@@ -40,6 +40,10 @@ type HostedSignupReferralActivationCandidate = {
   userId: string;
 };
 
+type HostedSignupReferralSettlementClock = {
+  settledAt: Date;
+};
+
 type HostedSignupReferralRewardOutcome =
   | "already_processed"
   | "ambiguous_attribution"
@@ -210,6 +214,7 @@ export async function settleHostedSignupReferralReward(input: {
         referralId: existing.id,
       };
     }
+    const settledAt = await readHostedSignupReferralSettlementTimeTx(tx);
 
     const attribution = await tx.hostedInvite.findFirst({
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -259,7 +264,7 @@ export async function settleHostedSignupReferralReward(input: {
           : !referrer || referrer.suspendedAt
             ? "signup_referral_referrer_unavailable"
             : await readHostedSignupReferralCapacityFailureTx({
-                activatedAt: activation.occurredAt,
+                capacityAt: settledAt,
                 beneficiaryMemberId: input.referrerMemberId,
                 referrerMemberId: input.referrerMemberId,
                 tx,
@@ -287,7 +292,7 @@ export async function settleHostedSignupReferralReward(input: {
           rewardUsdMicros:
             HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
           status: "disqualified",
-          terminalAt: activation.occurredAt,
+          terminalAt: settledAt,
           terminalReason: disqualificationReason,
         },
       });
@@ -305,16 +310,16 @@ export async function settleHostedSignupReferralReward(input: {
         policyVersion: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
         qualifiedAt: activation.occurredAt,
         referrerMemberId: input.referrerMemberId,
-        rewardedAt: activation.occurredAt,
+        rewardedAt: settledAt,
         rewardUsdMicros:
           HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
         status: "rewarded",
         targetBoundAt: attribution.createdAt,
-        terminalAt: activation.occurredAt,
+        terminalAt: settledAt,
       },
     });
     await appendHostedUsageCreditGrantTx({
-      effectiveAt: activation.occurredAt,
+      effectiveAt: settledAt,
       grantUsdMicros:
         HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
       lockedBeneficiary,
@@ -350,7 +355,7 @@ async function readHostedSignupReferralReferrerMemberIdsTx(input: {
 }
 
 async function readHostedSignupReferralCapacityFailureTx(input: {
-  activatedAt: Date;
+  capacityAt: Date;
   beneficiaryMemberId: string;
   referrerMemberId: string;
   tx: Prisma.TransactionClient;
@@ -358,7 +363,7 @@ async function readHostedSignupReferralCapacityFailureTx(input: {
   const referrerCommitments = await input.tx.hostedUsageReferral.aggregate({
     where: {
       referrerMemberId: input.referrerMemberId,
-      OR: buildHostedUsageReferralCapacityAtWhere(input.activatedAt),
+      OR: buildHostedUsageReferralCapacityAtWhere(input.capacityAt),
     },
     _sum: { rewardUsdMicros: true },
   });
@@ -374,7 +379,7 @@ async function readHostedSignupReferralCapacityFailureTx(input: {
     await input.tx.hostedUsageReferral.aggregate({
       where: {
         beneficiaryMemberId: input.beneficiaryMemberId,
-        OR: buildHostedUsageReferralCapacityAtWhere(input.activatedAt),
+        OR: buildHostedUsageReferralCapacityAtWhere(input.capacityAt),
       },
       _sum: { rewardUsdMicros: true },
     });
@@ -385,6 +390,18 @@ async function readHostedSignupReferralCapacityFailureTx(input: {
       > HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS
     ? "signup_referral_beneficiary_reward_cap_reached"
     : null;
+}
+
+async function readHostedSignupReferralSettlementTimeTx(
+  tx: Prisma.TransactionClient,
+): Promise<Date> {
+  const [clock] = await tx.$queryRaw<HostedSignupReferralSettlementClock[]>`
+    SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "settledAt"
+  `;
+  if (!clock) {
+    throw new TypeError("Hosted signup referral settlement clock unavailable");
+  }
+  return clock.settledAt;
 }
 
 async function acquireHostedSignupReferralReferrerLockTx(input: {

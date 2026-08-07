@@ -28,6 +28,7 @@ import {
 const ACTIVATED_AT = new Date("2026-08-06T12:05:00.000Z");
 const ATTRIBUTED_AT = new Date("2026-08-06T12:00:00.000Z");
 const INTRODUCED_AT = new Date("2026-08-06T12:00:00.000Z");
+const SETTLED_AT = new Date("2026-08-07T12:10:00.000Z");
 const REFERRER_MEMBER_ID = "member_referrer";
 const INTRODUCED_MEMBER_ID = "member_introduced";
 
@@ -46,8 +47,10 @@ function createPrisma(input: {
   const created: Array<Record<string, unknown>> = [];
   const tx = {
     $executeRaw: vi.fn().mockResolvedValue(1),
-    $queryRaw: vi.fn().mockResolvedValue(
-      input.referrerRows ?? [{ referrerMemberId }],
+    $queryRaw: vi.fn(async (query: readonly string[]) =>
+      query.join(" ").includes("clock_timestamp")
+        ? [{ settledAt: SETTLED_AT }]
+        : input.referrerRows ?? [{ referrerMemberId }]
     ),
     hostedInvite: {
       findFirst: vi.fn().mockResolvedValue({ createdAt: ATTRIBUTED_AT }),
@@ -191,11 +194,11 @@ describe("hosted signup referral rewards", () => {
           "hosted-signup-referral-activation-2026-08-v1",
         qualifiedAt: ACTIVATED_AT,
         referrerMemberId,
-        rewardedAt: ACTIVATED_AT,
+        rewardedAt: SETTLED_AT,
         rewardUsdMicros: 2_000_000n,
         status: "rewarded",
         targetBoundAt: ATTRIBUTED_AT,
-        terminalAt: ACTIVATED_AT,
+        terminalAt: SETTLED_AT,
       }),
     ]);
     expect(created[0]).not.toHaveProperty("sourceConversationJson");
@@ -206,7 +209,7 @@ describe("hosted signup referral rewards", () => {
       tx,
     });
     expect(mocks.appendHostedUsageCreditGrantTx).toHaveBeenCalledWith({
-      effectiveAt: ACTIVATED_AT,
+      effectiveAt: SETTLED_AT,
       grantUsdMicros: 2_000_000n,
       lockedBeneficiary: expect.objectContaining({
         beneficiaryMemberId: REFERRER_MEMBER_ID,
@@ -221,12 +224,12 @@ describe("hosted signup referral rewards", () => {
     });
     expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
     expect(tx.hostedUsageReferral.aggregate).toHaveBeenCalledTimes(2);
-    const capacityAtActivation = [
+    const capacityAtSettlement = [
       {
-        armedAt: { lte: ACTIVATED_AT },
+        armedAt: { lte: SETTLED_AT },
         rewardedAt: {
-          gte: new Date("2026-07-07T12:05:00.000Z"),
-          lte: ACTIVATED_AT,
+          gte: new Date("2026-07-08T12:10:00.000Z"),
+          lte: SETTLED_AT,
         },
       },
       {
@@ -234,39 +237,39 @@ describe("hosted signup referral rewards", () => {
           {
             OR: [
               { terminalAt: null },
-              { terminalAt: { gt: ACTIVATED_AT } },
+              { terminalAt: { gt: SETTLED_AT } },
             ],
           },
           {
             OR: [
               {
-                expiresAt: { gt: ACTIVATED_AT },
+                expiresAt: { gt: SETTLED_AT },
                 OR: [
                   { targetBoundAt: null },
-                  { targetBoundAt: { gt: ACTIVATED_AT } },
+                  { targetBoundAt: { gt: SETTLED_AT } },
                 ],
               },
               {
                 OR: [
                   {
                     expiresAt: {
-                      gt: new Date("2026-08-05T11:05:00.000Z"),
+                      gt: new Date("2026-08-06T11:10:00.000Z"),
                     },
                   },
-                  { qualifiedAt: { lte: ACTIVATED_AT } },
+                  { qualifiedAt: { lte: SETTLED_AT } },
                 ],
-                targetBoundAt: { lte: ACTIVATED_AT },
+                targetBoundAt: { lte: SETTLED_AT },
               },
             ],
           },
         ],
-        armedAt: { lte: ACTIVATED_AT },
-        createdAt: { lte: ACTIVATED_AT },
+        armedAt: { lte: SETTLED_AT },
+        createdAt: { lte: SETTLED_AT },
       },
     ];
     expect(tx.hostedUsageReferral.aggregate).toHaveBeenNthCalledWith(1, {
       where: {
-        OR: capacityAtActivation,
+        OR: capacityAtSettlement,
         referrerMemberId,
       },
       _sum: { rewardUsdMicros: true },
@@ -274,7 +277,7 @@ describe("hosted signup referral rewards", () => {
     expect(tx.hostedUsageReferral.aggregate).toHaveBeenNthCalledWith(2, {
       where: {
         beneficiaryMemberId: referrerMemberId,
-        OR: capacityAtActivation,
+        OR: capacityAtSettlement,
       },
       _sum: { rewardUsdMicros: true },
     });

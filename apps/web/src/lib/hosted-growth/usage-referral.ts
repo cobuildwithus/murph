@@ -281,43 +281,6 @@ export function isHostedUsageReferralEnabled(
   return source[HOSTED_USAGE_REFERRALS_ENABLED_ENV] === "1";
 }
 
-async function hasPendingHostedSignupReferralActivationTx(input: {
-  now: Date;
-  referrerMemberId: string;
-  tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  const lookback = new Date(input.now.getTime() - THIRTY_DAYS_MS);
-  const [result] = await input.tx.$queryRaw<Array<{ pending: boolean }>>`
-    SELECT EXISTS (
-      SELECT 1
-      FROM "hosted_mailbox_item" AS mailbox
-      WHERE mailbox."kind" = 'member.activated'
-        AND mailbox."occurred_at" >= ${lookback}
-        AND mailbox."occurred_at" <= ${input.now}
-        AND NOT EXISTS (
-          SELECT 1
-          FROM "hosted_usage_referral" AS receipt
-          WHERE receipt."introduced_member_id" = mailbox."user_id"
-        )
-        AND 1 = (
-          SELECT COUNT(DISTINCT invite."referrer_member_id")
-          FROM "hosted_invite" AS invite
-          WHERE invite."member_id" = mailbox."user_id"
-            AND invite."created_at" <= mailbox."occurred_at"
-            AND invite."referrer_member_id" IS NOT NULL
-        )
-        AND EXISTS (
-          SELECT 1
-          FROM "hosted_invite" AS invite
-          WHERE invite."member_id" = mailbox."user_id"
-            AND invite."created_at" <= mailbox."occurred_at"
-            AND invite."referrer_member_id" = ${input.referrerMemberId}
-        )
-    ) AS "pending"
-  `;
-  return result?.pending === true;
-}
-
 export function qualifiesHostedActiveGroupReferral(input: {
   firstHumanMessageAt: Date | null;
   humanMessageCount: number;
@@ -520,15 +483,6 @@ export async function handleHostedUsageReferralGroupTool(input: {
       );
       if (missingPolicies.length === 0) {
         return;
-      }
-      if (
-        await hasPendingHostedSignupReferralActivationTx({
-          now,
-          referrerMemberId: actor.referrerMemberId,
-          tx,
-        })
-      ) {
-        throw new TypeError("usage_referral_not_available");
       }
       const conflictingArmed = await tx.hostedUsageReferral.findFirst({
         select: { id: true },

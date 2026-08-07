@@ -16,10 +16,10 @@ Two rollout gates control their respective mutations:
   signup-link activations.
 
 The stable referral link remains available to an eligible signed-in member when
-either reward gate is disabled. The paths still share one rolling cap: an
-exactly attributed activation in the bounded signup-recovery window reserves
-its place before settlement is enabled, so a later same-referrer conversational
-arm must wait for that older qualification to settle, disqualify, or age out.
+either reward gate is disabled. The paths share one rolling cap at their first
+durable accounting commitment: conversational missions reserve capacity when
+armed, while an attributed activation claims capacity only when recovery
+atomically creates its receipt and grant under the same referrer lock.
 
 ## Product behavior
 
@@ -234,23 +234,23 @@ bound mission commitments:
 - at most $10.50 per referrer in a rolling 30-day window;
 - at most $20 per beneficiary in a rolling 30-day window.
 
-Delayed signup settlement reconstructs that capacity at the activation instant,
-not at recovery time. Completed rewards are bounded on both sides of the
-activation timestamp. A commitment counts only if it had been created and armed
-by then, was still within its armed or bound evidence window, and had not yet
-reached its terminal timestamp. A later reward, cancellation, expiry, or new
-commitment therefore cannot change which earlier activation owned capacity.
-Recovery scans activation candidates oldest first; the existing referrer lock
-serializes every capacity decision and receipt for that referrer. If one
-candidate fails transiently, that pass skips later activations for the same
-referrer so recovery failure cannot let a later signup steal earlier capacity.
-A conversational arm holding that same referrer lock fails temporarily if an
-older, exactly attributed activation in the 30-day recovery window still lacks
-a receipt, even while signup settlement is disabled. Recovery settles or
-disqualifies the older event after enablement; otherwise the pending event ages
-out with the same eligibility window. Existing missions continue. This bounded
-per-referrer pause preserves activation-time order without another reservation
-table or queue.
+Signup activation occurrence remains the immutable qualification timestamp. It
+controls invite attribution, the 30-day recovery window, and oldest-first
+candidate scanning, but it is not a cap reservation before a receipt exists.
+After taking the shared referrer and beneficiary locks, recovery reads the
+database clock and evaluates capacity at that settlement instant. A
+conversational arm that committed before settlement therefore counts even if
+its provider time followed the activation source; recovery records one terminal cap disqualification
+rather than retroactively invalidating or overbooking that promised arm. If
+signup settlement obtains the lock first, its immutable reward counts before a
+later arm is admitted. This lock-ordered accounting is complete without adding
+activation-path locks, reservation rows, or another lifecycle.
+
+Recovery still scans activation candidates oldest first. If one candidate fails
+transiently, that pass skips later activations for the same referrer so recovery
+failure cannot let a later signup steal the next settlement opportunity. While
+signup settlement is disabled, attributed activations remain eligible for the
+bounded backfill but neither reserve capacity nor pause conversational arming.
 
 The referrer cannot reward their own reconciled identity. Suspended referrers or
 introduced members are disqualified. One introduced member can own only one
@@ -284,7 +284,7 @@ includes legacy recipient-bound invites with exactly one durable referrer; it is
 a controlled backfill, not a prospective-only launch. Before enabling the gate,
 operators must run a count-only aggregate over that exact candidate predicate
 and keep the gate off if the eligible population or aggregate exposure is not
-accepted. Per-referrer rolling caps still apply at each activation instant, but
+accepted. Per-referrer rolling caps still apply when each receipt settles, but
 the batch size is throughput control rather than a company-wide liability cap.
 
 No signup-specific queue, scheduler, outbox, grant worker, or runtime action
@@ -391,9 +391,6 @@ enabling it:
    `pnpm public-routes:waf-check` to pass against the active configuration;
 2. run the count-only 30-day attributed-activation aggregate, explicitly accept
    the bounded backfill population and exposure, and otherwise keep the gate off;
-   after acceptance, enable recovery promptly because eligible pending
-   activations pause only new same-referrer conversational arms while the gate
-   remains off;
 3. confirm exact-head unit, typecheck, app, viewport, and design-proof checks;
 4. run the focused local-PostgreSQL concurrent settlement and replay proof,
    including delayed activation after invite expiry and `web` relabeling;
@@ -413,10 +410,9 @@ enabling it:
 
 Disabling the signup-reward gate immediately stops new activation scans. It does
 not revoke stable links, hide prior history, claw back existing credit, or
-suppress a notice for a reward that already committed. An exactly attributed
-activation that remains eligible for the 30-day backfill continues to pause only
-new same-referrer conversational arms until recovery resumes or it ages out;
-operators must treat that bounded coupling as part of the gate transition.
+suppress a notice for a reward that already committed. Unsettled attributed
+activations remain eligible for the bounded backfill but own no cap reservation
+and do not pause conversational missions while the gate is off.
 
 Once the first signup-link referral grant exists, Web must not roll back below a
 version that understands referral-backed entries and the signup policy version.

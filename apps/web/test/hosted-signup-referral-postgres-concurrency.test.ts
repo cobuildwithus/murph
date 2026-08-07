@@ -98,6 +98,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         });
 
+        const settlementStartedAt = new Date();
         const firstPass = await Promise.all([
           recoverPendingHostedSignupReferralRewards({
             enabled: true,
@@ -112,6 +113,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             prisma: secondClient,
           }),
         ]);
+        const settlementCompletedAt = new Date();
         expect(firstPass.reduce(
           (total, result) => total + result.failed,
           0,
@@ -147,11 +149,20 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           policyVersion:
             "hosted-signup-referral-activation-2026-08-v1",
           qualifiedAt: activatedAt,
-          rewardedAt: activatedAt,
+          rewardedAt: expect.any(Date),
           rewardUsdMicros: 2_000_000n,
           status: "rewarded",
           targetBoundAt: attributedAt,
         });
+        if (!referral.rewardedAt) {
+          throw new TypeError("Expected a rewarded signup receipt.");
+        }
+        expect(referral.rewardedAt.getTime()).toBeGreaterThanOrEqual(
+          settlementStartedAt.getTime(),
+        );
+        expect(referral.rewardedAt.getTime()).toBeLessThanOrEqual(
+          settlementCompletedAt.getTime(),
+        );
 
         const replay = await Promise.all([
           settleHostedSignupReferralReward({
@@ -325,6 +336,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           orderBy: [{ terminalAt: "asc" }, { id: "asc" }],
           select: {
             introducedMemberId: true,
+            qualifiedAt: true,
             rewardedAt: true,
             status: true,
             terminalReason: true,
@@ -335,13 +347,15 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(receipts.slice(0, 5)).toEqual(
           introducedMemberIds.slice(0, 5).map((introducedMemberId, index) => ({
             introducedMemberId,
-            rewardedAt: activatedAt[index],
+            qualifiedAt: activatedAt[index],
+            rewardedAt: expect.any(Date),
             status: "rewarded",
             terminalReason: null,
           })),
         );
         expect(receipts[5]).toEqual({
           introducedMemberId: introducedMemberIds[5],
+          qualifiedAt: null,
           rewardedAt: null,
           status: "disqualified",
           terminalReason: "signup_referral_referrer_reward_cap_reached",
@@ -413,7 +427,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     }, 60_000);
 
-    it("preserves pending signup capacity across the reward-gate transition", async () => {
+    it("orders delayed activation publication before recovery without overbooking", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for this proof.");
       }
@@ -431,16 +445,31 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         `hur_signup_cross_prior_0_${fixtureId}`,
         `hur_signup_cross_prior_1_${fixtureId}`,
       ];
-      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const publicationClient = createPrismaClient({
+        databaseUrl,
+        poolMax: 1,
+      });
+      const armClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const recoveryClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const sourceConversation = {
         channel: "linq" as const,
         linqService: "imessage" as const,
         threadId: `hid_${fixtureId.replaceAll("-", "")}`,
         threadIsDirect: true,
       };
+      let markPublicationReady = (): void => {};
+      const publicationReady = new Promise<void>((resolve) => {
+        markPublicationReady = resolve;
+      });
+      let releasePublication = (): void => {};
+      const publicationRelease = new Promise<void>((resolve) => {
+        releasePublication = resolve;
+      });
+      let publication: Promise<unknown> | null = null;
 
       try {
-        await prisma.hostedMember.create({
+        await observer.hostedMember.create({
           data: {
             billingRef: {
               create: {
@@ -464,14 +493,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             id: referrerMemberId,
           },
         });
-        await prisma.hostedMember.create({
+        await observer.hostedMember.create({
           data: {
             billingStatus: "active",
             createdAt: introducedAt,
             id: introducedMemberId,
           },
         });
-        await prisma.hostedUsageReferral.createMany({
+        await observer.hostedUsageReferral.createMany({
           data: priorReferralIds.map((id, index) => {
             const rewardedAt = new Date(
               activatedAt.getTime() - (index + 1) * 60_000,
@@ -492,7 +521,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             };
           }),
         });
-        await prisma.hostedInvite.create({
+        await observer.hostedInvite.create({
           data: {
             channel: "web",
             createdAt: attributedAt,
@@ -503,45 +532,28 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             referrerMemberId,
           },
         });
-        await prisma.hostedMailboxItem.create({
-          data: {
-            dedupeKey: `member.activated:${introducedMemberId}`,
-            id: `hmi_signup_cross_${fixtureId}`,
-            kind: "member.activated",
-            lane: "system",
-            laneSeq: 1n,
-            occurredAt: activatedAt,
-            payloadSchema: "murph.hosted-execution.member-activated.v1",
-            userId: introducedMemberId,
-          },
+        publication = publicationClient.$transaction(async (tx) => {
+          await tx.hostedMailboxItem.create({
+            data: {
+              dedupeKey: `member.activated:${introducedMemberId}`,
+              id: `hmi_signup_cross_${fixtureId}`,
+              kind: "member.activated",
+              lane: "system",
+              laneSeq: 1n,
+              occurredAt: activatedAt,
+              payloadSchema: "murph.hosted-execution.member-activated.v1",
+              userId: introducedMemberId,
+            },
+          });
+          markPublicationReady();
+          await publicationRelease;
         });
+        await publicationReady;
 
         await expect(handleHostedUsageReferralGroupTool({
           enabled: true,
           memberId: referrerMemberId,
-          prisma,
-          request: {
-            action: "arm_usage_referral",
-            policyCodes: ["active_group_v1"],
-            sourceConversation,
-          },
-        })).resolves.toEqual({
-          action: "arm_usage_referral",
-          result: {
-            referral: null,
-            status: "unavailable",
-            unavailableReason: "usage_referral_not_available",
-          },
-        });
-        await expect(recoverPendingHostedSignupReferralRewards({
-          enabled: true,
-          now,
-          prisma,
-        })).resolves.toEqual({ failed: 0, rewarded: 1, scanned: 1 });
-        await expect(handleHostedUsageReferralGroupTool({
-          enabled: true,
-          memberId: referrerMemberId,
-          prisma,
+          prisma: armClient,
           request: {
             action: "arm_usage_referral",
             policyCodes: ["active_group_v1"],
@@ -549,44 +561,136 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         })).resolves.toMatchObject({
           result: {
-            referral: null,
-            status: "unavailable",
+            outcome: "armed",
+            status: "ok",
           },
         });
-        await expect(prisma.hostedUsageReferral.count({
+
+        releasePublication();
+        await publication;
+
+        await expect(recoverPendingHostedSignupReferralRewards({
+          enabled: false,
+          now,
+          prisma: recoveryClient,
+        })).resolves.toEqual({ failed: 0, rewarded: 0, scanned: 0 });
+
+        const recoveryPasses = await Promise.all([
+          recoverPendingHostedSignupReferralRewards({
+            enabled: true,
+            now,
+            prisma: publicationClient,
+          }),
+          recoverPendingHostedSignupReferralRewards({
+            enabled: true,
+            now,
+            prisma: recoveryClient,
+          }),
+        ]);
+        expect(recoveryPasses.reduce(
+          (total, pass) => total + pass.failed,
+          0,
+        )).toBe(0);
+        expect(recoveryPasses.reduce(
+          (total, pass) => total + pass.rewarded,
+          0,
+        )).toBe(0);
+        expect(recoveryPasses.reduce(
+          (total, pass) => total + pass.scanned,
+          0,
+        )).toBeGreaterThanOrEqual(1);
+
+        const signupReceipt =
+          await observer.hostedUsageReferral.findFirstOrThrow({
+            select: {
+              id: true,
+              qualifiedAt: true,
+              rewardedAt: true,
+              status: true,
+              terminalAt: true,
+              terminalReason: true,
+            },
+            where: { introducedMemberId },
+          });
+        expect(signupReceipt).toMatchObject({
+          qualifiedAt: null,
+          rewardedAt: null,
+          status: "disqualified",
+          terminalReason: "signup_referral_referrer_reward_cap_reached",
+        });
+        if (!signupReceipt.terminalAt) {
+          throw new TypeError("Expected a terminal signup receipt.");
+        }
+        expect(signupReceipt.terminalAt.getTime()).toBeGreaterThan(
+          activatedAt.getTime(),
+        );
+
+        const capRows = await observer.hostedUsageReferral.findMany({
+          select: {
+            introducedMemberId: true,
+            policyCode: true,
+            rewardUsdMicros: true,
+            status: true,
+          },
           where: {
             referrerMemberId,
-            status: "armed",
           },
+        });
+        expect(capRows.filter(({ status }) => status === "rewarded"))
+          .toHaveLength(2);
+        expect(capRows.filter(({ status }) => status === "armed"))
+          .toEqual([expect.objectContaining({
+            introducedMemberId: null,
+            policyCode: "active_group_v1",
+            rewardUsdMicros: 3_500_000n,
+          })]);
+        expect(capRows
+          .filter(({ status }) => status === "rewarded" || status === "armed")
+          .reduce((total, row) => total + row.rewardUsdMicros, 0n))
+          .toBe(10_500_000n);
+        await expect(observer.hostedUsageCreditGrant.count({
+          where: { entry: { referralId: signupReceipt.id } },
         })).resolves.toBe(0);
+        await expect(recoverPendingHostedSignupReferralRewards({
+          enabled: true,
+          now,
+          prisma: recoveryClient,
+        })).resolves.toEqual({ failed: 0, rewarded: 0, scanned: 0 });
       } finally {
+        releasePublication();
+        await publication?.catch(() => undefined);
         const referralIds = (
-          await prisma.hostedUsageReferral.findMany({
+          await observer.hostedUsageReferral.findMany({
             select: { id: true },
             where: { referrerMemberId },
           })
         ).map(({ id }) => id);
-        await prisma.hostedUsageCreditGrant.deleteMany({
+        await observer.hostedUsageCreditGrant.deleteMany({
           where: { entry: { referralId: { in: referralIds } } },
         });
-        await prisma.hostedUsageCreditEntry.deleteMany({
+        await observer.hostedUsageCreditEntry.deleteMany({
           where: { referralId: { in: referralIds } },
         });
-        await prisma.hostedUsageReferral.deleteMany({
+        await observer.hostedUsageReferral.deleteMany({
           where: { id: { in: referralIds } },
         });
-        await prisma.hostedMailboxItem.deleteMany({
+        await observer.hostedMailboxItem.deleteMany({
           where: { userId: introducedMemberId },
         });
-        await prisma.hostedInvite.deleteMany({
+        await observer.hostedInvite.deleteMany({
           where: { memberId: introducedMemberId },
         });
-        await prisma.hostedMember.deleteMany({
+        await observer.hostedMember.deleteMany({
           where: { id: { in: [referrerMemberId, introducedMemberId] } },
         });
-        await prisma.$disconnect();
+        await Promise.all([
+          observer.$disconnect(),
+          publicationClient.$disconnect(),
+          armClient.$disconnect(),
+          recoveryClient.$disconnect(),
+        ]);
       }
-    }, 30_000);
+    }, 60_000);
 
     it("admits only one concurrent claim at the 49-to-50 boundary", async () => {
       if (!databaseUrl) {
