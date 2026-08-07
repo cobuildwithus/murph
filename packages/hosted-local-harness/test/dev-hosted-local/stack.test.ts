@@ -330,6 +330,17 @@ vi.mock("node:fs/promises", () => ({
   writeFile: vi.fn(async () => {}),
 }));
 
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    existsSync: vi.fn((filePath: Parameters<typeof actual.existsSync>[0]) =>
+      /[/\\]packages[/\\][^/\\]+[/\\]dist$/u.test(String(filePath))
+        || actual.existsSync(filePath)
+    ),
+  };
+});
+
 vi.mock("node:child_process", () => ({
   spawnSync,
 }));
