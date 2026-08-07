@@ -2,6 +2,9 @@ import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessageSnapshot,
 } from "@/src/lib/hosted-ops/growth-message-series";
+import {
+  buildHostedGrowthMonthlyRevenueSeries,
+} from "@/src/lib/hosted-ops/growth-monthly-revenue-series";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
 import type { HostedGrowthSponsorshipMetrics } from "@/src/lib/hosted-ops/growth-sponsorship-metrics";
 import {
@@ -75,6 +78,77 @@ const SNAPSHOT_SERIES = GROWTH_DATES.map((date, index) => ({
   payingCustomers: 54 + Math.floor(index * 0.8),
   trialingMembers: 16 + (index % 7),
 }));
+
+// April predates the subscription split columns, so it renders as one
+// unsplit subscription value; February and March have no data and are trimmed.
+const MONTHLY_REVENUE_SERIES = buildHostedGrowthMonthlyRevenueSeries({
+  monthCount: 6,
+  purchases: [
+    {
+      cashAmountMinor: 1_000,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-04-19T16:20:00.000Z"),
+    },
+    {
+      cashAmountMinor: 2_000,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-05-11T09:05:00.000Z"),
+    },
+    {
+      cashAmountMinor: 500,
+      isGroupSponsorship: true,
+      paidAt: new Date("2026-05-27T21:40:00.000Z"),
+    },
+    {
+      cashAmountMinor: 1_500,
+      isGroupSponsorship: true,
+      paidAt: new Date("2026-07-03T12:00:00.000Z"),
+    },
+    {
+      cashAmountMinor: 1_000,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-07-14T18:30:00.000Z"),
+    },
+    {
+      cashAmountMinor: 1_500,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-07-24T07:55:00.000Z"),
+    },
+  ],
+  snapshots: [
+    {
+      familyMrrUsdCents: null,
+      individualMrrUsdCents: null,
+      mrrUsdCents: 6_200,
+      snapshotDate: new Date("2026-04-28T00:00:00.000Z"),
+    },
+    {
+      familyMrrUsdCents: 2_100,
+      individualMrrUsdCents: 7_000,
+      mrrUsdCents: 9_100,
+      snapshotDate: new Date("2026-05-30T00:00:00.000Z"),
+    },
+    {
+      familyMrrUsdCents: 3_200,
+      individualMrrUsdCents: 9_600,
+      mrrUsdCents: 12_800,
+      snapshotDate: new Date("2026-06-29T00:00:00.000Z"),
+    },
+    {
+      familyMrrUsdCents: 3_300,
+      individualMrrUsdCents: 10_600,
+      mrrUsdCents: 13_900,
+      snapshotDate: new Date("2026-07-15T00:00:00.000Z"),
+    },
+    {
+      familyMrrUsdCents: 4_300,
+      individualMrrUsdCents: 11_800,
+      mrrUsdCents: 16_100,
+      snapshotDate: new Date("2026-07-30T00:00:00.000Z"),
+    },
+  ],
+  windowEnd: new Date("2026-07-31T12:00:00.000Z"),
+});
 
 const TRIAL_START_ATTRIBUTION = {
   counts: {
@@ -264,6 +338,7 @@ export function GrowthScorecardStudy() {
         <GrowthCharts
           dailySeries={DAILY_SERIES}
           messageSeries={MESSAGE_SERIES}
+          monthlyRevenueSeries={MONTHLY_REVENUE_SERIES}
           snapshotSeries={SNAPSHOT_SERIES}
         />
       </div>

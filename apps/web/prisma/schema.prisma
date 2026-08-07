@@ -1365,6 +1365,10 @@ model HostedGrowthDailySnapshot {
   // Null means the window is unknown or incomplete, never zero.
   activeUsersPriorDay      Int? @map("active_users_prior_day")
   activeUsersTrailing7Days Int? @map("active_users_trailing_7_days")
+  // MRR split behind mrr_usd_cents: individual plans versus family seats.
+  // Null means the row predates split capture, never zero.
+  individualMrrUsdCents Int? @map("individual_mrr_usd_cents")
+  familyMrrUsdCents     Int? @map("family_mrr_usd_cents")
 
   @@map("hosted_growth_daily_snapshot")
 }

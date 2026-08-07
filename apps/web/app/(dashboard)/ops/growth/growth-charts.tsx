@@ -22,6 +22,7 @@ import {
 import type {
   HostedGrowthDailyPoint,
   HostedGrowthMessagePoint,
+  HostedGrowthMonthlyRevenuePoint,
   HostedGrowthSnapshotPoint,
 } from "@/src/lib/hosted-ops/growth-metrics";
 
@@ -72,12 +73,20 @@ const revenueChartConfig = {
   },
 } satisfies ChartConfig;
 
+const monthlyRevenueChartConfig = {
+  totalRevenueUsd: {
+    color: "#7A8C6E",
+    label: "Monthly revenue",
+  },
+} satisfies ChartConfig;
+
 const interactiveChartClassName =
   "mt-4 h-64 w-full rounded-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring";
 
 interface GrowthChartsProps {
   dailySeries: HostedGrowthDailyPoint[];
   messageSeries: HostedGrowthMessagePoint[];
+  monthlyRevenueSeries: HostedGrowthMonthlyRevenuePoint[];
   snapshotSeries: HostedGrowthSnapshotPoint[];
 }
 
@@ -88,10 +97,15 @@ export function GrowthCharts(input: GrowthChartsProps) {
   const dailyMessagesTitleId = `${titleIdPrefix}-daily-messages`;
   const acquisitionTitleId = `${titleIdPrefix}-acquisition`;
   const revenueTitleId = `${titleIdPrefix}-revenue`;
+  const monthlyRevenueTitleId = `${titleIdPrefix}-monthly-revenue`;
   const revenueSeries = input.snapshotSeries.map((point) => ({
     date: point.date,
     mrrUsd: point.mrrUsdCents / 100,
     payingCustomers: point.payingCustomers,
+  }));
+  const monthlyRevenueSeries = input.monthlyRevenueSeries.map((point) => ({
+    ...point,
+    totalRevenueUsd: point.totalUsdCents / 100,
   }));
 
   return (
@@ -434,8 +448,153 @@ export function GrowthCharts(input: GrowthChartsProps) {
           </LineChart>
         </ChartContainer>
       </div>
+
+      <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 p-5">
+        <div className="flex flex-col gap-1">
+          <h3
+            className="font-serif text-lg font-semibold tracking-tight text-foreground"
+            id={monthlyRevenueTitleId}
+          >
+            Monthly revenue
+          </h3>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Each bar totals one UTC month: subscriptions at the month&apos;s
+            latest daily snapshot plus fulfilled usage top-ups and group
+            sponsorships paid that month. Hover or focus a bar for the source
+            breakdown. Months before August 2026 show subscriptions without the
+            personal and family split, and account deletion removes past
+            top-ups from these bars.
+          </p>
+        </div>
+        <ChartContainer
+          className={interactiveChartClassName}
+          config={monthlyRevenueChartConfig}
+        >
+          <BarChart
+            accessibilityLayer
+            aria-labelledby={monthlyRevenueTitleId}
+            data={monthlyRevenueSeries}
+            margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
+          >
+            <CartesianGrid
+              stroke="var(--color-border)"
+              strokeDasharray="3 3"
+              strokeOpacity={0.55}
+              vertical={false}
+            />
+            <XAxis
+              axisLine={false}
+              dataKey="month"
+              tickFormatter={formatMonthTick}
+              tickLine={false}
+            />
+            <YAxis
+              allowDecimals={false}
+              axisLine={false}
+              tickFormatter={formatUsdAxisTick}
+              tickLine={false}
+              width={44}
+            />
+            <ChartTooltip
+              content={<MonthlyRevenueTooltip />}
+              cursor={{ fill: "var(--color-muted)", fillOpacity: 0.35 }}
+            />
+            <Bar
+              dataKey="totalRevenueUsd"
+              fill="var(--color-totalRevenueUsd)"
+              maxBarSize={64}
+              name="Monthly revenue"
+              radius={[3, 3, 0, 0]}
+            />
+          </BarChart>
+        </ChartContainer>
+      </div>
     </div>
   );
+}
+
+function MonthlyRevenueTooltip(props: {
+  active?: boolean;
+  payload?: readonly { payload?: unknown }[];
+}) {
+  const point = props.payload?.[0]?.payload;
+  if (props.active !== true || !isMonthlyRevenuePoint(point)) {
+    return null;
+  }
+
+  const subscriptionRows = point.individualSubscriptionsUsdCents === null
+    && point.familySubscriptionsUsdCents === null
+    && point.subscriptionsUnsplitUsdCents === null
+    ? [{ label: "Subscriptions", value: "No snapshot" }]
+    : [
+      ...(point.individualSubscriptionsUsdCents === null ? [] : [{
+        label: "Personal subscriptions",
+        value: formatUsdFromCents(point.individualSubscriptionsUsdCents),
+      }]),
+      ...(point.familySubscriptionsUsdCents === null ? [] : [{
+        label: "Family subscriptions",
+        value: formatUsdFromCents(point.familySubscriptionsUsdCents),
+      }]),
+      ...(point.subscriptionsUnsplitUsdCents === null ? [] : [{
+        label: "Subscriptions (personal + family)",
+        value: formatUsdFromCents(point.subscriptionsUnsplitUsdCents),
+      }]),
+    ];
+  const rows = [
+    ...subscriptionRows,
+    {
+      label: "Group sponsorship",
+      value: formatUsdFromCents(point.groupSponsorshipUsdCents),
+    },
+    {
+      label: "Usage top-ups",
+      value: formatUsdFromCents(point.usageTopUpsUsdCents),
+    },
+  ];
+
+  return (
+    <div className="grid min-w-52 items-start gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+      <div className="font-medium">{formatMonthLabel(point.month)}</div>
+      <div className="grid gap-1">
+        {rows.map((row) => (
+          <div className="flex w-full justify-between gap-4" key={row.label}>
+            <span className="text-muted-foreground">{row.label}</span>
+            <span className="font-mono font-medium tabular-nums text-foreground">
+              {row.value}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="flex w-full justify-between gap-4 border-t border-border/50 pt-1 font-medium">
+        <span>Total</span>
+        <span className="font-mono tabular-nums">
+          {formatUsdFromCents(point.totalUsdCents)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function isMonthlyRevenuePoint(
+  value: unknown,
+): value is HostedGrowthMonthlyRevenuePoint {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate: Partial<Record<keyof HostedGrowthMonthlyRevenuePoint, unknown>> =
+    value;
+  return typeof candidate.month === "string"
+    && typeof candidate.totalUsdCents === "number"
+    && typeof candidate.groupSponsorshipUsdCents === "number"
+    && typeof candidate.usageTopUpsUsdCents === "number"
+    && isNullableNumber(candidate.individualSubscriptionsUsdCents)
+    && isNullableNumber(candidate.familySubscriptionsUsdCents)
+    && isNullableNumber(candidate.subscriptionsUnsplitUsdCents);
+}
+
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || typeof value === "number";
 }
 
 function formatShortDate(value: string): string {
@@ -451,6 +610,34 @@ function formatCompactNumber(value: number): string {
     maximumFractionDigits: 1,
     notation: "compact",
   }).format(value);
+}
+
+function formatMonthTick(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${value}-01T00:00:00.000Z`));
+}
+
+function formatMonthLabel(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    timeZone: "UTC",
+    year: "numeric",
+  }).format(new Date(`${value}-01T00:00:00.000Z`));
+}
+
+function formatUsdAxisTick(value: number): string {
+  return `$${formatCompactNumber(value)}`;
+}
+
+function formatUsdFromCents(valueUsdCents: number): string {
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: 2,
+    minimumFractionDigits: valueUsdCents % 100 === 0 ? 0 : 2,
+    style: "currency",
+  }).format(valueUsdCents / 100);
 }
 
 function formatTooltipDate(value: ReactNode): string {

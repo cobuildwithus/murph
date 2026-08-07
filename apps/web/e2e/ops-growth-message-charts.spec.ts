@@ -11,6 +11,7 @@ const CHART_NAMES = [
   "Messages sent per day",
   "Intake and activation",
   "Revenue snapshots",
+  "Monthly revenue",
 ] as const;
 
 function isLoopbackUrl(rawUrl: string): boolean {
@@ -71,8 +72,8 @@ for (const viewport of VIEWPORTS) {
     const chartSurfaces = chartCards.locator(
       '.recharts-surface[role="application"][tabindex="0"]',
     );
-    await expect(chartCards).toHaveCount(5);
-    await expect(chartSurfaces).toHaveCount(5);
+    await expect(chartCards).toHaveCount(6);
+    await expect(chartSurfaces).toHaveCount(6);
 
     for (const [index, name] of CHART_NAMES.entries()) {
       await expect(chartSurfaces.nth(index)).toHaveAccessibleName(name);
@@ -141,6 +142,35 @@ for (const viewport of VIEWPORTS) {
     await expect(dailyTooltip).toContainText("Jul 15");
     await expect(dailyTooltip).toContainText("Messages sent per day");
     await expect(dailyTooltip).toContainText("0");
+
+    const monthlyRevenueTooltip = chartCards.nth(5).locator(
+      ".recharts-tooltip-wrapper",
+    );
+    await chartSurfaces.nth(5).focus();
+    for (let index = 0; index < 3; index += 1) {
+      await page.keyboard.press("ArrowRight");
+    }
+    await expect(monthlyRevenueTooltip).toBeVisible();
+    await expect(monthlyRevenueTooltip).toContainText("July 2026");
+    await expect(monthlyRevenueTooltip).toContainText("Personal subscriptions");
+    await expect(monthlyRevenueTooltip).toContainText("$118");
+    await expect(monthlyRevenueTooltip).toContainText("Family subscriptions");
+    await expect(monthlyRevenueTooltip).toContainText("$43");
+    await expect(monthlyRevenueTooltip).toContainText("Group sponsorship");
+    await expect(monthlyRevenueTooltip).toContainText("$15");
+    await expect(monthlyRevenueTooltip).toContainText("Usage top-ups");
+    await expect(monthlyRevenueTooltip).toContainText("$25");
+    await expect(monthlyRevenueTooltip).toContainText("Total");
+    await expect(monthlyRevenueTooltip).toContainText("$201");
+    for (let index = 0; index < 3; index += 1) {
+      await page.keyboard.press("ArrowLeft");
+    }
+    await expect(monthlyRevenueTooltip).toContainText("April 2026");
+    await expect(monthlyRevenueTooltip).toContainText(
+      "Subscriptions (personal + family)",
+    );
+    await expect(monthlyRevenueTooltip).toContainText("$62");
+    await expect(monthlyRevenueTooltip).toContainText("$72");
 
     await page.emulateMedia({ forcedColors: "active" });
     await expect(activityLines.nth(1)).toHaveAttribute("stroke-dasharray", "6 4");
