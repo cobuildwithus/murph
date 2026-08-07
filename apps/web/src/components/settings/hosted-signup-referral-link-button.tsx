@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
+import { Input } from "@/src/components/ui/input";
 
 export type HostedSignupReferralLinkButtonState =
   | "copied"
@@ -144,7 +145,7 @@ export function HostedSignupReferralLinkButton(props: {
     } catch {
       if (generation === requestGeneration.current) {
         setStoredState({
-          announcement: "Could not copy the referral link.",
+          announcement: readDefaultAnnouncement("copy_error"),
           identityKey,
           inputSignupUrl: currentInputSignupUrl,
           signupUrl,
@@ -158,6 +159,7 @@ export function HostedSignupReferralLinkButton(props: {
     <HostedSignupReferralLinkButtonView
       announcement={state.announcement}
       onAction={handleAction}
+      signupUrl={state.signupUrl}
       status={state.status}
     />
   );
@@ -166,13 +168,16 @@ export function HostedSignupReferralLinkButton(props: {
 export function HostedSignupReferralLinkButtonView(props: {
   announcement?: string;
   onAction: () => void;
+  signupUrl?: string | null;
   status: HostedSignupReferralLinkButtonState;
 }) {
   const label = readHostedSignupReferralLinkButtonLabel(props.status);
   const busy = props.status === "loading" || props.status === "copying";
+  const manualCopyDescriptionId = useId();
+  const showManualCopy = props.status === "copy_error" && props.signupUrl;
 
   return (
-    <>
+    <div className="flex max-w-[min(20rem,58vw)] flex-col items-end">
       <Button
         aria-busy={busy ? "true" : undefined}
         aria-label={`${label} — your Murph referral link`}
@@ -184,10 +189,30 @@ export function HostedSignupReferralLinkButtonView(props: {
       >
         {label}
       </Button>
+      {showManualCopy ? (
+        <div className="mt-2 w-full space-y-1.5 text-left">
+          <p
+            className="text-xs leading-relaxed text-muted-foreground"
+            id={manualCopyDescriptionId}
+          >
+            Automatic copying was blocked. Select the link to copy it manually.
+          </p>
+          <Input
+            aria-describedby={manualCopyDescriptionId}
+            aria-label="Referral link for manual copy"
+            className="h-9 bg-background font-mono md:text-xs"
+            onClick={(event) => event.currentTarget.select()}
+            onFocus={(event) => event.currentTarget.select()}
+            readOnly
+            spellCheck={false}
+            value={props.signupUrl ?? ""}
+          />
+        </div>
+      ) : null}
       <span aria-live="polite" className="sr-only">
         {props.announcement ?? readDefaultAnnouncement(props.status)}
       </span>
-    </>
+    </div>
   );
 }
 
@@ -215,7 +240,7 @@ function readDefaultAnnouncement(
     : status === "load_error"
       ? "Could not load the referral link."
       : status === "copy_error"
-        ? "Could not copy the referral link."
+        ? "Could not copy the referral link. Select the link field below to copy it manually."
         : "";
 }
 

@@ -45,6 +45,7 @@ import {
 } from "@/src/lib/hosted-growth/signup-referral";
 
 function createPrisma(input: {
+  claimLockAcquired?: boolean;
   recentClaimCount?: number;
   referrer?: { id: string; suspendedAt: Date | null } | null;
 } = {}) {
@@ -57,6 +58,9 @@ function createPrisma(input: {
     ),
   };
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([
+      { locked: input.claimLockAcquired ?? true },
+    ]),
     hostedInvite: {
       count: vi.fn().mockResolvedValue(input.recentClaimCount ?? 0),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -215,6 +219,29 @@ describe("hosted signup referral links", () => {
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
   });
 
+  it("fails fast on a concurrent claim before touching shared account state", async () => {
+    const { prisma, tx } = createPrisma({ claimLockAcquired: false });
+    const issued = await issueHostedSignupReferralLink({
+      prisma: prisma as never,
+      referrerMemberId: "member_referrer",
+    });
+
+    await expect(claimHostedSignupReferralLink({
+      prisma: prisma as never,
+      referralCode: readReferralToken(issued.signupUrl),
+    })).rejects.toMatchObject({
+      code: "HOSTED_SIGNUP_REFERRAL_CLAIM_BUSY",
+      httpStatus: 429,
+      retryable: true,
+    });
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.hostedInvite.count).not.toHaveBeenCalled();
+    expect(mocks.lockHostedMemberRow).not.toHaveBeenCalled();
+    expect(mocks.createHostedMember).not.toHaveBeenCalled();
+    expect(tx.hostedInvite.create).not.toHaveBeenCalled();
+  });
+
   it("bounds attributed claims after ordinary onboarding relabels", async () => {
     const now = new Date("2026-08-06T12:00:00.000Z");
     const { prisma, tx } = createPrisma({
@@ -247,6 +274,7 @@ describe("hosted signup referral links", () => {
     expect(mocks.createHostedMember).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberIdentity).not.toHaveBeenCalled();
     expect(tx.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.lockHostedMemberRow).not.toHaveBeenCalled();
   });
 
   it("rejects tampered and ordinary invite tokens before mutation", async () => {

@@ -34,7 +34,10 @@ export const POST = withJsonError(async (
       throw error;
     }
 
-    const status = error.code === "HOSTED_SIGNUP_REFERRAL_CLAIM_LIMIT_REACHED"
+    const status = (
+      error.code === "HOSTED_SIGNUP_REFERRAL_CLAIM_LIMIT_REACHED"
+      || error.code === "HOSTED_SIGNUP_REFERRAL_CLAIM_BUSY"
+    )
       ? "busy"
       : "unavailable";
     const landingUrl = new URL(

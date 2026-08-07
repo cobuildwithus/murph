@@ -17,7 +17,7 @@ import {
   HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
 } from "./signup-referral-policy";
 import {
-  buildHostedUsageReferralOutstandingWhere,
+  buildHostedUsageReferralCapacityAtWhere,
   HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS,
   HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
   HOSTED_USAGE_REFERRAL_REFERRER_30D_CAP_USD_MICROS,
@@ -30,7 +30,6 @@ export const HOSTED_SIGNUP_REFERRAL_RECOVERY_LOOKBACK_MS =
   30 * 24 * 60 * 60 * 1_000;
 
 const SIGNUP_REFERRAL_RECEIPT_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1_000;
 
 type HostedSignupReferralActivationCandidate = {
   occurredAt: Date;
@@ -135,7 +134,13 @@ export async function recoverPendingHostedSignupReferralRewards(input: {
 
   let failed = 0;
   let rewarded = 0;
+  const failedReferrerMemberIds = new Set<string>();
   for (const candidate of candidates) {
+    // Do not let a later activation consume capacity while an earlier one for
+    // the same referrer is unresolved. The query order is activation-stable.
+    if (failedReferrerMemberIds.has(candidate.referrerMemberId)) {
+      continue;
+    }
     try {
       const result = await settleHostedSignupReferralReward({
         activatedAt: candidate.occurredAt,
@@ -148,6 +153,7 @@ export async function recoverPendingHostedSignupReferralRewards(input: {
       }
     } catch {
       failed += 1;
+      failedReferrerMemberIds.add(candidate.referrerMemberId);
     }
   }
 
@@ -352,14 +358,10 @@ async function readHostedSignupReferralCapacityFailureTx(input: {
   referrerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<string | null> {
-  const since = new Date(input.activatedAt.getTime() - THIRTY_DAYS_MS);
   const referrerCommitments = await input.tx.hostedUsageReferral.aggregate({
     where: {
       referrerMemberId: input.referrerMemberId,
-      OR: [
-        { rewardedAt: { gte: since } },
-        ...buildHostedUsageReferralOutstandingWhere(input.activatedAt),
-      ],
+      OR: buildHostedUsageReferralCapacityAtWhere(input.activatedAt),
     },
     _sum: { rewardUsdMicros: true },
   });
@@ -375,10 +377,7 @@ async function readHostedSignupReferralCapacityFailureTx(input: {
     await input.tx.hostedUsageReferral.aggregate({
       where: {
         beneficiaryMemberId: input.beneficiaryMemberId,
-        OR: [
-          { rewardedAt: { gte: since } },
-          ...buildHostedUsageReferralOutstandingWhere(input.activatedAt),
-        ],
+        OR: buildHostedUsageReferralCapacityAtWhere(input.activatedAt),
       },
       _sum: { rewardUsdMicros: true },
     });

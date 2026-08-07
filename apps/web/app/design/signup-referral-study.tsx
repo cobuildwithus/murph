@@ -69,6 +69,7 @@ export function SignupReferralComponentStudy() {
           <div className="mt-5">
             <HostedSignupReferralLinkButtonView
               onAction={() => undefined}
+              signupUrl={state === "copy_error" ? DESIGN_REFERRAL_URL : null}
               status={state}
             />
           </div>

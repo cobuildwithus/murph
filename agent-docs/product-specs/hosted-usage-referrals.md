@@ -103,11 +103,17 @@ person who uses the reusable link much later—receives isolated onboarding stat
 while `HostedInvite.referrerMemberId` remains attached to that invite throughout
 ordinary onboarding.
 
-Claims reuse the referrer's existing member-row lock and the `HostedInvite`
-table. At most 50 `signup-referral` invites may be created for one referrer in a
-rolling hour. The count is checked under that lock and before creating a
-placeholder member, so a shared link cannot produce unbounded abandoned accounts
-without adding another rate-limit service or persistence owner.
+Claims reuse the `HostedInvite` table. The production WAF admits at most 10
+matching claim requests per IP per minute. Inside Web, a non-blocking,
+feature-local advisory lock serializes one referrer's claim admission without
+queuing on account-wide state; a loser immediately receives the retryable busy
+state. At most 50 attributed invites may be created for one referrer in a
+rolling hour. The count is checked while holding that feature lock and before
+the shared member row or placeholder state is touched. An admitted claim then
+briefly takes the referrer's member row and rechecks active-account authority
+immediately before allocation. This keeps concurrent claims exact without
+adding another rate-limit service or persistence owner, and public claim
+pressure cannot queue unrelated billing, activation, settings, or deletion.
 
 Existing recipient-bound `/join/<inviteCode>` URLs remain valid. The browser
 never selects the referrer, reward, policy, destination, or accounting amount.
@@ -225,6 +231,17 @@ bound mission commitments:
 - at most $10.50 per referrer in a rolling 30-day window;
 - at most $20 per beneficiary in a rolling 30-day window.
 
+Delayed signup settlement reconstructs that capacity at the activation instant,
+not at recovery time. Completed rewards are bounded on both sides of the
+activation timestamp. A commitment counts only if it had been created and armed
+by then, was still within its armed or bound evidence window, and had not yet
+reached its terminal timestamp. A later reward, cancellation, expiry, or new
+commitment therefore cannot change which earlier activation owned capacity.
+Recovery scans activation candidates oldest first; the existing referrer lock
+serializes every capacity decision and receipt for that referrer. If one
+candidate fails transiently, that pass skips later activations for the same
+referrer so recovery failure cannot let a later signup steal earlier capacity.
+
 The referrer cannot reward their own reconciled identity. Suspended referrers or
 introduced members are disqualified. One introduced member can own only one
 referral receipt across all acquisition paths.
@@ -250,6 +267,15 @@ scheduler. Each bounded pass:
    personal completion notice;
 4. re-signals up to 50 oldest unconsumed referral-notification mailbox items in
    their actual `system` or `conversation` lane.
+
+The first reward enablement intentionally applies the same oldest-first scan to
+at most the preceding 30 days of attributed activations. That bounded window
+includes legacy recipient-bound invites with exactly one durable referrer; it is
+a controlled backfill, not a prospective-only launch. Before enabling the gate,
+operators must run a count-only aggregate over that exact candidate predicate
+and keep the gate off if the eligible population or aggregate exposure is not
+accepted. Per-referrer rolling caps still apply at each activation instant, but
+the batch size is throughput control rather than a company-wide liability cap.
 
 No signup-specific queue, scheduler, outbox, grant worker, or runtime action
 exists. A small policy-aware presenter chooses between the existing ordinary
@@ -350,20 +376,25 @@ Existing `/join/<inviteCode>` URLs remain compatible.
 Keep `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED` unset during deployment. Before
 enabling it:
 
-1. confirm exact-head unit, typecheck, app, viewport, and design-proof checks;
-2. run the focused local-PostgreSQL concurrent settlement and replay proof,
+1. create and publish the exact production signup-claim WAF rule, set
+   `MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID`, and require
+   `pnpm public-routes:waf-check` to pass against the active configuration;
+2. run the count-only 30-day attributed-activation aggregate, explicitly accept
+   the bounded backfill population and exposure, and otherwise keep the gate off;
+3. confirm exact-head unit, typecheck, app, viewport, and design-proof checks;
+4. run the focused local-PostgreSQL concurrent settlement and replay proof,
    including delayed activation after invite expiry and `web` relabeling;
-3. smoke one attributed activation and confirm one receipt, entry, grant, member
+5. smoke one attributed activation and confirm one receipt, entry, grant, member
    balance increment, accurate Settings history, and one identity-safe
    completion notice;
-4. replay the activation and recovery pass and confirm no second grant or notice;
-5. smoke one cap rejection and one self-referral rejection;
-6. exercise the 50-claims-per-hour boundary and confirm the rejected claim
+6. replay the activation and recovery pass and confirm no second grant or notice;
+7. smoke one cap rejection and one self-referral rejection;
+8. exercise the 50-claims-per-hour boundary and confirm the rejected claim
    creates no placeholder member or invite;
-7. verify invalid-origin claims remain 403 while known unavailable and busy
+9. verify invalid-origin claims remain 403 while known unavailable and busy
    links render their human-readable landing states and the busy retry succeeds
    after the rolling limit clears;
-8. switch between two authenticated Settings accounts without a full page
+10. switch between two authenticated Settings accounts without a full page
    reload and confirm neither referral action can render or copy the prior
    account's link.
 

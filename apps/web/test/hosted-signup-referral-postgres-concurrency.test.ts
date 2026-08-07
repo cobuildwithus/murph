@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
@@ -6,6 +6,11 @@ import {
   recoverPendingHostedSignupReferralRewards,
   settleHostedSignupReferralReward,
 } from "@/src/lib/hosted-growth/signup-referral-reward";
+import {
+  claimHostedSignupReferralLink,
+  issueHostedSignupReferralLink,
+} from "@/src/lib/hosted-growth/signup-referral";
+import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -233,6 +238,143 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ]);
       }
     }, 30_000);
+
+    it("admits only one concurrent claim at the 49-to-50 boundary", async () => {
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required for this proof.");
+      }
+
+      const fixtureId = randomUUID();
+      const referrerMemberId = `member_claim_referrer_${fixtureId}`;
+      const seededMemberIds = Array.from(
+        { length: 49 },
+        (_, index) => `member_claim_target_${index}_${fixtureId}`,
+      );
+      const now = new Date();
+      const createdAt = new Date(now.getTime() - 30 * 60_000);
+      const restoreCryptoEnv = configureHostedSignupClaimLocalCryptoForTest();
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            {
+              billingStatus: "active",
+              createdAt,
+              id: referrerMemberId,
+            },
+            ...seededMemberIds.map((id) => ({
+              billingStatus: "not_started" as const,
+              createdAt,
+              id,
+            })),
+          ],
+        });
+        await observer.hostedInvite.createMany({
+          data: seededMemberIds.map((memberId, index) => ({
+            channel: "web",
+            createdAt,
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            id: `invite_claim_seed_${index}_${fixtureId}`,
+            inviteCode: `claim-seed-${index}-${fixtureId}`,
+            memberId,
+            referrerMemberId,
+          })),
+        });
+        const referralUrl = (await issueHostedSignupReferralLink({
+          now,
+          prisma: observer,
+          publicBaseUrl: "https://www.withmurph.ai",
+          referrerMemberId,
+        })).signupUrl;
+        const referralCode = decodeURIComponent(
+          new URL(referralUrl).pathname.slice("/r/".length),
+        );
+
+        const outcomes = await Promise.allSettled([
+          claimHostedSignupReferralLink({
+            now,
+            prisma: firstClient,
+            publicBaseUrl: "https://www.withmurph.ai",
+            referralCode,
+          }),
+          claimHostedSignupReferralLink({
+            now,
+            prisma: secondClient,
+            publicBaseUrl: "https://www.withmurph.ai",
+            referralCode,
+          }),
+        ]);
+        const fulfilled = outcomes.filter(
+          (outcome) => outcome.status === "fulfilled",
+        );
+        const rejected = outcomes.filter(
+          (outcome) => outcome.status === "rejected",
+        );
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(1);
+        const rejection = rejected[0];
+        if (!rejection || !isHostedOnboardingError(rejection.reason)) {
+          throw new Error("Expected a typed hosted claim rejection.");
+        }
+        expect([
+          "HOSTED_SIGNUP_REFERRAL_CLAIM_BUSY",
+          "HOSTED_SIGNUP_REFERRAL_CLAIM_LIMIT_REACHED",
+        ]).toContain(rejection.reason.code);
+
+        const claimedInvites = await observer.hostedInvite.findMany({
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { memberId: true },
+          where: {
+            createdAt: { gte: new Date(now.getTime() - 60 * 60_000) },
+            referrerMemberId,
+          },
+        });
+        expect(claimedInvites).toHaveLength(50);
+        expect(new Set(claimedInvites.map(({ memberId }) => memberId)).size).toBe(50);
+        const newMemberIds = claimedInvites
+          .map(({ memberId }) => memberId)
+          .filter((memberId) => !seededMemberIds.includes(memberId));
+        expect(newMemberIds).toHaveLength(1);
+        await expect(observer.hostedMemberIdentity.count({
+          where: { memberId: { in: newMemberIds } },
+        })).resolves.toBe(1);
+
+        await expect(claimHostedSignupReferralLink({
+          now,
+          prisma: secondClient,
+          publicBaseUrl: "https://www.withmurph.ai",
+          referralCode,
+        })).rejects.toMatchObject({
+          code: "HOSTED_SIGNUP_REFERRAL_CLAIM_LIMIT_REACHED",
+        });
+      } finally {
+        const claimedMemberIds = (
+          await observer.hostedInvite.findMany({
+            select: { memberId: true },
+            where: { referrerMemberId },
+          })
+        ).map(({ memberId }) => memberId);
+        await observer.hostedInvite.deleteMany({
+          where: { referrerMemberId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [referrerMemberId, ...claimedMemberIds],
+            },
+          },
+        });
+        await Promise.all([
+          observer.$disconnect(),
+          firstClient.$disconnect(),
+          secondClient.$disconnect(),
+        ]);
+        restoreCryptoEnv();
+      }
+    }, 30_000);
   },
 );
 
@@ -254,4 +396,57 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
   return ["127.0.0.1", "::1", "[::1]", "localhost"].includes(
     effectiveHost,
   ) || effectiveHost.startsWith("/");
+}
+
+const SIGNUP_CLAIM_CRYPTO_ENV_KEYS = [
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
+  "HOSTED_CRYPTO_ENV",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+  "HOSTED_CRYPTO_GCP_KMS_API_ROOT",
+  "HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME",
+  "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+  "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY",
+] as const;
+
+function configureHostedSignupClaimLocalCryptoForTest(): () => void {
+  const previous = new Map(
+    SIGNUP_CLAIM_CRYPTO_ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
+  const authorityKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const automationKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "jwk" },
+  });
+  const authorityKeyVersion =
+    "projects/test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
+  Object.assign(process.env, {
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "test-automation-key",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
+      JSON.stringify(automationKey.publicKey),
+    HOSTED_CRYPTO_ENV: "test",
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: authorityKeyVersion,
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+      "projects/test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+      JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
+  });
+  return () => {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
 }

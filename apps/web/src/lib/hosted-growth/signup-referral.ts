@@ -291,11 +291,18 @@ async function claimHostedSignupReferralLinkTx(input: {
   prisma: Prisma.TransactionClient;
   referrerMemberId: string;
 }): Promise<HostedSignupReferralInvite> {
-  await lockHostedMemberRow(input.prisma, input.referrerMemberId);
-  await requireActiveHostedSignupReferrer({
-    prisma: input.prisma,
+  const claimLockAcquired = await tryAcquireHostedSignupReferralClaimLockTx({
     referrerMemberId: input.referrerMemberId,
+    tx: input.prisma,
   });
+  if (!claimLockAcquired) {
+    throw hostedOnboardingError({
+      code: "HOSTED_SIGNUP_REFERRAL_CLAIM_BUSY",
+      httpStatus: 429,
+      message: "That referral link is busy. Try again in a moment.",
+      retryable: true,
+    });
+  }
 
   // Channel is ordinary onboarding metadata and may later be relabeled during
   // authenticated resume. Referrer attribution is the durable claim evidence.
@@ -316,6 +323,15 @@ async function claimHostedSignupReferralLinkTx(input: {
     });
   }
 
+  // Keep the feature-local advisory lock through allocation so concurrent
+  // claims cannot exceed the rolling bound. Take the shared account row only
+  // after admission, then recheck account authority immediately before writes.
+  await lockHostedMemberRow(input.prisma, input.referrerMemberId);
+  await requireActiveHostedSignupReferrer({
+    prisma: input.prisma,
+    referrerMemberId: input.referrerMemberId,
+  });
+
   const targetMemberId = await createPristineHostedSignupMemberTx(input.prisma);
   return input.prisma.hostedInvite.create({
     data: {
@@ -334,6 +350,19 @@ async function claimHostedSignupReferralLinkTx(input: {
       inviteCode: true,
     },
   });
+}
+
+async function tryAcquireHostedSignupReferralClaimLockTx(input: {
+  referrerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ locked: boolean }>>`
+    SELECT pg_try_advisory_xact_lock(
+      hashtext(${"hosted-signup-referral-claim"}),
+      hashtext(${input.referrerMemberId})
+    ) AS locked
+  `;
+  return rows[0]?.locked === true;
 }
 
 async function requireActiveHostedSignupReferrer(input: {

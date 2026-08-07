@@ -128,6 +128,40 @@ describe("hosted signup referral rewards", () => {
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
+  it("does not settle a later activation after an earlier referrer failure", async () => {
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([
+        {
+          occurredAt: new Date("2026-08-06T10:00:00.000Z"),
+          referrerMemberId: "member_same_referrer",
+          userId: "member_first",
+        },
+        {
+          occurredAt: new Date("2026-08-06T11:00:00.000Z"),
+          referrerMemberId: "member_same_referrer",
+          userId: "member_later",
+        },
+        {
+          occurredAt: new Date("2026-08-06T11:30:00.000Z"),
+          referrerMemberId: "member_other_referrer",
+          userId: "member_independent",
+        },
+      ]),
+      $transaction: vi.fn().mockRejectedValue(new Error("retryable failure")),
+    };
+
+    await expect(recoverPendingHostedSignupReferralRewards({
+      enabled: true,
+      now: ACTIVATED_AT,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      failed: 2,
+      rewarded: 0,
+      scanned: 3,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+  });
+
   it("atomically writes the standard referral receipt and usage grant", async () => {
     const {
       created,
@@ -187,6 +221,64 @@ describe("hosted signup referral rewards", () => {
     });
     expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
     expect(tx.hostedUsageReferral.aggregate).toHaveBeenCalledTimes(2);
+    const capacityAtActivation = [
+      {
+        armedAt: { lte: ACTIVATED_AT },
+        createdAt: { lte: ACTIVATED_AT },
+        rewardedAt: {
+          gte: new Date("2026-07-07T12:05:00.000Z"),
+          lte: ACTIVATED_AT,
+        },
+      },
+      {
+        AND: [
+          {
+            OR: [
+              { terminalAt: null },
+              { terminalAt: { gt: ACTIVATED_AT } },
+            ],
+          },
+          {
+            OR: [
+              {
+                expiresAt: { gt: ACTIVATED_AT },
+                OR: [
+                  { targetBoundAt: null },
+                  { targetBoundAt: { gt: ACTIVATED_AT } },
+                ],
+              },
+              {
+                OR: [
+                  {
+                    expiresAt: {
+                      gt: new Date("2026-08-05T11:05:00.000Z"),
+                    },
+                  },
+                  { qualifiedAt: { lte: ACTIVATED_AT } },
+                ],
+                targetBoundAt: { lte: ACTIVATED_AT },
+              },
+            ],
+          },
+        ],
+        armedAt: { lte: ACTIVATED_AT },
+        createdAt: { lte: ACTIVATED_AT },
+      },
+    ];
+    expect(tx.hostedUsageReferral.aggregate).toHaveBeenNthCalledWith(1, {
+      where: {
+        OR: capacityAtActivation,
+        referrerMemberId,
+      },
+      _sum: { rewardUsdMicros: true },
+    });
+    expect(tx.hostedUsageReferral.aggregate).toHaveBeenNthCalledWith(2, {
+      where: {
+        beneficiaryMemberId: referrerMemberId,
+        OR: capacityAtActivation,
+      },
+      _sum: { rewardUsdMicros: true },
+    });
   });
 
   it("does not create a second receipt when another referral path owns the member", async () => {

@@ -159,29 +159,85 @@ describe("HostedSignupReferralLinkButton", () => {
     await rendered.cleanup();
   });
 
-  it("keeps a failed clipboard write recoverable", async () => {
+  it("keeps the loaded URL selectable after repeated clipboard denial", async () => {
     const rendered = await renderClientComponent(
       React.createElement(HostedSignupReferralLinkButton, {
         identityKey: IDENTITY_KEY,
         signupUrl: SIGNUP_URL,
       }),
     );
+    const writeText = vi.fn().mockRejectedValue(
+      new DOMException("Clipboard unavailable", "NotAllowedError"),
+    );
     vi.stubGlobal("navigator", {
       clipboard: {
-        writeText: vi.fn().mockRejectedValue(
-          new DOMException("Clipboard unavailable", "NotAllowedError"),
-        ),
+        writeText,
       },
     });
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await React.act(async () => {
+        rendered.button.click();
+      });
+    }
+
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(rendered.button.textContent).toBe("Try copy again");
+    expect(rendered.container.textContent).toContain(
+      "Automatic copying was blocked.",
+    );
+    expect(rendered.container.querySelector('[aria-live="polite"]')?.textContent)
+      .toBe(
+        "Could not copy the referral link. Select the link field below to copy it manually.",
+      );
+    const manualCopyInput = rendered.container.querySelector(
+      'input[aria-label="Referral link for manual copy"]',
+    );
+    expect(manualCopyInput?.tagName).toBe("INPUT");
+    const manualCopyField = manualCopyInput as HTMLInputElement;
+    expect(manualCopyField.value).toBe(SIGNUP_URL);
+    expect(manualCopyField.getAttribute("tabindex")).toBeNull();
+    const select = vi.fn();
+    Object.defineProperty(manualCopyField, "select", {
+      configurable: true,
+      value: select,
+    });
+    manualCopyField.dispatchEvent(
+      new rendered.window.Event("focusin", { bubbles: true }),
+    );
+    expect(select).toHaveBeenCalledOnce();
+
+    await rendered.cleanup();
+  });
+
+  it("clears the manual fallback before another identity can paint", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => undefined)));
+    vi.stubGlobal("navigator", {});
+    const rendered = await renderClientComponent(
+      React.createElement(HostedSignupReferralLinkButton, {
+        identityKey: "member_old",
+        signupUrl: "https://www.withmurph.ai/r/old_account",
+      }),
+    );
 
     await React.act(async () => {
       rendered.button.click();
     });
+    expect(rendered.container.querySelector(
+      'input[aria-label="Referral link for manual copy"]',
+    )).toHaveProperty("value", "https://www.withmurph.ai/r/old_account");
 
-    expect(rendered.button.textContent).toBe("Try copy again");
-    expect(rendered.container.textContent).toContain(
-      "Could not copy the referral link.",
+    await rendered.rerender(
+      React.createElement(HostedSignupReferralLinkButton, {
+        identityKey: "member_new",
+      }),
     );
+
+    expect(rendered.container.querySelector(
+      'input[aria-label="Referral link for manual copy"]',
+    )).toBeNull();
+    expect(rendered.container.textContent).not.toContain("old_account");
+    expect(rendered.button.textContent).toBe("Loading...");
 
     await rendered.cleanup();
   });
