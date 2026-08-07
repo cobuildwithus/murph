@@ -287,6 +287,126 @@ text(result.output);
     expect(toolOutputs).not.toContain(recoveryMarker)
   })
 
+  it('completes onboarding without arming or promising a revoked first read', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const skillsRoot = path.join(scenario.turnInput.workingDirectory, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'murph-onboarding'),
+      path.join(skillsRoot, 'murph-onboarding'),
+      { recursive: true },
+    )
+    const commandLog = path.join(
+      scenario.turnInput.workingDirectory,
+      'onboarding-completion-commands.log',
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    await writeFile(fakeVaultCli, `#!/bin/sh
+if [ "$*" = "assistant onboarding complete --reason user_answered" ]; then
+  printf '%s\\n' "$*" >> "${commandLog}"
+  printf '%s\\n' '{"status":"completed","completedReason":"user_answered"}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 1
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/murph-onboarding/SKILL.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,360p' skills/murph-onboarding/references/return-launch-completion.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli assistant onboarding complete --reason user_answered",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "Understood — you're all set, and I won't send proactive follow-ups.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            throw new Error('The revoked first read must not be armed.')
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onboardingFirstReadCompletionTransitionAvailable: true,
+      prompt: [
+        'Every user_answered onboarding criterion is now satisfied.',
+        'Complete onboarding, but do not follow up or message me proactively.',
+      ].join(' '),
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toBe(
+      "Understood — you're all set, and I won't send proactive follow-ups.",
+    )
+    expect(automationRequests).toEqual([])
+    expect((await readFile(commandLog, 'utf8')).trim().split('\n')).toEqual([
+      'assistant onboarding complete --reason user_answered',
+    ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain(
+      'Never arm it when the current message says the member asked not to',
+    )
+    expect(result.finalMessage).not.toContain(
+      'If I find something genuinely useful',
+    )
+  })
+
   it('carries a compact mixed-meal lookup through a grounded save and final reply', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

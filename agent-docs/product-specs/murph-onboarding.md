@@ -82,7 +82,8 @@ privacy, authorization, or provider boundaries.
   prerequisite is durable. The action accepts no prompt, schedule, model,
   route, or other fields. Code owns its fixed automation identity, current-
   conversation route binding, two-minute delay, sixty-minute execution window,
-  fresh Sol/high target, and complete selection-and-presentation prompt.
+  selected model with high reasoning, and complete selection-and-presentation
+  prompt.
   Generic automation save or patch cannot replace that fixed definition.
 - Reuse the ordinary automation, cron, foreground-priority, and outbox owners.
   Do not add a callback, child-result handoff, result queue, scheduler, database
@@ -588,12 +589,14 @@ succeeded. The host accepts the action only when the trusted ordinary foreground
 turn began with onboarding open, canonical state now reports answered completion,
 the route is private, and no fixed first read exists. Failure to save never
 blocks or rolls back onboarding and never produces a promise Murph cannot keep;
-an archived read cannot be reactivated.
+an archived read cannot be reactivated. A final-turn request for no proactive
+follow-up completes onboarding without creating the read or promising outreach.
 
 The occurrence becomes due two minutes after creation and expires sixty minutes
 later. Foreground member messages retain priority through the existing runtime;
 there is no parallel resident model writer or child callback. The scheduled
-turn runs in a fresh Sol/high context, revalidates answered completion, reads
+turn runs in a fresh context using the member's selected model with high
+reasoning, revalidates answered completion, reads
 the latest committed conversation before analysis and composition, and skips
 rather than interrupting a newer urgent or unresolved task or stacking another
 unanswered proactive health question.

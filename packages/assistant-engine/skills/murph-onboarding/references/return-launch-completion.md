@@ -210,14 +210,17 @@ transition, call `murph.automation` once with exactly:
 
 This structured action is only a trigger. The host owns the immutable automation
 identity, current-conversation route binding, two-minute delay, bounded active
-window, fresh continuity, Sol/high target, and complete first-read prompt. Do
-not call generic `save`, provide instructions, calculate timestamps, choose a
-model, or add fields. The host accepts the action only on the single trusted
+window, fresh continuity, selected model with high reasoning, and complete
+first-read prompt. Do not call generic `save`, provide instructions, calculate
+timestamps, choose a model, or add fields. The host accepts the action only on
+the single trusted
 ordinary foreground turn that began with onboarding open and has just completed
 it with `user_answered`; it cannot be invoked later, from a scheduled occurrence,
 or to reactivate an archived read. Never complete or arm it before every
 foundation-critical minimum fact or raw source is durable or explicitly
-deferred.
+deferred. Never arm it when the current message says the member asked not to
+receive this read, requested no follow-up, or otherwise revoked this proactive
+outreach.
 
 If the action fails or `murph.automation` is unavailable, do not retry, block
 completion, roll back completion, or mention the failure. Do not promise a later

@@ -102,7 +102,6 @@ export function buildOnboardingFirstPersonalReadAutomationSaveRequest(input: {
       now.getTime() + FIRST_PERSONAL_READ_ACTIVE_WINDOW_MS,
     ).toISOString(),
     assistantTargetOverride: {
-      model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
     },
     automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,

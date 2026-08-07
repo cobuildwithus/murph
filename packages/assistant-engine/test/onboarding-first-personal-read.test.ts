@@ -3,6 +3,9 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { resolveAutomationUpsertSlug } from '@murphai/core'
+import {
+  createAssistantModelTarget,
+} from '@murphai/operator-config/assistant-backend'
 
 import {
   resolveAssistantSkillsRoot,
@@ -16,6 +19,12 @@ import type {
   AssistantHostedAutomationTool,
   AssistantHostedAutomationToolRequest,
 } from '../src/assistant/execution-context.js'
+import {
+  automationAssistantTargetOverrideToProviderConfigInput,
+} from '../src/assistant/automation/target-override.js'
+import {
+  resolveAssistantExecutionPlan,
+} from '../src/assistant/execution-plan.js'
 import {
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
@@ -59,7 +68,6 @@ describe('onboarding first personal read', () => {
       action: 'save',
       activeUntil: '2026-08-06T22:02:00.000Z',
       assistantTargetOverride: {
-        model: 'gpt-5.6-sol',
         reasoningEffort: 'high',
       },
       automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
@@ -90,6 +98,40 @@ describe('onboarding first personal read', () => {
         title: 'Model-authored replacement',
       }),
     ).toBe(false)
+  })
+
+  it('inherits every selected model and provider while applying high reasoning', () => {
+    const override = automationAssistantTargetOverrideToProviderConfigInput(
+      buildOnboardingFirstPersonalReadAutomationSaveRequest({
+        now: new Date('2026-08-06T21:00:00.000Z'),
+      }).assistantTargetOverride,
+    )
+    for (const selected of [
+      { model: 'murph-custom-r7', modelProvider: 'hosted-custom-inference' },
+      { model: 'gpt-5.6-luna', modelProvider: 'openai' },
+      { model: 'gpt-5.6-terra', modelProvider: 'openai' },
+      { model: 'gpt-5.6-sol', modelProvider: 'openai' },
+    ]) {
+      const sessionTarget = createAssistantModelTarget({
+        model: selected.model,
+        modelProvider: selected.modelProvider,
+        provider: 'codex-cli',
+        reasoningEffort: 'medium',
+      })
+      if (!sessionTarget) {
+        throw new TypeError('Expected a selected assistant target.')
+      }
+
+      expect(resolveAssistantExecutionPlan({
+        defaults: null,
+        override,
+        sessionTarget,
+      }).primaryTarget).toMatchObject({
+        model: selected.model,
+        modelProvider: selected.modelProvider,
+        reasoningEffort: 'high',
+      })
+    }
   })
 
   it('turns the fieldless action into the code-owned request', () => {
@@ -329,9 +371,10 @@ describe('onboarding first personal read', () => {
       ),
     ).toHaveLength(1)
     expectContainsAll(onboarding, [
-      'The host owns the immutable automation identity, current-conversation route binding, two-minute delay, bounded active window, fresh continuity, Sol/high target, and complete first-read prompt.',
+      'The host owns the immutable automation identity, current-conversation route binding, two-minute delay, bounded active window, fresh continuity, selected model with high reasoning, and complete first-read prompt.',
       'Do not call generic `save`, provide instructions, calculate timestamps, choose a model, or add fields.',
       'The host accepts the action only on the single trusted ordinary foreground turn that began with onboarding open and has just completed it with `user_answered`',
+      'Never arm it when the current message says the member asked not to receive this read, requested no follow-up, or otherwise revoked this proactive outreach.',
       'do not retry, block completion, roll back completion, or mention the failure',
       'If I find something genuinely useful—whether that\'s a pattern, a clearer interpretation, or something worth watching next—I\'ll send it over.',
     ])
