@@ -31,6 +31,8 @@ import { normalizePhoneNumber } from "./phone";
 import { normalizeNullableString, sha256Hex } from "../primitives";
 
 export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
+  "chat.group_icon_updated",
+  "chat.group_icon_update_failed",
   "message.edited",
   "message.received",
   "message.sent",
@@ -45,6 +47,7 @@ export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
 
 export type HostedLinqProviderEventType = typeof HOSTED_LINQ_PROVIDER_EVENT_TYPES[number];
 export type HostedLinqProviderEventPhoneRole = "line" | "participant" | "unknown";
+const HOSTED_LINQ_GROUP_ICON_FAILURE_CODES = new Set([3007, 5006, 5007]);
 type HostedLinqProviderWebhookEvent = HostedLinqWebhookEvent & {
   event_type: HostedLinqProviderEventType;
 };
@@ -225,6 +228,16 @@ export function parseHostedLinqProviderEvent(input: {
     });
   }
 
+  if (
+    event.event_type === "chat.group_icon_updated"
+    || event.event_type === "chat.group_icon_update_failed"
+  ) {
+    return parseHostedLinqGroupIconProviderEvent({
+      event,
+      rawBody: input.rawBody,
+    });
+  }
+
   if (event.event_type === "reaction.added" || event.event_type === "reaction.removed") {
     return parseHostedLinqReactionProviderEvent({
       event,
@@ -242,6 +255,64 @@ export function parseHostedLinqProviderEvent(input: {
   return parseGenericHostedLinqProviderEvent({
     event,
     rawBody: input.rawBody,
+  });
+}
+
+function parseHostedLinqGroupIconProviderEvent(input: {
+  event: HostedLinqProviderWebhookEvent;
+  rawBody?: string | null;
+}): ParsedHostedLinqProviderEvent {
+  const data = readRecord(input.event.data);
+  const chatId = readFirstStringAtPaths(data, [
+    ["chat_id"],
+    ["chatId"],
+    ["chat", "id"],
+  ] as const);
+  const failed = input.event.event_type === "chat.group_icon_update_failed";
+  const rawFailureCode = failed
+    ? readFirstIntegerAtPaths(data, [
+        ["error_code"],
+        ["errorCode"],
+        ["error", "code"],
+      ] as const)
+    : null;
+  const failureCode = rawFailureCode !== null
+    && HOSTED_LINQ_GROUP_ICON_FAILURE_CODES.has(rawFailureCode)
+      ? String(rawFailureCode)
+      : null;
+  const providerCreatedAt = parseProviderDate(readFirstStringAtPaths(data, [
+    failed ? ["failed_at"] : ["updated_at"],
+    failed ? ["failedAt"] : ["updatedAt"],
+  ] as const));
+
+  return buildParsedProviderEvent({
+    chatId,
+    deliveryStatus: null,
+    direction: null,
+    event: input.event,
+    extraction: {
+      chatIdPresent: chatId !== null,
+      extractionStrategy: "group-icon-outcome",
+      failureCodePresent: failureCode !== null,
+      iconValuesRetained: false,
+      phoneNumberRole: "unknown",
+      providerTimestampPresent: providerCreatedAt !== null,
+      servicePresent: false,
+    },
+    failureCode,
+    failureReason: null,
+    messageId: null,
+    phoneNumber: null,
+    phoneNumberRole: "unknown",
+    providerCreatedAt,
+    providerHealth: { chat: null, line: null },
+    providerReason: null,
+    providerStatus: failed ? "failed" : "updated",
+    rawBody: input.rawBody,
+    reactionCustomEmoji: null,
+    reactionFromHandle: null,
+    reactionType: null,
+    service: null,
   });
 }
 
@@ -665,6 +736,7 @@ function buildParsedProviderEvent(input: {
   phoneNumber: string | null;
   phoneNumberRole: HostedLinqProviderEventPhoneRole;
   providerCreatedAt?: Date | null;
+  providerHealth?: HostedLinqProviderHealthEvent;
   providerReason: string | null;
   providerStatus: string | null;
   rawBody?: string | null;
@@ -720,7 +792,8 @@ function buildParsedProviderEvent(input: {
     phoneNumberLookupKey,
     phoneNumberRole: input.phoneNumberRole,
     providerCreatedAt,
-    providerHealth: parseHostedLinqProviderHealthEvent(input.event),
+    providerHealth:
+      input.providerHealth ?? parseHostedLinqProviderHealthEvent(input.event),
     providerReason: normalizeProviderFreeText(input.providerReason),
     providerStatus: normalizeSafeProviderToken(input.providerStatus),
     reactionCustomEmoji: normalizeSafeProviderToken(input.reactionCustomEmoji),

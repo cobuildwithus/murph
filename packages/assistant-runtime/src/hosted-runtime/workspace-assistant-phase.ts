@@ -7974,7 +7974,15 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
     sanitizedDetails,
     ["operation", "action"],
   ));
+  appendHostedOutboxDeliveryErrorDetail(output, "FailureStage", sanitizedDetails.failureStage);
+  appendHostedOutboxDeliveryErrorDetail(output, "Method", sanitizedDetails.method);
   appendHostedOutboxDeliveryErrorDetail(output, "Retryable", sanitizedDetails.retryable);
+  appendHostedOutboxDeliveryErrorDetail(output, "TimedOut", sanitizedDetails.timedOut);
+  appendHostedOutboxDeliveryErrorDetail(
+    output,
+    "TransportErrorName",
+    sanitizedDetails.transportErrorName,
+  );
   appendHostedOutboxDeliveryErrorDetail(output, "ErrorName", readFirstHostedOutboxDeliveryErrorDetail(
     sanitizedDetails,
     ["name", "errorName"],
