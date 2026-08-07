@@ -12,7 +12,10 @@ import {
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.ts";
 import type { AssistantConnectedAppsPort } from "../src/assistant/connected-apps-port.ts";
-import type { AssistantHostedToolContext } from "../src/assistant/hosted-tool-context.ts";
+import type {
+  AssistantHostedToolContext,
+  AssistantHostedUserActionScope,
+} from "../src/assistant/hosted-tool-context.ts";
 import type { AssistantProgressDelivery } from "../src/assistant/turn-progress.ts";
 
 describe("murph connected-app dynamic tools", () => {
@@ -45,6 +48,9 @@ describe("murph connected-app dynamic tools", () => {
     );
     expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
       "failed or ambiguous calendar create is non-retryable",
+    );
+    expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
+      "email sends are too",
     );
     expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).not.toContain(
       "GOOGLECALENDAR_CREATE_EVENT",
@@ -130,6 +136,103 @@ describe("murph connected-app dynamic tools", () => {
       },
       kind: "connected-apps-execute",
     });
+  });
+
+  it("blocks email sends without current private user input", async () => {
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async () => ({ result: { messageId: "unexpected" } })),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext(connectedApps),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          account: "work",
+          agentApproved: true,
+          arguments: {
+            body: "Please help with my account.",
+            recipient_email: "support@example.com",
+            subject: "Account help",
+          },
+          toolSlug: "GMAIL_SEND_EMAIL",
+        },
+        kind: "connected-apps-execute",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]!.text).toContain(
+      "requires current user input in a private conversation",
+    );
+    expect(connectedApps.request).not.toHaveBeenCalled();
+  });
+
+  it("blocks email sends from current group input", async () => {
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async () => ({ result: { messageId: "unexpected" } })),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext(connectedApps, {
+        userActionScope: createUserActionScope("group"),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          account: "work",
+          agentApproved: true,
+          arguments: {
+            body: "Please help with my account.",
+            recipient_email: "support@example.com",
+            subject: "Account help",
+          },
+          toolSlug: "GMAIL_SEND_EMAIL",
+        },
+        kind: "connected-apps-execute",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(connectedApps.request).not.toHaveBeenCalled();
+  });
+
+  it("allows email sends from current private user input", async () => {
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async () => ({ result: { messageId: "msg_123" } })),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext(connectedApps, {
+        userActionScope: createUserActionScope("direct"),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          account: "work",
+          agentApproved: true,
+          arguments: {
+            body: "Please help with my account.",
+            recipient_email: "support@example.com",
+            subject: "Account help",
+          },
+          toolSlug: "GMAIL_SEND_EMAIL",
+        },
+        kind: "connected-apps-execute",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(connectedApps.request).toHaveBeenCalledTimes(1);
   });
 
   it("passes search through the signed hosted control-plane transport", async () => {
@@ -435,16 +538,33 @@ function dynamicToolCall(input: {
 
 function createHostedToolContext(
   connectedApps: AssistantConnectedAppsPort | null,
+  options: {
+    userActionScope?: AssistantHostedUserActionScope | null;
+  } = {},
 ): AssistantHostedToolContext {
   return {
     connectedApps,
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: () => options.userActionScope ?? null,
     sendVaultFile: async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");
     },
     vaultFileSendAvailable: false,
+  };
+}
+
+function createUserActionScope(
+  conversationScope: AssistantHostedUserActionScope["conversationScope"],
+): AssistantHostedUserActionScope {
+  return {
+    acceptedInputIds: ["input_1"],
+    conversationId: "conversation_1",
+    conversationScope,
+    inboundMailboxItemIds: ["mailbox_1"],
+    originSessionId: "session_1",
+    recipientKey: "recipient_1",
   };
 }
 
