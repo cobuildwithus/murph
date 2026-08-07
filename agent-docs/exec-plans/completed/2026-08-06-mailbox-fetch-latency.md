@@ -1,6 +1,6 @@
 # Hosted mailbox fetch latency overlap
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -83,3 +83,11 @@ Updated: 2026-08-06
 - PASS: final ReviewGPT round 2 found no qualifying findings on the substantive
   candidate. A clean base-only rebase onto current `main` followed; the exact
   rebased candidate again passed 131 focused tests and Web prepared typecheck.
+- REJECTED in the parent final review: the allowed-path overlap starts the
+  optional group projection before the required AI-usage decision. That
+  projection can perform multiple database reads plus secure-box decryption,
+  while the denial path throws without joining the in-flight work. Waiting for
+  it would slow denied requests, and adding cancellation or lifecycle machinery
+  is not justified by a 105 ms injected-RTT model. PR #1362 was therefore
+  closed without merge or deployment.
+Completed: 2026-08-06
