@@ -8,13 +8,7 @@ TARGET = ROOT / "packages/assistant-runtime/test/hosted-runtime-workspace-entryp
 
 text = TARGET.read_text(encoding="utf-8")
 
-preview_import = "  ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,\n"
-if text.count(preview_import) != 1:
-    raise RuntimeError(
-        "expected exactly one stale group preview heading import"
-    )
-text = text.replace(preview_import, "", 1)
-
+preview_symbol = "ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING"
 heading = "binds a late group confirmation to the preview delivery receipt"
 if text.count(heading) != 1:
     raise RuntimeError(
@@ -22,6 +16,20 @@ if text.count(heading) != 1:
     )
 
 heading_index = text.index(heading)
+import_region = text[:heading_index]
+import_region, import_count = re.subn(
+    rf"(?m)^[ \t]*{preview_symbol},?[ \t]*\n",
+    "",
+    import_region,
+    count=1,
+)
+if import_count != 1:
+    raise RuntimeError(
+        "expected exactly one standalone stale group preview heading import"
+    )
+text = import_region + text[heading_index:]
+heading_index = text.index(heading)
+
 block_start = text.rfind("\n  it.each(", 0, heading_index)
 if block_start < 0:
     raise RuntimeError("could not find the stale parameterized test start")
@@ -41,7 +49,7 @@ for marker in (
     "retryable",
     "terminal",
     "ambiguous",
-    "ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING",
+    preview_symbol,
 ):
     if marker not in block:
         raise RuntimeError(
@@ -50,10 +58,7 @@ for marker in (
 
 text = text[:block_start] + text[block_end:]
 
-for stale in (
-    "ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING",
-    heading,
-):
+for stale in (preview_symbol, heading):
     if stale in text:
         raise RuntimeError(f"stale preview test residue remains: {stale}")
 
