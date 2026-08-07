@@ -2,7 +2,7 @@ import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "
 import path from "node:path";
 import { Writable } from "node:stream";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   BufferedNamedChildProcess,
@@ -567,6 +567,10 @@ function createDeferred<T>(): {
 }
 
 describe("hosted local dev stack", () => {
+  beforeEach(() => {
+    vi.stubEnv("HOSTED_EXECUTION_RUNNER_HOST_ALIAS", "host.docker.internal");
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     runCommand.mockImplementation(async () => {});
@@ -2947,7 +2951,10 @@ describe("hosted local dev stack", () => {
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
-      env: process.env,
+      env: {
+        ...process.env,
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: undefined,
+      },
     });
     await stack.ready;
     await stack.stop();
@@ -3052,7 +3059,10 @@ describe("hosted local dev stack", () => {
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     await expect(startHostedLocalDevStack({
-      env: process.env,
+      env: {
+        ...process.env,
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: undefined,
+      },
     })).rejects.toThrow(
       "Hosted local dev on Linux could not resolve a container-reachable worker host.",
     );
