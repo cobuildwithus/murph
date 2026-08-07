@@ -1,0 +1,151 @@
+name: Finalize optional sponsorship moments
+
+on:
+  push:
+    branches:
+      - agent/optional-sponsorship-moments-final
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-optional-sponsorship-moments
+  cancel-in-progress: true
+
+jobs:
+  finalize-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    env:
+      CLOUDFLARE_IMAGES_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_IMAGES_ACCOUNT_ID }}
+      CLOUDFLARE_IMAGES_API_KEY: ${{ secrets.CLOUDFLARE_IMAGES_API_KEY }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Port the verified implementation onto current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin agent/optional-sponsorship-moments
+          git checkout origin/agent/optional-sponsorship-moments -- \
+            agent-docs/exec-plans/active/2026-08-07-optional-group-sponsorship-moments.md \
+            agent-docs/index.md \
+            agent-docs/product-specs/hosted-usage-topups.md \
+            agent-docs/product-specs/index.md \
+            apps/web/prisma/migrations/20260807210000_add_group_sponsorship_creative_request/migration.sql \
+            apps/web/src/components/hosted-groups/group-sponsorship-dialog.tsx \
+            apps/web/src/lib/hosted-groups/group-sponsorship-contract.ts \
+            apps/web/src/lib/hosted-groups/group-sponsorship-notification.ts \
+            apps/web/src/lib/hosted-groups/group-sponsorship-store.ts \
+            apps/web/test/hosted-group-sponsorship-contract.test.ts \
+            apps/web/test/hosted-group-sponsorship-notification.test.ts \
+            apps/web/test/hosted-group-sponsorship-store.test.ts \
+            packages/assistant-engine/README.md \
+            packages/assistant-engine/src/assistant/system-prompt.ts \
+            packages/assistant-engine/test/assistant-creative-notification-prompt.test.ts
+          python3 scripts/prepare-final-optional-sponsorship-moments.py
+          git diff --check
+
+      - name: Typecheck hosted Web
+        run: pnpm --dir apps/web typecheck
+
+      - name: Lint changed hosted Web files
+        run: >-
+          pnpm --dir apps/web exec eslint
+          app/design/components-content.tsx
+          src/components/hosted-groups/group-sponsorship-dialog.tsx
+          src/lib/hosted-groups/group-sponsorship-contract.ts
+          src/lib/hosted-groups/group-sponsorship-store.ts
+          src/lib/hosted-groups/group-sponsorship-notification.ts
+          test/hosted-group-sponsorship-contract.test.ts
+          test/hosted-group-sponsorship-store.test.ts
+          test/hosted-group-sponsorship-notification.test.ts
+
+      - name: Run focused hosted Web tests
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/hosted-group-sponsorship-contract.test.ts
+          apps/web/test/hosted-group-sponsorship-store.test.ts
+          apps/web/test/hosted-group-sponsorship-notification.test.ts
+          apps/web/test/hosted-group-funding-page.test.tsx
+          apps/web/test/hosted-usage-credit-purchase-service.test.ts
+
+      - name: Typecheck assistant engine
+        run: pnpm --dir packages/assistant-engine typecheck
+
+      - name: Run focused assistant tests
+        run: >-
+          pnpm --dir packages/assistant-engine exec vitest run
+          --config vitest.config.ts
+          --no-coverage
+          test/assistant-creative-notification-prompt.test.ts
+          test/assistant-codex-turn-planning.test.ts
+          test/assistant-notification-turn-runtime.test.ts
+
+      - name: Check billing, docs, and generated artifacts
+        run: |
+          pnpm hosted-billing:ci-guard
+          pnpm docs:drift
+          pnpm no-js
+          git diff --check
+
+      - name: Install Chromium for rendered proof
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Capture and upload desktop and mobile design proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir apps/web dev:local-env --hostname 127.0.0.1 --port 3000 >/tmp/optional-sponsorship-design-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:3000/api/internal/health >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat /tmp/optional-sponsorship-design-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3000/api/internal/health >/dev/null
+          node scripts/capture-optional-sponsorship-proof.mjs
+          pnpm design-proof:upload -- \
+            /tmp/optional-sponsorship-desktop.png \
+            /tmp/optional-sponsorship-mobile.png | tee /tmp/optional-sponsorship-design-proof-urls.txt
+          {
+            echo '## Optional sponsorship design proof'
+            echo
+            sed 's/^/- /' /tmp/optional-sponsorship-design-proof-urls.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit the verified implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            scripts/capture-optional-sponsorship-proof.mjs \
+            .github/workflows/finalize-optional-sponsorship-moments.yml
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Add optional group sponsorship creative responses"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
