@@ -67,6 +67,9 @@ import {
   MURPH_LABS_TOOL,
 } from './dynamic-tools/labs.js'
 import {
+  MURPH_PENDING_VAULT_FILES_TOOL,
+} from './dynamic-tools/pending-vault-files.js'
+import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
 } from './dynamic-tools/group-room-model.js'
 import {
@@ -100,6 +103,9 @@ export type {
 export { MURPH_AUTOMATION_TOOL } from './dynamic-tools/automation.js'
 export { MURPH_DEVICE_TOOL } from './dynamic-tools/device.js'
 export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
+export {
+  MURPH_PENDING_VAULT_FILES_TOOL,
+} from './dynamic-tools/pending-vault-files.js'
 export {
   MURPH_GROUP_ROOM_MODEL_TOOL,
 } from './dynamic-tools/group-room-model.js'
@@ -1267,6 +1273,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
+  MURPH_PENDING_VAULT_FILES_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
@@ -1327,6 +1334,7 @@ export interface MurphDynamicToolAvailability {
   physicalNotesAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
+  pendingVaultFilesAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
   askGrokAvailable?: boolean | null
 }
@@ -1372,6 +1380,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
+    [MURPH_PENDING_VAULT_FILES_TOOL, defaultOff((a) => a.pendingVaultFilesAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     [MURPH_SEND_PHYSICAL_NOTE_TOOL, defaultOff((a) => a.physicalNotesAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(

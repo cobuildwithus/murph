@@ -7,6 +7,9 @@ import type {
 import { sanitizeAssistantDeliveryErrorForPersistence } from '../redaction.js'
 import { updateAssistantTurnReceipt } from '../turns.js'
 
+const ASSISTANT_VAULT_FILE_SEND_CANCELLED_CODE =
+  'ASSISTANT_VAULT_FILE_SEND_CANCELLED'
+
 export async function repairAssistantOutboxReceiptForIntent(input: {
   at?: string
   intent: AssistantOutboxIntent
@@ -100,6 +103,13 @@ function buildAssistantOutboxReceiptRepair(
   metadata: Record<string, string>
   status: AssistantTurnReceipt['status'] | null
 } | null {
+  if (
+    intent.status === 'abandoned'
+    && intent.lastError?.code === ASSISTANT_VAULT_FILE_SEND_CANCELLED_CODE
+  ) {
+    return null
+  }
+
   const at = atOverride ?? intent.updatedAt
   const channel = intent.channel ?? 'unknown'
 

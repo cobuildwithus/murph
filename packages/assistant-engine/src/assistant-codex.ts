@@ -5675,6 +5675,7 @@ function isInvalidDynamicToolRequest(
       | 'invalid-computer-arguments'
       | 'invalid-device-arguments'
       | 'invalid-generate-voice-memo-arguments'
+      | 'invalid-pending-vault-files-arguments'
       | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-reaction-arguments'
@@ -5691,6 +5692,7 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-computer-arguments' ||
     request.kind === 'invalid-device-arguments' ||
     request.kind === 'invalid-generate-voice-memo-arguments' ||
+    request.kind === 'invalid-pending-vault-files-arguments' ||
     request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-reaction-arguments' ||
@@ -5712,6 +5714,8 @@ function isSerializedDynamicToolRequest(
     request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'send-vault-file' ||
+    request.kind === 'pending-vault-files-list' ||
+    request.kind === 'pending-vault-files-cancel' ||
     request.kind === 'assistant-configuration' ||
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
@@ -5744,6 +5748,9 @@ function isInvocationScopedRootToolRequest(
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
     request.kind === 'invalid-device-arguments' ||
+    request.kind === 'pending-vault-files-list' ||
+    request.kind === 'pending-vault-files-cancel' ||
+    request.kind === 'invalid-pending-vault-files-arguments' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     request.kind === 'invalid-reaction-arguments' ||
