@@ -24,7 +24,8 @@ Updated: 2026-08-07
 ## Scope
 
 - In scope: one pnpm patch for `ink@6.8.0`, the workspace patched-dependency
-  declaration, lockfile, and focused regression proof if needed.
+  declaration, lockfile, and the existing public-CLI bundling path required to
+  carry that patch into npm installs.
 - Out of scope: upgrading Ink, changing Murph's Ink UI, changing hosted runner
   boot, or introducing a Murph-owned throttle implementation.
 
@@ -47,15 +48,20 @@ Updated: 2026-08-07
 3. Risk: a microbenchmark overstates user-visible impact.
    Mitigation: measure both isolated imports and full Ink import before/after,
    and frame the result only as local first-render startup work.
+4. Risk: a workspace-only pnpm patch does not reach public npm installs.
+   Mitigation: bundle patched Ink through the existing external-dependency
+   release path, promote its already-installed runtime dependencies explicitly,
+   and inspect the real packed tarball in the release test.
 
 ## Tasks
 
 1. [complete] Confirm current Ink, latest Ink, and upstream source retain the
    compatibility-barrel import; reproduce current import cost.
 2. [complete] Create the one-line pnpm package patch and lockfile metadata.
-3. [complete] Keep regression proof at the existing dependency boundary: the
-   patch checksum and frozen install fail closed if the one-line patch drifts,
-   while the existing Ink UI suite executes the installed package.
+3. [complete] Keep regression proof at existing boundaries: the patch checksum
+   and frozen install fail closed if the one-line patch drifts, the Ink UI suite
+   executes the installed package, and the real-tarball release test proves the
+   public CLI contains the patched Ink runtime.
 4. [complete] Run focused tests, package coverage, typecheck/build, dependency
    guards, frozen install, rendered-output comparison, and before/after
    benchmarks.
@@ -72,6 +78,9 @@ Updated: 2026-08-07
 - Do not add a repository-owned source-shape test for pnpm's patch file. The
   patch checksum already owns application integrity, and the Ink UI suite owns
   executable behavior.
+- Bundle Ink in the public CLI tarball. Workspace patch metadata is not an npm
+  distribution mechanism; the existing bundled-external path is the smallest
+  release owner that preserves the patch for end users.
 
 ## Verification
 
@@ -90,6 +99,9 @@ Updated: 2026-08-07
   passed, with 94.07% statement and 85.84% branch coverage.
 - The unpatched and patched Ink modules exposed identical export keys and
   identical `renderToString` output for the focused smoke case.
+- CLI release package shape passed; the focused release audit passed all 42
+  tests with prepared runtime artifacts and verified the actual packed tarball
+  contains Ink's patched subpath import.
 - In 41 alternating fresh-process samples, the compatibility barrel measured
   90.585 ms p50 versus 6.661 ms for the throttle subpath. Full Ink import
   measured 222.809 ms p50 unpatched versus 143.184 ms patched: -79.625 ms and
