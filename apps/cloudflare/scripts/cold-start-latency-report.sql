@@ -52,7 +52,7 @@ FROM samples
 HAVING count(*) > 0;
 
 \echo 'Temporal activity to runner job by recovery cohort (seconds)'
-WITH row_stamps AS (
+WITH raw_row_stamps AS (
   SELECT
     runtime_attempt_id,
     EXTRACT(EPOCH FROM (
@@ -75,6 +75,10 @@ WITH row_stamps AS (
     AND runtime_attempt_id IS NOT NULL
     AND runner_job_accepted_at IS NOT NULL
     AND phase_breakdown_json #> '{orchestration,temporalActivityStartedAtEpochMs}' IS NOT NULL
+), row_stamps AS (
+  SELECT *
+  FROM raw_row_stamps
+  WHERE runner_job_accepted_ms >= activity_started_ms
 ), attempt_stamps AS (
   SELECT DISTINCT
     runtime_attempt_id,
@@ -93,7 +97,6 @@ WITH row_stamps AS (
     (runner_job_accepted_ms - activity_started_ms) / 1000 AS duration_seconds
   FROM unambiguous_attempt_stamps
   WHERE stamp_candidate_count = 1
-    AND runner_job_accepted_ms >= activity_started_ms
 )
 SELECT
   cohort,

@@ -56,6 +56,9 @@ describe("hosted runtime operational report contracts", () => {
       "runner_job_accepted_at >= accepted_at",
     );
     expect(coldStartReportSql).toContain("stamp_candidate_count = 1");
+    expect(coldStartReportSql).toContain(
+      "WHERE runner_job_accepted_ms >= activity_started_ms",
+    );
     expect(coldStartReportSql).toContain("SELECT DISTINCT\n    runtime_attempt_id");
     expect(coldStartReportSql).toContain("WHERE phase.duration_ms >= 0");
     expect(coldStartReportSql).toContain("'web_direct_cold'");
@@ -398,6 +401,17 @@ function createFixtureSql(schemaName: string): string {
       'attempt-temporal-owned-with-direct-wake',
       jsonb_build_object('orchestration', jsonb_build_object(
         'temporalActivityStartedAtEpochMs', base_ms + 12000,
+        'triggeredByWebDirect', false
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'temporal-owned-post-runner-active-wake',
+      t0 + INTERVAL '17 seconds',
+      t0 + INTERVAL '16 seconds',
+      'attempt-temporal-owned-with-direct-wake',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'temporalActivityStartedAtEpochMs', base_ms + 17000,
         'triggeredByWebDirect', false
       ))
     FROM fixture

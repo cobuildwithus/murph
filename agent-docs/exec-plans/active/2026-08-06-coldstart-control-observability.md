@@ -150,6 +150,15 @@ Updated: 2026-08-06
   row first, then deduplicate the attempt-level owner/activity/runner tuple.
   Lower-priority marker differences now collapse when the final cohort agrees;
   conflicting final cohorts or attempt-level timestamps still fail closed.
+- Round 6 found that chronology-ineligible later Temporal wakes were still
+  counted before ambiguity, repeating the same row-reduction ordering mechanism
+  as Round 5. Requirement-level continuation decision: the startup report
+  includes only activities whose start can precede the reported runner-job
+  acceptance. Filter `activity <= runner` before cohort/attempt deduplication;
+  then assess ambiguity only among eligible launch stamps. Multiple eligible
+  activities, runner times, or final cohorts continue to fail closed. Later
+  active-wake latency is not part of this cold-start report and needs no new
+  measurement, state, or lifecycle for the current requirement.
 
 ## Verification
 
@@ -192,6 +201,10 @@ Updated: 2026-08-06
   by applying cohort precedence before DISTINCT. The PostgreSQL fixture covers
   differing mailbox-local markers that resolve to one cohort and a genuinely
   conflicting cohort pair that remains omitted.
+- ReviewGPT final round 6: chronology-ordering finding accepted and resolved by
+  filtering post-runner activity stamps before DISTINCT and ambiguity counting.
+  The PostgreSQL fixture includes one valid launch plus a later active wake on
+  the same attempt and still reports exactly one startup sample.
 - `git diff --check`: passed.
-- Pending: corrected-head ReviewGPT round 6, exact-head CI, parent final review, plan
+- Pending: corrected-head ReviewGPT round 7, exact-head CI, parent final review, plan
   closure, and mergeability proof.
