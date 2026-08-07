@@ -51,7 +51,7 @@ const providerPatterns = [
 const privateKeyBlockPattern =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]{32,16384}?-----END [A-Z0-9 ]*PRIVATE KEY-----/u;
 const authorizationCredentialPattern =
-  /\bAuthorization\b[\s\S]{0,96}?\b(Bearer|Basic)[ \t]+([A-Za-z0-9._~+/$={}-]{1,4096})/giu;
+  /\b(Bearer|Basic)[ \t]+([A-Za-z0-9._~+/$={}-]{1,4096})/gu;
 const privateJwkPatterns = [
   /\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["'][\s\S]{0,2000}?\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["']/iu,
   /\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["'][\s\S]{0,2000}?\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["']/iu,
@@ -61,6 +61,8 @@ const credentialUrlPattern =
   /\b(?:amqps?|https?|mongodb(?:\+srv)?|mysql|nats|postgres(?:ql)?|redis|sftp):\/\/[^:\s/@]+:[^@\s/]+@[^\s"'`,;]+/giu;
 const credentialParameterPattern =
   /(?:^|[?&])([A-Za-z_$][A-Za-z0-9_$-]{0,127})=([^&#\s"'`]{1,4096})/gimu;
+const quotedCredentialParameterPattern =
+  /(?:\.\s*(?:set|append)\s*\(\s*|\[\s*)(["'`])([A-Za-z_$][A-Za-z0-9_$-]*)\1\s*,\s*(["'`])([^"'`\r\n]{1,4096})\3\s*(?:\)|\])/gimu;
 const quotedColonAssignmentPattern =
   /(?:^|[,{][ \t\r\n]*|\n[ \t]*)["'`]?\b([A-Za-z_$][A-Za-z0-9_$-]*)\b["'`]?\s*:\s*(["'`])([^"'`\r\n]{1,4096})\2/gimu;
 const unquotedColonAssignmentPattern =
@@ -82,6 +84,36 @@ const exactPlaceholderValues = new Set([
   'redacted',
   'replace-me',
   'test-only',
+]);
+// These exact normalized names are credential holders even when they do not
+// end in a separator- or camel-case token such as `secret` or `token`.
+const exactCredentialKeys = new Set([
+  'accesskey',
+  'accesstoken',
+  'apikey',
+  'apitoken',
+  'auth',
+  'authheader',
+  'authorization',
+  'authorizationheader',
+  'authtoken',
+  'bearertoken',
+  'clientsecret',
+  'cookie',
+  'credential',
+  'credentials',
+  'csrftoken',
+  'idtoken',
+  'oauthtoken',
+  'passwd',
+  'password',
+  'privatekey',
+  'providersecretvalue',
+  'refreshtoken',
+  'secret',
+  'sessiontoken',
+  'setcookie',
+  'token',
 ]);
 // These are reviewed public literals from the real release inventory. Do not
 // replace them with key-suffix or value-shape exemptions.
@@ -111,6 +143,7 @@ const allowedPublicCredentialAssignments = new Set(
     ['TELEGRAM_SECRET_TOKEN_HEADER', 'x-telegram-bot-api-secret-token'],
     ['WHOOP_OAUTH_TOKEN_ENDPOINT_KIND', 'whoop_oauth_token'],
     ['WHOOP_TOKEN_PATH', '/oauth/oauth2/token'],
+    ['XAI_API_KEY', 'XAI_X_SEARCH_MODEL'],
     ['access_token_expires_at', 'null'],
     [
       'apiKey',
@@ -220,9 +253,13 @@ function isCredentialReference(value) {
 }
 
 function isCredentialLiteral(key, value) {
+  const authorizationValueMatch = /^(?:Bearer|Basic)[ \t]+(.+)$/iu.exec(
+    value.trim(),
+  );
+  const referenceValue = authorizationValueMatch?.[1] ?? value;
   return (
-    !isExactPlaceholder(value)
-    && !isCredentialReference(value)
+    !isExactPlaceholder(referenceValue)
+    && !isCredentialReference(referenceValue)
     && !allowedPublicCredentialAssignments.has(`${key}\0${value}`)
   );
 }
@@ -237,6 +274,11 @@ function credentialKeyParts(key) {
 }
 
 function isCredentialKey(key, options = {}) {
+  const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/gu, '');
+  if (exactCredentialKeys.has(normalizedKey)) {
+    return true;
+  }
+
   const parts = credentialKeyParts(key);
   const terminal = parts.at(-1);
   if (['mnemonic', 'password', 'secret', 'token'].includes(terminal)) {
@@ -252,6 +294,37 @@ function isCredentialKey(key, options = {}) {
     .slice(0, -1)
     .some((part) =>
       ['access', 'api', 'auth', 'client', 'private', 'secret', 'signing'].includes(part));
+}
+
+function parameterHasCredential(pattern, text, keyIndex, valueIndex, options = {}) {
+  pattern.lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    const key = match[keyIndex] ?? '';
+    const credential = match[valueIndex] ?? '';
+    if (
+      isCredentialKey(key, {
+        allowBareKey: options.allowBareKey === true,
+        allowSignature: true,
+      })
+      && isCredentialLiteral(key, credential)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isAuthorizationChallenge(scheme, value) {
+  return ['basic', 'bearer'].includes(scheme.toLowerCase())
+    && value.toLowerCase() === 'realm=';
+}
+
+function hasValidAuthorizationCredentialSyntax(scheme, value) {
+  if (scheme.toLowerCase() !== 'basic') {
+    return true;
+  }
+
+  return value.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/u.test(value);
 }
 
 function isAllowedLocalDatabasePlaceholder(rawUrl) {
@@ -313,8 +386,13 @@ function contentRuleIds(text, options = {}) {
   }
   authorizationCredentialPattern.lastIndex = 0;
   for (const match of text.matchAll(authorizationCredentialPattern)) {
+    const scheme = match[1] ?? '';
     const value = match[2] ?? '';
-    if (value.length >= 8 && isCredentialLiteral('authorization', value)) {
+    if (
+      !isAuthorizationChallenge(scheme, value)
+      && hasValidAuthorizationCredentialSyntax(scheme, value)
+      && isCredentialLiteral('authorization', value)
+    ) {
       ruleIds.add('credential:authorization-header');
       break;
     }
@@ -337,17 +415,13 @@ function contentRuleIds(text, options = {}) {
     }
   }
 
-  credentialParameterPattern.lastIndex = 0;
-  for (const match of text.matchAll(credentialParameterPattern)) {
-    const key = match[1] ?? '';
-    const credential = match[2] ?? '';
-    if (
-      isCredentialKey(key, { allowBareKey: true, allowSignature: true })
-      && isCredentialLiteral(key, credential)
-    ) {
-      ruleIds.add('credential:url-query');
-      break;
-    }
+  if (parameterHasCredential(credentialParameterPattern, text, 1, 2, {
+    allowBareKey: true,
+  })) {
+    ruleIds.add('credential:url-query');
+  }
+  if (parameterHasCredential(quotedCredentialParameterPattern, text, 2, 4)) {
+    ruleIds.add('credential:parameter');
   }
 
   if (

@@ -248,6 +248,7 @@ test('does not exempt complete credentials based on value shape', () => {
 test('detects standard authorization, parameter, and camel-case credential forms', async () => {
   const credential = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
   const basicCredential = ['c2VydmljZTp', 'wYXNzd29yZA=='].join('');
+  const shortBasicCredential = 'YTpi';
   const cases = [
     `{"Authorization":"Bearer ${credential}"}`,
     `headers["Authorization"] = "Bearer ${credential}"`,
@@ -260,11 +261,25 @@ test('detects standard authorization, parameter, and camel-case credential forms
     `const webhookSecret = "${credential}";`,
     `config["signingSecret"] = "${credential}";`,
     `const databasePassword = "${credential}";`,
+    `const providerSecretValue = "${credential}";`,
+    `const authorizationHeader = "Bearer ${credential}";`,
+    `const authHeader = "Basic ${credential}";`,
+    `url.searchParams.set("access_token", "${credential}");`,
+    `form.append("client_secret", "${credential}");`,
+    `const apikey = "${credential}";`,
+    `const clientsecret = "${credential}";`,
+    `const compactBasic = "Basic ${shortBasicCredential}";`,
+    `const formFields = [["refresh_token", "${credential}"]];`,
   ];
   for (const text of cases) {
     assert.ok(
       contentRuleIds(text).some((ruleId) =>
-        ['credential:authorization-header', 'credential:generic-assignment', 'credential:url-query'].includes(ruleId)),
+        [
+          'credential:authorization-header',
+          'credential:generic-assignment',
+          'credential:parameter',
+          'credential:url-query',
+        ].includes(ruleId)),
       `expected credential rule for ${text.replaceAll(credential, '<synthetic>')}`,
     );
   }
@@ -273,11 +288,27 @@ test('detects standard authorization, parameter, and camel-case credential forms
     'headers.set("Authorization", `Bearer ${ACCESS_TOKEN}`)',
     'const controlToken = process.env.CONTROL_TOKEN;',
     'refresh_token=${REFRESH_TOKEN}&grant_type=refresh_token',
+    'const providerSecretValue = process.env.PROVIDER_SECRET_VALUE;',
+    'const authorizationHeader = `Bearer ${ACCESS_TOKEN}`;',
+    'url.searchParams.set("access_token", "${ACCESS_TOKEN}");',
+    'form.append("client_secret", "placeholder");',
+    'headers.set("WWW-Authenticate", \'Basic realm="private"\');',
+    'headers.set("WWW-Authenticate", \'Bearer realm="device-sync"\');',
+    'const HOSTED_XAI_SEARCH_ENV_NAMES = ["XAI_API_KEY", "XAI_X_SEARCH_MODEL"];',
+    'const fixture = { testName: "Basic metabolic panel" };',
+    'const source = { title: "Basic Return to Running Guideline" };',
+    'const headings = ["Key", "Value"];',
   ]) {
     assert.equal(
       contentRuleIds(text).some((ruleId) =>
-        ['credential:authorization-header', 'credential:generic-assignment', 'credential:url-query'].includes(ruleId)),
+        [
+          'credential:authorization-header',
+          'credential:generic-assignment',
+          'credential:parameter',
+          'credential:url-query',
+        ].includes(ruleId)),
       false,
+      `expected credential reference or challenge to pass for ${text}`,
     );
   }
 
@@ -292,6 +323,15 @@ test('detects standard authorization, parameter, and camel-case credential forms
       `const refreshBody = "refresh_token=${credential}&grant_type=refresh_token";`,
       `const controlToken = "${credential}";`,
       `const webhookSecret = "${credential}";`,
+      `const providerSecretValue = "${credential}";`,
+      `const authorizationHeader = "Bearer ${credential}";`,
+      `const authHeader = "Basic ${credential}";`,
+      `url.searchParams.set("access_token", "${credential}");`,
+      `form.append("client_secret", "${credential}");`,
+      `const apikey = "${credential}";`,
+      `const clientsecret = "${credential}";`,
+      `const compactBasic = "Basic ${shortBasicCredential}";`,
+      `const formFields = [["refresh_token", "${credential}"]];`,
     ].join('\n'),
     'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
   });
@@ -302,6 +342,7 @@ test('detects standard authorization, parameter, and camel-case credential forms
         assert.match(error.message, /credential:authorization-header/u);
         assert.match(error.message, /credential:url-query/u);
         assert.match(error.message, /credential:generic-assignment/u);
+        assert.match(error.message, /credential:parameter/u);
         assert.equal(error.message.includes(credential), false);
         return true;
       },

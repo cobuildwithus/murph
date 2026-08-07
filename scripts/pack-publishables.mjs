@@ -86,11 +86,9 @@ function shouldSkipExternalPayloadArtifact(sourcePath) {
   return path.basename(sourcePath) === 'node_modules' || shouldSkipPayloadArtifact(sourcePath);
 }
 
-const nonRuntimeIncurPayloadPaths = new Set([
-  'src/Cli.test.ts',
-  'src/Mcp.test.ts',
-  'src/e2e.test.ts',
-]);
+function isNonRuntimeIncurPayloadPath(relativePath) {
+  return /(?:^|\/)[^/]+\.test\.[cm]?[jt]sx?$/u.test(relativePath);
+}
 
 async function pathExists(targetPath) {
   try {
@@ -196,7 +194,7 @@ async function copyExternalPackagePayload(packageName, packageJson, sourceDir, t
         return shouldSkipExternalPayloadArtifact(candidatePath)
           || (
             packageName === 'incur'
-            && nonRuntimeIncurPayloadPaths.has(relativeCandidate)
+            && isNonRuntimeIncurPayloadPath(relativeCandidate)
           );
       },
     });

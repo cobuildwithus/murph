@@ -94,7 +94,9 @@ Updated: 2026-08-06
   interpolation or environment-reference syntax. Preserve the required patched
   `incur` bundle and its runtime/source entrypoints, but omit the three proven
   non-runtime upstream test sources instead of weakening scanner policy for
-  their paths or contents.
+  their paths or contents. When later inventory found additional upstream test
+  sources, generalize that payload rule to omit every `incur` test source while
+  keeping its runtime and source entrypoints.
 
 ## Verification
 
@@ -163,3 +165,17 @@ Updated: 2026-08-06
   tests, a fresh five-tarball scan, CLI package-shape verification, and the
   prepared installed-CLI proof pass; the packed `incur` runtime/source
   entrypoints remain present while the three test sources are absent.
+- After current `main` added assistant image-continuation behavior, the branch
+  merged that base and aligned the affected CLI assertions with the new
+  explicit nullable session contract. The focused assistant-engine and CLI
+  continuation suites and the exact-head GitHub checks pass.
+- Final ReviewGPT round 4 accepted a remaining release-boundary gap for
+  repo-native credential holders, short Basic credentials, and quoted
+  setter/tuple parameters. It also identified the generic npm failure message
+  as a local tarball-path disclosure. The correction extends the shared exact
+  credential-key classifier, treats literal Bearer/Basic values independently,
+  covers setter/append/tuple parameters, removes every non-runtime `incur` test
+  source from the payload, and makes generic publication errors path-free while
+  preserving normal npm output. The focused guard suite passes 17/17, the
+  release workflow guard passes 5/5, CLI typecheck passes, and both a clean
+  five-package pack and a separate exact-manifest scan pass all five tarballs.

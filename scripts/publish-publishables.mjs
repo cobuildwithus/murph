@@ -95,9 +95,7 @@ async function execFileStreaming(command, args, cwd) {
         return;
       }
 
-      const error = new Error(
-        `Command failed: ${command} ${args.map(shellEscapeArgument).join(' ')}`,
-      );
+      const error = new Error('Release publication command failed.');
       error.code = code ?? 1;
       error.signal = signal ?? null;
       error.stderr = stderr;
@@ -180,6 +178,7 @@ for (const entry of summary.packages) {
 
   try {
     await execFileStreaming(publishCommand.command, publishCommand.args, context.repoRoot);
+    console.log(`Published ${entry.name}@${entry.version}.`);
   } catch (error) {
     const output = `${error.stdout ?? ''}${error.stderr ?? ''}`;
 

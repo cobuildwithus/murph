@@ -149,6 +149,8 @@ describe('release workflow guards', () => {
     expect(publishHelper).toContain('Skipping ${entry.name}@${entry.version}; version already published.')
     expect(publishHelper).toContain('npm trusted publishing is configured per package on npm')
     expect(publishHelper).toContain('node scripts/configure-trusted-publishing.mjs')
+    expect(publishHelper).toContain("new Error('Release publication command failed.')")
+    expect(publishHelper).not.toContain('Command failed: ${command}')
   })
 
   it('pins every action ref used by the npm release path', () => {
