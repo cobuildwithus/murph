@@ -397,7 +397,13 @@ export async function handleHostedRuntimeGroupTool(input: {
     return {
       action: "read_usage",
       result: usage
-        ? { status: "ok", usage }
+        ? {
+            status: "ok",
+            usage: {
+              fundingNeeded: usage.fundingNeeded,
+              fundingUrl: usage.fundingUrl,
+            },
+          }
         : {
             status: "unavailable",
             unavailableReason: "group_usage_unavailable",

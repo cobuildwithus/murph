@@ -26,7 +26,6 @@ const mocks = vi.hoisted(() => ({
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
   readHostedGroupSponsorshipDraftForCreator: vi.fn(),
   readHostedGroupSponsorshipManagementProjection: vi.fn(),
-  readHostedGroupSponsorshipPublicState: vi.fn(),
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedUsageCreditPurchaseStatus: vi.fn(),
@@ -81,8 +80,6 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
 vi.mock("@/src/lib/hosted-groups/group-sponsorship-authorization", () => ({
   readHostedGroupSponsorshipManagementProjection:
     mocks.readHostedGroupSponsorshipManagementProjection,
-  readHostedGroupSponsorshipPublicState:
-    mocks.readHostedGroupSponsorshipPublicState,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-sponsorship-store", () => ({
@@ -133,13 +130,11 @@ describe("hosted group funding page", () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      sponsorshipStatus: "not_sponsored",
     });
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
     mocks.readHostedGroupSponsorshipDraftForCreator.mockResolvedValue(null);
     mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValue(null);
-    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValue(
-      "not_sponsored",
-    );
     mocks.readHostedUsageCreditPurchaseStatus.mockResolvedValue({
       purchaseId: PURCHASE_ID,
       status: "fulfilled",
@@ -315,6 +310,7 @@ describe("hosted group funding page", () => {
       fundingNeeded: false,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      sponsorshipStatus: "not_sponsored",
     });
 
     const markup = renderToStaticMarkup(await GroupFundingPage({
@@ -348,10 +344,8 @@ describe("hosted group funding page", () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
       fundingNeeded: false,
       fundingUrl: null,
+      sponsorshipStatus: "sponsored",
     });
-    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValueOnce(
-      "sponsored",
-    );
     mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValueOnce({
       authorizationId: "hgsa_abcdefghijklmnop",
       chargedThisPeriodMinor: 500,
@@ -385,10 +379,8 @@ describe("hosted group funding page", () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
       fundingNeeded: false,
       fundingUrl: null,
+      sponsorshipStatus: "sponsored",
     });
-    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValueOnce(
-      "sponsored",
-    );
 
     const markup = renderToStaticMarkup(await GroupFundingPage({
       params: Promise.resolve({ joinCode: "group_join_code_1234" }),
@@ -419,10 +411,8 @@ describe("hosted group funding page", () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
       fundingNeeded: false,
       fundingUrl: null,
+      sponsorshipStatus: "sponsored",
     });
-    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValueOnce(
-      "sponsored",
-    );
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
       offerCode: "usage_5_usd",
       purchaseId: "hucp_onetimerecover",

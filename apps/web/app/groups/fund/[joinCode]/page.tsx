@@ -30,7 +30,6 @@ import {
 } from "@/src/lib/hosted-groups/group-usage-funding";
 import {
   readHostedGroupSponsorshipManagementProjection,
-  readHostedGroupSponsorshipPublicState,
 } from "@/src/lib/hosted-groups/group-sponsorship-authorization";
 import {
   hasHostedGroupSponsorshipCustomizationAuthority,
@@ -105,7 +104,6 @@ export default async function GroupFundingPage({
     purchaseReturnMatchesTarget,
     customizationAllowed,
     sponsorshipManagement,
-    sponsorshipStatus,
   ] =
     await Promise.all([
       readHostedGroupUsageStatus({
@@ -146,10 +144,6 @@ export default async function GroupFundingPage({
             prisma,
           })
         : Promise.resolve(null),
-      readHostedGroupSponsorshipPublicState({
-        beneficiaryMemberId: target.runtimeMemberId,
-        prisma,
-      }),
     ]);
   if (!usageStatus) {
     return <GroupFundingUnavailable />;
@@ -190,7 +184,7 @@ export default async function GroupFundingPage({
     : null;
   const openOneTimeContribution =
     sponsorshipManagement === null &&
-    sponsorshipStatus === "sponsored";
+    usageStatus.sponsorshipStatus === "sponsored";
   const oneTimeContributionDialog = member && oneTimeOffers.length > 0 ? (
     <GroupSponsorshipDialog
       checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
@@ -248,7 +242,7 @@ export default async function GroupFundingPage({
                 />
                 {oneTimeContributionAction}
               </div>
-            ) : sponsorshipStatus === "sponsored" ? (
+            ) : usageStatus.sponsorshipStatus === "sponsored" ? (
               <div className="space-y-4">
                 <p className="py-2 text-center text-sm text-muted-foreground">
                   Murph is sponsored in this chat.

@@ -15,6 +15,7 @@ import {
 } from "./group-usage-capacity";
 import {
   hasHostedGroupAutomaticRefillAvailable,
+  readHostedGroupSponsorshipPublicState,
 } from "./group-sponsorship-authorization";
 
 // A group funding locator is either the group's owner-created opaque join
@@ -44,6 +45,8 @@ export interface HostedGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
+  /** Private Web state for the funding page; runtime serializers must omit it. */
+  sponsorshipStatus: "not_sponsored" | "sponsored";
 }
 
 // Accepts the full funding-locator namespace: an owner-created join code or
@@ -142,6 +145,10 @@ export async function readHostedGroupUsageStatus(input: {
     : false;
   const fundingNeeded = capacityState === "exhausted" ||
     (capacityState === "low" && !automaticRefillAvailable);
+  const sponsorshipStatus = await readHostedGroupSponsorshipPublicState({
+    beneficiaryMemberId: input.runtimeMemberId,
+    prisma,
+  });
 
   // A group without an owner-created join code (including one with no
   // HostedGroup row at all) still gets a funding URL through the signed
@@ -154,6 +161,7 @@ export async function readHostedGroupUsageStatus(input: {
     fundingUrl: locator
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
       : null,
+    sponsorshipStatus,
   };
 }
 

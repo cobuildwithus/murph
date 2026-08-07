@@ -444,6 +444,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      sponsorshipStatus: "sponsored",
     });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
@@ -690,7 +691,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
-  it("returns only funding urgency and a first-party handoff", async () => {
+  it("does not expose private sponsorship state to the runtime", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: { action: "read_usage" },
