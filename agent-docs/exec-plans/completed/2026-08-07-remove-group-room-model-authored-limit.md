@@ -35,5 +35,8 @@ immediately classify as unavailable.
 - [x] Follow-up requirement and retained invariant identified.
 - [x] Implementation and durable docs updated.
 - [x] Focused verification passed.
-- [ ] Existing PR updated and correction review passed.
-- [ ] Final-head CI passed and plan archived.
+- [x] Existing PR updated and correction review passed.
+- [x] Final-head CI passed and plan archived.
+Status: completed
+Updated: 2026-08-07
+Completed: 2026-08-07
