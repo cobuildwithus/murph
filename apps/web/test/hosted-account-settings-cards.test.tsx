@@ -23,7 +23,27 @@ vi.mock("next/dynamic", () => ({
   },
 }));
 
+vi.mock("@/src/components/settings/hosted-signup-referral-link-button", () => ({
+  HostedSignupReferralLinkButton: () => React.createElement(
+    "button",
+    { type: "button" },
+    "Copy link",
+  ),
+}));
+
 describe("HostedAccountSettingsCards", () => {
+  test("keeps a reusable referral link visible without a messaging connection", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: makeAccountSnapshot({ phoneNumber: null }),
+      }),
+    );
+
+    expect(markup).toContain("Referral link");
+    expect(markup).toContain("Your reusable link for inviting friends");
+    expect(markup).toContain("Copy link");
+  });
+
   test("shows the SMS Murph link only after the member has linked a phone", () => {
     const withoutPhone = renderToStaticMarkup(
       React.createElement(HostedAccountSettingsCards, {
@@ -193,6 +213,7 @@ function makeAccountSnapshot(input: {
       number: input.phoneNumber,
       verifiedAt: input.phoneNumber ? "2026-05-02T00:00:00.000Z" : null,
     },
+    referralIdentityKey: "member_settings_test",
     telegram: {
       telegramUserId: null,
     },
