@@ -27,20 +27,15 @@ const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: 'member_123',
 } as const
 
-const QUESTION_PROFILE = {
-  question:
-    'What do recent randomized trials and systematic reviews show about creatine and cognitive performance in healthy adults?',
-} as const
-
-function createQuestionRequestBody() {
+function createFocusedRequestBody() {
   return buildExaResearchScoutRequest({
     profile: {
-      ...QUESTION_PROFILE,
-      topics: [],
+      mode: 'focused',
+      topics: ['creatine', 'cognitive performance'],
       biomarkers: [],
       behaviors: [],
       supplements: [],
-      conditionsOrConcerns: [],
+      conditionsOrConcerns: ['healthy adults'],
       goals: [],
       activeExperiments: [],
     },
@@ -67,12 +62,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('hosted Exa egress for focused public questions', () => {
-  it('validates and canonicalizes the generalized question before injecting the Worker secret', async () => {
+describe('hosted Exa egress for focused structured scopes', () => {
+  it('validates and canonicalizes compact focus before injecting the Worker secret', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-06T12:00:00.000Z'))
 
-    const requestBody = createQuestionRequestBody()
+    const requestBody = createFocusedRequestBody()
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('ok'))
     vi.stubGlobal('fetch', fetchMock)
     const validateRuntimeWriteFence = vi.fn(async () => true)
@@ -111,22 +106,19 @@ describe('hosted Exa egress for focused public questions', () => {
   })
 
   it.each([
-    'What should I do about my LDL 181 mg/dL?',
-    "What evidence applies to Example Person's recurring migraines?",
-    'What evidence applies to our patient with persistent anxiety?',
-    "What does mi esposa's insomnia mean according to research?",
-    'What does the research say about the resident at 123 Main Street?',
-  ])('fails closed before upstream fetch when the recipe contains private data: %s', async (privateQuestion) => {
+    "What evidence applies to sampleperson's recurring migraines?",
+    "What evidence applies to SAMPLEPERSON's recurring migraines?",
+    "What evidence applies to SaMpLePeRsOn's recurring migraines?",
+    'What evidence applies to sampleperson taking lithium?',
+    'What evidence applies to s a m p l e p e r s o n with recurring migraines?',
+  ])('rejects injected arbitrary question prose before upstream fetch: %s', async (privateQuestion) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-06T12:00:00.000Z'))
 
-    const requestBody = createQuestionRequestBody()
+    const requestBody = createFocusedRequestBody()
     const unsafeRequestBody = {
       ...requestBody,
-      query: requestBody.query.replace(
-        QUESTION_PROFILE.question,
-        privateQuestion,
-      ),
+      query: `${requestBody.query}\nQuestion: ${privateQuestion}`,
     }
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
     vi.stubGlobal('fetch', fetchMock)

@@ -21,7 +21,9 @@ describe('assistant research guidance', () => {
       progressUpdateMode: 'direct',
     })
 
-    expect(prompt).toContain('person-name-free public question')
+    expect(prompt).toContain('{"mode":"focused"}')
+    expect(prompt).toContain('compact lowercase non-identifying profile categories')
+    expect(prompt).toContain('never send arbitrary question prose')
     expect(prompt).toContain('`resultIndex` maps to a returned result')
     expect(prompt).toContain('source title, web URL')
     expect(prompt).toContain('no usable current source')

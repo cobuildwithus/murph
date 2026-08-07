@@ -4736,7 +4736,7 @@
                       "properties": {
                         "input": {
                           "type": "string",
-                          "description": "Focused public question JSON such as {\"question\":\"...\"}, or compact tag-profile JSON using topics, biomarkers, behaviors, supplements, conditionsOrConcerns, goals, and activeExperiments. Pass @file.json or - for stdin. Do not include private notes, contacts, identifiers, credentials, exact personal measurements, or medical records."
+                          "description": "Focused structured JSON using {\"mode\":\"focused\"} plus compact topics, biomarkers, behaviors, supplements, conditionsOrConcerns, goals, or activeExperiments; omit mode for broad discovery. Pass @file.json or - for stdin. Use lowercase non-identifying categories only, never names, organizations, private notes, contacts, identifiers, credentials, exact personal measurements, or medical records."
                         },
                         "since": {
                           "type": "string",
@@ -4767,7 +4767,7 @@
                       "properties": {
                         "input": {
                           "type": "string",
-                          "description": "Compact lane JSON in @file.json form or - for stdin. Use {\"lanes\":[{\"label\":\"sleep\",\"profile\":{\"topics\":[\"sleep\"]}}]}. Lane profiles accept compact bucket fields only and must not include focused questions, raw labs, names, dates of birth, full notes, or medical records."
+                          "description": "Compact lane JSON in @file.json form or - for stdin. Use {\"lanes\":[{\"label\":\"sleep\",\"profile\":{\"topics\":[\"sleep\"]}}]}. Lane profiles accept compact bucket fields only and must not include focused mode, raw labs, names, dates of birth, full notes, or medical records."
                         },
                         "since": {
                           "type": "string",

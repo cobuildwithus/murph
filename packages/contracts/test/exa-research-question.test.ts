@@ -8,119 +8,94 @@ import {
   resolveResearchScoutProfileKind,
 } from "../src/exa-research-scout.ts";
 
-const QUESTION_PROFILE = {
-  question:
-    "What do recent randomized trials and systematic reviews show about creatine and cognitive performance in healthy adults?",
+const FOCUSED_PROFILE = {
+  mode: "focused",
+  topics: ["creatine", "cognitive performance"],
+  conditionsOrConcerns: ["healthy adults"],
 } as const;
 
-const PARSED_QUESTION_PROFILE = researchScoutProfileSchema.parse(
-  QUESTION_PROFILE,
+const PARSED_FOCUSED_PROFILE = researchScoutProfileSchema.parse(
+  FOCUSED_PROFILE,
 );
 
-const QUESTION_INPUT = {
-  profile: PARSED_QUESTION_PROFILE,
+const FOCUSED_INPUT = {
+  profile: PARSED_FOCUSED_PROFILE,
   since: "2021-01-01T00:00:00.000Z",
   until: "2026-08-06T00:00:00.000Z",
   maxCandidates: 6,
 } as const;
 
-const ALLOWED_PUBLIC_QUESTIONS = [
-  "What did the 2025 Stanford University review conclude about GLP-1 medicines and cardiovascular outcomes?",
-  "What do National Institutes of Health guidelines say about sleep duration?",
-  "What do US guidelines recommend about creatine use in healthy adults?",
-  "What do studies show about sleep regularity and cardiometabolic risk?",
-  "How can conflicting evidence about morning light and sleep timing be interpreted?",
-  "What changed in human research from 2010-2020 about creatine and cognition?",
-  "What changed in human research from 2010 - 2020 about creatine and cognition?",
-  "What interventions reduce sleep deprivation at a population level?",
-  "What does the study creatine supplementation and memory: a meta-analysis conclude?",
-  "What do phase I trials show about a new insomnia treatment?",
-  "What does type I interferon signaling indicate in human studies?",
-  "What does mitochondrial complex I research show about Parkinson's disease?",
-] as const;
-
-describe("focused public Exa research questions", () => {
-  it("reuses the canonical research-paper request and round-trips through the hosted parser", () => {
-    const request = buildExaResearchScoutRequest(QUESTION_INPUT);
+describe("focused structured Exa research", () => {
+  it("synthesizes and round-trips a canonical focused request from compact categories", () => {
+    const request = buildExaResearchScoutRequest(FOCUSED_INPUT);
 
     expect(request.type).toBe("deep-reasoning");
     expect(request.category).toBe("research paper");
     expect(request.numResults).toBe(6);
     expect(request.moderation).toBe(true);
-    expect(request.query).toContain(QUESTION_PROFILE.question);
-    expect(request.query).toContain("generalized and non-identifying");
-    expect(request.query).not.toContain("Topics:");
-    expect(request.systemPrompt).toContain("focused public question");
+    expect(request.query).toContain(
+      "What does high-quality recent human research show for this focused structured scope?",
+    );
+    expect(request.query).toContain("Topics: creatine, cognitive performance");
+    expect(request.query).toContain("Conditions or concerns: healthy adults");
+    expect(request.query).not.toContain("Question:");
+    expect(request.systemPrompt).toContain("focused structured scope");
     expect(parseExaResearchScoutRequestBody(request)).toEqual({
       numResults: 6,
-      profile: PARSED_QUESTION_PROFILE,
-      since: QUESTION_INPUT.since,
-      until: QUESTION_INPUT.until,
+      profile: PARSED_FOCUSED_PROFILE,
+      since: FOCUSED_INPUT.since,
+      until: FOCUSED_INPUT.until,
     });
-    expect(resolveResearchScoutProfileKind(PARSED_QUESTION_PROFILE)).toBe(
-      "public_question",
+    expect(resolveResearchScoutProfileKind(PARSED_FOCUSED_PROFILE)).toBe(
+      "focused_profile",
     );
   });
-
-  it.each(ALLOWED_PUBLIC_QUESTIONS)(
-    "allows useful public research phrasing: %s",
-    (question) => {
-      expect(researchScoutProfileSchema.parse({ question })).toMatchObject({
-        question,
-        topics: [],
-        behaviors: [],
-      });
-    },
-  );
 
   it.each([
+    { topics: ["us guidelines", "creatine"] },
+    { topics: ["phase i trials", "insomnia treatment"] },
+    { topics: ["type i interferon signaling"] },
+    { topics: ["mitochondrial complex i", "parkinsons disease"] },
+    { topics: ["creatine cognition evidence 2010-2020"] },
+  ])("allows useful compact focused scope: %j", (scope) => {
+    expect(researchScoutProfileSchema.parse({
+      mode: "focused",
+      ...scope,
+    })).toMatchObject({
+      mode: "focused",
+      ...scope,
+    });
+  });
+
+  it.each([
+    "What evidence applies to sampleperson's recurring migraines?",
+    "What evidence applies to SAMPLEPERSON's recurring migraines?",
+    "What evidence applies to SaMpLePeRsOn's recurring migraines?",
+    "What evidence applies to sampleperson taking lithium?",
+    "What evidence applies to s a m p l e p e r s o n with recurring migraines?",
     "What should I do about my LDL 181 mg/dL?",
-    "What does this mean for me at 27 years old?",
-    "I experienced insomnia; what does the research show?",
-    "Review the research for patient id member_123.",
-    "Email person@example.test with the latest evidence.",
-    "Use Bearer secret-token to research sleep.",
-    "Use sk-live-secret-value to research sleep.",
-    "Review https://private.example.test/note/token for evidence.",
-    "Review private.example.test/note/token for evidence.",
-    "Review the clinical note from mychart.",
-    "What does 185 lb mean for health?",
-    "What does 32% body fat mean for health?",
-    "What applies to a 27-year-old adult?",
-    "Research patient 123e4567-e89b-12d3-a456-426614174000.",
-    "Can I take creatine for cognition?",
-    "What do phase I trials show, and should I take the treatment?",
-    "Research the appointment from 2026-08-06.",
-    "What does blood pressure 125/85 mean for my health?",
-    "What evidence applies to Example Person's recurring migraines?",
-    "What trials apply when Private Person reports a new skin reaction?",
-    "What does research on Avery show about sleep?",
-    "What should we do about a child's new seizures?",
-    "What evidence applies to our patient with persistent anxiety?",
-    "What does mi esposa's insomnia mean according to research?",
-    "What does the copied note say about persistent insomnia?",
     "What does the research say about the resident at 123 Main Street?",
-    "What does the research say about record number ABC-123?",
-    "What does the research show about sleep.",
-  ])("rejects private or identifying question text before provider work: %s", (question) => {
-    expect(() => researchScoutProfileSchema.parse({ question })).toThrow(
-      /focused English public questions/u,
-    );
-  });
-
-  it("rejects mixing a focused question with compact discovery tags", () => {
+  ])("rejects arbitrary question prose for every private-person casing: %s", (question) => {
+    expect(() => researchScoutProfileSchema.parse({ question })).toThrow();
     expect(() => researchScoutProfileSchema.parse({
-      question: QUESTION_PROFILE.question,
-      topics: ["creatine"],
-    })).toThrow(/either one focused public question or compact tag fields/u);
+      mode: "focused",
+      question,
+      topics: ["migraine treatment"],
+    })).toThrow();
   });
 
-  it("keeps batch discovery on compact tag profiles rather than question-shaped lanes", () => {
+  it("requires at least one compact category for focused mode", () => {
+    expect(() => researchScoutProfileSchema.parse({
+      mode: "focused",
+    })).toThrow(/must include at least one compact non-identifying profile tag/u);
+  });
+
+  it("keeps batch discovery on tag-only profiles", () => {
     expect(() => researchScoutBatchPayloadSchema.parse({
       lanes: [
         {
           label: "cognition",
-          profile: PARSED_QUESTION_PROFILE,
+          profile: PARSED_FOCUSED_PROFILE,
         },
       ],
     })).toThrow();

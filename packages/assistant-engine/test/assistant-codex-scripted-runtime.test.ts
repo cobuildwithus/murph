@@ -454,7 +454,7 @@ text(result.output);
       privacy: {
         persistedByTool: false,
         rawVaultValuesSent: false,
-        sentProfileKind: 'public_question',
+        sentProfileKind: 'focused_profile',
         tokenSource: 'env',
       },
       provider: {
@@ -490,7 +490,7 @@ text(result.output);
       privacy: {
         persistedByTool: false,
         rawVaultValuesSent: false,
-        sentProfileKind: 'public_question',
+        sentProfileKind: 'focused_profile',
         tokenSource: 'env',
       },
       provider: {
@@ -536,7 +536,7 @@ esac
       {
         customToolCall: {
           input: `
-const input = JSON.stringify({question: "What do systematic reviews show about creatine and cognitive performance in adults?"});
+const input = JSON.stringify({mode: "focused", topics: ["creatine", "cognitive performance"], conditionsOrConcerns: ["adults"]});
 const result = await tools.exec_command({
   cmd: "printf '%s' '" + input + "' | ./vault-cli research scout --input - --since 2020-01-01 --until 2026-08-06",
 });
@@ -572,16 +572,15 @@ text(result.output);
       'https://example.test/research/creatine-cognition-review',
     )
     const providerQuestion = (await readFile(requestLog, 'utf8')).trim()
-    expect(providerQuestion).toContain(
-      'What do systematic reviews show about creatine and cognitive performance in adults?',
-    )
+    expect(providerQuestion).toContain('"mode":"focused"')
+    expect(providerQuestion).toContain('"topics":["creatine","cognitive performance"]')
     expect(providerQuestion).not.toContain('<PRIVATE_PERSON>')
 
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const input = JSON.stringify({question: "What do recent trials show about meal timing and sleep timing in adults?"});
+const input = JSON.stringify({mode: "focused", topics: ["meal timing", "sleep timing"], conditionsOrConcerns: ["adults"]});
 const result = await tools.exec_command({
   cmd: "printf '%s' '" + input + "' | ./vault-cli research scout --input - --since 2025-01-01 --until 2026-08-06",
 });

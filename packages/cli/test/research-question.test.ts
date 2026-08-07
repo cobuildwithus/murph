@@ -10,9 +10,10 @@ import {
 } from '../src/research-scout-client.js'
 import { vaultCliCommandDescriptors } from '../src/vault-cli-command-manifest.js'
 
-const QUESTION_PROFILE = {
-  question:
-    'What do recent randomized trials and systematic reviews show about creatine and cognitive performance in healthy adults?',
+const FOCUSED_PROFILE = {
+  mode: 'focused',
+  topics: ['creatine', 'cognitive performance'],
+  conditionsOrConcerns: ['healthy adults'],
 } as const
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -26,30 +27,30 @@ function jsonResponse(payload: unknown, status = 200): Response {
 
 function createResearchCli() {
   const cli = Cli.create('vault-cli', {
-    description: 'focused research question test cli',
+    description: 'focused research scope test cli',
     version: '0.0.0-test',
   })
   registerResearchCommands(cli)
   return cli
 }
 
-describe('focused public research questions', () => {
-  it('accepts a question profile through the existing research scout input parser', () => {
-    expect(parseResearchScoutCliProfileInput(QUESTION_PROFILE)).toMatchObject({
-      ...QUESTION_PROFILE,
-      topics: [],
+describe('focused structured research', () => {
+  it('accepts focused compact categories through the existing scout input parser', () => {
+    expect(parseResearchScoutCliProfileInput(FOCUSED_PROFILE)).toMatchObject({
+      ...FOCUSED_PROFILE,
       behaviors: [],
+      biomarkers: [],
     })
     expect(parseResearchScoutCliProfileInput({
-      profile: QUESTION_PROFILE,
+      profile: FOCUSED_PROFILE,
     })).toMatchObject({
-      ...QUESTION_PROFILE,
-      topics: [],
+      ...FOCUSED_PROFILE,
       behaviors: [],
+      biomarkers: [],
     })
   })
 
-  it('documents both focused questions and compact tag profiles on the existing command', async () => {
+  it('documents focused and broad compact profiles on the existing command', async () => {
     const output: string[] = []
 
     await createResearchCli().serve(['research', 'scout', '--help'], {
@@ -60,17 +61,18 @@ describe('focused public research questions', () => {
     })
 
     const help = output.join('')
-    expect(help).toContain('focused public question')
+    expect(help).toContain('focused structured scope')
     expect(help).toContain('compact non-identifying tag profile')
-    expect(help).toContain('{"question":"..."}')
+    expect(help).toContain('{"mode":"focused"}')
     expect(help).toContain('--input @file.json')
     expect(help).toContain('--input -')
     expect(help).toContain(
-      'Preserve institutions, person-name-free study titles, publication years, and scientific terms',
+      'resultIndex maps to a returned source with a title, web URL',
     )
+    expect(help).toContain('otherwise report no usable current source')
   })
 
-  it('keeps the static command manifest aligned with both supported scout inputs', () => {
+  it('keeps the static command manifest aligned with both scout modes', () => {
     const researchDescriptor = vaultCliCommandDescriptors.find(
       (descriptor) => descriptor.id === 'research',
     )
@@ -92,22 +94,22 @@ describe('focused public research questions', () => {
       throw new Error('Expected the research scout descriptor to define a hint.')
     }
 
-    expect(payloadSchema?.description).toContain('focused-question')
+    expect(payloadSchema?.description).toContain('focused-scope')
     expect(payloadSchema?.description).toContain('compact tag-profile')
-    expect(scout?.description).toContain('person-name-free public question')
+    expect(scout?.description).toContain('focused structured scope')
     expect(scout?.description).toContain('compact non-identifying tags')
-    expect(scout?.hint).toContain('{"question":"..."}')
-    expect(scout?.hint).toContain('resultIndex maps to usable returned source metadata')
-    expect(scout?.hint).not.toContain('tag profile only')
+    expect(scout?.hint).toContain('{"mode":"focused"}')
+    expect(scout?.hint).toContain('resultIndex maps to a returned source')
+    expect(scout?.hint).toContain('without fabricating or repeating')
   })
 
-  it('gives actionable guidance for invalid focused-question input', () => {
+  it('gives actionable guidance for arbitrary question input', () => {
     expect(() => parseResearchScoutCliProfileInput({
       question: 'What should I do about my LDL 181 mg/dL?',
-    })).toThrow(/either .*focused public question or a compact profile/u)
+    })).toThrow(/expects compact profile bucket fields/u)
   })
 
-  it('uses the existing Exa request path and reports the sent profile kind', async () => {
+  it('uses the existing Exa request path and reports the focused profile kind', async () => {
     const providerPayload = {
       output: {
         content: {
@@ -121,7 +123,7 @@ describe('focused public research questions', () => {
     )
 
     const result = await fetchExaResearchScoutCandidates({
-      profile: parseResearchScoutCliProfileInput(QUESTION_PROFILE),
+      profile: parseResearchScoutCliProfileInput(FOCUSED_PROFILE),
       since: '2021-01-01T00:00:00.000Z',
       until: '2026-08-06T00:00:00.000Z',
       maxCandidates: 6,
@@ -145,30 +147,33 @@ describe('focused public research questions', () => {
     expect(requestBody.type).toBe('deep-reasoning')
     expect(requestBody.category).toBe('research paper')
     expect(requestBody.query).toEqual(
-      expect.stringContaining(QUESTION_PROFILE.question),
+      expect.stringContaining('Topics: creatine, cognitive performance'),
+    )
+    expect(requestBody.query).not.toEqual(
+      expect.stringContaining('Question:'),
     )
     expect(requestBody.systemPrompt).toEqual(
-      expect.stringContaining('focused public question'),
+      expect.stringContaining('focused structured scope'),
     )
     expect(result.privacy).toEqual({
       persistedByTool: false,
       rawVaultValuesSent: false,
-      sentProfileKind: 'public_question',
+      sentProfileKind: 'focused_profile',
       tokenSource: 'env',
     })
     expect(result.response).toEqual(providerPayload)
   })
 
   it.each([
-    'What should I do about my LDL 181 mg/dL?',
-    "What evidence applies to Example Person's recurring migraines?",
-    'What evidence applies to our patient with persistent anxiety?',
-    "What does mi esposa's insomnia mean according to research?",
+    "What evidence applies to sampleperson's recurring migraines?",
+    "What evidence applies to SAMPLEPERSON's recurring migraines?",
+    "What evidence applies to SaMpLePeRsOn's recurring migraines?",
+    'What evidence applies to sampleperson taking lithium?',
+    'What evidence applies to s a m p l e p e r s o n with recurring migraines?',
     'What does the research say about the resident at 123 Main Street?',
-  ])('rejects private question text before any Exa request: %s', async (question) => {
+  ])('rejects arbitrary question prose before any Exa request: %s', async (question) => {
     const fetchImpl = vi.fn<typeof fetch>()
-
-    await expect(fetchExaResearchScoutCandidates({
+    const rawInput = {
       profile: {
         question,
         topics: [],
@@ -182,12 +187,14 @@ describe('focused public research questions', () => {
       since: '2021-01-01T00:00:00.000Z',
       until: '2026-08-06T00:00:00.000Z',
       maxCandidates: 6,
-    }, {
+    }
+
+    await expect(fetchExaResearchScoutCandidates(rawInput, {
       env: {
         EXA_API_KEY: 'exa-test-token',
       },
       fetchImpl,
-    })).rejects.toThrow(/focused English public questions/u)
+    })).rejects.toThrow()
 
     expect(fetchImpl).not.toHaveBeenCalled()
   })

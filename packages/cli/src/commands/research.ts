@@ -53,9 +53,10 @@ const RESEARCH_SCOUT_PROFILE_EXAMPLE = {
   activeExperiments: [],
 } satisfies ResearchScoutProfile
 
-const RESEARCH_SCOUT_QUESTION_EXAMPLE = {
-  question:
-    'What do recent randomized trials and systematic reviews show about creatine and cognitive performance in healthy adults?',
+const RESEARCH_SCOUT_FOCUSED_EXAMPLE = {
+  mode: 'focused',
+  topics: ['creatine', 'cognitive performance'],
+  conditionsOrConcerns: ['healthy adults'],
 } satisfies Partial<ResearchScoutProfile>
 
 const RESEARCH_SCOUT_BATCH_EXAMPLE = {
@@ -96,10 +97,10 @@ export function registerResearchCommands(cli: Cli.Cli) {
   registerPayloadSchemaCommand(research, {
     command: 'research scout --input',
     description:
-      'Emit the exact focused-question or compact tag-profile JSON body schema for research scout --input.',
+      'Emit the exact focused-scope or compact tag-profile JSON body schema for research scout --input.',
     schema: researchScoutProfileSchema,
     schemaName: 'ResearchScoutProfile',
-    examples: [RESEARCH_SCOUT_PROFILE_EXAMPLE, RESEARCH_SCOUT_QUESTION_EXAMPLE],
+    examples: [RESEARCH_SCOUT_PROFILE_EXAMPLE, RESEARCH_SCOUT_FOCUSED_EXAMPLE],
   })
 
   research.command('scout-batch-payload-schema', {
@@ -122,11 +123,11 @@ export function registerResearchCommands(cli: Cli.Cli) {
 
   research.command('scout', {
     description:
-      'Search Exa for bounded human-research candidates from one focused public question or a compact non-identifying tag profile without writing vault records.',
+      'Search Exa for bounded human-research candidates from one focused structured scope or a compact non-identifying tag profile without writing vault records.',
     args: z.object({}),
     options: z.object({
       input: inputFileOptionSchema.describe(
-        'Focused public question JSON such as {"question":"..."}, or compact tag-profile JSON using topics, biomarkers, behaviors, supplements, conditionsOrConcerns, goals, and activeExperiments. Pass @file.json or - for stdin. Do not include private notes, contacts, identifiers, credentials, exact personal measurements, or medical records.',
+        'Focused structured JSON using {"mode":"focused"} plus compact topics, biomarkers, behaviors, supplements, conditionsOrConcerns, goals, or activeExperiments; omit mode for broad discovery. Pass @file.json or - for stdin. Use lowercase non-identifying categories only, never names, organizations, private notes, contacts, identifiers, credentials, exact personal measurements, or medical records.',
       ),
       since: researchScoutTimestampOptionSchema.describe(
         'Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp.',
@@ -144,7 +145,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
     }),
     examples: [
       {
-        description: 'Research one focused public question.',
+        description: 'Research one focused structured scope.',
         options: {
           input: '@research-question.json',
           since: '2021-01-01',
@@ -163,7 +164,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
       },
     ],
     hint:
-      'Requires EXA_API_KEY. Pass exactly one focused English, person-name-free public question as {"question":"..."}, or one compact non-identifying tag profile; use research payload-schema --format json for the exact file-body contract. Use --input @file.json or --input - for stdin, not inline JSON. Do not include private notes, names or personal framing, contacts, member or patient identifiers, credentials, dates of birth, exact personal labs or measurements, appointments, or medical records. Preserve institutions, person-name-free study titles, publication years, and scientific terms when they materially focus the search. The tool returns the provider response; source evaluation, local relevance, and final medical framing remain the assistant job.',
+      'Requires EXA_API_KEY. For one focused lookup, pass {"mode":"focused"} plus compact lowercase non-identifying profile categories; omit mode for broad discovery. Use research payload-schema --format json for the exact file-body contract and --input @file.json or --input - for stdin, not inline JSON. Never include private notes, names, organizations, personal framing, contacts, member or patient identifiers, credentials, dates of birth, exact personal labs or measurements, appointments, or medical records. Rely only on a candidate whose resultIndex maps to a returned source with a title, web URL, and enough publication metadata for the claim; otherwise report no usable current source without fabricating or repeating the lookup blindly.',
     output: researchScoutResultSchema,
     async run({ options }) {
       const rawProfile = await loadJsonInputObject(
@@ -196,7 +197,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
     args: z.object({}),
     options: z.object({
       input: inputFileOptionSchema.describe(
-        'Compact lane JSON in @file.json form or - for stdin. Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"]}}]}. Lane profiles accept compact bucket fields only and must not include focused questions, raw labs, names, dates of birth, full notes, or medical records.',
+        'Compact lane JSON in @file.json form or - for stdin. Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"]}}]}. Lane profiles accept compact bucket fields only and must not include focused mode, raw labs, names, dates of birth, full notes, or medical records.',
       ),
       since: researchScoutTimestampOptionSchema.describe(
         'Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp.',
@@ -266,7 +267,7 @@ export function parseResearchScoutCliProfileInput(
     const keys = Object.keys(rawInput)
     if (keys.length !== 1) {
       throw invalidResearchScoutProfileError(
-        'Put only the focused question or compact profile in --input. Pass since, until, and maxCandidates as CLI options.',
+        'Put only the focused or broad compact profile in --input. Pass since, until, and maxCandidates as CLI options.',
       )
     }
     const wrappedProfile = researchScoutProfileSchema.safeParse(rawInput.profile)
@@ -369,9 +370,9 @@ function invalidResearchScoutProfileError(extraDetail?: string): VaultCliError {
     'research_scout_invalid_profile',
     [
       extraDetail,
-      'research scout --input expects either {"question":"..."} for one focused public question or a compact profile with bucket fields: '
-        + `${fields}.`,
-      'Do not mix the question and bucket shapes. Do not use a generic tags field or include private notes, contacts, identifiers, credentials, raw labs, exact personal measurements, appointments, or medical records.',
+      'research scout --input expects compact profile bucket fields: '
+        + `${fields}. Add {"mode":"focused"} for one focused lookup; omit mode for broad discovery.`,
+      'Do not use arbitrary question text, a generic tags field, names, organizations, private notes, contacts, identifiers, credentials, raw labs, exact personal measurements, appointments, or medical records.',
     ].filter(Boolean).join(' '),
   )
 }
@@ -382,7 +383,7 @@ function invalidResearchScoutBatchPayloadError(extraDetail?: string): VaultCliEr
     [
       extraDetail,
       `research scout-batch --input expects {"lanes":[...]} with 1-${MAX_RESEARCH_SCOUT_BATCH_LANES} compact lane profiles.`,
-      'Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"],"behaviors":["morning light"]}}]}; do not use focused questions, generic tags, raw notes, raw labs, or full request fields.',
+      'Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"],"behaviors":["morning light"]}}]}; do not use focused mode, generic tags, raw notes, raw labs, or full request fields.',
     ].filter(Boolean).join(' '),
   )
 }

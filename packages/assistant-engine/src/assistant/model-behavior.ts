@@ -85,6 +85,6 @@ export function buildAssistantResearchScoutCapabilityText(input: {
 
   return `Configured Exa research capability:
 - Use \`vault-cli research scout --input - --since <date> --until <date>\` when current papers, guidelines, reviews, or trials could materially improve the answer; skip it when research would not change the result. ${progressGuidance}
-- Send only one focused English, person-name-free public question as \`{"question":"..."}\` on stdin. Generalize away every private person and personal detail; institutions, person-name-free study titles, publication years, and scientific terms may remain. Use compact non-identifying tags only for broad discovery or automation.
+- For one focused lookup, send \`{"mode":"focused"}\` plus only compact lowercase non-identifying profile categories on stdin; omit \`mode\` for broad discovery or automation. Synthesize the scope from the question, but never send arbitrary question prose, names, organizations, private notes, or personal details.
 - Rely only on a candidate whose \`resultIndex\` maps to a returned result with the source title, web URL, and enough publication metadata for the claim. Name the source and available publication date naturally, preserve caveats and disagreement, and distinguish established from early evidence. If none maps to a usable source, say the pass found no usable current source; do not fabricate evidence, increase confidence, or repeat the lookup blindly. Never turn candidates into personalized medical advice or unsupported causal claims.`
 }

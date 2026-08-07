@@ -967,7 +967,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['research', 'payload-schema'],
         description:
-          'Emit the exact focused-question or compact tag-profile JSON body schema for research scout --input.',
+          'Emit the exact focused-scope or compact tag-profile JSON body schema for research scout --input.',
         hint:
           'Use this before research scout when constructing the stdin or @file JSON body.',
         output: payloadSchemaResultSchema,
@@ -975,9 +975,9 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['research', 'scout'],
         description:
-          'Search Exa for bounded human-research candidates from one focused English, person-name-free public question or compact non-identifying tags without writing vault records.',
+          'Search Exa for bounded human-research candidates from one focused structured scope or compact non-identifying tags without writing vault records.',
         hint:
-          'Requires EXA_API_KEY. Pass {"question":"..."} through stdin or @file JSON with no person names or personal framing. Trust only candidates whose resultIndex maps to usable returned source metadata; otherwise report no usable current source.',
+          'Requires EXA_API_KEY. Pass {"mode":"focused"} plus compact lowercase non-identifying profile fields through stdin or @file JSON; omit mode for broad discovery. Never include names, organizations, private notes, or personal data. Trust only candidates whose resultIndex maps to a returned source with a title, web URL, and enough publication metadata for the claim; otherwise report no usable current source without fabricating or repeating the lookup blindly.',
         output: researchScoutResultSchema,
       },
     ],
