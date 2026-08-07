@@ -498,6 +498,12 @@ export async function materializeStoredExportPack(input: {
             `Export pack "${input.packId}" changed while it was being rebuilt; retry the materialization.`,
           )
         }
+        if (await tryReadFilesForMaterialization(input.vault, current.manifest)) {
+          throw new VaultCliError(
+            'export_pack_changed',
+            `Export pack "${input.packId}" was completed while it was being rebuilt; retry the materialization.`,
+          )
+        }
         await materializeExportPack(input.vault, files)
       })
     }

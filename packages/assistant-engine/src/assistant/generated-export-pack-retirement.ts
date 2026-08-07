@@ -4,6 +4,8 @@ import { lstat, readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
+  isVaultFilesystemCaseInsensitive,
+  normalizeRelativeVaultPathForComparison,
   readBoundedZipDirectory,
   readBoundedZipEntry,
   type BoundedZipEntry,
@@ -416,6 +418,9 @@ async function assistantExportPackHasActiveOutboxOwner(input: {
   signal?: AbortSignal | null
   vault: string
 }): Promise<boolean> {
+  input.signal?.throwIfAborted()
+  const caseInsensitive = await isVaultFilesystemCaseInsensitive(input.vault)
+  input.signal?.throwIfAborted()
   return await withAssistantRuntimeWriteLock(
     input.vault,
     async (paths) => {
@@ -429,7 +434,11 @@ async function assistantExportPackHasActiveOutboxOwner(input: {
         isActiveAssistantOutboxDeliveryIntent(record)
         && record.media.some((media) =>
           media.kind === 'vault_file'
-          && refIsEqualToOrBeneath(media.ref, input.basePath)
+          && refIsEqualToOrBeneath(
+            media.ref,
+            input.basePath,
+            caseInsensitive,
+          )
         )
       )
     },
@@ -444,6 +453,9 @@ async function deleteProvenAssistantExportPack(input: {
   signal?: AbortSignal | null
   vault: string
 }): Promise<'complete' | 'deferred' | 'pruned'> {
+  input.signal?.throwIfAborted()
+  const caseInsensitive = await isVaultFilesystemCaseInsensitive(input.vault)
+  input.signal?.throwIfAborted()
   return await withAssistantRuntimeWriteLock(
     input.vault,
     async (paths) => {
@@ -467,7 +479,11 @@ async function deleteProvenAssistantExportPack(input: {
         isActiveAssistantOutboxDeliveryIntent(record)
         && record.media.some((media) =>
           media.kind === 'vault_file'
-          && refIsEqualToOrBeneath(media.ref, input.liveSnapshot.receipt.basePath)
+          && refIsEqualToOrBeneath(
+            media.ref,
+            input.liveSnapshot.receipt.basePath,
+            caseInsensitive,
+          )
         )
       )) {
         return 'deferred'
@@ -748,8 +764,22 @@ function isExactDirectExportPackFileList(
   })
 }
 
-function refIsEqualToOrBeneath(ref: string, basePath: string): boolean {
-  return ref === basePath || ref.startsWith(`${basePath}/`)
+export function refIsEqualToOrBeneath(
+  ref: string,
+  basePath: string,
+  caseInsensitive: boolean,
+): boolean {
+  const comparisonOptions = { caseInsensitive }
+  const normalizedRef = normalizeRelativeVaultPathForComparison(
+    ref,
+    comparisonOptions,
+  )
+  const normalizedBasePath = normalizeRelativeVaultPathForComparison(
+    basePath,
+    comparisonOptions,
+  )
+  return normalizedRef === normalizedBasePath
+    || normalizedRef.startsWith(`${normalizedBasePath}/`)
 }
 
 function outboxProvesExactSentArchiveClaim(

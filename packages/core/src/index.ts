@@ -41,8 +41,10 @@ export type {
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
+  isVaultFilesystemCaseInsensitive,
   normalizeOpaquePathSegment,
   normalizeRelativeVaultPath,
+  normalizeRelativeVaultPathForComparison,
   normalizeVaultRoot,
   resolveVaultPath,
   resolveVaultPathOnDisk,

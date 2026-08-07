@@ -12,6 +12,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { isVaultFilesystemCaseInsensitive } from '@murphai/core'
 import type {
   AssistantOutboxIntent,
   AssistantVaultFileResponseMedia,
@@ -25,6 +26,7 @@ import {
 } from '../src/assistant/generated-delivery-files.ts'
 import {
   buildAssistantGeneratedDeliveryRetirement,
+  refIsEqualToOrBeneath,
 } from '../src/assistant/generated-export-pack-retirement.ts'
 import {
   createAssistantOutboxIntent,
@@ -66,6 +68,19 @@ afterEach(async () => {
 })
 
 describe('assistant generated export-pack retirement', () => {
+  it('compares active pack refs with the selected filesystem case policy', () => {
+    const basePath = 'exports/packs/pack-focus'
+    const mixedCaseRef = 'exports/packs/PACK-FOCUS/ENTITIES.JSON'
+
+    expect(refIsEqualToOrBeneath(mixedCaseRef, basePath, true)).toBe(true)
+    expect(refIsEqualToOrBeneath(mixedCaseRef, basePath, false)).toBe(false)
+    expect(refIsEqualToOrBeneath(
+      'exports/packs/pack-focus-sibling/entities.json',
+      basePath,
+      true,
+    )).toBe(false)
+  })
+
   it('records only an exact generated ZIP copy of an unchanged derived pack', async () => {
     const setup = await createExportPackDelivery('exact')
 
@@ -687,6 +702,52 @@ describe('assistant generated export-pack retirement', () => {
       exportPacksPruned: 1,
       filesPruned: 1,
     })
+    await expect(stat(setup.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('defers a mixed-case direct pack-file ref on a case-insensitive vault', async () => {
+    const setup = await createExportPackDelivery('active-direct-case-alias')
+    if (!(await isVaultFilesystemCaseInsensitive(setup.vaultRoot))) {
+      return
+    }
+    const directMedia = await resolveAssistantVaultFileResponseMedia({
+      ref: `exports/packs/${setup.packId.toUpperCase()}/ENTITIES.JSON`,
+      vaultRoot: setup.vaultRoot,
+    })
+    const directIntent = await createDirectPackFileIntent({
+      deliveryConfirmationPending: false,
+      media: directMedia,
+      seed: 'case-alias',
+      status: 'pending',
+      vaultRoot: setup.vaultRoot,
+    })
+    const zipIntent = await createDeliveryIntent({
+      media: setup.media,
+      status: 'pending',
+      vaultRoot: setup.vaultRoot,
+    })
+    await expect(markExportPackIntentSent(zipIntent, setup.vaultRoot)).resolves
+      .toMatchObject({ status: 'sent' })
+
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 0, filesPruned: 0 })
+    await expect(stat(setup.packPath)).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    })
+    await expect(stat(setup.archivePath)).resolves.toMatchObject({
+      size: setup.archive.byteLength,
+    })
+
+    await saveAssistantOutboxIntent(setup.vaultRoot, {
+      ...directIntent,
+      status: 'failed',
+      updatedAt: '2026-08-06T18:03:00.000Z',
+    })
+    await expect(pruneQuiescentAssistantGeneratedDeliveryResidue({
+      vault: setup.vaultRoot,
+    })).resolves.toMatchObject({ exportPacksPruned: 1, filesPruned: 1 })
     await expect(stat(setup.packPath)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(stat(setup.archivePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })

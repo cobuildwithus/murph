@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm, symlink } from 'node:fs/promises'
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -225,7 +233,7 @@ test.sequential(
 )
 
 test.sequential(
-  'canonical reconstruction does not overwrite a newer same-id generation',
+  'canonical reconstruction does not overwrite a newer complete same-manifest pack',
   async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), 'murph-export-lock-newer-'),
@@ -244,21 +252,44 @@ test.sequential(
     try {
       await initializeVault({ vaultRoot })
       await symlink(path.dirname(vaultRoot), aliasParent, 'dir')
-      const readModel = await readVault(vaultRoot)
-      const olderPack = buildExportPack(readModel, {
+      const journalPath = path.join(
+        vaultRoot,
+        'journal/2026/2026-03-10.md',
+      )
+      await mkdir(path.dirname(journalPath), { recursive: true })
+      const journalPrefix = `---
+schemaVersion: murph.frontmatter.journal-day.v1
+docType: journal_day
+dayKey: 2026-03-10
+eventIds: []
+sampleStreams: []
+---
+# March 10
+
+`
+      await writeFile(journalPath, `${journalPrefix}Older journal details.\n`)
+      const olderReadModel = await readVault(vaultRoot)
+      const packOptions = {
         packId: 'canonical-generation-pack',
         generatedAt: '2026-03-13T12:00:00.000Z',
-      })
+      }
+      const olderPack = buildExportPack(olderReadModel, packOptions)
       await materializeExportPack(vaultRoot, olderPack.files)
       const missingFile = olderPack.files.find(
         (file) => !file.path.endsWith('/manifest.json'),
       )
       assert.ok(missingFile)
       await rm(path.join(vaultRoot, missingFile.path), { force: true })
+      let rebuildReadCount = 0
+      let newerReadModel = olderReadModel
       readVaultTolerantMock.mockImplementation(async () => {
-        reportRebuildStarted()
-        await rebuildRelease
-        return readModel
+        rebuildReadCount += 1
+        if (rebuildReadCount === 1) {
+          reportRebuildStarted()
+          await rebuildRelease
+          return olderReadModel
+        }
+        return newerReadModel
       })
 
       const materialization = materializeStoredExportPack({
@@ -267,13 +298,32 @@ test.sequential(
         vault: vaultRoot,
       })
       await within(rebuildStarted, 'same-id rebuild did not start')
-      const newerPack = buildExportPack(readModel, {
+      await writeFile(journalPath, `${journalPrefix}Newer journal details.\n`)
+      newerReadModel = await readVault(vaultRoot)
+      const newerPack = buildExportPack(newerReadModel, packOptions)
+      const olderManifest = olderPack.files.find(
+        (file) => file.path.endsWith('/manifest.json'),
+      )
+      const newerManifest = newerPack.files.find(
+        (file) => file.path.endsWith('/manifest.json'),
+      )
+      assert.ok(olderManifest)
+      assert.ok(newerManifest)
+      assert.equal(newerManifest.contents, olderManifest.contents)
+      const newerContentsByPath = new Map(
+        newerPack.files.map((file) => [file.path, file.contents]),
+      )
+      assert.equal(olderPack.files.some((file) => (
+        !file.path.endsWith('/manifest.json')
+        && newerContentsByPath.get(file.path) !== file.contents
+      )), true)
+
+      const newerMaterialization = await materializeStoredExportPack({
+        out: aliasVault,
         packId: olderPack.packId,
-        generatedAt: '2026-03-14T12:00:00.000Z',
+        vault: vaultRoot,
       })
-      await withAssistantRuntimeWriteLock(vaultRoot, async () => {
-        await materializeExportPack(vaultRoot, newerPack.files)
-      })
+      assert.equal(newerMaterialization.rebuilt, true)
       releaseRebuild()
 
       await within(
@@ -286,8 +336,7 @@ test.sequential(
       )
       assert.equal(
         await readFile(manifestPath, 'utf8'),
-        newerPack.files.find((file) => file.path.endsWith('/manifest.json'))
-          ?.contents,
+        newerManifest.contents,
       )
       for (const file of newerPack.files) {
         assert.equal(
