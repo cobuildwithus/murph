@@ -1481,9 +1481,13 @@ customer provisioning, saved-card preparation, and Checkout Session
 creation/resume. Paid-plan upgrades, paid-trial transitions, and scheduled plan
 switches own their complete provider-backed action in the same way; individual
 SDK calls do not independently own email. The
-Family action derives one complete provider-effect identity from the current
-plan, current Price, target Price, and seat count, and a stale Session restart
-rebinds reporting to the replacement checkout attempt. Explicit
+Family direct-paid action derives one complete provider-effect identity from
+the current plan, current Price, target Price, and seat count, and a stale
+Session restart rebinds reporting to the replacement checkout attempt. Paid
+Family capacity changes reuse the exact capacity-update idempotency identity;
+member-tier swaps reuse their persisted transition identity. Provider failures
+abort those complete actions and alert once, while already-applied capacity,
+successful updates, and domain-only conflicts remain silent. Explicit
 group-sponsorship recovery is another checkout action owner; a capacity-only
 reactivation makes no provider request and remains silent. Family checkout
 returns a Murph redirect that performs one final mandatory Session read; a

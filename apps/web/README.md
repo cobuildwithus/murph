@@ -1077,7 +1077,10 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   group-sponsorship recovery reports only when its own provider-backed checkout
   terminates; a no-charge reactivation stays silent. The final Family redirect
   Session read reports a provider rejection only for a still-current blind
-  Session binding, keeping unknown or stale public IDs silent.
+  Session binding, keeping unknown or stale public IDs silent. Paid Family
+  capacity changes reuse their exact Stripe update identity for alert replay;
+  member-tier swaps reuse the persisted transition identity. Successful,
+  already-applied, and domain-only outcomes schedule no email.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep

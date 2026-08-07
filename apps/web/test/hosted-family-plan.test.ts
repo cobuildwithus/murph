@@ -2563,6 +2563,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: { planCode: "edge" } }),
     );
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
   });
 
   it("reuses the original pending timestamp and idempotency key on retry", async () => {
@@ -2753,6 +2754,7 @@ describe("hosted Family plan", () => {
 
     expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalled();
     expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
   });
 
   it("keeps the current member tier when the Stripe swap fails", async () => {
@@ -2806,6 +2808,84 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: { planCode: "edge" } }),
     );
+  });
+
+  it("alerts for request-id-free member-tier failures with stable transition identity", async () => {
+    const tx = createTxMock();
+    const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
+    const pendingMembership = {
+      id: "hbagm_mom",
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+      updatedAt: pendingStartedAt,
+    };
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce(pendingMembership)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(pendingMembership)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    tx.hostedAccountGroupMembership.findUnique.mockResolvedValue({
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+      { memberId: "member_mom", planCode: "pulse" },
+    ]);
+    tx.hostedAccountGroupPlanCapacity.findMany.mockResolvedValue([
+      { billedQuantity: 2, planCode: "pulse" },
+    ]);
+    const providerError = buildFamilyStripeConnectionErrorWithoutRequestId();
+    const stripeUpdate = vi.fn().mockRejectedValue(providerError);
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscription({ itemQuantity: 2 }),
+        ),
+        update: stripeUpdate,
+      },
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const fetchMock = stubFamilyStripeAlertEmailDelivery();
+    const input = {
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      ownerMemberId: "member_owner",
+      planCode: "edge",
+      prisma: prisma as never,
+    };
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(updateHostedFamilyMemberPlan(input)).rejects.toBe(providerError);
+      await runOnlyScheduledFamilyStripeAlert();
+      if (attempt === 0) {
+        nextServerMocks.after.mockClear();
+      }
+    }
+
+    expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalled();
+    expect(stripeUpdate).toHaveBeenCalledTimes(2);
+    expect(stripeUpdate.mock.calls[0]?.[2]).toEqual({
+      idempotencyKey:
+        `family-member-plan:hbag_family:hbagm_mom:${pendingStartedAt.getTime()}:edge`,
+    });
+    expect(stripeUpdate.mock.calls[1]?.[2]).toEqual(stripeUpdate.mock.calls[0]?.[2]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(readResendIdempotencyKey(fetchMock, 0)).toBe(
+      readResendIdempotencyKey(fetchMock, 1),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
+      fetchMock.mock.calls[1]?.[1]?.body,
+    );
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain(
+      "family.billing.member-plan",
+    );
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).not.toContain("member_mom");
   });
 
   it("signals the accepted member activation mailbox after browser acceptance commits", async () => {
@@ -6550,6 +6630,96 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupPlanCapacity.createMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupPlanCapacity.deleteMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
+  });
+
+  it("alerts for request-id-free Family capacity failures with stable effect identity", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 1,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+    ]);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const providerError = buildFamilyStripeConnectionErrorWithoutRequestId();
+    const stripeSubscriptionRetrieve = vi.fn().mockRejectedValue(providerError);
+    const stripeSubscriptionUpdate = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: stripeSubscriptionRetrieve,
+        update: stripeSubscriptionUpdate,
+      },
+    });
+    const fetchMock = stubFamilyStripeAlertEmailDelivery();
+    const input = {
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetCapacities: { edge: 2, pulse: 1 },
+    };
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(updateHostedFamilyPlanCapacities(input)).rejects.toBe(providerError);
+      await runOnlyScheduledFamilyStripeAlert();
+      if (attempt === 0) {
+        nextServerMocks.after.mockClear();
+      }
+    }
+
+    expect(stripeSubscriptionRetrieve).toHaveBeenCalledTimes(2);
+    expect(stripeSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(readResendIdempotencyKey(fetchMock, 0)).toBe(
+      readResendIdempotencyKey(fetchMock, 1),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
+      fetchMock.mock.calls[1]?.[1]?.body,
+    );
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain(
+      "family.billing.capacity",
+    );
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).not.toContain("member_owner");
+  });
+
+  it("keeps an already-applied Family capacity update alert-silent", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 1,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+    ]);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const stripeSubscriptionUpdate = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscription({ edgeItemQuantity: 2, itemQuantity: 1 }),
+        ),
+        update: stripeSubscriptionUpdate,
+      },
+    });
+
+    await expect(updateHostedFamilyPlanCapacities({
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetCapacities: { edge: 2, pulse: 1 },
+    })).resolves.toMatchObject({ groupId: "hbag_family" });
+
+    expect(stripeSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
   });
 
   it("invoices a Family capacity reduction instead of silently discarding proration", async () => {

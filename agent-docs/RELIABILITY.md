@@ -331,7 +331,10 @@ Last verified: 2026-08-06
   fails. No individual provider call is a separate alert occurrence. Family
   replacement attempts rebind alert identity to the current
   attempt, while direct paid upgrades include the complete current-plan,
-  current-Price, target-Price, and seat-count provider effect. An explicit
+  current-Price, target-Price, and seat-count provider effect. Paid Family
+  capacity changes reuse the exact Stripe capacity-update idempotency identity,
+  and member-tier swaps reuse their persisted transition identity. Their
+  already-applied, successful, and domain-only outcomes remain silent. An explicit
   group-sponsorship recovery owns a terminal provider rejection, but a
   no-charge capacity reactivation remains silent. The final Murph-owned Family
   redirect reports a blocking Session-read rejection only when the unique blind

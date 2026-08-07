@@ -165,3 +165,12 @@ Updated: 2026-08-06
   paid-trial, scheduled-switch, and cardless Group payment-setup failures.
   Stable replays retain the same body and Resend key, while recovered ambiguous
   mutations, already-applied outcomes, and domain conflicts schedule no email.
+- Final round 7 found that paid Family capacity changes and member-tier swaps
+  still relied on the now log-only SDK diagnostic wrappers. Both complete
+  actions now own their terminal provider-failure alert. Capacity updates reuse
+  their exact Stripe idempotency key; member-tier swaps reuse the persisted
+  transition idempotency key. The per-call diagnostic wrappers were deleted so
+  one failed action cannot double-log or double-email.
+- Added real Resend transport proof for request-id-free capacity-read and
+  member-tier update failures across stable replays, plus explicit silence for
+  successful, already-applied, and domain-only outcomes.
