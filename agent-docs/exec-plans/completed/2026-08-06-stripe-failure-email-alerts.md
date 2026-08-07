@@ -1,8 +1,8 @@
 # Stripe failure email alerts
 
-Status: active
+Status: completed
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -70,14 +70,14 @@ Updated: 2026-08-06
 
 ## Tasks
 
-1. Inventory Stripe failure events, shared call paths, and operational email
+1. [x] Inventory Stripe failure events, shared call paths, and operational email
    configuration against current provider docs.
-2. Implement the smallest privacy-safe Resend alert helper at the existing
+2. [x] Implement the smallest privacy-safe Resend alert helper at the existing
    checkout-action and webhook receipt boundaries.
-3. Add focused coverage for checkout/API failures, payment-failure events,
+3. [x] Add focused coverage for checkout/API failures, payment-failure events,
    replay identity, redaction, missing configuration, and Resend failure.
-4. Update the owning operational/security/reliability documentation.
-5. Run focused proof and typecheck, push an exact candidate, complete both
+4. [x] Update the owning operational/security/reliability documentation.
+5. [x] Run focused proof and typecheck, push an exact candidate, complete both
    required ReviewGPT stages with CI, resolve findings, and close the plan.
 
 ## Decisions
@@ -194,3 +194,28 @@ Updated: 2026-08-06
 - Production-shaped child-process proof runs the exact line-sync package command
   with Node server conditions unset and reaches its existing environment gate;
   the legacy Stripe migration likewise reaches its own required mode gate.
+- Final round 10 passed with no findings after verifying the dependency-free
+  runtime boundary, action/webhook/reconciliation ownership, Resend replay and
+  privacy behavior, and production-shaped standalone command coverage.
+
+## Final verification
+
+- Focused Stripe Web Vitest: 14 files and 647 tests passed.
+- Runtime-boundary remediation regression: 4 files and 203 tests passed.
+- Web TypeScript, targeted ESLint, `pnpm logs:guard`,
+  `pnpm stripe-requests:guard`, `pnpm docs:drift`, `git diff --check`, and the
+  direct-identifier scan passed.
+- The corrected preliminary specialist pass and final ReviewGPT round 10 both
+  passed with no remaining findings.
+- Exact-head GitHub Actions passed on the branch reconciled with current
+  `main`: release build/typecheck, app verification, fixture coverage, CLI and
+  platform/assistant package coverage, both CLI host matrices, repository
+  hygiene, frontend design proof, viewport overflow, the release aggregate,
+  and Vercel's configured ignored-build check.
+- Production configuration-name proof exists for the Resend API key, sender,
+  and recipient-list variables, and read-only production receipts confirm an
+  `invoice.payment_failed` delivery. Live Stripe endpoint subscription and
+  exact recipient-membership inspection remain a deployment follow-up that
+  requires explicit approval to inject production-only secret values without
+  printing or persisting them.
+Completed: 2026-08-07
