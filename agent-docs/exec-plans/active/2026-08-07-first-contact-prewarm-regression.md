@@ -88,15 +88,27 @@ Updated: 2026-08-07
   A deterministic deferred-start regression proves authoritative readiness
   proceeds within its own budget, and the Web ordering regression leaves the
   prewarm promise unresolved while enrollment and conversation handoff finish.
+- Final ReviewGPT round 2 found the same convoy mechanism remained around the
+  earlier persisted-state read, which did not observe the supersession signal.
+  The required retrospective retained the measured overlap but shrank the
+  implementation: the hint no longer calls `getState()`, reuses
+  `Container.start()` for its synchronous running check and start coalescing,
+  and preserves only a failed or in-progress attempt for authoritative
+  readiness to complete through the canonical port and health path. A
+  never-settling state-read double is now untouched by the hint, while a running
+  shell whose start wait is superseded or uncertain still enters
+  `startAndWaitForPorts` under the authoritative budget. This adds no queue,
+  durable state, scheduler, or reconciliation owner.
 
 ## Risks and mitigations
 
 1. Risk: the shell hint accidentally gains runtime authority.
    Mitigation: route directly to the deterministic container and expose a
-   dedicated RPC that calls only `start()` after validating stopped state; unit
+   dedicated RPC that calls only `start()` and never reads persisted state; unit
    tests prove no `UserRunner`, readiness wait, workspace call, fence, or invoke.
    The hint does not block pointerless wakes, duplicate hints coalesce, and
-   authoritative readiness aborts it before joining the lifecycle queue.
+   authoritative readiness claims and aborts it before joining the lifecycle
+   queue, then owns canonical port and health readiness.
 2. Risk: enrollment fails after starting a shell.
    Mitigation: the shell has no work or owner and expires through the existing
    idle lifecycle; enrollment failure keeps its current signup fallback.
@@ -137,7 +149,7 @@ Updated: 2026-08-07
   one-owner, mailbox, provider, and delivery assertions. Completed on isolated
   Blacksmith with a 693 ms provider-start p50 improvement and 662 ms delivery
   p50 improvement across six measured samples per variant.
-- Post-finding focused remediation proof: 187 RunnerContainer tests and 184 Web
+- Post-finding focused remediation proof: 189 RunnerContainer tests and 184 Web
   instant-start/direct-wake tests passed; Cloudflare and Web typechecks passed.
 - Preliminary `completion-specialists`, final ReviewGPT, and required exact-head
   GitHub Actions.

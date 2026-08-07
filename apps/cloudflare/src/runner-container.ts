@@ -207,7 +207,7 @@ export interface RunnerContainerEnsureReadyForProcessingResult {
 
 export type RunnerContainerPrewarmShellResult =
   | {
-      action: "already_started" | "start_issued";
+      action: "start_issued";
       kind: "started";
     }
   | {
@@ -734,7 +734,8 @@ export class RunnerContainer extends Container {
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
     this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    this.supersedeShellPrewarmForAuthoritativeReadiness();
+    const supersededShellPrewarm =
+      this.supersedeShellPrewarmForAuthoritativeReadiness();
     return await this.withLifecycleLock(async () => {
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
@@ -744,6 +745,7 @@ export class RunnerContainer extends Container {
         const action = await this.ensureContainerReady(
           input,
           AbortSignal.timeout(input.timeoutMs),
+          { completeSupersededShellPrewarm: supersededShellPrewarm },
         );
         return { action, kind: "ready" };
       } finally {
@@ -770,6 +772,7 @@ export class RunnerContainer extends Container {
     }
 
     const abortController = new AbortController();
+    let retainForAuthoritativeReadiness = false;
     const result = this.withLifecycleLock(
       async (): Promise<RunnerContainerPrewarmShellResult> => {
         const signal = combineRunnerContainerAbortSignals(
@@ -778,12 +781,6 @@ export class RunnerContainer extends Container {
         );
         try {
           throwIfRunnerContainerOperationAborted(signal);
-          const status = readContainerStatus(await this.getState());
-          throwIfRunnerContainerOperationAborted(signal);
-          if (!isRunnerContainerStopped(status)) {
-            return { action: "already_started", kind: "started" };
-          }
-
           const logContext: RunnerContainerLogContext = {
             userId: input.userId,
           };
@@ -806,6 +803,10 @@ export class RunnerContainer extends Container {
           ) {
             return { action: "superseded", kind: "superseded" };
           }
+          // start() can issue the platform command before a later wait fails.
+          // Preserve that uncertain attempt so authoritative readiness finishes
+          // the canonical lifecycle path instead of trusting warm health alone.
+          retainForAuthoritativeReadiness = true;
           throw error;
         }
       },
@@ -821,7 +822,10 @@ export class RunnerContainer extends Container {
     try {
       return await result;
     } finally {
-      if (this.shellPrewarmOperation === operation) {
+      if (
+        this.shellPrewarmOperation === operation
+        && !retainForAuthoritativeReadiness
+      ) {
         this.shellPrewarmOperation = null;
       }
     }
@@ -2032,6 +2036,9 @@ export class RunnerContainer extends Container {
   private async ensureContainerReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
     operationAbortSignal: AbortSignal,
+    options: {
+      completeSupersededShellPrewarm?: boolean;
+    } = {},
   ): Promise<"already_warm" | "started"> {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
@@ -2060,7 +2067,10 @@ export class RunnerContainer extends Container {
         failClosed: true,
         reason: "warm-invalidated",
       });
-    } else if (!isRunnerContainerStopped(status)) {
+    } else if (
+      !isRunnerContainerStopped(status)
+      && !options.completeSupersededShellPrewarm
+    ) {
       if (isRunnerContainerRunning(status)) {
         const recentReadinessProof = this.readRecentReadinessProof(
           Date.now(),
@@ -2690,13 +2700,18 @@ export class RunnerContainer extends Container {
     return next;
   }
 
-  private supersedeShellPrewarmForAuthoritativeReadiness(): void {
+  private supersedeShellPrewarmForAuthoritativeReadiness(): boolean {
     const operation = this.shellPrewarmOperation;
-    if (operation && !operation.abortController.signal.aborted) {
+    if (!operation) {
+      return false;
+    }
+    this.shellPrewarmOperation = null;
+    if (!operation.abortController.signal.aborted) {
       operation.abortController.abort(
         new RunnerContainerShellPrewarmSupersededError(),
       );
     }
+    return true;
   }
 
   private recordRecentReadinessProof(userId: string): void {

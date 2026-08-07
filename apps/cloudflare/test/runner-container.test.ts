@@ -1546,8 +1546,10 @@ describe("RunnerContainer", () => {
   });
 
   it("prewarmShell issues startup without waiting for ports or invoking workspace work", async () => {
+    const neverSettlingStateRead = new Promise<never>(() => undefined);
+    const getState = vi.fn(() => neverSettlingStateRead);
     const { container, containerFetch, start, startAndWaitForPorts } =
-      createContainerDouble();
+      createContainerDouble({ getState });
 
     await expect(container.prewarmShell({
       timeoutMs: 7_500,
@@ -1564,23 +1566,71 @@ describe("RunnerContainer", () => {
     });
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(containerFetch).not.toHaveBeenCalled();
+    expect(getState).not.toHaveBeenCalled();
   });
 
-  it("prewarmShell leaves an already-started shell untouched", async () => {
-    const { container, start, startAndWaitForPorts } = createContainerDouble({
-      initialStatus: "running",
-    });
+  it("prewarmShell delegates the already-running fast path to Container.start", async () => {
+    const { container, getState, start, startAndWaitForPorts } =
+      createContainerDouble({ initialStatus: "running" });
 
     await expect(container.prewarmShell({
       timeoutMs: 7_500,
       userId: "member_123",
     })).resolves.toEqual({
-      action: "already_started",
+      action: "start_issued",
       kind: "started",
     });
 
-    expect(start).not.toHaveBeenCalled();
+    expect(start).toHaveBeenCalledOnce();
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(getState).not.toHaveBeenCalled();
+  });
+
+  it("reuses a completed shell prewarm through ordinary health readiness", async () => {
+    const { container, start, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.prewarmShell({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "start_issued",
+      kind: "started",
+    });
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "already_warm",
+      kind: "ready",
+    });
+
+    expect(start).toHaveBeenCalledOnce();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("finishes canonical readiness after an uncertain shell prewarm failure", async () => {
+    const start = vi.fn(async () => {
+      throw new Error("platform start wait failed after command issue");
+    });
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      start,
+    });
+
+    await expect(container.prewarmShell({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).rejects.toThrow("platform start wait failed after command issue");
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+
+    expect(start).toHaveBeenCalledOnce();
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
   });
 
   it("lets authoritative readiness supersede a stalled shell prewarm", async () => {
@@ -1604,7 +1654,10 @@ describe("RunnerContainer", () => {
         });
       });
     });
-    const { container, startAndWaitForPorts } = createContainerDouble({ start });
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      start,
+    });
 
     const firstPrewarm = container.prewarmShell({
       timeoutMs: 20_000,
