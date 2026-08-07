@@ -179,3 +179,15 @@ Updated: 2026-08-06
   preserving normal npm output. The focused guard suite passes 17/17, the
   release workflow guard passes 5/5, CLI typecheck passes, and both a clean
   five-package pack and a separate exact-manifest scan pass all five tarballs.
+- Final ReviewGPT round 5 accepted two incomplete parts of the round-4
+  correction: lowercase or mixed-case schemes in an explicit Authorization
+  context were no longer covered, and separator/camel-case names ending in
+  `credential` were not treated like names ending in `secret` or `token`. The
+  correction keeps standalone matching case-sensitive for prose safety, adds a
+  case-insensitive matcher scoped to an explicit Authorization key, and extends
+  the shared key classifier with `credential`/`credentials` terminals. Valid
+  TypeScript type-alias declarations are excluded from executable-assignment
+  handling while invalid declaration-file assignments remain covered. Direct
+  reproductions now fail closed, environment references and harmless prose
+  remain accepted, the focused suite passes 17/17, and all five completed
+  release tarballs pass the exact final scanner.

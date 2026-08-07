@@ -52,6 +52,8 @@ const privateKeyBlockPattern =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]{32,16384}?-----END [A-Z0-9 ]*PRIVATE KEY-----/u;
 const authorizationCredentialPattern =
   /\b(Bearer|Basic)[ \t]+([A-Za-z0-9._~+/$={}-]{1,4096})/gu;
+const scopedAuthorizationCredentialPattern =
+  /\b(?:authorization(?:Header)?|authHeader)\b["'`\]\s,:=()]{1,32}\b(Bearer|Basic)[ \t]+([A-Za-z0-9._~+/$={}-]{1,4096})/giu;
 const privateJwkPatterns = [
   /\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["'][\s\S]{0,2000}?\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["']/iu,
   /\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["'][\s\S]{0,2000}?\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["']/iu,
@@ -100,8 +102,6 @@ const exactCredentialKeys = new Set([
   'bearertoken',
   'clientsecret',
   'cookie',
-  'credential',
-  'credentials',
   'csrftoken',
   'idtoken',
   'oauthtoken',
@@ -281,7 +281,10 @@ function isCredentialKey(key, options = {}) {
 
   const parts = credentialKeyParts(key);
   const terminal = parts.at(-1);
-  if (['mnemonic', 'password', 'secret', 'token'].includes(terminal)) {
+  if (
+    ['credential', 'credentials', 'mnemonic', 'password', 'secret', 'token']
+      .includes(terminal)
+  ) {
     return true;
   }
   if (terminal === 'signature') {
@@ -327,6 +330,22 @@ function hasValidAuthorizationCredentialSyntax(scheme, value) {
   return value.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/u.test(value);
 }
 
+function authorizationHasCredential(pattern, text) {
+  pattern.lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    const scheme = match[1] ?? '';
+    const value = match[2] ?? '';
+    if (
+      !isAuthorizationChallenge(scheme, value)
+      && hasValidAuthorizationCredentialSyntax(scheme, value)
+      && isCredentialLiteral('authorization', value)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function isAllowedLocalDatabasePlaceholder(rawUrl) {
   try {
     const parsed = new URL(rawUrl);
@@ -350,6 +369,15 @@ function secretAssignmentHasCredential(
 ) {
   pattern.lastIndex = 0;
   for (const match of text.matchAll(pattern)) {
+    const matchIndex = match.index ?? 0;
+    if (
+      options.skipTypeAliases === true
+      && /\btype\s*$/u.test(
+        text.slice(Math.max(0, matchIndex - 32), matchIndex),
+      )
+    ) {
+      continue;
+    }
     const key = match[keyIndex] ?? '';
     const matchedValue = valueIndexes
       .map((index) => ({ index, value: match[index] }))
@@ -384,18 +412,11 @@ function contentRuleIds(text, options = {}) {
   if (privateKeyBlockPattern.test(text)) {
     ruleIds.add('private-key:block');
   }
-  authorizationCredentialPattern.lastIndex = 0;
-  for (const match of text.matchAll(authorizationCredentialPattern)) {
-    const scheme = match[1] ?? '';
-    const value = match[2] ?? '';
-    if (
-      !isAuthorizationChallenge(scheme, value)
-      && hasValidAuthorizationCredentialSyntax(scheme, value)
-      && isCredentialLiteral('authorization', value)
-    ) {
-      ruleIds.add('credential:authorization-header');
-      break;
-    }
+  if (
+    authorizationHasCredential(authorizationCredentialPattern, text)
+    || authorizationHasCredential(scopedAuthorizationCredentialPattern, text)
+  ) {
+    ruleIds.add('credential:authorization-header');
   }
   if (privateJwkPatterns.some((pattern) => pattern.test(text))) {
     ruleIds.add('private-key:jwk');
@@ -428,6 +449,7 @@ function contentRuleIds(text, options = {}) {
     secretAssignmentHasCredential(quotedColonAssignmentPattern, text, 1, [3])
     || secretAssignmentHasCredential(equalsAssignmentPattern, text, 1, [3, 4], {
       includeUnquoted: includeUnquotedEqualsAssignments,
+      skipTypeAliases: true,
       unquotedValueIndex: 4,
     })
     || secretAssignmentHasCredential(bracketEqualsAssignmentPattern, text, 2, [4, 5], {
