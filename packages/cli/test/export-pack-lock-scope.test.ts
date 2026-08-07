@@ -21,10 +21,12 @@ const {
   loadQueryRuntimeMock,
   materializeExportPackMock,
   readVaultTolerantMock,
+  resolveVaultRelativePathHook,
 } = vi.hoisted(() => ({
   loadQueryRuntimeMock: vi.fn(),
   materializeExportPackMock: vi.fn(),
   readVaultTolerantMock: vi.fn(),
+  resolveVaultRelativePathHook: vi.fn(),
 }))
 
 vi.mock('@murphai/vault-usecases/runtime', async () => {
@@ -49,6 +51,12 @@ vi.mock('@murphai/vault-usecases/helpers', async () => {
       materializeExportPackMock(...args)
       return await actual.materializeExportPack(...args)
     },
+    async resolveVaultRelativePath(
+      ...args: Parameters<typeof actual.resolveVaultRelativePath>
+    ) {
+      await resolveVaultRelativePathHook(...args)
+      return await actual.resolveVaultRelativePath(...args)
+    },
   }
 })
 
@@ -62,6 +70,7 @@ loadQueryRuntimeMock.mockResolvedValue({
 afterEach(() => {
   materializeExportPackMock.mockClear()
   readVaultTolerantMock.mockReset()
+  resolveVaultRelativePathHook.mockReset()
 })
 
 async function within<T>(promise: Promise<T>, label: string): Promise<T> {
@@ -79,6 +88,124 @@ async function within<T>(promise: Promise<T>, label: string): Promise<T> {
     }
   }
 }
+
+test.sequential(
+  'complete external export-pack reads do not hold the assistant runtime lock',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-read-'))
+    const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-output-'))
+    let releaseRead!: () => void
+    const readRelease = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    let reportReadStarted!: () => void
+    const readStarted = new Promise<void>((resolve) => {
+      reportReadStarted = resolve
+    })
+
+    try {
+      await initializeVault({ vaultRoot })
+      const pack = buildExportPack(await readVault(vaultRoot), {
+        packId: 'external-complete-pack',
+        generatedAt: '2026-03-13T12:00:00.000Z',
+      })
+      await materializeExportPack(vaultRoot, pack.files)
+      const targetFile = pack.files.find((file) => file.path.endsWith('/entities.json'))
+      assert.ok(targetFile)
+      let targetResolveCount = 0
+      resolveVaultRelativePathHook.mockImplementation(async (_vault, relativePath) => {
+        if (relativePath !== targetFile.path) return
+        targetResolveCount += 1
+        if (targetResolveCount === 2) {
+          reportReadStarted()
+          await readRelease
+        }
+      })
+
+      const materialization = materializeStoredExportPack({
+        out: outRoot,
+        packId: pack.packId,
+        vault: vaultRoot,
+      })
+      await within(readStarted, 'stored pack read did not start')
+      const lockOutcome = await within(
+        withAssistantRuntimeWriteLock(vaultRoot, async () => 'acquired' as const),
+        'complete external read held the runtime lock',
+      )
+      releaseRead()
+
+      const result = await materialization
+      assert.equal(lockOutcome, 'acquired')
+      assert.equal(result.rebuilt, false)
+      await access(path.join(outRoot, `exports/packs/${pack.packId}/manifest.json`))
+    } finally {
+      releaseRead()
+      await rm(vaultRoot, { force: true, recursive: true })
+      await rm(outRoot, { force: true, recursive: true })
+    }
+  },
+)
+
+test.sequential(
+  'complete external export-pack reads reject a concurrent canonical change before writing',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-change-'))
+    const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-output-'))
+    let releaseRead!: () => void
+    const readRelease = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    let reportReadStarted!: () => void
+    const readStarted = new Promise<void>((resolve) => {
+      reportReadStarted = resolve
+    })
+
+    try {
+      await initializeVault({ vaultRoot })
+      const pack = buildExportPack(await readVault(vaultRoot), {
+        packId: 'external-changing-pack',
+        generatedAt: '2026-03-13T12:00:00.000Z',
+      })
+      await materializeExportPack(vaultRoot, pack.files)
+      const targetFile = pack.files.find((file) => file.path.endsWith('/entities.json'))
+      assert.ok(targetFile)
+      let targetResolveCount = 0
+      resolveVaultRelativePathHook.mockImplementation(async (_vault, relativePath) => {
+        if (relativePath !== targetFile.path) return
+        targetResolveCount += 1
+        if (targetResolveCount === 2) {
+          reportReadStarted()
+          await readRelease
+        }
+      })
+
+      const materialization = materializeStoredExportPack({
+        out: outRoot,
+        packId: pack.packId,
+        vault: vaultRoot,
+      })
+      await within(readStarted, 'stored pack read did not start')
+      await withAssistantRuntimeWriteLock(vaultRoot, async () => {
+        await materializeExportPack(vaultRoot, pack.files.map((file) => (
+          file.path === targetFile.path
+            ? { ...file, contents: `${file.contents}\n` }
+            : file
+        )))
+      })
+      releaseRead()
+
+      await within(
+        assert.rejects(materialization, { code: 'export_pack_changed' }),
+        'changed external materialization did not reject',
+      )
+      await assert.rejects(access(path.join(outRoot, 'exports')), { code: 'ENOENT' })
+    } finally {
+      releaseRead()
+      await rm(vaultRoot, { force: true, recursive: true })
+      await rm(outRoot, { force: true, recursive: true })
+    }
+  },
+)
 
 test.sequential(
   'external export-pack reconstruction does not hold the assistant runtime lock',

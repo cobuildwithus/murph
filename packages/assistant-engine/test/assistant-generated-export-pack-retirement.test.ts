@@ -30,6 +30,7 @@ import {
 } from '../src/assistant/generated-export-pack-retirement.ts'
 import {
   createAssistantOutboxIntent,
+  listAssistantOutboxIntents,
   markAssistantOutboxIntentSentById,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
@@ -769,6 +770,41 @@ describe('assistant generated export-pack retirement', () => {
     })).rejects.toMatchObject({
       code: 'ASSISTANT_VAULT_FILE_CHANGED_BEFORE_PERSISTENCE',
     })
+  })
+
+  it('revalidates a fully case-varied direct pack ref after deletion wins the lock race', async () => {
+    const setup = await createExportPackDelivery('creation-race-case-alias')
+    if (!(await isVaultFilesystemCaseInsensitive(setup.vaultRoot))) {
+      return
+    }
+    const directMedia = await resolveAssistantVaultFileResponseMedia({
+      ref: `EXPORTS/PACKS/${setup.packId.toUpperCase()}/ENTITIES.JSON`,
+      vaultRoot: setup.vaultRoot,
+    })
+    let beginCreation!: () => void
+    const creationStarted = new Promise<void>((resolve) => {
+      beginCreation = resolve
+    })
+    const creation = creationStarted.then(async () => (
+      createDirectPackFileIntent({
+        deliveryConfirmationPending: false,
+        media: directMedia,
+        seed: 'creation-race-case-alias',
+        status: 'pending',
+        vaultRoot: setup.vaultRoot,
+      })
+    ))
+
+    await withAssistantRuntimeWriteLock(setup.vaultRoot, async () => {
+      beginCreation()
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      await rm(setup.packPath, { recursive: true })
+    })
+
+    await expect(creation).rejects.toMatchObject({
+      code: 'ASSISTANT_VAULT_FILE_CHANGED_BEFORE_PERSISTENCE',
+    })
+    await expect(listAssistantOutboxIntents(setup.vaultRoot)).resolves.toEqual([])
   })
 
   it('retires more than twenty packs in one interruptible quiescent sweep', async () => {

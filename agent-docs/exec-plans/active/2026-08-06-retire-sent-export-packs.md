@@ -98,9 +98,11 @@ Updated: 2026-08-07
     external reconstruction lock-scope findings.
 11. [completed] Resolve final ReviewGPT round 6 stale same-ID generation
     publication during unlocked reconstruction.
-12. [in progress] Resolve final ReviewGPT round 7 same-manifest completion and
-    case-only active-file ownership findings; then push the exact remediation
-    head and complete final ReviewGPT plus exact-head CI.
+12. [completed] Resolve final ReviewGPT round 7 same-manifest completion and
+    case-only active-file ownership findings.
+13. [in progress] Resolve final ReviewGPT round 8 case-aware outbox creation
+    and complete external stored-pack lock-scope findings; then push the exact
+    remediation head and complete final ReviewGPT plus exact-head CI.
 
 ## Verification
 
@@ -130,5 +132,9 @@ Updated: 2026-08-07
 - Same-manifest reconstruction interleaving refuses to overwrite a complete
   newer pack, and case-aware ownership covers both comparison policies plus a
   real mixed-case direct-file lifecycle on a case-insensitive vault.
-- Exact-head CI passed at the round 7 candidate head.
-- Pending final round 8 ReviewGPT and exact-head CI.
+- Fully case-varied direct pack-file creation revalidates under the selected
+  vault's case policy after a concurrent deletion wins the shared lock.
+- Complete external stored-pack reads do not hold the assistant runtime lock,
+  reject a concurrent canonical change, and leave the destination untouched.
+- Exact-head CI passed at the round 8 candidate head.
+- Pending final round 9 ReviewGPT and exact-head CI.

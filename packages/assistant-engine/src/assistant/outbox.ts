@@ -2,6 +2,10 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, type Stats } from 'node:fs'
 import { lstat } from 'node:fs/promises'
 import {
+  isVaultFilesystemCaseInsensitive,
+  normalizeRelativeVaultPathForComparison,
+} from '@murphai/core'
+import {
   ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
   type AssistantChannelDelivery,
   assistantChannelDeliverySchema,
@@ -2552,15 +2556,29 @@ function shouldUpgradeAssistantOutboxIntentReactionOperation(
 
 const DIRECT_ASSISTANT_EXPORT_PACK_FILE_PATTERN =
   /^exports\/packs\/[A-Za-z0-9_-]+\/[A-Za-z0-9][A-Za-z0-9._-]*$/u
+const CASE_VARIANT_DIRECT_ASSISTANT_EXPORT_PACK_FILE_PATTERN =
+  /^exports\/packs\/[A-Za-z0-9_-]+\/[A-Za-z0-9][A-Za-z0-9._-]*$/iu
 
 async function assertAssistantExportPackMediaStillMatchesVault(input: {
   media: readonly AssistantResponseMedia[]
   vault: string
 }): Promise<void> {
+  const needsCasePolicy = input.media.some((media) => (
+    media.kind === 'vault_file'
+    && CASE_VARIANT_DIRECT_ASSISTANT_EXPORT_PACK_FILE_PATTERN.test(media.ref)
+    && !DIRECT_ASSISTANT_EXPORT_PACK_FILE_PATTERN.test(media.ref)
+  ))
+  const caseInsensitive = needsCasePolicy
+    ? await isVaultFilesystemCaseInsensitive(input.vault)
+    : false
   for (const media of input.media) {
+    const comparisonRef = media.kind === 'vault_file'
+      ? normalizeRelativeVaultPathForComparison(media.ref, { caseInsensitive })
+      : null
     if (
       media.kind !== 'vault_file'
-      || !DIRECT_ASSISTANT_EXPORT_PACK_FILE_PATTERN.test(media.ref)
+      || comparisonRef === null
+      || !DIRECT_ASSISTANT_EXPORT_PACK_FILE_PATTERN.test(comparisonRef)
     ) {
       continue
     }

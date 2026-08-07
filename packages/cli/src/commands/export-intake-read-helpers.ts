@@ -1,5 +1,5 @@
-import type { Dirent } from 'node:fs'
-import { readFile, readdir, rm } from 'node:fs/promises'
+import type { Dirent, Stats } from 'node:fs'
+import { lstat, readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { rawImportManifestSchema } from '@murphai/contracts'
 import { z } from 'incur'
@@ -355,6 +355,122 @@ async function tryReadFilesForMaterialization(
   }
 }
 
+function directoryEntryKind(entry: Dirent) {
+  if (entry.isFile()) return 'file'
+  if (entry.isDirectory()) return 'directory'
+  if (entry.isSymbolicLink()) return 'symbolic-link'
+  if (entry.isBlockDevice()) return 'block-device'
+  if (entry.isCharacterDevice()) return 'character-device'
+  if (entry.isFIFO()) return 'fifo'
+  if (entry.isSocket()) return 'socket'
+  return 'unknown'
+}
+
+function serializeDirectoryInventory(entries: readonly Dirent[]) {
+  return JSON.stringify(entries
+    .map((entry) => [entry.name, directoryEntryKind(entry)] as const)
+    .sort(([left], [right]) => left.localeCompare(right)))
+}
+
+function fileIdentityMatches(left: Stats, right: Stats) {
+  return (
+    left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs
+  )
+}
+
+async function captureStoredExportPackIdentity(
+  vaultRoot: string,
+  manifest: ExportPackManifest,
+) {
+  const packRoot = await resolveVaultRelativePath(
+    vaultRoot,
+    packDirectory(manifest.packId),
+  )
+  const [root, entries, files] = await Promise.all([
+    lstat(packRoot),
+    readdir(packRoot, { withFileTypes: true }),
+    Promise.all(manifest.files.map(async (file) => {
+      const identity = await lstat(
+        await resolveVaultRelativePath(vaultRoot, file.path),
+      )
+      if (!identity.isFile() || identity.isSymbolicLink()) {
+        throw new Error('Stored export-pack entry is not a regular file.')
+      }
+      return identity
+    })),
+  ])
+  if (!root.isDirectory() || root.isSymbolicLink()) {
+    throw new Error('Stored export-pack root is not a directory.')
+  }
+  return {
+    files,
+    inventory: serializeDirectoryInventory(entries),
+    root,
+  }
+}
+
+function storedExportPackIdentityMatches(
+  left: Awaited<ReturnType<typeof captureStoredExportPackIdentity>>,
+  right: Awaited<ReturnType<typeof captureStoredExportPackIdentity>>,
+) {
+  return (
+    fileIdentityMatches(left.root, right.root)
+    && left.inventory === right.inventory
+    && left.files.length === right.files.length
+    && left.files.every((identity, index) => {
+      const current = right.files[index]
+      return current !== undefined && fileIdentityMatches(identity, current)
+    })
+  )
+}
+
+function exportPackChangedWhileCopying(packId: string) {
+  return new VaultCliError(
+    'export_pack_changed',
+    `Export pack "${packId}" changed while it was being copied; retry the materialization.`,
+  )
+}
+
+async function readStableStoredExportPack(
+  vaultRoot: string,
+  packId: string,
+) {
+  const stored = await readStoredExportPackManifest(vaultRoot, packId)
+  let before: Awaited<ReturnType<typeof captureStoredExportPackIdentity>>
+
+  try {
+    before = await captureStoredExportPackIdentity(vaultRoot, stored.manifest)
+  } catch {
+    return { ...stored, files: null }
+  }
+
+  try {
+    const files = await readStoredExportPackFiles(vaultRoot, stored.manifest)
+    const [current, after] = await Promise.all([
+      readStoredExportPackManifest(vaultRoot, packId),
+      captureStoredExportPackIdentity(vaultRoot, stored.manifest),
+    ])
+    if (
+      current.manifestContents !== stored.manifestContents
+      || !storedExportPackIdentityMatches(before, after)
+    ) {
+      throw exportPackChangedWhileCopying(packId)
+    }
+    return { ...stored, files }
+  } catch (error) {
+    if (error instanceof VaultCliError && error.code === 'export_pack_changed') {
+      throw error
+    }
+    throw exportPackChangedWhileCopying(packId)
+  }
+}
+
 export async function showStoredExportPack(vaultRoot: string, packId: string) {
   const { manifestFile, manifest } = await readStoredExportPackManifest(vaultRoot, packId)
 
@@ -463,6 +579,21 @@ export async function materializeStoredExportPack(input: {
     input.vault,
     outDir,
   )
+  if (!writesCanonicalVault) {
+    const stored = await readStableStoredExportPack(input.vault, input.packId)
+    const rebuilt = stored.files === null
+    const files = stored.files
+      ?? await rebuildStoredExportPackFiles(input.vault, stored.manifest)
+    await materializeExportPack(outDir, files)
+    return {
+      vault: input.vault,
+      packId: stored.manifest.packId,
+      manifestFile: stored.manifestFile,
+      outDir,
+      rebuilt,
+      files: files.map((file: { path: string }) => file.path),
+    }
+  }
   const stored = await withAssistantRuntimeWriteLock(input.vault, async () => {
     const {
       manifestContents,
@@ -470,7 +601,7 @@ export async function materializeStoredExportPack(input: {
       manifest,
     } = await readStoredExportPackManifest(input.vault, input.packId)
     const files = await tryReadFilesForMaterialization(input.vault, manifest)
-    if (writesCanonicalVault && files) {
+    if (files) {
       await materializeExportPack(input.vault, files)
     }
     return {
@@ -478,37 +609,33 @@ export async function materializeStoredExportPack(input: {
       manifest,
       manifestContents,
       manifestFile,
-      materializedCanonical: writesCanonicalVault && files !== null,
+      materializedCanonical: files !== null,
     }
   })
   const rebuilt = stored.files === null
   const files = stored.files
     ?? await rebuildStoredExportPackFiles(input.vault, stored.manifest)
 
-  if (writesCanonicalVault) {
-    if (!stored.materializedCanonical) {
-      await withAssistantRuntimeWriteLock(input.vault, async () => {
-        const current = await readStoredExportPackManifest(
-          input.vault,
-          input.packId,
+  if (!stored.materializedCanonical) {
+    await withAssistantRuntimeWriteLock(input.vault, async () => {
+      const current = await readStoredExportPackManifest(
+        input.vault,
+        input.packId,
+      )
+      if (current.manifestContents !== stored.manifestContents) {
+        throw new VaultCliError(
+          'export_pack_changed',
+          `Export pack "${input.packId}" changed while it was being rebuilt; retry the materialization.`,
         )
-        if (current.manifestContents !== stored.manifestContents) {
-          throw new VaultCliError(
-            'export_pack_changed',
-            `Export pack "${input.packId}" changed while it was being rebuilt; retry the materialization.`,
-          )
-        }
-        if (await tryReadFilesForMaterialization(input.vault, current.manifest)) {
-          throw new VaultCliError(
-            'export_pack_changed',
-            `Export pack "${input.packId}" was completed while it was being rebuilt; retry the materialization.`,
-          )
-        }
-        await materializeExportPack(input.vault, files)
-      })
-    }
-  } else {
-    await materializeExportPack(outDir, files)
+      }
+      if (await tryReadFilesForMaterialization(input.vault, current.manifest)) {
+        throw new VaultCliError(
+          'export_pack_changed',
+          `Export pack "${input.packId}" was completed while it was being rebuilt; retry the materialization.`,
+        )
+      }
+      await materializeExportPack(input.vault, files)
+    })
   }
 
   return {
