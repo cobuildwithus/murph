@@ -64,6 +64,7 @@ import type {
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
 const LINQ_HTTP_TIMEOUT_MS = 30_000
+const LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS = 2_500
 const LINQ_HTTP_MAX_ATTEMPTS = 3
 const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
 const LINQ_CHAT_NOT_FOUND_CODES = new Set(['CHAT_NOT_FOUND', 'chat_not_found'])
@@ -671,6 +672,7 @@ export async function checkLinqIMessageCapability(
     path: '/capability/check_imessage',
     body,
     signal: dependencies.signal,
+    timeoutMs: LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS,
   })
   return readRecord(response)?.available === true
 }
@@ -857,6 +859,7 @@ async function uploadLinqAttachmentBytes(
             requestOrigin: readRequestOrigin(uploadUrl),
             retryable: true,
             timedOut: timeout.timedOut(),
+            timeoutMs: LINQ_HTTP_TIMEOUT_MS,
           })
           lastRetryableFailure = failure
           throw failure
@@ -1426,6 +1429,7 @@ async function requestLinqJson<T>(input: {
   path: string
   body?: LinqJsonRequestBody
   signal?: AbortSignal
+  timeoutMs?: number
 }): Promise<T> {
   return requestLinq<T>({
     ...input,
@@ -1462,6 +1466,7 @@ async function requestLinq<T>(input: {
   body?: LinqJsonRequestBody
   parseResponse(response: LinqFetchResponse): Promise<T>
   signal?: AbortSignal
+  timeoutMs?: number
 }): Promise<T> {
   const request = resolveLinqRequest(input)
   const diagnosticPath = sanitizeLinqPathForDiagnostics(input.path)
@@ -1492,6 +1497,7 @@ async function requestLinq<T>(input: {
         method: input.method,
         path: diagnosticPath,
         signal: input.signal,
+        timeoutMs: input.timeoutMs ?? LINQ_HTTP_TIMEOUT_MS,
         url: request.url,
       }),
     isRetryableError: isRetryableLinqRequestError,
@@ -1574,6 +1580,7 @@ async function fetchLinqResponse(input: {
   headers: Record<string, string>
   body?: string
   signal?: AbortSignal
+  timeoutMs: number
 }): Promise<LinqFetchResponse> {
   return fetchJsonResponse({
     body: input.body,
@@ -1586,6 +1593,7 @@ async function fetchLinqResponse(input: {
           method: input.method,
           path: input.path,
           timedOut,
+          timeoutMs: input.timeoutMs,
           retryable: shouldRetryLinqTransportFailure(
             input.method,
             input.allowDeleteRetries,
@@ -1596,7 +1604,7 @@ async function fetchLinqResponse(input: {
     headers: input.headers,
     method: input.method,
     signal: input.signal,
-    timeoutMs: LINQ_HTTP_TIMEOUT_MS,
+    timeoutMs: input.timeoutMs,
     url: input.url,
   })
 }
@@ -1730,11 +1738,12 @@ function createLinqRequestError(input: {
   method: LinqHttpMethod
   path: string
   timedOut: boolean
+  timeoutMs: number
   retryable: boolean
 }): VaultCliError {
   const transportErrorDiagnostics = buildLinqTransportErrorDiagnostics(input.error)
   const baseMessage = input.timedOut
-    ? `Linq request ${input.method} ${input.path} timed out after ${LINQ_HTTP_TIMEOUT_MS}ms.`
+    ? `Linq request ${input.method} ${input.path} timed out after ${input.timeoutMs}ms.`
     : `Linq request ${input.method} ${input.path} failed before a response was returned.`
 
   return new VaultCliError(
@@ -1748,7 +1757,7 @@ function createLinqRequestError(input: {
       path: input.path,
       ...(input.requestOrigin ? { requestOrigin: input.requestOrigin } : {}),
       retryable: input.retryable,
-      timeoutMs: LINQ_HTTP_TIMEOUT_MS,
+      timeoutMs: input.timeoutMs,
       timedOut: input.timedOut,
     },
   )

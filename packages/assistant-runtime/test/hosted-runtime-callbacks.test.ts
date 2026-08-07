@@ -9325,6 +9325,146 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
+  it("starts the persisted text fallback at the short capability deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const idempotencyKey = "assistant-outbox:card-capability-timeout";
+      const events: string[] = [];
+      const startedAt = Date.now();
+      let capabilityAbortedAt: number | null = null;
+      let capabilityRequestCount = 0;
+      let textStartedAt: number | null = null;
+      const assertRecentInbound = vi.fn(async (request: {
+        authorityCheckOnly: boolean;
+        idempotencyKey?: string | null;
+      }) => {
+        events.push(
+          "authority:"
+          + (request.authorityCheckOnly ? "read" : "claim")
+          + ":"
+          + (request.idempotencyKey ?? "none"),
+        );
+        return buildClaimedLinqEngagementResult(request);
+      });
+      const recordDeliveryOutcome = vi.fn(async (request: {
+        acceptedAt?: string | null;
+        idempotencyKey?: string | null;
+      }) => {
+        events.push(
+          "outcome:"
+          + (request.acceptedAt ? "accepted" : "failed")
+          + ":"
+          + (request.idempotencyKey ?? "none"),
+        );
+      });
+      const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+        const url = new URL(String(request));
+        if (url.pathname.endsWith("/capability/check_imessage")) {
+          capabilityRequestCount += 1;
+          events.push("provider:capability");
+          return await new Promise<Response>((_resolve, reject) => {
+            const rejectOnAbort = () => {
+              capabilityAbortedAt = Date.now();
+              reject(new DOMException("aborted", "AbortError"));
+            };
+            if (init?.signal?.aborted) {
+              rejectOnAbort();
+              return;
+            }
+            init?.signal?.addEventListener("abort", rejectOnAbort, { once: true });
+          });
+        }
+        textStartedAt = Date.now();
+        const body = JSON.parse(String(init?.body)) as {
+          message?: { idempotency_key?: string; parts?: Array<{ type?: string }> };
+        };
+        events.push("provider:text:" + (body.message?.idempotency_key ?? "none"));
+        expect(body.message?.parts?.some((part) => part.type === "imessage_app"))
+          .toBe(false);
+        return new Response(JSON.stringify({ message: { id: "linq_text_1" } }), {
+          headers: { "content-type": "application/json" },
+        });
+      });
+      const persistAppCardTextFallback = vi.fn(async (fallback: {
+        idempotencyKey: string;
+      }) => {
+        events.push("persist:" + fallback.idempotencyKey);
+      });
+      const dependencies = createHostedAssistantProgressDeliveryDependencies({
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+          recordLinqDeliveryOutcome: recordDeliveryOutcome,
+        }),
+        forwardedEnv: {
+          LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+          LINQ_API_TOKEN: "linq-actual-runtime-token",
+        },
+        providerFetch,
+      });
+      assert.ok(dependencies.sendLinq);
+
+      const delivery = dependencies.sendLinq({
+        card: HOSTED_LINQ_RESPONSE_CARD,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        idempotencyKey,
+        message: "Nutrition summary",
+        persistAppCardTextFallback,
+        target: "linq_chat_123",
+        targetKind: "thread",
+        threadIsDirect: true,
+      });
+      await vi.advanceTimersByTimeAsync(2_499);
+
+      expect(capabilityRequestCount).toBe(1);
+      expect(capabilityAbortedAt).toBeNull();
+      expect(textStartedAt).toBeNull();
+      expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+      expect(recordDeliveryOutcome).not.toHaveBeenCalled();
+      expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+      expect(assertRecentInbound).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          authorityCheckOnly: true,
+          idempotencyKey,
+        }),
+        { signal: null },
+      );
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(delivery).resolves.toMatchObject({
+        idempotencyKey,
+        providerMessageId: "linq_text_1",
+      });
+      await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+      expect(capabilityAbortedAt).toBe(startedAt + 2_500);
+      expect(textStartedAt).toBe(startedAt + 2_500);
+      expect(capabilityRequestCount).toBe(1);
+      expect(providerFetch).toHaveBeenCalledTimes(2);
+      expect(persistAppCardTextFallback).toHaveBeenCalledOnce();
+      expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+      expect(assertRecentInbound).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          authorityCheckOnly: false,
+          idempotencyKey,
+        }),
+        { signal: null },
+      );
+      expect(events).toEqual([
+        "authority:read:" + idempotencyKey,
+        "provider:capability",
+        "persist:" + idempotencyKey,
+        "authority:claim:" + idempotencyKey,
+        "provider:text:" + idempotencyKey,
+        "outcome:accepted:" + idempotencyKey,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("settles a rejected Linq card before claiming and sending its fallback identity", async () => {
     const idempotencyKey = "assistant-outbox:card-rejected";
     const fallbackIdempotencyKey = `${idempotencyKey}:fallback`;

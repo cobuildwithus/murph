@@ -497,6 +497,53 @@ test('linq iMessage capability does not wait or retry after rate limiting', asyn
   }
 })
 
+test('linq iMessage capability uses its short read deadline without retrying', async () => {
+  vi.useFakeTimers()
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  let abortedAt: number | null = null
+  const startedAt = Date.now()
+  const fetchImplementation = vi.fn<LinqFetch>(async (_url, init) =>
+    await new Promise<Response>((_resolve, reject) => {
+      const rejectOnAbort = () => {
+        abortedAt = Date.now()
+        reject(new DOMException('aborted', 'AbortError'))
+      }
+      if (init.signal?.aborted) {
+        rejectOnAbort()
+        return
+      }
+      init.signal?.addEventListener('abort', rejectOnAbort, { once: true })
+    }))
+  try {
+    const rejection = expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: expect.objectContaining({
+        operation: 'check_imessage_capability',
+        retryable: false,
+        timedOut: true,
+        timeoutMs: 2_500,
+      }),
+      message:
+        'Linq request POST /capability/check_imessage timed out after 2500ms.',
+    })
+    await vi.advanceTimersByTimeAsync(2_499)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(abortedAt).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1)
+    await rejection
+
+    expect(abortedAt).toBe(startedAt + 2_500)
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 test('linq app-card failure diagnostics do not expose nutrition values', async () => {
   await assert.rejects(
     () => sendLinqIMessageAppCard({
