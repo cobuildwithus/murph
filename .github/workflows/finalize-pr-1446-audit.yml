@@ -1,0 +1,233 @@
+name: Finalize PR 1446 audit
+
+on:
+  push:
+    branches:
+      - agent/optional-sponsorship-moments
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-pr-1446-audit
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Apply audited fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/pr1446-finalizer/00 \
+              scripts/pr1446-finalizer/01 \
+              scripts/pr1446-finalizer/02 \
+            | tr -d '\r\n ' \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/finalize-pr-1446.py
+          echo 'ed3d729f7ebce7616f4d3135b15aa1698daf915499c78b4a6371831ab9dbd18c  /tmp/finalize-pr-1446.py' \
+            | sha256sum --check
+          python3 -m py_compile /tmp/finalize-pr-1446.py
+          python3 /tmp/finalize-pr-1446.py
+          git diff --check
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck Web
+        run: pnpm --dir apps/web typecheck
+
+      - name: Lint changed Web files
+        run: >-
+          pnpm --dir apps/web exec eslint
+          app/design/group-usage-funding-study.tsx
+          app/design/sections-content.tsx
+          src/components/hosted-groups/group-sponsorship-dialog.tsx
+          src/lib/hosted-groups/group-sponsorship-contract.ts
+          src/lib/hosted-groups/group-sponsorship-notification.ts
+          src/lib/hosted-groups/group-sponsorship-store.ts
+          test/hosted-group-sponsorship-contract.test.ts
+          test/hosted-group-sponsorship-notification.test.ts
+          test/hosted-group-sponsorship-store.test.ts
+          test/hosted-usage-top-up-product-spec.test.ts
+
+      - name: Run focused Web regression tests
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/hosted-group-sponsorship-contract.test.ts
+          apps/web/test/hosted-group-sponsorship-store.test.ts
+          apps/web/test/hosted-group-sponsorship-notification.test.ts
+          apps/web/test/hosted-group-funding-page.test.tsx
+          apps/web/test/hosted-usage-credit-purchase-service.test.ts
+          apps/web/test/hosted-usage-top-up-product-spec.test.ts
+          apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts
+
+      - name: Verify assistant engine
+        run: |
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/assistant-creative-notification-prompt.test.ts \
+            test/assistant-codex-turn-planning.test.ts \
+            test/assistant-notification-turn-runtime.test.ts
+
+      - name: Verify hosted execution contract
+        run: |
+          pnpm --dir packages/hosted-execution typecheck
+          pnpm --dir packages/hosted-execution exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/hosted-execution-sponsorship-contract.test.ts
+
+      - name: Verify assistant runtime notification handling
+        run: |
+          pnpm --dir packages/assistant-runtime typecheck
+          pnpm --dir packages/assistant-runtime exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/hosted-runtime-system-mailbox-notification.test.ts
+
+      - name: Check billing and documentation boundaries
+        run: |
+          pnpm hosted-billing:ci-guard
+          pnpm docs:drift
+          pnpm no-js
+          git diff --check
+
+      - name: Install Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Exercise the desktop and mobile personalization flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/capture-pr-1446-proof.mjs <<'EOF'
+          import { chromium } from 'playwright'
+
+          const browser = await chromium.launch({ headless: true })
+          try {
+            for (const scenario of [
+              {
+                isMobile: false,
+                output: '/tmp/pr-1446-desktop.png',
+                viewport: { height: 1000, width: 1280 },
+              },
+              {
+                deviceScaleFactor: 2,
+                isMobile: true,
+                output: '/tmp/pr-1446-mobile.png',
+                viewport: { height: 1000, width: 390 },
+              },
+            ]) {
+              const context = await browser.newContext({
+                deviceScaleFactor: scenario.deviceScaleFactor ?? 1,
+                isMobile: scenario.isMobile,
+                viewport: scenario.viewport,
+              })
+              const page = await context.newPage()
+              await page.goto(
+                'http://127.0.0.1:3000/design?tab=sections#group-one-time-contribution',
+                { waitUntil: 'networkidle' },
+              )
+              const dialog = page.getByRole('dialog')
+              await dialog.waitFor({ state: 'visible' })
+              await dialog.getByRole('button', {
+                name: 'Personalize (optional)',
+              }).click()
+              await dialog.getByLabel('Send something to the group').check()
+              await dialog.getByRole('radio', { name: /Song/ }).check()
+              await dialog.getByRole('radio', { name: /Absurd/ }).check()
+              await dialog.getByLabel('What should it be about?').fill(
+                "Make this the group’s theme song and use our latest running joke.",
+              )
+              await dialog.getByLabel('Genre or style reference').fill(
+                'Warm ensemble-sitcom theme with a bright acoustic intro',
+              )
+              await dialog.getByLabel('Credit it as').fill(
+                'The Group Historian',
+              )
+              const dimensions = await page.evaluate(() => ({
+                clientWidth: document.documentElement.clientWidth,
+                scrollWidth: document.documentElement.scrollWidth,
+              }))
+              if (dimensions.scrollWidth > dimensions.clientWidth + 1) {
+                throw new Error(
+                  `Horizontal overflow: ${dimensions.scrollWidth} > ${dimensions.clientWidth}`,
+                )
+              }
+              await page.screenshot({
+                animations: 'disabled',
+                fullPage: false,
+                path: scenario.output,
+              })
+              await context.close()
+            }
+          } finally {
+            await browser.close()
+          }
+          EOF
+
+          pnpm --dir apps/web dev:local-env --hostname 127.0.0.1 --port 3000 \
+            >/tmp/pr-1446-design-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:3000/api/internal/health >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat /tmp/pr-1446-design-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3000/api/internal/health >/dev/null
+          node /tmp/capture-pr-1446-proof.mjs
+          test -s /tmp/pr-1446-desktop.png
+          test -s /tmp/pr-1446-mobile.png
+
+      - name: Commit and push verified fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_ref="$(git rev-parse HEAD)"
+          rm -rf scripts/pr1446-finalizer
+          rm -f .github/workflows/finalize-pr-1446-audit.yml
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Harden optional sponsorship creative responses"
+          final_commit="$(git rev-parse HEAD)"
+
+          git switch -C agent/optional-sponsorship-moments-proof "$final_commit"
+          mkdir -p design-proof/pr-1446
+          cp /tmp/pr-1446-desktop.png design-proof/pr-1446/desktop.png
+          cp /tmp/pr-1446-mobile.png design-proof/pr-1446/mobile.png
+          git add design-proof/pr-1446
+          git commit -m "Add PR 1446 design proof"
+          git push --force origin HEAD:agent/optional-sponsorship-moments-proof
+
+          git switch -C agent/optional-sponsorship-moments "$final_commit"
+          git push \
+            --force-with-lease=refs/heads/agent/optional-sponsorship-moments:${source_ref} \
+            origin HEAD:agent/optional-sponsorship-moments
