@@ -43,6 +43,9 @@ jobs:
           test/stripe-billing-live-config.test.ts
           test/dev-hosted-local/stack.test.ts
 
+      - name: Generate hosted web test client
+        run: pnpm --dir apps/web prisma:generate
+
       - name: Test billing resume contract and live support
         run: >-
           pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage

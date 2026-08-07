@@ -161,6 +161,14 @@ describe("hosted Stripe billing workflow guard", () => {
     expect(issueCodes(source)).toContain("secret-before-live-job");
   });
 
+  it("rejects removing fresh-checkout Prisma Client generation", async () => {
+    const source = (await readWorkflow()).replace(
+      "        run: pnpm --dir apps/web prisma:generate\n",
+      "        run: echo skipped-web-test-client-generation\n",
+    );
+    expect(issueCodes(source)).toContain("missing-web-test-client-setup");
+  });
+
   it("rejects removing the public Privy client configuration", async () => {
     const source = (await readWorkflow()).replaceAll(
       "vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID",

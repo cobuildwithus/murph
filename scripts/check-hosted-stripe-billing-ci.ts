@@ -79,6 +79,11 @@ export function inspectHostedStripeBillingWorkflow(
     "Hermetic proof must retain browser and provider-boundary support tests.",
   );
   requireText(
+    "missing-web-test-client-setup",
+    "pnpm --dir apps/web prisma:generate",
+    "Hermetic web billing proof must generate Prisma Client in a fresh checkout.",
+  );
+  requireText(
     "missing-pr-author-check",
     "PR_AUTHOR: ${{ github.event.pull_request.user.login }}",
     "Live eligibility must classify the pull request author independently of the event actor.",
