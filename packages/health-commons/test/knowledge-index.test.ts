@@ -44,6 +44,10 @@ function testCatalog(): HealthCommonsCatalog {
         status: "reviewed",
         quality: "usable",
         categories: ["dry-sauna", "cardiovascular"],
+        relations: [{
+          type: "parent_family",
+          target: "experiment_family:dry-sauna",
+        }],
         source: {
           kind: "review",
           title: "Clinical Effects of Regular Dry Sauna Bathing: A Systematic Review",
@@ -134,6 +138,15 @@ describe("Health Commons knowledge SQLite projection", () => {
         focus: "immunity",
         query: "dry sauna",
       }).items).toEqual([]);
+      expect(searchHealthCommonsKnowledgeIndex({
+        databasePath: firstPath,
+        focus: "spermatogenesis",
+        query: "dry sauna",
+      }).safety).toMatchObject({
+        caveat: "Evidence use: safety.",
+        kind: "safety",
+        sources: [expect.objectContaining({ pmid: "29849692" })],
+      });
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }

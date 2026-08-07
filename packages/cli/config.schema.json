@@ -3609,7 +3609,7 @@
                                   "default": 3,
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
-                                  "maximum": 6
+                                  "maximum": 3
                                 }
                               }
                             }

@@ -8,7 +8,7 @@ import type {
 export const HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE = "knowledge.sqlite";
 export const HEALTH_COMMONS_KNOWLEDGE_INDEX_SCHEMA_VERSION = 3;
 export const HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT = 3;
-export const HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT = 6;
+export const HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT = 3;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_SOURCES_PER_ITEM = 4;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES = 48;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS = 32;
@@ -120,6 +120,9 @@ export function writeHealthCommonsKnowledgeIndex(
     for (const entity of catalog.entities) {
       if (entity.entityType !== "source_artifact") {
         for (const [index, phrase] of [entity.title, ...(entity.aliases ?? [])].entries()) {
+          if (index === 0 && hasSameTitleParent(entity, entitiesByKey)) {
+            continue;
+          }
           insertTopicOwner.run(normalizeTopicPhrase(phrase), entity.key, entity.key, index === 0 ? 0 : 1);
         }
       }
@@ -371,18 +374,21 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
     for (const [findingIndex, finding] of (entity.sourceFindings ?? []).entries()) {
       const safetyFinding = finding.findingKind === "safety"
         || finding.findingKind === "adverse_event";
-      chunks.push({
-        caveat: null,
-        entityKey: entity.key,
-        entityTitle: entity.title,
-        id: `finding:${entity.key}:${finding.findingId}:${findingIndex}`,
-        kind: safetyFinding ? "safety" : "source_finding",
-        priority: safetyFinding ? 10 : 25,
-        searchText: `${entityTopic} ${finding.summary ?? finding.outcome ?? ""}`,
-        sources: resolveSources([entity.key], entitiesByKey),
-        strength: null,
-        text: finding.summary ?? finding.outcome ?? "",
-      });
+      const evidenceUse = finding.evidenceUse?.join(", ") ?? null;
+      for (const target of sourceFindingTargets(entity, entitiesByKey)) {
+        chunks.push({
+          caveat: evidenceUse ? `Evidence use: ${evidenceUse}.` : null,
+          entityKey: target.key,
+          entityTitle: target.title,
+          id: `finding:${entity.key}:${target.key}:${finding.findingId}:${findingIndex}`,
+          kind: safetyFinding ? "safety" : "source_finding",
+          priority: safetyFinding ? 10 : 25,
+          searchText: `${entityTopicText(target)} ${finding.summary ?? finding.outcome ?? ""}`,
+          sources: resolveSources([entity.key], entitiesByKey),
+          strength: null,
+          text: finding.summary ?? finding.outcome ?? "",
+        });
+      }
     }
     if (entity.safety) {
       const safetyText = [
@@ -492,6 +498,39 @@ function evidencePriority(source: HealthCommonsCatalogEntity | undefined): numbe
 
 function entityTopicText(entity: HealthCommonsCatalogEntity): string {
   return [entity.title, ...(entity.aliases ?? [])].join(" ");
+}
+
+function hasSameTitleParent(
+  entity: HealthCommonsCatalogEntity,
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+): boolean {
+  if (entity.entityType !== "protocol_variant") {
+    return false;
+  }
+  const title = normalizeTopicPhrase(entity.title);
+  return (entity.relations ?? []).some((relation) =>
+    relation.type === "parent_family"
+    && normalizeTopicPhrase(entitiesByKey.get(relation.target)?.title ?? "") === title
+  );
+}
+
+function sourceFindingTargets(
+  entity: HealthCommonsCatalogEntity,
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+): HealthCommonsCatalogEntity[] {
+  if (entity.entityType !== "source_artifact") {
+    return [entity];
+  }
+  const relations = entity.relations ?? [];
+  const relatedProtocols = relations.filter((relation) => relation.type === "related_protocol");
+  const selected = relatedProtocols.length > 0
+    ? relatedProtocols
+    : relations.filter((relation) => relation.type === "parent_family");
+  return [...new Set(selected.map((relation) => relation.target))]
+    .flatMap((targetKey) => {
+      const target = entitiesByKey.get(targetKey);
+      return target && target.entityType !== "source_artifact" ? [target] : [];
+    });
 }
 
 function toFtsQuery(query: string): string {
