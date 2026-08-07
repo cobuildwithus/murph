@@ -165,6 +165,21 @@ describe("Health Commons knowledge SQLite projection", () => {
     })).toThrow("at least one searchable term");
   });
 
+  it("requires every focus term instead of silently dropping terms after eight", async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), "health-commons-focus-"));
+    const databasePath = path.join(temporaryRoot, "knowledge.sqlite");
+    try {
+      writeHealthCommonsKnowledgeIndex(databasePath, testCatalog());
+      expect(searchHealthCommonsKnowledgeIndex({
+        databasePath,
+        focus: "dry sauna heat cardiovascular recovery fertility regular frequent mortality absent",
+        query: "dry sauna",
+      })).toMatchObject({ items: [], safety: null });
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
+  });
+
   it("returns nothing when one exact alias has two direct owners", async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), "health-commons-ambiguous-"));
     const databasePath = path.join(temporaryRoot, "knowledge.sqlite");
