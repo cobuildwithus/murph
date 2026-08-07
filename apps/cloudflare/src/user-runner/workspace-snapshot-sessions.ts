@@ -11,6 +11,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   isHostedWorkspaceSnapshotV2Ref,
+  parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionSnapshotRef,
   parseHostedWorkspaceSnapshotV2Ref,
   readHostedExecutionSnapshotBaseRef,
@@ -22,7 +23,12 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import { HostedBundleGarbageCollector } from "../bundle-gc.js";
+import {
+  parseHostedBrowserVaultReplicaOrphanCandidate,
+  type HostedBrowserVaultReplicaOrphanCandidate,
+} from "../browser-vault-store.ts";
 import type { R2BucketLike } from "../bundle-store.js";
+import { hostedBrowserVaultReplicaUserPrefix } from "../storage-paths.ts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
   parseHostedWorkspaceSnapshotOrphanCandidate,
@@ -73,6 +79,9 @@ export interface WorkspaceSnapshotSessionService {
   recordOrphanCandidate(
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
+  recordBrowserVaultReplicaOrphanCandidate(
+    input: HostedBrowserVaultReplicaOrphanCandidate,
+  ): Promise<HostedBrowserVaultReplicaOrphanCandidate>;
   syncOrphanCandidateAlarm(userId: string): Promise<void>;
 }
 
@@ -240,6 +249,28 @@ export function createWorkspaceSnapshotSessionService(input: {
       return candidate;
     },
 
+    async recordBrowserVaultReplicaOrphanCandidate(candidateInput) {
+      await input.stateStore.bindUser(candidateInput.userId);
+      const candidate = parseHostedBrowserVaultReplicaOrphanCandidate(candidateInput);
+      if (candidate.userId !== candidateInput.userId) {
+        throw new Error("Hosted browser vault replica orphan candidate user mismatch.");
+      }
+      const expectedPrefix = await hostedBrowserVaultReplicaUserPrefix({
+        userId: candidate.userId,
+      });
+      if (!candidate.objectKey.startsWith(expectedPrefix)) {
+        throw new Error(
+          "Hosted browser vault replica orphan candidate is outside the bound user namespace.",
+        );
+      }
+      await input.state.storage.put(
+        browserVaultReplicaOrphanCandidateStorageKey(candidate.objectKey),
+        candidate,
+      );
+      await service.syncOrphanCandidateAlarm(candidate.userId);
+      return candidate;
+    },
+
     async cleanupOrphanCandidatesBestEffort(userId) {
       try {
         await service.cleanupOrphanCandidates(userId);
@@ -251,7 +282,7 @@ export function createWorkspaceSnapshotSessionService(input: {
             cleanupFailed: true,
           },
           level: "warn",
-          message: "Hosted runner workspace snapshot orphan cleanup failed.",
+          message: "Hosted runner R2 orphan cleanup failed.",
           phase: "wake.running",
           userId,
         });
@@ -266,12 +297,24 @@ export function createWorkspaceSnapshotSessionService(input: {
       const candidates = await input.state.storage.list<unknown>({
         prefix: workspaceSnapshotOrphanCandidateStoragePrefix(),
       });
+      const browserVaultReplicaCandidates = await input.state.storage.list<unknown>({
+        prefix: browserVaultReplicaOrphanCandidateStoragePrefix(),
+      });
+      const expectedBrowserVaultReplicaPrefix = await hostedBrowserVaultReplicaUserPrefix({
+        userId,
+      });
       const nowMs = Date.now();
       const eligibleCandidates: Array<[string, HostedWorkspaceSnapshotOrphanCandidate]> = [];
+      const eligibleBrowserVaultReplicaCandidates: Array<[
+        string,
+        HostedBrowserVaultReplicaOrphanCandidate,
+      ]> = [];
 
       for (const [key, value] of candidates) {
-        const candidate = await readHostedWorkspaceSnapshotOrphanCandidateForCleanup({
+        const candidate = await readHostedOrphanCandidateForCleanup({
+          candidateLabel: "workspace snapshot",
           key,
+          parse: parseHostedWorkspaceSnapshotOrphanCandidate,
           state: input.state,
           userId,
           value,
@@ -282,23 +325,47 @@ export function createWorkspaceSnapshotSessionService(input: {
         if (candidate.userId !== userId) {
           continue;
         }
-        const createdAtMs = Date.parse(candidate.createdAt);
-        if (
-          !Number.isFinite(createdAtMs)
-          || nowMs - createdAtMs < WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS
-        ) {
+        if (!isHostedR2OrphanCleanupCreatedAtEligible(candidate.createdAt, nowMs)) {
           continue;
         }
         eligibleCandidates.push([key, candidate]);
+      }
+      for (const [key, value] of browserVaultReplicaCandidates) {
+        const candidate = await readHostedOrphanCandidateForCleanup({
+          candidateLabel: "browser vault replica",
+          key,
+          parse: parseHostedBrowserVaultReplicaOrphanCandidate,
+          state: input.state,
+          userId,
+          value,
+        });
+        if (!candidate) {
+          continue;
+        }
+        if (
+          candidate.userId !== userId
+          || !candidate.objectKey.startsWith(expectedBrowserVaultReplicaPrefix)
+        ) {
+          await input.state.storage.delete(key);
+          continue;
+        }
+        if (!isHostedR2OrphanCleanupCreatedAtEligible(candidate.createdAt, nowMs)) {
+          continue;
+        }
+        eligibleBrowserVaultReplicaCandidates.push([key, candidate]);
       }
       const currentSession = await readWorkspaceSnapshotUploadSessionForCleanup({
         state: input.state,
         userId,
       });
       const sessionCleanupEligible = currentSession
-        ? isWorkspaceSnapshotCleanupCreatedAtEligible(currentSession.createdAt, nowMs)
+        ? isHostedR2OrphanCleanupCreatedAtEligible(currentSession.createdAt, nowMs)
         : false;
-      if (eligibleCandidates.length === 0 && !sessionCleanupEligible) {
+      if (
+        eligibleCandidates.length === 0
+        && eligibleBrowserVaultReplicaCandidates.length === 0
+        && !sessionCleanupEligible
+      ) {
         await service.syncOrphanCandidateAlarm(userId);
         return;
       }
@@ -307,6 +374,9 @@ export function createWorkspaceSnapshotSessionService(input: {
       input.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, userId);
       const currentObjectKey = readHostedWorkspaceV2SnapshotObjectKey(workspaceRead.workspace);
       const currentSnapshotRef = readHostedWorkspaceSnapshotRef(workspaceRead.workspace);
+      const currentBrowserVaultReplicaObjectKey = readHostedBrowserVaultReplicaObjectKey(
+        workspaceRead.workspace,
+      );
       const errors: unknown[] = [];
 
       for (const [key, candidate] of eligibleCandidates) {
@@ -318,6 +388,19 @@ export function createWorkspaceSnapshotSessionService(input: {
             currentSnapshotRef,
             key,
             runnerStoreCache: input.runnerStoreCache,
+            state: input.state,
+          });
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      for (const [key, candidate] of eligibleBrowserVaultReplicaCandidates) {
+        try {
+          await cleanupBrowserVaultReplicaOrphanCandidate({
+            bucket: input.bucket,
+            candidate,
+            currentObjectKey: currentBrowserVaultReplicaObjectKey,
+            key,
             state: input.state,
           });
         } catch (error) {
@@ -388,7 +471,7 @@ export function createWorkspaceSnapshotSessionService(input: {
     },
 
     async syncOrphanCandidateAlarm(userId) {
-      await syncWorkspaceSnapshotOrphanCandidateAlarm({
+      await syncHostedR2OrphanCandidateAlarm({
         state: input.state,
         userId,
       });
@@ -463,7 +546,7 @@ function parseWorkspaceSnapshotR2PutDrainState(value: unknown): {
   };
 }
 
-export async function readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input: {
+export async function readHostedR2OrphanCandidateNextAlarmAt(input: {
   state: DurableObjectStateLike;
   userId: string;
 }): Promise<number | null> {
@@ -472,6 +555,9 @@ export async function readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input: {
   }
   const candidates = await input.state.storage.list<unknown>({
     prefix: workspaceSnapshotOrphanCandidateStoragePrefix(),
+  });
+  const browserVaultReplicaCandidates = await input.state.storage.list<unknown>({
+    prefix: browserVaultReplicaOrphanCandidateStoragePrefix(),
   });
   let nextAtMs: number | null = null;
   const currentSession = await readWorkspaceSnapshotUploadSessionForCleanup({
@@ -482,7 +568,7 @@ export async function readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input: {
     ? buildWorkspaceSnapshotOrphanCandidateFromUploadSessionObject(currentSession)
     : null;
   if (sessionSnapshotCandidate) {
-    nextAtMs = selectEarliestWorkspaceSnapshotCleanupAlarm(
+    nextAtMs = selectEarliestHostedR2OrphanCleanupAlarm(
       nextAtMs,
       sessionSnapshotCandidate.createdAt,
     );
@@ -491,7 +577,7 @@ export async function readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input: {
     ? buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(currentSession)
     : null;
   if (sessionReplacedCandidate) {
-    nextAtMs = selectEarliestWorkspaceSnapshotCleanupAlarm(
+    nextAtMs = selectEarliestHostedR2OrphanCleanupAlarm(
       nextAtMs,
       sessionReplacedCandidate.createdAt,
     );
@@ -506,7 +592,19 @@ export async function readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input: {
     if (candidate.userId !== input.userId) {
       continue;
     }
-    nextAtMs = selectEarliestWorkspaceSnapshotCleanupAlarm(nextAtMs, candidate.createdAt);
+    nextAtMs = selectEarliestHostedR2OrphanCleanupAlarm(nextAtMs, candidate.createdAt);
+  }
+  for (const value of browserVaultReplicaCandidates.values()) {
+    let candidate: HostedBrowserVaultReplicaOrphanCandidate;
+    try {
+      candidate = parseHostedBrowserVaultReplicaOrphanCandidate(value);
+    } catch {
+      continue;
+    }
+    if (candidate.userId !== input.userId) {
+      continue;
+    }
+    nextAtMs = selectEarliestHostedR2OrphanCleanupAlarm(nextAtMs, candidate.createdAt);
   }
   return nextAtMs;
 }
@@ -572,7 +670,7 @@ function buildWorkspaceSnapshotOrphanCandidateFromUploadSessionReplacedRef(
   };
 }
 
-function selectEarliestWorkspaceSnapshotCleanupAlarm(
+function selectEarliestHostedR2OrphanCleanupAlarm(
   previous: number | null,
   createdAt: string,
 ): number | null {
@@ -584,17 +682,17 @@ function selectEarliestWorkspaceSnapshotCleanupAlarm(
   return previous === null ? eligibleAtMs : Math.min(previous, eligibleAtMs);
 }
 
-function isWorkspaceSnapshotCleanupCreatedAtEligible(createdAt: string, nowMs: number): boolean {
+function isHostedR2OrphanCleanupCreatedAtEligible(createdAt: string, nowMs: number): boolean {
   const createdAtMs = Date.parse(createdAt);
   return Number.isFinite(createdAtMs)
     && nowMs - createdAtMs >= WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS;
 }
 
-async function syncWorkspaceSnapshotOrphanCandidateAlarm(input: {
+async function syncHostedR2OrphanCandidateAlarm(input: {
   state: DurableObjectStateLike;
   userId: string;
 }): Promise<void> {
-  const nextAtMs = await readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input);
+  const nextAtMs = await readHostedR2OrphanCandidateNextAlarmAt(input);
   if (nextAtMs === null) {
     await input.state.storage.deleteAlarm?.();
     return;
@@ -631,6 +729,39 @@ async function cleanupWorkspaceSnapshotOrphanCandidate(input: {
     candidate,
     currentObjectKey: input.currentObjectKey,
   });
+  await input.state.storage.delete(input.key);
+}
+
+async function cleanupBrowserVaultReplicaOrphanCandidate(input: {
+  bucket: R2BucketLike;
+  candidate: HostedBrowserVaultReplicaOrphanCandidate;
+  currentObjectKey: string | null;
+  key: string;
+  state: DurableObjectStateLike;
+}): Promise<void> {
+  if (input.candidate.objectKey !== input.currentObjectKey) {
+    await deleteR2ObjectIfSupported(input.bucket, input.candidate.objectKey);
+  }
+  await deleteBrowserVaultReplicaOrphanCandidateIfUnchanged(input);
+}
+
+async function deleteBrowserVaultReplicaOrphanCandidateIfUnchanged(input: {
+  candidate: HostedBrowserVaultReplicaOrphanCandidate;
+  key: string;
+  state: DurableObjectStateLike;
+}): Promise<void> {
+  const currentValue = await input.state.storage.get<unknown>(input.key);
+  if (currentValue === undefined) {
+    return;
+  }
+  const currentCandidate = parseHostedBrowserVaultReplicaOrphanCandidate(currentValue);
+  if (
+    currentCandidate.createdAt !== input.candidate.createdAt
+    || currentCandidate.objectKey !== input.candidate.objectKey
+    || currentCandidate.userId !== input.candidate.userId
+  ) {
+    return;
+  }
   await input.state.storage.delete(input.key);
 }
 
@@ -758,14 +889,16 @@ function collectLegacyWorkspaceSnapshotBundleRefs(
   return refs;
 }
 
-async function readHostedWorkspaceSnapshotOrphanCandidateForCleanup(input: {
+async function readHostedOrphanCandidateForCleanup<T>(input: {
+  candidateLabel: string;
   key: string;
+  parse(value: unknown): T;
   state: DurableObjectStateLike;
   userId: string;
   value: unknown;
-}): Promise<HostedWorkspaceSnapshotOrphanCandidate | null> {
+}): Promise<T | null> {
   try {
-    return parseHostedWorkspaceSnapshotOrphanCandidate(input.value);
+    return input.parse(input.value);
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -774,16 +907,17 @@ async function readHostedWorkspaceSnapshotOrphanCandidateForCleanup(input: {
         orphanCandidateKeyPresent: input.key.length > 0,
       },
       level: "warn",
-      message: "Hosted runner skipped malformed workspace snapshot orphan candidate.",
+      message: `Hosted runner skipped malformed ${input.candidateLabel} orphan candidate.`,
       phase: "wake.running",
       userId: input.userId,
     });
-    await deleteMalformedWorkspaceSnapshotOrphanCandidateBestEffort(input);
+    await deleteMalformedHostedOrphanCandidateBestEffort(input);
     return null;
   }
 }
 
-async function deleteMalformedWorkspaceSnapshotOrphanCandidateBestEffort(input: {
+async function deleteMalformedHostedOrphanCandidateBestEffort(input: {
+  candidateLabel: string;
   key: string;
   state: DurableObjectStateLike;
   userId: string;
@@ -798,7 +932,7 @@ async function deleteMalformedWorkspaceSnapshotOrphanCandidateBestEffort(input: 
         orphanCandidateKeyPresent: input.key.length > 0,
       },
       level: "warn",
-      message: "Hosted runner failed to discard malformed workspace snapshot orphan candidate.",
+      message: `Hosted runner failed to discard malformed ${input.candidateLabel} orphan candidate.`,
       phase: "wake.running",
       userId: input.userId,
     });
@@ -817,6 +951,14 @@ export function workspaceSnapshotOrphanCandidateStorageKey(snapshotId: string): 
   return `${workspaceSnapshotOrphanCandidateStoragePrefix()}${snapshotId}`;
 }
 
+export function browserVaultReplicaOrphanCandidateStoragePrefix(): string {
+  return "browser-vault-replica-orphan-candidate:";
+}
+
+export function browserVaultReplicaOrphanCandidateStorageKey(objectKey: string): string {
+  return `${browserVaultReplicaOrphanCandidateStoragePrefix()}${objectKey}`;
+}
+
 export function readHostedWorkspaceV2SnapshotObjectKey(
   workspace: HostedWorkspaceState | null,
 ): string | null {
@@ -829,6 +971,15 @@ export function readHostedWorkspaceV2SnapshotObjectKey(
     record,
     "Hosted workspace snapshot orphan cleanup current snapshotRef",
   ).objectKey;
+}
+
+export function readHostedBrowserVaultReplicaObjectKey(
+  workspace: HostedWorkspaceState | null,
+): string | null {
+  return parseHostedBrowserVaultReplicaRef(
+    workspace?.browserVaultReplicaRef,
+    "Hosted browser vault replica orphan cleanup current replicaRef",
+  )?.objectKey ?? null;
 }
 
 function readObjectRecord(value: unknown): Record<string, unknown> | null {

@@ -416,6 +416,16 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       "packages/query/dist/browser-replica/murph-age.js",
       /packages\/query\/dist\/browser-replica\/murph-age\.js/,
     ],
+    [
+      "Zod locale catalog",
+      "node_modules/zod/v4/locales/index.js",
+      /node_modules\/zod\/v4\/locales\/index\.js/,
+    ],
+    [
+      "non-English Zod locale",
+      "node_modules/zod/v4/locales/fr.js",
+      /node_modules\/zod\/v4\/locales\/fr\.js/,
+    ],
   ])("rejects %s inputs from the static boot closure", (_label, inputPath, expected) => {
     const metafile = staticBootClosureMetafile(inputPath);
 
@@ -427,6 +437,16 @@ describe("runner bundle container-entrypoint esbuild step", () => {
   it("allows the narrow clinical-records retrieval-limits leaf in the static boot closure", () => {
     const metafile = staticBootClosureMetafile(
       ".deploy/runner-bundle/node_modules/@murphai/clinical-records/dist/retrieval-limits.js",
+    );
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS)
+    ).not.toThrow();
+  });
+
+  it("allows Zod's default English locale in the static boot closure", () => {
+    const metafile = staticBootClosureMetafile(
+      "node_modules/zod/v4/locales/en.js",
     );
 
     expect(() =>
@@ -563,8 +583,8 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
       entryBytes: 1_699_250 + 48_000,
-      staticClosureBytes: 8_540_082 + 96_000,
-      totalBytes: 10_276_559 + 32_768,
+      staticClosureBytes: 8_182_922 + 96_000,
+      totalBytes: 9_862_735 + 32_768,
     });
   });
 

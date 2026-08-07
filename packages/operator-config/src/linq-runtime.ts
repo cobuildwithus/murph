@@ -787,57 +787,100 @@ async function uploadLinqAttachmentBytes(
     )
   }
 
+  const details: LinqSafeRequestDetails = {
+    operation: 'create_attachment_upload',
+    provider: 'linq',
+    requestAttachmentBytes: bytes.byteLength,
+    requestAttachmentHeaderCount: Object.keys(headers).length,
+  }
+  const body = new Blob([copyUint8ArrayToArrayBuffer(bytes)], {
+    type: headers['content-type'] ?? 'application/octet-stream',
+  })
   const timeout = createTimeoutAbortController(
     dependencies.signal,
     LINQ_HTTP_TIMEOUT_MS,
   )
-  let response: LinqFetchResponse
+  let lastRetryableFailure: VaultCliError | null = null
+
   try {
-    response = await fetchImplementation(uploadUrl, {
-      body: new Blob([copyUint8ArrayToArrayBuffer(bytes)], {
-        type: headers['content-type'] ?? 'application/octet-stream',
-      }),
-      headers,
-      method: 'PUT',
-      redirect: 'error',
+    await requestJsonWithRetry<void, LinqFetchResponse>({
+      createHttpError: async (response) => {
+        const failure = await createLinqHttpError(
+          response,
+          details,
+          'PUT',
+          '[presigned-upload]',
+          false,
+          true,
+        )
+        if (isRetryableLinqRequestError(failure)) {
+          lastRetryableFailure = failure
+        }
+        return failure
+      },
+      fetchResponse: async () => {
+        if (timeout.signal.aborted) {
+          if (dependencies.signal?.aborted) {
+            dependencies.signal.throwIfAborted()
+          }
+          if (lastRetryableFailure) {
+            throw lastRetryableFailure
+          }
+          timeout.signal.throwIfAborted()
+        }
+        try {
+          return await fetchImplementation(uploadUrl, {
+            body,
+            headers,
+            method: 'PUT',
+            redirect: 'error',
+            signal: timeout.signal,
+          })
+        } catch (error) {
+          if (dependencies.signal?.aborted) {
+            throw error
+          }
+          const failure = createLinqRequestError({
+            details,
+            error,
+            method: 'PUT',
+            path: '[presigned-upload]',
+            requestOrigin: readRequestOrigin(uploadUrl),
+            retryable: true,
+            timedOut: timeout.timedOut(),
+          })
+          lastRetryableFailure = failure
+          throw failure
+        }
+      },
+      isRetryableError: isRetryableLinqRequestError,
+      maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+      parseResponse: () => undefined,
       signal: timeout.signal,
+      waitForRetryDelay: async (attempt, signal, responseHeaders) => {
+        try {
+          await waitForLinqRetryDelay(attempt, signal, responseHeaders)
+        } catch (error) {
+          if (dependencies.signal?.aborted) {
+            throw error
+          }
+          if (timeout.timedOut() && lastRetryableFailure) {
+            throw lastRetryableFailure
+          }
+          throw error
+        }
+      },
     })
   } catch (error) {
-    if (dependencies.signal?.aborted) {
+    if (!isRetryableLinqRequestError(error)) {
       throw error
     }
-    throw createLinqRequestError({
-      details: {
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        requestAttachmentBytes: bytes.byteLength,
-        requestAttachmentHeaderCount: Object.keys(headers).length,
-      },
-      error,
-      method: 'PUT',
-      path: '[presigned-upload]',
-      requestOrigin: readRequestOrigin(uploadUrl),
+    throw new VaultCliError(error.code, error.message, {
+      ...error.context,
       retryable: false,
-      timedOut: timeout.timedOut(),
     })
   } finally {
     timeout.cleanup()
-  }
-
-  if (!response.ok) {
-    throw await createLinqHttpError(
-      response,
-      {
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        requestAttachmentBytes: bytes.byteLength,
-        requestAttachmentHeaderCount: Object.keys(headers).length,
-      },
-      'PUT',
-      '[presigned-upload]',
-      false,
-      false,
-    )
   }
 }
 
@@ -1783,6 +1826,7 @@ function shouldRetryLinqHttpStatus(
   return (
     (
       method === 'GET' ||
+      method === 'PUT' ||
       (method === 'POST' && hasIdempotencyKey) ||
       (method === 'DELETE' && allowDeleteRetries)
     ) &&
@@ -1968,6 +2012,7 @@ function shouldRetryLinqTransportFailure(
   hasIdempotencyKey = false,
 ): boolean {
   return method === 'GET' ||
+    method === 'PUT' ||
     (method === 'POST' && hasIdempotencyKey) ||
     (method === 'DELETE' && allowDeleteRetries)
 }

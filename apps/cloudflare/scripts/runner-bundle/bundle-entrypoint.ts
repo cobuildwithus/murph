@@ -133,9 +133,16 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // tool path without adding a forbidden boot input. After merging the native-
 // memory relay restoration, macOS measured 10,276,559B total on 2026-08-06;
 // retain the established allowance above that combined measurement.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_276_559 + 32_768;
+
+// The bounded @murphai/contracts/zod-runtime surface keeps Zod's required
+// English error map while removing the 53-module locale catalog and unrelated
+// namespace exports from production workspace imports. A clean macOS assembly
+// measured a 1,729,632B entry, 8,182,922B static closure, and 9,862,735B total
+// on 2026-08-06. Ratchet the static and total baselines to that implementation
+// while retaining the established cross-platform tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_862_735 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_540_082;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_182_922;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
@@ -158,10 +165,12 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/contracts/dist/examples.js",
   "/query/dist/murph-age.js",
   "/query/dist/browser-replica/murph-age.js",
+  "node_modules/zod/v4/locales/",
 ] as const;
 
 const RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS = [
   "/clinical-records/dist/retrieval-limits.js",
+  "node_modules/zod/v4/locales/en.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(

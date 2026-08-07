@@ -25,6 +25,7 @@ import {
 import {
   HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
 } from "./linq-group-line-recovery";
+import { HOSTED_LINQ_GROUP_SETUP_TEMPLATE } from "./linq-group-setup";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedLinqMessageEditedWebhook,
@@ -369,6 +370,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         duplicate: providerResult.duplicate,
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
         eventType,
+        ...(providerEvent.eventType === "chat.group_icon_updated"
+          || providerEvent.eventType === "chat.group_icon_update_failed"
+            ? {
+                chatIdSuffix: toHostedOnboardingLogIdSuffix(providerEvent.linqChatId),
+                failureCode: providerEvent.failureCode,
+                providerStatus: providerEvent.providerStatus,
+              }
+            : {}),
         responseReason,
       });
       return response;
@@ -713,6 +722,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           (
             skip.template === "invite_signup"
             || skip.template === "invite_signup_fallback"
+            || skip.template === HOSTED_LINQ_GROUP_SETUP_TEMPLATE
             || skip.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
           )
           && skip.reason === "notice_in_flight",
@@ -721,14 +731,20 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         const groupLineRecoveryInFlight =
           pendingRequiredDelivery.template
             === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
+        const groupSetupInFlight = pendingRequiredDelivery.template
+          === HOSTED_LINQ_GROUP_SETUP_TEMPLATE;
         throw hostedOnboardingError({
-          code: groupLineRecoveryInFlight
-            ? "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT"
-            : "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+          code: groupSetupInFlight
+            ? "HOSTED_LINQ_GROUP_SETUP_DELIVERY_IN_FLIGHT"
+            : groupLineRecoveryInFlight
+              ? "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT"
+              : "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
           httpStatus: 503,
-          message: groupLineRecoveryInFlight
-            ? "The group line recovery message is still recovering. Retry this webhook after the current delivery attempt expires."
-            : "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
+          message: groupSetupInFlight
+            ? "The group setup message is still recovering. Retry this webhook after the current delivery attempt expires."
+            : groupLineRecoveryInFlight
+              ? "The group line recovery message is still recovering. Retry this webhook after the current delivery attempt expires."
+              : "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
           retryable: true,
         });
       }
