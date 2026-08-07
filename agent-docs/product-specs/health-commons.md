@@ -207,7 +207,10 @@ normalized entity title or authored alias. An exact title wins over an alias.
 Two equally ranked owners or an unknown topic return no packet. Optional
 question terms then filter and rank evidence only within that resolved owner
 set. A protocol with the same title as its direct family shares the family
-owner; unrelated equal aliases still fail closed. Source findings use one
+owner. A canonical family title can include its typed child protocols. A family
+alias stays on the family and never makes a child protocol interchangeable.
+Child titles and aliases resolve the child directly. Unrelated equal aliases
+still fail closed. Source findings use one
 unambiguous authored target: `related_protocol`, then `parent_family`, then
 `measures`. Multi-target and untargeted findings stay out of the projection
 until their ownership is authored more precisely. Safety comes only from a
