@@ -59,6 +59,9 @@ patchedDependencies:
   incur@0.4.5:
     hash: d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e
     path: patches/incur@0.4.5.patch
+  ink@6.8.0:
+    hash: 9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5
+    path: patches/ink@6.8.0.patch
 
 importers:
 
@@ -374,7 +377,7 @@ importers:
         version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       ink:
         specifier: ^6.8.0
-        version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
+        version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
       react:
         specifier: ^19.2.6
         version: 19.2.6
@@ -580,7 +583,7 @@ importers:
         version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       ink:
         specifier: ^6.8.0
-        version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
+        version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
       react:
         specifier: ^19.2.6
         version: 19.2.6
@@ -909,7 +912,7 @@ importers:
         version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       ink:
         specifier: ^6.8.0
-        version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
+        version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
       react:
         specifier: ^19.2.6
         version: 19.2.6
@@ -17642,7 +17645,7 @@ snapshots:
   ini@1.3.8:
     optional: true
 
-  ink@6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6):
+  ink@6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6):
     dependencies:
       '@alcalzone/ansi-tokenize': 0.2.5
       ansi-escapes: 7.3.0
