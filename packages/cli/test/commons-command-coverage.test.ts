@@ -50,7 +50,7 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
     "commons",
     "knowledge",
     "search",
-    "dry sauna evidence",
+    "dry sauna",
     "--limit",
     "3",
   ]);

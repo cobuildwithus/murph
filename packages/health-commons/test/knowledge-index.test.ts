@@ -110,15 +110,17 @@ describe("Health Commons knowledge SQLite projection", () => {
       const result = searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
         limit: 2,
-        query: "dry sauna cardiovascular",
+        query: "dry sauna",
       });
 
-      expect(result.items).toHaveLength(1);
-      expect(result.items[0]).toMatchObject({
+      expect(result.items).toHaveLength(2);
+      expect(result.items).toContainEqual(expect.objectContaining({
         entityKey: "experiment_family:dry-sauna",
-        kind: "claim",
-        sources: [{ pmid: "29849692", designKind: "systematic_review" }],
-      });
+        sources: expect.arrayContaining([expect.objectContaining({
+          pmid: "29849692",
+          designKind: "systematic_review",
+        })]),
+      }));
       expect(result.safety).toMatchObject({
         entityKey: "experiment_family:dry-sauna",
         kind: "safety",

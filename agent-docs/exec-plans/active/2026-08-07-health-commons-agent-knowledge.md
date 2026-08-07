@@ -82,6 +82,12 @@ Updated: 2026-08-07
 - Full-catalog tests cover safety-only sauna results, nearby-topic rejection,
   one-character qualifiers, and the direct sauna systematic review. A real
   assistant harness also covers the lookup without experiment creation.
+- Round 2 reproduced the same wrong-topic mechanism through citation-title
+  composition and Porter stems. The retrospective kept SQLite but redesigned
+  eligibility around typed ownership: canonical entity titles and authored
+  aliases resolve topic keys first. Evidence text and its one returned source
+  title can rank rows only after that step. Ordinary evidence and independent
+  safety must share a resolved owner key.
 
 ## Verification
 
