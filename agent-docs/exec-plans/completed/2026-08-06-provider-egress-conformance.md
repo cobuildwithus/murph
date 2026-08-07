@@ -1,6 +1,6 @@
 # Extend hosted provider egress conformance to Telegram
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-07
 
@@ -122,4 +122,9 @@ Updated: 2026-08-07
   success or error bodies, and classified stale-card recovery under the
   fallback identity.
 - Documentation drift/gardening and `git diff --check`.
-- Exact-head required GitHub Actions and final review before closing this plan.
+- Exact-head required GitHub Actions passed after one unrelated app-verification
+  timeout rerun; the isolated Cloudflare target passed locally before rerun.
+- ReviewGPT final round six returned a valid `PASS` on the same exact head after
+  verifying every accepted finding and the completed deletion-first
+  retrospective.
+Completed: 2026-08-07
