@@ -400,6 +400,43 @@ describe("hosted group usage funding", () => {
     });
   });
 
+  it("canonicalizes owner and signed locators to one purchase target", async () => {
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+    const group = {
+      displayName: "Sunday sleep crew",
+      joinCode: "group_join_code_1234",
+      kind: "friends",
+      runtimeMemberId: "member_group_runtime",
+    };
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => group),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+
+    const [ownerTarget, signedTarget] = await Promise.all([
+      readHostedGroupUsageFundingTargetByJoinCode({
+        joinCode: group.joinCode,
+        prisma: prisma as never,
+      }),
+      readHostedGroupUsageFundingTargetByJoinCode({
+        joinCode: locator ?? "",
+        prisma: prisma as never,
+      }),
+    ]);
+
+    expect(signedTarget).toEqual(ownerTarget);
+    expect(signedTarget).toMatchObject({
+      fundingPath: "/groups/fund/group_join_code_1234",
+      joinCode: "group_join_code_1234",
+      runtimeMemberId: "member_group_runtime",
+    });
+  });
+
   it("fails closed on a locator for a missing or inactive container", async () => {
     const locator =
       buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");

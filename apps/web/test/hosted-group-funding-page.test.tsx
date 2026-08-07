@@ -221,6 +221,8 @@ describe("hosted group funding page", () => {
   });
 
   it("restores the payer's exact frozen sponsor details with a matching active purchase", async () => {
+    const signedFundingLocator =
+      "gf1.member_group_runtime.signed_exhaustion_locator";
     const frozenSponsorship = {
       publicAlias: "The Group Historian",
       runningBitRequest: "Treat me like Murph’s exhausted CFO.",
@@ -242,9 +244,22 @@ describe("hosted group funding page", () => {
     );
 
     renderToStaticMarkup(await GroupFundingPage({
-      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+      params: Promise.resolve({ joinCode: signedFundingLocator }),
     }));
 
+    expect(mocks.readHostedGroupUsageFundingTargetByJoinCode).toHaveBeenCalledWith({
+      joinCode: signedFundingLocator,
+      prisma: { label: "test-prisma" },
+    });
+    expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
+      serverApprovedPayableTargets: [{
+        beneficiaryMemberId: "member_group_runtime",
+        groupJoinCode: "group_join_code_1234",
+        kind: "group",
+      }],
+      payerMemberId: "member_payer",
+      prisma: { label: "test-prisma" },
+    });
     expect(mocks.readHostedGroupSponsorshipDraftForCreator).toHaveBeenCalledWith({
       creatorMemberId: "member_payer",
       prisma: { label: "test-prisma" },
@@ -261,6 +276,9 @@ describe("hosted group funding page", () => {
       }),
       undefined,
     );
+    const renderedActivePurchase = mocks.HostedUsageTopUpDialog.mock.calls[0]?.[0]
+      ?.activePurchase;
+    expect(renderedActivePurchase).not.toHaveProperty("targetConflict");
   });
 
   it("does not offer payment recovery when the frozen sponsor draft cannot be read", async () => {

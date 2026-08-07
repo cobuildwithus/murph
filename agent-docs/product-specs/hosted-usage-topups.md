@@ -1087,6 +1087,14 @@ row, membership, join code, vault-share projection, or profile-name/email
 grant is created. Owner-created join codes keep funding exactly as before,
 and enrollment stays behind the owner-minted join link.
 
+An exhaustion notice may also use the signed locator for an owner-created
+group so notice construction stays database-free. After authenticating that
+locator, the existing funding-target resolver returns the group's durable join
+code as both its funding path and exact purchase identity. A purchase begun
+from either URL therefore resumes through the other without weakening exact
+target matching; codeless groups continue to use their signed locator as the
+canonical identity.
+
 The Stripe Customer belongs to the payer, never to the group owner or synthetic
 container. Fulfilled credit belongs to the beneficiary. Payer departure and
 beneficiary deletion therefore follow the separate lifecycle rules above.

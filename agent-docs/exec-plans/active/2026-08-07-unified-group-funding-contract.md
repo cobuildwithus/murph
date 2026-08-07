@@ -66,6 +66,7 @@ Updated: 2026-08-07
 - Remove group funding reads from referral eligibility.
 - Add direct privacy, pending-state, deterministic-copy, and prompt-contract coverage.
 - Validate delivery against the configured hosted origin, and extend the existing production predeploy guard to construct and parse the same signed funding-only URL before serving traffic.
+- Canonicalize an authenticated signed locator to an owner-created group's durable join code inside the existing funding-target resolver so every entry point shares one purchase identity.
 
 ## Review anomaly retrospective
 
@@ -74,6 +75,7 @@ Updated: 2026-08-07
 - Repeated mechanism: removing the private sponsor read did not remove every fallible dependency before the one-shot notice claim; a null or caught projection could still send linkless copy.
 - Decision: the link is mandatory. The delivery projector uses only the runtime member ID, configured first-party origin, and signing key. Capacity and exact-route authority remain with the existing claim owner; sponsor state, join-code preference, display data, and billing state are not delivery prerequisites.
 - Failure disposition: production predeploy must prove the configured HTTPS origin and signing authority can construct and parse the mandatory URL. Runtime projection validates against that same origin and fails before Linq or Telegram claim/provider work rather than sending terminal linkless copy. A completed crossing has no separate replay owner, so the pre-serve invariant—not a claimed retry—is what prevents this configuration dead end.
+- Purchase-target disposition: exhaustion remains database-free and may carry a signed locator for any room. After that locator authenticates, the funding-page target resolver maps an owner-created group to its durable join code; codeless rooms retain the signed locator. Downstream exact target matching remains unchanged.
 - Architecture disposition: continue with the existing owners and no new state, queue, scheduler, replay lifecycle, or notification system.
 
 ## Verification
