@@ -137,9 +137,7 @@ export function writeHealthCommonsKnowledgeIndex(
         if (!parent) {
           continue;
         }
-        for (const [index, phrase] of [parent.title, ...(parent.aliases ?? [])].entries()) {
-          insertTopicOwner.run(normalizeTopicPhrase(phrase), parent.key, entity.key, index === 0 ? 0 : 1);
-        }
+        insertTopicOwner.run(normalizeTopicPhrase(parent.title), parent.key, entity.key, 0);
       }
     }
     for (const chunk of buildKnowledgeChunks(catalog)) {
@@ -538,6 +536,7 @@ function toFtsQuery(query: string): string {
 function normalizeTopicPhrase(value: string): string {
   return value
     .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .toLowerCase()
     .match(/[\p{L}\p{N}]+/gu)
     ?.join(" ") ?? "";
@@ -546,9 +545,9 @@ function normalizeTopicPhrase(value: string): string {
 function searchTokens(query: string): string[] {
   return [...new Set(query
     .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .toLowerCase()
-    .match(/[\p{L}\p{N}]+/gu)
-    ?.slice(0, 8) ?? [])];
+    .match(/[\p{L}\p{N}]+/gu) ?? [])];
 }
 
 function nullableString(value: unknown): string | null {

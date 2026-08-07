@@ -118,6 +118,15 @@ Updated: 2026-08-07
 - Round 5 also found that aggregate page safety text used unrelated page-wide
   citations. The projection no longer emits those rows. Safety results now come
   only from directly sourced safety claims, appraisals, or typed findings.
+- Round 6 found that family aliases were copied to child protocols even when
+  the corpus said those variants were not interchangeable. Only the canonical
+  family title now expands to its typed children. A family alias stays on the
+  family unless a child authors that phrase itself. Regression coverage keeps
+  UC-II separate from hydrolyzed collagen and keeps cold showers and winter
+  swimming separate from Cold Plunge.
+- Topic and focus normalization now remove combining marks after Unicode
+  decomposition. This makes the authored `V̇O2max` alias usable. Focus searches
+  also keep every term instead of silently dropping terms after the eighth.
 
 ## Verification
 

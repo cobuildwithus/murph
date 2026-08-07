@@ -88,13 +88,45 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     expect(search("vitamin c")).toMatchObject({ items: [], safety: null });
   });
 
+  it.each([
+    ["UC-II", "joint pain", "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides"],
+    ["native type-II collagen", "joint pain", "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides"],
+    ["gelatin plus vitamin C", "joint pain", "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides"],
+    ["bone broth", "allergy", "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides"],
+    ["cold shower", "immunity", "protocol_variant:cold-water-immersion/cold-plunge"],
+    ["winter swimming", "mood", "protocol_variant:cold-water-immersion/cold-plunge"],
+  ])("does not substitute a child protocol for the family alias %s", (query, focus, excludedKey) => {
+    const result = search(query, focus);
+
+    expect([...result.items, ...(result.safety ? [result.safety] : [])]
+      .every((item) => item.entityKey !== excludedKey)).toBe(true);
+  });
+
+  it("keeps broad canonical family retrieval and direct child retrieval", () => {
+    for (const query of ["Dry Sauna", "Collagen Supplementation", "Cold Water Immersion"]) {
+      expect(search(query).items.length).toBeGreaterThan(0);
+    }
+    for (const query of ["Finnish Dry Sauna", "Caffeine Curfew", "Cold Plunge"]) {
+      expect(search(query).items.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("normalizes combining-mark aliases without changing their topic", () => {
+    const combiningMark = search("V̇O2max");
+
+    expect(combiningMark.items.length).toBeGreaterThan(0);
+    expect(combiningMark.items.every((item) => item.entityKey === "biomarker:estimated-vo2max"))
+      .toBe(true);
+    expect(combiningMark.items.every((item) => item.sources.length > 0)).toBe(true);
+  });
+
   it("does not compose a topic from unrelated sauna citations", () => {
     expect(search("pregnancy cold medicine")).toMatchObject({ items: [], safety: null });
     expect(search("cold medicine pregnancy")).toMatchObject({ items: [], safety: null });
   });
 
   it("keeps water-fasting evidence and safety on the fasting topic", () => {
-    const direct = search("water fasting");
+    const direct = search("Prolonged Fasting");
     const naturalQuestionTerms = search("water fasting", "health");
 
     expect(packetText(direct)).toMatch(/water fast|prolonged fast/iu);
@@ -236,6 +268,16 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
           )
         `).get(title, title)).toMatchObject({ count: 1 });
       }
+      expect(database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM topic_owners child_owner
+        JOIN topic_owners parent_owner
+          ON parent_owner.phrase = child_owner.phrase
+         AND parent_owner.owner_key = child_owner.owner_key
+         AND parent_owner.entity_key = parent_owner.owner_key
+        WHERE child_owner.entity_key <> child_owner.owner_key
+          AND child_owner.match_priority > 0
+      `).get()).toMatchObject({ count: 0 });
     } finally {
       database.close();
     }
