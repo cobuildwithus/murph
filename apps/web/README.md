@@ -645,15 +645,19 @@ Before a production build, configure these Production-scoped server values:
 - `MURPH_PUBLIC_ROUTES_WAF_REQUIRED=1`
 - `MURPH_SAFE_SEARCH_WAF_RULE_ID`
 - `MURPH_SAFE_DETAIL_WAF_RULE_ID`
+- `MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID`
 - `HOSTED_WEB_VERCEL_PROJECT_ID`
 - optional `HOSTED_WEB_VERCEL_TEAM_ID`
 - `HOSTED_WEB_VERCEL_TOKEN`, limited to reading the project's firewall config
 
-The exact-id custom rules must be the first active rules after the optional
+The exact-id Murph Safe rules must be the first active rules after the optional
 companion diagnostics rule. Search is an exact POST path with a fixed-window
 per-IP 429 at 30 requests per 60 seconds. Detail covers the public API prefix
 while excluding search, plus the public web-detail prefix, at 120 requests per
-60 seconds. `pnpm public-routes:waf-check` reads the active Vercel firewall
+60 seconds. The signup-referral claim rule matches only POST paths that start
+with `/r/` and end with `/claim`, with a fixed-window per-IP 429 at 10 requests
+per 60 seconds. It may follow other scoped active rules but never an active
+bypass rule. `pnpm public-routes:waf-check` reads the active Vercel firewall
 configuration and fails on disabled firewall, order, condition, algorithm,
 key, limit, window, action, or id drift. It never downloads environment values
 or prints the provider token or response body.

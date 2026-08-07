@@ -126,8 +126,19 @@ test("design page routes the biomarker studies through the dedicated sections ta
     "Group sponsorship and mobile one-time contribution",
   );
   expect(sectionsMarkup).toContain(
-    "Overall AI usage, purchase reset, Family owner action, credits, and referrals",
+    "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
   );
+  expect(sectionsMarkup).toContain(
+    "Reusable signup referral link and recipient claim states",
+  );
+  expect(sectionsMarkup).toContain(
+    'data-design-section="signup-referral-flow"',
+  );
+  expect(sectionsMarkup).toContain("Settings · Messaging");
+  expect(sectionsMarkup).toContain("Recipient landing states");
+  expect(sectionsMarkup).toContain("Meet Murph");
+  expect(sectionsMarkup).toContain("Try again soon");
+  expect(sectionsMarkup).toContain("This link isn’t available");
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
   expect(sectionsMarkup).toContain("Boundary result detail");
@@ -185,6 +196,10 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-boundary-result"');
   expect(componentsMarkup).toContain('data-design-component="group-usage-funding"');
+  expect(componentsMarkup).toContain(
+    'data-design-component="signup-referral-link-states"',
+  );
+  expect(componentsMarkup).toContain("Clipboard write failed");
   expect(componentsMarkup).toContain(
     'data-design-component="group-sponsorship-management"',
   );

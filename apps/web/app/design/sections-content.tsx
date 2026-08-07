@@ -44,6 +44,7 @@ import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
+import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import {
   GroupUsageFundingStudy,
@@ -359,7 +360,13 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Overall AI usage, purchase reset, Family owner action, credits, and referrals">
+      <StudySection title="Reusable signup referral link and recipient claim states">
+        <SignupReferralFlowStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
