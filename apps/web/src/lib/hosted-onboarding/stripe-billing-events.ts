@@ -1391,9 +1391,10 @@ async function reconcileHostedMemberUsagePlanTransitionTx(input: {
     memberId: input.memberId,
     prisma: input.tx,
   });
+  const transitionKind = currentMember?.billingRef?.usagePlanTransitionKind;
   if (
-    currentMember?.billingRef?.usagePlanTransitionKind !== "plan_upgrade"
-    || currentMember.billingRef.usagePlanTransitionAt?.getTime()
+    (transitionKind !== "plan_upgrade" && transitionKind !== "trial_conversion")
+    || currentMember?.billingRef?.usagePlanTransitionAt?.getTime()
       !== input.dispatchContext.eventCreatedAt.getTime()
   ) {
     return null;

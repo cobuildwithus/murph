@@ -3789,6 +3789,28 @@ describe("hosted Family plan", () => {
     );
   });
 
+  it("replays the exact active Family owner wake after the direct binding is cleared", async () => {
+    const tx = createTxMock();
+    const eventCreatedAt = new Date("2026-07-15T12:30:00.000Z");
+    const billingRef = createBillingRefMock({
+      lastStripeEventCreatedAt: eventCreatedAt,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(null);
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: { eventCreatedAt },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      runtimeRecheckMemberIds: ["member_owner"],
+    });
+
+    expect(tx.hostedMember.update).not.toHaveBeenCalled();
+    expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
+  });
+
   it("keeps a pending member tier when a webhook has the current quantities", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([

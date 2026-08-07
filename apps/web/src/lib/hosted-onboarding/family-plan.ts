@@ -1794,6 +1794,16 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     prisma: input.tx,
   });
   const eventCreatedAt = input.dispatchContext.eventCreatedAt ?? null;
+  const recheckOwnerOnExactActiveEventReplay = Boolean(
+    eventCreatedAt
+    && input.subscription.status === "active"
+    && group.billingStatus === HostedBillingStatus.active
+    && matchedBillingRef?.currentBillingPhase === "paid"
+    && matchedBillingRef.currentBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE
+    && matchedBillingRef.stripeSubscriptionId === input.subscription.id
+    && matchedBillingRef.lastStripeEventCreatedAt?.getTime()
+      === eventCreatedAt.getTime()
+  );
   if (isHostedFamilyStripeEventStale({
     billingRef: matchedBillingRef,
     eventCreatedAt,
@@ -2052,6 +2062,9 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       stripeSubscriptionId: input.subscription.id,
       tx: input.tx,
     });
+    if (billingModeChanged || recheckOwnerOnExactActiveEventReplay) {
+      runtimeRecheckMemberIds.add(group.ownerMemberId);
+    }
     await revokeNewestHostedFamilyPendingInvitesToFitPlanCapacitiesTx({
       capacities: familyPlanState.capacities,
       groupId: group.id,
@@ -2073,10 +2086,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
         ? [group.ownerMemberId]
         : [],
       groupId: group.id,
-      runtimeRecheckMemberIds: [
-        ...runtimeRecheckMemberIds,
-        ...(billingModeChanged ? [group.ownerMemberId] : []),
-      ],
+      runtimeRecheckMemberIds: [...runtimeRecheckMemberIds],
     };
   }
 
