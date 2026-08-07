@@ -54,9 +54,9 @@ Updated: 2026-08-07
 
 ## Verification
 
-- Focused runtime-shape and container-image contract coverage passes 16 tests
-  exercising exact removal, sibling retention, root/subpath import rejection,
-  and post-bundle assembly ordering.
+- Focused runtime-shape, container-image contract, and smoke-bundle coverage
+  passes 17 tests exercising exact removal, sibling retention, root/subpath
+  import rejection, post-bundle assembly ordering, and test-only Zod overlay.
 - Cloudflare typecheck, workspace-boundary verification, and workspace package
   cycle verification pass.
 - Exact production runner assembly succeeds after the current startup-graph
@@ -70,6 +70,10 @@ Updated: 2026-08-07
 - The fully pruned read-only image imports all 67 emitted JavaScript chunks,
   runs the bundled CLI help and schema surfaces, runs as uid 1001, keeps `/app`
   immutable, and confirms `/app/node_modules/zod` is absent.
+- The permission smoke intentionally overlays Zod only into its isolated test
+  image because its smoke entrypoint is unbundled. The production artifact
+  remains Zod-free; the exact local smoke passed the former missing-package
+  point and reached the Codex permission probe.
 - The network-isolated full runner smoke reached the Codex permission probe but
   Docker Desktop's emulated kernel returned `ENOSYS` while Codex installed its
   nested seccomp policy. The same environment limitation is outside package
