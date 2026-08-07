@@ -6,7 +6,6 @@ import {
 } from '@murphai/contracts'
 import type {
   AttachmentCreateParams,
-  AttachmentCreateResponse,
   ChatCreateParams,
   ChatCreateResponse,
   ChatSendVoicememoParams,
@@ -738,7 +737,7 @@ async function createLinqAttachmentUpload(
     filename,
     size_bytes: sizeBytes,
   }
-  const response = await requestLinqJson<AttachmentCreateResponse>({
+  return requestLinq<CreateLinqAttachmentUploadResult>({
     allowRateLimitRetries: false,
     details: {
       operation: 'create_attachment_upload',
@@ -751,10 +750,21 @@ async function createLinqAttachmentUpload(
     method: 'POST',
     path: '/attachments',
     body,
+    parseResponse: async (response) => {
+      let payload: unknown
+      try {
+        payload = await response.json()
+      } catch {
+        throw createLinqAttachmentReservationResponseError({
+          message: 'Linq attachment upload response was not valid JSON.',
+          responseBodyKind: 'invalid_json',
+          status: response.status,
+        })
+      }
+      return parseLinqAttachmentUploadResponse(payload, response.status)
+    },
     signal: dependencies.signal,
   })
-
-  return parseLinqAttachmentUploadResponse(response)
 }
 
 async function uploadLinqAttachmentBytes(
@@ -1723,11 +1733,16 @@ function createLinqRequestError(input: {
   retryable: boolean
 }): VaultCliError {
   const transportErrorDiagnostics = buildLinqTransportErrorDiagnostics(input.error)
+  const providerSkippedProvenance =
+    input.method === 'POST' &&
+    input.details.operation === 'create_attachment_upload'
+      ? readLinqProviderSkippedDeliveryProvenance(input.error)
+      : null
   const baseMessage = input.timedOut
     ? `Linq request ${input.method} ${input.path} timed out after ${LINQ_HTTP_TIMEOUT_MS}ms.`
     : `Linq request ${input.method} ${input.path} failed before a response was returned.`
 
-  return new VaultCliError(
+  const error = new VaultCliError(
     'LINQ_API_REQUEST_FAILED',
     baseMessage,
     {
@@ -1736,12 +1751,64 @@ function createLinqRequestError(input: {
       failureStage: 'transport',
       method: input.method,
       path: input.path,
+      ...(providerSkippedProvenance?.assistantDeliveryFailureClass
+        ? {
+            assistantDeliveryFailureClass:
+              providerSkippedProvenance.assistantDeliveryFailureClass,
+          }
+        : {}),
+      ...(providerSkippedProvenance?.assistantDeliveryResumeTrigger
+        ? {
+            assistantDeliveryResumeTrigger:
+              providerSkippedProvenance.assistantDeliveryResumeTrigger,
+          }
+        : {}),
       ...(input.requestOrigin ? { requestOrigin: input.requestOrigin } : {}),
       retryable: input.retryable,
       timeoutMs: LINQ_HTTP_TIMEOUT_MS,
       timedOut: input.timedOut,
     },
   )
+
+  return providerSkippedProvenance
+    ? Object.assign(error, {
+        ...providerSkippedProvenance,
+        deliveryMayHaveSucceeded: false as const,
+      })
+    : error
+}
+
+type LinqProviderSkippedDeliveryProvenance = {
+  assistantDeliveryFailureClass?: 'transient'
+  assistantDeliveryResumeTrigger?: 'fresh_foreground_input'
+  retryable: boolean
+}
+
+function readLinqProviderSkippedDeliveryProvenance(
+  error: unknown,
+): LinqProviderSkippedDeliveryProvenance | null {
+  const errorRecord = readRecord(error)
+  if (errorRecord?.deliveryMayHaveSucceeded !== false) {
+    return null
+  }
+  const context = readRecord(errorRecord.context)
+  const failureClass =
+    errorRecord.assistantDeliveryFailureClass ??
+    context?.assistantDeliveryFailureClass
+  const resumeTrigger =
+    errorRecord.assistantDeliveryResumeTrigger ??
+    context?.assistantDeliveryResumeTrigger
+
+  return {
+    ...(failureClass === 'transient'
+      ? { assistantDeliveryFailureClass: 'transient' as const }
+      : {}),
+    ...(resumeTrigger === 'fresh_foreground_input'
+      ? { assistantDeliveryResumeTrigger: 'fresh_foreground_input' as const }
+      : {}),
+    retryable:
+      errorRecord.retryable === true || context?.retryable === true,
+  }
 }
 
 function buildLinqTransportErrorDiagnostics(
@@ -1835,7 +1902,8 @@ function shouldRetryLinqHttpStatus(
 }
 
 function parseLinqAttachmentUploadResponse(
-  value: AttachmentCreateResponse,
+  value: unknown,
+  status: number,
 ): CreateLinqAttachmentUploadResult {
   const record = readRecord(value)
   const attachmentId = normalizeNullableString(readStringField(record, 'attachment_id'))
@@ -1846,33 +1914,32 @@ function parseLinqAttachmentUploadResponse(
   const requiredHeaders = readStringRecord(record?.required_headers)
 
   if (!attachmentId || !rawUploadUrl || !expiresAt || !requiredHeaders) {
-    throw new VaultCliError(
-      'LINQ_API_REQUEST_FAILED',
-      'Linq attachment upload response was missing required fields.',
-      {
-        failureStage: 'http',
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        responseBodyKind: record ? 'json_object' : 'unknown',
-        responseBodyKeys: record ? Object.keys(record).sort() : [],
-        retryable: false,
-      },
-    )
+    throw createLinqAttachmentReservationResponseError({
+      message: 'Linq attachment upload response was missing required fields.',
+      payload: value,
+      status,
+    })
   }
   if (httpMethod && httpMethod.toUpperCase() !== 'PUT') {
-    throw new VaultCliError(
-      'LINQ_API_REQUEST_FAILED',
-      'Linq attachment upload response returned an unsupported upload method.',
-      {
-        failureStage: 'http',
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        retryable: false,
-      },
-    )
+    throw createLinqAttachmentReservationResponseError({
+      message: 'Linq attachment upload response returned an unsupported upload method.',
+      payload: value,
+      status,
+    })
   }
 
-  const uploadUrl = normalizeLinqAttachmentUploadUrl(rawUploadUrl)
+  let uploadUrl: string
+  try {
+    uploadUrl = normalizeLinqAttachmentUploadUrl(rawUploadUrl)
+  } catch (error) {
+    throw createLinqAttachmentReservationResponseError({
+      message: error instanceof VaultCliError
+        ? error.message
+        : 'Linq attachment upload response returned an invalid upload URL.',
+      payload: value,
+      status,
+    })
+  }
 
   return {
     attachmentId,
@@ -1881,6 +1948,36 @@ function parseLinqAttachmentUploadResponse(
     requiredHeaders,
     uploadUrl,
   }
+}
+
+function createLinqAttachmentReservationResponseError(input: {
+  message: string
+  payload?: unknown
+  responseBodyKind?: string
+  status: number
+}): VaultCliError & {
+  deliveryMayHaveSucceeded: true
+  retryable: false
+} {
+  return Object.assign(new VaultCliError(
+    'LINQ_API_REQUEST_FAILED',
+    input.message,
+    {
+      ...(input.responseBodyKind
+        ? { responseBodyKind: input.responseBodyKind }
+        : buildLinqErrorResponseDiagnostics(input.payload, null)),
+      failureStage: 'http',
+      method: 'POST',
+      operation: 'create_attachment_upload',
+      path: '/attachments',
+      provider: 'linq',
+      retryable: false,
+      status: input.status,
+    },
+  ), {
+    deliveryMayHaveSucceeded: true as const,
+    retryable: false as const,
+  })
 }
 
 function normalizeLinqAttachmentUploadUrl(value: string): string {

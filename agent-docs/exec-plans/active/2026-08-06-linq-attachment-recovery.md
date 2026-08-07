@@ -102,6 +102,11 @@ Updated: 2026-08-06
   same indivisible no-replay requirement, current source shape remains far
   below the churn threshold, and the correction tightens existing owner
   boundaries without adding state, a queue, or a lifecycle.
+- Accept final round 3's provenance finding. Preserve explicit provider-skipped
+  evidence when the hosted boundary defers before the reservation fetch, and
+  treat every successful but unusable reservation response as ambiguous. Both
+  corrections reuse the existing prepared intent and terminal ambiguity owner;
+  they add no state, queue, or transport-wide retry policy.
 
 ## Verification
 
@@ -124,3 +129,14 @@ Updated: 2026-08-06
   from `packages/assistant-engine`: 102 tests passed.
 - `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-cron-runtime.test.ts`
   from `packages/assistant-engine`: 201 tests passed.
+- `pnpm --filter @murphai/operator-config exec vitest run test/http-linq-device-runtime.test.ts --reporter=dot`:
+  56 tests passed after final-round provenance remediation.
+- `pnpm --filter @murphai/assistant-runtime exec vitest run test/hosted-runtime-linq-outbox-regression.test.ts --reporter=dot`:
+  3 tests passed through the real hosted adapter/outbox boundary.
+- `pnpm --filter @murphai/assistant-runtime exec vitest run test/hosted-runtime-callbacks.test.ts --reporter=dot`:
+  215 tests passed.
+- `pnpm --filter @murphai/assistant-engine exec vitest run test/assistant-outbox-runtime.test.ts test/assistant-outbox-retry-policy.test.ts test/assistant-cron-runtime.test.ts --reporter=dot`:
+  306 tests passed.
+- `pnpm --filter @murphai/operator-config typecheck`,
+  `pnpm --filter @murphai/assistant-engine typecheck`, and
+  `pnpm --filter @murphai/assistant-runtime typecheck`: passed.

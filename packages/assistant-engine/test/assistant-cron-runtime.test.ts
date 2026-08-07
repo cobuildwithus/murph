@@ -11209,76 +11209,17 @@ describe('assistant cron runtime orchestration', () => {
   it('consumes a finite required-send occurrence after confirmed Linq attachment PUT exhaustion', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-06T20:00:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-required-linq-attachment-exhausted-',
-    )
-    const canonicalJob = await addAssistantCronJob({
-      channel: 'linq',
-      deliveryTarget: 'linq_chat_required_attachment_exhausted',
-      name: 'required private attachment delivery',
-      now: new Date('2026-08-06T19:00:00.000Z'),
-      prompt: 'Deliver the private generated image once.',
-      schedule: {
-        at: '2026-08-06T20:00:00.000Z',
-        kind: 'at',
-      },
-      vault: vaultRoot,
+    const fixture = await createRequiredLinqAttachmentDeliveryFixture({
+      intentId: 'outbox_required_linq_attachment_exhausted',
+      prefix: 'assistant-cron-runtime-required-linq-attachment-exhausted-',
+      target: 'linq_chat_required_attachment_exhausted',
     })
-    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
-    if (!automation) {
-      throw new Error('Expected the required-delivery automation fixture.')
-    }
-    automation.activeUntil = '2026-08-13T20:00:00.000Z'
-    automation.tags.push('system:assistant-require-send')
-
-    const imageBytes = new Uint8Array([51, 52, 53, 54])
-    const intent = assistantOutboxIntentSchema.parse({
-      ...buildTestLinqOutboxIntent({
-        createdAt: '2026-08-06T20:00:00.000Z',
-        intentId: 'outbox_required_linq_attachment_exhausted',
-        message: 'Private generated image',
-      }),
-      explicitTarget: 'linq_chat_required_attachment_exhausted',
-      media: [{
-        alt: 'Private generated image',
-        contentType: 'image/png',
-        filename: 'required-generated.png',
-        kind: 'vault_image',
-        ref: 'raw/captures/required-generated.png',
-        sha256: 'e'.repeat(64),
-        sizeBytes: imageBytes.byteLength,
-        source: 'gpt-image-2',
-      }],
-      threadId: 'linq_chat_required_attachment_exhausted',
-    })
-    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
-      onProviderRequestStarted?: () => Promise<void> | void
-    }) => {
-      await input.onProviderRequestStarted?.()
-      await saveAssistantOutboxIntent(vaultRoot, intent)
-      return {
-        decision: {
-          kind: 'send_message' as const,
-          privateSummary: 'Queued the private generated image.',
-          text: intent.message,
-        },
-        deliveryOutcome: {
-          kind: 'queued' as const,
-          error: null,
-          intentId: intent.intentId,
-          session: { sessionId: intent.sessionId },
-        },
-        response: intent.message,
-        session: { sessionId: intent.sessionId },
-      }
-    })
-
-    await expect(processDueAssistantCronJobsLocal({
-      deliveryDispatchMode: 'queue-only',
-      limit: 1,
-      vault: vaultRoot,
-    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
-
+    const {
+      canonicalJob,
+      imageBytes,
+      intent,
+      vaultRoot,
+    } = fixture
     const reservationFetch = vi.fn<LinqFetch>(async (url) => {
       if (!url.endsWith('/attachments')) {
         throw new Error(`Unexpected Linq provider request: ${url}`)
@@ -11314,13 +11255,6 @@ describe('assistant cron runtime orchestration', () => {
         publicFetchImplementation: uploadFetch,
       }),
     )
-    const actualChannelAdapters = await vi.importActual<
-      typeof import('../src/assistant/channel-adapters.ts')
-    >('../src/assistant/channel-adapters.ts')
-    cronMocks.getAssistantChannelAdapter.mockImplementation(
-      actualChannelAdapters.getAssistantChannelAdapter,
-    )
-
     const failed = await dispatchAssistantOutboxIntent({
       dependencies: { sendLinq },
       force: true,
@@ -11364,6 +11298,239 @@ describe('assistant cron runtime orchestration', () => {
     ])
     expect(reservationFetch).toHaveBeenCalledTimes(1)
     expect(uploadFetch).toHaveBeenCalledTimes(3)
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a finite required-send occurrence on the same intent after provider-skipped reservation entry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-06T20:00:00.000Z'))
+    const fixture = await createRequiredLinqAttachmentDeliveryFixture({
+      intentId: 'outbox_required_linq_attachment_provider_skipped',
+      prefix: 'assistant-cron-runtime-required-linq-provider-skipped-',
+      target: 'linq_chat_required_attachment_provider_skipped',
+    })
+    let providerEntryAllowed = false
+    const linqNetworkFetch = vi.fn<LinqFetch>(async (url) => {
+      if (url.endsWith('/attachments')) {
+        return new Response(JSON.stringify({
+          attachment_id: 'attachment_required_provider_skipped',
+          expires_at: '2026-08-06T21:00:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'image/png',
+          },
+          upload_url: 'https://uploads.example.test/private/required-provider-skipped',
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.endsWith(`/chats/${fixture.target}/messages`)) {
+        return new Response(JSON.stringify({
+          message: { id: 'linq_required_provider_skipped_sent' },
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected Linq provider request: ${url}`)
+    })
+    const hostedBoundaryFetch = vi.fn<LinqFetch>(async (url, init) => {
+      if (!providerEntryAllowed) {
+        throw Object.assign(new Error('foreground work owns provider entry'), {
+          assistantDeliveryFailureClass: 'transient' as const,
+          assistantDeliveryResumeTrigger: 'fresh_foreground_input' as const,
+          deliveryMayHaveSucceeded: false as const,
+          retryable: true as const,
+        })
+      }
+      return await linqNetworkFetch(url, init)
+    })
+    const uploadFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>(
+      async (request) => await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: hostedBoundaryFetch,
+        loadVaultImage: async () => fixture.imageBytes,
+        publicFetchImplementation: uploadFetch,
+      }),
+    )
+
+    const deferred = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: fixture.intent.intentId,
+      now: new Date('2026-08-06T20:00:00.000Z'),
+      vault: fixture.vaultRoot,
+    })
+
+    expect(deferred.intent).toMatchObject({
+      intentId: fixture.intent.intentId,
+      status: 'retryable',
+    })
+    expect(findCanonicalAutomation(
+      fixture.vaultRoot,
+      fixture.canonicalJob.jobId,
+    )?.status).toBe('active')
+    expect(hostedBoundaryFetch).toHaveBeenCalledTimes(1)
+    expect(linqNetworkFetch).not.toHaveBeenCalled()
+    expect(uploadFetch).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+    await expect(listAssistantOutboxIntents(fixture.vaultRoot)).resolves.toMatchObject([
+      { intentId: fixture.intent.intentId },
+    ])
+
+    vi.setSystemTime(new Date('2026-08-06T20:00:30.000Z'))
+    await processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      limit: 1,
+      vault: fixture.vaultRoot,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+    expect(findCanonicalAutomation(
+      fixture.vaultRoot,
+      fixture.canonicalJob.jobId,
+    )?.status).toBe('active')
+    await expect(listAssistantOutboxIntents(fixture.vaultRoot)).resolves.toEqual([
+      expect.objectContaining({
+        intentId: fixture.intent.intentId,
+        status: 'retryable',
+      }),
+    ])
+
+    providerEntryAllowed = true
+    const sent = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: fixture.intent.intentId,
+      now: new Date('2026-08-06T20:00:30.000Z'),
+      vault: fixture.vaultRoot,
+    })
+
+    expect(sent.intent).toMatchObject({
+      delivery: {
+        providerMessageId: 'linq_required_provider_skipped_sent',
+      },
+      intentId: fixture.intent.intentId,
+      status: 'sent',
+    })
+    expect(findCanonicalAutomation(
+      fixture.vaultRoot,
+      fixture.canonicalJob.jobId,
+    )?.status).toBe('archived')
+    await expect(listAssistantCronJobs(fixture.vaultRoot)).resolves.toEqual([])
+    expect(hostedBoundaryFetch).toHaveBeenCalledTimes(3)
+    expect(linqNetworkFetch).toHaveBeenCalledTimes(2)
+    expect(uploadFetch).toHaveBeenCalledTimes(1)
+    expect(sendLinq).toHaveBeenCalledTimes(2)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+
+    vi.setSystemTime(new Date('2026-08-06T20:01:00.000Z'))
+    await expect(processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      limit: 1,
+      vault: fixture.vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+    await expect(listAssistantOutboxIntents(fixture.vaultRoot)).resolves.toHaveLength(1)
+  })
+
+  it.each([
+    {
+      label: 'missing required fields',
+      payload: {
+        attachment_id: 'attachment_required_missing_upload_url',
+        expires_at: '2026-08-06T21:00:00.000Z',
+        http_method: 'PUT',
+        required_headers: {
+          'content-type': 'image/png',
+        },
+      },
+    },
+    {
+      label: 'an unsupported upload method',
+      payload: {
+        attachment_id: 'attachment_required_unsupported_method',
+        expires_at: '2026-08-06T21:00:00.000Z',
+        http_method: 'POST',
+        required_headers: {
+          'content-type': 'image/png',
+        },
+        upload_url: 'https://uploads.example.test/private/required-unsupported-method',
+      },
+    },
+  ])('consumes a finite required-send occurrence after a 2xx reservation with $label', async ({
+    label,
+    payload,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-06T20:00:00.000Z'))
+    const fixture = await createRequiredLinqAttachmentDeliveryFixture({
+      intentId: `outbox_required_linq_attachment_${label.replaceAll(' ', '_')}`,
+      prefix: `assistant-cron-runtime-required-linq-${label.replaceAll(' ', '-')}-`,
+      target: 'linq_chat_required_attachment_unusable_reservation',
+    })
+    const reservationFetch = vi.fn<LinqFetch>(async (url) => {
+      if (!url.endsWith('/attachments')) {
+        throw new Error(`Unexpected Linq provider request: ${url}`)
+      }
+      return new Response(JSON.stringify(payload), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    const uploadFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>(
+      async (request) => await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: reservationFetch,
+        loadVaultImage: async () => fixture.imageBytes,
+        publicFetchImplementation: uploadFetch,
+      }),
+    )
+
+    const abandoned = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: fixture.intent.intentId,
+      now: new Date('2026-08-06T20:00:00.000Z'),
+      vault: fixture.vaultRoot,
+    })
+
+    expect(abandoned.intent).toMatchObject({
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      },
+      nextAttemptAt: null,
+      status: 'abandoned',
+    })
+    expect(reservationFetch).toHaveBeenCalledTimes(1)
+    expect(uploadFetch).not.toHaveBeenCalled()
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+    expect(findCanonicalAutomation(
+      fixture.vaultRoot,
+      fixture.canonicalJob.jobId,
+    )?.status).toBe('archived')
+    await expect(listAssistantCronJobs(fixture.vaultRoot)).resolves.toEqual([])
+
+    vi.setSystemTime(new Date('2026-08-06T20:00:30.000Z'))
+    await expect(processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      limit: 1,
+      vault: fixture.vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 })
+
+    const intents = await listAssistantOutboxIntents(fixture.vaultRoot)
+    expect(intents.map((candidate) => candidate.intentId)).toEqual([
+      fixture.intent.intentId,
+    ])
+    expect(reservationFetch).toHaveBeenCalledTimes(1)
+    expect(uploadFetch).not.toHaveBeenCalled()
     expect(sendLinq).toHaveBeenCalledTimes(1)
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
   })
@@ -12388,6 +12555,101 @@ function buildTestLinqOutboxIntent(input: {
     deliveryTransportIdempotent: false,
     lastError: null,
   })
+}
+
+async function createRequiredLinqAttachmentDeliveryFixture(input: {
+  intentId: string
+  prefix: string
+  target: string
+}): Promise<{
+  canonicalJob: Awaited<ReturnType<typeof addAssistantCronJob>>
+  imageBytes: Uint8Array
+  intent: AssistantOutboxIntent
+  target: string
+  vaultRoot: string
+}> {
+  const { vaultRoot } = await createRuntimeContext(input.prefix)
+  const canonicalJob = await addAssistantCronJob({
+    channel: 'linq',
+    deliveryTarget: input.target,
+    name: 'required private attachment delivery',
+    now: new Date('2026-08-06T19:00:00.000Z'),
+    prompt: 'Deliver the private generated image once.',
+    schedule: {
+      at: '2026-08-06T20:00:00.000Z',
+      kind: 'at',
+    },
+    vault: vaultRoot,
+  })
+  const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+  if (!automation) {
+    throw new Error('Expected the required-delivery automation fixture.')
+  }
+  automation.activeUntil = '2026-08-13T20:00:00.000Z'
+  automation.tags.push('system:assistant-require-send')
+
+  const imageBytes = new Uint8Array([81, 82, 83, 84])
+  const intent = assistantOutboxIntentSchema.parse({
+    ...buildTestLinqOutboxIntent({
+      createdAt: '2026-08-06T20:00:00.000Z',
+      intentId: input.intentId,
+      message: 'Private generated image',
+    }),
+    explicitTarget: input.target,
+    media: [{
+      alt: 'Private generated image',
+      contentType: 'image/png',
+      filename: 'required-generated.png',
+      kind: 'vault_image',
+      ref: 'raw/captures/required-generated.png',
+      sha256: createHash('sha256').update(imageBytes).digest('hex'),
+      sizeBytes: imageBytes.byteLength,
+      source: 'gpt-image-2',
+    }],
+    threadId: input.target,
+  })
+  cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (request: {
+    onProviderRequestStarted?: () => Promise<void> | void
+  }) => {
+    await request.onProviderRequestStarted?.()
+    await saveAssistantOutboxIntent(vaultRoot, intent)
+    return {
+      decision: {
+        kind: 'send_message' as const,
+        privateSummary: 'Queued the private generated image.',
+        text: intent.message,
+      },
+      deliveryOutcome: {
+        kind: 'queued' as const,
+        error: null,
+        intentId: intent.intentId,
+        session: { sessionId: intent.sessionId },
+      },
+      response: intent.message,
+      session: { sessionId: intent.sessionId },
+    }
+  })
+
+  await expect(processDueAssistantCronJobsLocal({
+    deliveryDispatchMode: 'queue-only',
+    limit: 1,
+    vault: vaultRoot,
+  })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+
+  const actualChannelAdapters = await vi.importActual<
+    typeof import('../src/assistant/channel-adapters.ts')
+  >('../src/assistant/channel-adapters.ts')
+  cronMocks.getAssistantChannelAdapter.mockImplementation(
+    actualChannelAdapters.getAssistantChannelAdapter,
+  )
+
+  return {
+    canonicalJob,
+    imageBytes,
+    intent,
+    target: input.target,
+    vaultRoot,
+  }
 }
 
 async function updateLocalJob(

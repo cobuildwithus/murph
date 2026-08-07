@@ -531,6 +531,9 @@ function isLinqAttachmentReservationAmbiguity(input: {
 
   const errorRecord = readRecord(input.error)
   const context = readRecord(errorRecord?.context)
+  if (errorRecord?.deliveryMayHaveSucceeded === false) {
+    return false
+  }
   if (
     readNonEmptyString(errorRecord?.code) !== 'LINQ_API_REQUEST_FAILED' ||
     readNonEmptyString(context?.method) !== 'POST' ||
@@ -538,18 +541,26 @@ function isLinqAttachmentReservationAmbiguity(input: {
   ) {
     return false
   }
+  if (errorRecord?.deliveryMayHaveSucceeded === true) {
+    return true
+  }
 
   const failureStage = readNonEmptyString(context?.failureStage)
   if (failureStage === 'transport') {
     return true
   }
 
-  // The reservation POST has no idempotency key. A timeout or server-side
-  // failure response cannot prove that Linq did not create the reservation.
+  // The reservation POST has no idempotency key. A successful but unusable
+  // response, timeout, or server-side failure cannot prove that Linq did not
+  // create the reservation.
   const status = context?.status
   return failureStage === 'http' &&
     typeof status === 'number' &&
-    (status === 408 || (status >= 500 && status <= 599))
+    (
+      (status >= 200 && status <= 299) ||
+      status === 408 ||
+      (status >= 500 && status <= 599)
+    )
 }
 
 function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
