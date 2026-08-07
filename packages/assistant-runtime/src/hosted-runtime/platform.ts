@@ -60,9 +60,7 @@ import type {
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
   assistantResponseMediaSchema,
-} from "@murphai/operator-config/assistant-cli-contracts";
-import type {
-  AssistantResponseMedia,
+  type AssistantResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AssistantResponseCard,

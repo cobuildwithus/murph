@@ -17,19 +17,11 @@ import {
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
-import type {
-  AssistantOutboxIntent,
-} from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import {
-  buildGroupNewsletterAutomationSaveRequest,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-  type AssistantAutomationOperationScope,
-} from "@murphai/assistant-engine";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -226,14 +218,18 @@ import {
   upsertAutomation,
 } from "@murphai/core";
 import {
+  buildGroupNewsletterAutomationSaveRequest,
+  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
   markAssistantContextSnapshotDirty,
   readAssistantContextSnapshotState,
   saveAssistantAutomationState,
   saveAssistantSession,
   upsertAssistantInputEvent,
+  type AssistantAutomationOperationScope,
 } from "@murphai/assistant-engine";
 import {
   parseAssistantSessionRecord,
+  type AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   runHostedWorkspaceAssistantPhase,

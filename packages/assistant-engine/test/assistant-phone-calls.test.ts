@@ -15,14 +15,12 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
-import type {
-  AssistantHostedToolContext,
-  AssistantHostedScheduledPhoneCallScope,
-  AssistantHostedToolRequestKeyScope,
-} from "../src/assistant/hosted-tool-context.js";
 import {
   resolveAssistantHostedScheduledInvocationScope,
   resolveAssistantHostedScheduledPhoneCallScope,
+  type AssistantHostedToolContext,
+  type AssistantHostedScheduledPhoneCallScope,
+  type AssistantHostedToolRequestKeyScope,
 } from "../src/assistant/hosted-tool-context.js";
 import type {
   AssistantAcceptedMessageTargetAuthorizer,

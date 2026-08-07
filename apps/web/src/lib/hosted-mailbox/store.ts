@@ -8,22 +8,20 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  type HostedMailboxFetchCursorMode,
+  type HostedMailboxItem,
+  type HostedMailboxKind,
+  type HostedMailboxLane,
+  type HostedMailboxLaneConsumed,
+  type HostedMailboxLaneHighWater,
+  type HostedMailboxPayload,
+  type HostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedMailboxFetchCursorMode,
-  HostedMailboxItem,
-  HostedMailboxKind,
-  HostedMailboxLane,
-  HostedMailboxLaneConsumed,
-  HostedMailboxLaneHighWater,
-  HostedMailboxPayload,
-  HostedMailboxPayloadFetchResponse,
-} from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedExecutionConversationMessageWake,
   HostedExecutionEnvironmentVoiceCapturedWake,
