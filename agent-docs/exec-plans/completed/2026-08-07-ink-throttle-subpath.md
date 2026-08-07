@@ -1,6 +1,6 @@
 # ink-throttle-subpath
 
-Status: active
+Status: completed
 Created: 2026-08-07
 Updated: 2026-08-07
 
@@ -72,8 +72,8 @@ Updated: 2026-08-07
 4. [complete] Run focused tests, package coverage, typecheck/build, dependency
    guards, frozen install, rendered-output comparison, and before/after
    benchmarks.
-5. [in progress] Push, open the PR, and complete specialist review plus CI.
-6. [pending] Close this plan through the final scoped commit and prove current
+5. [complete] Push, open the PR, and complete specialist review plus CI.
+6. [complete] Close this plan through the final scoped commit and prove current
    base mergeability.
 
 ## Decisions
@@ -142,7 +142,20 @@ Updated: 2026-08-07
   probe budget allowed final artifact inspection, then was restored without a
   commit. This pre-existing 12,461-byte current-main overage is unrelated and
   is not folded into this dependency patch.
+- Final ReviewGPT round 2 passed with no findings against exact pushed head
+  `34ce8bb160af10d2faa8d931bfd76a0f1506e435` after an approximately 18-minute
+  correction audit. The guarded packet confirmed correction scope, same-thread
+  context, first/previous/context-anchor ancestry, and model slug
+  `gpt-5-6-pro`. The earlier malformed retry omitted required round environment
+  metadata and was correctly discarded as `INVALID` before substantive review.
+- Parent final review found no additional issue.
+- Exact-head GitHub release/build/typecheck, app verification, CLI host matrix,
+  package coverage, bundle closure, runner permission, frontend, artifact, and
+  hermetic billing checks passed. The live Stripe job was cancelled before
+  meaningful execution by the repository-wide shared concurrency lane; rerun
+  it sequentially on the final docs-only closure head.
 - In 41 alternating fresh-process samples, the compatibility barrel measured
   90.585 ms p50 versus 6.661 ms for the throttle subpath. Full Ink import
   measured 222.809 ms p50 unpatched versus 143.184 ms patched: -79.625 ms and
   -35.74%. These measurements apply only to local CLI first rendering.
+Completed: 2026-08-07
