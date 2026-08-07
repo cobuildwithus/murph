@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { eventSourceSchema, normalizeStrictIsoTimestamp, type EventSource } from "@murphai/contracts";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 const MEDIA_TYPES: ReadonlyMap<string, string> = new Map([
   [".csv", "text/csv"],
