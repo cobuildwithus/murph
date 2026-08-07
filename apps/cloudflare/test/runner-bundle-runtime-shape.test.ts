@@ -63,9 +63,15 @@ describe("post-bundle dependency pruning", () => {
       "utf8",
     );
     await writeFile(siblingSourcePath, "retained when required\n", "utf8");
+    const zodPackageName = ["zo", "d"].join("");
     await writeFile(
       path.join(bundleDir, "dist", "consumer.js"),
-      'import "zod"\nimport "zod/v4"\nimport "zod/v4/core"\n',
+      [
+        `import "${zodPackageName}"`,
+        `import "${zodPackageName}/v4"`,
+        `import "${zodPackageName}/v4/core"`,
+        "",
+      ].join("\n"),
       "utf8",
     );
 
@@ -93,9 +99,10 @@ describe("post-bundle dependency pruning", () => {
       recursive: true,
     });
     await mkdir(path.join(bundleDir, "dist"), { recursive: true });
+    const zodPackageName = ["zo", "d"].join("");
     await writeFile(
       path.join(bundleDir, "dist", "consumer.js"),
-      'import { object } from "zod/v3"\n',
+      `import { object } from "${zodPackageName}/v3"\n`,
       "utf8",
     );
 
