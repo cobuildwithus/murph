@@ -134,7 +134,7 @@ test("lab chart keeps tiny values precise without adding a nested keyboard stop"
   expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("0.0015 mg/L");
 });
 
-test("the latest two-sided range expands the scale and separates in-range from review regions", () => {
+test("the latest two-sided lab range expands the scale and separates in-range from review regions", () => {
   const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "HbA1c",
     points: [
@@ -155,6 +155,14 @@ test("the latest two-sided range expands the scale and separates in-range from r
     "HbA1c results over time; latest lab range 4 to 5.6% from Example Lab",
   );
   expect(captured.referenceLines.map((line) => line.y)).toEqual([4, 5.6]);
+  for (const line of captured.referenceLines) {
+    expect(line).toMatchObject({
+      ifOverflow: "hidden",
+      stroke: "var(--color-value)",
+      strokeDasharray: "4 4",
+      strokeOpacity: 0.5,
+    });
+  }
   expect(captured.referenceAreas).toHaveLength(3);
   expect(captured.referenceAreas[0]).toMatchObject({
     fill: "var(--destructive)",
@@ -188,15 +196,11 @@ test("the latest two-sided range expands the scale and separates in-range from r
   expect(minimum(5.6)).toBe(4);
   expect(maximum(5.8)).toBe(5.8);
 
-  for (const line of captured.referenceLines) {
-    expect(line).toMatchObject({ ifOverflow: "hidden" });
-  }
-
   const tooltip = captured.tooltipFormatter?.(5.8);
   expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("5.8%");
 });
 
-test("a wide two-sided range stays fully visible around a single in-range result", () => {
+test("a wide two-sided lab range stays fully visible around a single in-range result", () => {
   renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "Example marker",
     points: [
@@ -220,7 +224,7 @@ test("a wide two-sided range stays fully visible around a single in-range result
   ]));
 });
 
-test("an upper-only range shades the accepted side below its dashed limit", () => {
+test("an upper-only lab range shades the accepted side below its dashed limit", () => {
   const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "LDL cholesterol",
     points: [
@@ -234,7 +238,7 @@ test("an upper-only range shades the accepted side below its dashed limit", () =
 
   expect(markup).toContain("Latest lab range");
   expect(markup).toContain("Up to 99 mg/dL");
-  expect(markup).toContain("border-dashed");
+  expect(markup).toContain("border-primary/50");
   expect(captured.referenceLines.map((line) => line.y)).toEqual([99]);
   expect(captured.referenceAreas).toHaveLength(2);
   expect(captured.referenceAreas[0]).toMatchObject({
@@ -247,7 +251,7 @@ test("an upper-only range shades the accepted side below its dashed limit", () =
   });
 });
 
-test("a fallback bound uses a distinct general-reference label", () => {
+test("a published comparator stays neutral while keeping its bound visible", () => {
   const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "HbA1c",
     points: [
@@ -256,18 +260,28 @@ test("a fallback bound uses a distinct general-reference label", () => {
     ],
     referenceRange: { high: 5.7, low: null },
     referenceRangeLabel: "<5.7%",
-    referenceRangeSourceLabel: "Reviewed source",
-    referenceRangeTitle: "General reference",
+    referenceRangeSourceLabel: "Reviewed source · not the reporting lab's range",
+    referenceRangeTitle: "Published adult comparator",
     unit: "percent",
   }));
 
-  expect(markup).toContain("General reference");
+  expect(markup).toContain("Published adult comparator");
   expect(markup).toContain("Reviewed source");
   expect(markup).not.toContain("Latest lab range");
+  expect(markup).toContain("border-muted-foreground/40");
+  expect(markup).not.toContain("bg-primary/10");
   expect(captured.chartAriaLabel).toBe(
-    "HbA1c results over time; general reference <5.7% from Reviewed source",
+    "HbA1c results over time; published adult comparator <5.7% from Reviewed source · not the reporting lab's range",
   );
-  expect(captured.referenceLines.map((line) => line.y)).toEqual([5.7]);
+  expect(captured.referenceAreas).toHaveLength(0);
+  expect(captured.referenceLines).toHaveLength(1);
+  expect(captured.referenceLines[0]).toMatchObject({
+    ifOverflow: "hidden",
+    stroke: "var(--muted-foreground)",
+    strokeDasharray: "4 4",
+    strokeOpacity: 0.45,
+    y: 5.7,
+  });
   const [minimum, maximum] = captured.yAxisDomain as [
     (value: number) => number,
     (value: number) => number,
@@ -276,7 +290,7 @@ test("a fallback bound uses a distinct general-reference label", () => {
   expect(maximum(5)).toBe(5.7);
 });
 
-test("a lower-only range shades the accepted side above its dashed limit", () => {
+test("a lower-only lab range shades the accepted side above its dashed limit", () => {
   renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "eGFR",
     points: [
@@ -285,7 +299,6 @@ test("a lower-only range shades the accepted side above its dashed limit", () =>
     ],
     referenceRange: { high: null, low: 60 },
     referenceRangeLabel: ">=60 mL/min/1.73m^2",
-    referenceRangeTitle: "General reference",
     unit: "mL/min/1.73m^2",
   }));
 
@@ -307,14 +320,17 @@ test("a lower-only range shades the accepted side above its dashed limit", () =>
   expect(maximum(102)).toBe(102);
 });
 
-test("an inverted reference range is omitted instead of shading a misleading interval", () => {
+test.each([
+  { high: 6, label: "inverted", low: 20 },
+  { high: 10, label: "zero-width", low: 10 },
+])("a $label two-sided range is omitted instead of showing misleading bands", ({ high, low }) => {
   renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "Invalid range",
     points: [
       { date: "2026-06-14", id: "p1", value: 15 },
     ],
-    referenceRange: { high: 6, low: 20 },
-    referenceRangeLabel: "20 to 6 mg/dL",
+    referenceRange: { high, low },
+    referenceRangeLabel: `${low} to ${high} mg/dL`,
     unit: "mg/dL",
   }));
 
