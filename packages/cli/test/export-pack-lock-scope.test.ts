@@ -18,16 +18,33 @@ import { materializeExportPack } from '@murphai/vault-usecases/helpers'
 import { afterEach, test, vi } from 'vitest'
 
 const {
+  directoriesSharePhysicalIdentityHook,
   loadQueryRuntimeMock,
   materializeExportPackMock,
   readVaultTolerantMock,
   resolveVaultRelativePathHook,
+  writeFileHook,
 } = vi.hoisted(() => ({
+  directoriesSharePhysicalIdentityHook: vi.fn(),
   loadQueryRuntimeMock: vi.fn(),
   materializeExportPackMock: vi.fn(),
   readVaultTolerantMock: vi.fn(),
   resolveVaultRelativePathHook: vi.fn(),
+  writeFileHook: vi.fn(),
 }))
+
+vi.mock('node:fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>(
+    'node:fs/promises',
+  )
+  return {
+    ...actual,
+    async writeFile(...args: Parameters<typeof actual.writeFile>) {
+      await writeFileHook(...args)
+      return await actual.writeFile(...args)
+    },
+  }
+})
 
 vi.mock('@murphai/vault-usecases/runtime', async () => {
   const actual = await vi.importActual<
@@ -45,6 +62,13 @@ vi.mock('@murphai/vault-usecases/helpers', async () => {
   >('@murphai/vault-usecases/helpers')
   return {
     ...actual,
+    async directoriesSharePhysicalIdentity(
+      ...args: Parameters<typeof actual.directoriesSharePhysicalIdentity>
+    ) {
+      const result = await actual.directoriesSharePhysicalIdentity(...args)
+      await directoriesSharePhysicalIdentityHook(...args)
+      return result
+    },
     async materializeExportPack(
       ...args: Parameters<typeof actual.materializeExportPack>
     ) {
@@ -60,7 +84,10 @@ vi.mock('@murphai/vault-usecases/helpers', async () => {
   }
 })
 
-import { materializeStoredExportPack } from '../src/commands/export-intake-read-helpers.js'
+import {
+  exportPackManifestSchema,
+  materializeStoredExportPack,
+} from '../src/commands/export-intake-read-helpers.js'
 
 loadQueryRuntimeMock.mockResolvedValue({
   buildExportPack,
@@ -68,9 +95,11 @@ loadQueryRuntimeMock.mockResolvedValue({
 })
 
 afterEach(() => {
+  directoriesSharePhysicalIdentityHook.mockReset()
   materializeExportPackMock.mockClear()
   readVaultTolerantMock.mockReset()
   resolveVaultRelativePathHook.mockReset()
+  writeFileHook.mockReset()
 })
 
 async function within<T>(promise: Promise<T>, label: string): Promise<T> {
@@ -88,6 +117,118 @@ async function within<T>(promise: Promise<T>, label: string): Promise<T> {
     }
   }
 }
+
+test.sequential(
+  'external materialization waits out a manifest-first canonical rewrite',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-writer-'))
+    const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-lock-output-'))
+    const aliasParent = `${outRoot}-alias-parent`
+    const aliasOut = path.join(aliasParent, path.basename(outRoot))
+    let releaseWriter!: () => void
+    const writerRelease = new Promise<void>((resolve) => {
+      releaseWriter = resolve
+    })
+    let reportWriterPaused!: () => void
+    const writerPaused = new Promise<void>((resolve) => {
+      reportWriterPaused = resolve
+    })
+    let reportExternalClassified!: () => void
+    const externalClassified = new Promise<void>((resolve) => {
+      reportExternalClassified = resolve
+    })
+
+    try {
+      await initializeVault({ vaultRoot })
+      await symlink(path.dirname(outRoot), aliasParent, 'dir')
+      const pack = buildExportPack(await readVault(vaultRoot), {
+        packId: 'external-manifest-first-pack',
+        generatedAt: '2026-03-13T12:00:00.000Z',
+      })
+      await materializeExportPack(vaultRoot, pack.files)
+      const manifestFile = pack.files.find((file) => file.path.endsWith('/manifest.json'))
+      assert.ok(manifestFile)
+      const parsedManifest = exportPackManifestSchema.parse(
+        JSON.parse(manifestFile.contents),
+      )
+      const newerFiles = pack.files.map((file) => {
+        if (file.path === manifestFile.path) {
+          return {
+            ...file,
+            contents: JSON.stringify({
+              ...parsedManifest,
+              generatedAt: '2026-03-14T12:00:00.000Z',
+            }),
+          }
+        }
+        if (file.path.endsWith('/question-pack.json')) {
+          return { ...file, contents: `${file.contents}\n${' '.repeat(2 * 1024 * 1024)}` }
+        }
+        return { ...file, contents: `${file.contents}\n` }
+      })
+      const canonicalPackRoot = path.join(
+        vaultRoot,
+        `exports/packs/${pack.packId}`,
+      )
+      let paused = false
+      writeFileHook.mockImplementation(async (filePath) => {
+        const candidate = String(filePath)
+        if (
+          !paused
+          && candidate.startsWith(`${canonicalPackRoot}${path.sep}`)
+          && path.basename(candidate).startsWith('.question-pack.json.')
+          && candidate.endsWith('.tmp')
+        ) {
+          paused = true
+          reportWriterPaused()
+          await writerRelease
+        }
+      })
+
+      const writer = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+        await materializeExportPack(vaultRoot, newerFiles)
+      })
+      await within(writerPaused, 'canonical writer did not pause after manifest publish')
+      let externalSnapshotStarted = false
+      resolveVaultRelativePathHook.mockImplementation(async (_vault, relativePath) => {
+        if (relativePath === manifestFile.path) {
+          externalSnapshotStarted = true
+        }
+      })
+      directoriesSharePhysicalIdentityHook.mockImplementation(async (left, right) => {
+        if (left === vaultRoot && right === aliasOut) {
+          reportExternalClassified()
+        }
+      })
+      const external = materializeStoredExportPack({
+        out: aliasOut,
+        packId: pack.packId,
+        vault: vaultRoot,
+      })
+      await within(externalClassified, 'external output identity was not classified')
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      assert.equal(externalSnapshotStarted, false)
+
+      releaseWriter()
+      await writer
+      const result = await external
+
+      assert.equal(result.rebuilt, false)
+      assert.equal(externalSnapshotStarted, true)
+      for (const file of newerFiles) {
+        assert.equal(
+          await readFile(path.join(aliasOut, file.path), 'utf8'),
+          file.contents,
+        )
+      }
+    } finally {
+      releaseWriter()
+      await rm(aliasParent, { force: true })
+      await rm(vaultRoot, { force: true, recursive: true })
+      await rm(outRoot, { force: true, recursive: true })
+    }
+  },
+)
 
 test.sequential(
   'complete external export-pack reads do not hold the assistant runtime lock',

@@ -100,8 +100,10 @@ Updated: 2026-08-07
     publication during unlocked reconstruction.
 12. [completed] Resolve final ReviewGPT round 7 same-manifest completion and
     case-only active-file ownership findings.
-13. [in progress] Resolve final ReviewGPT round 8 case-aware outbox creation
-    and complete external stored-pack lock-scope findings; then push the exact
+13. [completed] Resolve final ReviewGPT round 8 case-aware outbox creation and
+    complete external stored-pack lock-scope findings.
+14. [in progress] Resolve final ReviewGPT round 9 intermediate-generation
+    admission during complete external stored-pack reads; then push the exact
     remediation head and complete final ReviewGPT plus exact-head CI.
 
 ## Verification
@@ -136,5 +138,8 @@ Updated: 2026-08-07
   vault's case policy after a concurrent deletion wins the shared lock.
 - Complete external stored-pack reads do not hold the assistant runtime lock,
   reject a concurrent canonical change, and leave the destination untouched.
-- Exact-head CI passed at the round 8 candidate head.
-- Pending final round 9 ReviewGPT and exact-head CI.
+- Manifest-first canonical publication cannot expose a stable intermediate
+  generation to an external copy because both metadata boundaries share the
+  writer lock while payload transfer remains outside it.
+- Exact-head CI passed at the round 9 candidate head.
+- Pending final round 10 ReviewGPT and exact-head CI.

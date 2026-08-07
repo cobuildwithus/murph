@@ -372,6 +372,18 @@ function serializeDirectoryInventory(entries: readonly Dirent[]) {
     .sort(([left], [right]) => left.localeCompare(right)))
 }
 
+function serializeExpectedExportPackInventory(manifest: ExportPackManifest) {
+  const expectedRoot = packDirectory(manifest.packId)
+  return JSON.stringify(manifest.files
+    .map((file) => {
+      if (path.posix.dirname(file.path) !== expectedRoot) {
+        throw new Error('Stored export-pack manifest contains a nested file.')
+      }
+      return [path.posix.basename(file.path), 'file'] as const
+    })
+    .sort(([left], [right]) => left.localeCompare(right)))
+}
+
 function fileIdentityMatches(left: Stats, right: Stats) {
   return (
     left.dev === right.dev
@@ -408,9 +420,13 @@ async function captureStoredExportPackIdentity(
   if (!root.isDirectory() || root.isSymbolicLink()) {
     throw new Error('Stored export-pack root is not a directory.')
   }
+  const inventory = serializeDirectoryInventory(entries)
+  if (inventory !== serializeExpectedExportPackInventory(manifest)) {
+    throw new Error('Stored export-pack inventory is not exact.')
+  }
   return {
     files,
-    inventory: serializeDirectoryInventory(entries),
+    inventory,
     root,
   }
 }
@@ -441,34 +457,48 @@ async function readStableStoredExportPack(
   vaultRoot: string,
   packId: string,
 ) {
-  const stored = await readStoredExportPackManifest(vaultRoot, packId)
-  let before: Awaited<ReturnType<typeof captureStoredExportPackIdentity>>
-
-  try {
-    before = await captureStoredExportPackIdentity(vaultRoot, stored.manifest)
-  } catch {
-    return { ...stored, files: null }
+  const initial = await withAssistantRuntimeWriteLock(vaultRoot, async () => {
+    const stored = await readStoredExportPackManifest(vaultRoot, packId)
+    try {
+      return {
+        ...stored,
+        identity: await captureStoredExportPackIdentity(vaultRoot, stored.manifest),
+      }
+    } catch {
+      return { ...stored, identity: null }
+    }
+  })
+  if (initial.identity === null) {
+    return { ...initial, files: null }
   }
 
+  let files: Awaited<ReturnType<typeof readStoredExportPackFiles>>
   try {
-    const files = await readStoredExportPackFiles(vaultRoot, stored.manifest)
-    const [current, after] = await Promise.all([
-      readStoredExportPackManifest(vaultRoot, packId),
-      captureStoredExportPackIdentity(vaultRoot, stored.manifest),
-    ])
-    if (
-      current.manifestContents !== stored.manifestContents
-      || !storedExportPackIdentityMatches(before, after)
-    ) {
-      throw exportPackChangedWhileCopying(packId)
-    }
-    return { ...stored, files }
-  } catch (error) {
-    if (error instanceof VaultCliError && error.code === 'export_pack_changed') {
-      throw error
-    }
+    files = await readStoredExportPackFiles(vaultRoot, initial.manifest)
+  } catch {
     throw exportPackChangedWhileCopying(packId)
   }
+
+  await withAssistantRuntimeWriteLock(vaultRoot, async () => {
+    try {
+      const [current, after] = await Promise.all([
+        readStoredExportPackManifest(vaultRoot, packId),
+        captureStoredExportPackIdentity(vaultRoot, initial.manifest),
+      ])
+      if (
+        current.manifestContents !== initial.manifestContents
+        || !storedExportPackIdentityMatches(initial.identity, after)
+      ) {
+        throw exportPackChangedWhileCopying(packId)
+      }
+    } catch (error) {
+      if (error instanceof VaultCliError && error.code === 'export_pack_changed') {
+        throw error
+      }
+      throw exportPackChangedWhileCopying(packId)
+    }
+  })
+  return { ...initial, files }
 }
 
 export async function showStoredExportPack(vaultRoot: string, packId: string) {
