@@ -26,8 +26,11 @@ class CapturingWritable extends Writable {
 }
 
 describe("evaluateHostedLocalStripeCheckoutEnv", () => {
-  it("keeps every fixed usage-credit Price under local Stripe authority", () => {
+  it("keeps every direct plan and fixed usage-credit Price under local Stripe authority", () => {
     expect(HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS).toEqual(expect.arrayContaining([
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MAX_MONTHLY",
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD",
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD",
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD",
@@ -40,6 +43,7 @@ describe("evaluateHostedLocalStripeCheckoutEnv", () => {
       evaluateHostedLocalStripeCheckoutEnv({
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_replace_me",
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_replace_me",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MAX_MONTHLY: "price_replace_me",
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_replace_me",
         STRIPE_SECRET_KEY: "sk_test_replace_me",
       }),
@@ -48,6 +52,7 @@ describe("evaluateHostedLocalStripeCheckoutEnv", () => {
       missingFlatPriceKeys: [
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+        "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MAX_MONTHLY",
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
       ],
       secretMode: "placeholder",
@@ -64,6 +69,7 @@ describe("writeHostedLocalStripeCheckoutDiagnostics", () => {
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge_secretish",
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY:
           "price_family_secretish",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MAX_MONTHLY: "price_max_secretish",
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_secretish",
         STRIPE_SECRET_KEY: "sk_test_secretish",
       },
@@ -71,12 +77,18 @@ describe("writeHostedLocalStripeCheckoutDiagnostics", () => {
       stripeListenerWillCaptureSecret: true,
     });
 
-    expect(diagnostics.configuredPlanLabels).toEqual(["monthly", "edge", "family"]);
+    expect(diagnostics.configuredPlanLabels).toEqual([
+      "monthly",
+      "edge",
+      "max",
+      "family",
+    ]);
     expect(stderrTarget.text()).toContain("Stripe test checkout env ready");
     expect(stderrTarget.text()).toContain("Stripe webhook signing secret will be injected");
     expect(stderrTarget.text()).not.toContain("sk_test_secretish");
     expect(stderrTarget.text()).not.toContain("price_monthly_secretish");
     expect(stderrTarget.text()).not.toContain("price_edge_secretish");
+    expect(stderrTarget.text()).not.toContain("price_max_secretish");
     expect(stderrTarget.text()).not.toContain("price_family_secretish");
   });
 
