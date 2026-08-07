@@ -373,7 +373,10 @@ describe("hosted onboarding stripe billing events", () => {
         stripeSubscriptionId: "sub_loser_123",
       })),
     ).resolves.toMatchObject({
-      cleanupStandardCheckoutStripeSubscriptionId: "sub_loser_123",
+      cleanupStandardCheckout: {
+        checkoutSessionId: "cs_loser_123",
+        subscriptionId: "sub_loser_123",
+      },
       welcomeEmailMemberId: null,
     });
 
@@ -2416,7 +2419,11 @@ function makePreparedStandardCheckoutCompletion(input: {
       stripeSubscriptionIdEncrypted: "encrypted-subscription",
       stripeSubscriptionLookupKey: "subscription-lookup",
     },
-    canonicalSubscription: null,
+    canonicalSubscription: {
+      customer: input.stripeCustomerId,
+      id: input.stripeSubscriptionId,
+      status: "active",
+    } as Stripe.Subscription,
     memberId: "member_123",
     stripeCheckoutEmail: input.stripeCheckoutEmail
       ? {

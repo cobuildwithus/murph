@@ -26,9 +26,10 @@ import {
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
   cleanupHostedFamilySponsoredDirectSubscription,
+  cleanupHostedStandardCheckoutAndRetireAttempt,
   cancelHostedPulseTrialCheckoutLoserSubscription,
   HostedStripeFamilySponsoredCleanupPendingError,
-  type HostedFamilySponsoredCheckoutCleanup,
+  type HostedStripeCheckoutCleanup,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
   prepareHostedStripeCheckoutCompletion,
@@ -82,10 +83,7 @@ import {
   logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
-import {
-  cleanupHostedStandardCheckoutLoser,
-  HostedStripeCheckoutLoserCleanupPendingError,
-} from "./stripe-checkout-loser-cleanup";
+import { HostedStripeCheckoutLoserCleanupPendingError } from "./stripe-checkout-loser-cleanup";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -358,10 +356,10 @@ async function processHostedStripeEventRecord(
 ): Promise<{
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupFamilySponsoredCheckout: HostedFamilySponsoredCheckoutCleanup | null;
+  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId: string | null;
+  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
@@ -898,6 +896,9 @@ async function processClaimedHostedStripeEvent(
     if (result.cleanupFamilySponsoredCheckout && !processingMemberId) {
       throw new Error("Family-sponsored Checkout cleanup requires a direct billing member.");
     }
+    if (result.cleanupStandardCheckout && !processingMemberId) {
+      throw new Error("Standard Checkout cleanup requires a direct billing member.");
+    }
     if (legacyFamilySubscriptionId) {
       await executeHostedLegacySyntheticFamilyCleanup({
         invoice: stripeEvent.type === "invoice.paid"
@@ -954,10 +955,12 @@ async function processClaimedHostedStripeEvent(
         subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
       });
     }
-    if (result.cleanupStandardCheckoutStripeSubscriptionId) {
-      await cleanupHostedStandardCheckoutLoser({
-        stripeSubscriptionId:
-          result.cleanupStandardCheckoutStripeSubscriptionId,
+    if (result.cleanupStandardCheckout && processingMemberId) {
+      await cleanupHostedStandardCheckoutAndRetireAttempt({
+        checkoutSessionId: result.cleanupStandardCheckout.checkoutSessionId,
+        memberId: processingMemberId,
+        prisma,
+        subscriptionId: result.cleanupStandardCheckout.subscriptionId,
       });
     }
     if (result.welcomeEmailMemberId) {
@@ -1706,10 +1709,10 @@ function mapHostedStripeActivationOutcome(
   outcome: {
     activatedMemberId: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
-    cleanupFamilySponsoredCheckout?: HostedFamilySponsoredCheckoutCleanup | null;
+    cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
-    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
+    cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId: string | null;
     runtimeRecheckMemberIds?: string[];
     welcomeEmailMemberId?: string | null;
@@ -1717,10 +1720,10 @@ function mapHostedStripeActivationOutcome(
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupFamilySponsoredCheckout: HostedFamilySponsoredCheckoutCleanup | null;
+  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId: string | null;
+  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
@@ -1735,8 +1738,7 @@ function mapHostedStripeActivationOutcome(
       outcome.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
-    cleanupStandardCheckoutStripeSubscriptionId:
-      outcome.cleanupStandardCheckoutStripeSubscriptionId ?? null,
+    cleanupStandardCheckout: outcome.cleanupStandardCheckout ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     runtimeRecheckMemberIds: outcome.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail: null,
@@ -1748,10 +1750,10 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   outcome: {
     activatedMemberId?: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
-    cleanupFamilySponsoredCheckout?: HostedFamilySponsoredCheckoutCleanup | null;
+    cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
-    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
+    cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId?: string | null;
     runtimeRecheckMemberIds?: string[];
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
@@ -1760,10 +1762,10 @@ function mapHostedStripeSubscriptionUpdateOutcome(
 ): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupFamilySponsoredCheckout: HostedFamilySponsoredCheckoutCleanup | null;
+  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId: string | null;
+  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
@@ -1778,8 +1780,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
       outcome?.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
-    cleanupStandardCheckoutStripeSubscriptionId:
-      outcome?.cleanupStandardCheckoutStripeSubscriptionId ?? null,
+    cleanupStandardCheckout: outcome?.cleanupStandardCheckout ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     runtimeRecheckMemberIds: outcome?.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail:
@@ -1791,10 +1792,10 @@ function mapHostedStripeSubscriptionUpdateOutcome(
 function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupFamilySponsoredCheckout: HostedFamilySponsoredCheckoutCleanup | null;
+  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId: string | null;
+  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
@@ -1806,7 +1807,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     cleanupFamilySponsoredCheckout: null,
     cleanupFamilySponsoredStripeSubscriptionId: null,
     cleanupPulseTrialStripeSubscriptionId: null,
-    cleanupStandardCheckoutStripeSubscriptionId: null,
+    cleanupStandardCheckout: null,
     hostedExecutionEventId: null,
     runtimeRecheckMemberIds: [],
     subscriptionCancellationEmail: null,

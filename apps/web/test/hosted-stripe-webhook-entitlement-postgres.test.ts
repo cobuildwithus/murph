@@ -108,6 +108,9 @@ import {
 import {
   processRecordedHostedStripeWebhookEvent,
 } from "@/src/lib/hosted-onboarding/stripe-webhook-reconciliation";
+import {
+  recordHostedStripeEvent,
+} from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   startHostedStripeHttpFixture,
@@ -383,6 +386,194 @@ describe.skipIf(!runPostgresProof)(
         ]);
       }
     });
+
+    it("refunds a terminal direct Checkout replay before retiring its exact attempt and receipt", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixture = await seedFamilySponsoredDirectCleanupFixture(
+        prisma,
+        { pendingCheckout: true },
+      );
+      const eventId = `evt_family_checkout_partial_${fixture.fixtureId}`;
+      const event = {
+        created: Math.floor(Date.now() / 1_000),
+        data: {
+          object: {
+            customer: fixture.directCustomerId,
+            id: fixture.checkoutSessionId,
+            metadata: {
+              billingPlanCode: "launch_monthly",
+              checkoutAttemptId: fixture.checkoutAttemptId,
+              checkoutIntentHash: fixture.checkoutIntentHash,
+              checkoutOffer: "standard",
+              memberId: fixture.memberId,
+            },
+            object: "checkout.session",
+            status: "complete",
+            subscription: fixture.directSubscriptionId,
+          },
+        },
+        id: eventId,
+        object: "event",
+        type: "checkout.session.completed",
+      } as never;
+      let directStatus: Stripe.Subscription.Status = "active";
+      const directSubscription = () => ({
+        customer: fixture.directCustomerId,
+        id: fixture.directSubscriptionId,
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "standard",
+          memberId: fixture.memberId,
+        },
+        status: directStatus,
+      }) as never;
+      const familySubscription = {
+        customer: fixture.familyCustomerId,
+        id: fixture.familySubscriptionId,
+        metadata: {
+          accountGroupId: fixture.groupId,
+          billingPlanCode: "launch_family_monthly",
+          kind: "hosted_family_plan",
+          ownerMemberId: fixture.ownerMemberId,
+        },
+        status: "active",
+      } as never;
+      const retrieve = vi.fn(async (subscriptionId: string) => {
+        if (subscriptionId === fixture.directSubscriptionId) {
+          return directSubscription();
+        }
+        if (subscriptionId === fixture.familySubscriptionId) {
+          return familySubscription;
+        }
+        throw Object.assign(new Error("Stripe subscription was not found."), {
+          code: "resource_missing",
+        });
+      });
+      const cancel = vi.fn(async () => {
+        directStatus = "canceled";
+        return directSubscription();
+      });
+      const listInvoices = vi.fn()
+        .mockRejectedValueOnce(new Error("Stripe invoice lookup unavailable"))
+        .mockResolvedValue({
+          data: [{
+            amount_due: 5_000,
+            amount_paid: 5_000,
+            amount_remaining: 0,
+            id: `in_family_checkout_partial_${fixture.fixtureId}`,
+            post_payment_credit_notes_amount: 0,
+            pre_payment_credit_notes_amount: 0,
+            starting_balance: 0,
+            status: "paid",
+          }],
+          has_more: false,
+        });
+      const listInvoicePayments = vi.fn(async () => ({
+        data: [{
+          amount_paid: 5_000,
+          amount_requested: 5_000,
+          payment: {
+            payment_intent: {
+              amount_received: 5_000,
+              id: `pi_family_checkout_partial_${fixture.fixtureId}`,
+              status: "succeeded",
+            },
+            type: "payment_intent",
+          },
+        }],
+        has_more: false,
+      }));
+      const listRefunds = vi.fn(async () => ({ data: [], has_more: false }));
+      const createRefund = vi.fn(async () => ({
+        amount: 5_000,
+        id: `re_family_checkout_partial_${fixture.fixtureId}`,
+        status: "succeeded",
+      }));
+      const stripe = {
+        events: { retrieve: vi.fn(async () => event) },
+        invoicePayments: { list: listInvoicePayments },
+        invoices: { list: listInvoices },
+        refunds: { create: createRefund, list: listRefunds },
+        subscriptions: { cancel, retrieve },
+      } as never;
+      const runtimeGlobals = readHostedStripeRuntimeGlobals();
+
+      configureHostedStripeFixtureEnvironment({
+        edgePriceId: `price_edge_${fixture.fixtureId}`,
+        pulsePriceId: `price_pulse_${fixture.fixtureId}`,
+        stripe,
+        webhookSecret: "whsec_family_checkout_partial_fixture",
+      });
+
+      try {
+        await recordHostedStripeEvent({ event, prisma });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId,
+          prisma,
+          timeoutMs: 5_000,
+        })).rejects.toBeDefined();
+
+        expect(directStatus).toBe("canceled");
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(createRefund).not.toHaveBeenCalled();
+        await expect(readStripeReceiptProof({ eventId, prisma }))
+          .resolves.toMatchObject({
+            attemptCount: 1,
+            processedAt: null,
+            status: HostedStripeEventStatus.failed,
+          });
+        await expect(readFamilyCheckoutAttemptProof({
+          memberId: fixture.memberId,
+          prisma,
+        })).resolves.toMatchObject({
+          checkoutAttemptId: fixture.checkoutAttemptId,
+          stripeCheckoutSessionLookupKey: expect.any(String),
+          stripeSubscriptionLookupKey: null,
+        });
+
+        await expect(prisma.$transaction((tx) =>
+          removeHostedFamilyMemberTx({
+            groupId: fixture.groupId,
+            memberId: fixture.memberId,
+            ownerMemberId: fixture.ownerMemberId,
+            tx,
+          }),
+          HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+        )).resolves.toBe(true);
+        await makeStripeReceiptImmediatelyRetryable({ eventId, prisma });
+
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId,
+          prisma,
+          timeoutMs: 5_000,
+        })).resolves.toEqual({ accepted: true, required: false });
+
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(listInvoices).toHaveBeenCalledTimes(2);
+        expect(listInvoicePayments).toHaveBeenCalledOnce();
+        expect(listRefunds).toHaveBeenCalledOnce();
+        expect(createRefund).toHaveBeenCalledOnce();
+        await expect(readStripeReceiptProof({ eventId, prisma }))
+          .resolves.toMatchObject({
+            attemptCount: 2,
+            processedAt: expect.any(Date),
+            status: HostedStripeEventStatus.completed,
+          });
+        await expect(readFamilyCheckoutAttemptProof({
+          memberId: fixture.memberId,
+          prisma,
+        })).resolves.toEqual({
+          checkoutAttemptId: null,
+          stripeCheckoutSessionLookupKey: null,
+          stripeSubscriptionLookupKey: null,
+        });
+      } finally {
+        clearHostedStripeFixtureEnvironment(runtimeGlobals);
+        await prisma.hostedStripeEvent.deleteMany({ where: { eventId } });
+        await deleteFamilyCleanupFixture(prisma, fixture);
+        await prisma.$disconnect();
+      }
+    }, 60_000);
 
     it("holds the Family owner lock through Stripe cleanup and exact local terminalization", async () => {
       const cleanupClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -1952,6 +2143,20 @@ function readStripeReceiptProof(input: {
       status: true,
     },
     where: { eventId: input.eventId },
+  });
+}
+
+function readFamilyCheckoutAttemptProof(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}) {
+  return input.prisma.hostedMemberBillingRef.findUniqueOrThrow({
+    select: {
+      checkoutAttemptId: true,
+      stripeCheckoutSessionLookupKey: true,
+      stripeSubscriptionLookupKey: true,
+    },
+    where: { memberId: input.memberId },
   });
 }
 

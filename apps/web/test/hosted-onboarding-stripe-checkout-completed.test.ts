@@ -707,7 +707,7 @@ describe("applyStripeCheckoutCompleted", () => {
         // The reconciliation owner only starts loser cancel/refund cleanup when
         // this identifier is returned.
         expect(outcome).not.toHaveProperty(
-          "cleanupStandardCheckoutStripeSubscriptionId",
+          "cleanupStandardCheckout",
         );
       }
 
@@ -774,7 +774,10 @@ describe("applyStripeCheckoutCompleted", () => {
       } as never,
       {} as never,
     )).resolves.toMatchObject({
-      cleanupStandardCheckoutStripeSubscriptionId: "sub_different",
+      cleanupStandardCheckout: {
+        checkoutSessionId: "cs_different_after_family",
+        subscriptionId: "sub_different",
+      },
       welcomeEmailMemberId: null,
     });
 
@@ -783,6 +786,48 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_different");
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
+
+  it.each(["canceled", "incomplete_expired"] as const)(
+    "keeps an exact %s direct Checkout on loser cleanup until its attempt can be retired",
+    async (status) => {
+      mocks.retrieveStripeSubscription.mockResolvedValueOnce({
+        customer: "cus_terminal",
+        id: "sub_terminal",
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+        },
+        status,
+      });
+
+      await expect(applyStripeCheckoutCompleted(
+        {
+          created: 1_744_416_000,
+          customer: "cus_terminal",
+          id: "cs_terminal",
+          metadata: {
+            billingPlanCode: "launch_monthly",
+            checkoutAttemptId: "attempt_terminal",
+            checkoutIntentHash: "intent_terminal",
+            checkoutOffer: "standard",
+            memberId: "member_123",
+          },
+          subscription: "sub_terminal",
+        } as never,
+        {} as never,
+      )).resolves.toMatchObject({
+        cleanupStandardCheckout: {
+          checkoutSessionId: "cs_terminal",
+          subscriptionId: "sub_terminal",
+        },
+        welcomeEmailMemberId: null,
+      });
+
+      expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).not.toHaveBeenCalled();
+      expect(mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx).not.toHaveBeenCalled();
+    },
+  );
 
   it("terminalizes the exact direct projection when the sponsored checkout subscription is already absent", async () => {
     mocks.retrieveStripeSubscription.mockRejectedValueOnce({ code: "resource_missing" });
@@ -1103,6 +1148,16 @@ describe("applyStripeCheckoutCompleted", () => {
         stripeSubscriptionId: "sub_current",
       },
     }));
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce({
+      customer: "cus_old",
+      id: "sub_old",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    });
 
     await expect(
       applyStripeCheckoutCompleted(
@@ -1117,7 +1172,10 @@ describe("applyStripeCheckoutCompleted", () => {
       ),
     ).resolves.toMatchObject({
       activatedMemberId: null,
-      cleanupStandardCheckoutStripeSubscriptionId: "sub_old",
+      cleanupStandardCheckout: {
+        checkoutSessionId: "cs_old",
+        subscriptionId: "sub_old",
+      },
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });

@@ -28,14 +28,12 @@ import {
 import {
   applyStripeCheckoutCompleted,
   cleanupHostedFamilySponsoredDirectSubscription,
+  cleanupHostedStandardCheckoutAndRetireAttempt,
   cancelHostedPulseTrialCheckoutLoserSubscription,
-  type HostedFamilySponsoredCheckoutCleanup,
+  type HostedStripeCheckoutCleanup,
   prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeCheckoutCompletion,
 } from "./stripe-billing-events";
-import {
-  cleanupHostedStandardCheckoutLoser,
-} from "./stripe-checkout-loser-cleanup";
 
 export async function reconcileHostedBillingCheckoutSuccess(input: {
   inviteCode: string;
@@ -104,11 +102,15 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
       subscriptionId: activationOutcome.cleanupPulseTrialStripeSubscriptionId,
     });
   }
-  if (activationOutcome.cleanupStandardCheckoutStripeSubscriptionId) {
-    await cleanupHostedStandardCheckoutLoser({
+  if (activationOutcome.cleanupStandardCheckout) {
+    await cleanupHostedStandardCheckoutAndRetireAttempt({
+      checkoutSessionId:
+        activationOutcome.cleanupStandardCheckout.checkoutSessionId,
+      memberId: invite.memberId,
+      prisma,
       stripe,
-      stripeSubscriptionId:
-        activationOutcome.cleanupStandardCheckoutStripeSubscriptionId,
+      subscriptionId:
+        activationOutcome.cleanupStandardCheckout.subscriptionId,
     });
   }
   await nudgeHostedCheckoutSuccessActivationRunner({
@@ -136,9 +138,9 @@ type HostedCheckoutSessionSuccessInput = {
 type HostedCheckoutSessionSuccessOutcome = {
   activatedMemberId: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
-  cleanupFamilySponsoredCheckout?: HostedFamilySponsoredCheckoutCleanup | null;
+  cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId?: string | null;
+  cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   welcomeEmailMemberId: string | null;
 };

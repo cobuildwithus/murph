@@ -113,17 +113,17 @@ export type HostedStripeActivatedMemberOutcome = {
   hostedExecutionEventId: string | null;
 };
 
-export interface HostedFamilySponsoredCheckoutCleanup {
+export interface HostedStripeCheckoutCleanup {
   checkoutSessionId: string;
   subscriptionId: string;
 }
 
 type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
-  cleanupFamilySponsoredCheckout?: HostedFamilySponsoredCheckoutCleanup | null;
+  cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
-  cleanupStandardCheckoutStripeSubscriptionId?: string | null;
+  cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
   runtimeRecheckMemberIds?: string[];
   welcomeEmailMemberId: string | null;
 };
@@ -399,6 +399,43 @@ export async function applyStripeCheckoutCompleted(
     return outcome;
   }
 
+  const stripeCustomerId = coerceStripeObjectId(session.customer);
+  const stripeSubscriptionId = coerceStripeSubscriptionId(session.subscription);
+  const canonicalSubscription =
+    preparedCheckoutCompletion?.canonicalSubscription ?? null;
+  if (
+    stripeCustomerId
+    && stripeSubscriptionId
+    && (
+      !canonicalSubscription
+      || canonicalSubscription.id !== stripeSubscriptionId
+      || coerceStripeObjectId(canonicalSubscription.customer) !== stripeCustomerId
+    )
+  ) {
+    throw new TypeError(
+      "Prepared canonical Stripe subscription does not match the Checkout Session.",
+    );
+  }
+  if (
+    stripeCustomerId
+    && stripeSubscriptionId
+    && (
+      canonicalSubscription?.status === "canceled"
+      || canonicalSubscription?.status === "incomplete_expired"
+    )
+  ) {
+    // Stripe cancellation can survive a rolled-back Family cleanup. Keep the
+    // original receipt responsible for its idempotent refund instead of
+    // rebinding a subscription that can no longer provide access.
+    return {
+      ...buildEmptyHostedStripeActivationOutcome(),
+      cleanupStandardCheckout: {
+        checkoutSessionId: session.id,
+        subscriptionId: stripeSubscriptionId,
+      },
+    };
+  }
+
   const accepted = await bindHostedStripeBillingRefsFromCheckoutSessionTx({
     dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
     memberId: memberSnapshot.core.id,
@@ -410,10 +447,17 @@ export async function applyStripeCheckoutCompleted(
     tx: prisma,
   });
   if (!accepted) {
+    if (!stripeSubscriptionId) {
+      throw new TypeError(
+        "Accepted standard Stripe Checkout is missing its subscription.",
+      );
+    }
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
-      cleanupStandardCheckoutStripeSubscriptionId:
-        coerceStripeSubscriptionId(session.subscription),
+      cleanupStandardCheckout: {
+        checkoutSessionId: session.id,
+        subscriptionId: stripeSubscriptionId,
+      },
     };
   }
 
@@ -422,6 +466,28 @@ export async function applyStripeCheckoutCompleted(
     hostedExecutionEventId: null,
     welcomeEmailMemberId: memberSnapshot.core.id,
   };
+}
+
+export async function cleanupHostedStandardCheckoutAndRetireAttempt(input: {
+  checkoutSessionId: string;
+  memberId: string;
+  prisma: PrismaClient;
+  stripe?: Stripe;
+  subscriptionId: string;
+}): Promise<void> {
+  await cleanupHostedStandardCheckoutLoser({
+    ...(input.stripe ? { stripe: input.stripe } : {}),
+    stripeSubscriptionId: input.subscriptionId,
+  });
+  // The conditional session-key clear is safe on stale replays and must stay
+  // after provider cleanup so a failed refund remains owned by the receipt.
+  await input.prisma.$transaction((tx) =>
+    clearHostedMemberStripeCheckoutAttemptForSessionTx({
+      memberId: input.memberId,
+      sessionId: input.checkoutSessionId,
+      tx,
+    })
+  );
 }
 
 export async function prepareHostedStripeCheckoutCompletion(input: {

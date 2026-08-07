@@ -101,6 +101,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeCheckoutCompleted: mocks.applyStripeCheckoutCompleted,
   cleanupHostedFamilySponsoredDirectSubscription:
     mocks.cleanupHostedFamilySponsoredDirectSubscription,
+  cleanupHostedStandardCheckoutAndRetireAttempt:
+    mocks.cleanupHostedStandardCheckoutLoser,
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
   prepareHostedStripeDirectMemberActivationCrypto:
@@ -533,7 +535,10 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     };
     mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
       activatedMemberId: null,
-      cleanupStandardCheckoutStripeSubscriptionId: "sub_loser",
+      cleanupStandardCheckout: {
+        checkoutSessionId: "cs_123",
+        subscriptionId: "sub_loser",
+      },
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
@@ -546,8 +551,11 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     })).resolves.toEqual(createStatus({ stage: "activating" }));
 
     expect(mocks.cleanupHostedStandardCheckoutLoser).toHaveBeenCalledWith({
+      checkoutSessionId: "cs_123",
+      memberId: "member_123",
+      prisma,
       stripe: mocks.stripe,
-      stripeSubscriptionId: "sub_loser",
+      subscriptionId: "sub_loser",
     });
   });
 

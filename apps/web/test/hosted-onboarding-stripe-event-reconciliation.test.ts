@@ -154,6 +154,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
     type === "refund.created" || type === "refund.updated",
   cleanupHostedFamilySponsoredDirectSubscription:
     mocks.cleanupHostedFamilySponsoredDirectSubscription,
+  cleanupHostedStandardCheckoutAndRetireAttempt:
+    mocks.cleanupHostedStandardCheckoutLoser,
   HostedStripeFamilySponsoredCleanupPendingError: class extends Error {},
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
@@ -588,7 +590,10 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
       activatedMemberId: null,
-      cleanupStandardCheckoutStripeSubscriptionId: "sub_loser",
+      cleanupStandardCheckout: {
+        checkoutSessionId: "cs_checkout_123",
+        subscriptionId: "sub_loser",
+      },
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
@@ -603,7 +608,10 @@ describe("hosted Stripe event reconciliation", () => {
     });
 
     expect(mocks.cleanupHostedStandardCheckoutLoser).toHaveBeenCalledWith({
-      stripeSubscriptionId: "sub_loser",
+      checkoutSessionId: "cs_checkout_123",
+      memberId: "member_123",
+      prisma: prisma.client,
+      subscriptionId: "sub_loser",
     });
     expect(
       mocks.cleanupHostedStandardCheckoutLoser.mock.invocationCallOrder[0],
@@ -621,7 +629,10 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
       activatedMemberId: null,
-      cleanupStandardCheckoutStripeSubscriptionId: "sub_loser",
+      cleanupStandardCheckout: {
+        checkoutSessionId: "cs_checkout_123",
+        subscriptionId: "sub_loser",
+      },
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
@@ -653,7 +664,10 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
-      cleanupStandardCheckoutStripeSubscriptionId: "sub_loser",
+      cleanupStandardCheckout: {
+        checkoutSessionId: "cs_checkout_123",
+        subscriptionId: "sub_loser",
+      },
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
