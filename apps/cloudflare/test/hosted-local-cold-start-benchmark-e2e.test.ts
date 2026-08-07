@@ -17,9 +17,6 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
-import {
-  buildCloudflareHostedControlRuntimeShellPrewarmPath,
-} from "@murphai/cloudflare-hosted-control/routes";
 import type {
   HostedRunnerStatusResponse,
   HostedRuntimeLatencyPhaseBreakdown,
@@ -50,9 +47,6 @@ import {
   assertSingleSuccessfulColdStartAttempt,
 } from "./helpers/hosted-local-cold-start-benchmark.js";
 import {
-  ensureProcessingAfterSyntheticMailboxAppendForTest,
-} from "./helpers/hosted-local-wake.js";
-import {
   buildAssistantProviderShellCommandCall,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
@@ -67,8 +61,6 @@ import {
 const defaultWarmupCount = 3;
 const defaultSampleCount = 12;
 const maxTrialCount = 100;
-const blacksmithColdStartExperiment = process.env.CI === "true"
-  && process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
 const warmupCount = readTrialCount(
   "MURPH_E2E_COLD_START_WARMUP_COUNT",
   defaultWarmupCount,
@@ -82,9 +74,6 @@ const sampleCount = readTrialCount(
 const totalTrialCount = warmupCount + sampleCount;
 const benchmarkRunToken = readBenchmarkRunToken();
 const benchmarkTarget = readBenchmarkTarget();
-const shellPrewarmLeadMs = readShellPrewarmLeadMs();
-const prewarmComparisonMode = readPrewarmComparisonMode();
-assertPrewarmBenchmarkConfiguration();
 const trialUserIds = Array.from(
   { length: totalTrialCount },
   (_, index) => `member_local_cold_start_benchmark_${benchmarkRunToken}_${index + 1}`,
@@ -116,11 +105,9 @@ interface ColdStartSample {
   preparedRestore?: boolean;
   presignGetMs?: number;
   providerPreProviderSetupMs?: number;
-  prewarmVariant: FirstContactPrewarmVariant;
   runnerAcceptedToRestoreDoneMs?: number;
   runtimeInvocationPreparationMs?: number;
   sizeGuardMs?: number;
-  shellPrewarmLeadMs: number;
   stagedToProviderMs?: number;
   systemMailboxMaintenanceMs?: number;
   workspaceReadMs?: number;
@@ -131,11 +118,6 @@ interface ColdStartSample {
 }
 
 type ColdStartBenchmarkTarget = "established-v2-r2" | "first-contact";
-type FirstContactPrewarmVariant =
-  | "command-only-shell"
-  | "none"
-  | "post-enrollment-ensure";
-type PrewarmComparisonMode = "balanced" | "standard";
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
@@ -201,43 +183,42 @@ describe("hosted local cold-start benchmark e2e", () => {
         mailbox: true,
         measured: !isWarmup,
         ordinal: index + 1,
-        prewarmComparisonMode,
         provider: true,
         sameAttempt: true,
         summary: false,
         target: benchmarkTarget,
       });
-      if (
-        prewarmComparisonMode === "balanced"
-        && index + 1 < trialUserIds.length
-      ) {
-        // Keep consecutive cold containers independent when the shared host is
-        // too busy to honor the one-second idle TTL before the next trial.
-        await sleep(10_000);
-      }
     }
 
     expect(measuredSamples).toHaveLength(sampleCount);
-    printBenchmarkSummary(measuredSamples, {
-      prewarmVariant: prewarmComparisonMode === "standard" ? "none" : "mixed",
-      summaryScope: "all",
+    printBenchmarkRecord({
+      ...buildSamplePercentileRecord(measuredSamples),
+      cold: true,
+      delivery: true,
+      mailbox: true,
+      provider: true,
+      sameAttempt: true,
+      samples: measuredSamples.length,
+      summary: true,
+      target: benchmarkTarget,
+      warmups: warmupCount,
+      webhookToDeliveryP50Ms: percentile(
+        measuredSamples.map((sample) => sample.webhookToDeliveryMs),
+        0.5,
+      ),
+      webhookToDeliveryP90Ms: percentile(
+        measuredSamples.map((sample) => sample.webhookToDeliveryMs),
+        0.9,
+      ),
+      webhookToProviderP50Ms: percentile(
+        measuredSamples.map((sample) => sample.webhookToProviderMs),
+        0.5,
+      ),
+      webhookToProviderP90Ms: percentile(
+        measuredSamples.map((sample) => sample.webhookToProviderMs),
+        0.9,
+      ),
     });
-    if (prewarmComparisonMode === "balanced") {
-      for (const prewarmVariant of [
-        "post-enrollment-ensure",
-        "command-only-shell",
-      ] as const) {
-        printBenchmarkSummary(
-          measuredSamples.filter((sample) =>
-            sample.prewarmVariant === prewarmVariant
-          ),
-          {
-            prewarmVariant,
-            summaryScope: "prewarm-variant",
-          },
-        );
-      }
-    }
   }, Math.max(300_000, totalTrialCount * 300_000));
 });
 
@@ -314,13 +295,6 @@ async function runColdStartTrial(
     // first contact are imported by one genuinely cold runtime attempt.
     await activeScenario.enqueueWake(buildActivationWake(userId, ordinal), userId);
   }
-  const prewarmVariant = resolveTrialPrewarmVariant(ordinal);
-  const postEnrollmentEnsurePromise = prewarmVariant === "post-enrollment-ensure"
-    ? ensureProcessingAfterSyntheticMailboxAppendForTest({
-        harness: activeScenario.harness,
-        userId,
-      })
-    : null;
   const providerRequestBaseline = listResponsesApiRequests().length;
   const totalProviderRequestBaseline = activeScenario.assistantProviderRequests.length;
   const totalAcceptedSendBaseline = activeLinqStub.acceptedSendRequests.length;
@@ -331,17 +305,6 @@ async function runColdStartTrial(
   activeScenario.queueAssistantResponses([replyText], {
     matchInputContains: inboundText,
   });
-
-  const trialShellPrewarmLeadMs = prewarmVariant === "command-only-shell"
-    ? shellPrewarmLeadMs
-    : 0;
-  const shellPrewarmPromise = prewarmVariant === "command-only-shell"
-    ? prewarmRuntimeShellForBenchmark(userId)
-    : null;
-  void shellPrewarmPromise?.catch(() => undefined);
-  if (trialShellPrewarmLeadMs > 0) {
-    await sleep(trialShellPrewarmLeadMs);
-  }
 
   const measuredWindowStartedAt = new Date(Date.now() - 1);
   const webhookStartedAtEpochMs = Date.now();
@@ -359,14 +322,7 @@ async function runColdStartTrial(
     ok: true,
     reason: "wake-appended-active-member",
   });
-  if (postEnrollmentEnsurePromise) {
-    await expect(postEnrollmentEnsurePromise).resolves.toMatchObject({
-      kind: "runtime_processing_accepted",
-    });
-  }
-  if (shellPrewarmPromise) {
-    await shellPrewarmPromise;
-  }
+
   await activeScenario.waitForLatestPendingWake(userId);
   const completionPromise = activeScenario.waitForHostedCompletion(userId);
   const acceptedReplies = await activeLinqStub.waitForMatchingAcceptedSendCount({
@@ -476,8 +432,6 @@ async function runColdStartTrial(
   }));
 
   const baseSample: ColdStartSample = {
-    prewarmVariant,
-    shellPrewarmLeadMs: trialShellPrewarmLeadMs,
     webhookToDeliveryMs: deliveryObservedAtEpochMs - webhookStartedAtEpochMs,
     webhookToProviderMs: providerObservedAtEpochMs - webhookStartedAtEpochMs,
   };
@@ -571,24 +525,6 @@ async function runColdStartTrial(
       trace.assistantInputStagedAt,
     ),
   };
-}
-
-async function prewarmRuntimeShellForBenchmark(
-  userId: string,
-): Promise<void> {
-  const response = await requireScenario().harness.request(
-    buildCloudflareHostedControlRuntimeShellPrewarmPath(userId),
-    {
-      body: "{}",
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "POST",
-    },
-  );
-  expect(response.status).toBe(202);
-  await expect(response.json()).resolves.toEqual({ accepted: true });
 }
 
 async function prepareEstablishedWorkspaceTrial(input: {
@@ -1046,54 +982,6 @@ function buildSamplePercentileRecord(
   return result;
 }
 
-function printBenchmarkSummary(
-  samples: readonly ColdStartSample[],
-  input: {
-    prewarmVariant: FirstContactPrewarmVariant | "mixed";
-    summaryScope: "all" | "prewarm-variant";
-  },
-): void {
-  if (samples.length === 0) {
-    throw new Error("Cannot print a cold-start benchmark summary without samples.");
-  }
-  printBenchmarkRecord({
-    ...buildSamplePercentileRecord(samples),
-    cold: true,
-    delivery: true,
-    mailbox: true,
-    prewarmComparisonMode,
-    prewarmVariant: input.prewarmVariant,
-    provider: true,
-    sameAttempt: true,
-    samples: samples.length,
-    shellPrewarmLeadMs: input.prewarmVariant === "command-only-shell"
-      ? shellPrewarmLeadMs
-      : input.prewarmVariant === "mixed"
-        ? "mixed"
-        : 0,
-    summary: true,
-    summaryScope: input.summaryScope,
-    target: benchmarkTarget,
-    warmups: input.summaryScope === "all" ? warmupCount : undefined,
-    webhookToDeliveryP50Ms: percentile(
-      samples.map((sample) => sample.webhookToDeliveryMs),
-      0.5,
-    ),
-    webhookToDeliveryP90Ms: percentile(
-      samples.map((sample) => sample.webhookToDeliveryMs),
-      0.9,
-    ),
-    webhookToProviderP50Ms: percentile(
-      samples.map((sample) => sample.webhookToProviderMs),
-      0.5,
-    ),
-    webhookToProviderP90Ms: percentile(
-      samples.map((sample) => sample.webhookToProviderMs),
-      0.9,
-    ),
-  });
-}
-
 function printBenchmarkRecord(
   record: Record<string, boolean | number | string | undefined>,
 ): void {
@@ -1182,62 +1070,6 @@ function readBenchmarkTarget(): ColdStartBenchmarkTarget {
   throw new RangeError(
     "MURPH_E2E_COLD_START_TARGET must be first-contact or established-v2-r2.",
   );
-}
-
-function readShellPrewarmLeadMs(): number {
-  const rawValue = process.env.MURPH_E2E_COLD_START_SHELL_PREWARM_LEAD_MS?.trim();
-  if (!rawValue) {
-    return blacksmithColdStartExperiment ? 700 : 0;
-  }
-  const value = Number(rawValue);
-  if (!Number.isSafeInteger(value) || value < 0 || value > 30_000) {
-    throw new RangeError(
-      "MURPH_E2E_COLD_START_SHELL_PREWARM_LEAD_MS must be an integer from 0 through 30000.",
-    );
-  }
-  return value;
-}
-
-function readPrewarmComparisonMode(): PrewarmComparisonMode {
-  const value = process.env.MURPH_E2E_COLD_START_PREWARM_COMPARISON_MODE?.trim()
-    || (blacksmithColdStartExperiment ? "balanced" : "standard");
-  if (value === "balanced" || value === "standard") {
-    return value;
-  }
-  throw new RangeError(
-    "MURPH_E2E_COLD_START_PREWARM_COMPARISON_MODE must be balanced or standard.",
-  );
-}
-
-function assertPrewarmBenchmarkConfiguration(): void {
-  if (prewarmComparisonMode !== "balanced") {
-    return;
-  }
-  if (benchmarkTarget !== "first-contact") {
-    throw new RangeError(
-      "Balanced prewarm comparison is available only for the first-contact target.",
-    );
-  }
-  if (shellPrewarmLeadMs === 0) {
-    throw new RangeError(
-      "Balanced shell-prewarm mode requires a positive shell-prewarm lead.",
-    );
-  }
-  if (sampleCount % 4 !== 0) {
-    throw new RangeError(
-      "Balanced shell-prewarm mode requires a sample count divisible by four.",
-    );
-  }
-}
-
-function resolveTrialPrewarmVariant(ordinal: number): FirstContactPrewarmVariant {
-  if (prewarmComparisonMode === "standard" || benchmarkTarget !== "first-contact") {
-    return "none";
-  }
-  const balancedPosition = (ordinal - 1) % 4;
-  return balancedPosition === 1 || balancedPosition === 2
-    ? "command-only-shell"
-    : "post-enrollment-ensure";
 }
 
 function readBenchmarkRunToken(): string {

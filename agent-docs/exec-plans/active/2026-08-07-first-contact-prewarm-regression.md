@@ -63,7 +63,16 @@ Updated: 2026-08-07
 - The first corrected command-only 10-vs-10 attempt stopped at sample four
   because the benchmark detected a recovered runtime generation while the
   shared host was under extreme unrelated test load. No partial timing from
-  that run is countable; a load-admitted rerun owns the performance decision.
+  that run is countable. Two further shared-host attempts were also invalidated
+  by recovered generations and contribute no performance evidence.
+- An isolated Blacksmith comparison on exact experimental head `44eacea7cd9d`
+  completed three warmups and twelve measured cold starts with six samples per
+  variant. Every sample proved one successful cold attempt, mailbox consumption,
+  provider start, and reply delivery. Post-enrollment ensure measured provider
+  p50 1.834 s and delivery p50 2.038 s; command-only shell measured provider p50
+  1.141 s and delivery p50 1.376 s, improving those medians by 693 ms and 662 ms.
+  Candidate provider samples ranged from 904-1,295 ms versus baseline
+  1,613-1,949 ms, so the distributions did not overlap.
 - The remaining minimal hypothesis is narrower. Cloudflare Containers exposes
   a command-only `start()` that does not wait for ports. Issuing that command
   against the deterministic container before enrollment can overlap platform
@@ -113,6 +122,8 @@ Updated: 2026-08-07
 - Shared-control, Cloudflare, and Web typechecks plus `git diff --check`.
 - Hosted-local post-enrollment foreground proof with the private Temporal worker.
 - Balanced hosted-local cold-start baseline/candidate comparison with coldness,
-  one-owner, mailbox, provider, and delivery assertions.
+  one-owner, mailbox, provider, and delivery assertions. Completed on isolated
+  Blacksmith with a 693 ms provider-start p50 improvement and 662 ms delivery
+  p50 improvement across six measured samples per variant.
 - Preliminary `completion-specialists`, final ReviewGPT, and required exact-head
   GitHub Actions.
