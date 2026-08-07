@@ -2,7 +2,12 @@ import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import {
+  HostedGroupSponsorshipAuthorizationStatus,
+  HostedUsageCreditPurchaseStatus,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 
 import {
   openHostedUserSecureBoxStrings,
@@ -24,6 +29,13 @@ const SPONSORSHIP_PRIVATE_CONTENT_SCOPE =
 const SPONSORSHIP_PRIVATE_CONTENT_PURPOSE =
   "hosted-group-sponsorship-moment-private-content";
 const FORBIDDEN_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/u;
+const HOSTED_GROUP_FUNDING_ONE_TIME_CONTRIBUTION_LIMIT = 20;
+const HOSTED_GROUP_FUNDING_ANONYMOUS_NAME = "Anonymous";
+const HOSTED_GROUP_FUNDING_LIVE_SPONSORSHIP_STATUSES = [
+  HostedGroupSponsorshipAuthorizationStatus.active,
+  HostedGroupSponsorshipAuthorizationStatus.paused,
+  HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+] as const;
 
 export const HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS = 80;
 export const HOSTED_GROUP_SPONSORSHIP_MESSAGE_MAX_CODE_POINTS = 280;
@@ -48,6 +60,19 @@ export interface HostedGroupRunningBitProjection {
   publicAlias: string | null;
   requestedBit: string;
   schema: "murph.group-sponsorship-bit.v1";
+}
+
+export interface HostedGroupFundingSupportersProjection {
+  monthlySponsor: {
+    id: string;
+    monthlyCapMinor: number;
+    name: string;
+  } | null;
+  oneTimeContributions: Array<{
+    amountMinor: number;
+    id: string;
+    name: string;
+  }>;
 }
 
 export function parseHostedGroupSponsorshipDraft(
@@ -326,6 +351,83 @@ export async function readHostedGroupSponsorshipDraftForCreator(input: {
   });
 }
 
+export async function readHostedGroupFundingSupporters(input: {
+  beneficiaryMemberId: string;
+  prisma: SponsorshipPrisma;
+}): Promise<HostedGroupFundingSupportersProjection> {
+  const [authorization, oneTimeContributions] = await Promise.all([
+    input.prisma.hostedGroupSponsorshipAuthorization.findFirst({
+      select: {
+        id: true,
+        monthlyCapMinor: true,
+      },
+      where: {
+        beneficiaryMemberId: input.beneficiaryMemberId,
+        status: {
+          in: [...HOSTED_GROUP_FUNDING_LIVE_SPONSORSHIP_STATUSES],
+        },
+      },
+    }),
+    input.prisma.hostedUsageCreditPurchase.findMany({
+      orderBy: [
+        { paidAt: "desc" },
+        { id: "desc" },
+      ],
+      select: {
+        cashAmountMinor: true,
+        id: true,
+      },
+      take: HOSTED_GROUP_FUNDING_ONE_TIME_CONTRIBUTION_LIMIT,
+      where: {
+        beneficiaryMemberId: input.beneficiaryMemberId,
+        groupSponsorshipAuthorizationId: null,
+        paidAt: { not: null },
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+      },
+    }),
+  ]);
+  const monthlyActivation = authorization
+    ? await input.prisma.hostedUsageCreditPurchase.findFirst({
+        orderBy: [
+          { paidAt: "desc" },
+          { id: "desc" },
+        ],
+        select: { id: true },
+        where: {
+          groupSponsorshipAuthorizationId: authorization.id,
+          groupSponsorshipChargeOrdinal: 0,
+          status: HostedUsageCreditPurchaseStatus.fulfilled,
+        },
+      })
+    : null;
+  const purchaseIds = [
+    ...(monthlyActivation ? [monthlyActivation.id] : []),
+    ...oneTimeContributions.map((contribution) => contribution.id),
+  ];
+  const publicAliases = await readHostedGroupFundingPublicAliases({
+    beneficiaryMemberId: input.beneficiaryMemberId,
+    prisma: input.prisma,
+    purchaseIds,
+  });
+
+  return {
+    monthlySponsor: authorization && monthlyActivation
+      ? {
+          id: monthlyActivation.id,
+          monthlyCapMinor: authorization.monthlyCapMinor,
+          name: publicAliases.get(monthlyActivation.id)
+            ?? HOSTED_GROUP_FUNDING_ANONYMOUS_NAME,
+        }
+      : null,
+    oneTimeContributions: oneTimeContributions.map((contribution) => ({
+      amountMinor: contribution.cashAmountMinor,
+      id: contribution.id,
+      name: publicAliases.get(contribution.id)
+        ?? HOSTED_GROUP_FUNDING_ANONYMOUS_NAME,
+    })),
+  };
+}
+
 export async function readHostedActiveGroupRunningBit(input: {
   now: Date;
   prisma: SponsorshipPrisma;
@@ -397,6 +499,60 @@ function normalizeOptionalPlainText(
     throw invalidSponsorshipError();
   }
   return normalized;
+}
+
+async function readHostedGroupFundingPublicAliases(input: {
+  beneficiaryMemberId: string;
+  prisma: SponsorshipPrisma;
+  purchaseIds: readonly string[];
+}): Promise<Map<string, string>> {
+  const purchaseIds = [...new Set(input.purchaseIds)];
+  if (purchaseIds.length === 0) {
+    return new Map();
+  }
+
+  try {
+    const moments = await input.prisma.hostedGroupSponsorshipMoment.findMany({
+      select: {
+        creatorMemberId: true,
+        publicAliasEncrypted: true,
+        purchaseId: true,
+      },
+      where: {
+        beneficiaryMemberId: input.beneficiaryMemberId,
+        publicAliasEncrypted: { not: null },
+        purchaseId: { in: purchaseIds },
+      },
+    });
+    const decryptedAliases = await openHostedUserSecureBoxStrings({
+      entries: moments.map((moment) => ({
+        aad: sponsorshipAad(moment.purchaseId, "public_alias_encrypted"),
+        scope: SPONSORSHIP_PRIVATE_CONTENT_SCOPE,
+        userId: moment.creatorMemberId,
+        value: moment.publicAliasEncrypted,
+      })),
+      lane: "hosted-member-private-field",
+      prisma: input.prisma,
+    });
+    const aliases = new Map<string, string>();
+    for (const [index, moment] of moments.entries()) {
+      try {
+        const alias = parseHostedGroupSponsorshipDraft({
+          publicAlias: decryptedAliases[index],
+        })?.publicAlias;
+        if (alias) {
+          aliases.set(moment.purchaseId, alias);
+        }
+      } catch {
+        // A malformed optional alias should not make the funding page fail.
+      }
+    }
+    return aliases;
+  } catch {
+    // Public attribution is best effort. Funding remains available even when
+    // an old encrypted alias can no longer be opened.
+    return new Map();
+  }
 }
 
 async function openSponsorshipDraft(input: {
