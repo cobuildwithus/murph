@@ -4,7 +4,7 @@ import {
   type MealNutrition,
   mealNutritionSchema,
 } from "@murphai/contracts";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 import { assertCanonicalWritePort } from "./core-port.ts";
 import type { MealImportPayload } from "./core-port.ts";

@@ -78,7 +78,9 @@
     "@murphai/importers": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/query": "workspace:*",
-    "@murphai/runtime-state": "workspace:*",
+    "@murphai/runtime-state": "workspace:*"
+  },
+  "devDependencies": {
     "zod": "^4.4.3"
   },
   "engines": {

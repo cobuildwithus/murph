@@ -1,6 +1,5 @@
 import { Cli, z } from 'incur'
-import type { ZodTypeAny } from 'zod'
-import * as zod from 'zod'
+import * as zod from '@murphai/contracts/zod-runtime'
 
 export const payloadSchemaResultSchema = z.object({
   schemaVersion: z.literal('murph.payload-schema.v1'),
@@ -17,7 +16,7 @@ export interface PayloadSchemaCommandConfig {
   description?: string
   examples?: unknown[]
   mediaType?: 'application/json' | 'application/jsonl'
-  schema: ZodTypeAny
+  schema: zod.ZodTypeAny
   schemaName?: string
   lineSchemaName?: string
 }
