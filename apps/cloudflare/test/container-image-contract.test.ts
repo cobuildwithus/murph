@@ -415,8 +415,9 @@ describe("hosted runner container image contract", () => {
       ...publishedMurphBundledWorkspacePackageNames,
       ...publishedMurphBundledExternalPackageNames,
     ].sort());
-    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur"]);
+    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur", "ink"]);
     expect(hostedRunnerBuildPackageNames).not.toContain("incur");
+    expect(hostedRunnerBuildPackageNames).not.toContain("ink");
 
     for (const dependencyName of publishedMurphBundledWorkspacePackageNames) {
       expect(hostedRunnerBuildPackageNames).toContain(dependencyName);

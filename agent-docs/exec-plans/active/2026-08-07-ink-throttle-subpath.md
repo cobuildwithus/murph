@@ -102,6 +102,14 @@ Updated: 2026-08-07
 - CLI release package shape passed; the focused release audit passed all 42
   tests with prepared runtime artifacts and verified the actual packed tarball
   contains Ink's patched subpath import.
+- A fresh global install of that tarball (without the repository workspace or
+  lockfile) retained the patched import. In 31 alternating fresh-process
+  samples against a fresh registry Ink 6.8.0 install, full-import p50 measured
+  121.441 ms upstream versus 75.570 ms in the installed Murph tarball:
+  -45.870 ms and -37.77%.
+- The two Cloudflare bundle-closure contracts were updated to recognize Ink as
+  an external bundled dependency while keeping it out of workspace build
+  closure; 14 focused tests and Cloudflare typecheck passed.
 - In 41 alternating fresh-process samples, the compatibility barrel measured
   90.585 ms p50 versus 6.661 ms for the throttle subpath. Full Ink import
   measured 222.809 ms p50 unpatched versus 143.184 ms patched: -79.625 ms and
