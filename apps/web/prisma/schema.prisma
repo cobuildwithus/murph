@@ -1559,6 +1559,7 @@ model HostedGroupSponsorshipMoment {
   beneficiaryMemberId        String   @map("beneficiary_member_id")
   creatorMemberId            String   @map("creator_member_id")
   configurationDigest        String   @map("configuration_digest")
+  creativeRequestEncrypted   String?  @map("creative_request_encrypted")
   publicAliasEncrypted       String?  @map("public_alias_encrypted")
   sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
   runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")

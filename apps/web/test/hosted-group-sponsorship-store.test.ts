@@ -30,14 +30,31 @@ afterEach(() => {
 });
 
 describe("hosted group sponsorship store", () => {
-  it("normalizes bounded plain text and rejects extra or unsafe input", () => {
+  it("normalizes bounded creative requests and rejects ambiguous input", () => {
     expect(parseHostedGroupSponsorshipDraft({
+      creativeRequest: {
+        format: "song",
+        prompt: "  Make this the group theme.  ",
+        styleRequest: "  Warm ensemble-sitcom theme.  ",
+      },
       publicAlias: "  The Group Historian  ",
       runningBitRequest: "Treat me like the exhausted CFO.",
-      sponsorMessage: "For whatever adventure comes next.",
+      sponsorMessage: null,
     })).toEqual({
+      creativeRequest: {
+        format: "song",
+        prompt: "Make this the group theme.",
+        styleRequest: "Warm ensemble-sitcom theme.",
+      },
       publicAlias: "The Group Historian",
       runningBitRequest: "Treat me like the exhausted CFO.",
+      sponsorMessage: null,
+    });
+    expect(parseHostedGroupSponsorshipDraft({
+      sponsorMessage: "  For whatever adventure comes next.  ",
+    })).toEqual({
+      publicAlias: null,
+      runningBitRequest: null,
       sponsorMessage: "For whatever adventure comes next.",
     });
     expect(parseHostedGroupSponsorshipDraft({})).toBeNull();
@@ -46,16 +63,40 @@ describe("hosted group sponsorship store", () => {
       unexpected: true,
     })).toThrow(/short plain text/u);
     expect(() => parseHostedGroupSponsorshipDraft({
-      sponsorMessage: "unsafe\u0000text",
+      creativeRequest: {
+        format: "message",
+        prompt: "Thanks, everyone.",
+        styleRequest: "Like a particular song.",
+      },
+    })).toThrow(/short plain text/u);
+    expect(() => parseHostedGroupSponsorshipDraft({
+      creativeRequest: {
+        format: "song",
+        prompt: "Theme song",
+        styleRequest: null,
+      },
+      sponsorMessage: "Legacy note",
+    })).toThrow(/short plain text/u);
+    expect(() => parseHostedGroupSponsorshipDraft({
+      creativeRequest: {
+        format: "song",
+        prompt: "unsafe\u0000text",
+        styleRequest: null,
+      },
     })).toThrow(/short plain text/u);
   });
 
-  it("freezes encrypted content, rejects changed replay, and activates one expiring bit", async () => {
+  it("freezes encrypted creative content and activates one expiring bit", async () => {
     const harness = createHarness();
     const draft = {
+      creativeRequest: {
+        format: "song" as const,
+        prompt: "Make this the group theme.",
+        styleRequest: "Warm ensemble-sitcom theme with a bright acoustic intro.",
+      },
       publicAlias: "The Group Historian",
       runningBitRequest: "Treat me like the exhausted CFO.",
-      sponsorMessage: "For whatever adventure comes next.",
+      sponsorMessage: null,
     };
 
     await createHostedGroupSponsorshipMomentTx({
@@ -71,9 +112,12 @@ describe("hosted group sponsorship store", () => {
       beneficiaryMemberId: "member_group_runtime",
       creatorMemberId: "member_sponsor",
       purchaseId: "purchase_123",
+      sponsorMessageEncrypted: null,
     });
     expect(harness.row.configurationDigest).not.toContain("Group Historian");
     expect(harness.row.publicAliasEncrypted).not.toContain("Group Historian");
+    expect(harness.row.creativeRequestEncrypted).toMatch(/^sealed:/u);
+    expect(harness.row.creativeRequestEncrypted).not.toContain("ensemble");
 
     await expect(assertHostedGroupSponsorshipRequestMatchesTx({
       draft,
@@ -81,7 +125,13 @@ describe("hosted group sponsorship store", () => {
       tx: harness.prisma as never,
     })).resolves.toBeUndefined();
     await expect(assertHostedGroupSponsorshipRequestMatchesTx({
-      draft: { ...draft, sponsorMessage: "Changed after payment started." },
+      draft: {
+        ...draft,
+        creativeRequest: {
+          ...draft.creativeRequest,
+          styleRequest: "Changed after payment started.",
+        },
+      },
       purchaseId: "purchase_123",
       tx: harness.prisma as never,
     })).rejects.toMatchObject({
@@ -107,6 +157,7 @@ describe("hosted group sponsorship store", () => {
       purchaseId: "purchase_123",
     })).resolves.toMatchObject({
       celebrationScale: "medium",
+      legacyAutomaticSong: false,
       ...draft,
     });
     await expect(readHostedGroupSponsorshipDraftForCreator({
@@ -123,6 +174,45 @@ describe("hosted group sponsorship store", () => {
       publicAlias: draft.publicAlias,
       requestedBit: draft.runningBitRequest,
       schema: "murph.group-sponsorship-bit.v1",
+    });
+  });
+
+  it("distinguishes an explicit quiet sponsorship from a legacy automatic song", async () => {
+    const harness = createHarness();
+    await createHostedGroupSponsorshipMomentTx({
+      authorizedDraft: null,
+      beneficiaryMemberId: "member_group_runtime",
+      creatorMemberId: "member_sponsor",
+      offerCode: "usage_5_usd",
+      purchaseId: "purchase_quiet",
+      tx: harness.prisma as never,
+    });
+
+    expect(harness.row.creativeRequestEncrypted).toBe(
+      "murph.group-sponsorship-creative.v1:none",
+    );
+    expect(harness.row.sponsorMessageEncrypted).toBeNull();
+    const quiet = await readHostedGroupSponsorshipMomentForNotification({
+      customContentAuthorized: true,
+      offerCode: "usage_5_usd",
+      prisma: harness.prisma as never,
+      purchaseId: "purchase_quiet",
+    });
+    expect(quiet).toMatchObject({
+      legacyAutomaticSong: false,
+      sponsorMessage: null,
+    });
+    expect(quiet).not.toHaveProperty("creativeRequest");
+
+    harness.row.creativeRequestEncrypted = null;
+    await expect(readHostedGroupSponsorshipMomentForNotification({
+      customContentAuthorized: true,
+      offerCode: "usage_5_usd",
+      prisma: harness.prisma as never,
+      purchaseId: "purchase_quiet",
+    })).resolves.toMatchObject({
+      legacyAutomaticSong: true,
+      sponsorMessage: null,
     });
   });
 

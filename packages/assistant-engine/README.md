@@ -51,19 +51,21 @@ thread-local deny configuration does not change the ordinary process launch
 identity or persist a resumable notification thread.
 
 The `creative-response` notification prompt profile is an isolated system
-continuation for verified social moments. Its prompt is built only from the
-engine-supplied task and bounded committed conversation history. Planning
-projects only `generate_song`, applies the output-only turn's native-capability
-deny set, and runs as a fresh ephemeral thread on the resident process. The
-application-owned song tool retains the bound provider transport plus the
-existing authority-free public transport required for a validated signed Linq
-upload; those transports are not native Codex browsing capabilities. The
-ordinary response-media and outbox owners remain unchanged. The prompt tells
-the model to call that tool exactly once and pass `durationSeconds: 15` for one
-short original sponsor song. The notification task supplies the
-room-specific current-conversation premise and lyric pacing. A creative provider
-failure settles the optional notification instead of starting another song
-attempt; a committed delivery intent retains the ordinary outbox retry and
+continuation for verified, explicitly requested social moments. Its prompt is
+built only from the engine-supplied task and bounded committed conversation
+history. Planning projects only `generate_song`, the sole format-specific tool;
+message and poem formats call no tool. The profile applies the output-only
+turn's native-capability deny set and runs as a fresh ephemeral thread on the
+resident process. The application-owned song tool retains the bound provider
+transport plus the existing authority-free public transport required for a
+validated signed Linq upload; those transports are not native Codex browsing
+capabilities. The ordinary response-media and outbox owners remain unchanged.
+For a song, the prompt requires exactly one tool call with
+`durationSeconds: 15`; message and poem responses remain text-only. Named style
+references are reduced to broad musical traits rather than copied melody,
+lyrics, catchphrases, vocal identity, or signature arrangement. A creative
+provider failure settles the optional notification instead of starting another
+song attempt; a committed delivery intent retains the ordinary outbox retry and
 deduplication behavior.
 
 Hosted invocation-scoped automation and device authority enters only the

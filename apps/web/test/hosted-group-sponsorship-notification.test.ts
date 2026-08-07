@@ -133,10 +133,16 @@ beforeEach(() => {
   mocks.readMailboxItem.mockResolvedValue(null);
   mocks.readMoment.mockResolvedValue({
     celebrationScale: "medium",
+    creativeRequest: {
+      format: "song",
+      prompt: "For whatever adventure comes next.",
+      styleRequest: "Warm ensemble-sitcom theme with a bright acoustic intro.",
+    },
     expiresAt: new Date("2026-07-28T12:00:00.000Z"),
+    legacyAutomaticSong: false,
     publicAlias: "The Group Historian",
     runningBitRequest: "Treat me like the exhausted CFO.",
-    sponsorMessage: "For whatever adventure comes next.",
+    sponsorMessage: null,
   });
   mocks.resolveDestination.mockResolvedValue(DESTINATION);
   mocks.signalRuntime.mockResolvedValue(undefined);
@@ -207,6 +213,12 @@ describe("group sponsorship notification", () => {
       "prefer it as the creative seed and blend it with the current conversation",
     );
     expect(envelope.notification.instructions).toContain(
+      '"styleRequest":"Warm ensemble-sitcom theme with a bright acoustic intro."',
+    );
+    expect(envelope.notification.instructions).toContain(
+      "translate any named song, show, soundtrack, artist, or genre into broad traits",
+    );
+    expect(envelope.notification.instructions).toContain(
       "without inventing personal facts or referring to sensitive history",
     );
     expect(envelope.notification.instructions).toContain(
@@ -224,6 +236,84 @@ describe("group sponsorship notification", () => {
       mailboxItemId: "mailbox_item",
       prisma,
     });
+  });
+
+  it("keeps an explicit quiet sponsorship silent while still activating its moment", async () => {
+    const prisma = createPrismaHarness();
+    mocks.readMoment.mockResolvedValueOnce({
+      celebrationScale: "medium",
+      expiresAt: null,
+      legacyAutomaticSong: false,
+      publicAlias: "The Group Historian",
+      runningBitRequest: "Treat me like the exhausted CFO.",
+      sponsorMessage: null,
+    });
+
+    await expect(materializeHostedGroupSponsorshipIfApplicable({
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(false);
+
+    expect(mocks.activateMoment).toHaveBeenCalledWith(expect.objectContaining({
+      purchaseId: "purchase_private_123",
+    }));
+    expect(mocks.resolveDestination).not.toHaveBeenCalled();
+    expect(mocks.appendMailbox).not.toHaveBeenCalled();
+    expect(mocks.signalRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each(["message", "poem"] as const)(
+    "queues a requested %s without asking for song generation",
+    async (format) => {
+      const prisma = createPrismaHarness();
+      mocks.readMoment.mockResolvedValueOnce({
+        celebrationScale: "small",
+        creativeRequest: {
+          format,
+          prompt: "Celebrate the group finishing the challenge.",
+          styleRequest: null,
+        },
+        expiresAt: null,
+        legacyAutomaticSong: false,
+        publicAlias: null,
+        runningBitRequest: null,
+        sponsorMessage: null,
+      });
+
+      await expect(materializeHostedGroupSponsorshipIfApplicable({
+        prisma: prisma as never,
+        purchaseId: "purchase_private_123",
+      })).resolves.toBe(true);
+
+      const instructions =
+        mocks.appendMailbox.mock.calls[0]?.[0]?.envelope.notification.instructions;
+      expect(instructions).toContain(`Validated creative format: ${format}.`);
+      expect(instructions).toContain("Do not call a tool");
+      expect(instructions).not.toContain(
+        "calling murph.generate_song exactly once",
+      );
+    },
+  );
+
+  it("preserves the automatic song for a legacy sponsorship row", async () => {
+    const prisma = createPrismaHarness();
+    mocks.readMoment.mockResolvedValueOnce({
+      celebrationScale: "small",
+      expiresAt: null,
+      legacyAutomaticSong: true,
+      publicAlias: null,
+      runningBitRequest: null,
+      sponsorMessage: null,
+    });
+
+    await expect(materializeHostedGroupSponsorshipIfApplicable({
+      prisma: prisma as never,
+      purchaseId: "purchase_private_123",
+    })).resolves.toBe(true);
+
+    expect(
+      mocks.appendMailbox.mock.calls[0]?.[0]?.envelope.notification.instructions,
+    ).toContain("calling murph.generate_song exactly once");
   });
 
   it("uses the actual $5 activation for the public moment, not the private monthly maximum", async () => {
@@ -268,12 +358,13 @@ describe("group sponsorship notification", () => {
     });
   });
 
-  it("suppresses custom content when participant authority expired", async () => {
+  it("suppresses new creative content when participant authority expired", async () => {
     const prisma = createPrismaHarness();
     mocks.hasCustomizationAuthority.mockResolvedValueOnce(false);
     mocks.readMoment.mockResolvedValueOnce({
       celebrationScale: "medium",
       expiresAt: null,
+      legacyAutomaticSong: false,
       publicAlias: null,
       runningBitRequest: null,
       sponsorMessage: null,
@@ -282,7 +373,7 @@ describe("group sponsorship notification", () => {
     await expect(materializeHostedGroupSponsorshipIfApplicable({
       prisma: prisma as never,
       purchaseId: "purchase_private_123",
-    })).resolves.toBe(true);
+    })).resolves.toBe(false);
 
     expect(mocks.activateMoment).toHaveBeenCalledWith(expect.objectContaining({
       customContentAuthorized: false,
@@ -290,8 +381,8 @@ describe("group sponsorship notification", () => {
     expect(mocks.readMoment).toHaveBeenCalledWith(expect.objectContaining({
       customContentAuthorized: false,
     }));
-    expect(mocks.appendMailbox.mock.calls[0]?.[0]?.envelope.notification.instructions)
-      .not.toContain("The Group Historian");
+    expect(mocks.resolveDestination).not.toHaveBeenCalled();
+    expect(mocks.appendMailbox).not.toHaveBeenCalled();
   });
 
   it.each([

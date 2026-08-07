@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-07-30
+Last verified: 2026-08-07
 
 ## Decision
 
@@ -195,53 +195,68 @@ actually pauses work, using neutral language without a funding prompt.
 
 Every explicit one-time group contribution and monthly activation purchase has
 one purchase-linked sponsorship-moment row. Automatic $5 refills do not create
-another moment, song, group notice, or running bit. The moment is not a
-financial status or balance. It freezes an HMAC-bound request configuration
-and, only for a current owner or active participant, may encrypt an optional
-public alias, group note, and temporary running-bit request using the hosted
-member secure-box owner.
+another moment, creative response, group notice, or running bit. The moment is
+not a financial status or balance. It freezes an HMAC-bound request
+configuration and, only for a current owner or active participant, may encrypt
+an optional public alias, optional creative request, and temporary running-bit
+request using the hosted member secure-box owner.
+
+A creative request is absent by default, so funding alone is quiet in the room.
+The bounded formats are `message`, `poem`, and `song`. Every request may include
+an optional premise; a song may additionally include one genre or style
+reference. Named songs, shows, soundtracks, artists, and genres are interpreted
+only as broad traits such as mood, tempo, instrumentation, and structure. They
+never authorize copied melody, lyrics, catchphrases, vocal identity, or a
+signature arrangement. The encrypted creative envelope is versioned. A fixed, non-sensitive v1
+marker represents an explicit modern quiet request without invoking the secure-box
+owner. A null creative-request column identifies a pre-feature row and preserves
+its legacy automatic-song behavior without treating new quiet sponsorships as
+legacy.
 
 A valid funding locator remains sufficient to contribute anonymously. It is
 not sufficient to publish content into the room. Web checks current
 participant authority when the purchase is created and again after verified
-payment. Losing that authority suppresses the authored content without
-changing the grant.
+payment. Losing that authority suppresses the new authored creative request
+without changing the grant. Legacy rows may still receive their generic
+pre-feature song, but no expired private copy is read or exposed.
 
 Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:
 
 1. activates a requested bit for 24 hours on a `$10` one-time contribution or
    72 hours on a `$20` one-time contribution;
-2. resolves the exact current non-direct group destination, with no personal
-   fallback; and
-3. appends one purchase-deduplicated creative notification to the existing
+2. stops without creating a public notification when no creative response was
+   explicitly requested;
+3. otherwise resolves the exact current non-direct group destination, with no
+   personal fallback; and
+4. appends one purchase-deduplicated creative notification to the existing
    mailbox.
 
-A monthly activation is the actual `$5` purchase socially acknowledged in the
-room. Its private monthly maximum never changes the public acknowledgment or
+A monthly activation is the actual `$5` purchase eligible for the optional
+social response. Its private monthly maximum never changes public output or
 creates a running bit.
 
-The creative turn is isolated, projects only `generate_song`, applies the
-output-only native-capability deny set, and runs as a fresh ephemeral thread on
-the resident App Server. The application-owned song tool retains the existing
-provider and authority-free public transports needed for generation and its
-validated signed upload; neither becomes native Codex browsing. The turn uses
-the ordinary delivery path. Its prompt tells the model to call that tool exactly once for one
-roughly 15-second original sponsor song. The song transforms one vivid, recent,
+The creative turn is isolated, applies the output-only native-capability deny
+set, and runs as a fresh ephemeral thread on the resident App Server. Planning
+projects only `generate_song`, which is used exactly once and only for the song
+format; message and poem formats remain text-only. A song is exactly 15 seconds
+with at most four short lyric lines. The requested format cannot be changed by
+participant-authored prompt text. The response transforms one vivid, recent,
 non-sensitive detail, exchange, or room dynamic from the current group
-conversation into a surprising room-specific hook when one is available. A
-present sponsor message is the preferred creative seed when it blends naturally
-with the room. When neither source offers a safe, usable premise, the song
-becomes a gentle group celebration without inventing personal facts or referring
-to sensitive history.
+conversation into a room-specific hook when one is available. The optional
+premise is the preferred creative seed when it blends naturally with the room.
+When neither source offers a safe, usable premise, the response becomes a
+gentle group celebration in the requested format without inventing personal
+facts or referring to sensitive history.
+
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
-song gentle and non-comedic. A creative provider failure terminally settles
-this optional notification instead of asking the model to make another song.
+response gentle and non-comedic. A creative provider failure terminally settles
+this optional notification instead of asking the model to try another song.
 Once a delivery intent commits, the ordinary outbox retains its retry and
 deduplication behavior. There is no reservation, attempt counter, post-hoc
-media-attempt accounting, or media-specific retry state. The reconciler wakes newly paid usage work before
-attempting this optional social effect, and notification failure never rolls
-back an already committed credit grant.
+media-attempt accounting, or media-specific retry state. The reconciler wakes
+newly paid usage work before attempting this optional social effect, and
+notification failure never rolls back an already committed credit grant.
 
 The running bit remains a Web-owned expiring product fact, not durable group
 memory. Mailbox fetch projects only the newest active bit to fresh,

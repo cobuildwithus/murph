@@ -11,6 +11,17 @@ import {
 import { readHostedAppSessionHmacKey } from "../hosted-onboarding/app-session-config";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
+  HOSTED_GROUP_SPONSORSHIP_CREATIVE_FORMATS,
+  HOSTED_GROUP_SPONSORSHIP_CREATIVE_PROMPT_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_CREATIVE_STYLE_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_MESSAGE_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_RUNNING_BIT_MAX_CODE_POINTS,
+  type HostedGroupSponsorshipCreativeFormat,
+  type HostedGroupSponsorshipCreativeRequest,
+  type HostedGroupSponsorshipDraft,
+} from "./group-sponsorship-contract";
+import {
   activeHostedThreadContainerParticipantWhere,
 } from "./thread-container-participant-access";
 import {
@@ -18,29 +29,41 @@ import {
   isHostedGroupSponsorshipOfferCode,
 } from "./group-sponsorship-policy";
 
+export {
+  HOSTED_GROUP_SPONSORSHIP_CREATIVE_FORMATS,
+  HOSTED_GROUP_SPONSORSHIP_CREATIVE_PROMPT_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_CREATIVE_STYLE_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_MESSAGE_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_RUNNING_BIT_MAX_CODE_POINTS,
+} from "./group-sponsorship-contract";
+export type {
+  HostedGroupSponsorshipCreativeFormat,
+  HostedGroupSponsorshipCreativeRequest,
+  HostedGroupSponsorshipDraft,
+} from "./group-sponsorship-contract";
+
 const SPONSORSHIP_DIGEST_DOMAIN = "murph.group-sponsorship-configuration.v1";
 const SPONSORSHIP_PRIVATE_CONTENT_SCOPE =
   "hosted-group-sponsorship-moment:private-content:v1";
 const SPONSORSHIP_PRIVATE_CONTENT_PURPOSE =
   "hosted-group-sponsorship-moment-private-content";
+const SPONSORSHIP_CREATIVE_REQUEST_SCHEMA =
+  "murph.group-sponsorship-creative.v1";
+const SPONSORSHIP_CREATIVE_REQUEST_NONE_SENTINEL =
+  "murph.group-sponsorship-creative.v1:none";
 const FORBIDDEN_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/u;
-
-export const HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS = 80;
-export const HOSTED_GROUP_SPONSORSHIP_MESSAGE_MAX_CODE_POINTS = 280;
-export const HOSTED_GROUP_SPONSORSHIP_RUNNING_BIT_MAX_CODE_POINTS = 240;
+const CREATIVE_FORMATS = new Set<string>(
+  HOSTED_GROUP_SPONSORSHIP_CREATIVE_FORMATS,
+);
 
 type SponsorshipPrisma = PrismaClient | Prisma.TransactionClient;
-
-export interface HostedGroupSponsorshipDraft {
-  publicAlias: string | null;
-  runningBitRequest: string | null;
-  sponsorMessage: string | null;
-}
 
 export interface HostedGroupSponsorshipMomentProjection
   extends HostedGroupSponsorshipDraft {
   celebrationScale: "small" | "medium" | "large";
   expiresAt: Date | null;
+  legacyAutomaticSong: boolean;
 }
 
 export interface HostedGroupRunningBitProjection {
@@ -61,6 +84,7 @@ export function parseHostedGroupSponsorshipDraft(
   }
   const record = value as Record<string, unknown>;
   const allowedKeys = new Set([
+    "creativeRequest",
     "publicAlias",
     "runningBitRequest",
     "sponsorMessage",
@@ -68,7 +92,18 @@ export function parseHostedGroupSponsorshipDraft(
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     throw invalidSponsorshipError();
   }
-  const draft = {
+  const creativeRequest = parseHostedGroupSponsorshipCreativeRequest(
+    record.creativeRequest,
+  );
+  const sponsorMessage = normalizeOptionalPlainText(
+    record.sponsorMessage,
+    HOSTED_GROUP_SPONSORSHIP_MESSAGE_MAX_CODE_POINTS,
+  );
+  if (creativeRequest && sponsorMessage) {
+    throw invalidSponsorshipError();
+  }
+  const draft: HostedGroupSponsorshipDraft = {
+    ...(creativeRequest ? { creativeRequest } : {}),
     publicAlias: normalizeOptionalPlainText(
       record.publicAlias,
       HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS,
@@ -77,12 +112,12 @@ export function parseHostedGroupSponsorshipDraft(
       record.runningBitRequest,
       HOSTED_GROUP_SPONSORSHIP_RUNNING_BIT_MAX_CODE_POINTS,
     ),
-    sponsorMessage: normalizeOptionalPlainText(
-      record.sponsorMessage,
-      HOSTED_GROUP_SPONSORSHIP_MESSAGE_MAX_CODE_POINTS,
-    ),
+    sponsorMessage,
   };
-  return draft.publicAlias || draft.runningBitRequest || draft.sponsorMessage
+  return draft.creativeRequest ||
+      draft.publicAlias ||
+      draft.runningBitRequest ||
+      draft.sponsorMessage
     ? draft
     : null;
 }
@@ -150,13 +185,21 @@ export async function createHostedGroupSponsorshipMomentTx(input: {
     });
   }
 
+  const legacySponsorMessage = input.authorizedDraft?.sponsorMessage ?? null;
+  const creativeRequest = legacySponsorMessage === null
+    ? input.authorizedDraft?.creativeRequest ?? null
+    : null;
+  const creativeRequestPayload = creativeRequest
+    ? serializeHostedGroupSponsorshipCreativeRequest(creativeRequest)
+    : null;
   const plaintextEntries = [
     ["public_alias_encrypted", input.authorizedDraft?.publicAlias ?? null],
-    ["sponsor_message_encrypted", input.authorizedDraft?.sponsorMessage ?? null],
+    ["sponsor_message_encrypted", legacySponsorMessage],
     [
       "running_bit_request_encrypted",
       input.authorizedDraft?.runningBitRequest ?? null,
     ],
+    ["creative_request_encrypted", creativeRequestPayload],
   ].filter((entry): entry is [string, string] => entry[1] !== null);
   const encryptedValues = await sealHostedUserSecureBoxStrings({
     entries: plaintextEntries.map(([field, value]) => ({
@@ -171,6 +214,11 @@ export async function createHostedGroupSponsorshipMomentTx(input: {
   const encryptedByField = new Map(
     plaintextEntries.map(([field], index) => [field, encryptedValues[index]]),
   );
+  const encryptedCreativeRequest =
+    encryptedByField.get("creative_request_encrypted") ?? null;
+  if (creativeRequestPayload !== null && encryptedCreativeRequest === null) {
+    throw new Error("Group sponsorship creative request was not encrypted.");
+  }
 
   await input.tx.hostedGroupSponsorshipMoment.create({
     data: {
@@ -178,6 +226,10 @@ export async function createHostedGroupSponsorshipMomentTx(input: {
       configurationDigest: digestHostedGroupSponsorshipDraft(
         input.authorizedDraft,
       ),
+      creativeRequestEncrypted: legacySponsorMessage !== null
+        ? null
+        : encryptedCreativeRequest
+          ?? SPONSORSHIP_CREATIVE_REQUEST_NONE_SENTINEL,
       creatorMemberId: input.creatorMemberId,
       publicAliasEncrypted:
         encryptedByField.get("public_alias_encrypted") ?? null,
@@ -284,6 +336,7 @@ export async function readHostedGroupSponsorshipMomentForNotification(input: {
   }
   const draft = input.customContentAuthorized
     ? await openSponsorshipDraft({
+        creativeRequestEncrypted: row.creativeRequestEncrypted,
         creatorMemberId: row.creatorMemberId,
         prisma: input.prisma,
         publicAliasEncrypted: row.publicAliasEncrypted,
@@ -295,7 +348,11 @@ export async function readHostedGroupSponsorshipMomentForNotification(input: {
   return {
     celebrationScale:
       getHostedGroupSponsorshipExperiencePolicy(input.offerCode).celebrationScale,
+    ...(draft?.creativeRequest
+      ? { creativeRequest: draft.creativeRequest }
+      : {}),
     expiresAt: row.expiresAt,
+    legacyAutomaticSong: row.creativeRequestEncrypted === null,
     publicAlias: draft?.publicAlias ?? null,
     runningBitRequest: draft?.runningBitRequest ?? null,
     sponsorMessage: draft?.sponsorMessage ?? null,
@@ -317,6 +374,7 @@ export async function readHostedGroupSponsorshipDraftForCreator(input: {
     return null;
   }
   return await openSponsorshipDraft({
+    creativeRequestEncrypted: row.creativeRequestEncrypted,
     creatorMemberId: row.creatorMemberId,
     prisma: input.prisma,
     publicAliasEncrypted: row.publicAliasEncrypted,
@@ -355,6 +413,7 @@ export async function readHostedActiveGroupRunningBit(input: {
   }
   try {
     const draft = await openSponsorshipDraft({
+      creativeRequestEncrypted: row.creativeRequestEncrypted,
       creatorMemberId: row.creatorMemberId,
       prisma: input.prisma,
       publicAliasEncrypted: row.publicAliasEncrypted,
@@ -374,6 +433,48 @@ export async function readHostedActiveGroupRunningBit(input: {
   } catch {
     return null;
   }
+}
+
+function parseHostedGroupSponsorshipCreativeRequest(
+  value: unknown,
+): HostedGroupSponsorshipCreativeRequest | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw invalidSponsorshipError();
+  }
+  const record = value as Record<string, unknown>;
+  const allowedKeys = new Set(["format", "prompt", "styleRequest"]);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+    throw invalidSponsorshipError();
+  }
+  const format = record.format;
+  if (!isHostedGroupSponsorshipCreativeFormat(format)) {
+    throw invalidSponsorshipError();
+  }
+  const prompt = normalizeOptionalPlainText(
+    record.prompt,
+    HOSTED_GROUP_SPONSORSHIP_CREATIVE_PROMPT_MAX_CODE_POINTS,
+  );
+  const styleRequest = normalizeOptionalPlainText(
+    record.styleRequest,
+    HOSTED_GROUP_SPONSORSHIP_CREATIVE_STYLE_MAX_CODE_POINTS,
+  );
+  if (format !== "song" && styleRequest !== null) {
+    throw invalidSponsorshipError();
+  }
+  return {
+    format,
+    prompt,
+    styleRequest: format === "song" ? styleRequest : null,
+  };
+}
+
+function isHostedGroupSponsorshipCreativeFormat(
+  value: unknown,
+): value is HostedGroupSponsorshipCreativeFormat {
+  return typeof value === "string" && CREATIVE_FORMATS.has(value);
 }
 
 function normalizeOptionalPlainText(
@@ -399,7 +500,45 @@ function normalizeOptionalPlainText(
   return normalized;
 }
 
+function serializeHostedGroupSponsorshipCreativeRequest(
+  request: HostedGroupSponsorshipCreativeRequest,
+): string {
+  return JSON.stringify({
+    request,
+    schema: SPONSORSHIP_CREATIVE_REQUEST_SCHEMA,
+  });
+}
+
+function parseStoredHostedGroupSponsorshipCreativeRequest(
+  value: string | null,
+): HostedGroupSponsorshipCreativeRequest | null {
+  if (value === null) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw invalidSponsorshipError();
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw invalidSponsorshipError();
+  }
+  const record = parsed as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (
+    keys.length !== 2 ||
+    keys[0] !== "request" ||
+    keys[1] !== "schema" ||
+    record.schema !== SPONSORSHIP_CREATIVE_REQUEST_SCHEMA
+  ) {
+    throw invalidSponsorshipError();
+  }
+  return parseHostedGroupSponsorshipCreativeRequest(record.request);
+}
+
 async function openSponsorshipDraft(input: {
+  creativeRequestEncrypted: string | null;
   creatorMemberId: string;
   prisma: SponsorshipPrisma;
   publicAliasEncrypted: string | null;
@@ -407,17 +546,32 @@ async function openSponsorshipDraft(input: {
   runningBitRequestEncrypted: string | null;
   sponsorMessageEncrypted: string | null;
 }): Promise<HostedGroupSponsorshipDraft | null> {
-  const [publicAlias, sponsorMessage, runningBitRequest] =
-    await openHostedUserSecureBoxStrings({
-      entries: [
-        sponsorshipOpenEntry(input, "public_alias_encrypted"),
-        sponsorshipOpenEntry(input, "sponsor_message_encrypted"),
-        sponsorshipOpenEntry(input, "running_bit_request_encrypted"),
-      ],
-      lane: "hosted-member-private-field",
-      prisma: input.prisma,
-    });
+  const hasEncryptedCreativeRequest =
+    input.creativeRequestEncrypted !== null
+    && input.creativeRequestEncrypted
+      !== SPONSORSHIP_CREATIVE_REQUEST_NONE_SENTINEL;
+  const [
+    publicAlias,
+    sponsorMessage,
+    runningBitRequest,
+    creativeRequestPayload = null,
+  ] = await openHostedUserSecureBoxStrings({
+    entries: [
+      sponsorshipOpenEntry(input, "public_alias_encrypted"),
+      sponsorshipOpenEntry(input, "sponsor_message_encrypted"),
+      sponsorshipOpenEntry(input, "running_bit_request_encrypted"),
+      ...(hasEncryptedCreativeRequest
+        ? [sponsorshipOpenEntry(input, "creative_request_encrypted")]
+        : []),
+    ],
+    lane: "hosted-member-private-field",
+    prisma: input.prisma,
+  });
+  const creativeRequest = parseStoredHostedGroupSponsorshipCreativeRequest(
+    creativeRequestPayload,
+  );
   return parseHostedGroupSponsorshipDraft({
+    ...(creativeRequest ? { creativeRequest } : {}),
     publicAlias,
     runningBitRequest,
     sponsorMessage,
@@ -427,15 +581,18 @@ async function openSponsorshipDraft(input: {
 function sponsorshipOpenEntry(
   input: Parameters<typeof openSponsorshipDraft>[0],
   field:
+    | "creative_request_encrypted"
     | "public_alias_encrypted"
     | "running_bit_request_encrypted"
     | "sponsor_message_encrypted",
 ) {
-  const value = field === "public_alias_encrypted"
-    ? input.publicAliasEncrypted
-    : field === "running_bit_request_encrypted"
-      ? input.runningBitRequestEncrypted
-      : input.sponsorMessageEncrypted;
+  const value = field === "creative_request_encrypted"
+    ? input.creativeRequestEncrypted
+    : field === "public_alias_encrypted"
+      ? input.publicAliasEncrypted
+      : field === "running_bit_request_encrypted"
+        ? input.runningBitRequestEncrypted
+        : input.sponsorMessageEncrypted;
   return {
     aad: sponsorshipAad(input.purchaseId, field),
     scope: SPONSORSHIP_PRIVATE_CONTENT_SCOPE,
