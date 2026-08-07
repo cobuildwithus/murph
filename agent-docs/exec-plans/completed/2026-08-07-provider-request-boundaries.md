@@ -32,9 +32,20 @@ Prevent structurally typed object composition from silently forwarding unsupport
 
 ## Verification
 
-- Focused assistantd HTTP tests prove unknown top-level and engine-only fields return 400 and do not reach the service.
-- Focused assistant-cli serialization tests prove only the wire DTO is emitted.
-- Device-syncd tests prove optional OAuth scope is retained while reserved fields remain protocol-owned.
-- Repo-tool guard tests cover official SDK calls, typed builders, aliases, nested parameters, options, custom clients, and allowed internal spreads.
-- Focused provider request-shape tests remain green for migrated Stripe, Kernel, Linq, Retell, and Temporal paths.
-- Exact-head CI, preliminary specialist ReviewGPT coverage lens, and final ReviewGPT sensitive gate all pass with no unresolved accepted findings.
+- Assistantd HTTP tests passed with 13 cases proving unknown top-level and engine-only fields return 400 without reaching the service.
+- Assistant CLI tests passed with 128 cases, including exact wire projection and local handling for engine-only input.
+- Shared OAuth tests passed with 13 cases, including cross-grant dynamic attempts to replace protocol-owned fields before a provider call.
+- The generalized provider guard passed with 19 regressions covering official SDK calls, typed and object-literal builders, aliases, factories, nested parameters, options, custom clients, and allowed internal spreads.
+- Focused hosted web, operator, Pulse, Junction, and assistant package tests passed, together with the relevant typechecks and targeted lint checks.
+- The final ReviewGPT gate passed with no findings after remediation of the preliminary specialist coverage finding and the final round-one verification gaps.
+- All ordinary exact-head GitHub checks and the hermetic hosted billing proof passed. The secret-backed live Stripe job was canceled before setup on four attempts by churn in its repository-global concurrency group; no live test step failed, and the externally contended lane remains the only incomplete remote proof.
+
+## Outcome
+
+- Provider-bound object composition is now explicit and checked against official request types at the migrated Stripe, Kernel, Linq, Retell, Temporal, OpenAI, and Junction boundaries.
+- The repository guard bans request spreads and `Object.assign` at registered provider calls while leaving internal object composition alone.
+- Assistant daemon and OAuth boundaries now reject authority-bearing or protocol-owned fields that previously could pass through structural typing gaps.
+- Pull request #1430 contains the implementation, regressions, documentation, and exact review evidence.
+Status: completed
+Updated: 2026-08-07
+Completed: 2026-08-07
