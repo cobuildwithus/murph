@@ -191,3 +191,13 @@ Updated: 2026-08-06
   reproductions now fail closed, environment references and harmless prose
   remain accepted, the focused suite passes 17/17, and all five completed
   release tarballs pass the exact final scanner.
+- Final ReviewGPT round 6 accepted repository-owned opaque authority holders
+  that still fell outside the shared classifier: auth JSON, HMAC/encryption/
+  fingerprint/root/routing/privacy keys, private JWK/key material, and plural
+  execution-control tokens. The correction extends the existing component
+  policy for those proven semantics without decoding values or adding another
+  scanner. Plural token metrics remain public data; only control-token
+  containers are classified. Exact public root labels remain enumerated. The
+  direct and complete-tarball cases fail closed for every reproduced authority,
+  reference/placeholder cases remain accepted, the focused suite passes 17/17,
+  and the fresh five-package inventory passes the exact updated scanner.

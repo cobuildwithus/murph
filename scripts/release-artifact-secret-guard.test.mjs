@@ -275,6 +275,17 @@ test('detects standard authorization, parameter, and camel-case credential forms
     `const clientsecret = "${credential}";`,
     `const compactBasic = "Basic ${shortBasicCredential}";`,
     `const formFields = [["refresh_token", "${credential}"]];`,
+    `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON="${credential}"`,
+    `HOSTED_APP_SESSION_HMAC_KEY="${credential}"`,
+    `HOSTED_MAILBOX_FINGERPRINT_KEY="${credential}"`,
+    `HOSTED_EXECUTION_CONTROL_TOKENS="${credential}"`,
+    `const hmacKey = "${credential}";`,
+    `const encryptionKey = "${credential}";`,
+    `const routingIndexKey = "${credential}";`,
+    `const privateJwkJson = "${credential}";`,
+    `const contactPrivacyKeys = "${credential}";`,
+    `const keyMaterial = "${credential}";`,
+    `const rootKey = "${credential}";`,
   ];
   for (const text of cases) {
     assert.ok(
@@ -308,6 +319,14 @@ test('detects standard authorization, parameter, and camel-case credential forms
     'const source = { title: "Basic Return to Running Guideline" };',
     'const headings = ["Key", "Value"];',
     'const prose = "basic care and bearer token handling";',
+    'HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON=${HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON}',
+    'HOSTED_APP_SESSION_HMAC_KEY=${HOSTED_APP_SESSION_HMAC_KEY}',
+    'HOSTED_EXECUTION_CONTROL_TOKENS=${HOSTED_EXECUTION_CONTROL_TOKENS}',
+    'const hmacKey = process.env.HOSTED_APP_SESSION_HMAC_KEY;',
+    'const privateJwkJson = `${HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK}`;',
+    'const contactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;',
+    'const rootKey = "vault";',
+    'const rootKeyId = "runtime-v1";',
   ]) {
     assert.equal(
       contentRuleIds(text).some((ruleId) =>
@@ -346,6 +365,17 @@ test('detects standard authorization, parameter, and camel-case credential forms
       `const clientsecret = "${credential}";`,
       `const compactBasic = "Basic ${shortBasicCredential}";`,
       `const formFields = [["refresh_token", "${credential}"]];`,
+      `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON="${credential}"`,
+      `HOSTED_APP_SESSION_HMAC_KEY="${credential}"`,
+      `HOSTED_MAILBOX_FINGERPRINT_KEY="${credential}"`,
+      `HOSTED_EXECUTION_CONTROL_TOKENS="${credential}"`,
+      `const hmacKey = "${credential}";`,
+      `const encryptionKey = "${credential}";`,
+      `const routingIndexKey = "${credential}";`,
+      `const privateJwkJson = "${credential}";`,
+      `const contactPrivacyKeys = "${credential}";`,
+      `const keyMaterial = "${credential}";`,
+      `const rootKey = "${credential}";`,
     ].join('\n'),
     'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
   });

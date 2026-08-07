@@ -115,6 +115,28 @@ const exactCredentialKeys = new Set([
   'setcookie',
   'token',
 ]);
+const credentialTerminalParts = new Set([
+  'credential',
+  'credentials',
+  'mnemonic',
+  'password',
+  'secret',
+  'token',
+]);
+const credentialKeyAuthorityParts = new Set([
+  'access',
+  'api',
+  'auth',
+  'client',
+  'encryption',
+  'fingerprint',
+  'hmac',
+  'private',
+  'privacy',
+  'root',
+  'secret',
+  'signing',
+]);
 // These are reviewed public literals from the real release inventory. Do not
 // replace them with key-suffix or value-shape exemptions.
 const allowedPublicCredentialAssignments = new Set(
@@ -132,6 +154,7 @@ const allowedPublicCredentialAssignments = new Set(
     ['HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN', '[redacted]'],
     ['HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER', 'x-hosted-runtime-ensure-processing-token-acquired-at-ms'],
     ['HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER', 'x-hosted-runtime-ensure-processing-token-acquire-started-at-ms'],
+    ['HOSTED_OPERATOR_HOME_ROOT_KEY', 'operator-home'],
     ['MANAGED_CONTROL_TOKEN_FILE_NAME', 'control-token'],
     ['MANAGED_ENCRYPTION_SECRET_FILE_NAME', 'encryption-secret'],
     ['OURA_OAUTH_TOKEN_ENDPOINT_KIND', 'oura_oauth_token'],
@@ -158,6 +181,7 @@ const allowedPublicCredentialAssignments = new Set(
     ],
     ['clinical-records-token', 'device'],
     ['device-sync-token', 'device'],
+    ['rootKey', 'vault'],
     ['token', '-${suffix}'],
     [
       'webhookSecret',
@@ -281,22 +305,39 @@ function isCredentialKey(key, options = {}) {
 
   const parts = credentialKeyParts(key);
   const terminal = parts.at(-1);
-  if (
-    ['credential', 'credentials', 'mnemonic', 'password', 'secret', 'token']
-      .includes(terminal)
-  ) {
+  if (credentialTerminalParts.has(terminal)) {
+    return true;
+  }
+  if (terminal === 'tokens' && parts.includes('control')) {
     return true;
   }
   if (terminal === 'signature') {
     return options.allowSignature === true;
   }
-  if (terminal !== 'key') {
+  if (
+    terminal === 'json'
+    && (
+      parts.includes('auth')
+      || parts.includes('keyring')
+      || (parts.includes('private') && parts.includes('jwk'))
+    )
+  ) {
+    return true;
+  }
+  if (terminal === 'jwk' && parts.includes('private')) {
+    return true;
+  }
+  if (terminal === 'material' && parts.includes('key')) {
+    return true;
+  }
+  if (!['key', 'keys'].includes(terminal)) {
     return false;
   }
-  return (parts.length === 1 && options.allowBareKey === true) || parts
-    .slice(0, -1)
-    .some((part) =>
-      ['access', 'api', 'auth', 'client', 'private', 'secret', 'signing'].includes(part));
+  return (
+    (parts.length === 1 && options.allowBareKey === true)
+    || parts.slice(0, -1).some((part) => credentialKeyAuthorityParts.has(part))
+    || (parts.includes('routing') && parts.includes('index'))
+  );
 }
 
 function parameterHasCredential(pattern, text, keyIndex, valueIndex, options = {}) {
