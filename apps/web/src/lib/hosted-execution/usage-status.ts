@@ -55,7 +55,8 @@ export async function readHostedPersonalAiUsageStatus(input: {
   subscriptionActionTargetPlanCode?:
     | "launch_group_monthly"
     | "launch_monthly"
-    | "launch_edge_monthly";
+    | "launch_edge_monthly"
+    | "launch_max_monthly";
 }): Promise<HostedPlanUsageStatus> {
   const now = normalizeUsageStatusDate(input.now ?? new Date());
   const prisma = input.prisma ?? getPrisma();
@@ -90,7 +91,8 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   subscriptionActionTargetPlanCode?:
     | "launch_group_monthly"
     | "launch_monthly"
-    | "launch_edge_monthly";
+    | "launch_edge_monthly"
+    | "launch_max_monthly";
 }): Promise<HostedPlanUsageStatus> {
   const now = normalizeUsageStatusDate(input.now ?? new Date());
   const prisma = input.prisma ?? getPrisma();
@@ -227,11 +229,13 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     ? "Family"
     : accessKind === "trial"
       ? "Pulse Trial"
-      : decision.billingPlanCode === "launch_edge_monthly"
-        ? "Edge"
-        : decision.billingPlanCode === "launch_group_monthly"
-          ? "Group"
-          : "Pulse";
+      : decision.billingPlanCode === "launch_max_monthly"
+        ? "Max"
+        : decision.billingPlanCode === "launch_edge_monthly"
+          ? "Edge"
+          : decision.billingPlanCode === "launch_group_monthly"
+            ? "Group"
+            : "Pulse";
   const shouldRecommendAction = exhausted
     || forecast !== null
     || usedPercent >= USAGE_ACTION_THRESHOLD_PERCENT;
@@ -243,7 +247,10 @@ export async function projectHostedPersonalAiUsageStatus(input: {
         accessKind === "trial"
         || (
           accessKind === "paid"
-          && decision.billingPlanCode === "launch_group_monthly"
+          && (
+            decision.billingPlanCode === "launch_group_monthly"
+            || decision.billingPlanCode === "launch_edge_monthly"
+          )
         )
       )
       && actionUrl !== null
@@ -304,9 +311,14 @@ export async function projectHostedPersonalAiUsageStatus(input: {
               action: availableSubscriptionOffer.quote,
               actionUrl,
             })
-          : personalUsageCreditOfferCodes.length > 0
-            ? buildAddUsageRecommendedAction()
-            : null
+          : availableSubscriptionOffer.quote
+            ? buildRecommendedAction({
+                action: availableSubscriptionOffer.quote,
+                actionUrl,
+              })
+            : personalUsageCreditOfferCodes.length > 0
+              ? buildAddUsageRecommendedAction()
+              : null
       : null,
     ...projectSubscriptionActionQuoteExpansion({
       include: includeSubscriptionActionQuote,
@@ -495,7 +507,8 @@ interface HostedResolvedSubscriptionOffer {
   recommendedPlanCode?:
     | "launch_group_monthly"
     | "launch_monthly"
-    | "launch_edge_monthly";
+    | "launch_edge_monthly"
+    | "launch_max_monthly";
 }
 
 const EMPTY_SUBSCRIPTION_OFFER: HostedResolvedSubscriptionOffer = {
@@ -511,7 +524,8 @@ async function resolveAvailableSubscriptionOffer(input: {
   requestedTargetPlanCode?:
     | "launch_group_monthly"
     | "launch_monthly"
-    | "launch_edge_monthly";
+    | "launch_edge_monthly"
+    | "launch_max_monthly";
   trialTiming?: "at_trial_end" | "now";
 }): Promise<HostedResolvedSubscriptionOffer> {
   if (input.accessKind === "family_sponsored") {
@@ -633,7 +647,9 @@ async function resolveAvailableSubscriptionOffer(input: {
         ? "launch_monthly"
         : input.planCode === "launch_monthly"
           ? "launch_edge_monthly"
-          : null
+          : input.planCode === "launch_edge_monthly"
+            ? "launch_max_monthly"
+            : null
     );
   if (!targetPlanCode || targetPlanCode === input.planCode) {
     return EMPTY_SUBSCRIPTION_OFFER;
@@ -778,7 +794,9 @@ function projectHostedScheduledPlan(
         ? "Group"
         : planCode === "launch_edge_monthly"
           ? "Edge"
-          : "Pulse",
+          : planCode === "launch_max_monthly"
+            ? "Max"
+            : "Pulse",
     effectiveAt:
       billingState?.scheduledBillingEffectiveAt?.toISOString() ?? null,
   };
