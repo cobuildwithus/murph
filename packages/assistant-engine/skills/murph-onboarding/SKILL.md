@@ -543,7 +543,7 @@ the supplied facts before replying and leaves optional label details unknown.
    it open, once as one checkpoint, not as four separate turns. When a V2 spawn
    tool is available, always start the medical-and-safety child immediately
    from the user's exact words. It owns every supported fact and negative
-   clinical assertion across the named clinical owners, schema-correct record
+   clinical assertion across the named medical owners, schema-correct record
    shape, detail fields, and cross-owner consistency. This applies to every
    medical answer, including an all-negative one such as "no meds, no
    conditions." The parent does not
