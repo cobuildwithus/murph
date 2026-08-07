@@ -113,7 +113,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   resolveMurphDynamicTools,
   type MurphDynamicTool,
-} from '../../assistant-codex/dynamic-tools.js'
+} from '../../assistant-codex/dynamic-tool-catalog.js'
 import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'

@@ -56,6 +56,13 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
               : null,
         })
         return {
+          ...(input.request.kind === 'finish-without-reply'
+            ? {
+                finalActionPatch: {
+                  kind: 'none' as const,
+                },
+              }
+            : {}),
           rpcResult: {
             success: true,
             contentItems: [
@@ -123,6 +130,74 @@ afterEach(async () => {
 })
 
 describe('Codex dynamic tool runtime routing', () => {
+  it('keeps cold and cached tool requests bound to their request-time delivery contexts', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-request-context-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-request-context-home-',
+    )
+    const beforeToolExecution = vi.fn(async () => undefined)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedRequestContextTurn(child)
+      })
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        codexCommand: 'codex',
+        codexHome,
+        dynamicTools: resolveMurphDynamicTools({
+          allowFinishWithoutReply: true,
+          progressUpdatesAvailable: true,
+        }),
+        env: {
+          CODEX_HOME: codexHome,
+          PATH: '/usr/bin',
+        },
+        hostedToolContext: {
+          beforeToolExecution,
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: vi.fn(async () => {
+            throw new Error('Vault-file sending is unavailable for this turn.')
+          }),
+          vaultFileSendAvailable: false,
+        },
+        prompt: 'Handle two tool requests and both live follow ups.',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      finalMessage: 'The latest follow up still receives this reply.',
+      threadId: 'thread-request-context',
+      turnId: 'turn-request-context',
+    })
+
+    expect(beforeToolExecution).toHaveBeenNthCalledWith(1, 0)
+    expect(beforeToolExecution).toHaveBeenNthCalledWith(2, 1)
+    expect(codexMocks.dynamicToolCalls).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        kind: 'finish-without-reply',
+        voiceMemoRuntime: null,
+      },
+      {
+        deliveryContextOrdinal: 1,
+        kind: 'send-progress-update',
+        voiceMemoRuntime: null,
+      },
+    ])
+  })
+
   it('passes voice memo and exact-turn style capabilities only to their tools', async () => {
     const workingDirectory = await createTempDir('assistant-codex-dynamic-runtime-work-')
     const codexHome = await createTempDir('assistant-codex-dynamic-runtime-home-')
@@ -421,6 +496,68 @@ describe('Codex dynamic tool runtime routing', () => {
       'pending-vault-files-cancel',
     ])
   })
+
+  it('keeps invalid computer calls in the serialized provider command order', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-invalid-computer-order-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-invalid-computer-order-home-',
+    )
+    const invalidStarted = createDeferred<void>()
+    const releaseInvalid = createDeferred<void>()
+    const executionOrder: string[] = []
+    codexMocks.onDynamicToolCall = async ({ kind }) => {
+      executionOrder.push(kind)
+      if (kind === 'invalid-computer-arguments') {
+        invalidStarted.resolve()
+        await releaseInvalid.promise
+      }
+    }
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedInvalidComputerThenStyleTurn(child)
+      })
+      return child
+    })
+
+    const turn = executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      dynamicTools: resolveMurphDynamicTools({
+        assistantStyleSettingsAvailable: true,
+        computerToolsAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      prompt: 'Try the computer, then set humor.',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    await invalidStarted.promise
+    await Promise.resolve()
+    const orderWhileInvalidWasPending = [...executionOrder]
+    releaseInvalid.resolve()
+
+    await expect(turn).resolves.toMatchObject({
+      finalMessage: 'invalid computer ordered',
+      threadId: 'thread-invalid-computer-order',
+      turnId: 'turn-invalid-computer-order',
+    })
+    expect(orderWhileInvalidWasPending).toEqual([
+      'invalid-computer-arguments',
+    ])
+    expect(executionOrder).toEqual([
+      'invalid-computer-arguments',
+      'assistant-style',
+    ])
+  })
 })
 
 async function runScriptedOverlappingPendingVaultFilesTurn(
@@ -484,6 +621,100 @@ async function runScriptedOverlappingPendingVaultFilesTurn(
     method: 'turn/completed',
     params: {
       turn: { id: 'turn-pending-file-order', status: 'completed' },
+    },
+  }))
+}
+
+async function runScriptedRequestContextTurn(
+  child: MockChildProcess,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-request-context' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-request-context' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-request-context' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'user-request-context-initial',
+        message: 'Handle two tool requests and both live follow ups.',
+        type: 'user_message',
+      },
+    },
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  child.stdout.write(
+    jsonLine({
+      id: 31,
+      method: 'item/tool/call',
+      params: {
+        arguments: {},
+        namespace: 'murph',
+        tool: 'finish_without_reply',
+        turnId: 'turn-request-context',
+      },
+    }) + jsonLine({
+      method: 'item/completed',
+      params: {
+        item: {
+          id: 'user-request-context-first-steer',
+          message: 'Actually, please keep going.',
+          type: 'user_message',
+        },
+      },
+    }),
+  )
+  await child.waitForRpcId(31)
+
+  child.stdout.write(
+    jsonLine({
+      id: 32,
+      method: 'item/tool/call',
+      params: {
+        arguments: { text: 'Continuing with the update.' },
+        namespace: 'murph',
+        tool: 'send_progress_update',
+        turnId: 'turn-request-context',
+      },
+    }) + jsonLine({
+      method: 'item/completed',
+      params: {
+        item: {
+          id: 'user-request-context-second-steer',
+          message: 'Please answer this latest follow up too.',
+          type: 'user_message',
+        },
+      },
+    }),
+  )
+  await child.waitForRpcId(32)
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'assistant-request-context',
+        message: 'The latest follow up still receives this reply.',
+        type: 'assistant_message',
+      },
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-request-context', status: 'completed' },
     },
   }))
 }
@@ -607,6 +838,66 @@ async function runScriptedOverlappingStyleTurn(
     method: 'turn/completed',
     params: {
       turn: { id: 'turn-style-order', status: 'completed' },
+    },
+  }))
+}
+
+async function runScriptedInvalidComputerThenStyleTurn(
+  child: MockChildProcess,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-invalid-computer-order' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-invalid-computer-order' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-invalid-computer-order' } },
+  }))
+
+  child.stdout.write(jsonLine({
+    id: 13,
+    method: 'item/tool/call',
+    params: {
+      arguments: { runId: 'run_123' },
+      namespace: 'murph',
+      tool: 'computer_act',
+      turnId: 'turn-invalid-computer-order',
+    },
+  }))
+  child.stdout.write(jsonLine({
+    id: 14,
+    method: 'item/tool/call',
+    params: {
+      arguments: { action: 'set', setting: 'humor', value: 6 },
+      namespace: 'murph',
+      tool: 'assistant_style',
+      turnId: 'turn-invalid-computer-order',
+    },
+  }))
+  await child.waitForRpcId(13)
+  await child.waitForRpcId(14)
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'assistant-invalid-computer-order',
+        message: 'invalid computer ordered',
+        type: 'assistant_message',
+      },
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-invalid-computer-order', status: 'completed' },
     },
   }))
 }
