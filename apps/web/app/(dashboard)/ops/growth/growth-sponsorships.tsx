@@ -29,9 +29,10 @@ export function GrowthSponsorships({
         <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
           Monthly sponsorships are capped usage authorizations, not subscriptions,
           so their caps and charges stay outside plan MRR. Gross charges are
-          fulfilled live-mode payments in the current UTC month and do not net
-          refunds or disputes; usage is exact sponsor-funded credit consumed in
-          the same window.
+          fulfilled live-mode payments still represented in the retained
+          sponsorship ledger in the current UTC month and do not net refunds or
+          disputes; usage is exact sponsor-funded credit consumed in the same
+          window.
         </p>
       </div>
 
@@ -39,7 +40,7 @@ export function GrowthSponsorships({
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <SponsorshipMetric
-              helper={`${formatInteger(metrics.paidPurchasesThisMonth)} fulfilled ${pluralize(
+              helper={`${formatInteger(metrics.paidPurchasesThisMonth)} retained fulfilled ${pluralize(
                 metrics.paidPurchasesThisMonth,
                 "payment",
               )} · refunds not netted`}
