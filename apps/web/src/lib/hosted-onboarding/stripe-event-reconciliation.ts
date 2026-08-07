@@ -78,11 +78,15 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
-import { requireHostedStripeApi } from "./runtime";
+import {
+  requireHostedStripeApi,
+  requireHostedStripeApiMode,
+} from "./runtime";
 import {
   logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
+import { scheduleHostedStripeReconciliationFailureAlert } from "./stripe-alert-email";
 import { HostedStripeCheckoutLoserCleanupPendingError } from "./stripe-checkout-loser-cleanup";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
@@ -267,6 +271,10 @@ export async function reconcileDueHostedStripeEvents(input: {
     ],
     take: input.limit ?? 25,
   });
+  if (candidates.length === 0) {
+    return reconciledEventIds;
+  }
+  const { stripeLiveMode } = requireHostedStripeApiMode();
 
   for (const candidate of candidates) {
     const claimed = await claimHostedStripeEvent({
@@ -280,7 +288,11 @@ export async function reconcileDueHostedStripeEvents(input: {
       continue;
     }
 
-    const result = await processClaimedHostedStripeEvent(claimed, input.prisma);
+    const result = await processClaimedHostedStripeEvent(
+      claimed,
+      input.prisma,
+      stripeLiveMode,
+    );
     if (result.status === "completed") {
       reconciledEventIds.push(result.eventId);
     }
@@ -303,6 +315,7 @@ export async function reconcileHostedStripeEventById(input: {
   if (!candidate) {
     return null;
   }
+  const { stripeLiveMode } = requireHostedStripeApiMode();
 
   const claimed = await claimHostedStripeEvent({
     eventId: candidate.eventId,
@@ -315,7 +328,11 @@ export async function reconcileHostedStripeEventById(input: {
     return null;
   }
 
-  return processClaimedHostedStripeEvent(claimed, input.prisma);
+  return processClaimedHostedStripeEvent(
+    claimed,
+    input.prisma,
+    stripeLiveMode,
+  );
 }
 
 async function claimHostedStripeEvent(input: {
@@ -834,6 +851,7 @@ function computeHostedStripeEventNextAttemptAt(attemptCount: number, now = new D
 async function processClaimedHostedStripeEvent(
   claimed: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>,
   prisma: PrismaClient,
+  stripeLiveMode: boolean,
 ): Promise<HostedStripeEventReconcileResult> {
   const timing = startHostedOnboardingTiming("hosted-onboarding.stripe.reconcile-event", {
     attemptCount: claimed.attemptCount,
@@ -1048,6 +1066,7 @@ async function processClaimedHostedStripeEvent(
       !usageCreditEventHandled &&
       !isHostedUsageCreditStripeRetryableError(error) &&
       !isHostedStripeEventOperationallyRetryableError(error);
+    const reconciliationErrorCode = deriveHostedStripeEventErrorCode(error);
     logHostedStripeEventReconciliationFailure({
       attemptCount: claimed.attemptCount,
       error,
@@ -1055,6 +1074,14 @@ async function processClaimedHostedStripeEvent(
       eventType: claimed.type,
       poisoned,
     });
+    if (claimed.attemptCount === 1) {
+      scheduleHostedStripeReconciliationFailureAlert({
+        errorCode: reconciliationErrorCode,
+        eventId: claimed.eventId,
+        eventType: claimed.type,
+        livemode: stripeLiveMode,
+      });
+    }
     await prisma.hostedStripeEvent.updateMany({
       where: {
         attemptCount: claimed.attemptCount,
@@ -1064,7 +1091,7 @@ async function processClaimedHostedStripeEvent(
       data: {
         claimExpiresAt: null,
         lastErrorCode: sanitizeHostedOnboardingPersistedErrorCode(
-          deriveHostedStripeEventErrorCode(error),
+          reconciliationErrorCode,
         ),
         lastErrorMessage: sanitizeHostedOnboardingPersistedErrorMessage(
           error instanceof Error ? error.message : String(error),

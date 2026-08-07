@@ -645,15 +645,19 @@ Before a production build, configure these Production-scoped server values:
 - `MURPH_PUBLIC_ROUTES_WAF_REQUIRED=1`
 - `MURPH_SAFE_SEARCH_WAF_RULE_ID`
 - `MURPH_SAFE_DETAIL_WAF_RULE_ID`
+- `MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID`
 - `HOSTED_WEB_VERCEL_PROJECT_ID`
 - optional `HOSTED_WEB_VERCEL_TEAM_ID`
 - `HOSTED_WEB_VERCEL_TOKEN`, limited to reading the project's firewall config
 
-The exact-id custom rules must be the first active rules after the optional
+The exact-id Murph Safe rules must be the first active rules after the optional
 companion diagnostics rule. Search is an exact POST path with a fixed-window
 per-IP 429 at 30 requests per 60 seconds. Detail covers the public API prefix
 while excluding search, plus the public web-detail prefix, at 120 requests per
-60 seconds. `pnpm public-routes:waf-check` reads the active Vercel firewall
+60 seconds. The signup-referral claim rule matches only POST paths that start
+with `/r/` and end with `/claim`, with a fixed-window per-IP 429 at 10 requests
+per 60 seconds. It may follow other scoped active rules but never an active
+bypass rule. `pnpm public-routes:waf-check` reads the active Vercel firewall
 configuration and fails on disabled firewall, order, condition, algorithm,
 key, limit, window, action, or id drift. It never downloads environment values
 or prints the provider token or response body.
@@ -676,6 +680,13 @@ Hosted onboarding extras:
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
 - `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients when Stripe reconciliation accepts a hosted signup or trial activation. Leave it unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
+- `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
+  `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
+  uses it for metadata-only alerts when a provider rejection aborts a complete
+  billing action, for new verified payment-failure events, and for the first
+  failed reconciliation attempt. Both website and iMessage Assistant billing
+  use the same Web-owned Stripe services, so there is no separate
+  channel-specific configuration.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
 - `PRIVY_CUSTOM_AUTH_DOMAIN`
@@ -1055,6 +1066,31 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   The time zone is the monitor opt-in: without it the monitor stays disabled;
   with it, incomplete Resend email config or an invalid time zone fails the
   cron visibly. The latency path has no Linq/iMessage fallback.
+- The same `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`, and
+  `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts. No
+  time-zone setting is required for Stripe alerts. Confirm that the Stripe
+  webhook endpoint subscribes to `checkout.session.async_payment_failed`,
+  `payment_intent.payment_failed`, `invoice.payment_failed`, and
+  `invoice.finalization_failed`. Checkout action owners cover mandatory
+  price reads, customer provisioning, saved-card preparation, and Checkout
+  Session create/resume. Paid-plan upgrades, paid-trial transitions, and
+  scheduled plan switches use the same complete-action ownership. An owner
+  emails only when the provider rejection aborts the action; recovered reads,
+  replays, and cleanup races remain diagnostic logs.
+  Family retries bind alerts to the current replacement attempt, and explicit
+  group-sponsorship recovery reports only when its own provider-backed checkout
+  terminates; a no-charge reactivation stays silent. The final Family redirect
+  Session read reports a provider rejection only for a still-current blind
+  Session binding, keeping unknown or stale public IDs silent. Paid Family
+  capacity changes reuse their exact Stripe update identity for alert replay;
+  member-tier swaps reuse the persisted transition identity. Successful,
+  already-applied, and domain-only outcomes schedule no email. Provider
+  adapters retain only a validated opaque Stripe request id in a frozen
+  non-serialized correlation record so distinct failed requests remain distinct
+  emails; client-visible error details still expose presence only. The parser
+  is dependency-free so production migration line sync and standalone Stripe
+  tooling can continue importing the general onboarding runtime under ordinary
+  Node conditions.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
