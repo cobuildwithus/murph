@@ -939,14 +939,16 @@ sequence as a tie-breaker. Accepted inputs use their original conversation row,
 scheduled updates use the exact occurrence, and Settings or event updates retain
 their existing source metadata. Web appends one preference event containing only the
 sparse fields that order approves; an all-stale request appends nothing. Canonical
-field pointers then reference that approved event, and the runtime applies approved
-events by their own mailbox append sequence. This separates source-order admission
-from runtime delivery order: either callback execution order converges in Web, while
-runtime retries cannot use an older source sequence to overwrite a later approved
-event. Deterministic identities include the occurrence or accepted input, operation,
-requested fields, and exact provider tool-call id. Replaying the same identity with
-different approved bytes fails retryably; distinct commands in one turn remain
-distinct. No receipt table, second preference owner, or repair queue is introduced.
+field pointers retain the winning source sequence, and retention preserves the
+referenced structural source row needed to recover its trusted timestamp. The runtime
+applies approved events by their own mailbox append sequence. This separates
+source-order admission from runtime delivery order: either callback execution order
+converges in Web, while runtime retries cannot use an older source sequence to
+overwrite a later approved event. Deterministic identities include the occurrence or
+accepted input, operation, requested fields, and exact provider tool-call id.
+Replaying the same identity with different source metadata or approved bytes fails
+retryably; distinct commands in one turn remain distinct. No receipt table, second
+preference owner, or repair queue is introduced.
 Scheduled Clinical Records calls return a stable authenticated launcher and create no
 intent. The ordinary 15-minute, single-use claim begins only when the member opens
 that exact launcher; transient creation failure remains retryable, and successful

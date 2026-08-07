@@ -61,6 +61,7 @@ interface HostedRuntimeAssistantPersonalityTransactionResult {
 
 interface HostedRuntimeAssistantPreferenceWriteAuthority {
   occurredAt: string;
+  preferenceCausalSeq?: string;
   updateId: string;
 }
 
@@ -116,6 +117,9 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
           causalOrigin: "turn",
           memberId: input.memberId,
           occurredAt: writeAuthority.occurredAt,
+          ...(writeAuthority.preferenceCausalSeq === undefined
+            ? {}
+            : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
           preferences: {
             ...(request.tone === undefined ? {} : { tone: request.tone }),
             ...(request.voice === undefined ? {} : { voice: request.voice }),
@@ -196,6 +200,9 @@ async function handleHostedRuntimeAssistantPersonalityUpdate(input: {
       causalOrigin: "turn",
       memberId: input.memberId,
       occurredAt: writeAuthority.occurredAt,
+      ...(writeAuthority.preferenceCausalSeq === undefined
+        ? {}
+        : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
       preferences: {
         personality: input.personality,
       },
@@ -344,6 +351,7 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
   }
   return {
     occurredAt: inputAuthority.occurredAt,
+    preferenceCausalSeq: inputAuthority.causalSeq,
     updateId: buildHostedAssistantPreferenceUpdateId({
       authority: input.authority,
       operation: input.operation,

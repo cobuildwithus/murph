@@ -359,6 +359,14 @@ describe("hosted assistant personalization tool owner adapter", () => {
       .mock.calls[0]?.[0]?.updateId;
     const secondUpdateId = mocks.upsertHostedMemberAssistantPreferencesTx
       .mock.calls[1]?.[0]?.updateId;
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx)
+      .toHaveBeenNthCalledWith(1, expect.objectContaining({
+        preferenceCausalSeq: "42",
+      }));
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx)
+      .toHaveBeenNthCalledWith(2, expect.objectContaining({
+        preferenceCausalSeq: "42",
+      }));
     expect(firstUpdateId).toBe(buildAcceptedPreferenceUpdateId({
       assistantInputId,
       operation: "personality",
@@ -501,6 +509,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       causalOrigin: "turn",
       memberId: "member_group_runtime",
       occurredAt: expect.any(String),
+      preferenceCausalSeq: "42",
       preferences: {
         personality: {
           detail: 7,
@@ -840,6 +849,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       causalOrigin: "turn",
       memberId: "member_personalization_1",
       occurredAt: expect.any(String),
+      preferenceCausalSeq: "42",
       preferences: {
         personality: {
           detail: 9,
@@ -934,6 +944,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       expect.objectContaining({
         causalOrigin: "turn",
         memberId: "member_personalization_1",
+        preferenceCausalSeq: "42",
         preferences: { voice: "warm" },
         prisma: expect.objectContaining({ tx: true }),
         updateId: buildAcceptedPreferenceUpdateId({

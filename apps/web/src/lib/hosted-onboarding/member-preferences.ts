@@ -104,11 +104,6 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     });
   }
 
-  if (input.preferenceCausalSeq !== undefined && input.updateId !== undefined) {
-    throw new TypeError(
-      "Assistant preference update cannot provide both source sequence and update identity.",
-    );
-  }
   if (!Number.isFinite(Date.parse(input.occurredAt))) {
     throw new TypeError("Assistant preference logical ordering time is invalid.");
   }
@@ -143,6 +138,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
         eventId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
+        preferenceCausalSeq: input.preferenceCausalSeq,
         preferences: input.preferences,
         wake: existingWake,
       });
@@ -163,6 +159,8 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     currentCausalSeq,
     currentOccurredAt,
     occurredAt: input.occurredAt,
+    sameSourceCommand: input.updateId !== undefined
+      && input.preferenceCausalSeq !== undefined,
   });
 
   if (!applicablePreferences) {
@@ -207,6 +205,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       currentCausalSeq,
       currentOccurredAt,
       occurredAt: input.occurredAt,
+      sameSourceCommand: false,
     });
     if (
       !finalizedPreferences
@@ -496,6 +495,7 @@ function assertHostedMemberPreferenceWakeReplay(input: {
   eventId: string;
   memberId: string;
   occurredAt: string;
+  preferenceCausalSeq?: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
   wake: Awaited<ReturnType<typeof readHostedMailboxWakeByDedupeKey>>;
 }): void {
@@ -507,6 +507,7 @@ function assertHostedMemberPreferenceWakeReplay(input: {
     || wake.userId !== input.memberId
     || wake.occurredAt !== input.occurredAt
     || wake.causalOrigin !== input.causalOrigin
+    || wake.preferenceCausalSeq !== input.preferenceCausalSeq
     || JSON.stringify(wake.requestedFields ?? [])
       !== JSON.stringify(
         resolveHostedAssistantPreferenceRequestedFields(input.preferences),
@@ -566,6 +567,7 @@ function resolveApplicableAssistantPreferences(input: {
   };
   occurredAt: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
+  sameSourceCommand: boolean;
 }): {
   appliedFields: AssistantPreferenceFieldId[];
   preferences: HostedExecutionMemberPreferences;
@@ -576,6 +578,7 @@ function resolveApplicableAssistantPreferences(input: {
     currentOccurredAt: input.currentOccurredAt?.persona,
     occurredAt: input.occurredAt,
     requestedValue: input.preferences.persona,
+    sameSourceCommand: input.sameSourceCommand,
   });
   const toneApplicable = isAssistantPreferenceFieldApplicable({
     causalSeq: input.causalSeq,
@@ -583,6 +586,7 @@ function resolveApplicableAssistantPreferences(input: {
     currentOccurredAt: input.currentOccurredAt?.tone,
     occurredAt: input.occurredAt,
     requestedValue: input.preferences.tone,
+    sameSourceCommand: input.sameSourceCommand,
   });
   const voiceApplicable = isAssistantPreferenceFieldApplicable({
     causalSeq: input.causalSeq,
@@ -590,6 +594,7 @@ function resolveApplicableAssistantPreferences(input: {
     currentOccurredAt: input.currentOccurredAt?.voice,
     occurredAt: input.occurredAt,
     requestedValue: input.preferences.voice,
+    sameSourceCommand: input.sameSourceCommand,
   });
   const persona = personaApplicable && input.preferences.persona !== undefined
     ? input.preferences.persona
@@ -618,6 +623,7 @@ function resolveApplicableAssistantPreferences(input: {
       currentOccurredAt: input.currentOccurredAt?.personality[settingId],
       occurredAt: input.occurredAt,
       requestedValue: requestedScore,
+      sameSourceCommand: input.sameSourceCommand,
     })) {
       continue;
     }
@@ -653,6 +659,7 @@ function isAssistantPreferenceFieldApplicable<T>(input: {
   currentOccurredAt: Date | null | undefined;
   occurredAt: string;
   requestedValue: T | undefined;
+  sameSourceCommand: boolean;
 }): boolean {
   if (input.requestedValue === undefined) {
     return false;
@@ -668,7 +675,11 @@ function isAssistantPreferenceFieldApplicable<T>(input: {
   if (requestedAt !== currentAt) {
     return requestedAt > currentAt;
   }
-  return input.causalSeq > input.currentCausalSeq;
+  return input.causalSeq > input.currentCausalSeq
+    || (
+      input.sameSourceCommand
+      && input.causalSeq === input.currentCausalSeq
+    );
 }
 
 async function readHostedAssistantPreferenceOccurredAtByCausalSeq(input: {

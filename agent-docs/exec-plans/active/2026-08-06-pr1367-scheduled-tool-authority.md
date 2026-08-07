@@ -76,6 +76,14 @@ message-bound effects.
   commands and replay dedupe, makes the exact launcher resumable and retryable while
   staging the claim in the existing private browser-history owner, and restores the
   accepted-input id list as the feedback boundary.
+- Final ReviewGPT round 4 found that the accepted-input resolver discarded its
+  original mailbox sequence, allowing a delayed same-timestamp callback to be
+  promoted behind newer state. The candidate now supplies both the deterministic
+  command identity and the real accepted source sequence. Web retains that source
+  sequence as the field pointer, rejects older missing-row barriers, permits only a
+  distinct deterministic command from the same source to tie, validates source
+  metadata on replay, and continues to order runtime application by each approved
+  event's own mailbox sequence.
 - Focused owner suites pass, including 278 assistant-runtime phase tests and a
   Strict Mode launcher replay test. The full-stack scheduled-image scenario
   observed the expected image upload, attachment, and Linq delivery, then timed
