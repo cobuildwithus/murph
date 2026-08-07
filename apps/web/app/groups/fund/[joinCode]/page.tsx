@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
+import { GroupFundingSupporters } from "@/src/components/hosted-groups/group-funding-supporters";
 import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
@@ -33,6 +34,7 @@ import {
 } from "@/src/lib/hosted-groups/group-sponsorship-authorization";
 import {
   hasHostedGroupSponsorshipCustomizationAuthority,
+  readHostedGroupFundingSupporters,
   readHostedGroupSponsorshipDraftForCreator,
 } from "@/src/lib/hosted-groups/group-sponsorship-store";
 import {
@@ -104,6 +106,7 @@ export default async function GroupFundingPage({
     purchaseReturnMatchesTarget,
     customizationAllowed,
     sponsorshipManagement,
+    supporters,
   ] =
     await Promise.all([
       readHostedGroupUsageStatus({
@@ -144,6 +147,13 @@ export default async function GroupFundingPage({
             prisma,
           })
         : Promise.resolve(null),
+      readHostedGroupFundingSupporters({
+        beneficiaryMemberId: target.runtimeMemberId,
+        prisma,
+      }).catch(() => ({
+        monthlySponsor: null,
+        oneTimeContributions: [],
+      })),
     ]);
   if (!usageStatus) {
     return <GroupFundingUnavailable />;
@@ -218,63 +228,66 @@ export default async function GroupFundingPage({
     <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-4 py-8 sm:px-6 sm:py-12">
       <GroupUsageFundingShell
         action={
-          member ? (
-            sponsorshipManagement?.status === "pending_activation" &&
-            visibleActivePurchase ? (
-              <GroupSponsorshipDialog
-                activePurchase={visibleActivePurchase}
-                checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-                customizationAllowed={customizationAllowed}
-                frozenSponsorship={frozenSponsorship}
-                initialOpen
-                mode="monthly"
-                monthlyCapMinor={sponsorshipManagement.monthlyCapMinor}
-                monthlyCapOptions={monthlyCapOptions}
-                offers={monthlyOffer}
-                payerMemberId={member.id}
-                purchaseReturn={purchaseReturn}
-              />
-            ) : sponsorshipManagement ? (
-              <div className="space-y-4">
-                <GroupSponsorshipManagementCard
-                  endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
-                  management={sponsorshipManagement}
+          <div>
+            {member ? (
+              sponsorshipManagement?.status === "pending_activation" &&
+              visibleActivePurchase ? (
+                <GroupSponsorshipDialog
+                  activePurchase={visibleActivePurchase}
+                  checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                  customizationAllowed={customizationAllowed}
+                  frozenSponsorship={frozenSponsorship}
+                  initialOpen
+                  mode="monthly"
+                  monthlyCapMinor={sponsorshipManagement.monthlyCapMinor}
+                  monthlyCapOptions={monthlyCapOptions}
+                  offers={monthlyOffer}
+                  payerMemberId={member.id}
+                  purchaseReturn={purchaseReturn}
                 />
-                {oneTimeContributionAction}
-              </div>
-            ) : usageStatus.sponsorshipStatus === "sponsored" ? (
-              <div className="space-y-4">
-                <p className="py-2 text-center text-sm text-muted-foreground">
-                  Murph is sponsored in this chat.
-                </p>
-                {oneTimeContributionAction}
-              </div>
-            ) : visibleActivePurchase ? (
-              oneTimeContributionAction
-            ) : oneTimeOffers.length > 0 ? (
-              <GroupUsageFundingActions
-                monthlyAction={(
-                  <GroupSponsorshipDialog
-                    checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-                    customizationAllowed={customizationAllowed}
-                    initialOpen
-                    mode="monthly"
-                    monthlyCapOptions={monthlyCapOptions}
-                    offers={monthlyOffer}
-                    payerMemberId={member.id}
-                    purchaseReturn={purchaseReturn}
+              ) : sponsorshipManagement ? (
+                <div className="space-y-4">
+                  <GroupSponsorshipManagementCard
+                    endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
+                    management={sponsorshipManagement}
                   />
-                )}
-                oneTimeAction={oneTimeContributionDialog}
-              />
+                  {oneTimeContributionAction}
+                </div>
+              ) : usageStatus.sponsorshipStatus === "sponsored" ? (
+                <div className="space-y-4">
+                  <p className="py-2 text-center text-sm text-muted-foreground">
+                    Murph is sponsored in this chat.
+                  </p>
+                  {oneTimeContributionAction}
+                </div>
+              ) : visibleActivePurchase ? (
+                oneTimeContributionAction
+              ) : oneTimeOffers.length > 0 ? (
+                <GroupUsageFundingActions
+                  monthlyAction={(
+                    <GroupSponsorshipDialog
+                      checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                      customizationAllowed={customizationAllowed}
+                      initialOpen
+                      mode="monthly"
+                      monthlyCapOptions={monthlyCapOptions}
+                      offers={monthlyOffer}
+                      payerMemberId={member.id}
+                      purchaseReturn={purchaseReturn}
+                    />
+                  )}
+                  oneTimeAction={oneTimeContributionDialog}
+                />
+              ) : (
+                <p className="py-2 text-center text-sm text-muted-foreground">
+                  Sponsorship isn&apos;t available from this account right now.
+                </p>
+              )
             ) : (
-              <p className="py-2 text-center text-sm text-muted-foreground">
-                Sponsorship isn&apos;t available from this account right now.
-              </p>
-            )
-          ) : (
-            <GroupFundingSignInButton />
-          )
+              <GroupFundingSignInButton />
+            )}
+            <GroupFundingSupporters supporters={supporters} />
+          </div>
         }
         groupName={groupName}
       />
