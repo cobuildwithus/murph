@@ -378,12 +378,28 @@ function emitHostedLinqAppCardFallbackError(input: {
       linqAppCardFallbackReason: input.reason,
       providerKind: "linq",
     },
-    error: input.error,
+    error: boundLinqAppCardFallbackLogError(input.error),
     level: "warn",
     message:
       "Hosted Linq iMessage app-card delivery selected text recovery after an error.",
     phase: "outbox",
   });
+}
+
+// JSON.parse SyntaxError messages embed raw provider body snippets, so a
+// malformed Linq response must not reach the structured log unbounded.
+function boundLinqAppCardFallbackLogError(error: unknown): unknown {
+  if (!(error instanceof SyntaxError)) {
+    return error;
+  }
+  const bounded = new SyntaxError("Linq provider response was not valid JSON.");
+  bounded.stack = [
+    `SyntaxError: ${bounded.message}`,
+    ...(typeof error.stack === "string"
+      ? error.stack.split(/\r?\n/gu).filter((line) => /^\s*at /u.test(line))
+      : []),
+  ].join("\n");
+  return bounded;
 }
 
 function createHostedProviderEffectContext(

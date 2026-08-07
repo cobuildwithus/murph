@@ -12541,6 +12541,7 @@ describe("hosted runtime callbacks", () => {
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
+      onAppCardFallbackError: expect.any(Function),
       signal: undefined,
     });
     const linqFetch = mocks.sendLinqMessage.mock.calls[0]?.[1]?.fetchImplementation;
@@ -14133,6 +14134,7 @@ describe("hosted runtime callbacks", () => {
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
+      onAppCardFallbackError: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -14236,6 +14238,7 @@ describe("hosted runtime callbacks", () => {
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
+      onAppCardFallbackError: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -14340,6 +14343,7 @@ describe("hosted runtime callbacks", () => {
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
+      onAppCardFallbackError: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([

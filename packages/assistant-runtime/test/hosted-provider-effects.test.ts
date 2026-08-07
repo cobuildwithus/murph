@@ -625,6 +625,75 @@ describe("hosted provider effects", () => {
     expect(serializedLog).not.toContain("Forbidden");
   });
 
+  it("bounds malformed provider JSON before the hosted fallback warning", async () => {
+    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/capability/check_imessage")) {
+        return new Response("LEAKMARKER private provider prose", {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-08-05",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-malformed-json",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: "fallback-message",
+    });
+
+    expect(warn).toHaveBeenCalledOnce();
+    const logged = JSON.parse(String(warn.mock.calls[0]?.[0])) as {
+      details?: Record<string, unknown>;
+      errorCode?: string;
+      level?: string;
+    };
+    expect(logged).toMatchObject({
+      details: {
+        errorDetail: "Linq provider response was not valid JSON.",
+        eventType: "assistant.delivery.linq_app_card_fallback_error",
+        fallbackKind: "text",
+        linqAppCardFallbackReason: "capability_check_failed",
+        providerKind: "linq",
+      },
+      errorCode: "syntax_error",
+      level: "warn",
+    });
+    const serializedLog = JSON.stringify(logged);
+    expect(serializedLog).not.toContain("LEAKMARKER");
+    expect(serializedLog).not.toContain("+15550001");
+    expect(serializedLog).not.toContain("direct-chat");
+    expect(serializedLog).not.toContain("hosted-card-malformed-json");
+    expect(serializedLog).not.toContain("linq-token");
+  });
+
   it.each([
     {
       capabilityAvailable: false,
