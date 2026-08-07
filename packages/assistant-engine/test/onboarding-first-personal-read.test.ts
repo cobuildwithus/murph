@@ -296,7 +296,7 @@ describe('onboarding first personal read', () => {
       'save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn',
       'it accepts no prompt, timing, model, route, or other fields',
       'Generic save cannot replace it',
-      'generic patch may only archive it when the member cancels',
+      'generic patch may only archive the existing record when the member cancels',
     ])
   })
 
