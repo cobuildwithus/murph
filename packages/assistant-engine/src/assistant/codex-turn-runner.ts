@@ -70,6 +70,9 @@ import type {
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
 import type {
+  AssistantProviderStartCriticalPathContext,
+} from './provider-start-critical-path.js'
+import type {
   AssistantActiveTurnLiveProviderSteering,
 } from './turn-input.js'
 import {
@@ -246,6 +249,7 @@ export async function executeCodexTurnWithRecovery(input: {
   plan: AssistantTurnSharedPlan
   profile?: AssistantCodexTurnThreadScopeProfile | null
   providerRequestOrdinal?: number | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   progressDelivery?: AssistantProgressDelivery | null
@@ -272,6 +276,9 @@ export async function executeCodexTurnWithRecovery(input: {
       executionPlan,
       onProviderRequestStarted: input.onProviderRequestStarted ?? null,
       providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+      ...(input.providerStartCriticalPath
+        ? { providerStartCriticalPath: input.providerStartCriticalPath }
+        : {}),
     })
   } finally {
     await releaseProviderAcceptedInputs?.()
@@ -426,6 +433,7 @@ async function executeAssistantCodexAttempt(input: {
     startedAt: string
   } & AssistantProviderRequestStartTiming) => Promise<void> | void) | null
   providerRequestOrdinal: number | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
 }): Promise<AssistantCodexAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
   let attemptMetadata: AssistantProviderAttemptMetadata = {
@@ -574,6 +582,10 @@ async function executeAssistantCodexAttempt(input: {
           nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
+        onboardingFirstReadCompletionTransitionAvailable:
+          attemptPlan.routePlan.onboardingGuidanceInjected &&
+          executionPlan.input.scheduledOccurrenceAt == null &&
+          executionPlan.input.scheduledInvocationAuthority == null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
         onFinishWithoutReplyAccepted:
           executionPlan.onFinishWithoutReplyAccepted ?? null,
@@ -624,6 +636,9 @@ async function executeAssistantCodexAttempt(input: {
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+        ...(input.providerStartCriticalPath
+          ? { providerStartCriticalPath: input.providerStartCriticalPath }
+          : {}),
         publicInternetFetch:
           outputOnlyTurn || readOnlyAutomationTurn
           ? null

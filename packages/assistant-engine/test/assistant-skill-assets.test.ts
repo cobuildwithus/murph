@@ -1035,7 +1035,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
     expect(raw).toMatch(/If `read_current` returns `status="none"`, do not create a hosted group as a\s+side effect of challenge kickoff/u)
-    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from that scoring read\s+with only the exact scoring scope it proved `not_granted`/u)
+    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from the most recent\s+scoring read with only the exact eligible offer scope that same read proved\s+`not_granted`/u)
     expect(raw).toMatch(/record the offer as\s+handled only when the tool reports `status="ok"`/u)
     expect(raw).toMatch(/grant without `grantedAt`, a grant before `offeredAt`, a grant more\s+than 24 hours later, silence, an unresolved identity, unavailable recency\s+evidence, or an offer followed by materially changed challenge terms does not\s+establish buy-in/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
@@ -1999,6 +1999,9 @@ describe('assistant skill assets', () => {
     )
     expect(root.replace(/\s+/gu, ' ')).toContain(
       'A vague opener—including bare “Let’s continue” without a visible onboarding referent—and generic saved records—even a goal plus aspiration readiness and all six areas—do not establish onboarding stage.',
+    )
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'This skill may create only the scheduled early-stall check-in defined in `references/persistence-recovery-follow-up.md` and the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
     )
     for (const movedSection of [
       '## Delegating onboarding work',

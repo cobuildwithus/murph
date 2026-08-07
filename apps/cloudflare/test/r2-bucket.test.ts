@@ -12,8 +12,9 @@ vi.mock("node:child_process", () => ({
 }));
 
 import {
+  assertHostedR2Bucket,
   createWranglerR2BucketInfoReader,
-} from "../scripts/r2-fixed-buckets.js";
+} from "../scripts/r2-bucket.js";
 
 const appDir = path.resolve(fileURLToPath(new URL("../", import.meta.url)));
 
@@ -22,6 +23,49 @@ beforeEach(() => {
 });
 
 describe("Wrangler R2 bucket metadata reader", () => {
+  it("requires the configured bucket to match its expected location and use Standard", () => {
+    expect(() => assertHostedR2Bucket({
+      bucket: {
+        defaultStorageClass: "Standard",
+        location: "ENAM",
+        name: "hosted-bundles",
+      },
+      bucketName: "hosted-bundles",
+      label: "runtime",
+      location: "ENAM",
+    })).not.toThrow();
+    expect(() => assertHostedR2Bucket({
+      bucket: {
+        defaultStorageClass: "Standard",
+        location: "OC",
+        name: "hosted-bundles-retiring",
+      },
+      bucketName: "hosted-bundles-retiring",
+      label: "retiring runtime",
+      location: "OC",
+    })).not.toThrow();
+    expect(() => assertHostedR2Bucket({
+      bucket: {
+        defaultStorageClass: "Standard",
+        location: "OC",
+        name: "hosted-bundles",
+      },
+      bucketName: "hosted-bundles",
+      label: "runtime",
+      location: "ENAM",
+    })).toThrow("runtime bucket must report ENAM");
+    expect(() => assertHostedR2Bucket({
+      bucket: {
+        defaultStorageClass: "InfrequentAccess",
+        location: "ENAM",
+        name: "hosted-bundles",
+      },
+      bucketName: "hosted-bundles",
+      label: "runtime",
+      location: "ENAM",
+    })).toThrow("runtime bucket must use Standard");
+  });
+
   it("uses the exact command and allowlisted deploy environment", async () => {
     const child = createSpawnedChild();
     spawnMock.mockReturnValue(child);

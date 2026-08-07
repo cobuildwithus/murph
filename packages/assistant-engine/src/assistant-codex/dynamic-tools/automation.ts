@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 import {
   automationAssistantTargetOverrideSchema,
@@ -14,6 +14,12 @@ import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedAutomationToolResponse,
 } from '../../assistant/execution-context.js'
+import {
+  buildOnboardingFirstPersonalReadAutomationSaveRequest,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+} from '../../assistant/onboarding-first-personal-read-automation.js'
 import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
@@ -72,6 +78,10 @@ const saveAutomationArgumentsSchema = z.object({
   title: automationTitleSchema,
 }).strict()
 
+const saveOnboardingFirstPersonalReadArgumentsSchema = z.object({
+  action: z.literal(MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION),
+}).strict()
+
 const patchAutomationArgumentsSchema = z.object({
   action: z.literal('patch'),
   activeUntil: automationActiveUntilSchema.nullable().optional(),
@@ -104,7 +114,32 @@ const patchAutomationArgumentsSchema = z.object({
     'tags',
     'title',
   ] as const
-  if (!patchKeys.some((key) => Object.hasOwn(value, key))) {
+  const requestedPatchKeys = patchKeys.filter((key) =>
+    Object.hasOwn(value, key),
+  )
+  const targetsOnboardingFirstRead =
+    value.lookup === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
+    || value.lookup === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
+  const archivesOnboardingFirstReadOnly =
+    requestedPatchKeys.length === 1
+    && requestedPatchKeys[0] === 'status'
+    && value.status === 'archived'
+  const claimsOnboardingFirstReadSlug =
+    value.slug === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
+
+  if (
+    claimsOnboardingFirstReadSlug
+    || (targetsOnboardingFirstRead && !archivesOnboardingFirstReadOnly)
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'The onboarding first personal read slug is reserved, and its existing record can only be archived through generic patch.',
+      path: ['lookup'],
+    })
+  }
+
+  if (requestedPatchKeys.length === 0) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'Patch requires at least one field to change.',
@@ -153,6 +188,7 @@ const saveGroupNewsletterArgumentsSchema = z.object({
 
 const automationArgumentsSchema = z.discriminatedUnion('action', [
   saveAutomationArgumentsSchema,
+  saveOnboardingFirstPersonalReadArgumentsSchema,
   saveGroupNewsletterArgumentsSchema,
   patchAutomationArgumentsSchema,
   reconcileAutomationArgumentsSchema,
@@ -163,13 +199,14 @@ export const MURPH_AUTOMATION_TOOL = {
   name: 'automation',
   deferLoading: true,
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
 export type AutomationDynamicToolRequest =
   | {
       kind: 'automation'
+      onboardingFirstReadCompletionRequested?: true
       request: AssistantHostedAutomationToolRequest
     }
   | {
@@ -218,23 +255,29 @@ export function readAutomationDynamicToolRequest(input: {
   return parsed.ok
     ? {
         kind: 'automation',
-        request: parsed.args.action === 'save_newsletter'
-          ? buildGroupNewsletterAutomationSaveRequest({
-              configuration: {
-                customNote: parsed.args.customNote,
-                delivery: parsed.args.delivery,
-                healthScopes: parsed.args.healthScopes
-                  ?? (
-                    parsed.args.delivery === 'current_chat'
-                      ? [...GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES]
-                      : [...GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES]
-                  ),
-                newsletterName: parsed.args.newsletterName,
-                tone: parsed.args.tone,
-              },
-              schedule: parsed.args.schedule,
-            })
-          : parsed.args,
+        ...(parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
+          ? { onboardingFirstReadCompletionRequested: true as const }
+          : {}),
+        request:
+          parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
+            ? buildOnboardingFirstPersonalReadAutomationSaveRequest()
+            : parsed.args.action === 'save_newsletter'
+              ? buildGroupNewsletterAutomationSaveRequest({
+                  configuration: {
+                    customNote: parsed.args.customNote,
+                    delivery: parsed.args.delivery,
+                    healthScopes: parsed.args.healthScopes
+                      ?? (
+                        parsed.args.delivery === 'current_chat'
+                          ? [...GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES]
+                          : [...GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES]
+                      ),
+                    newsletterName: parsed.args.newsletterName,
+                    tone: parsed.args.tone,
+                  },
+                  schedule: parsed.args.schedule,
+                })
+              : parsed.args,
       }
     : {
         kind: 'invalid-automation-arguments',
@@ -245,6 +288,7 @@ export function readAutomationDynamicToolRequest(input: {
 export async function executeAutomationDynamicTool(input: {
   abortSignal?: AbortSignal | null
   automationTool: AssistantHostedAutomationTool
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   request: Extract<AutomationDynamicToolRequest, { kind: 'automation' }>
 }): Promise<{
   rpcResult: {
@@ -252,8 +296,21 @@ export async function executeAutomationDynamicTool(input: {
     success: boolean
   }
 }> {
+  if (
+    input.request.onboardingFirstReadCompletionRequested === true
+    && input.onboardingFirstReadCompletionTransitionAvailable !== true
+  ) {
+    return automationTextResult(
+      false,
+      'onboarding first read is unavailable outside its completion transition',
+    )
+  }
+
   try {
     const response = await input.automationTool.request(input.request.request, {
+      ...(input.request.onboardingFirstReadCompletionRequested === true
+        ? { onboardingFirstReadCompletionTransition: true as const }
+        : {}),
       signal: input.abortSignal ?? null,
     })
     if (response.action !== input.request.request.action) {

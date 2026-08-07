@@ -33,10 +33,14 @@ import {
   GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
   GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
   GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   applyMurphManagedAutomations,
   getAssistantCronStatus,
   hasGroupNewsletterDeliveryTag,
+  isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
   isCanonicalGroupNewsletterAutomationInstructions,
+  readAssistantOnboardingState,
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
@@ -52,10 +56,12 @@ import {
   type AssistantHostedGroupSharedReader,
   type AssistantHostedImageGenerationLauncher,
   type AssistantInputEventRecord,
+  type AssistantProviderStartCriticalPathContext,
   type MurphManagedAutomationDiagnosticStage,
   type MurphOnboardingFollowupDiagnostic,
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
+  stampAssistantProviderStartCriticalPath,
 } from "@murphai/assistant-engine";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
@@ -317,6 +323,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   currentAssistantInputId?: () => string | null;
   imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
@@ -1306,6 +1313,7 @@ function createHostedAssistantAutomationTool(input: {
   const currentRoute = automationRouteSchema.parse(
     resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
   );
+  let onboardingFirstReadCompletionTransitionConsumed = false;
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
@@ -1338,6 +1346,47 @@ function createHostedAssistantAutomationTool(input: {
               vaultRoot: input.vaultRoot,
             })
           : null;
+        const targetsOnboardingFirstRead =
+          request.automationId ===
+            MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
+          || requestedSlug ===
+            MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
+          || existingTarget?.slug ===
+            MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG;
+        if (targetsOnboardingFirstRead) {
+          if (
+            context?.onboardingFirstReadCompletionTransition !== true
+            || !isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest(
+              request,
+            )
+            || currentRoute.threadIsDirect !== true
+            || onboardingFirstReadCompletionTransitionConsumed
+          ) {
+            throw new VaultCliError(
+              "invalid_option",
+              "The onboarding first read can be created only once during its answered-completion transition.",
+            );
+          }
+          onboardingFirstReadCompletionTransitionConsumed = true;
+          const onboardingState = await readAssistantOnboardingState(
+            input.vaultRoot,
+          );
+          const existingFirstRead = existingTarget
+            ?? await showAutomation({
+              slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+              vaultRoot: input.vaultRoot,
+            });
+          if (
+            onboardingState.status !== "completed"
+            || onboardingState.completedReason !== "user_answered"
+            || existingFirstRead !== null
+          ) {
+            throw new VaultCliError(
+              "invalid_option",
+              "The onboarding first read can be created only once during its answered-completion transition.",
+            );
+          }
+        }
         const isGroupNewsletter =
           requestedSlug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
           || existingTarget?.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG;
@@ -1648,6 +1697,10 @@ function buildHostedAutomationToolResponse(input: {
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    "assistantPhaseStartedAtMonotonicMs",
+  );
   const assistantPhaseStartedAt = Date.now();
   const channelAbortController = new AbortController();
   const releaseChannelAbortRelay = relayHostedAssistantPhaseAbortSignal(
@@ -2164,6 +2217,9 @@ export async function runHostedWorkspaceAssistantPhase(
               systemMailboxMaintenanceMs,
               workspaceAssistantPreAutomationMs: elapsedSince(assistantPhaseStartedAt),
             },
+            ...(providerStartCriticalPath
+              ? { providerStartCriticalPath }
+              : {}),
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
             ...(input.beforeProviderAcceptedInputs
