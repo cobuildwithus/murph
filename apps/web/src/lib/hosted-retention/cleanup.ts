@@ -253,7 +253,10 @@ export async function retireExpiredMailboxContent(input: {
   // An unhandled conversation row becomes an explicit policy non-reply in the
   // same owner row, and its lane watermark advances in the same transaction.
   // That keeps accepted-work terminality durable while both inline and sidecar
-  // ciphertext disappear at the privacy deadline. A consumed preference row
+  // ciphertext disappear at the privacy deadline. Current preference causal
+  // rows retain only their retired structural metadata until a newer field
+  // watermark supersedes them, preserving logical ordering without payload.
+  // A consumed preference row
   // from before causal sequencing cannot be updated after the current check
   // constraint was installed, so retention deletes that already-handled legacy
   // tombstone directly instead of inventing a causal sequence. Both content
@@ -394,12 +397,26 @@ export async function retireExpiredMailboxContent(input: {
         RETURNING counter."user_id"
       ),
       prunable AS MATERIALIZED (
-        SELECT "id"
-        FROM "hosted_mailbox_item"
-        WHERE "content_retired_at" IS NOT NULL
-          AND "retention_disposition" IS NULL
-          AND "created_at" < ${structuralCutoff}
-        ORDER BY "created_at" ASC, "id" ASC
+        SELECT item."id"
+        FROM "hosted_mailbox_item" AS item
+        WHERE item."content_retired_at" IS NOT NULL
+          AND item."retention_disposition" IS NULL
+          AND item."created_at" < ${structuralCutoff}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "hosted_member" AS member
+            WHERE member."id" = item."user_id"
+              AND item."causal_seq" IN (
+                member."assistant_persona_causal_seq",
+                member."assistant_tone_causal_seq",
+                member."assistant_voice_causal_seq",
+                member."assistant_humor_causal_seq",
+                member."assistant_push_causal_seq",
+                member."assistant_detail_causal_seq",
+                member."assistant_unhinged_causal_seq"
+              )
+          )
+        ORDER BY item."created_at" ASC, item."id" ASC
         LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
         FOR UPDATE
       ),
