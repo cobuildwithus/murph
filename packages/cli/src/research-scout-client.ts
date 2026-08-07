@@ -9,15 +9,16 @@ import {
   EXA_RESEARCH_SCOUT_PROVIDER_NAME,
   MAX_RESEARCH_SCOUT_BATCH_LANES,
   MAX_RESEARCH_SCOUT_CANDIDATES,
+  buildExaResearchScoutBatchLaneRequest,
   buildExaResearchScoutRequest,
   researchScoutBatchInputSchema,
   researchScoutBatchResultSchema,
   researchScoutInputSchema,
   researchScoutResultSchema,
   resolveResearchScoutProfileKind,
+  type ExaResearchScoutRequestBody,
   type ResearchScoutBatchInput,
   type ResearchScoutBatchResult,
-  type ResearchScoutInput,
   type ResearchScoutResult,
 } from '@murphai/contracts'
 
@@ -43,7 +44,7 @@ export function readExaApiKey(
 }
 
 export async function fetchExaResearchScoutCandidates(
-  rawInput: ResearchScoutInput,
+  rawInput: unknown,
   dependencies: ExaResearchScoutClientDependencies = {},
 ): Promise<ResearchScoutResult> {
   const input = researchScoutInputSchema.parse(rawInput)
@@ -70,7 +71,11 @@ export async function fetchExaResearchScoutCandidates(
       sentProfileKind: resolveResearchScoutProfileKind(input.profile),
       rawVaultValuesSent: false,
     },
-    response: await fetchExaResearchScoutResponse(input, apiKey, fetchImpl),
+    response: await fetchExaResearchScoutResponse(
+      buildExaResearchScoutRequest(input),
+      apiKey,
+      fetchImpl,
+    ),
   } satisfies ResearchScoutResult
 
   return researchScoutResultSchema.parse(result)
@@ -96,12 +101,16 @@ export async function fetchExaResearchScoutBatchCandidates(
   for (const lane of input.lanes) {
     lanes.push({
       label: lane.label,
-      response: await fetchExaResearchScoutResponse({
-        profile: lane.profile,
-        since: input.since,
-        until: input.until,
-        maxCandidates: input.maxCandidatesPerLane,
-      }, apiKey, fetchImpl),
+      response: await fetchExaResearchScoutResponse(
+        buildExaResearchScoutBatchLaneRequest({
+          profile: lane.profile,
+          since: input.since,
+          until: input.until,
+          maxCandidates: input.maxCandidatesPerLane,
+        }),
+        apiKey,
+        fetchImpl,
+      ),
     })
   }
 
@@ -122,7 +131,7 @@ export async function fetchExaResearchScoutBatchCandidates(
 }
 
 async function fetchExaResearchScoutResponse(
-  input: ResearchScoutInput,
+  requestBody: ExaResearchScoutRequestBody,
   apiKey: string,
   fetchImpl: typeof fetch,
 ): Promise<unknown> {
@@ -138,7 +147,7 @@ async function fetchExaResearchScoutResponse(
         'content-type': 'application/json; charset=utf-8',
         'x-api-key': apiKey,
       },
-      body: JSON.stringify(buildExaResearchScoutRequest(input)),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS),
     })
   } catch (error) {

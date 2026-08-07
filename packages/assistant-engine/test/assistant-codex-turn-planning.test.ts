@@ -211,6 +211,12 @@ describe('assistant Codex turn planning', () => {
       expect(configuredPlan.systemPrompt).toContain(
         'no usable current source',
       )
+      expect(configuredPlan.systemPrompt).toContain(
+        'Use `research scout-batch` for broad discovery or automation',
+      )
+      expect(configuredPlan.systemPrompt).toContain(
+        'never send a mode-less single-scout request',
+      )
     }
 
     for (const unavailablePlan of await Promise.all([

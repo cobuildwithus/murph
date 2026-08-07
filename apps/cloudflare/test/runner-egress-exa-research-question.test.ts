@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  buildExaResearchScoutBatchLaneRequest,
   buildExaResearchScoutRequest,
 } from '@murphai/contracts'
 
@@ -58,6 +59,23 @@ function createFocusedRequestBody() {
       conditionsOrConcerns: ['healthy adults'],
       goals: ['cognitive performance'],
       activeExperiments: [],
+    },
+    since: '2021-01-01T00:00:00.000Z',
+    until: '2026-08-06T00:00:00.000Z',
+    maxCandidates: 6,
+  })
+}
+
+function createLegacyBatchLaneRequestBody() {
+  return buildExaResearchScoutBatchLaneRequest({
+    profile: {
+      topics: ['sleep'],
+      biomarkers: ['hs-crp'],
+      behaviors: ['morning light'],
+      supplements: ['creatine'],
+      conditionsOrConcerns: ['healthy adults'],
+      goals: ['sleep quality'],
+      activeExperiments: ['screen curfew'],
     },
     since: '2021-01-01T00:00:00.000Z',
     until: '2026-08-06T00:00:00.000Z',
@@ -200,6 +218,52 @@ describe('hosted Exa egress for focused structured scopes', () => {
           }),
           createExaTestEnv(validateRuntimeWriteFence),
           { containerId: `opaque-${field}-container-id` },
+        )
+
+        expect(response.status).toBe(403)
+      }
+    }
+
+    expect(validateRuntimeWriteFence).toHaveBeenCalledTimes(
+      Object.keys(FOCUSED_QUERY_LABELS_BY_FIELD).length
+        * PRIVATE_FOCUSED_VALUES.length,
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects private-shaped values in every legacy batch query field before upstream fetch', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-06T12:00:00.000Z'))
+
+    const requestBody = createLegacyBatchLaneRequestBody()
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
+    vi.stubGlobal('fetch', fetchMock)
+    const validateRuntimeWriteFence = vi.fn(async () => true)
+
+    for (const [field, label] of Object.entries(FOCUSED_QUERY_LABELS_BY_FIELD)) {
+      for (const value of PRIVATE_FOCUSED_VALUES) {
+        const linePrefix = `${label}: `
+        const unsafeRequestBody = {
+          ...requestBody,
+          query: requestBody.query
+            .split('\n')
+            .map((line) =>
+              line.startsWith(linePrefix) ? `${linePrefix}${value}` : line
+            )
+            .join('\n'),
+        }
+        const response = await hostedRunnerIntercept(
+          new Request('https://api.exa.ai/search', {
+            body: JSON.stringify(unsafeRequestBody),
+            headers: {
+              ...WRITE_FENCE_HEADERS,
+              'content-type': 'application/json; charset=utf-8',
+              'x-api-key': HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+            },
+            method: 'POST',
+          }),
+          createExaTestEnv(validateRuntimeWriteFence),
+          { containerId: `legacy-${field}-container-id` },
         )
 
         expect(response.status).toBe(403)

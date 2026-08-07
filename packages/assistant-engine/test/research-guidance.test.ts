@@ -24,8 +24,10 @@ describe('assistant research guidance', () => {
     expect(prompt).toContain('{"mode":"focused"}')
     expect(prompt).toContain('exact server-owned public concepts')
     expect(prompt).toContain('research payload-schema --format json')
-    expect(prompt).toContain('otherwise make no Exa call')
+    expect(prompt).toContain('not exactly representable, make no Exa call')
     expect(prompt).toContain('Never send arbitrary values or question prose')
+    expect(prompt).toContain('Use `research scout-batch` for broad discovery or automation')
+    expect(prompt).toContain('never send a mode-less single-scout request')
     expect(prompt).toContain('`resultIndex` maps to a returned result')
     expect(prompt).toContain('source title, web URL')
     expect(prompt).toContain('no usable current source')
@@ -43,6 +45,8 @@ describe('assistant research guidance', () => {
     expect(prompt).toContain(
       'a research lookup alone does not justify a status message',
     )
+    expect(prompt).toContain('research scout-batch')
+    expect(prompt).toContain('never send a mode-less single-scout request')
     expect(prompt).not.toContain('one short natural update')
   })
 })

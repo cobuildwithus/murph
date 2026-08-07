@@ -108,6 +108,9 @@ describe("focused structured Exa research", () => {
           mode: "focused",
           [field]: [value],
         }).success).toBe(false);
+        expect(researchScoutProfileSchema.safeParse({
+          [field]: [value],
+        }).success).toBe(false);
       }
     }
   });
@@ -132,7 +135,7 @@ describe("focused structured Exa research", () => {
   it("requires at least one compact category for focused mode", () => {
     expect(() => researchScoutProfileSchema.parse({
       mode: "focused",
-    })).toThrow(/must include at least one compact non-identifying profile tag/u);
+    })).toThrow(/must include at least one server-owned public concept/u);
   });
 
   it("keeps batch discovery on tag-only profiles", () => {

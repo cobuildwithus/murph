@@ -44,16 +44,6 @@ const RESEARCH_SCOUT_PROFILE_FIELDS = [
   'activeExperiments',
 ] as const
 
-const RESEARCH_SCOUT_PROFILE_EXAMPLE = {
-  topics: ['sleep', 'recovery'],
-  behaviors: ['exercise'],
-  biomarkers: [],
-  supplements: [],
-  conditionsOrConcerns: [],
-  goals: [],
-  activeExperiments: [],
-} satisfies ResearchScoutProfile
-
 const RESEARCH_SCOUT_FOCUSED_EXAMPLE = {
   mode: 'focused',
   topics: ['cognition'],
@@ -100,10 +90,10 @@ export function registerResearchCommands(cli: Cli.Cli) {
   registerPayloadSchemaCommand(research, {
     command: 'research scout --input',
     description:
-      'Emit the exact focused-scope or compact tag-profile JSON body schema for research scout --input.',
+      'Emit the exact finite focused-scope JSON body schema for research scout --input.',
     schema: researchScoutProfileSchema,
     schemaName: 'ResearchScoutProfile',
-    examples: [RESEARCH_SCOUT_PROFILE_EXAMPLE, RESEARCH_SCOUT_FOCUSED_EXAMPLE],
+    examples: [RESEARCH_SCOUT_FOCUSED_EXAMPLE],
   })
 
   research.command('scout-batch-payload-schema', {
@@ -126,11 +116,11 @@ export function registerResearchCommands(cli: Cli.Cli) {
 
   research.command('scout', {
     description:
-      'Search Exa for bounded human-research candidates from one focused structured scope or a compact non-identifying tag profile without writing vault records.',
+      'Search Exa for bounded human-research candidates from one finite focused structured scope without writing vault records.',
     args: z.object({}),
     options: z.object({
       input: inputFileOptionSchema.describe(
-        `Focused structured JSON using {"mode":"focused"} plus exact server-owned public concepts; omit mode for broad discovery. Pass @file.json or - for stdin. Focused concept values: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. Never include arbitrary values, names, organizations, private notes, contacts, identifiers, credentials, exact personal measurements, or medical records.`,
+        `Focused structured JSON using required {"mode":"focused"} plus exact server-owned public concepts. Pass @file.json or - for stdin. Focused concept values: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. Never include arbitrary values, names, organizations, private notes, contacts, identifiers, credentials, exact personal measurements, or medical records.`,
       ),
       since: researchScoutTimestampOptionSchema.describe(
         'Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp.',
@@ -146,28 +136,17 @@ export function registerResearchCommands(cli: Cli.Cli) {
         .default(MAX_RESEARCH_SCOUT_CANDIDATES)
         .describe('Maximum research candidates to request from Exa.'),
     }),
-    examples: [
-      {
-        description: 'Research one focused structured scope.',
-        options: {
-          input: '@research-focus.json',
-          since: '2021-01-01',
-          until: '2026-06-24T12:00:00.000Z',
-          maxCandidates: 8,
-        },
+    examples: [{
+      description: 'Research one focused structured scope.',
+      options: {
+        input: '@research-focus.json',
+        since: '2021-01-01',
+        until: '2026-06-24T12:00:00.000Z',
+        maxCandidates: 8,
       },
-      {
-        description: 'Discover recent research candidates from a compact profile.',
-        options: {
-          input: '@research-profile.json',
-          since: '2026-04-25',
-          until: '2026-06-24T12:00:00.000Z',
-          maxCandidates: 12,
-        },
-      },
-    ],
+    }],
     hint:
-      `Requires EXA_API_KEY. For one focused lookup, pass {"mode":"focused"} plus exact server-owned public concepts; omit mode for broad discovery. Focused values: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. If the question cannot be represented exactly, make no Exa call and continue without the lookup. Use research payload-schema --format json for the file-body contract and --input @file.json or --input - for stdin, not inline JSON. Never include arbitrary values, private notes, names, organizations, personal framing, contacts, member or patient identifiers, credentials, dates of birth, exact personal labs or measurements, appointments, or medical records. Rely only on a candidate whose resultIndex maps to a returned source with a title, web URL, and enough publication metadata for the claim; otherwise report no usable current source without fabricating or repeating the lookup blindly.`,
+      `Requires EXA_API_KEY and {"mode":"focused"}. Use only exact server-owned public concepts: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. If the question cannot be represented exactly, make no Exa call. Use research scout-batch for broad discovery or automation. Use research payload-schema --format json for the file-body contract and --input @file.json or --input - for stdin, not inline JSON. Never include arbitrary values, private notes, names, organizations, personal framing, contacts, member or patient identifiers, credentials, dates of birth, exact personal labs or measurements, appointments, or medical records. Rely only on a candidate whose resultIndex maps to a returned source with a title, web URL, and enough publication metadata for the claim; otherwise report no usable current source without fabricating or repeating the lookup blindly.`,
     output: researchScoutResultSchema,
     async run({ options }) {
       const rawProfile = await loadJsonInputObject(
@@ -200,7 +179,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
     args: z.object({}),
     options: z.object({
       input: inputFileOptionSchema.describe(
-        'Compact lane JSON in @file.json form or - for stdin. Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"]}}]}. Lane profiles accept compact bucket fields only and must not include focused mode, raw labs, names, dates of birth, full notes, or medical records.',
+        'Finite public-concept lane JSON in @file.json form or - for stdin. Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"]}}]}. Lane profiles accept tag-only bucket fields with the same server-owned provider concepts and must not include focused mode, arbitrary values, raw labs, names, dates of birth, full notes, or medical records.',
       ),
       since: researchScoutTimestampOptionSchema.describe(
         'Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp.',
@@ -228,7 +207,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
       },
     ],
     hint:
-      `Requires EXA_API_KEY. Pass up to ${MAX_RESEARCH_SCOUT_BATCH_LANES} compact non-identifying tag-profile lanes only; use research scout-batch-payload-schema for the exact file-body contract. The tool runs the existing research scout request once per lane and returns lane-tagged provider responses. Local vault relevance, deduping, final ranking, and medical framing remain the assistant job.`,
+      `Requires EXA_API_KEY. Pass up to ${MAX_RESEARCH_SCOUT_BATCH_LANES} tag-only lanes using the exact server-owned public concepts; use research scout-batch-payload-schema for the file-body contract. The tool runs the legacy research-scout query and prompt once per lane and returns lane-tagged provider responses. Local vault relevance, deduping, final ranking, and medical framing remain the managed automation owner's job.`,
     output: researchScoutBatchResultSchema,
     async run({ options }) {
       const rawPayload = await loadJsonInputObject(
@@ -270,7 +249,7 @@ export function parseResearchScoutCliProfileInput(
     const keys = Object.keys(rawInput)
     if (keys.length !== 1) {
       throw invalidResearchScoutProfileError(
-        'Put only the focused or broad compact profile in --input. Pass since, until, and maxCandidates as CLI options.',
+        'Put only the focused profile in --input. Pass since, until, and maxCandidates as CLI options.',
       )
     }
     const wrappedProfile = researchScoutProfileSchema.safeParse(rawInput.profile)
@@ -374,7 +353,7 @@ function invalidResearchScoutProfileError(extraDetail?: string): VaultCliError {
     [
       extraDetail,
       'research scout --input expects compact profile bucket fields: '
-        + `${fields}. Add {"mode":"focused"} for one focused lookup; omit mode for broad discovery.`,
+        + `${fields}. Include required {"mode":"focused"}; managed broad discovery uses research scout-batch.`,
       `Focused mode accepts only these exact server-owned public concepts: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}.`,
       'Do not use arbitrary question text or values, a generic tags field, names, organizations, private notes, contacts, identifiers, credentials, raw labs, exact personal measurements, appointments, or medical records.',
     ].filter(Boolean).join(' '),
@@ -387,7 +366,7 @@ function invalidResearchScoutBatchPayloadError(extraDetail?: string): VaultCliEr
     [
       extraDetail,
       `research scout-batch --input expects {"lanes":[...]} with 1-${MAX_RESEARCH_SCOUT_BATCH_LANES} compact lane profiles.`,
-      'Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"],"behaviors":["morning light"]}}]}; do not use focused mode, generic tags, raw notes, raw labs, or full request fields.',
+      `Use {"lanes":[{"label":"sleep","profile":{"topics":["sleep"],"behaviors":["morning light"]}}]}; lane values must use these exact server-owned public concepts: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. Do not use focused mode, generic tags, raw notes, raw labs, or full request fields.`,
     ].filter(Boolean).join(' '),
   )
 }

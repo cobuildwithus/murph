@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import {
+  buildExaResearchScoutBatchLaneRequest,
   buildExaResearchScoutRequest,
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
@@ -3671,12 +3672,19 @@ function readHostedExaResearchScoutRequestBody(
 function buildHostedExaResearchScoutCanonicalRequest(
   input: ExaResearchScoutParsedRequest,
 ): ExaResearchScoutRequestBody {
-  return buildExaResearchScoutRequest({
-    maxCandidates: input.numResults,
-    profile: input.profile,
-    since: input.since,
-    until: input.until,
-  });
+  return "mode" in input.profile
+    ? buildExaResearchScoutRequest({
+        maxCandidates: input.numResults,
+        profile: input.profile,
+        since: input.since,
+        until: input.until,
+      })
+    : buildExaResearchScoutBatchLaneRequest({
+        maxCandidates: input.numResults,
+        profile: input.profile,
+        since: input.since,
+        until: input.until,
+      });
 }
 
 async function maybeHandleMapboxRequest(input: {

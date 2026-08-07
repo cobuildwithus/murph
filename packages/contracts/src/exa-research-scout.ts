@@ -185,6 +185,7 @@ export const RESEARCH_SCOUT_FOCUSED_CONCEPTS_BY_FIELD = {
     "screen curfew",
     "sleep timing",
     "yoga",
+    "zone 2 training",
   ],
   supplements: [
     "caffeine",
@@ -203,6 +204,7 @@ export const RESEARCH_SCOUT_FOCUSED_CONCEPTS_BY_FIELD = {
     "older adults",
     "parkinsons disease",
     "sleep deprivation",
+    "type 2 diabetes",
   ],
   goals: [
     "better recovery",
@@ -273,17 +275,7 @@ const longerTagSchema = z
     message: unsafeResearchScoutTagMessage,
   });
 
-const researchScoutTagProfileShape = {
-  topics: z.array(tagSchema).max(24).default([]),
-  biomarkers: z.array(tagSchema).max(24).default([]),
-  behaviors: z.array(tagSchema).max(24).default([]),
-  supplements: z.array(tagSchema).max(24).default([]),
-  conditionsOrConcerns: z.array(longerTagSchema).max(16).default([]),
-  goals: z.array(longerTagSchema).max(16).default([]),
-  activeExperiments: z.array(longerTagSchema).max(12).default([]),
-} as const;
-
-function createFocusedCapableResearchScoutValuesSchema(
+function createResearchScoutProviderValuesSchema(
   field: ResearchScoutProfileField,
   maxItems: number,
   maxLength: number,
@@ -294,24 +286,28 @@ function createFocusedCapableResearchScoutValuesSchema(
       .trim()
       .min(1)
       .max(maxLength)
+      .refine(
+        (value) => isAllowedFocusedResearchScoutConcept(field, value),
+        { message: unsupportedFocusedResearchScoutConceptMessage },
+      )
       .describe(
-        `Focused values: ${RESEARCH_SCOUT_FOCUSED_CONCEPTS_BY_FIELD[field].join(", ")}.`,
+        `Allowed provider values: ${RESEARCH_SCOUT_FOCUSED_CONCEPTS_BY_FIELD[field].join(", ")}.`,
       ),
   ).max(maxItems).default([]);
 }
 
-const focusedCapableResearchScoutProfileShape = {
-  topics: createFocusedCapableResearchScoutValuesSchema("topics", 24, 80),
-  biomarkers: createFocusedCapableResearchScoutValuesSchema("biomarkers", 24, 80),
-  behaviors: createFocusedCapableResearchScoutValuesSchema("behaviors", 24, 80),
-  supplements: createFocusedCapableResearchScoutValuesSchema("supplements", 24, 80),
-  conditionsOrConcerns: createFocusedCapableResearchScoutValuesSchema(
+const researchScoutProviderProfileShape = {
+  topics: createResearchScoutProviderValuesSchema("topics", 24, 80),
+  biomarkers: createResearchScoutProviderValuesSchema("biomarkers", 24, 80),
+  behaviors: createResearchScoutProviderValuesSchema("behaviors", 24, 80),
+  supplements: createResearchScoutProviderValuesSchema("supplements", 24, 80),
+  conditionsOrConcerns: createResearchScoutProviderValuesSchema(
     "conditionsOrConcerns",
     16,
     120,
   ),
-  goals: createFocusedCapableResearchScoutValuesSchema("goals", 16, 120),
-  activeExperiments: createFocusedCapableResearchScoutValuesSchema(
+  goals: createResearchScoutProviderValuesSchema("goals", 16, 120),
+  activeExperiments: createResearchScoutProviderValuesSchema(
     "activeExperiments",
     12,
     120,
@@ -319,40 +315,24 @@ const focusedCapableResearchScoutProfileShape = {
 } as const;
 
 export const researchScoutTagProfileSchema = z
-  .object(researchScoutTagProfileShape)
+  .object(researchScoutProviderProfileShape)
   .strict();
 
 const emptyFocusedResearchScoutProfileMessage =
-  "Focused research scout input must include at least one compact non-identifying profile tag.";
+  "Focused research scout input must include at least one server-owned public concept.";
 
 export const researchScoutProfileSchema = z
   .object({
-    ...focusedCapableResearchScoutProfileShape,
-    mode: z.literal("focused").optional(),
+    ...researchScoutProviderProfileShape,
+    mode: z.literal("focused"),
   })
   .strict()
   .superRefine((profile, context) => {
-    if (profile.mode === "focused" && !hasResearchScoutProfileTags(profile)) {
+    if (!hasResearchScoutProfileTags(profile)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: emptyFocusedResearchScoutProfileMessage,
         path: ["mode"],
-      });
-    }
-    for (const section of EXA_RESEARCH_SCOUT_QUERY_PROFILE_SECTIONS) {
-      profile[section.field].forEach((value, index) => {
-        const valid = profile.mode === "focused"
-          ? isAllowedFocusedResearchScoutConcept(section.field, value)
-          : isSafeResearchScoutProfileTag(value);
-        if (!valid) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: profile.mode === "focused"
-              ? unsupportedFocusedResearchScoutConceptMessage
-              : unsafeResearchScoutTagMessage,
-            path: [section.field, index],
-          });
-        }
       });
     }
   });
@@ -403,6 +383,10 @@ export const researchScoutInputSchema = z
       .max(MAX_RESEARCH_SCOUT_CANDIDATES)
       .default(MAX_RESEARCH_SCOUT_CANDIDATES),
   })
+  .strict();
+
+const researchScoutTagInputSchema = researchScoutInputSchema
+  .extend({ profile: researchScoutTagProfileSchema })
   .strict();
 
 export const researchScoutBatchInputSchema = researchScoutBatchPayloadSchema
@@ -542,12 +526,13 @@ export interface ExaResearchScoutOutputSchema {
 
 export interface ExaResearchScoutParsedRequest {
   numResults: number;
-  profile: ResearchScoutProfile;
+  profile: ResearchScoutProfile | ResearchScoutTagProfile;
   since: string;
   until: string;
 }
 
 export type ResearchScoutInput = z.infer<typeof researchScoutInputSchema>;
+export type ResearchScoutTagInput = z.infer<typeof researchScoutTagInputSchema>;
 export type ResearchScoutBatchInput = z.infer<typeof researchScoutBatchInputSchema>;
 export type ResearchScoutBatchPayload = z.infer<typeof researchScoutBatchPayloadSchema>;
 export type ResearchScoutBatchResult = z.infer<typeof researchScoutBatchResultSchema>;
@@ -560,14 +545,16 @@ export type ExaResearchScoutStructuredCandidate = z.infer<
 >;
 
 export function resolveResearchScoutProfileKind(
-  profile: ResearchScoutProfile,
+  profile: ResearchScoutProfile | ResearchScoutTagProfile,
 ): ResearchScoutProfileKind {
   return isFocusedResearchScoutProfile(profile)
     ? "focused_profile"
     : "tag_profile";
 }
 
-export function buildResearchScoutQuery(profile: ResearchScoutProfile): string {
+export function buildResearchScoutQuery(
+  profile: ResearchScoutProfile | ResearchScoutTagProfile,
+): string {
   return [
     ...(isFocusedResearchScoutProfile(profile)
       ? EXA_RESEARCH_FOCUSED_QUERY_PREFIX_LINES
@@ -585,11 +572,27 @@ export function buildExaResearchScoutRequest(
   input: ResearchScoutInput,
 ): ExaResearchScoutRequestBody {
   const parsed = researchScoutInputSchema.parse(input);
+  return buildExaResearchScoutRequestForProfile(parsed);
+}
+
+export function buildExaResearchScoutBatchLaneRequest(
+  input: ResearchScoutTagInput,
+): ExaResearchScoutRequestBody {
+  const parsed = researchScoutTagInputSchema.parse(input);
+  return buildExaResearchScoutRequestForProfile(parsed);
+}
+
+function buildExaResearchScoutRequestForProfile(input: {
+  maxCandidates: number;
+  profile: ResearchScoutProfile | ResearchScoutTagProfile;
+  since: string;
+  until: string;
+}): ExaResearchScoutRequestBody {
   return buildExaResearchScoutRequestFromQuery({
-    query: buildResearchScoutQuery(parsed.profile),
-    since: parsed.since,
-    until: parsed.until,
-    maxCandidates: parsed.maxCandidates,
+    query: buildResearchScoutQuery(input.profile),
+    since: input.since,
+    until: input.until,
+    maxCandidates: input.maxCandidates,
   });
 }
 
@@ -743,7 +746,9 @@ export function isExaResearchScoutQuery(value: unknown): boolean {
   return parseResearchScoutQuery(value) !== null;
 }
 
-export function parseResearchScoutQuery(value: unknown): ResearchScoutProfile | null {
+export function parseResearchScoutQuery(
+  value: unknown,
+): ResearchScoutProfile | ResearchScoutTagProfile | null {
   if (typeof value !== "string" || value.length > 4_096) {
     return null;
   }
@@ -780,8 +785,20 @@ function parseResearchScoutProfileQuery(
   value: string,
   prefixLines: readonly string[],
   suffixLines: readonly string[],
+  mode: "focused",
+): ResearchScoutProfile | null;
+function parseResearchScoutProfileQuery(
+  value: string,
+  prefixLines: readonly string[],
+  suffixLines: readonly string[],
+  mode?: undefined,
+): ResearchScoutTagProfile | null;
+function parseResearchScoutProfileQuery(
+  value: string,
+  prefixLines: readonly string[],
+  suffixLines: readonly string[],
   mode?: "focused",
-): ResearchScoutProfile | null {
+): ResearchScoutProfile | ResearchScoutTagProfile | null {
   const lines = value.split("\n");
   const expectedLineCount =
     prefixLines.length
@@ -814,11 +831,7 @@ function parseResearchScoutProfileQuery(
     if (!line.startsWith(prefix)) {
       return null;
     }
-    const tags = parseSafeResearchScoutTags(
-      line.slice(prefix.length),
-      section,
-      mode,
-    );
+    const tags = parseSafeResearchScoutTags(line.slice(prefix.length), section);
     if (tags === null) {
       return null;
     }
@@ -839,13 +852,13 @@ function parseResearchScoutProfileQuery(
 }
 
 function isFocusedResearchScoutProfile(
-  profile: ResearchScoutProfile,
-): profile is ResearchScoutProfile & { mode: "focused" } {
-  return profile.mode === "focused";
+  profile: ResearchScoutProfile | ResearchScoutTagProfile,
+): profile is ResearchScoutProfile {
+  return "mode" in profile && profile.mode === "focused";
 }
 
 function resolveResearchScoutSystemPrompt(
-  profile: ResearchScoutProfile,
+  profile: ResearchScoutProfile | ResearchScoutTagProfile,
 ): string {
   return isFocusedResearchScoutProfile(profile)
     ? EXA_RESEARCH_FOCUSED_SYSTEM_PROMPT
@@ -859,7 +872,6 @@ function parseSafeResearchScoutTags(
     maxItems: number;
     maxLength: number;
   },
-  mode?: "focused",
 ): string[] | null {
   if (rawValue === "none") {
     return [];
@@ -873,9 +885,7 @@ function parseSafeResearchScoutTags(
     || tags.length > section.maxItems
     || !tags.every((tag) =>
       tag.length <= section.maxLength
-      && (mode === "focused"
-        ? isAllowedFocusedResearchScoutConcept(section.field, tag)
-        : isSafeResearchScoutProfileTag(tag))
+      && isAllowedFocusedResearchScoutConcept(section.field, tag)
     )
   ) {
     return null;

@@ -78,7 +78,7 @@ describe('focused structured research', () => {
     })
   })
 
-  it('documents focused and broad compact profiles on the existing command', async () => {
+  it('documents focused single-scout input and routes broad discovery to batch', async () => {
     const output: string[] = []
 
     await createResearchCli().serve(['research', 'scout', '--help'], {
@@ -90,7 +90,6 @@ describe('focused structured research', () => {
 
     const help = output.join('')
     expect(help).toContain('focused structured scope')
-    expect(help).toContain('compact non-identifying tag profile')
     expect(help).toContain('{"mode":"focused"}')
     expect(help).toContain('exact server-owned public concepts')
     expect(help).toContain('supplements=[caffeine, creatine')
@@ -100,6 +99,7 @@ describe('focused structured research', () => {
       'resultIndex maps to a returned source with a title, web URL',
     )
     expect(help).toContain('otherwise report no usable current source')
+    expect(help).toContain('Use research scout-batch for broad discovery or automation')
 
     const payloadSchema = createPayloadSchemaResult({
       command: 'research scout --input',
@@ -111,7 +111,7 @@ describe('focused structured research', () => {
     expect(serializedPayloadSchema).toContain('healthy adults, insomnia')
   })
 
-  it('keeps the static command manifest aligned with both scout modes', () => {
+  it('keeps the static command manifest aligned with the focused-only scout', () => {
     const researchDescriptor = vaultCliCommandDescriptors.find(
       (descriptor) => descriptor.id === 'research',
     )
@@ -134,14 +134,13 @@ describe('focused structured research', () => {
     }
 
     expect(payloadSchema?.description).toContain('focused-scope')
-    expect(payloadSchema?.description).toContain('compact tag-profile')
     expect(scout?.description).toContain('focused structured scope')
-    expect(scout?.description).toContain('compact non-identifying tags')
     expect(scout?.hint).toContain('{"mode":"focused"}')
     expect(scout?.hint).toContain('exact server-owned public concepts')
     expect(scout?.hint).toContain('conditionsOrConcerns=[adults, anxiety')
     expect(scout?.hint).toContain('resultIndex maps to a returned source')
     expect(scout?.hint).toContain('without fabricating or repeating')
+    expect(scout?.hint).toContain('broad discovery and automation use research scout-batch')
   })
 
   it('gives actionable guidance for arbitrary question input', () => {
@@ -270,6 +269,33 @@ describe('focused structured research', () => {
           fetchImpl,
         })).rejects.toThrow(/exact server-owned public concepts/u)
       }
+    }
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('rejects mode-less values in every field before any Exa request', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    for (const field of FOCUSED_PROFILE_FIELDS) {
+      await expect(fetchExaResearchScoutCandidates({
+        profile: {
+          topics: [],
+          biomarkers: [],
+          behaviors: [],
+          supplements: [],
+          conditionsOrConcerns: [],
+          goals: [],
+          activeExperiments: [],
+          [field]: ['sleep'],
+        },
+        since: '2021-01-01T00:00:00.000Z',
+        until: '2026-08-06T00:00:00.000Z',
+        maxCandidates: 6,
+      }, {
+        env: { EXA_API_KEY: 'exa-test-token' },
+        fetchImpl,
+      })).rejects.toThrow()
     }
 
     expect(fetchImpl).not.toHaveBeenCalled()

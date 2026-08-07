@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE,
   buildExaResearchScoutOutputSchema,
-  buildExaResearchScoutRequest,
+  buildExaResearchScoutBatchLaneRequest,
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_CATEGORY,
   EXA_RESEARCH_SCOUT_METHOD,
@@ -33,7 +33,7 @@ const VALID_INPUT = {
 
 describe("Exa research scout contracts", () => {
   it("builds the current research-paper request recipe from a compact profile", () => {
-    const request = buildExaResearchScoutRequest(VALID_INPUT);
+    const request = buildExaResearchScoutBatchLaneRequest(VALID_INPUT);
 
     expect(EXA_RESEARCH_SCOUT_METHOD).toBe("POST");
     expect(EXA_RESEARCH_SCOUT_PATH).toBe("/search");
@@ -68,30 +68,34 @@ describe("Exa research scout contracts", () => {
     });
   });
 
-  it("allows broad lowercase category tags but rejects raw or identifying profile data", () => {
+  it("allows finite focused concepts and rejects mode-less single-scout profiles", () => {
     expect(researchScoutProfileSchema.parse({
+      mode: "focused",
       behaviors: ["yoga"],
       conditionsOrConcerns: ["menopause"],
     })).toMatchObject({
+      mode: "focused",
       behaviors: ["yoga"],
       conditionsOrConcerns: ["menopause"],
     });
 
     expect(() =>
       researchScoutProfileSchema.parse({
-        biomarkers: ["LDL 181 mg/dL"],
+        biomarkers: ["ldl cholesterol"],
       })
-    ).toThrow(/non-identifying categories/u);
+    ).toThrow();
     expect(() =>
       researchScoutProfileSchema.parse({
-        topics: ["John Smith"],
+        mode: "focused",
+        topics: ["sampleperson"],
       })
-    ).toThrow(/non-identifying categories/u);
+    ).toThrow(/exact server-owned public concepts/u);
     expect(() =>
       researchScoutProfileSchema.parse({
+        mode: "focused",
         conditionsOrConcerns: ["mayo clinic"],
       })
-    ).toThrow(/non-identifying categories/u);
+    ).toThrow(/exact server-owned public concepts/u);
   });
 
   it("bounds batch lanes while reusing compact profile validation", () => {
@@ -176,7 +180,7 @@ describe("Exa research scout contracts", () => {
   });
 
   it("rejects drift from the exact request shape", () => {
-    const request = buildExaResearchScoutRequest(VALID_INPUT);
+    const request = buildExaResearchScoutBatchLaneRequest(VALID_INPUT);
 
     expect(parseExaResearchScoutRequestBody({
       ...request,

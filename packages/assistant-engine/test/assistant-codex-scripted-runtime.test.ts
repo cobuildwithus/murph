@@ -605,7 +605,7 @@ text(result.output);
     })
     await writeFile(fakeVaultCli, `#!/bin/sh
 if [ "$*" = "research payload-schema --format json" ]; then
-  printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"properties":{"topics":{"items":{"description":"Focused values: cognition."}},"supplements":{"items":{"description":"Focused values: creatine."}},"conditionsOrConcerns":{"items":{"description":"Focused values: adults, healthy adults."}},"goals":{"items":{"description":"Focused values: cognitive performance."}}}}}'
+  printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"properties":{"topics":{"items":{"description":"Allowed provider values: cognition."}},"supplements":{"items":{"description":"Allowed provider values: creatine."}},"conditionsOrConcerns":{"items":{"description":"Allowed provider values: adults, healthy adults."}},"goals":{"items":{"description":"Allowed provider values: cognitive performance."}}}}}'
   exit 0
 fi
 request="$(cat)"
@@ -690,7 +690,7 @@ text(result.output);
       scenario.stub.requestSummariesSinceBaseline()
         .flatMap((summary) => summary.customToolCallOutputs ?? [])
         .join('\n'),
-    ).toContain('Focused values: creatine')
+    ).toContain('Allowed provider values: creatine')
     const providerQuestion = (await readFile(requestLog, 'utf8')).trim()
     expect(providerQuestion).toContain('"mode":"focused"')
     expect(providerQuestion).toContain('"topics":["cognition"]')
