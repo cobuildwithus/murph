@@ -81,6 +81,12 @@ describe('Codex app-server protocol boundary', () => {
     { method: 'item/completed', params: null },
     { method: 'item/completed', params: {}, result: {} },
     { jsonrpc: '2.0', method: 'item/completed', params: {} },
+    {
+      id: 1,
+      method: 'item/tool/call',
+      params: {},
+      trace: { traceparent: '00-00000000000000000000000000000000-0000000000000000-00' },
+    },
     { emitted_at_ms: 1, method: 'item/completed', params: {} },
     { id: 1 },
     { id: 1, result: {}, error: { code: -1, message: 'no' } },
