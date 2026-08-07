@@ -1,6 +1,6 @@
 # retire-sent-export-packs
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-07
 
@@ -102,9 +102,9 @@ Updated: 2026-08-07
     case-only active-file ownership findings.
 13. [completed] Resolve final ReviewGPT round 8 case-aware outbox creation and
     complete external stored-pack lock-scope findings.
-14. [in progress] Resolve final ReviewGPT round 9 intermediate-generation
-    admission during complete external stored-pack reads; then push the exact
-    remediation head and complete final ReviewGPT plus exact-head CI.
+14. [completed] Resolve final ReviewGPT round 9 intermediate-generation
+    admission during complete external stored-pack reads and complete final
+    ReviewGPT plus exact-head CI.
 
 ## Verification
 
@@ -142,4 +142,6 @@ Updated: 2026-08-07
   generation to an external copy because both metadata boundaries share the
   writer lock while payload transfer remains outside it.
 - Exact-head CI passed at the round 9 candidate head.
-- Pending final round 10 ReviewGPT and exact-head CI.
+- Final ReviewGPT round 10 returned `ROUND_OUTCOME: PASS` for the exact pushed
+  candidate, and every required GitHub check passed on that head.
+Completed: 2026-08-07
