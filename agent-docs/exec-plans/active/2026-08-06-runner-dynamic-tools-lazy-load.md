@@ -90,6 +90,50 @@ Updated: 2026-08-07
   catalog needs their descriptors. This PR defers the 187,998 B combined
   parser/executor chunk without duplicating schemas or splitting every handler.
 
+## Round 2 requirement-level retrospective
+
+Decision: continue the complete catalog/runtime separation as one change.
+
+- The original requirement is to keep the provider-visible dynamic-tool
+  catalog available before the first provider request while removing parsing
+  and execution from Node's startup closure. The first-reviewed implementation
+  contained 1,526 additions and 1,373 deletions of authored production source
+  (2,899 churn lines); the current implementation contains 1,528 additions and
+  1,375 deletions (2,903 churn lines).
+- The measured result justifies the boundary: 172,747 static-closure bytes move
+  off startup, ordinary text-only turns never evaluate that runtime, controlled
+  Docker timing moved directionally by -27.3 ms at the median, and the first
+  tool call pays a 10.4 ms median import. The tradeoff is a 15,679-byte increase
+  in total emitted output from the lazy boundary.
+- The separate eager catalog is necessary because Codex needs exact tool names,
+  schemas, descriptions, order, and availability before it can issue a tool
+  request. Keeping the former combined module eager fails the requirement;
+  loading the combined module lazily makes provider planning impossible.
+- The single process-local import promise makes initialization and failure one
+  explicit boundary for concurrent first calls. Repeating direct `import()`
+  expressions would still rely on Node's implicit module cache and would not
+  remove the underlying process-wide state; the named promise keeps that state
+  explicit without adding a manager, retry policy, or lifecycle service.
+- The turn-local accepted-request set extends the existing execution and
+  progress drains across the new import await. Without it, terminal cleanup can
+  finish before an already accepted request registers on the serialized
+  execution chain. It is not a second queue or durable owner and disappears
+  with the turn.
+- The static-closure exclusion and byte ratchet extend the existing production
+  assembly guard. They are required to prevent a future import from silently
+  undoing the only measured benefit; they add no runtime state.
+- Splitting every individual tool handler would create many more module
+  boundaries while the provider still needs their eager descriptors. Starting
+  the runtime speculatively on every turn would avoid first-tool latency only by
+  evaluating it for text-only turns, contrary to the requirement. Splitting the
+  catalog move from request ownership would leave either PR without a safe,
+  measurable production behavior.
+- Review-driven production growth is two additions and two deletions: the sole
+  accepted round-one correction moves immutable delivery-context capture before
+  the import await. Its production-shaped regression adds coverage but no state
+  or lifecycle owner. The correction remains the smallest fix and introduces
+  no repeated mechanism.
+
 ## Verification
 
 - Production runner assembly passed: entry 1,729,822 B; static closure
