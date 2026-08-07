@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     React.createElement("div", null, `top-up:${String(props.scope)}`)
   ),
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
+  readHostedGroupFundingSupporters: vi.fn(),
   readHostedGroupSponsorshipDraftForCreator: vi.fn(),
   readHostedGroupSponsorshipManagementProjection: vi.fn(),
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
@@ -85,6 +86,8 @@ vi.mock("@/src/lib/hosted-groups/group-sponsorship-authorization", () => ({
 vi.mock("@/src/lib/hosted-groups/group-sponsorship-store", () => ({
   hasHostedGroupSponsorshipCustomizationAuthority:
     mocks.hasHostedGroupSponsorshipCustomizationAuthority,
+  readHostedGroupFundingSupporters:
+    mocks.readHostedGroupFundingSupporters,
   readHostedGroupSponsorshipDraftForCreator:
     mocks.readHostedGroupSponsorshipDraftForCreator,
 }));
@@ -133,6 +136,10 @@ describe("hosted group funding page", () => {
       sponsorshipStatus: "not_sponsored",
     });
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
+    mocks.readHostedGroupFundingSupporters.mockResolvedValue({
+      monthlySponsor: null,
+      oneTimeContributions: [],
+    });
     mocks.readHostedGroupSponsorshipDraftForCreator.mockResolvedValue(null);
     mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValue(null);
     mocks.readHostedUsageCreditPurchaseStatus.mockResolvedValue({
@@ -158,6 +165,7 @@ describe("hosted group funding page", () => {
     assert.doesNotMatch(markup, /Keep Murph going/u);
     assert.doesNotMatch(markup, /Support Murph for everyone in this chat\./u);
     assert.doesNotMatch(markup, /Group usage|Running low/u);
+    assert.doesNotMatch(markup, /Supporters/u);
     assert.match(markup, /top-up:group/u);
     assert.match(markup, /href="\/home"[^>]*>Back to Murph<\/a>/u);
     expect(mocks.readHostedUsageCreditPurchaseStatus).toHaveBeenCalledWith({
@@ -184,6 +192,10 @@ describe("hosted group funding page", () => {
         kind: "group",
       }],
       payerMemberId: "member_payer",
+      prisma: { label: "test-prisma" },
+    });
+    expect(mocks.readHostedGroupFundingSupporters).toHaveBeenCalledWith({
+      beneficiaryMemberId: "member_group_runtime",
       prisma: { label: "test-prisma" },
     });
   });
@@ -405,6 +417,41 @@ describe("hosted group funding page", () => {
       offerCode: "usage_5_usd",
       sponsorshipKind: "one_time",
     }));
+  });
+
+  it("shows the current monthly sponsor and recent one-time contributions", async () => {
+    mocks.readHostedGroupFundingSupporters.mockResolvedValueOnce({
+      monthlySponsor: {
+        id: "hucp_monthlysponsor1",
+        monthlyCapMinor: 1_000,
+        name: "The Group Historian",
+      },
+      oneTimeContributions: [
+        {
+          amountMinor: 2_000,
+          id: "hucp_onetimecontrib1",
+          name: "Night Shift",
+        },
+        {
+          amountMinor: 500,
+          id: "hucp_onetimecontrib2",
+          name: "Anonymous",
+        },
+      ],
+    });
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, /Supporters/u);
+    assert.match(markup, /The Group Historian/u);
+    assert.match(markup, /Monthly sponsor/u);
+    assert.match(markup, /Up to \$10\/month/u);
+    assert.match(markup, /Night Shift/u);
+    assert.match(markup, /\$20 one time/u);
+    assert.match(markup, /Anonymous/u);
+    assert.match(markup, /\$5 one time/u);
   });
 
   it("keeps a non-sponsor's one-time recovery reachable after another monthly sponsorship activates", async () => {
