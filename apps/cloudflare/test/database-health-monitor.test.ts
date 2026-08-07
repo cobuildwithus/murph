@@ -1447,7 +1447,7 @@ describe("database health monitor", () => {
       expect(request).toBeDefined();
       expect(request.url).not.toContain("service-token-id");
       expect(request.url).not.toContain("service-token");
-      expect(request.redirect).toBe("error");
+      expect(request.redirect).toBe("manual");
     }
   });
 
