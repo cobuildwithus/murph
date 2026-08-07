@@ -801,6 +801,25 @@ Last verified: 2026-08-06
   must attach that environment and may call the hook only for the exact current
   protected `main` commit after required push CI passes.
 - Resend-backed hosted signup welcome email must keep `RESEND_API_KEY` and sender identity in environment variables only, send a plain-text-only body, claim the durable per-member welcome-attempt marker before the provider call, keep the stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata such as status/code. The optional internal signup notification must also keep recipients in environment variables only, use a plain-text-only body, claim its own durable per-member attempt marker before the provider call, keep a separate stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata. Resend-backed subscription cancellation feedback email must use the same env-only API key/sender configuration, send plain text only, rely on the existing Stripe event receipt for retry ownership until completion, store a receipt-local sent marker only after provider success so later receipt retries do not resend, use a subscription-scoped Resend idempotency key as provider replay defense, and log only sanitized provider metadata. A Stripe-collected checkout email may be stored only as an encrypted unverified email hint plus transactional welcome and cancellation-feedback recipient; do not use it for hosted account lookup, direct-public sender authorization, direct-public start instructions, or email-linked channel state until Privy verifies it. Later successful Stripe payments must not re-run activation welcome side effects.
+- Resend-backed Stripe failure alerts must use only the environment-owned shared
+  operational sender, recipient allowlist, and API key. Their plain-text body
+  may include only bounded operation/event types, sanitized error tokens and
+  status, live/test mode, and opaque stable operation-attempt or Stripe
+  request/event correlation. An SDK-to-hosted-error adapter may retain only the
+  already-validated opaque Stripe request id in a frozen non-serialized cause
+  record; client-visible details may expose only its presence. The adapter must
+  discard the raw error, provider message, submitted parameters, and payload.
+  It must not include member or customer identity, contact details, checkout contents,
+  raw provider messages, raw errors, or webhook/provider payloads. Alert-send
+  diagnostics may expose only the alert kind, sanitized provider status/code,
+  and a safe Stripe type token. Only the Web-owned terminal billing-action
+  boundary may classify an SDK or explicitly wrapped provider rejection as
+  alertable; a generic application failure or a provider rejection absorbed by
+  recovery, cleanup, or replay must remain silent. The public Family checkout
+  redirect may report its mandatory Session-read rejection only after the
+  submitted Session ID's unique blind lookup key still resolves to a current
+  checkout attempt; syntax alone, an unknown ID, or a cleared/stale binding
+  cannot create an operator email.
 - Assistant runtime state is high-sensitivity local runtime data: directories under `vault/.runtime/operations/assistant/**` must be `0700`, files under that tree must be `0600`, secret-bearing provider headers must never remain inline in persisted session JSON, and operator-facing repair flows should use `assistant doctor --repair` to tighten assistant runtime permissions in place. Inline secret findings indicate stale local session data that should be rebuilt or repaired manually rather than a supported migration lane.
 - Vault-file refs remain normalized and non-hidden except for one flat assistant-owned shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. Initial preparation may accept that exact ref only after the reader-compatible runner has converged, and both initial and retry paths must adopt/revalidate its regular bounded file before revalidating filename, media type, byte size, and SHA-256. Adoption tightens assistant-runtime parents to `0700` and the exact file to `0600`; ordinary vault refs are not chmodded. Prefix siblings, nested paths, hidden filenames, control characters, snapshot-excluded temp/lock names, symlinks, special files, and every other hidden ref fail closed. Never infer ownership or deletion authority from `exports/assistant-deliveries/**` or another generic vault path.
 - Do not clear or abandon provider-native assistant thread continuity merely because a tool returned authenticated private data or because provider history differs slightly from delivered output. Session invalidation is not a privacy boundary. Protect private data through authorization, bounded tool results, output and logging policy, and the normal encrypted snapshot boundary.

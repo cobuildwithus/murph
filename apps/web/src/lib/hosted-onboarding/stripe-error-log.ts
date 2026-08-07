@@ -1,11 +1,22 @@
+import {
+  isHostedOnboardingError,
+} from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import type { HostedOnboardingStructuredLogDetails } from "./logging";
+import {
+  buildHostedStripeOperationCorrelationId,
+  scheduleHostedStripeOperationFailureAlert,
+} from "./stripe-alert-email";
+import {
+  readHostedStripeAlertCorrelationRequestId,
+  readHostedStripeRequestId,
+} from "./stripe-error-fields";
+
+export { buildHostedStripeAlertCorrelationCause } from "./stripe-error-fields";
 
 const STRIPE_ERROR_TOKEN_MAX_LENGTH = 120;
 const STRIPE_ERROR_MESSAGE_MAX_LENGTH = 240;
 const STRIPE_OPERATION_NAME_MAX_LENGTH = 120;
-// Stripe request ids are opaque correlation handles (`req_...`); anything else is dropped.
-const STRIPE_REQUEST_ID_PATTERN = /^req_[A-Za-z0-9_-]{1,64}$/u;
 const STRIPE_ERROR_TOKEN_PATTERN = /^[A-Za-z0-9_.\-[\]]{1,120}$/u;
 
 export interface HostedStripeErrorFields {
@@ -39,8 +50,6 @@ export function describeHostedStripeError(error: unknown): HostedStripeErrorFiel
     };
   }
 
-  const requestId = readHostedStripeErrorString(error, "requestId");
-
   return {
     code: readHostedStripeErrorToken(error, "code"),
     declineCode: readHostedStripeErrorToken(error, "decline_code") ??
@@ -51,7 +60,7 @@ export function describeHostedStripeError(error: unknown): HostedStripeErrorFiel
     ),
     param: readHostedStripeErrorToken(error, "param"),
     rawType: readHostedStripeErrorToken(error, "rawType"),
-    requestId: requestId && STRIPE_REQUEST_ID_PATTERN.test(requestId) ? requestId : null,
+    requestId: readHostedStripeRequestId(error),
     statusCode: readHostedStripeErrorStatusCode(error),
     type: readHostedStripeErrorToken(error, "type"),
   };
@@ -84,8 +93,9 @@ function describeHostedStripeErrorForLog(input: {
 }
 
 /**
- * Records a failed Stripe call so it stays diagnosable even when the caller
- * swallows or reshapes the rejection.
+ * Records a failed Stripe call. Logging is deliberately not alert eligibility:
+ * callers also use this diagnostic for provider rejections that are safely
+ * absorbed by a re-read, cleanup race, or canonical reconciliation retry.
  */
 export function logHostedStripeFailure(input: {
   error: unknown;
@@ -95,8 +105,83 @@ export function logHostedStripeFailure(input: {
 }
 
 /**
- * Logs any Stripe rejection and rethrows it untouched. Observability only: it
- * never changes control flow, retries or status codes.
+ * Records and alerts a Stripe rejection that is known to abort a user-visible
+ * billing action. The caller owns the stable attempt identity and live/test
+ * mode so the email remains both replay-safe and useful for triage.
+ */
+export function reportHostedStripeOperationFailure(input: {
+  error: unknown;
+  operationIdentity: string;
+  operationName: string;
+  stripeLiveMode: boolean;
+}): void {
+  logHostedStripeFailure(input);
+  scheduleHostedStripeOperationFailureAlert({
+    fields: describeHostedStripeAlertFields(input.error),
+    operationCorrelationId: buildHostedStripeOperationCorrelationId(
+      input.operationIdentity,
+    ),
+    operationName: input.operationName,
+    stripeLiveMode: input.stripeLiveMode,
+  });
+}
+
+/**
+ * Provider wrappers intentionally replace raw Stripe errors with safe hosted
+ * errors before they reach an action owner. Rehydrate only their already-safe
+ * token/status detail and correlation-only cause so the alert remains useful
+ * without retaining a raw provider object or message.
+ */
+function describeHostedStripeAlertFields(
+  error: unknown,
+): HostedStripeErrorFields {
+  const direct = describeHostedStripeError(error);
+  if (!isHostedOnboardingError(error)) {
+    return direct;
+  }
+  const requestId = readHostedStripeAlertCorrelationRequestId(error);
+  if (!error.details) {
+    return {
+      ...direct,
+      requestId: requestId ?? direct.requestId,
+    };
+  }
+
+  const providerType =
+    readHostedStripeErrorToken(error.details, "providerErrorType") ??
+    readHostedStripeErrorToken(error.details, "type");
+  const providerCode =
+    readHostedStripeErrorToken(error.details, "providerErrorCode") ??
+    readHostedStripeErrorToken(error.details, "code");
+
+  return {
+    ...direct,
+    code: providerCode ?? direct.code,
+    param:
+      readHostedStripeErrorToken(error.details, "stripeParam") ?? direct.param,
+    requestId: requestId ?? direct.requestId,
+    statusCode:
+      readHostedStripeErrorStatusCode(error.details) ?? direct.statusCode,
+    type: providerType ?? direct.type,
+  };
+}
+
+/**
+ * Distinguishes a Stripe SDK rejection from an arbitrary action failure. Stripe
+ * errors expose either a `Stripe...` type, a raw provider type, or a request id;
+ * hosted/domain errors must be classified explicitly by their action owner.
+ */
+export function isHostedStripeProviderError(error: unknown): boolean {
+  const fields = describeHostedStripeError(error);
+
+  return fields.requestId !== null ||
+    fields.rawType !== null ||
+    fields.type?.startsWith("Stripe") === true;
+}
+
+/**
+ * Observes any Stripe rejection and rethrows it untouched. It never changes
+ * control flow, retries or status codes.
  */
 export async function withHostedStripeFailureLog<T>(
   operationName: string,
@@ -111,10 +196,41 @@ export async function withHostedStripeFailureLog<T>(
 }
 
 /**
+ * Observes a Stripe rejection that aborts a user-visible billing action,
+ * schedules a best-effort alert, and rethrows it untouched.
+ */
+export async function withHostedStripeActionFailureAlert<T>(
+  input: {
+    isTerminalStripeFailure?: (error: unknown) => boolean;
+    operationIdentity: string;
+    operationName: string;
+    stripeLiveMode: boolean;
+  },
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    const isTerminalStripeFailure = input.isTerminalStripeFailure ??
+      isHostedStripeProviderError;
+    if (isTerminalStripeFailure(error)) {
+      reportHostedStripeOperationFailure({
+        error,
+        operationIdentity: input.operationIdentity,
+        operationName: input.operationName,
+        stripeLiveMode: input.stripeLiveMode,
+      });
+    }
+    throw error;
+  }
+}
+
+/**
  * The client-visible detail shape carried on hosted onboarding domain errors.
  * Domain error details are serialized into HTTP error responses, so this stays
  * a narrow token-only projection; the provider message and request id are
- * log-only and live in {@link logHostedStripeFailure}.
+ * absent from this client-visible shape. A validated request id may cross an
+ * internal adapter only through the frozen, non-serialized correlation cause.
  */
 export function describeHostedStripeErrorDetails(input: {
   error: unknown;
