@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 export const MAPBOX_DIRECTIONS_API_VERSION = 'v5'
 export const MAPBOX_GEOCODING_API_VERSION = 'v6'

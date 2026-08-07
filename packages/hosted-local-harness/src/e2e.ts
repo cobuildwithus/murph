@@ -56,6 +56,7 @@ export type HostedLocalE2eScenarioName =
   | "active-turn-latency"
   | "canonical-receipt-lost-ack-recovery"
   | "checkpoint-baseline"
+  | "cold-start-benchmark"
   | "codex-container-continuity"
   | "codex-gateway-prefix"
   | "codex-image-media-delivery"
@@ -138,6 +139,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
     name: "checkpoint-baseline",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
+    manualOnly: true,
+    name: "cold-start-benchmark",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",

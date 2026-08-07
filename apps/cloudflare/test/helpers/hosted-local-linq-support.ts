@@ -33,6 +33,7 @@ export interface ObservedLinqRequest {
   body: string;
   host: string | null;
   method: string;
+  observedAtEpochMs?: number;
   url: string;
 }
 
@@ -258,6 +259,7 @@ export async function startHostedLocalLinqStub(input: {
   let server: HttpServer | null = null;
 
   server = createServer(async (request, response) => {
+    const observedAtEpochMs = Date.now();
     const body = await readRequestBody(request);
     const observedRequest: ObservedLinqRequest = {
       authorizationStatus: classifyObservedLinqAuthorization(
@@ -267,6 +269,7 @@ export async function startHostedLocalLinqStub(input: {
       body,
       host: request.headers.host?.trim() || null,
       method: request.method ?? "GET",
+      observedAtEpochMs,
       url: request.url ?? "/",
     };
     observedRequests.push(observedRequest);
