@@ -15,6 +15,7 @@ import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
   HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
+  isHostedSignupReferralRewardEnabled,
 } from "./signup-referral-policy";
 import {
   buildHostedUsageReferralCapacityAtWhere,
@@ -23,8 +24,10 @@ import {
   HOSTED_USAGE_REFERRAL_REFERRER_30D_CAP_USD_MICROS,
 } from "./usage-referral";
 
-export const HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED_ENV =
-  "HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED";
+export {
+  HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED_ENV,
+  isHostedSignupReferralRewardEnabled,
+} from "./signup-referral-policy";
 export const HOSTED_SIGNUP_REFERRAL_RECOVERY_BATCH_SIZE = 50;
 export const HOSTED_SIGNUP_REFERRAL_RECOVERY_LOOKBACK_MS =
   30 * 24 * 60 * 60 * 1_000;
@@ -54,12 +57,6 @@ export interface HostedSignupReferralRewardRecoveryResult {
   failed: number;
   rewarded: number;
   scanned: number;
-}
-
-export function isHostedSignupReferralRewardEnabled(
-  source: Readonly<Record<string, string | undefined>> = process.env,
-): boolean {
-  return source[HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED_ENV] === "1";
 }
 
 /**

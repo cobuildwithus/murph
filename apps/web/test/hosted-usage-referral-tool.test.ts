@@ -536,6 +536,33 @@ describe("hosted usage referral tool", () => {
     expect(referrals).toHaveLength(0);
   });
 
+  it("does not arm a later mission while an attributed activation is pending", async () => {
+    const { prisma, referrals } = buildPrisma({
+      pendingSignupActivation: true,
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCodes: ["active_group_v1"],
+        sourceConversation: PERSONAL_SOURCE,
+      },
+      signupReferralRewardsEnabled: true,
+    })).resolves.toEqual({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "usage_referral_not_available",
+      },
+    });
+    expect(referrals).toHaveLength(0);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
   it("suppresses and rejects a policy already armed for another destination", async () => {
     const { prisma, referrals } = buildPrisma();
     referrals.push({
@@ -869,6 +896,7 @@ function buildPrisma(input: {
   beneficiaryRewardTotal?: bigint;
   containerMemberId?: string;
   inProgressCount?: number;
+  pendingSignupActivation?: boolean;
   referrerRewardTotal?: bigint;
 } = {}): {
   peakTransactionQueries: () => number;
@@ -1054,11 +1082,17 @@ function buildPrisma(input: {
   };
   const prisma = {
     $executeRaw: vi.fn(async () => runQuery(() => 1)),
-    $queryRaw: vi.fn(async () => runQuery(() => [{
-      balanceUsdMicros: 0n,
-      beneficiaryMemberId: "member_personal",
-      ledgerVersion: 0n,
-    }])),
+    $queryRaw: vi.fn(async (...query: unknown[]) => runQuery(() => {
+      const sql = Array.isArray(query[0]) ? query[0].join(" ") : "";
+      if (sql.includes('FROM "hosted_mailbox_item"')) {
+        return [{ pending: input.pendingSignupActivation ?? false }];
+      }
+      return [{
+        balanceUsdMicros: 0n,
+        beneficiaryMemberId: "member_personal",
+        ledgerVersion: 0n,
+      }];
+    })),
     $transaction: vi.fn(async (
       callback: (tx: Record<string, unknown>) => Promise<unknown>,
     ) => {

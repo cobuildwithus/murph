@@ -10,6 +10,13 @@ import {
   claimHostedSignupReferralLink,
   issueHostedSignupReferralLink,
 } from "@/src/lib/hosted-growth/signup-referral";
+import {
+  handleHostedUsageReferralGroupTool,
+  HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+} from "@/src/lib/hosted-growth/usage-referral";
+import {
+  getHostedAiUsageMonthlyAllowanceUsdMicros,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -236,6 +243,351 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           firstClient.$disconnect(),
           secondClient.$disconnect(),
         ]);
+      }
+    }, 30_000);
+
+    it("settles six delayed activations oldest-first without exceeding the cap", async () => {
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required for this proof.");
+      }
+
+      const fixtureId = randomUUID();
+      const referrerMemberId = `member_signup_cap_referrer_${fixtureId}`;
+      const introducedMemberIds = Array.from(
+        { length: 6 },
+        (_, index) => `member_signup_cap_${index}_${fixtureId}`,
+      );
+      const now = new Date();
+      const introducedAt = new Date(now.getTime() - 24 * 60 * 60_000);
+      const attributedAt = new Date(now.getTime() - 23 * 60 * 60_000);
+      const activatedAt = introducedMemberIds.map(
+        (_, index) => new Date(now.getTime() - (10 - index) * 60_000),
+      );
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            {
+              billingStatus: "active",
+              createdAt: new Date(introducedAt.getTime() - 60_000),
+              id: referrerMemberId,
+            },
+            ...introducedMemberIds.map((id) => ({
+              billingStatus: "active" as const,
+              createdAt: introducedAt,
+              id,
+            })),
+          ],
+        });
+        await observer.hostedInvite.createMany({
+          data: introducedMemberIds.map((memberId, index) => ({
+            channel: "web",
+            createdAt: attributedAt,
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            id: `invite_signup_cap_${index}_${fixtureId}`,
+            inviteCode: `signup-cap-${index}-${fixtureId}`,
+            memberId,
+            referrerMemberId,
+          })),
+        });
+        await observer.hostedMailboxItem.createMany({
+          data: introducedMemberIds.map((userId, index) => ({
+            dedupeKey: `member.activated:${userId}`,
+            id: `hmi_signup_cap_${index}_${fixtureId}`,
+            kind: "member.activated",
+            lane: "system" as const,
+            laneSeq: 1n,
+            occurredAt: activatedAt[index]!,
+            payloadSchema: "murph.hosted-execution.member-activated.v1",
+            userId,
+          })),
+        });
+
+        const passes = await Promise.all([
+          recoverPendingHostedSignupReferralRewards({
+            enabled: true,
+            now,
+            prisma: firstClient,
+          }),
+          recoverPendingHostedSignupReferralRewards({
+            enabled: true,
+            now,
+            prisma: secondClient,
+          }),
+        ]);
+        expect(passes.reduce((total, pass) => total + pass.failed, 0)).toBe(0);
+        expect(passes.reduce((total, pass) => total + pass.rewarded, 0)).toBe(5);
+
+        const receipts = await observer.hostedUsageReferral.findMany({
+          orderBy: [{ terminalAt: "asc" }, { id: "asc" }],
+          select: {
+            introducedMemberId: true,
+            rewardedAt: true,
+            status: true,
+            terminalReason: true,
+          },
+          where: { introducedMemberId: { in: introducedMemberIds } },
+        });
+        expect(receipts).toHaveLength(6);
+        expect(receipts.slice(0, 5)).toEqual(
+          introducedMemberIds.slice(0, 5).map((introducedMemberId, index) => ({
+            introducedMemberId,
+            rewardedAt: activatedAt[index],
+            status: "rewarded",
+            terminalReason: null,
+          })),
+        );
+        expect(receipts[5]).toEqual({
+          introducedMemberId: introducedMemberIds[5],
+          rewardedAt: null,
+          status: "disqualified",
+          terminalReason: "signup_referral_referrer_reward_cap_reached",
+        });
+
+        await expect(Promise.all([
+          observer.hostedUsageCreditEntry.count({
+            where: {
+              beneficiaryMemberId: referrerMemberId,
+              kind: "referral_grant",
+            },
+          }),
+          observer.hostedUsageCreditGrant.count({
+            where: {
+              entry: { beneficiaryMemberId: referrerMemberId },
+            },
+          }),
+          observer.hostedMember.findUniqueOrThrow({
+            select: {
+              usageCreditBalanceUsdMicros: true,
+              usageCreditLedgerVersion: true,
+            },
+            where: { id: referrerMemberId },
+          }),
+          recoverPendingHostedSignupReferralRewards({
+            enabled: true,
+            now,
+            prisma: firstClient,
+          }),
+        ])).resolves.toEqual([
+          5,
+          5,
+          {
+            usageCreditBalanceUsdMicros: 10_000_000n,
+            usageCreditLedgerVersion: 5n,
+          },
+          { failed: 0, rewarded: 0, scanned: 0 },
+        ]);
+      } finally {
+        const referralIds = (
+          await observer.hostedUsageReferral.findMany({
+            select: { id: true },
+            where: { introducedMemberId: { in: introducedMemberIds } },
+          })
+        ).map(({ id }) => id);
+        await observer.hostedUsageCreditGrant.deleteMany({
+          where: { entry: { referralId: { in: referralIds } } },
+        });
+        await observer.hostedUsageCreditEntry.deleteMany({
+          where: { referralId: { in: referralIds } },
+        });
+        await observer.hostedUsageReferral.deleteMany({
+          where: { id: { in: referralIds } },
+        });
+        await observer.hostedMailboxItem.deleteMany({
+          where: { userId: { in: introducedMemberIds } },
+        });
+        await observer.hostedInvite.deleteMany({
+          where: { memberId: { in: introducedMemberIds } },
+        });
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [referrerMemberId, ...introducedMemberIds] } },
+        });
+        await Promise.all([
+          observer.$disconnect(),
+          firstClient.$disconnect(),
+          secondClient.$disconnect(),
+        ]);
+      }
+    }, 60_000);
+
+    it("blocks a later group arm while an older signup activation owns cap capacity", async () => {
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required for this proof.");
+      }
+
+      const fixtureId = randomUUID();
+      const referrerMemberId = `member_signup_cross_cap_${fixtureId}`;
+      const introducedMemberId = `member_signup_cross_target_${fixtureId}`;
+      const now = new Date();
+      const introducedAt = new Date(now.getTime() - 5 * 60_000);
+      const attributedAt = new Date(now.getTime() - 4 * 60_000);
+      const activatedAt = new Date(now.getTime() - 3 * 60_000);
+      const periodStart = new Date(now.getTime() - 24 * 60 * 60_000);
+      const periodEnd = new Date(now.getTime() + 31 * 24 * 60 * 60_000);
+      const priorReferralIds = [
+        `hur_signup_cross_prior_0_${fixtureId}`,
+        `hur_signup_cross_prior_1_${fixtureId}`,
+      ];
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const sourceConversation = {
+        channel: "linq" as const,
+        linqService: "imessage" as const,
+        threadId: `hid_${fixtureId.replaceAll("-", "")}`,
+        threadIsDirect: true,
+      };
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingRef: {
+              create: {
+                currentBillingPhase: "paid",
+                currentBillingPlanCode: "launch_monthly",
+                currentPeriodEnd: periodEnd,
+                currentPeriodStart: periodStart,
+              },
+            },
+            billingStatus: "active",
+            hostedAiUsagePeriods: {
+              create: {
+                billingPlanCode: "launch_monthly",
+                limitUsdMicros:
+                  getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly"),
+                periodEnd,
+                periodStart,
+                spentUsdMicros: 0n,
+              },
+            },
+            id: referrerMemberId,
+          },
+        });
+        await prisma.hostedMember.create({
+          data: {
+            billingStatus: "active",
+            createdAt: introducedAt,
+            id: introducedMemberId,
+          },
+        });
+        await prisma.hostedUsageReferral.createMany({
+          data: priorReferralIds.map((id, index) => {
+            const rewardedAt = new Date(
+              activatedAt.getTime() - (index + 1) * 60_000,
+            );
+            return {
+              armedAt: new Date(rewardedAt.getTime() - 60_000),
+              beneficiaryMemberId: referrerMemberId,
+              expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+              id,
+              policyCode: "active_group_v1" as const,
+              policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+              qualifiedAt: rewardedAt,
+              referrerMemberId,
+              rewardedAt,
+              rewardUsdMicros: 3_500_000n,
+              status: "rewarded" as const,
+              terminalAt: rewardedAt,
+            };
+          }),
+        });
+        await prisma.hostedInvite.create({
+          data: {
+            channel: "web",
+            createdAt: attributedAt,
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            id: `invite_signup_cross_${fixtureId}`,
+            inviteCode: `signup-cross-${fixtureId}`,
+            memberId: introducedMemberId,
+            referrerMemberId,
+          },
+        });
+        await prisma.hostedMailboxItem.create({
+          data: {
+            dedupeKey: `member.activated:${introducedMemberId}`,
+            id: `hmi_signup_cross_${fixtureId}`,
+            kind: "member.activated",
+            lane: "system",
+            laneSeq: 1n,
+            occurredAt: activatedAt,
+            payloadSchema: "murph.hosted-execution.member-activated.v1",
+            userId: introducedMemberId,
+          },
+        });
+
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId: referrerMemberId,
+          prisma,
+          request: {
+            action: "arm_usage_referral",
+            policyCodes: ["active_group_v1"],
+            sourceConversation,
+          },
+          signupReferralRewardsEnabled: true,
+        })).resolves.toEqual({
+          action: "arm_usage_referral",
+          result: {
+            referral: null,
+            status: "unavailable",
+            unavailableReason: "usage_referral_not_available",
+          },
+        });
+        await expect(settleHostedSignupReferralReward({
+          activatedAt,
+          introducedMemberId,
+          prisma,
+          referrerMemberId,
+        })).resolves.toMatchObject({ outcome: "rewarded" });
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId: referrerMemberId,
+          prisma,
+          request: {
+            action: "arm_usage_referral",
+            policyCodes: ["active_group_v1"],
+            sourceConversation,
+          },
+          signupReferralRewardsEnabled: true,
+        })).resolves.toMatchObject({
+          result: {
+            referral: null,
+            status: "unavailable",
+          },
+        });
+        await expect(prisma.hostedUsageReferral.count({
+          where: {
+            referrerMemberId,
+            status: "armed",
+          },
+        })).resolves.toBe(0);
+      } finally {
+        const referralIds = (
+          await prisma.hostedUsageReferral.findMany({
+            select: { id: true },
+            where: { referrerMemberId },
+          })
+        ).map(({ id }) => id);
+        await prisma.hostedUsageCreditGrant.deleteMany({
+          where: { entry: { referralId: { in: referralIds } } },
+        });
+        await prisma.hostedUsageCreditEntry.deleteMany({
+          where: { referralId: { in: referralIds } },
+        });
+        await prisma.hostedUsageReferral.deleteMany({
+          where: { id: { in: referralIds } },
+        });
+        await prisma.hostedMailboxItem.deleteMany({
+          where: { userId: introducedMemberId },
+        });
+        await prisma.hostedInvite.deleteMany({
+          where: { memberId: introducedMemberId },
+        });
+        await prisma.hostedMember.deleteMany({
+          where: { id: { in: [referrerMemberId, introducedMemberId] } },
+        });
+        await prisma.$disconnect();
       }
     }, 30_000);
 

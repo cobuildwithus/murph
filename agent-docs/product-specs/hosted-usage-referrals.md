@@ -241,6 +241,11 @@ Recovery scans activation candidates oldest first; the existing referrer lock
 serializes every capacity decision and receipt for that referrer. If one
 candidate fails transiently, that pass skips later activations for the same
 referrer so recovery failure cannot let a later signup steal earlier capacity.
+While signup rewards are enabled, a conversational arm holding that same
+referrer lock also fails temporarily if an older, exactly attributed activation
+still lacks a receipt. Recovery must first settle or disqualify the older event;
+the arm then sees its durable cap result. This preserves activation-time order
+without another reservation table or queue.
 
 The referrer cannot reward their own reconciled identity. Suspended referrers or
 introduced members are disqualified. One introduced member can own only one

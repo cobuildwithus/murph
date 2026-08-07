@@ -1,5 +1,7 @@
 export const HOSTED_SIGNUP_REFERRAL_POLICY_VERSION =
   "hosted-signup-referral-activation-2026-08-v1";
+export const HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED_ENV =
+  "HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED";
 
 /**
  * Persisted signup-link policy versions. Keep prior entries when the policy
@@ -22,4 +24,10 @@ export function isHostedSignupReferralPolicyVersion(
   return HOSTED_SIGNUP_REFERRAL_POLICY_VERSIONS.some(
     (knownVersion) => knownVersion === policyVersion,
   );
+}
+
+export function isHostedSignupReferralRewardEnabled(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  return source[HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED_ENV] === "1";
 }

@@ -224,7 +224,6 @@ describe("hosted signup referral rewards", () => {
     const capacityAtActivation = [
       {
         armedAt: { lte: ACTIVATED_AT },
-        createdAt: { lte: ACTIVATED_AT },
         rewardedAt: {
           gte: new Date("2026-07-07T12:05:00.000Z"),
           lte: ACTIVATED_AT,
