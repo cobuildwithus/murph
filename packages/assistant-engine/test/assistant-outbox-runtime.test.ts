@@ -1168,11 +1168,13 @@ describe('assistant outbox runtime', () => {
     )
     const intent = await createAssistantOutboxIntent({
       actorId: '+15550001',
+      answeredMailboxItemIds: ['mailbox-card-fallback-restart'],
       card: NUTRITION_RESPONSE_CARD,
       channel: 'linq',
       dedupeToken: 'stable-card-fallback-restart',
       deliverySource: TEST_LINQ_DELIVERY_SOURCE,
       message: 'ignored model prose',
+      replyToMessageId: 'message-card-fallback-restart',
       sessionId: 'session-card-fallback-restart',
       threadId: 'thread-card-fallback-restart',
       threadIsDirect: true,
@@ -1252,6 +1254,7 @@ describe('assistant outbox runtime', () => {
 
     const interrupted = await readAssistantOutboxIntent(vaultRoot, intent.intentId)
     expect(interrupted).toMatchObject({
+      answeredMailboxItemIds: ['mailbox-card-fallback-restart'],
       card: null,
       bindingDelivery: {
         kind: 'thread',
@@ -1259,6 +1262,7 @@ describe('assistant outbox runtime', () => {
       },
       delivery: null,
       deliveryIdempotencyKey: fallbackIdempotencyKey,
+      replyToMessageId: 'message-card-fallback-restart',
       status: 'sending',
     })
     expect(interrupted?.targetFingerprint).not.toBe(intent.targetFingerprint)
@@ -1282,8 +1286,10 @@ describe('assistant outbox runtime', () => {
 
     expect(sendLinq).toHaveBeenCalledTimes(2)
     expect(sendLinq.mock.calls[1]?.[0]).toMatchObject({
+      answeredMailboxItemIds: ['mailbox-card-fallback-restart'],
       idempotencyKey: fallbackIdempotencyKey,
       message: renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD),
+      replyToMessageId: 'message-card-fallback-restart',
       target: recoveredTarget,
       targetKind: 'thread',
     })

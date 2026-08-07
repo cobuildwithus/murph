@@ -72,6 +72,11 @@ Updated: 2026-08-06
   authority without an override, so exact replay retried the rejected chat
   forever even though Web retained the encrypted member identity and assigned
   line needed to authorize a participant-addressed replacement.
+- Final ReviewGPT round 10 exposed that an ordinary auto-reply persists its
+  answered-mailbox and reply-target selectors across the fallback transition.
+  A fresh process treated those historical selectors as route authority before
+  current-home projection, so it could send fallback text to the rejected chat
+  despite the phone-free participant recovery added in round 9.
 
 ## Success criteria
 
@@ -123,6 +128,12 @@ Updated: 2026-08-06
   replaces only the exact rejected current home; callback replay is
   idempotent, a newer home wins, and missing durable route authority leaves the
   card untouched and confirmation-pending.
+- A persisted fallback key forces current-home-only authority even when the
+  outbox retains answered-mailbox IDs and a reply-target message ID for
+  accounting and receipts. Those selectors cannot authorize the delivery
+  target. The projection distinguishes the exact rejected predecessor from an
+  already-persisted replacement thread; missing replacement authority makes no
+  provider delivery request and remains confirmation-pending.
 - Exhausted provider-message `429` responses after dispatch admission are
   confirmation-pending; a capability-only `429` may still select deterministic
   text fallback before message dispatch.
@@ -265,3 +276,14 @@ Updated: 2026-08-06
   the three affected Web files 131, the full Cloudflare Node workspace 2,264,
   and local PostgreSQL fallback lifecycle 3. All four affected package
   typechecks, documentation gardening, and documentation drift checks pass.
+- Final ReviewGPT round 10 found that production auto-reply selectors survived
+  restart and bypassed current-home projection. Failing-first runtime proof sent
+  toward the rejected thread, while Web proof both authorized the old inbound
+  and rematerialized over an already-persisted replacement. The fallback key
+  now forces selector-independent projection, Web compares the requested/current
+  chat with the predecessor, and missing authority remains confirmation-pending
+  before provider delivery. Focused correction proof passes: assistant outbox
+  96, hosted callbacks 224, and Web Linq engagement 54. The combined affected
+  files pass 160 assistant-engine tests, 252 hosted-runtime tests, and 136 Web
+  tests including the PostgreSQL lifecycle; affected typechecks and both
+  documentation checks pass.

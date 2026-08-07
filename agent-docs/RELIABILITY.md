@@ -55,7 +55,10 @@ Last verified: 2026-08-06
   participant plus assigned-line route. The outbox then persists only
   `card: null` and the stable fallback key before `/chats`; it never stores the
   raw participant route, and every initial or resumed fallback dispatch
-  reacquires that route from Web. Web atomically terminalizes the thread-card
+  reacquires that route from Web. Retained answered-mailbox and reply-target
+  selectors remain available for accounting and receipts but cannot authorize
+  a persisted app-card fallback target; the fallback key forces the
+  current-home-only projection on every drain. Web atomically terminalizes the thread-card
   predecessor and claims the participant fallback fence without persisting its
   raw target. An accepted provider chat replaces the exact rejected home chat
   under the same member, route, identity, line, and predecessor-provenance
@@ -907,7 +910,8 @@ Last verified: 2026-08-06
   that commit. A different current chat is persisted with the fallback. When
   the rejected chat remains current, the fallback instead reacquires Web's
   encrypted participant and assigned-line route on every drain, persists no raw
-  phone locally, and materializes the provider chat only after the text
+  phone locally, ignores retained historical selectors for route authority,
+  and materializes the provider chat only after the text
   transition is durable. If neither route exists, the card remains unchanged
   and confirmation-pending. Before the first fallback provider request, Web
   terminalizes the exact thread-card dispatch and claims the fallback identity

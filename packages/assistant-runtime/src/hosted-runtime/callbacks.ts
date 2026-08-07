@@ -3518,9 +3518,11 @@ function createHostedAssistantLinqSendDependency(input: {
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
+    const idempotencyKey = request.idempotencyKey?.trim() || null;
     const currentHomeRouteOnly = shouldBypassHostedLinqDeliveryContextForHomeFallback({
       answeredMailboxItemIds: request.answeredMailboxItemIds,
       homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
+      idempotencyKey,
       nativeReplyRequested: request.nativeReplyRequested,
       replyToMessageId: request.replyToMessageId ?? null,
     });
@@ -3544,7 +3546,6 @@ function createHostedAssistantLinqSendDependency(input: {
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const idempotencyKey = request.idempotencyKey?.trim() || null;
     let effectiveIdempotencyKey = idempotencyKey;
     let providerDispatchPredecessorIdempotencyKey =
       readHostedLinqAppCardFallbackPredecessorIdempotencyKey(idempotencyKey);
@@ -3579,6 +3580,28 @@ function createHostedAssistantLinqSendDependency(input: {
           targetKind: request.targetKind ?? null,
         })
       : {};
+    if (
+      currentHomeRouteOnly
+      && providerDispatchPredecessorIdempotencyKey
+      && !engagement.targetOverride
+    ) {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: {
+          eventType:
+            "assistant.delivery.linq_app_card_stale_chat_recovery_unavailable",
+          providerKind: "linq",
+        },
+        level: "warn",
+        message: "Hosted Linq stale app-card recovery had no current Web-authorized direct route.",
+        phase: "outbox",
+      });
+      throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
+        "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        "Hosted iMessage app-card recovery requires a current direct route before provider delivery.",
+        { retryable: false },
+      ));
+    }
     if (initialNativeCard && engagement.providerDispatchStarted === true) {
       throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
         "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
@@ -4230,6 +4253,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     const currentHomeRouteOnly = shouldBypassHostedLinqDeliveryContextForHomeFallback({
       answeredMailboxItemIds: request.answeredMailboxItemIds,
       homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
+      idempotencyKey: null,
       replyToMessageId: request.replyToMessageId ?? null,
     });
     const deliveryContext = currentHomeRouteOnly
@@ -4896,13 +4920,21 @@ function normalizeHostedAssistantLinqTargetKind(
 function shouldBypassHostedLinqDeliveryContextForHomeFallback(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   homeRouteFallbackAllowed: boolean;
+  idempotencyKey: string | null;
   nativeReplyRequested?: true;
   replyToMessageId: string | null;
 }): boolean {
   return input.homeRouteFallbackAllowed
     && input.nativeReplyRequested !== true
-    && !input.replyToMessageId?.trim()
-    && (input.answeredMailboxItemIds?.length ?? 0) === 0;
+    && (
+      readHostedLinqAppCardFallbackPredecessorIdempotencyKey(
+        input.idempotencyKey,
+      ) !== null
+      || (
+        !input.replyToMessageId?.trim()
+        && (input.answeredMailboxItemIds?.length ?? 0) === 0
+      )
+    );
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {

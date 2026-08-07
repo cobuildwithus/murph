@@ -11319,10 +11319,11 @@ describe("hosted runtime callbacks", () => {
     mocks.useActualLinqMessage = true;
     mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
         homeRouteFallbackAllowed: true,
         idempotencyKey: "assistant-outbox:intent_123:fallback",
         message: "Nutrition summary",
-        replyToMessageId: null,
+        replyToMessageId: "message-stale-direct-chat",
         target: "stale-direct-chat",
         targetKind: "thread",
         threadIsDirect: true,
@@ -11365,13 +11366,78 @@ describe("hosted runtime callbacks", () => {
     expect(authorityChecks).toHaveLength(2);
     for (const request of authorityChecks) {
       expect(request).toEqual(expect.objectContaining({
+        answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
         idempotencyKey: "assistant-outbox:intent_123:fallback",
+        replyToMessageId: "message-stale-direct-chat",
         target: "stale-direct-chat",
         targetKind: "thread",
       }));
     }
+  });
+
+  it("keeps a fresh persisted fallback confirmation-pending when Web has no replacement route", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "stale-direct-chat",
+      channel: "linq",
+      explicitTarget: "stale-direct-chat",
+      idempotencyKey: "assistant-outbox:intent_123:fallback",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+    }) => request.authorityCheckOnly
+      ? { threadIsDirect: true }
+      : { providerDispatchClaimed: true });
+    const providerFetch = vi.fn<typeof fetch>(async () => {
+      throw new Error("Provider delivery must not start without a current route.");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendLinq({
+          answeredMailboxItemIds: ["mailbox-stale-direct-chat"],
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: "assistant-outbox:intent_123:fallback",
+          message: "Nutrition summary",
+          replyToMessageId: "message-stale-direct-chat",
+          target: "stale-direct-chat",
+          targetKind: "thread",
+          threadIsDirect: true,
+        });
+        throw new Error("unreachable without a current fallback route");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      deliveryMayHaveSucceeded: true,
+    });
+
+    expect(providerFetch.mock.calls.filter(([providerInput]) => {
+      const url = String(providerInput);
+      return url.endsWith("/chats") || url.endsWith("/messages");
+    })).toHaveLength(0);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          eventType:
+            "assistant.delivery.linq_app_card_stale_chat_recovery_unavailable",
+        }),
+        level: "warn",
+      }),
+    );
   });
 
   it("keeps stale-card state when no current direct thread is authorized", async () => {

@@ -227,6 +227,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     containerMemberId: input.memberId,
     prisma: input.prisma,
   });
+  const currentHomeOnly = isHostedLinqCurrentHomeOnlyAssertion(input);
 
   const targetThreadRoute = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
@@ -235,7 +236,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   });
   if (targetThreadRoute) {
     if (
-      isHostedLinqCurrentHomeOnlyAssertion(input)
+      currentHomeOnly
       || targetThreadRoute.containerMemberId !== input.memberId
     ) {
       throwHostedLinqRouteAuthorityMismatch();
@@ -250,13 +251,16 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     };
   }
 
-  if (await matchesPersistedHostedLinqDirectInbound({
-    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
-    memberId: input.memberId,
-    prisma: input.prisma,
-    replyToMessageId: input.replyToMessageId,
-    target: input.target,
-  })) {
+  if (
+    !currentHomeOnly
+    && await matchesPersistedHostedLinqDirectInbound({
+      answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+      memberId: input.memberId,
+      prisma: input.prisma,
+      replyToMessageId: input.replyToMessageId,
+      target: input.target,
+    })
+  ) {
     return { targetOverride: null, threadIsDirect: true };
   }
 
@@ -269,18 +273,24 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     replyToMessageId: input.replyToMessageId,
     targetKind: input.targetKind,
     homeRouteFallbackAllowed:
-      input.homeRouteFallbackAllowed === true && input.authorityCheckOnly === true,
+      currentHomeOnly && input.authorityCheckOnly === true,
   });
 }
 
 function isHostedLinqCurrentHomeOnlyAssertion(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   homeRouteFallbackAllowed?: boolean | null;
+  idempotencyKey?: string | null;
   replyToMessageId?: string | null;
 }): boolean {
   return input.homeRouteFallbackAllowed === true
-    && normalizeNullable(input.replyToMessageId) === null
-    && (input.answeredMailboxItemIds?.length ?? 0) === 0;
+    && (
+      isHostedLinqAppCardFallbackIdempotencyKey(input.idempotencyKey)
+      || (
+        normalizeNullable(input.replyToMessageId) === null
+        && (input.answeredMailboxItemIds?.length ?? 0) === 0
+      )
+    );
 }
 
 async function matchesPersistedHostedLinqDirectInbound(input: {
@@ -487,6 +497,38 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   if (!routing) {
     throwHostedLinqRouteAuthorityMismatch();
   }
+  const appCardFallbackRoute = input.homeRouteFallbackAllowed
+    && isHostedLinqAppCardFallbackIdempotencyKey(input.idempotencyKey)
+      ? await readHostedLinqAppCardFallbackRoute({
+          idempotencyKey: input.idempotencyKey,
+          prisma: input.prisma,
+        })
+      : null;
+  if (
+    appCardFallbackRoute?.fallbackTargetKind === "participant"
+    && routing.linqChatLookupKey
+  ) {
+    const participantRecovery =
+      await resolveHostedLinqAppCardFallbackParticipantRoute({
+        expectedCurrentChatLookupKey: routing.linqChatLookupKey,
+        memberId: input.memberId,
+        prisma: input.prisma,
+        routing,
+      });
+    if (participantRecovery) {
+      return participantRecovery;
+    }
+    return {
+      ...(routing.linqRecipientPhoneLookupKey
+        ? {
+            linePhoneNumberLookupKey:
+              routing.linqRecipientPhoneLookupKey,
+          }
+        : {}),
+      targetOverride: null,
+      threadIsDirect: true,
+    };
+  }
   if (
     routing.linqChatLookupKey
     && chatLookupKeys.includes(routing.linqChatLookupKey)
@@ -495,15 +537,41 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
       input.homeRouteFallbackAllowed
       && isHostedLinqAppCardFallbackIdempotencyKey(input.idempotencyKey)
     ) {
-      const participantRecovery =
-        await resolveHostedLinqAppCardFallbackParticipantRoute({
-          expectedCurrentChatId: normalizeNullable(input.chatId),
-          memberId: input.memberId,
-          prisma: input.prisma,
-          routing,
-        });
-      if (participantRecovery) {
-        return participantRecovery;
+      if (
+        appCardFallbackRoute
+        && chatLookupKeys.includes(
+          appCardFallbackRoute.predecessorChatLookupKey,
+        )
+      ) {
+        const participantRecovery =
+          await resolveHostedLinqAppCardFallbackParticipantRoute({
+            expectedCurrentChatId: normalizeNullable(input.chatId),
+            expectedCurrentChatLookupKey:
+              appCardFallbackRoute.predecessorChatLookupKey,
+            memberId: input.memberId,
+            prisma: input.prisma,
+            routing,
+          });
+        if (participantRecovery) {
+          return participantRecovery;
+        }
+      } else {
+        const currentChatId = normalizeNullable(input.chatId);
+        if (currentChatId) {
+          return {
+            ...(routing.linqRecipientPhoneLookupKey
+              ? {
+                  linePhoneNumberLookupKey:
+                    routing.linqRecipientPhoneLookupKey,
+                }
+              : {}),
+            targetOverride: {
+              target: currentChatId,
+              targetKind: "thread",
+            },
+            threadIsDirect: true,
+          };
+        }
       }
     }
     return {
@@ -607,41 +675,24 @@ async function assertHostedLinqAppCardFallbackParticipantEgressAuthority(input: 
   prisma: HostedLinqEngagementClient;
   target?: string | null;
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
-  const predecessorIdempotencyKey =
-    parseHostedLinqAppCardFallbackPredecessorIdempotencyKey(
-      input.idempotencyKey,
-    );
-  const predecessorIdempotencyLookupKey =
-    createHostedLinqDeliveryIdempotencyLookupKey(
-      predecessorIdempotencyKey,
-    );
-  if (!predecessorIdempotencyLookupKey) {
-    throwHostedLinqParticipantEgressAuthorityMismatch();
-  }
   const [routing, predecessor] = await Promise.all([
     input.prisma.hostedMemberRouting.findUnique({
       where: { memberId: input.memberId },
       select: HOSTED_LINQ_EGRESS_ROUTING_SELECT,
     }),
-    input.prisma.hostedLinqDelivery.findUnique({
-      where: { idempotencyKey: predecessorIdempotencyLookupKey },
-      select: {
-        linqChatLookupKey: true,
-        source: true,
-        targetKind: true,
-      },
+    readHostedLinqAppCardFallbackRoute({
+      idempotencyKey: input.idempotencyKey,
+      prisma: input.prisma,
     }),
   ]);
   if (
     !routing
-    || !predecessor?.linqChatLookupKey
-    || predecessor.source !== "hosted_runtime_linq_delivery"
-    || predecessor.targetKind !== "thread"
+    || !predecessor
   ) {
     throwHostedLinqParticipantEgressAuthorityMismatch();
   }
   const authority = await resolveHostedLinqAppCardFallbackParticipantRoute({
-    expectedCurrentChatLookupKey: predecessor.linqChatLookupKey,
+    expectedCurrentChatLookupKey: predecessor.predecessorChatLookupKey,
     memberId: input.memberId,
     prisma: input.prisma,
     routing,
@@ -661,6 +712,65 @@ async function assertHostedLinqAppCardFallbackParticipantEgressAuthority(input: 
       : {}),
     targetOverride: null,
     threadIsDirect: true,
+  };
+}
+
+async function readHostedLinqAppCardFallbackRoute(input: {
+  idempotencyKey?: string | null;
+  prisma: HostedLinqEngagementClient;
+}): Promise<{
+  fallbackTargetKind: "participant" | "thread" | null;
+  predecessorChatLookupKey: string;
+} | null> {
+  const predecessorIdempotencyKey =
+    parseHostedLinqAppCardFallbackPredecessorIdempotencyKey(
+      input.idempotencyKey,
+    );
+  const predecessorIdempotencyLookupKey =
+    createHostedLinqDeliveryIdempotencyLookupKey(
+      predecessorIdempotencyKey,
+    );
+  if (!predecessorIdempotencyLookupKey) {
+    return null;
+  }
+  const fallbackIdempotencyLookupKey =
+    createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
+  const [predecessor, fallback] = await Promise.all([
+    input.prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey: predecessorIdempotencyLookupKey },
+      select: {
+        linqChatLookupKey: true,
+        source: true,
+        targetKind: true,
+      },
+    }),
+    fallbackIdempotencyLookupKey
+      ? input.prisma.hostedLinqDelivery.findUnique({
+          where: { idempotencyKey: fallbackIdempotencyLookupKey },
+          select: {
+            source: true,
+            targetKind: true,
+          },
+        })
+      : null,
+  ]);
+  if (!(
+    predecessor?.linqChatLookupKey
+    && predecessor.source === "hosted_runtime_linq_delivery"
+    && predecessor.targetKind === "thread"
+  )) {
+    return null;
+  }
+  return {
+    fallbackTargetKind:
+      fallback?.source === "hosted_runtime_linq_delivery"
+      && (
+        fallback.targetKind === "participant"
+        || fallback.targetKind === "thread"
+      )
+        ? fallback.targetKind
+        : null,
+    predecessorChatLookupKey: predecessor.linqChatLookupKey,
   };
 }
 
