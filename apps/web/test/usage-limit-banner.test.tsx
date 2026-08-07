@@ -39,7 +39,7 @@ test("Family usage exhaustion always links to the existing add-usage flow", asyn
   );
   assert.match(
     markup,
-    /New AI work is paused until more usage is added or your allowance resets\./u,
+    /Murph is paused until more usage is added or your allowance resets\./u,
   );
   assert.doesNotMatch(markup, /Other Family members have separate allowances/u);
 });

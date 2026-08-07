@@ -37,27 +37,27 @@ const usageLimitBannerCopy: Record<
   }
 > = {
   edge_usage_limit_reached: {
-    body: "New replies and other AI work are blocked until your included usage resets.",
+    body: "Murph is paused until your included usage resets.",
     title: "You've used 100% of this month's included Edge usage",
   },
   family_usage_limit_reached: {
-    body: "New AI work is paused until more usage is added or your allowance resets.",
+    body: "Murph is paused until more usage is added or your allowance resets.",
     title: "You've used 100% of your included usage this month",
   },
   group_upgrade_pulse: {
-    body: "New replies and other AI work are blocked until your included usage resets. Your wearable keeps syncing and your group activity stays current.",
+    body: "Murph is paused until your included usage resets.",
     title: "You've used 100% of this month's included Core usage",
   },
   pulse_upgrade_edge: {
-    body: "New replies and other AI work are blocked until your included usage resets.",
+    body: "Murph is paused until your included usage resets.",
     title: "You've used 100% of this month's included Pulse usage",
   },
   trial_conversion_pending: {
-    body: "New replies and other AI work are blocked because your included trial access is no longer active.",
+    body: "Murph is paused because your included trial access is no longer active.",
     title: "Your trial just ended",
   },
   trial_usage_limit_reached: {
-    body: "New replies and other AI work are blocked because your included trial usage is exhausted.",
+    body: "Murph is paused because your included trial usage is exhausted.",
     title: "You've used 100% of your included trial usage",
   },
 };
@@ -78,10 +78,8 @@ export function UsageLimitBanner({
     ?? (noticeCode === "family_usage_limit_reached"
       ? familyUsageRecoveryAction
       : null);
-  const body = action?.kind === "add_usage"
-    ? noticeCode === "family_usage_limit_reached"
-      ? "New AI work is paused until more usage is added or your allowance resets."
-      : "New AI work is paused until you add usage or your allowance resets."
+  const body = action?.kind === "add_usage" && noticeCode !== "family_usage_limit_reached"
+    ? "Murph is paused until you add usage or your allowance resets."
     : copy.body;
   const actionBody = action?.kind === "start_pulse"
     ? " Start Pulse to continue."
