@@ -1803,11 +1803,6 @@ function createLinqRequestError(input: {
   retryable: boolean
 }): VaultCliError {
   const transportErrorDiagnostics = buildLinqTransportErrorDiagnostics(input.error)
-  const providerSkippedProvenance =
-    input.method === 'POST' &&
-    input.details.operation === 'create_attachment_upload'
-      ? readLinqProviderSkippedDeliveryProvenance(input.error)
-      : null
   const attachmentReservationMayHaveSucceeded =
     readRecord(input.error)?.linqAttachmentReservationMayHaveSucceeded === true
   const retryable = attachmentReservationMayHaveSucceeded
@@ -1826,18 +1821,6 @@ function createLinqRequestError(input: {
       failureStage: 'transport',
       method: input.method,
       path: input.path,
-      ...(providerSkippedProvenance?.assistantDeliveryFailureClass
-        ? {
-            assistantDeliveryFailureClass:
-              providerSkippedProvenance.assistantDeliveryFailureClass,
-          }
-        : {}),
-      ...(providerSkippedProvenance?.assistantDeliveryResumeTrigger
-        ? {
-            assistantDeliveryResumeTrigger:
-              providerSkippedProvenance.assistantDeliveryResumeTrigger,
-          }
-        : {}),
       ...(input.requestOrigin ? { requestOrigin: input.requestOrigin } : {}),
       retryable,
       timeoutMs: input.timeoutMs,
@@ -1845,50 +1828,11 @@ function createLinqRequestError(input: {
     },
   )
 
-  const errorWithProviderSkippedProvenance = providerSkippedProvenance
-    ? Object.assign(error, {
-        ...providerSkippedProvenance,
-        deliveryMayHaveSucceeded: false as const,
-      })
-    : error
   return attachmentReservationMayHaveSucceeded
-    ? Object.assign(errorWithProviderSkippedProvenance, {
+    ? Object.assign(error, {
         linqAttachmentReservationMayHaveSucceeded: true as const,
       })
-    : errorWithProviderSkippedProvenance
-}
-
-type LinqProviderSkippedDeliveryProvenance = {
-  assistantDeliveryFailureClass?: 'transient'
-  assistantDeliveryResumeTrigger?: 'fresh_foreground_input'
-  retryable: boolean
-}
-
-function readLinqProviderSkippedDeliveryProvenance(
-  error: unknown,
-): LinqProviderSkippedDeliveryProvenance | null {
-  const errorRecord = readRecord(error)
-  if (errorRecord?.deliveryMayHaveSucceeded !== false) {
-    return null
-  }
-  const context = readRecord(errorRecord.context)
-  const failureClass =
-    errorRecord.assistantDeliveryFailureClass ??
-    context?.assistantDeliveryFailureClass
-  const resumeTrigger =
-    errorRecord.assistantDeliveryResumeTrigger ??
-    context?.assistantDeliveryResumeTrigger
-
-  return {
-    ...(failureClass === 'transient'
-      ? { assistantDeliveryFailureClass: 'transient' as const }
-      : {}),
-    ...(resumeTrigger === 'fresh_foreground_input'
-      ? { assistantDeliveryResumeTrigger: 'fresh_foreground_input' as const }
-      : {}),
-    retryable:
-      errorRecord.retryable === true || context?.retryable === true,
-  }
+    : error
 }
 
 function readPreProviderLinqRequestError(error: unknown): Error | null {
