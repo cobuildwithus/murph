@@ -421,6 +421,13 @@ Last verified: 2026-08-06
   explicit WAF build gate and exact rule ids in server-side deployment config;
   the verifier may inspect only the active project configuration and must not
   log its bearer or provider response body.
+- The public reusable-referral landing is read-only. Its explicit dynamic
+  `POST /r/<token>/claim` mutation must be covered by the production WAF's exact
+  method plus path-prefix/path-suffix rule at 10 requests per minute per IP.
+  The server then takes a non-blocking referral-claim advisory lock before its
+  rolling per-referrer count and touches the shared member row only after that
+  feature-local admission succeeds, so public claim pressure cannot queue
+  billing, activation, settings, or account-deletion work.
 - Hosted browser app sessions require `HOSTED_APP_SESSION_HMAC_KEY` as a dedicated web-only canonical 32-byte base64url key. The strict v2 cookie carries only its session id and random bearer; web must verify the existing row authenticator over domain/version, session id, bearer, member id, Privy identity, and expiry before trusting any row claim or reading member data. Resolution and revocation must use the authenticated id/tag pair, legacy unsigned cookies must fail closed, and the key must never be stored in Postgres, sent to Cloudflare or browsers, logged, or reused for contact privacy, mailbox fingerprints, provider credentials, or encryption. Before the strict-v2 production hard cut, the Vercel project must use Standard or All Deployment Protection so historical generated production URLs cannot expose a legacy app build; the authenticated project-setting verifier is a mandatory cutover gate.
 - Privy completion with an ambient Murph app session is same-member reauthentication, not account switching. The fresh Privy user id and resolved member id must both match that app session before web issues a replacement session; a member who intends to switch accounts must end the current app session first.
 - Every interactive authentication completion that may mutate Privy-derived identity, sender, routing, or messaging state must perform a bounded live-provider read for the exact principal, including new-member creation, changed-principal recovery, exact-principal consent retry, and lost-response retry. A changed principal may replace an existing member binding only when that live principal still owns a verified email resolving uniquely to the same member's durable verified-email authorization. The same live identity snapshot must supply every later identity, verified-email, sender-authority, routing, and messaging-state mutation in that completion; a bearer-token snapshot is candidate-lookup input, not replacement or downstream write authority. Every non-best-effort live binding, including secondary Telegram ownership, must be checked and written in the same transaction as the principal replacement so a split credential rolls the entire completion back. An exact already-bound principal remains the member candidate during an interactive retry; a different bearer or live phone cannot redirect or reject that retry. Interactive completion preserves a non-null stored phone whenever the live phone differs, and only the settings phone-link/transfer owner may replace it. Same-phone verification may refresh, and an absent phone may be filled only when the verified bearer and live projection agree and no other member owns that phone; optional enrichment never vetoes an exact-principal retry. Missing, stale, or mismatched provider state, phone-only changed-principal matches, credentials split across members on unbound or changed-principal attempts, and non-interactive callers such as App Review operations must continue to fail closed.
@@ -855,3 +862,30 @@ Last verified: 2026-08-06
 - `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. Web derives the target runtime, exact membership generation, origin, expiry, and private return route from the signed caller; the model cannot supply them. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Leaving, rejoining, expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.
 - Except for that explicitly confined Assistant Ask child, Codex running inside the local Murph runtime or hosted execution container is assumed to have full access to that local/container filesystem. Passing repo-relative, vault-relative, or container-local paths to Codex so it can inspect or modify files is not a privacy leak by itself. Those paths still must not escape into user-facing messaging copy, public API responses, persisted logs/diagnostics, fixtures, generated docs, screenshots, provider requests, external review bundles, or other third-party outputs unless the surface has an explicit safe path policy.
 - Assistant turns may execute the same canonical local assistant/vault tool catalog shape through the active vault's per-turn Murph runtime context. Message-triggered assistant auto-reply now has the same full Murph autonomy as other assistant turns, including assistant runtime control plus canonical `memory` / `automation` and canonical vault write surfaces, so any accepted inbound channel message is effectively an operator-authorized action for that bound user and vault. The hard-cut assistant command surface is Codex App Server only: it may run with normal local CLI/filesystem/env authority through Codex-specific launch/config options, while legacy OpenAI-compatible endpoint flags are not part of the command surface. That privileged Codex App Server posture still does not grant hosted-control-plane authority outside the local runtime boundary.
+
+## Scheduled assistant action authority
+
+A scheduled tool action is authorized only by the trusted runtime's exact
+`automationId + occurrenceAt` pair when the turn trigger is `automation-cron` and
+the occurrence equals `scheduledOccurrenceAt`. Assistant Engine derives the opaque
+typed occurrence scope itself; it never creates an `ain_` identifier. Model
+arguments cannot choose, replay, or transform that scope. It does not grant
+accepted-message targeting, participant identity, physical-mail continuation, support
+escalation, subscription changes, or any other fresh-human-input capability.
+
+Personalization transports either the existing accepted `assistantInputId` or the
+additive exact scheduled pair. Web verifies the signed, member-bound runtime
+callback and active hosted access in both cases; accepted-input writes retain their
+mailbox and current-route causal checks, while scheduled writes never fabricate a
+conversation message or participant. Scheduled authority does not bypass existing
+channel or audience eligibility. An optional exact provider tool-call id is retry and
+command identity only: it cannot supply, replace, or widen accepted-input or scheduled
+authority. Clinical Records links remain private and use an operation-scoped retry
+key. Only the exact authenticated launcher may resume through sign-in. Its one-time
+claim is staged in browser history state and removed from any legacy visible fragment
+without erasing unrelated state or URL context. Automatic Web-control replay is
+restricted to the deterministic, non-mutating scheduled request-key branch; current
+message-authorized claim creation remains single-attempt at the transport boundary.
+Ordinary feedback and verified-private
+support escalation both require accepted-message authority; scheduled turns receive
+neither capability.

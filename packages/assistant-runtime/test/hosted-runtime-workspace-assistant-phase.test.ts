@@ -17,23 +17,11 @@ import {
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
-import type {
-  AssistantOutboxIntent,
-} from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import {
-  buildOnboardingFirstPersonalReadAutomationSaveRequest,
-  buildGroupNewsletterAutomationSaveRequest,
-  completeAssistantOnboarding,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
-  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
-  type AssistantAutomationOperationScope,
-} from "@murphai/assistant-engine";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -230,14 +218,22 @@ import {
   upsertAutomation,
 } from "@murphai/core";
 import {
+  buildGroupNewsletterAutomationSaveRequest,
+  buildOnboardingFirstPersonalReadAutomationSaveRequest,
+  completeAssistantOnboarding,
+  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
   markAssistantContextSnapshotDirty,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   readAssistantContextSnapshotState,
   saveAssistantAutomationState,
   saveAssistantSession,
   upsertAssistantInputEvent,
+  type AssistantAutomationOperationScope,
 } from "@murphai/assistant-engine";
 import {
   parseAssistantSessionRecord,
+  type AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   runHostedWorkspaceAssistantPhase,
@@ -8468,6 +8464,51 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       recorded: true,
     });
     await postCheckpointPromise;
+  });
+
+  it("does not record queued product feedback when the current delivery fails", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const feedback = {
+      idempotencyKey: "feedback-after-failed-delivery",
+      kind: "feature_request" as const,
+      relatedChangelogItemIds: [],
+      summary: "Speculative: support the missing Murph path.",
+    };
+    const recordProductFeedback = vi.fn();
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(feedback);
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [
+            deliveryEffect.effectId,
+          ],
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "SYNTHETIC_DELIVERY_FAILURE",
+        effectId: deliveryEffect.effectId,
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeProductFeedbackPort: { recordProductFeedback },
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(recordProductFeedback).not.toHaveBeenCalled();
   });
 
   it("records support escalations through the port inside the turn instead of the post-delivery flush", async () => {

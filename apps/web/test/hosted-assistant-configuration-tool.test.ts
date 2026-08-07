@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   readPreference: vi.fn(),
-  readPreferenceCausalSeq: vi.fn(),
+  readConversationInputAuthority: vi.fn(),
   transaction: vi.fn(),
   updateConfiguration: vi.fn(),
 }));
@@ -20,8 +20,8 @@ vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx:
-    mocks.readPreferenceCausalSeq,
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx:
+    mocks.readConversationInputAuthority,
 }));
 
 import {
@@ -41,7 +41,10 @@ describe("hosted runtime assistant configuration tool", () => {
       $transaction: mocks.transaction,
     });
     mocks.readPreference.mockResolvedValue(buildSnapshot());
-    mocks.readPreferenceCausalSeq.mockResolvedValue("42");
+    mocks.readConversationInputAuthority.mockResolvedValue({
+      causalSeq: "42",
+      occurredAt: "2026-08-06T14:30:00.000Z",
+    });
     mocks.updateConfiguration.mockResolvedValue({
       ...buildSnapshot({
         model: "gpt-5.6-luna",
@@ -90,7 +93,7 @@ describe("hosted runtime assistant configuration tool", () => {
         status: "updated",
       },
     });
-    expect(mocks.readPreferenceCausalSeq).toHaveBeenCalledWith({
+    expect(mocks.readConversationInputAuthority).toHaveBeenCalledWith({
       assistantInputId: request.assistantInputId,
       memberId: "member_123",
       prisma: { label: "tx" },
@@ -101,13 +104,13 @@ describe("hosted runtime assistant configuration tool", () => {
       prisma: { label: "tx" },
       reasoningEffort: "high",
     });
-    expect(mocks.readPreferenceCausalSeq.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mocks.readConversationInputAuthority.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.updateConfiguration.mock.invocationCallOrder[0]!,
     );
   });
 
   it("rejects direct updates without live conversation input authority", async () => {
-    mocks.readPreferenceCausalSeq.mockResolvedValue(null);
+    mocks.readConversationInputAuthority.mockResolvedValue(null);
 
     await expect(handleHostedRuntimeAssistantConfigurationTool({
       memberId: "member_123",

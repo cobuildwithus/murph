@@ -359,6 +359,9 @@ describe("hosted retention cleanup", () => {
     expect(sql).toContain('"payload_inline_ciphertext" = NULL');
     expect(sql).toContain('"payload_ref" = NULL');
     expect(sql).toContain('"consumed_at" = CASE');
+    expect(sql).toContain('FROM "hosted_member" AS member');
+    expect(sql).toContain('member."assistant_tone_causal_seq"');
+    expect(sql).toContain('member."assistant_unhinged_causal_seq"');
   });
 
   it("bounds mailbox retirement and structural pruning to the per-run ceiling", async () => {
