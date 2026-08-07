@@ -66,11 +66,20 @@ Updated: 2026-08-07
 
 ## Verification
 
-- Passing local proof: 81 focused operator-config tests, eight hosted provider
+- Passing local proof: 83 focused operator-config tests, eight hosted provider
   egress tests, operator-config and Cloudflare typechecks, docs drift, and
-  diff/privacy inspection.
+  diff/privacy inspection. Exact V1/V2 TypeScript fixtures also pass 31 focused
+  shipping Swift decoder tests in the companion repository.
 - Hosted-local journey gap: runner preparation timed out while generating the
   unrelated Assistant CLI surface manifest, before the scenario started. The
   exact-head CI run remains the broad journey owner.
 - Remaining proof: exact-head CI, both required ReviewGPT stages, and physical
   Messages sends showing the real custom transcript cards.
+
+## Review disposition
+
+- Both ReviewGPT stages accepted the already-declared physical-device rollout
+  gate; no compensating text path or additional delivery machinery is valid.
+- The specialist coverage finding was accepted and resolved with matching exact
+  TypeScript fixtures plus shipping Swift V1/V2 decoder assertions in companion
+  PR #56. No runtime iOS change was required.
