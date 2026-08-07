@@ -48,20 +48,35 @@ Updated: 2026-08-07
 ## Tasks
 
 1. [x] Establish the installed-byte and deferred runtime-import evidence.
-2. [ ] Land the local completion predicate and staged-runtime guard on the
+2. [x] Land the local completion predicate and staged-runtime guard on the
    current runner assembly implementation.
-3. [ ] Run focused tests, typecheck, exact production assembly, and Docker
+3. [x] Run focused tests, typecheck, exact production assembly, and Docker
    deferred-import/device-sync proof.
 4. [ ] Commit, push, open a PR, complete exact-head CI/reviews, and close the
    plan with `scripts/finish-task`.
 
 ## Verification
 
-- Device-sync typecheck, build, and the 215-test Junction provider suite pass
+- Device-sync typecheck, build, and the 216-test Junction provider suite pass
   after removing the SDK runtime import; emitted device-sync JavaScript has no
   SDK specifier.
+- Cloudflare typecheck and 60 focused runtime-shape, entrypoint-bundle, and
+  container-contract tests pass. Workspace-boundary and package-cycle checks
+  pass on the combined Zod/Junction shaper.
 - The local ISO-8601 predicate matches the pinned SDK serializer across date,
   datetime, week-date, ordinal-date, invalid-string, empty, and wrong-type
   representative cases.
-- Exact current-base assembly and Docker measurements remain pending after the
-  Zod runtime-shaping change lands.
+- Exact production assembly leaves entry and static startup bytes unchanged at
+  1,641,254 and 7,885,509 while reducing total JavaScript from 9,902,746 to
+  9,851,385 (-51,361).
+- The artifact falls from 87,533,395 to 82,109,152 logical bytes (-5,424,243),
+  from 111,788 to 92,268 allocated KiB (-19,520), and from 8,655 to 4,316 files
+  (-4,339).
+- The paired amd64 Docker image falls from 486,043,010 to 485,172,198 bytes
+  (-870,812). In a network-isolated, read-only container, uid 1001 imports the
+  deferred device-sync, importer, clinical-record, Zod root, and Zod v4 paths;
+  the SDK is absent, `/app` is immutable, and CLI help, LLM metadata, and schema
+  commands all exit successfully.
+- A ten-pair alternating local Docker health benchmark is noise-neutral, as
+  expected for a lazy-path/image-shape change: baseline p50 1,308 ms, candidate
+  p50 1,311 ms, and paired median -28 ms.
