@@ -123,8 +123,25 @@ Updated: 2026-08-07
 - Final ReviewGPT round 1 accepted one affected-surface finding: the shared
   patch changes the next runner artifact even though it does not change the
   hosted boot graph. The two stale contract assertions were already corrected
-  on the test-only follow-up head; runner assembly and disclosure proof remain
-  before remediation review.
+  on the test-only follow-up head. The PR/plan disclosure is corrected and the
+  real runner-bundle proof below resolves the remaining request; remediation
+  review is pending.
+- Full Cloudflare node verification passed: 136 files and 2,273 tests.
+- Real runner assembly applied the shared patch and materialized a final bundle
+  whose installed `ink/build/ink.js` imports only
+  `es-toolkit/compat/throttle`; the broad barrel import is absent. The
+  entrypoint metafile's existing `/ink/` forbidden-input guard passed, as did
+  all six bundled-versus-unbundled vault-cli parity probes.
+- The patched candidate and a no-Ink-patch control on identical current main
+  produced the same 8,878,190-byte vault-cli bundle and the same 9,896,614-byte
+  runner entrypoint output, proving zero package-size or boot-graph delta from
+  this patch. The entry chunk (1,650,524 bytes) and static closure (7,927,658
+  bytes) remain within their existing caps.
+- The real assembly stops at current main's 9,884,153-byte total-output ratchet;
+  the no-patch control fails identically at 9,896,614 bytes. A temporary local
+  probe budget allowed final artifact inspection, then was restored without a
+  commit. This pre-existing 12,461-byte current-main overage is unrelated and
+  is not folded into this dependency patch.
 - In 41 alternating fresh-process samples, the compatibility barrel measured
   90.585 ms p50 versus 6.661 ms for the throttle subpath. Full Ink import
   measured 222.809 ms p50 unpatched versus 143.184 ms patched: -79.625 ms and
