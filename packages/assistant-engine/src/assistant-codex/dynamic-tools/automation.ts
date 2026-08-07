@@ -61,17 +61,6 @@ const automationTagsSchema = z
     }
   })
 
-function deriveAutomationSlugFromTitle(title: string): string {
-  // Mirrors the canonical automation title fallback without importing the
-  // filesystem-heavy core package into deferred tool schema assembly.
-  const normalized = title
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-  return normalized || 'item'
-}
-
 const saveAutomationArgumentsSchema = z.object({
   action: z.literal('save'),
   activeUntil: automationActiveUntilSchema.nullable().optional(),
@@ -87,22 +76,7 @@ const saveAutomationArgumentsSchema = z.object({
   supportSeriesId: automationSupportSeriesIdSchema.optional(),
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema,
-}).strict().superRefine((value, context) => {
-  const requestedSlug =
-    value.slug ?? deriveAutomationSlugFromTitle(value.title)
-  if (
-    value.automationId ===
-      MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
-    || requestedSlug === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG
-  ) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message:
-        'The onboarding first personal read must use its fixed structured action.',
-      path: ['action'],
-    })
-  }
-})
+}).strict()
 
 const saveOnboardingFirstPersonalReadArgumentsSchema = z.object({
   action: z.literal(MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION),

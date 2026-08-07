@@ -30,6 +30,7 @@ import {
   buildGroupNewsletterAutomationSaveRequest,
   completeAssistantOnboarding,
   GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   type AssistantAutomationOperationScope,
 } from "@murphai/assistant-engine";
@@ -5446,6 +5447,98 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         buildOnboardingFirstPersonalReadAutomationSaveRequest({
           now: new Date("2026-08-06T21:00:00.000Z"),
         });
+      const genericFixedTargetRequests = [
+        {
+          action: "save" as const,
+          automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          instructions: "Replace the fixed first-read policy.",
+          schedule: {
+            at: "2026-08-06T21:02:00.000Z",
+            kind: "at" as const,
+          },
+          title: "Replacement by identifier",
+        },
+        {
+          action: "save" as const,
+          instructions: "Replace the fixed first-read policy.",
+          schedule: {
+            at: "2026-08-06T21:02:00.000Z",
+            kind: "at" as const,
+          },
+          slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+          title: "Replacement by slug",
+        },
+        {
+          action: "save" as const,
+          instructions: "Replace the fixed first-read policy.",
+          schedule: {
+            at: "2026-08-06T21:02:00.000Z",
+            kind: "at" as const,
+          },
+          title: "Onboarding___first / personal read",
+        },
+      ];
+      for (const request of genericFixedTargetRequests) {
+        await expect(operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [inputId],
+          operation: async (executionContext) => {
+            const automationTool = executionContext.hosted?.automationTool;
+            if (!automationTool) {
+              throw new Error("Expected scoped hosted automation tool.");
+            }
+            return await automationTool.request(request);
+          },
+          turnEnvironment: null,
+        })).rejects.toThrow(
+          "only once during its answered-completion transition",
+        );
+      }
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(genericFixedTargetRequests[0], {
+            onboardingFirstReadCompletionTransition: true,
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "only once during its answered-completion transition",
+      );
+      await expect(showAutomation({
+        slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        vaultRoot,
+      })).resolves.toBeNull();
+
+      const unrelated = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "save",
+            instructions: "Send the unrelated reminder.",
+            schedule: {
+              at: "2026-08-07T13:00:00.000Z",
+              kind: "at",
+            },
+            title: "Unrelated reminder",
+          });
+        },
+        turnEnvironment: null,
+      });
+      expect(unrelated).toEqual(expect.objectContaining({
+        action: "save",
+        created: true,
+      }));
       await expect(operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
         inputIds: [inputId],

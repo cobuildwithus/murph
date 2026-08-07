@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { resolveAutomationUpsertSlug } from '@murphai/core'
 import {
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
@@ -247,16 +246,6 @@ describe('onboarding first personal read', () => {
   it('protects the fixed definition while allowing explicit cancellation', () => {
     const invalidRequests = [
       {
-        action: 'save',
-        instructions: 'Replace the fixed policy.',
-        schedule: {
-          kind: 'at',
-          at: '2026-08-06T21:02:00.000Z',
-        },
-        slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
-        title: 'Replacement',
-      },
-      {
         action: 'patch',
         instructions: 'Replace the fixed policy.',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
@@ -272,29 +261,6 @@ describe('onboarding first personal read', () => {
       expect(
         readAutomationDynamicToolRequest({
           arguments: request,
-          tool: 'automation',
-        })?.kind,
-      ).toBe('invalid-automation-arguments')
-    }
-
-    for (const title of [
-      'Onboarding first personal read',
-      'Onboarding___first / personal read',
-    ]) {
-      expect(resolveAutomationUpsertSlug({ title })).toBe(
-        MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
-      )
-      expect(
-        readAutomationDynamicToolRequest({
-          arguments: {
-            action: 'save',
-            instructions: 'Replace the fixed policy through a derived slug.',
-            schedule: {
-              kind: 'at',
-              at: '2026-08-06T21:02:00.000Z',
-            },
-            title,
-          },
           tool: 'automation',
         })?.kind,
       ).toBe('invalid-automation-arguments')
