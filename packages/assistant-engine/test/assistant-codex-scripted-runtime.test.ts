@@ -57,6 +57,10 @@ import {
 import {
   buildAssistantResearchScoutCapabilityText,
 } from '../src/assistant/model-behavior.ts'
+import {
+  MURPH_MANAGED_AUTOMATIONS,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+} from '../src/assistant/managed-automations.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
 // matching CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
@@ -549,7 +553,7 @@ text(result.output);
       scenario.turnInput.workingDirectory,
       'vault-cli',
     )
-    const sourcedResponse = JSON.stringify({
+    const sourcedResponsePayload = {
       ok: true,
       privacy: {
         persistedByTool: false,
@@ -584,7 +588,8 @@ text(result.output);
           url: 'https://example.test/research/creatine-cognition-review',
         }],
       },
-    })
+    }
+    const sourcedResponse = JSON.stringify(sourcedResponsePayload)
     const emptyResponse = JSON.stringify({
       ok: true,
       privacy: {
@@ -603,13 +608,32 @@ text(result.output);
         results: [],
       },
     })
+    const batchResponse = JSON.stringify({
+      ok: true,
+      privacy: {
+        ...sourcedResponsePayload.privacy,
+        sentProfileKind: 'tag_profile',
+      },
+      provider: sourcedResponsePayload.provider,
+      lanes: [{
+        label: 'creatine and cognition',
+        response: sourcedResponsePayload.response,
+      }],
+    })
     await writeFile(fakeVaultCli, `#!/bin/sh
 if [ "$*" = "research payload-schema --format json" ]; then
   printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"properties":{"topics":{"items":{"description":"Allowed provider values: cognition."}},"supplements":{"items":{"description":"Allowed provider values: creatine."}},"conditionsOrConcerns":{"items":{"description":"Allowed provider values: adults, healthy adults."}},"goals":{"items":{"description":"Allowed provider values: cognitive performance."}}}}}'
   exit 0
 fi
+if [ "$*" = "research scout-batch-payload-schema --format json" ]; then
+  printf '%s\\n' '{"command":"research scout-batch-payload-schema","schemaVersion":"murph.payload-schema.v1","schema":{"properties":{"lanes":{"items":{"properties":{"profile":{"properties":{"topics":{"items":{"description":"Allowed provider values: cognition."}},"supplements":{"items":{"description":"Allowed provider values: creatine."}},"conditionsOrConcerns":{"items":{"description":"Allowed provider values: healthy adults."}},"goals":{"items":{"description":"Allowed provider values: cognitive performance."}}}}}}}}}}'
+  exit 0
+fi
 request="$(cat)"
 printf '%s\\n' "$request" >> "research-request.log"
+case "$*" in
+  *"research scout-batch"*) printf '%s\\n' '${batchResponse}'; exit 0 ;;
+esac
 case "$request" in
   *creatine*) printf '%s\\n' '${sourcedResponse}' ;;
   *) printf '%s\\n' '${emptyResponse}' ;;
@@ -732,6 +756,113 @@ text(result.output);
     )
     expect(progressUpdates).toHaveLength(1)
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(2)
+
+    const managedResearchScout = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) =>
+        seed.automationId ===
+          MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+    )
+    expect(managedResearchScout).toBeDefined()
+
+    scenario.stub.markRequestBaseline()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli research scout-batch-payload-schema --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const input = JSON.stringify({lanes: [{label: "creatine and cognition", profile: {topics: ["cognition"], supplements: ["creatine"], conditionsOrConcerns: ["healthy adults"], goals: ["cognitive performance"]}}]});
+const result = await tools.exec_command({
+  cmd: "printf '%s' '" + input + "' | ./vault-cli research scout-batch --input - --since 2024-08-07 --until 2026-08-07 --maxCandidatesPerLane 8",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'A current review suggests creatine may have a small memory benefit, although the trials were small and heterogeneous.',
+      },
+    )
+
+    const scheduled = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      allowFinishWithoutReply: true,
+      baseInstructions: managedResearchScout!.instructions,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      prompt: 'Scheduled occurrence context: the current vault context contains an active creatine experiment and a current cognition question.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(scheduled.finalMessage).toContain('small memory benefit')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    const scheduledToolOutputs =
+      scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.customToolCallOutputs ?? [])
+        .join('\n')
+    expect(scheduledToolOutputs).toContain(
+      'research scout-batch-payload-schema',
+    )
+    expect(scheduledToolOutputs).toContain(
+      'https://example.test/research/creatine-cognition-review',
+    )
+    const scheduledRequests = (await readFile(requestLog, 'utf8'))
+      .trim()
+      .split('\n')
+    expect(scheduledRequests).toHaveLength(3)
+    expect(scheduledRequests[2]).toContain('"topics":["cognition"]')
+    expect(scheduledRequests[2]).toContain('"supplements":["creatine"]')
+    expect(scheduledRequests[2]).not.toContain('mode')
+
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli research scout-batch-payload-schema --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {},
+          name: 'finish_without_reply',
+          namespace: 'murph',
+        },
+      },
+      { text: '' },
+    )
+
+    const suppressed = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      allowFinishWithoutReply: true,
+      baseInstructions: managedResearchScout!.instructions,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      prompt: 'Scheduled occurrence context: a current private context exists, but none of it maps exactly to an allowed provider concept.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(suppressed.finalAction).toEqual({ kind: 'none' })
+    expect(suppressed.finalMessage).toBe('')
+    expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
   it.each(['direct', 'group'] as const)(

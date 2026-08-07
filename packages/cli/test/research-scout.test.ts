@@ -474,6 +474,45 @@ describe('research scout', () => {
     ])
   })
 
+  it('runs one schema-valid managed batch lane through the CLI parser and client', async () => {
+    const payload = parseResearchScoutBatchCliPayloadInput({
+      lanes: [{
+        label: 'creatine and cognition',
+        profile: {
+          topics: ['cognition'],
+          supplements: ['creatine'],
+          conditionsOrConcerns: ['healthy adults'],
+          goals: ['cognitive performance'],
+        },
+      }],
+    })
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({
+      output: { content: { candidates: [] } },
+      results: [],
+    }))
+
+    await fetchExaResearchScoutBatchCandidates({
+      ...payload,
+      since: '2024-08-07T00:00:00.000Z',
+      until: '2026-08-07T00:00:00.000Z',
+      maxCandidatesPerLane: 8,
+    }, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl,
+    })
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const request = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as {
+      query?: unknown
+      systemPrompt?: unknown
+    }
+    expect(request.query).toEqual(expect.stringContaining('Topics: cognition'))
+    expect(request.query).toEqual(expect.stringContaining('Supplements: creatine'))
+    expect(request.systemPrompt).toEqual(
+      expect.stringContaining('practical interpretive value'),
+    )
+  })
+
   it('rejects unsupported batch lane concepts before Exa fetches', async () => {
     const fetchImpl = vi.fn<typeof fetch>()
 
