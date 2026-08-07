@@ -207,10 +207,13 @@ normalized entity title or authored alias. An exact title wins over an alias.
 Two equally ranked owners or an unknown topic return no packet. Optional
 question terms then filter and rank evidence only within that resolved owner
 set. A protocol with the same title as its direct family shares the family
-owner; unrelated equal aliases still fail closed. Source findings use their
-authored `related_protocol` target, or `parent_family` only when no protocol is
-assigned. Untargeted source findings stay out of the projection. The default
-packet contains three distinct sourced evidence items,
+owner; unrelated equal aliases still fail closed. Source findings use one
+unambiguous authored target: `related_protocol`, then `parent_family`, then
+`measures`. Multi-target and untargeted findings stay out of the projection
+until their ownership is authored more precisely. Safety comes only from a
+directly sourced safety claim, appraisal, or typed source finding. Page-wide
+`safety` arrays do not enter the source-backed projection. The default packet
+contains three distinct sourced evidence items,
 up to one safety item that matches the question terms, and at most four source
 locators per item. Multi-term question terms require every term and use
 stemming. Unsourced overview text is not part of the assistant projection. One
