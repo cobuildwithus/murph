@@ -2,6 +2,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
+  type HostedRuntimeAssistantPersonalizationToolAuthority,
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
@@ -105,8 +106,10 @@ import {
 } from '../assistant/group-shared-read-limits.js'
 import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
-import type {
-  AssistantHostedToolContext,
+import {
+  createAssistantHostedScheduledRequestKey,
+  type AssistantHostedInvocationScope,
+  type AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
 import type {
   AssistantProviderUsageDraft,
@@ -1128,6 +1131,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'personalization'
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
+      toolCallId?: string
     }
   | {
       kind: 'plan-usage'
@@ -1250,6 +1254,7 @@ export function readMurphDynamicToolRequest(
   const assistantStyleRequest = readAssistantStyleDynamicToolRequest({
     arguments: request.arguments,
     tool: request.tool,
+    toolCallId: request.toolCallId,
   })
   if (assistantStyleRequest) {
     return assistantStyleRequest
@@ -1470,6 +1475,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'personalization',
         request: parsed.request,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
@@ -1931,8 +1937,9 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'assistant-style': {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
-        assistantInputId:
-          hostedToolContext?.currentAssistantInputId?.() ?? null,
+        authority: resolveHostedAssistantPersonalizationToolAuthority(
+          hostedToolContext,
+        ),
         available: input.assistantStyleSettingsAvailable === true,
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
@@ -2368,20 +2375,32 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
 
+      const invocationScope = hostedToolContext.currentInvocationScope?.() ?? null
       const userActionScope = hostedToolContext.currentUserActionScope?.() ?? null
-      if (
-        !userActionScope
-        || userActionScope.conversationScope !== 'direct'
-        || userActionScope.acceptedInputIds.length === 0
-      ) {
+      const conversationScope =
+        invocationScope?.conversationScope ??
+        userActionScope?.conversationScope ??
+        null
+      const hasAuthority =
+        invocationScope !== null ||
+        (userActionScope?.acceptedInputIds.length ?? 0) > 0
+      if (conversationScope !== 'direct' || !hasAuthority) {
         return toolTextResult(
           false,
-          'Clinical Records connection links require current user input in a private conversation',
+          'Clinical Records connection links require current user input in a private conversation or exact private scheduled automation authority',
         )
       }
 
       try {
         const result = await connectLinkTool.createConnectLink({
+          ...(invocationScope?.origin.kind === 'automation_occurrence'
+            ? {
+                requestKey: createAssistantHostedScheduledRequestKey({
+                  operation: 'clinical-records-connect-link',
+                  origin: invocationScope.origin,
+                }),
+              }
+            : {}),
           signal: input.abortSignal ?? null,
         })
         return toolTextResult(true, safeToolPayloadText({
@@ -2421,6 +2440,7 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executePersonalizationTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
+        toolCallId: input.request.toolCallId ?? null,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
@@ -2509,6 +2529,8 @@ export async function executeMurphDynamicToolRequest(input: {
         input.hostedToolContext?.imageGenerationLauncher ?? null
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
+      const invocationScope =
+        input.hostedToolContext?.currentInvocationScope?.() ?? null
       const explicitOriginAssistantInputId = input.request.messageRef
         && userActionScope?.acceptedInputIds.includes(input.request.messageRef)
         ? await authorizeDynamicToolEffectOrigin({
@@ -2525,10 +2547,21 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       const originAssistantInputId = explicitOriginAssistantInputId
-        ?? input.hostedToolContext?.currentAssistantInputId?.()
+        ?? (invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.origin.assistantInputId
+          : invocationScope === null
+            ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
+            : null)
         ?? null
       const originAssistantInputIdExact = explicitOriginAssistantInputId !== null
-      const imageGenerationScopeId = userActionScope?.originSessionId ?? null
+      const acceptedInvocationSessionId =
+        invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.originSessionId ?? null
+          : null
+      const imageGenerationScopeId =
+        acceptedInvocationSessionId ??
+        userActionScope?.originSessionId ??
+        null
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
@@ -3045,26 +3078,52 @@ function isHostedBillingPlanQuoteStaleError(error: unknown): boolean {
     && Reflect.get(error, 'code') === 'HOSTED_BILLING_PLAN_QUOTE_STALE'
 }
 
+function resolveHostedAssistantPersonalizationToolAuthority(
+  hostedToolContext: AssistantHostedToolContext | null,
+): HostedRuntimeAssistantPersonalizationToolAuthority | null {
+  const invocationScope: AssistantHostedInvocationScope | null =
+    hostedToolContext?.currentInvocationScope?.() ?? null
+  if (invocationScope?.origin.kind === 'accepted_input') {
+    return { assistantInputId: invocationScope.origin.assistantInputId }
+  }
+  if (invocationScope?.origin.kind === 'automation_occurrence') {
+    return {
+      automationId: invocationScope.origin.automationId,
+      occurrenceAt: invocationScope.origin.occurrenceAt,
+    }
+  }
+  const assistantInputId =
+    hostedToolContext?.currentAssistantInputId?.() ?? null
+  return assistantInputId ? { assistantInputId } : null
+}
+
 async function executePersonalizationTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeAssistantPersonalizationModelToolRequest
+  toolCallId: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const personalizationTool = input.hostedToolContext?.personalizationTool ?? null
   if (!personalizationTool) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
-  const assistantInputId = input.request.action === 'update'
-    ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
+  const authority = input.request.action === 'update'
+    ? resolveHostedAssistantPersonalizationToolAuthority(
+        input.hostedToolContext,
+      )
     : null
-  if (input.request.action === 'update' && assistantInputId === null) {
+  if (input.request.action === 'update' && authority === null) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
   try {
     const result = await personalizationTool.request(
       input.request,
-      assistantInputId === null ? undefined : { assistantInputId },
+      authority === null
+        ? undefined
+        : input.toolCallId
+          ? { ...authority, toolCallId: input.toolCallId }
+          : authority,
     )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {

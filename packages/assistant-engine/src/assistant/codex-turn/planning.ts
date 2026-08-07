@@ -79,6 +79,7 @@ import {
   type AssistantProgressDelivery,
 } from '../turn-progress.js'
 import {
+  resolveAssistantHostedScheduledInvocationScope,
   resolveAssistantHostedScheduledPhoneCallScope,
   type AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
@@ -99,6 +100,7 @@ import type {
   AssistantProviderConversationMessage,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
 } from '../providers/types.js'
+import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {
   assistantConversationHistoryUtf8Bytes,
   limitAssistantConversationHistoryTextBytes,
@@ -459,6 +461,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   }
   const privateInteractiveAudience = conversationScope === 'direct'
+  const scheduledInvocationScope =
+    resolveAssistantHostedScheduledInvocationScope({
+      conversationScope,
+      messageInput: input.input,
+      originSessionId: input.session.sessionId,
+    })
   const scheduledPhoneCallScope =
     resolveAssistantHostedScheduledPhoneCallScope({
       channel: input.input.channel,
@@ -506,8 +514,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   const responseCardsAvailable =
     privateInteractiveProviderTurn &&
-    ((ordinaryInboundTurn &&
-      input.input.scheduledInvocationAuthority == null) ||
+    (scheduledInvocationScope !== null ||
+      (ordinaryInboundTurn &&
+        input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
   const shouldUseCommittedTranscriptHistory =
@@ -815,6 +824,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       session: input.session,
       sharedPlan: input.sharedPlan,
     })
+  const imageGenerationAvailable =
+    scheduledInvocationScope === null ||
+    getAssistantChannelAdapter(
+      currentAudienceDeliveryFields.channel,
+    )?.supportedResponseMediaKinds.includes('vault_image') === true
   const messageTargetingAvailable =
     input.messageTargetAuthorizerAvailable === true &&
     supportsAssistantAcceptedMessageTargetingRoute({
@@ -823,8 +837,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
       threadId: currentAudienceDeliveryFields.threadId,
       threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
     })
-  const productFeedbackAcceptedInputIds =
-    resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
+  const productFeedbackAuthorized =
+    resolveAssistantProductFeedbackAcceptedInputIds(
+      input.acceptedInputItems ?? [],
+    ).length > 0
   const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
@@ -844,6 +860,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
+        imageGenerationAvailable,
         messageTargetingAvailable,
         assistantConfigurationAvailable:
           privateInteractiveAudience &&
@@ -866,7 +883,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.deviceTool != null,
         clinicalRecordsConnectLinkAvailable:
           privateInteractiveAudience &&
-          userActionAcceptedInputIds.length > 0 &&
+          (userActionAcceptedInputIds.length > 0 ||
+            scheduledInvocationScope !== null) &&
           input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
         familyPlanAvailable:
           privateInteractiveAudience &&
@@ -902,7 +920,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           assistantStyleSettingsAvailable &&
           input.hostedToolContext?.personalizationTool != null,
         productFeedbackAvailable:
-          productFeedbackAcceptedInputIds.length > 0 &&
+          productFeedbackAuthorized &&
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,

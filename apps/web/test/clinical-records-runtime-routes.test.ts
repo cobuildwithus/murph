@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   fetchClinicalRetrievalPage: vi.fn(),
   readClinicalRetrievalRun: vi.fn(),
   recordClinicalRetrievalOutcome: vi.fn(),
+  resolveHostedPublicBaseUrl: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   requireHostedRuntimeActiveAccess: vi.fn(),
 }));
@@ -27,6 +28,10 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   requireHostedRuntimeActiveAccess: mocks.requireHostedRuntimeActiveAccess,
+}));
+
+vi.mock("@/src/lib/hosted-web/public-url", () => ({
+  resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
 }));
 
 type ReadRunRoute = typeof import("../app/api/internal/clinical-records/runtime/read-run/route");
@@ -54,6 +59,7 @@ describe("Clinical Records internal runtime routes", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_clinical_1");
     mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.createClinicalRecordConnectIntent.mockResolvedValue({
       claim: `cr_${"a".repeat(32)}`,
       connectUrl:
@@ -114,9 +120,10 @@ describe("Clinical Records internal runtime routes", () => {
 
   it("accepts canonical forwarded fences and preserves strict runtime response shapes", async () => {
     const headers = runtimeWriteFenceHeaders();
+    const requestKey = `scheduled_${"a".repeat(64)}`;
     const connectResponse = await connectLinkRoute.POST(jsonRequest(
       "/api/internal/clinical-records/connect-link",
-      {},
+      { requestKey },
       headers,
     ));
     const readResponse = await readRunRoute.POST(jsonRequest(
@@ -148,9 +155,8 @@ describe("Clinical Records internal runtime routes", () => {
     ));
 
     await expect(connectResponse.json()).resolves.toEqual({
-      connectUrl:
-        `https://join.example.test/records/connect#clinicalRecordsIntent=cr_${"a".repeat(32)}`,
-      expiresAt: "2026-07-10T12:15:00.000Z",
+      connectUrl: "https://join.example.test/records/connect?launch=clinical-records",
+      expiresAt: null,
       ok: true,
     });
     await expect(readResponse.json()).resolves.toEqual({
@@ -166,6 +172,17 @@ describe("Clinical Records internal runtime routes", () => {
     await expect(outcomeResponse.json()).resolves.toEqual({ ok: true });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(4);
     expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalledTimes(4);
+    expect(mocks.createClinicalRecordConnectIntent).not.toHaveBeenCalled();
+  });
+
+  it("creates a short-lived claim immediately for current-message authority", async () => {
+    const response = await connectLinkRoute.POST(jsonRequest(
+      "/api/internal/clinical-records/connect-link",
+      {},
+      runtimeWriteFenceHeaders(),
+    ));
+
+    expect(response.status).toBe(200);
     expect(mocks.createClinicalRecordConnectIntent).toHaveBeenCalledWith({
       memberId: "member_clinical_1",
       request: expect.any(Request),

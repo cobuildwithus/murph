@@ -106,8 +106,10 @@ import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
 } from '../src/assistant/turn-finalizer.js'
-import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
-import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.js'
+import type {
+  AssistantMessageInput,
+  AssistantTurnSharedPlan,
+} from '../src/assistant/service-contracts.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
@@ -2089,7 +2091,7 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('offers response cards to current private requests and managed closeout', async () => {
+  it('offers response cards to current private requests and exact scheduled occurrences', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -2140,7 +2142,7 @@ describe('assistant Codex turn planning', () => {
       },
       scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
       turnTrigger: 'automation-cron',
-    })).resolves.not.toContain('attach_response_card')
+    })).resolves.toContain('attach_response_card')
     await expect(toolNames(
       {
         ...createMessageInput(),
@@ -2155,6 +2157,101 @@ describe('assistant Codex turn planning', () => {
         threadIsDirect: false,
       }),
     )).resolves.not.toContain('attach_response_card')
+  })
+
+  it('offers scheduled image generation only on routes that can deliver vault images', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const common = {
+      executionContext: null,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-28',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+    } satisfies Omit<
+      Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+      'input' | 'sharedPlan'
+    >
+    const toolNames = async (input: {
+      channel: 'email' | 'linq' | 'telegram'
+      scheduled: boolean
+      threadIsDirect: boolean
+    }) => {
+      const occurrenceAt = '2026-07-28T21:00:00.000-04:00'
+      const plan = await resolveAssistantRouteTurnPlan({
+        ...common,
+        input: {
+          ...createMessageInput(),
+          channel: input.channel,
+          ...(input.scheduled
+            ? {
+                scheduledInvocationAuthority: {
+                  automationId: 'automation_image',
+                  occurrenceAt,
+                },
+                scheduledOccurrenceAt: occurrenceAt,
+                turnTrigger: 'automation-cron' as const,
+              }
+            : {}),
+          threadId: `${input.channel}-thread`,
+          threadIsDirect: input.threadIsDirect,
+        },
+        sharedPlan: createSharedPlan({}, {
+          channel: input.channel,
+          effectiveThreadIsDirect: input.threadIsDirect,
+          threadId: `${input.channel}-thread`,
+          threadIsDirect: input.threadIsDirect,
+        }),
+      })
+      return {
+        systemPrompt: plan.systemPrompt,
+        toolNames: plan.dynamicTools.map((tool) => tool.name),
+      }
+    }
+
+    for (const threadIsDirect of [true, false]) {
+      const email = await toolNames({
+        channel: 'email',
+        scheduled: true,
+        threadIsDirect,
+      })
+      expect(email.toolNames).not.toContain('generate_image')
+      expect(email.systemPrompt).toContain('The bound outbound channel is email.')
+      expect(email.systemPrompt).toContain('`text` is the single final user-facing message.')
+    }
+    await expect(toolNames({
+      channel: 'linq',
+      scheduled: true,
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      toolNames: expect.arrayContaining(['generate_image']),
+    })
+    await expect(toolNames({
+      channel: 'telegram',
+      scheduled: true,
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      toolNames: expect.arrayContaining(['generate_image']),
+    })
+    await expect(toolNames({
+      channel: 'email',
+      scheduled: false,
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      toolNames: expect.arrayContaining(['generate_image']),
+    })
   })
 
   it('exposes private style settings to email turns only with exact-turn sender authority', async () => {
@@ -3533,6 +3630,9 @@ describe('assistant Codex turn planning', () => {
         executionContext: {
           hosted: {
             memberId: 'member-scheduled-phone-call',
+            productFeedbackCandidateSink: {
+              acceptProductFeedbackCandidate: vi.fn(),
+            },
             progressDeliveryDependencies: {},
             providerFetch: null,
             userEnvKeys: [],
@@ -3540,7 +3640,11 @@ describe('assistant Codex turn planning', () => {
         },
         hostedToolContext: {
           ...createHostedToolContext(),
+          clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
+          personalizationTool: { request: vi.fn() },
           phoneCalls: { start: vi.fn() },
+          physicalNotes: { send: vi.fn() },
+          privateImageUrlPublisher: { publishPrivateImageUrl: vi.fn() },
         },
         input: {
           ...createMessageInput(),
@@ -3574,9 +3678,25 @@ describe('assistant Codex turn planning', () => {
         }),
       })
 
-      expect(plan.dynamicTools.map((tool) => tool.name).includes(
-        'create_phone_call',
-      )).toBe(expectedAvailable)
+      const toolNames = plan.dynamicTools.map((tool) => tool.name)
+      expect(toolNames.includes('create_phone_call')).toBe(expectedAvailable)
+      expect(toolNames).not.toContain('submit_product_feedback')
+      if (expectedAvailable) {
+        expect(toolNames).toEqual(expect.arrayContaining([
+          'assistant_style',
+          'attach_response_card',
+          'create_clinical_records_connect_link',
+          'personalization',
+          'send_physical_note',
+        ]))
+        expect(toolNames).not.toContain('send_progress_update')
+      }
+      if (channel === 'email') {
+        expect(toolNames).not.toContain('assistant_style')
+        expect(toolNames).not.toContain('personalization')
+        expect(toolNames).toContain('create_clinical_records_connect_link')
+        expect(toolNames).toContain('attach_response_card')
+      }
     },
   )
 
