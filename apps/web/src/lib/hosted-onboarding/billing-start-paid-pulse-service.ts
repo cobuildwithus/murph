@@ -67,6 +67,8 @@ import {
 } from "./stripe-error-log";
 import {
   hasHostedStripeSubscriptionPaymentMethod,
+  readHostedStripeSubscriptionPaymentMethodId,
+  readHostedStripeSubscriptionPaymentMethodUpdate,
 } from "./stripe-subscription-payment-method";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
@@ -1146,7 +1148,9 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
     subscription: input.subscription,
   });
 
-  if (!hasHostedStripeSubscriptionPaymentMethod(input.subscription)) {
+  const paymentMethodUpdate =
+    readHostedStripeSubscriptionPaymentMethodUpdate(input.subscription);
+  if (!paymentMethodUpdate) {
     return {
       billingPlanCode: input.targetPlanCode,
       paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
@@ -1161,6 +1165,10 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
       status: "payment_required",
     };
   }
+
+  const paymentMethodId = "default_payment_method" in paymentMethodUpdate
+    ? paymentMethodUpdate.default_payment_method
+    : paymentMethodUpdate.default_source;
 
   let stripeMutationCompleted = false;
 
@@ -1184,6 +1192,14 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
           cleanupParams.items = input.transitionItems;
           cleanupParams.proration_behavior = "none";
         }
+        // Customer-level payment inheritance is made explicit here because
+        // Resume does not accept either payment instrument field.
+        if ("default_payment_method" in paymentMethodUpdate) {
+          cleanupParams.default_payment_method =
+            paymentMethodUpdate.default_payment_method;
+        } else {
+          cleanupParams.default_source = paymentMethodUpdate.default_source;
+        }
         const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.paused-pre-resume-cleanup",
           // Stripe rejects `proration_behavior` on a paused subscription unless
@@ -1198,6 +1214,16 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
           priceId: input.priceId,
           subscription: cleanedSubscription,
         });
+        if (
+          readHostedStripeSubscriptionPaymentMethodId(cleanedSubscription) !==
+            paymentMethodId
+        ) {
+          throw hostedOnboardingError({
+            code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_STATE_UNSUPPORTED",
+            httpStatus: 409,
+            message: "Your subscription payment method could not be confirmed.",
+          });
+        }
         if (cleanedSubscription.status !== "paused") {
           return cleanedSubscription;
         }
@@ -1328,7 +1354,9 @@ function isHostedPulseTrialStartPaidPaymentRequired(invoice: Stripe.Invoice): bo
       paymentIntent.status === "requires_payment_method";
   }
 
-  return invoice.status === "open" && invoice.attempted === true &&
+  // Resume can create an immediately payable hosted invoice before Stripe has
+  // attempted an automatic charge or attached a PaymentIntent.
+  return invoice.status === "open" &&
     typeof invoice.amount_remaining === "number" &&
     invoice.amount_remaining > 0;
 }

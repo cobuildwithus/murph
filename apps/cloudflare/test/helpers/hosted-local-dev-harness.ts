@@ -40,6 +40,7 @@ const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 
 export interface HostedLocalDevHarness {
   assertNoInterventions(): void;
+  assertStripeListenerAlive(): void;
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
   /** The app-session HMAC key the web process runs with. */
   hostedAppSessionHmacKey: string;
@@ -228,6 +229,14 @@ export async function startHostedLocalDevHarness(input: {
         throw new Error(
           `Expected a passive hosted-local scenario, but the harness issued ${interventionCount} mutating intervention request(s). Deliberate recovery controls require faultInjection: true.`,
         );
+      },
+      assertStripeListenerAlive: (): void => {
+        const stripeListener = stack?.processes.stripe;
+        if (!stripeListener || stripeListener.child.exitCode !== null) {
+          throw new Error(
+            "The hosted-local scenario requires its owned stripe listen process to remain alive.",
+          );
+        }
       },
       config: {
         ...config,

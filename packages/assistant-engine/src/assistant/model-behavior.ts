@@ -75,3 +75,16 @@ export function buildAssistantExecutionBehaviorText(input: {
 
   return `Murph progress-delivery and browser-action rules:${progressUpdateGuidance}${browserActionGuidance}${messagingPresentationGuidance}`
 }
+
+export function buildAssistantResearchScoutCapabilityText(input: {
+  progressUpdateMode: 'direct' | 'group'
+}): string {
+  const progressGuidance = input.progressUpdateMode === 'group'
+    ? 'Honor the stricter group progress threshold; a research lookup alone does not justify a status message.'
+    : 'Before a noticeable foreground pass, send one short natural update; skip it for one quick lookup.'
+
+  return `Configured Exa research:
+- Run \`vault-cli research scout --input - --since <date> --until <date>\` only when current research could change the answer. ${progressGuidance}
+- For a focused lookup, read \`vault-cli research payload-schema --format json\`, then send \`{"mode":"focused"}\` plus exact server-owned public concepts only. If not exactly representable, make no Exa call. For an explicit current-research request, say you could not safely form the current-source lookup and no current sources were checked; do not imply that current studies were found, checked, reviewed, or verified. Label existing knowledge as general background, not current research. Never send arbitrary values, question prose, names, organizations, private notes, or personal details. Use \`research scout-batch\` for broad discovery or automation; never send a mode-less single-scout request.
+- Use only candidates whose \`resultIndex\` maps to a result with the source title, web URL, and publication metadata. Name source and date; preserve caveats, disagreement, and evidence maturity. If none maps, say the pass found no usable current source; do not fabricate evidence, raise confidence, or repeat the lookup blindly. Never personalize medical advice or assert unsupported causation.`
+}

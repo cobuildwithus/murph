@@ -17,6 +17,7 @@ export {
   researchScoutInputSchema,
   researchScoutProfileSchema,
   researchScoutResultSchema,
+  RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE,
   type ResearchScoutBatchInput,
   type ResearchScoutBatchPayload,
   type ResearchScoutBatchResult,

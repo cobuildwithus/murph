@@ -217,7 +217,9 @@ export async function startHostedLocalDevStack(input: {
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
 }): Promise<HostedLocalDevStack> {
   throwIfAbortSignalAborted(input.abortSignal);
+  const inheritedStripeCliApiKey = input.env.STRIPE_API_KEY?.trim() || null;
   const initialEnv = sanitizeHostedLocalGenericEnvironment(input.env);
+  delete initialEnv.STRIPE_API_KEY;
   removeHostedLocalWebAuthorityFromProcessEnvironment();
   const initialProcessEnv = { ...initialEnv } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
@@ -347,6 +349,12 @@ export async function startHostedLocalDevStack(input: {
       ...localStripeEnv,
       ...initialEnv,
     };
+    const stripeCliApiKey =
+      rawVercelEnv.STRIPE_API_KEY?.trim() || inheritedStripeCliApiKey;
+    // STRIPE_API_KEY exists only to authenticate the harness-owned Stripe CLI
+    // listener. The website uses STRIPE_SECRET_KEY, and no worker, web,
+    // Temporal, or runner child should inherit the CLI-only credential.
+    delete rawVercelEnv.STRIPE_API_KEY;
     const hostedAppSessionHmacKey =
       rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim()
       || HOSTED_LOCAL_APP_SESSION_HMAC_KEY;
@@ -818,6 +826,7 @@ export async function startHostedLocalDevStack(input: {
       pipeOutput: input.pipeOutput,
       repoEnv,
       runtimeEnv,
+      stripeCliApiKey,
       stderrTarget: input.stderrTarget,
       stdoutTarget: input.stdoutTarget,
     });
@@ -1030,7 +1039,7 @@ export async function startHostedLocalDevStack(input: {
       try {
         const healthChecks = [
           waitForHealthyHttpEndpoint({
-            host: config.workerHost,
+            host: resolveHostedLocalClientWorkerHost(config.workerHost),
             label: "cloudflare",
             path: "/health",
             port: config.workerPort,
@@ -1472,8 +1481,13 @@ function assertHostedLocalE2eIsolation(
   if (!config.skipWeb && !env.NEXT_DIST_DIR_SUFFIX?.trim()) {
     failures.push("NEXT_DIST_DIR_SUFFIX must be set");
   }
-  if (!config.skipStripeListen) {
-    failures.push("MURPH_DEV_SKIP_STRIPE_LISTEN must be 1");
+  if (
+    !config.skipStripeListen
+    && env.MURPH_HOSTED_LOCAL_E2E_STRIPE_LISTENER !== "1"
+  ) {
+    failures.push(
+      "MURPH_DEV_SKIP_STRIPE_LISTEN must be 1 unless the isolated Stripe listener is explicitly owned",
+    );
   }
   if (config.linqWebhookTunnelMode !== "disabled") {
     failures.push("MURPH_DEV_LINQ_WEBHOOK_TUNNEL must be disabled");
@@ -2457,6 +2471,7 @@ async function maybeStartStripeWebhookListener(input: {
   pipeOutput?: boolean;
   repoEnv: NodeJS.ProcessEnv;
   runtimeEnv: NodeJS.ProcessEnv;
+  stripeCliApiKey: string | null;
   stderrTarget?: NodeJS.WritableStream;
   stdoutTarget?: NodeJS.WritableStream;
 }): Promise<BufferedNamedChildProcess | null> {
@@ -2485,7 +2500,12 @@ async function maybeStartStripeWebhookListener(input: {
     const result = await spawnStripeListenerWithSecretCapture({
       args: ["listen", "--forward-to", forwardUrl],
       command: "stripe",
-      env: runtimeEnv,
+      env: {
+        ...runtimeEnv,
+        ...(input.stripeCliApiKey === null
+          ? {}
+          : { STRIPE_API_KEY: input.stripeCliApiKey }),
+      },
       pipeOutput: input.pipeOutput,
       stderrTarget: input.stderrTarget,
       stdoutTarget: input.stdoutTarget,

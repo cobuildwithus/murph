@@ -25,6 +25,7 @@ import {
 
 const RESEARCH_SCOUT_INPUT = {
   profile: {
+    mode: 'focused',
     topics: ['sleep'],
     biomarkers: ['hs-crp'],
     behaviors: ['zone 2 training'],
@@ -133,11 +134,13 @@ function createStructuredCandidate(input: {
 describe('research scout', () => {
   it('accepts raw profile JSON and an exact profile wrapper for CLI input', () => {
     const rawProfile = {
+      mode: 'focused',
       topics: ['sleep', 'recovery'],
       behaviors: ['exercise'],
     }
 
     expect(parseResearchScoutCliProfileInput(rawProfile)).toMatchObject({
+      mode: 'focused',
       topics: ['sleep', 'recovery'],
       behaviors: ['exercise'],
       biomarkers: [],
@@ -245,13 +248,15 @@ describe('research scout', () => {
     expect(payloadSchema.schemaVersion).toBe('murph.payload-schema.v1')
     expect(payloadSchema.command).toBe('research scout --input')
     expect(payloadSchema.schemaName).toBe('ResearchScoutProfile')
+    expect(payloadSchema.schema.properties).toHaveProperty('mode')
     expect(payloadSchema.schema.properties).toHaveProperty('topics')
     expect(payloadSchema.schema.properties).toHaveProperty('behaviors')
     expect(payloadSchema.schema.properties).not.toHaveProperty('tags')
     expect(payloadSchema.schema.additionalProperties).toBe(false)
     expect(payloadSchema.examples?.[0]).toMatchObject({
-      topics: ['sleep', 'recovery'],
-      behaviors: ['exercise'],
+      mode: 'focused',
+      topics: ['cognition'],
+      supplements: ['creatine'],
     })
   })
 
@@ -320,7 +325,7 @@ describe('research scout', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it('posts one deep-reasoning research-paper search with a compact tag profile', async () => {
+  it('posts one deep-reasoning research-paper search with a finite focused profile', async () => {
     const providerPayload = {
       output: {
         content: JSON.stringify({
@@ -377,9 +382,9 @@ describe('research scout', () => {
     expect(requestBody.numResults).toBe(2)
     expect(requestBody.query).toEqual(expect.stringContaining('sleep'))
     expect(requestBody.query).toEqual(expect.stringContaining('hs-crp'))
-    expect(requestBody.query).toEqual(expect.stringContaining('local context decides send-worthiness'))
+    expect(requestBody.query).toEqual(expect.stringContaining('focused structured scope'))
     expect(requestBody.query).not.toEqual(expect.stringContaining('raw lab'))
-    expect(requestBody.systemPrompt).toEqual(expect.stringContaining('practical interpretive value'))
+    expect(requestBody.systemPrompt).toEqual(expect.stringContaining('focused structured scope'))
     expect(requestBody.systemPrompt).toEqual(expect.stringContaining('not personalized medical advice or tasks to do'))
     expect(requestBody.systemPrompt).toEqual(expect.stringContaining('not a behavior prescription'))
     expect(requestBody.outputSchema?.properties?.candidates?.maxItems).toBe(2)
@@ -398,7 +403,7 @@ describe('research scout', () => {
     expect(result.privacy).toEqual({
       persistedByTool: false,
       rawVaultValuesSent: false,
-      sentProfileKind: 'tag_profile',
+      sentProfileKind: 'focused_profile',
       tokenSource: 'env',
     })
     expect(result.response).toEqual(providerPayload)
@@ -469,7 +474,46 @@ describe('research scout', () => {
     ])
   })
 
-  it('rejects unsafe batch lane profiles before Exa fetches', async () => {
+  it('runs one schema-valid managed batch lane through the CLI parser and client', async () => {
+    const payload = parseResearchScoutBatchCliPayloadInput({
+      lanes: [{
+        label: 'creatine and cognition',
+        profile: {
+          topics: ['cognition'],
+          supplements: ['creatine'],
+          conditionsOrConcerns: ['healthy adults'],
+          goals: ['cognitive performance'],
+        },
+      }],
+    })
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({
+      output: { content: { candidates: [] } },
+      results: [],
+    }))
+
+    await fetchExaResearchScoutBatchCandidates({
+      ...payload,
+      since: '2024-08-07T00:00:00.000Z',
+      until: '2026-08-07T00:00:00.000Z',
+      maxCandidatesPerLane: 8,
+    }, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl,
+    })
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const request = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as {
+      query?: unknown
+      systemPrompt?: unknown
+    }
+    expect(request.query).toEqual(expect.stringContaining('Topics: cognition'))
+    expect(request.query).toEqual(expect.stringContaining('Supplements: creatine'))
+    expect(request.systemPrompt).toEqual(
+      expect.stringContaining('practical interpretive value'),
+    )
+  })
+
+  it('rejects unsupported batch lane concepts before Exa fetches', async () => {
     const fetchImpl = vi.fn<typeof fetch>()
 
     await expect(
@@ -495,7 +539,7 @@ describe('research scout', () => {
         },
         fetchImpl,
       }),
-    ).rejects.toThrow(/non-identifying categories/u)
+    ).rejects.toThrow(/exact server-owned public concepts/u)
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
@@ -540,11 +584,11 @@ describe('research scout', () => {
         },
         fetchImpl,
       }),
-    ).rejects.toThrow(/non-identifying categories/u)
+    ).rejects.toThrow(/exact server-owned public concepts/u)
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it('allows compact non-identifying free-form category tags', async () => {
+  it('allows exact finite public concepts', async () => {
     const providerPayload = {
       output: {
         content: {

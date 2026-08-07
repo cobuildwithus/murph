@@ -15306,6 +15306,25 @@ describe('assistant codex runtime', () => {
           })
 
           child.stdout.write(jsonLine({
+            id: 1000,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'list' },
+              namespace: 'murph',
+              threadId: 'thread-root-tool-scope',
+              tool: 'pending_vault_files',
+              turnId: 'turn-stale-root-tool-scope',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 1000)).resolves.toEqual({
+            error: {
+              code: -32000,
+              message: 'Codex message turn id does not match the active turn.',
+            },
+            id: 1000,
+          })
+
+          child.stdout.write(jsonLine({
             id: 100,
             method: 'item/tool/call',
             params: {
@@ -15549,6 +15568,7 @@ describe('assistant codex runtime', () => {
       dynamicTools: resolveMurphDynamicTools({
         deviceAvailable: true,
         messageTargetingAvailable: true,
+        pendingVaultFilesAvailable: true,
       }),
       prompt: 'inspect connected devices',
       workingDirectory,
@@ -15683,6 +15703,99 @@ describe('assistant codex runtime', () => {
       }),
     ])
     expect(JSON.stringify(result.runtimeIssueInputs)).not.toContain('arguments')
+  })
+
+  it('records pending-file schema rejection through the standard safe diagnostic', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-pending-file-invalid-',
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: { id: 'thread-pending-file-invalid' },
+            },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: { id: 'turn-pending-file-invalid' },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 99,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'cancel',
+                intentIds: ['private invalid intent'],
+              },
+              namespace: 'murph',
+              tool: 'pending_vault_files',
+              turnId: 'turn-pending-file-invalid',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 99)).resolves.toEqual({
+            id: 99,
+            result: {
+              success: false,
+              contentItems: [{
+                type: 'inputText',
+                text: 'invalid pending vault-file arguments',
+              }],
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-pending-file-invalid',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      dynamicTools: resolveMurphDynamicTools({
+        pendingVaultFilesAvailable: true,
+      }),
+      prompt: 'try invalid pending file tool',
+      workingDirectory,
+    })
+    expect(result.runtimeIssueInputs).toEqual([
+      expect.objectContaining({
+        component: 'assistant.tool-validation',
+        operation: 'murph.pending_vault_files',
+        phase: 'tool_call',
+        issueKind: 'schema_rejection',
+        severity: 'warning',
+        errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+        details: expect.objectContaining({
+          detailsSchema: 'murph.tool-call-validation-digest.v1',
+          invalidPaths: ['intentIds.[]'],
+          schemaName: 'murph.pending_vault_files.input',
+          toolName: 'murph.pending_vault_files',
+        }),
+      }),
+    ])
+    expect(JSON.stringify(result.runtimeIssueInputs))
+      .not.toContain('private invalid intent')
   })
 
   it('uses native cold resume when the turn requires the private style tool', async () => {
