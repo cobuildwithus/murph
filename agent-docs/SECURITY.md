@@ -788,7 +788,10 @@ Last verified: 2026-08-05
   not include member or customer identity, contact details, checkout contents,
   raw provider messages, raw errors, or webhook/provider payloads. Alert-send
   diagnostics may expose only the alert kind, sanitized provider status/code,
-  and a safe Stripe type token.
+  and a safe Stripe type token. Only the Web-owned terminal billing-action
+  boundary may classify an SDK or explicitly wrapped provider rejection as
+  alertable; a generic application failure or a provider rejection absorbed by
+  recovery, cleanup, or replay must remain silent.
 - Assistant runtime state is high-sensitivity local runtime data: directories under `vault/.runtime/operations/assistant/**` must be `0700`, files under that tree must be `0600`, secret-bearing provider headers must never remain inline in persisted session JSON, and operator-facing repair flows should use `assistant doctor --repair` to tighten assistant runtime permissions in place. Inline secret findings indicate stale local session data that should be rebuilt or repaired manually rather than a supported migration lane.
 - Vault-file refs remain normalized and non-hidden except for one flat assistant-owned shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. Initial preparation may accept that exact ref only after the reader-compatible runner has converged, and both initial and retry paths must adopt/revalidate its regular bounded file before revalidating filename, media type, byte size, and SHA-256. Adoption tightens assistant-runtime parents to `0700` and the exact file to `0600`; ordinary vault refs are not chmodded. Prefix siblings, nested paths, hidden filenames, control characters, snapshot-excluded temp/lock names, symlinks, special files, and every other hidden ref fail closed. Never infer ownership or deletion authority from `exports/assistant-deliveries/**` or another generic vault path.
 - Do not clear or abandon provider-native assistant thread continuity merely because a tool returned authenticated private data or because provider history differs slightly from delivered output. Session invalidation is not a privacy boundary. Protect private data through authorization, bounded tool results, output and logging policy, and the normal encrypted snapshot boundary.

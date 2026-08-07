@@ -678,10 +678,11 @@ Hosted onboarding extras:
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
-  uses it for metadata-only alerts on caught provider-call failures, new
-  verified payment-failure events, and the first failed reconciliation attempt.
-  Both website and iMessage Assistant billing use the same Web-owned Stripe
-  services, so there is no separate channel-specific configuration.
+  uses it for metadata-only alerts when a provider rejection aborts a complete
+  billing action, for new verified payment-failure events, and for the first
+  failed reconciliation attempt. Both website and iMessage Assistant billing
+  use the same Web-owned Stripe services, so there is no separate
+  channel-specific configuration.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
 - `PRIVY_CUSTOM_AUTH_DOMAIN`
@@ -1066,9 +1067,10 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   time-zone setting is required for Stripe alerts. Confirm that the Stripe
   webhook endpoint subscribes to `checkout.session.async_payment_failed`,
   `payment_intent.payment_failed`, `invoice.payment_failed`, and
-  `invoice.finalization_failed`. Checkout create/resume alerts fire only when
-  the provider rejection aborts that user action; recovered reads and cleanup
-  races remain diagnostic logs and do not email.
+  `invoice.finalization_failed`. The checkout action owner covers mandatory
+  price reads, customer provisioning, saved-card preparation, and Checkout
+  Session create/resume. It emails only when the provider rejection aborts the
+  action; recovered reads, replays, and cleanup races remain diagnostic logs.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep

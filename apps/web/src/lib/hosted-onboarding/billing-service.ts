@@ -57,7 +57,7 @@ import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
-import { withHostedStripeOperationFailureAlert } from "./stripe-error-log";
+import { withHostedStripeActionFailureAlert } from "./stripe-error-log";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -288,10 +288,17 @@ async function createOrReuseHostedBillingCheckoutAttempt(input: {
       return { alreadyActive: true, url: null };
     }
 
-    const outcome = await runHostedBillingCheckoutAttempt({
-      ...input,
-      prepared,
-    });
+    const outcome = await withHostedStripeActionFailureAlert(
+      {
+        operationIdentity: prepared.attempt.attemptId,
+        operationName: "billing.checkout",
+        stripeLiveMode: input.stripeLiveMode,
+      },
+      () => runHostedBillingCheckoutAttempt({
+        ...input,
+        prepared,
+      }),
+    );
     if (outcome.kind === "restart") {
       continue;
     }
@@ -415,15 +422,8 @@ async function runHostedBillingCheckoutAttempt(input: {
 }): Promise<HostedBillingCheckoutAttemptOutcome> {
   const currentAttempt = input.prepared.attempt;
   if (currentAttempt.stripeCheckoutSessionId) {
-    const session = await withHostedStripeOperationFailureAlert(
-      {
-        operationIdentity: currentAttempt.attemptId,
-        operationName: "checkout.sessions.retrieve.billing-start",
-        stripeLiveMode: input.stripeLiveMode,
-      },
-      () => input.stripe.checkout.sessions.retrieve(
-        currentAttempt.stripeCheckoutSessionId as string,
-      ),
+    const session = await input.stripe.checkout.sessions.retrieve(
+      currentAttempt.stripeCheckoutSessionId,
     );
     assertHostedBillingCheckoutSessionMatchesAttempt({
       attempt: currentAttempt,
@@ -543,44 +543,37 @@ async function runHostedBillingCheckoutAttempt(input: {
     checkoutAttemptId: currentAttempt.attemptId,
     checkoutIntentHash: currentAttempt.intentHash,
   };
-  const session = await withHostedStripeOperationFailureAlert(
-    {
-      operationIdentity: currentAttempt.attemptId,
-      operationName: "checkout.sessions.create.billing-start",
-      stripeLiveMode: input.stripeLiveMode,
-    },
-    () => input.stripe.checkout.sessions.create({
-      cancel_url: buildStripeCancelUrl(input.publicBaseUrl, input.inviteCode),
-      client_reference_id: input.memberId,
-      ...(input.prepared.stripeCustomerId
-        ? { customer: input.prepared.stripeCustomerId }
-        : {}),
-      ...(input.prepared.verifiedEmailAddress
-        ? { customer_email: input.prepared.verifiedEmailAddress }
-        : {}),
-      line_items: buildHostedBillingCheckoutLineItems(input.priceId),
+  const session = await input.stripe.checkout.sessions.create({
+    cancel_url: buildStripeCancelUrl(input.publicBaseUrl, input.inviteCode),
+    client_reference_id: input.memberId,
+    ...(input.prepared.stripeCustomerId
+      ? { customer: input.prepared.stripeCustomerId }
+      : {}),
+    ...(input.prepared.verifiedEmailAddress
+      ? { customer_email: input.prepared.verifiedEmailAddress }
+      : {}),
+    line_items: buildHostedBillingCheckoutLineItems(input.priceId),
+    metadata: checkoutMetadata,
+    mode: "subscription",
+    payment_method_types: ["card"],
+    subscription_data: {
       metadata: checkoutMetadata,
-      mode: "subscription",
-      payment_method_types: ["card"],
-      subscription_data: {
-        metadata: checkoutMetadata,
-        ...(input.prepared.resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
-          ? { trial_period_days: HOSTED_PULSE_TRIAL_DAYS }
-          : {}),
-      },
-      success_url: buildStripeSuccessUrl(
-        input.publicBaseUrl,
-        input.inviteCode,
-      ),
-    }, {
-      ...HOSTED_BILLING_CHECKOUT_REQUEST_OPTIONS,
-      idempotencyKey: [
-        "hosted-billing-checkout",
-        currentAttempt.attemptId,
-        currentAttempt.intentHash,
-      ].join(":"),
-    }),
-  );
+      ...(input.prepared.resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
+        ? { trial_period_days: HOSTED_PULSE_TRIAL_DAYS }
+        : {}),
+    },
+    success_url: buildStripeSuccessUrl(
+      input.publicBaseUrl,
+      input.inviteCode,
+    ),
+  }, {
+    ...HOSTED_BILLING_CHECKOUT_REQUEST_OPTIONS,
+    idempotencyKey: [
+      "hosted-billing-checkout",
+      currentAttempt.attemptId,
+      currentAttempt.intentHash,
+    ].join(":"),
+  });
   assertHostedBillingCheckoutSessionMatchesAttempt({
     attempt: currentAttempt,
     memberId: input.memberId,

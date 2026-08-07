@@ -36,6 +36,9 @@ const runtimeMocks = vi.hoisted(() => ({
   requireHostedStripeBillingPlanConfig: vi.fn(),
   requireHostedStripeFamilyPlanConfig: vi.fn(),
 }));
+const nextServerMocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
+}));
 const activationWakeMocks = vi.hoisted(() => ({
   signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
 }));
@@ -82,6 +85,9 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApiMode: runtimeMocks.requireHostedStripeApiMode,
   requireHostedStripeBillingPlanConfig: runtimeMocks.requireHostedStripeBillingPlanConfig,
   requireHostedStripeFamilyPlanConfig: runtimeMocks.requireHostedStripeFamilyPlanConfig,
+}));
+vi.mock("next/server", () => ({
+  after: nextServerMocks.after,
 }));
 
 import {
@@ -329,6 +335,8 @@ describe("hosted Family plan", () => {
       "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
       previousHostedOnboardingPublicBaseUrl,
     );
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     clearHostedOnboardingEnvCache();
   });
 
@@ -5557,7 +5565,29 @@ describe("hosted Family plan", () => {
       $transaction: ReturnType<typeof vi.fn>;
     };
     prisma.$transaction = vi.fn((callback) => callback(tx));
-    const retrievalError = new Error("Stripe Session retrieval unavailable");
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    vi.stubEnv(
+      "HOSTED_LINQ_ALERT_EMAIL_FROM",
+      "Murph Alerts <alerts@example.com>",
+    );
+    vi.stubEnv("HOSTED_LINQ_ALERT_EMAILS", "operator@example.com");
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ id: "email_family_failure" }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const retrievalError = Object.assign(
+      new Error("Stripe Session retrieval unavailable"),
+      {
+        rawType: "api_connection_error",
+        requestId: "req_family_checkout_failed",
+        statusCode: 503,
+        type: "StripeConnectionError",
+      },
+    );
     const checkoutCreate = vi.fn();
     const checkoutRetrieve = vi.fn().mockRejectedValue(retrievalError);
     runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
@@ -5577,6 +5607,13 @@ describe("hosted Family plan", () => {
       seatCount: 2,
     })).rejects.toBe(retrievalError);
 
+    expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
+    await nextServerMocks.after.mock.calls[0]?.[0]?.();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)))
+      .toMatchObject({
+        subject: "Murph Stripe operation failed — family.billing.checkout",
+      });
     expect(checkoutRetrieve).toHaveBeenCalledWith("cs_test_delivered123");
     expect(checkoutCreate).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();

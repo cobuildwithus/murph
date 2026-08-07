@@ -1,3 +1,4 @@
+import { isHostedOnboardingError } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import type { HostedOnboardingStructuredLogDetails } from "./logging";
 import {
@@ -112,13 +113,58 @@ export function reportHostedStripeOperationFailure(input: {
 }): void {
   logHostedStripeFailure(input);
   scheduleHostedStripeOperationFailureAlert({
-    fields: describeHostedStripeError(input.error),
+    fields: describeHostedStripeAlertFields(input.error),
     operationCorrelationId: buildHostedStripeOperationCorrelationId(
       input.operationIdentity,
     ),
     operationName: input.operationName,
     stripeLiveMode: input.stripeLiveMode,
   });
+}
+
+/**
+ * Provider wrappers intentionally replace raw Stripe errors with safe hosted
+ * errors before they reach an action owner. Rehydrate only their already-safe
+ * token/status detail so the alert remains useful without retaining a raw
+ * provider object or message.
+ */
+function describeHostedStripeAlertFields(
+  error: unknown,
+): HostedStripeErrorFields {
+  const direct = describeHostedStripeError(error);
+  if (!isHostedOnboardingError(error) || !error.details) {
+    return direct;
+  }
+
+  const providerType =
+    readHostedStripeErrorToken(error.details, "providerErrorType") ??
+    readHostedStripeErrorToken(error.details, "type");
+  const providerCode =
+    readHostedStripeErrorToken(error.details, "providerErrorCode") ??
+    readHostedStripeErrorToken(error.details, "code");
+
+  return {
+    ...direct,
+    code: providerCode ?? direct.code,
+    param:
+      readHostedStripeErrorToken(error.details, "stripeParam") ?? direct.param,
+    statusCode:
+      readHostedStripeErrorStatusCode(error.details) ?? direct.statusCode,
+    type: providerType ?? direct.type,
+  };
+}
+
+/**
+ * Distinguishes a Stripe SDK rejection from an arbitrary action failure. Stripe
+ * errors expose either a `Stripe...` type, a raw provider type, or a request id;
+ * hosted/domain errors must be classified explicitly by their action owner.
+ */
+export function isHostedStripeProviderError(error: unknown): boolean {
+  const fields = describeHostedStripeError(error);
+
+  return fields.requestId !== null ||
+    fields.rawType !== null ||
+    fields.type?.startsWith("Stripe") === true;
 }
 
 /**
@@ -141,8 +187,9 @@ export async function withHostedStripeFailureLog<T>(
  * Observes a Stripe rejection that aborts a user-visible billing action,
  * schedules a best-effort alert, and rethrows it untouched.
  */
-export async function withHostedStripeOperationFailureAlert<T>(
+export async function withHostedStripeActionFailureAlert<T>(
   input: {
+    isTerminalStripeFailure?: (error: unknown) => boolean;
     operationIdentity: string;
     operationName: string;
     stripeLiveMode: boolean;
@@ -152,7 +199,16 @@ export async function withHostedStripeOperationFailureAlert<T>(
   try {
     return await operation();
   } catch (error) {
-    reportHostedStripeOperationFailure({ error, ...input });
+    const isTerminalStripeFailure = input.isTerminalStripeFailure ??
+      isHostedStripeProviderError;
+    if (isTerminalStripeFailure(error)) {
+      reportHostedStripeOperationFailure({
+        error,
+        operationIdentity: input.operationIdentity,
+        operationName: input.operationName,
+        stripeLiveMode: input.stripeLiveMode,
+      });
+    }
     throw error;
   }
 }

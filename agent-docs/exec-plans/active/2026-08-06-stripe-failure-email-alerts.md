@@ -114,7 +114,7 @@ Updated: 2026-08-06
 
 - Accepted the preliminary and final-round finding that the shared Stripe
   diagnostic logger also observes recovered races and retry-owned work. It is
-  log-only again; operation email is owned only by checkout create/resume
+  log-only again; operation email is owned only by terminal checkout-action
   boundaries that propagate the provider rejection to the caller.
 - Replaced random request-id fallback with a stable opaque operation-attempt
   correlation and included that correlation plus live/test mode in the email.
@@ -123,3 +123,14 @@ Updated: 2026-08-06
 - Added integrated proof through the real alert helper and Resend transport,
   including two failed reconciliation claims producing exactly one
   reconciliation email and zero retry-attempt operation emails.
+- Final round 2 correctly found that selected Checkout Session calls were still
+  too narrow: a mandatory price read could abort the same user action before
+  those calls. The anomaly retrospective fixed the requirement at one alert per
+  terminal failed action occurrence. Ordinary, Family, and usage-credit action
+  owners now span mandatory price lookup, customer provisioning, saved-card
+  preparation, and Checkout Session create/resume while recovered projections,
+  absorbed cleanup/race outcomes, and exact replays remain silent.
+- Added direct Resend transport proof for ordinary and Family checkout failures,
+  early usage-credit price-read failure, final Session failure, saved-card
+  preparation failure, group customer provisioning failure, stable exact
+  replay identity, recovered purchase projection, and non-Stripe action errors.

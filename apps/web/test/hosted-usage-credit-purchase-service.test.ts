@@ -1,4 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const nextServerMocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
+}));
+
+vi.mock("next/server", () => ({
+  after: nextServerMocks.after,
+}));
 
 const mocks = vi.hoisted(() => ({
   createHostedStripeBillingEventLookupKey: vi.fn(
@@ -378,6 +386,11 @@ beforeEach(() => {
   );
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
 describe("parseHostedUsageCreditCheckoutRequest", () => {
   it("accepts only an exact opaque offer and request key", () => {
     expect(parseHostedUsageCreditCheckoutRequest({
@@ -521,6 +534,146 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
+  it("emails once when the mandatory price read aborts a fresh action but not its recovered retry", async () => {
+    const fake = createFakePrisma();
+    const fetchMock = stubStripeAlertEmailDelivery();
+    mocks.stripePriceRetrieve.mockRejectedValue(
+      buildStripeConnectionError("req_price_read_failed"),
+    );
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+
+    await runOnlyScheduledStripeAlert();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstAlert = readResendRequestBody(fetchMock);
+    expect(firstAlert).toMatchObject({
+      subject: "Murph Stripe operation failed — usage-credit.checkout",
+    });
+    expect(firstAlert.text).toContain("error type: StripeConnectionError");
+    expect(firstAlert.text).toContain("error code: api_connection_error");
+    expect(firstAlert.text).toContain("http status: 503");
+
+    nextServerMocks.after.mockClear();
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: "recovered_price_read_key",
+      memberId: MEMBER_ID,
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({
+      recovered: true,
+      status: "reconciling",
+    });
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: new Date(NOW.getTime() + 2_000),
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+    await runOnlyScheduledStripeAlert();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(readResendIdempotencyKey(fetchMock, 1)).toBe(
+      readResendIdempotencyKey(fetchMock, 0),
+    );
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(
+      fetchMock.mock.calls[0]?.[1]?.body,
+    );
+  });
+
+  it("emails when final Checkout Session creation terminates the action", async () => {
+    const fake = createFakePrisma();
+    const fetchMock = stubStripeAlertEmailDelivery();
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      buildStripeConnectionError("req_session_create_failed"),
+    );
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+
+    await runOnlyScheduledStripeAlert();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("emails when saved-card preparation terminates the checkout action", async () => {
+    const fake = createFakePrisma();
+    const fetchMock = stubStripeAlertEmailDelivery();
+    mockCanonicalSavedCard("cus_123");
+    mocks.stripeSubscriptionsList.mockResolvedValueOnce({
+      data: [{
+        customer: "cus_123",
+        default_payment_method: null,
+        id: "sub_123",
+        livemode: false,
+        object: "subscription",
+        status: "active",
+      }],
+      has_more: false,
+      object: "list",
+      url: "/v1/subscriptions",
+    });
+    mocks.stripePaymentIntentCreate.mockRejectedValueOnce(
+      buildStripeConnectionError("req_saved_card_failed"),
+    );
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+
+    await runOnlyScheduledStripeAlert();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("emails when group customer provisioning terminates the checkout action", async () => {
+    const fake = createFakePrisma();
+    const fetchMock = stubStripeAlertEmailDelivery();
+    mocks.ensureHostedMemberStripeCustomer.mockRejectedValueOnce(
+      buildStripeConnectionError("req_group_customer_failed"),
+    );
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      requestId: "req_group_customer_failed",
+    });
+
+    await runOnlyScheduledStripeAlert();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fake.purchases.size).toBe(0);
+  });
+
   it("starts monthly group sponsorship without consulting current capacity", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
@@ -5515,6 +5668,59 @@ function buildStripeSession(request: Record<string, unknown>) {
     status: "open",
     url: "https://checkout.stripe.test/session",
   };
+}
+
+function stubStripeAlertEmailDelivery() {
+  vi.stubEnv("RESEND_API_KEY", "re_test");
+  vi.stubEnv(
+    "HOSTED_LINQ_ALERT_EMAIL_FROM",
+    "Murph Alerts <alerts@example.com>",
+  );
+  vi.stubEnv("HOSTED_LINQ_ALERT_EMAILS", "operator@example.com");
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+    JSON.stringify({ id: "email_usage_credit_failure" }),
+    {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    },
+  ));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function buildStripeConnectionError(requestId: string) {
+  return Object.assign(new Error("Stripe API unavailable"), {
+    code: "api_connection_error",
+    rawType: "api_connection_error",
+    requestId,
+    statusCode: 503,
+    type: "StripeConnectionError",
+  });
+}
+
+async function runOnlyScheduledStripeAlert(): Promise<void> {
+  expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
+  const task = nextServerMocks.after.mock.calls[0]?.[0];
+  expect(task).toBeTypeOf("function");
+  await task?.();
+}
+
+function readResendRequestBody(
+  fetchMock: ReturnType<typeof stubStripeAlertEmailDelivery>,
+): { subject: string; text: string } {
+  const request = fetchMock.mock.calls[0];
+  return JSON.parse(String(request?.[1]?.body)) as {
+    subject: string;
+    text: string;
+  };
+}
+
+function readResendIdempotencyKey(
+  fetchMock: ReturnType<typeof stubStripeAlertEmailDelivery>,
+  callIndex: number,
+): string | null {
+  return new Headers(fetchMock.mock.calls[callIndex]?.[1]?.headers)
+    .get("Idempotency-Key");
 }
 
 function clearStripeProviderMockHistory(): void {

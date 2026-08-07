@@ -39,7 +39,7 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-webhook-workflow-start", () => ({
 
 import {
   logHostedStripeFailure,
-  withHostedStripeOperationFailureAlert,
+  withHostedStripeActionFailureAlert,
 } from "@/src/lib/hosted-onboarding/stripe-error-log";
 import { handleHostedStripeWebhook } from
   "@/src/lib/hosted-onboarding/webhook-service-stripe";
@@ -115,7 +115,7 @@ describe("hosted Stripe alert integration", () => {
     vi.stubGlobal("fetch", fetchMock);
     const stripeError = createStripeError();
 
-    await expect(withHostedStripeOperationFailureAlert({
+    await expect(withHostedStripeActionFailureAlert({
       operationIdentity: "checkout-attempt-123",
       operationName: "checkout.sessions.create.billing-start",
       stripeLiveMode: true,
@@ -147,6 +147,20 @@ describe("hosted Stripe alert integration", () => {
       }),
       operationName: "checkout.sessions.expire.subscription-cleanup-race",
     });
+
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it("does not alert for a non-Stripe action failure", async () => {
+    const applicationError = new Error("database unavailable");
+
+    await expect(withHostedStripeActionFailureAlert({
+      operationIdentity: "checkout-attempt-application-failure",
+      operationName: "billing.checkout",
+      stripeLiveMode: false,
+    }, async () => Promise.reject(applicationError))).rejects.toBe(
+      applicationError,
+    );
 
     expect(mocks.after).not.toHaveBeenCalled();
   });
@@ -203,7 +217,7 @@ describe("hosted Stripe alert integration", () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const stripeError = createStripeError();
 
-    await expect(withHostedStripeOperationFailureAlert({
+    await expect(withHostedStripeActionFailureAlert({
       operationIdentity: "checkout-attempt-fallback",
       operationName: "checkout.sessions.create.billing-start",
       stripeLiveMode: false,

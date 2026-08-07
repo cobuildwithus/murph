@@ -324,8 +324,11 @@ Last verified: 2026-08-05
 - Stripe failure email reuses the shared operational Resend transport as a
   best-effort projection, never a retry or billing owner. Only an action owner
   schedules a metadata-only operation alert when a Stripe rejection actually
-  aborts checkout creation or resume; the central diagnostic logger remains
-  log-only because it also observes recovered reads and cleanup races. New
+  aborts the complete checkout action. That owner covers mandatory price
+  lookup, customer provisioning, saved-card preparation, and Checkout Session
+  creation/resume without treating each provider call as a separate alert
+  occurrence. The central diagnostic logger remains log-only because it also
+  observes recovered reads and cleanup races. New
   verified `checkout.session.async_payment_failed`,
   `payment_intent.payment_failed`, `invoice.payment_failed`, and
   `invoice.finalization_failed` receipts schedule event-scoped alerts; and only

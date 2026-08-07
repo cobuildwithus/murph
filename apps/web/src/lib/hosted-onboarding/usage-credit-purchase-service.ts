@@ -72,7 +72,11 @@ import {
   requireHostedUsageCreditLookupKey,
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
-import { reportHostedStripeOperationFailure } from "./stripe-error-log";
+import {
+  isHostedStripeProviderError,
+  logHostedStripeFailure,
+  reportHostedStripeOperationFailure,
+} from "./stripe-error-log";
 import {
   tryChargeHostedUsageCreditSavedCard,
   type HostedUsageCreditSavedCardBillingAuthority,
@@ -383,30 +387,44 @@ export async function createHostedGroupUsageCreditCheckout(
   if (!fundingTarget) {
     throw buildHostedUsageCreditNotEligibleError("group");
   }
-  const stripeCustomerId = input.recoveryOnly
-    ? null
-    : await ensureHostedMemberStripeCustomer({
-        memberId: input.payerMemberId,
-        prisma,
-      });
+  try {
+    const stripeCustomerId = input.recoveryOnly
+      ? null
+      : await ensureHostedMemberStripeCustomer({
+          memberId: input.payerMemberId,
+          prisma,
+        });
 
-  return createHostedUsageCreditCheckoutForTarget({
-    clientRequestKey: input.clientRequestKey,
-    ...(stripeCustomerId ? { groupStripeCustomerId: stripeCustomerId } : {}),
-    groupSponsorship: input.sponsorship ?? null,
-    groupSponsorshipKind: input.sponsorshipKind ?? "one_time",
-    groupSponsorshipMonthlyCapMinor: input.monthlyCapMinor ?? null,
-    now: input.now,
-    offerCode: input.offerCode,
-    prisma,
-    ...(input.recoveryOnly ? { recoveryOnly: true } : {}),
-    target: {
-      beneficiaryMemberId: fundingTarget.runtimeMemberId,
-      joinCode: fundingTarget.joinCode,
-      kind: "group",
-      payerMemberId: input.payerMemberId,
-    },
-  });
+    return await createHostedUsageCreditCheckoutForTarget({
+      clientRequestKey: input.clientRequestKey,
+      ...(stripeCustomerId ? { groupStripeCustomerId: stripeCustomerId } : {}),
+      groupSponsorship: input.sponsorship ?? null,
+      groupSponsorshipKind: input.sponsorshipKind ?? "one_time",
+      groupSponsorshipMonthlyCapMinor: input.monthlyCapMinor ?? null,
+      now: input.now,
+      offerCode: input.offerCode,
+      prisma,
+      ...(input.recoveryOnly ? { recoveryOnly: true } : {}),
+      target: {
+        beneficiaryMemberId: fundingTarget.runtimeMemberId,
+        joinCode: fundingTarget.joinCode,
+        kind: "group",
+        payerMemberId: input.payerMemberId,
+      },
+    });
+  } catch (error) {
+    if (!input.recoveryOnly && isHostedStripeProviderError(error)) {
+      const { stripeLiveMode } = requireHostedStripeApiMode();
+      reportHostedStripeOperationFailure({
+        error,
+        operationIdentity:
+          `${input.payerMemberId}:${input.clientRequestKey}`,
+        operationName: "usage-credit.checkout",
+        stripeLiveMode,
+      });
+    }
+    throw error;
+  }
 }
 
 export function createHostedFamilyMemberUsageCreditCheckout(
@@ -960,6 +978,17 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           : {}),
       };
     }
+    if (
+      isHostedOnboardingError(error) &&
+      error.code === "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE"
+    ) {
+      reportHostedStripeOperationFailure({
+        error,
+        operationIdentity: resolution.purchase.id,
+        operationName: "usage-credit.checkout",
+        stripeLiveMode: resolution.purchase.stripeLiveMode,
+      });
+    }
     throw error;
   }
 }
@@ -1129,11 +1158,9 @@ export async function continueHostedUsageCreditCheckout(input: {
       idempotencyKey: buildHostedUsageCreditCheckoutIdempotencyKey(purchase.id),
     });
   } catch (error) {
-    reportHostedStripeOperationFailure({
+    logHostedStripeFailure({
       error,
-      operationIdentity: purchase.id,
       operationName: "checkout.sessions.create.usage-credit",
-      stripeLiveMode,
     });
     throw hostedOnboardingError({
       code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
