@@ -95,6 +95,20 @@ test("commons knowledge search returns a safety-only sauna hard stop", async () 
   ));
 });
 
+test("commons knowledge search rejects a packet larger than three items", async () => {
+  const result = await runInProcessJsonCli(createCommonsSliceCli(), [
+    "commons",
+    "knowledge",
+    "search",
+    "Finnish Dry Sauna",
+    "--limit",
+    "4",
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.envelope.ok, false);
+});
+
 test("commons knowledge search stays non-blocking when its generated index is missing", async () => {
   const previousRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
   process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = path.join(
