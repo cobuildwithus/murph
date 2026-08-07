@@ -919,10 +919,10 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
     return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
-  const r2BucketRole = await locateHostedR2ObjectBucketRole(
-    resolveHostedR2CutoverContext(input.env),
-    requestedObjectKey,
-  );
+  const r2BucketRole = await locateWorkspaceSnapshotObjectBucketRole({
+    env: input.env,
+    objectKey: requestedObjectKey,
+  });
   if (!r2BucketRole) {
     return notFound();
   }
@@ -2250,6 +2250,43 @@ function createWorkspaceSnapshotObjectStore(input: {
     ...(input.bucket?.delete ? { delete: input.bucket.delete.bind(input.bucket) } : {}),
     ...(input.bucket?.head ? { head: input.bucket.head.bind(input.bucket) } : {}),
   };
+}
+
+async function locateWorkspaceSnapshotObjectBucketRole(input: {
+  env: RunnerOutboundEnvironmentSource;
+  objectKey: string;
+}): Promise<HostedR2BucketRole | null> {
+  const context = resolveHostedR2CutoverContext(input.env);
+  if (
+    asWorkerStringEnvironment(input.env)
+      .HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?.trim() !== "1"
+  ) {
+    return await locateHostedR2ObjectBucketRole(context, input.objectKey);
+  }
+
+  const bucketRoles: readonly HostedR2BucketRole[] = context.coexisting
+    ? [
+        context.writeBucketRole,
+        context.writeBucketRole === "source" ? "destination" : "source",
+      ]
+    : ["source"];
+  for (const bucketRole of bucketRoles) {
+    const objectStore = createWorkspaceSnapshotObjectStore({
+      bucket: readHostedR2BucketForRole(context, bucketRole),
+      bucketRole,
+      env: input.env,
+    });
+    if (objectStore.configurationError) {
+      throw new Error(objectStore.configurationError);
+    }
+    if (!objectStore.head) {
+      throw new Error("Hosted workspace snapshot object metadata is unavailable.");
+    }
+    if (await objectStore.head(input.objectKey)) {
+      return bucketRole;
+    }
+  }
+  return null;
 }
 
 function readWorkspaceSnapshotLocalS3Environment(
