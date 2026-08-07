@@ -7,7 +7,9 @@ Updated: 2026-08-07
 ## Goal
 
 - Make hosted Linq policy denials and app-card-to-text error recovery visible
-  through existing structured logs.
+  through existing operator-queryable log surfaces: Worker structured logs for
+  policy denials, and the durable hosted runtime log for in-container app-card
+  recovery (container stdout/stderr never reaches a queryable sink).
 - Keep every diagnostic metadata-only and preserve the delivery behavior already
   shipped in the narrow egress-conformance fix.
 
@@ -15,8 +17,10 @@ Updated: 2026-08-07
 
 - A rejected Linq route or missing credential sentinel emits one sanitized
   Worker warning naming only the bounded policy reason and safe request facts.
-- A capability-check exception or definitive app-card rejection emits one
-  sanitized hosted-delivery warning before the existing text recovery continues.
+- A capability-check exception or definitive app-card rejection writes one
+  bounded, allowlist-projected warn entry to the durable hosted runtime log
+  before the existing text recovery continues; a failed or stalled log write
+  never changes delivery.
 - Expected `available: false` capability results remain ordinary fallback and do
   not warn.
 - Aborted, provider-skipped, ambiguous, timeout, rate-limit, and server-failure
@@ -55,8 +59,10 @@ Updated: 2026-08-07
 ## Verification log
 
 - `apps/cloudflare/test/runner-egress-intercept.test.ts`: 237 tests passed.
-- `packages/assistant-runtime/test/hosted-provider-effects.test.ts`: 22 tests
+- `packages/assistant-runtime/test/hosted-provider-effects.test.ts`: 23 tests
   passed.
+- `packages/assistant-runtime/test/hosted-runtime-callbacks.test.ts`: 232 tests
+  passed, including the five durable fallback-log entry proofs.
 - `packages/assistant-engine/test/assistant-channels-runtime.test.ts`: 60 tests
   passed.
 - Assistant Engine, Assistant Runtime, and Cloudflare package typechecks passed.

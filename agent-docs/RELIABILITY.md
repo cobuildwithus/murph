@@ -23,11 +23,13 @@ Last verified: 2026-08-07
   reply and reaction authorization rechecks the accepted event against the same
   thread binding, so deleting the duplicate does not remove those tools or
   change the provider contract. A capability-check exception or definitive
-  app-card rejection emits one sanitized hosted warning before the existing
-  text recovery; an ordinary `available: false` result is expected and silent.
-  The warning is metadata-only observability: it adds no state, retry, or user
-  latency and contains no message, route, delivery-key, credential, or provider
-  body values. Transport ambiguity, timeouts, rate
+  app-card rejection writes one bounded warn entry to the durable hosted
+  runtime log before the existing text recovery, because container
+  stdout/stderr never reaches a queryable sink; an ordinary `available: false`
+  result is expected and silent. The entry is fire-and-forget,
+  allowlist-projected observability: it adds no state, retry, or user latency,
+  never copies error messages, and contains no message, route, delivery-key,
+  credential, or provider body values. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.

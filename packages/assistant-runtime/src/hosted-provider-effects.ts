@@ -5,7 +5,6 @@ import {
   setLinqMessageReaction,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
-import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import type {
   AssistantMessageReaction,
   AssistantVaultFileResponseMedia,
@@ -50,6 +49,10 @@ export interface HostedProviderEffectDependencies {
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
   publicFetchImplementation?: typeof fetch | null;
+  onAppCardFallbackError?: (input: {
+    error: unknown;
+    reason: "app_card_rejected" | "capability_check_failed";
+  }) => void;
   onProviderDispatchEntered?: (() => void) | null;
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
@@ -66,6 +69,10 @@ interface HostedProviderEffectContext {
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch;
   publicFetchImplementation?: typeof fetch;
+  onAppCardFallbackError?: (input: {
+    error: unknown;
+    reason: "app_card_rejected" | "capability_check_failed";
+  }) => void;
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
   }) => Promise<void>;
@@ -359,47 +366,13 @@ async function sendHostedProviderLinqMessageDirect(
       : {}),
     ...(context.loadVaultFile ? { loadVaultFile: context.loadVaultFile } : {}),
     ...(context.loadVaultImage ? { loadVaultImage: context.loadVaultImage } : {}),
-    onAppCardFallbackError: emitHostedLinqAppCardFallbackError,
+    ...(context.onAppCardFallbackError
+      ? { onAppCardFallbackError: context.onAppCardFallbackError }
+      : {}),
     ...(context.persistAppCardTextFallback
       ? { persistAppCardTextFallback: context.persistAppCardTextFallback }
       : {}),
   });
-}
-
-function emitHostedLinqAppCardFallbackError(input: {
-  error: unknown;
-  reason: "app_card_rejected" | "capability_check_failed";
-}): void {
-  emitHostedExecutionStructuredLog({
-    component: "assistant-delivery",
-    details: {
-      eventType: "assistant.delivery.linq_app_card_fallback_error",
-      fallbackKind: "text",
-      linqAppCardFallbackReason: input.reason,
-      providerKind: "linq",
-    },
-    error: boundLinqAppCardFallbackLogError(input.error),
-    level: "warn",
-    message:
-      "Hosted Linq iMessage app-card delivery selected text recovery after an error.",
-    phase: "outbox",
-  });
-}
-
-// JSON.parse SyntaxError messages embed raw provider body snippets, so a
-// malformed Linq response must not reach the structured log unbounded.
-function boundLinqAppCardFallbackLogError(error: unknown): unknown {
-  if (!(error instanceof SyntaxError)) {
-    return error;
-  }
-  const bounded = new SyntaxError("Linq provider response was not valid JSON.");
-  bounded.stack = [
-    `SyntaxError: ${bounded.message}`,
-    ...(typeof error.stack === "string"
-      ? error.stack.split(/\r?\n/gu).filter((line) => /^\s*at /u.test(line))
-      : []),
-  ].join("\n");
-  return bounded;
 }
 
 function createHostedProviderEffectContext(
@@ -429,6 +402,9 @@ function createHostedProviderEffectContext(
       : {}),
     ...(dependencies.loadVaultImage
       ? { loadVaultImage: dependencies.loadVaultImage }
+      : {}),
+    ...(dependencies.onAppCardFallbackError
+      ? { onAppCardFallbackError: dependencies.onAppCardFallbackError }
       : {}),
     ...(dependencies.persistAppCardTextFallback
       ? { persistAppCardTextFallback: dependencies.persistAppCardTextFallback }

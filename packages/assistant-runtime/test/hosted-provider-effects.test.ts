@@ -20,7 +20,6 @@ import {
 describe("hosted provider effects", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 
@@ -414,8 +413,7 @@ describe("hosted provider effects", () => {
   });
 
   it("persists hosted app-card text fallback before its provider send", async () => {
-    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const onAppCardFallbackError = vi.fn();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
@@ -452,6 +450,7 @@ describe("hosted provider effects", () => {
     }, {
       env: { LINQ_API_TOKEN: "linq-token" },
       fetchImplementation: fetchMock,
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toMatchObject({
       idempotencyKey: "hosted-card-fallback",
@@ -464,12 +463,11 @@ describe("hosted provider effects", () => {
     expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
       fetchMock.mock.invocationCallOrder[1]!,
     );
-    expect(warn).not.toHaveBeenCalled();
+    expect(onAppCardFallbackError).not.toHaveBeenCalled();
   });
 
   it("returns the promoted identity after a direct app-card text fallback", async () => {
-    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const onAppCardFallbackError = vi.fn();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
@@ -517,6 +515,7 @@ describe("hosted provider effects", () => {
     }, {
       env: { LINQ_API_TOKEN: "linq-token" },
       fetchImplementation: fetchMock,
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toEqual({
       idempotencyKey: "hosted-card-rejected:fallback",
@@ -528,34 +527,17 @@ describe("hosted provider effects", () => {
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: "hosted-card-rejected:fallback",
     });
-    expect(warn).toHaveBeenCalledOnce();
-    const logged = JSON.parse(String(warn.mock.calls[0]?.[0])) as {
-      details?: Record<string, unknown>;
-      level?: string;
-    };
-    expect(logged).toMatchObject({
-      details: {
-        eventType: "assistant.delivery.linq_app_card_fallback_error",
-        fallbackKind: "text",
-        linqAppCardFallbackReason: "app_card_rejected",
-        operation: "send_imessage_app_card",
-        provider: "linq",
-        providerKind: "linq",
-        status: 400,
-      },
-      level: "warn",
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce();
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "LINQ_API_REQUEST_FAILED",
+      }),
+      reason: "app_card_rejected",
     });
-    const serializedLog = JSON.stringify(logged);
-    expect(serializedLog).not.toContain("+15550001");
-    expect(serializedLog).not.toContain("direct-chat");
-    expect(serializedLog).not.toContain("hosted-card-rejected");
-    expect(serializedLog).not.toContain("linq-token");
-    expect(serializedLog).not.toContain("unsupported app card");
   });
 
-  it("logs a sanitized warning when a hosted capability error selects text recovery", async () => {
-    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("observes a hosted capability error before selecting text recovery", async () => {
+    const onAppCardFallbackError = vi.fn();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       if (String(input).endsWith("/capability/check_imessage")) {
@@ -589,45 +571,23 @@ describe("hosted provider effects", () => {
     }, {
       env: { LINQ_API_TOKEN: "linq-token" },
       fetchImplementation: fetchMock,
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toMatchObject({
       providerMessageId: "fallback-message",
     });
 
-    expect(warn).toHaveBeenCalledOnce();
-    const logged = JSON.parse(String(warn.mock.calls[0]?.[0])) as {
-      details?: Record<string, unknown>;
-      errorCode?: string;
-      level?: string;
-      message?: string;
-    };
-    expect(logged).toMatchObject({
-      details: {
-        eventType: "assistant.delivery.linq_app_card_fallback_error",
-        fallbackKind: "text",
-        linqAppCardFallbackReason: "capability_check_failed",
-        operation: "check_imessage_capability",
-        provider: "linq",
-        providerKind: "linq",
-        status: 403,
-      },
-      errorCode: "authorization_error",
-      level: "warn",
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce();
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "LINQ_API_REQUEST_FAILED",
+      }),
+      reason: "capability_check_failed",
     });
-    expect(logged.message).toContain(
-      "Hosted Linq iMessage app-card delivery selected text recovery after an error.",
-    );
-    const serializedLog = JSON.stringify(logged);
-    expect(serializedLog).not.toContain("+15550001");
-    expect(serializedLog).not.toContain("direct-chat");
-    expect(serializedLog).not.toContain("hosted-card-capability-error");
-    expect(serializedLog).not.toContain("linq-token");
-    expect(serializedLog).not.toContain("Forbidden");
   });
 
-  it("bounds malformed provider JSON before the hosted fallback warning", async () => {
-    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("observes a malformed capability response error before selecting text recovery", async () => {
+    const onAppCardFallbackError = vi.fn();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       if (String(input).endsWith("/capability/check_imessage")) {
@@ -664,34 +624,17 @@ describe("hosted provider effects", () => {
     }, {
       env: { LINQ_API_TOKEN: "linq-token" },
       fetchImplementation: fetchMock,
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toMatchObject({
       providerMessageId: "fallback-message",
     });
 
-    expect(warn).toHaveBeenCalledOnce();
-    const logged = JSON.parse(String(warn.mock.calls[0]?.[0])) as {
-      details?: Record<string, unknown>;
-      errorCode?: string;
-      level?: string;
-    };
-    expect(logged).toMatchObject({
-      details: {
-        errorDetail: "Linq provider response was not valid JSON.",
-        eventType: "assistant.delivery.linq_app_card_fallback_error",
-        fallbackKind: "text",
-        linqAppCardFallbackReason: "capability_check_failed",
-        providerKind: "linq",
-      },
-      errorCode: "syntax_error",
-      level: "warn",
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce();
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: expect.any(SyntaxError),
+      reason: "capability_check_failed",
     });
-    const serializedLog = JSON.stringify(logged);
-    expect(serializedLog).not.toContain("LEAKMARKER");
-    expect(serializedLog).not.toContain("+15550001");
-    expect(serializedLog).not.toContain("direct-chat");
-    expect(serializedLog).not.toContain("hosted-card-malformed-json");
-    expect(serializedLog).not.toContain("linq-token");
   });
 
   it.each([
