@@ -11519,6 +11519,57 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
   });
 
+  it("projects bounded Linq attachment transport fields without provider request details", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+        deliveryErrorDetails: {
+          authorization: "Bearer <REDACTED_TOKEN>",
+          failureStage: "transport",
+          method: "PUT",
+          operation: "create_attachment_upload",
+          path: "https://uploads.example.test/private-object?signature=private",
+          requestOrigin: "https://uploads.example.test",
+          retryable: false,
+          timedOut: false,
+          transportErrorName: "TypeError",
+        },
+        deliveryErrorMessage: "Linq attachment upload failed before a response was returned.",
+        effectId: "effect_linq_attachment_transport",
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
+    const deliveryLogRequest = filteredLogRequests[1];
+
+    expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+      deliveryErrorSummaries: [
+        expect.objectContaining({
+          deliveryErrorDetailFailureStage: "transport",
+          deliveryErrorDetailMethod: "PUT",
+          deliveryErrorDetailOperation: "create_attachment_upload",
+          deliveryErrorDetailRetryable: false,
+          deliveryErrorDetailTimedOut: false,
+          deliveryErrorDetailTransportErrorName: "TypeError",
+        }),
+      ],
+    }));
+    const serializedLog = JSON.stringify(deliveryLogRequest);
+    expect(serializedLog).not.toContain("REDACTED_TOKEN");
+    expect(serializedLog).not.toContain("private-object");
+    expect(serializedLog).not.toContain("uploads.example.test");
+    expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
+  });
+
   it("preserves safe Telegram reaction delivery error codes", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
