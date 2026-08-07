@@ -396,6 +396,161 @@ test('detects standard authorization, parameter, and camel-case credential forms
   }
 });
 
+test('classifies encoded private-key holders without classifying certificates', () => {
+  const encodedPrivateKey = Buffer.from(
+    'synthetic Temporal client private key material',
+  ).toString('base64');
+  const encodedCertificate = Buffer.from(
+    'synthetic public Temporal client certificate',
+  ).toString('base64');
+  const escapedPem = [
+    '-----BEGIN PRIVATE KEY-----',
+    'QWxwaGFCZXRhR2FtbWFEZWx0YUVwc2lsb25aZXRhRXRhVGhldGE=',
+    '-----END PRIVATE KEY-----',
+  ].join('\\n');
+
+  for (const assignment of [
+    `HOSTED_TEMPORAL_CLIENT_KEY_BASE64="${encodedPrivateKey}"`,
+    `TEMPORAL_CLIENT_KEY_BASE64="${encodedPrivateKey}"`,
+    `HOSTED_TEMPORAL_CLIENT_KEY_PEM="${escapedPem}"`,
+    `TEMPORAL_CLIENT_KEY_PEM="${escapedPem}"`,
+  ]) {
+    assert.ok(
+      contentRuleIds(assignment).includes('credential:generic-assignment'),
+      `expected encoded private-key holder to fail for ${assignment.split('=', 1)[0]}`,
+    );
+  }
+
+  for (const assignment of [
+    'HOSTED_TEMPORAL_CLIENT_KEY_BASE64=${HOSTED_TEMPORAL_CLIENT_KEY_BASE64}',
+    'TEMPORAL_CLIENT_KEY_BASE64=process.env.TEMPORAL_CLIENT_KEY_BASE64',
+    `HOSTED_TEMPORAL_CLIENT_CERT_BASE64="${encodedCertificate}"`,
+    `TEMPORAL_CLIENT_CERT_PEM="${encodedCertificate}"`,
+  ]) {
+    assert.equal(
+      contentRuleIds(assignment).includes('credential:generic-assignment'),
+      false,
+      `expected reference or public certificate to pass for ${assignment.split('=', 1)[0]}`,
+    );
+  }
+});
+
+test('enforces encoded private-key holders through the complete tarball boundary', async () => {
+  const encodedPrivateKey = Buffer.from(
+    'synthetic Temporal client private key material',
+  ).toString('base64');
+  const encodedCertificate = Buffer.from(
+    'synthetic public Temporal client certificate',
+  ).toString('base64');
+  const escapedPem = [
+    '-----BEGIN PRIVATE KEY-----',
+    'QWxwaGFCZXRhR2FtbWFEZWx0YUVwc2lsb25aZXRhRXRhVGhldGE=',
+    '-----END PRIVATE KEY-----',
+  ].join('\\n');
+
+  for (const assignment of [
+    `HOSTED_TEMPORAL_CLIENT_KEY_BASE64="${encodedPrivateKey}"`,
+    `TEMPORAL_CLIENT_KEY_BASE64="${encodedPrivateKey}"`,
+    `HOSTED_TEMPORAL_CLIENT_KEY_PEM="${escapedPem}"`,
+    `TEMPORAL_CLIENT_KEY_PEM="${escapedPem}"`,
+  ]) {
+    const fixture = await createTarball({
+      'dist/temporal-env.js': assignment,
+      'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+    });
+    try {
+      await assert.rejects(
+        verifyReleaseArtifacts(fixture.root, fixture.packOutput),
+        /credential:generic-assignment/u,
+      );
+    } finally {
+      await fixture.cleanup();
+    }
+  }
+
+  const publicFixture = await createTarball({
+    'dist/temporal-env.js': [
+      'HOSTED_TEMPORAL_CLIENT_KEY_BASE64=${HOSTED_TEMPORAL_CLIENT_KEY_BASE64}',
+      'TEMPORAL_CLIENT_KEY_BASE64=process.env.TEMPORAL_CLIENT_KEY_BASE64',
+      `HOSTED_TEMPORAL_CLIENT_CERT_BASE64="${encodedCertificate}"`,
+      `TEMPORAL_CLIENT_CERT_PEM="${encodedCertificate}"`,
+    ].join('\n'),
+    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+  });
+  try {
+    await verifyReleaseArtifacts(publicFixture.root, publicFixture.packOutput);
+  } finally {
+    await publicFixture.cleanup();
+  }
+});
+
+test('detects serialized credential headers while allowing public forms', () => {
+  const credential = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
+  for (const header of [
+    `const headerLine = "X-API-Key: ${credential}";`,
+    `curl -H "X-API-Key: ${credential}" https://provider.example/v1`,
+    `const cookieLine = "Cookie: session=${credential}";`,
+  ]) {
+    assert.ok(
+      contentRuleIds(header).includes('credential:serialized-header'),
+      'expected serialized credential header to fail',
+    );
+  }
+
+  for (const header of [
+    'const headerLine = `X-API-Key: ${EXA_API_KEY}`;',
+    'curl -H "X-API-Key: placeholder" https://provider.example/v1',
+    'const authorizationLine = "Authorization: Bearer <token>";',
+    'const cookieLine = `Cookie: ${COOKIE_HEADER}`;',
+    'const prose = "The X-API-Key header is required.";',
+    'const headerName = "X-API-Key";',
+  ]) {
+    assert.equal(
+      contentRuleIds(header).includes('credential:serialized-header'),
+      false,
+      'expected serialized header reference, placeholder, or prose to pass',
+    );
+  }
+});
+
+test('enforces serialized credential headers through the complete tarball boundary', async () => {
+  const credential = ['uY7nQ2pL9vR4', 'xT8mW3cD6fH1'].join('');
+  for (const header of [
+    `const headerLine = "X-API-Key: ${credential}";`,
+    `curl -H "X-API-Key: ${credential}" https://provider.example/v1`,
+    `const cookieLine = "Cookie: session=${credential}";`,
+  ]) {
+    const fixture = await createTarball({
+      'README.md': header,
+      'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+    });
+    try {
+      await assert.rejects(
+        verifyReleaseArtifacts(fixture.root, fixture.packOutput),
+        /credential:serialized-header/u,
+      );
+    } finally {
+      await fixture.cleanup();
+    }
+  }
+
+  const publicFixture = await createTarball({
+    'README.md': [
+      'const headerLine = `X-API-Key: ${EXA_API_KEY}`;',
+      'curl -H "X-API-Key: placeholder" https://provider.example/v1',
+      'const authorizationLine = "Authorization: Bearer <token>";',
+      'const cookieLine = `Cookie: ${COOKIE_HEADER}`;',
+      'The X-API-Key header is required.',
+    ].join('\n'),
+    'package.json': '{"name":"@fixture/package","version":"1.0.0"}',
+  });
+  try {
+    await verifyReleaseArtifacts(publicFixture.root, publicFixture.packOutput);
+  } finally {
+    await publicFixture.cleanup();
+  }
+});
+
 test('rejects sensitive credential filenames', async () => {
   const fixture = await createTarball({
     '.env.production': 'SERVICE_TOKEN=not-a-real-value',

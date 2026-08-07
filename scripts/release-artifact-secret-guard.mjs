@@ -54,6 +54,8 @@ const authorizationCredentialPattern =
   /\b(Bearer|Basic)[ \t]+([A-Za-z0-9._~+/$={}-]{1,4096})/gu;
 const scopedAuthorizationCredentialPattern =
   /\b(?:authorization(?:Header)?|authHeader)\b["'`\]\s,:=()]{1,32}\b(Bearer|Basic)[ \t]+([A-Za-z0-9._~+/$={}-]{1,4096})/giu;
+const serializedHeaderCredentialPattern =
+  /(["'`])([A-Za-z][A-Za-z0-9_-]{0,127})[ \t]*:[ \t]*([^"'`\r\n]{1,4096})\1/gu;
 const privateJwkPatterns = [
   /\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["'][\s\S]{0,2000}?\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["']/iu,
   /\bd\s*["']?\s*:\s*["']([A-Za-z0-9_-]{32,})["'][\s\S]{0,2000}?\bkty\s*["']?\s*:\s*["'](?:EC|OKP|RSA)["']/iu,
@@ -80,6 +82,7 @@ const mnemonicPattern =
 
 const exactPlaceholderValues = new Set([
   '...',
+  '<token>',
   'api-key',
   'changeme',
   'placeholder',
@@ -304,6 +307,9 @@ function isCredentialKey(key, options = {}) {
   }
 
   const parts = credentialKeyParts(key);
+  while (['base64', 'pem'].includes(parts.at(-1))) {
+    parts.pop();
+  }
   const terminal = parts.at(-1);
   if (credentialTerminalParts.has(terminal)) {
     return true;
@@ -458,6 +464,11 @@ function contentRuleIds(text, options = {}) {
     || authorizationHasCredential(scopedAuthorizationCredentialPattern, text)
   ) {
     ruleIds.add('credential:authorization-header');
+  }
+  if (
+    parameterHasCredential(serializedHeaderCredentialPattern, text, 2, 3)
+  ) {
+    ruleIds.add('credential:serialized-header');
   }
   if (privateJwkPatterns.some((pattern) => pattern.test(text))) {
     ruleIds.add('private-key:jwk');
