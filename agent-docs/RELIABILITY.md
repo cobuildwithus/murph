@@ -941,23 +941,27 @@ input. Scheduled images run synchronously; background image and physical-note
 continuation stays message-authorized. Existing Web owners still decide whether a
 write is saved, unchanged, unavailable, or ambiguous.
 
-Every hosted preference origin participates in one owner-shared lexicographic order:
-the trusted source `occurredAt`, then the durable mailbox source sequence as a
-tie-breaker. Accepted inputs use their original conversation row, scheduled updates
-use the exact occurrence and deterministic identity scoped by operation and requested
-fields, and Settings or event updates append their existing preference wake before
-projection. Each field stores the exact source sequence that won, even when that
-pointer is numerically lower than the previous winner, so either callback execution
-order converges. Retention keeps only retired structural mailbox rows still referenced
-by current per-field source pointers; the ordering timestamp therefore survives
-without preserving payload content or adding a state owner, while superseded rows
-return to ordinary pruning. A pre-cutover numeric pointer whose source row was already
-pruned uses its old sequence barrier once; only a higher source sequence may replace
-it, and that replacement immediately restores exact-source ordering. Scheduled
-Clinical Records calls return a stable
-authenticated launcher and create no intent; the ordinary 15-minute, single-use claim
-begins only when the member opens that launcher. Ordinary product feedback remains
-accepted-message-only and scheduled turns create no feedback obligation.
+Every hosted preference origin participates in one Web-owned field-local
+lexicographic order: the trusted source `occurredAt`, then its durable source causal
+sequence as a tie-breaker. Accepted inputs use their original conversation row,
+scheduled updates use the exact occurrence, and Settings or event updates retain
+their existing source metadata. Web appends one preference event containing only the
+sparse fields that order approves; an all-stale request appends nothing. Canonical
+field pointers then reference that approved event, and the runtime applies approved
+events by their own mailbox append sequence. This separates source-order admission
+from runtime delivery order: either callback execution order converges in Web, while
+runtime retries cannot use an older source sequence to overwrite a later approved
+event. Deterministic identities include the occurrence or accepted input, operation,
+requested fields, and exact provider tool-call id. Replaying the same identity with
+different approved bytes fails retryably; distinct commands in one turn remain
+distinct. No receipt table, second preference owner, or repair queue is introduced.
+Scheduled Clinical Records calls return a stable authenticated launcher and create no
+intent. The ordinary 15-minute, single-use claim begins only when the member opens
+that exact launcher; transient creation failure remains retryable, and successful
+creation stages the claim in the existing private browser-history owner without
+exposing it in the visible URL or replacing unrelated history state. Ordinary product
+feedback remains accepted-message-only and scheduled turns create no feedback
+obligation.
 
 Progress updates are the deliberate exception: queue-only cron work has no active
 reader and an ephemeral update could arrive after the final outbox reply. The

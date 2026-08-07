@@ -27,29 +27,29 @@ describe("assistant product feedback", () => {
       summary: "Interested in the beta and alpha updates.",
     };
     const first = buildAssistantProductFeedbackIdempotencyKey({
-      authority: { assistantInputId: "assistant_input_1", kind: "accepted_input" },
+      acceptedInputIds: ["assistant_input_1"],
       feedback,
     });
     const reordered = buildAssistantProductFeedbackIdempotencyKey({
-      authority: { assistantInputId: "assistant_input_1", kind: "accepted_input" },
+      acceptedInputIds: ["assistant_input_1"],
       feedback: {
         ...feedback,
         relatedChangelogItemIds: ["alpha", "beta"],
       },
     });
     const reworded = buildAssistantProductFeedbackIdempotencyKey({
-      authority: { assistantInputId: "assistant_input_1", kind: "accepted_input" },
+      acceptedInputIds: ["assistant_input_1"],
       feedback: {
         ...feedback,
         summary: "Different concise wording for the same explicit feedback.",
       },
     });
     const nextInput = buildAssistantProductFeedbackIdempotencyKey({
-      authority: { assistantInputId: "assistant_input_2", kind: "accepted_input" },
+      acceptedInputIds: ["assistant_input_2"],
       feedback,
     });
     const liveSteeredInput = buildAssistantProductFeedbackIdempotencyKey({
-      authority: { assistantInputId: "assistant_input_2", kind: "accepted_input" },
+      acceptedInputIds: ["assistant_input_1", "assistant_input_2"],
       feedback,
     });
 
@@ -96,10 +96,7 @@ describe("assistant product feedback", () => {
     const acceptProductFeedbackCandidate = vi.fn();
     const recorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
-      getAuthority: () => ({
-        assistantInputId: acceptedInputIds.at(-1)!,
-        kind: "accepted_input",
-      }),
+      getAcceptedInputIds: () => acceptedInputIds,
       productFeedbackCandidateSink: { acceptProductFeedbackCandidate },
     });
     if (!recorder) {
@@ -118,10 +115,7 @@ describe("assistant product feedback", () => {
     expect(recorder.readProductFeedback()).toEqual({
       ...feedback,
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-        authority: {
-          assistantInputId: acceptedInputIds.at(-1)!,
-          kind: "accepted_input",
-        },
+        acceptedInputIds,
         feedback,
       }),
     });
@@ -256,10 +250,7 @@ describe("assistant product feedback", () => {
     expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled();
     expect(productFeedbackRecorder.readProductFeedback()).toEqual({
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-        authority: {
-          assistantInputId: "assistant_input_1",
-          kind: "accepted_input",
-        },
+        acceptedInputIds: ["assistant_input_1"],
         feedback: {
           kind: "feature_interest",
           relatedChangelogItemIds: ["native-message-formatting"],

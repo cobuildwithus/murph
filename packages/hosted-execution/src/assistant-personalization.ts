@@ -41,10 +41,12 @@ export type HostedRuntimeAssistantPersonalizationToolRequest =
 const hostedRuntimeAssistantPersonalizationToolAuthoritySchema = z.union([
   z.object({
     assistantInputId: z.string().regex(/^ain_[0-9a-f]{32}$/u),
+    toolCallId: z.string().trim().min(1).max(256).optional(),
   }).strict(),
   z.object({
     automationId: z.string().trim().min(1).max(256),
     occurrenceAt: z.string().datetime({ offset: true }),
+    toolCallId: z.string().trim().min(1).max(256).optional(),
   }).strict(),
 ]);
 

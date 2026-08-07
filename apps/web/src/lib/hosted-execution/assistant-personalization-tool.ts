@@ -61,8 +61,7 @@ interface HostedRuntimeAssistantPersonalityTransactionResult {
 
 interface HostedRuntimeAssistantPreferenceWriteAuthority {
   occurredAt: string;
-  preferenceCausalSeq?: string;
-  updateId?: string;
+  updateId: string;
 }
 
 export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
@@ -117,17 +116,12 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
           causalOrigin: "turn",
           memberId: input.memberId,
           occurredAt: writeAuthority.occurredAt,
-          ...(writeAuthority.preferenceCausalSeq === undefined
-            ? {}
-            : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
           preferences: {
             ...(request.tone === undefined ? {} : { tone: request.tone }),
             ...(request.voice === undefined ? {} : { voice: request.voice }),
           },
           prisma: tx,
-          ...(writeAuthority.updateId === undefined
-            ? {}
-            : { updateId: writeAuthority.updateId }),
+          updateId: writeAuthority.updateId,
         })
       : null;
     const model = await readHostedMemberAssistantModelPreference({
@@ -202,16 +196,11 @@ async function handleHostedRuntimeAssistantPersonalityUpdate(input: {
       causalOrigin: "turn",
       memberId: input.memberId,
       occurredAt: writeAuthority.occurredAt,
-      ...(writeAuthority.preferenceCausalSeq === undefined
-        ? {}
-        : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
       preferences: {
         personality: input.personality,
       },
       prisma: tx,
-      ...(writeAuthority.updateId === undefined
-        ? {}
-        : { updateId: writeAuthority.updateId }),
+      updateId: writeAuthority.updateId,
     });
     const outcomes = buildHostedAssistantPersonalityUpdateOutcomes({
       appliedFields: styleResult.appliedFields,
@@ -332,15 +321,11 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
   if ("automationId" in input.authority) {
     return {
       occurredAt: input.authority.occurrenceAt,
-      updateId: createHash("sha256")
-        .update(JSON.stringify({
-          automationId: input.authority.automationId,
-          occurrenceAt: input.authority.occurrenceAt,
-          operation: input.operation,
-          requestedFields: [...input.requestedFields].sort(),
-          schema: "murph.scheduled-assistant-preference-update.v1",
-        }))
-        .digest("hex"),
+      updateId: buildHostedAssistantPreferenceUpdateId({
+        authority: input.authority,
+        operation: input.operation,
+        requestedFields: input.requestedFields,
+      }),
     };
   }
   await requireHostedAssistantStyleInputAuthority({
@@ -359,8 +344,37 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
   }
   return {
     occurredAt: inputAuthority.occurredAt,
-    preferenceCausalSeq: inputAuthority.causalSeq,
+    updateId: buildHostedAssistantPreferenceUpdateId({
+      authority: input.authority,
+      operation: input.operation,
+      requestedFields: input.requestedFields,
+    }),
   };
+}
+
+function buildHostedAssistantPreferenceUpdateId(input: {
+  authority: HostedRuntimeAssistantPersonalizationToolAuthority;
+  operation: "personality" | "tone-voice";
+  requestedFields: readonly AssistantPreferenceFieldId[];
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      origin: "automationId" in input.authority
+        ? {
+            automationId: input.authority.automationId,
+            kind: "automation_occurrence",
+            occurrenceAt: input.authority.occurrenceAt,
+          }
+        : {
+            assistantInputId: input.authority.assistantInputId,
+            kind: "accepted_input",
+          },
+      operation: input.operation,
+      requestedFields: [...input.requestedFields].sort(),
+      schema: "murph.assistant-preference-update.v2",
+      toolCallId: input.authority.toolCallId ?? null,
+    }))
+    .digest("hex");
 }
 
 async function requireHostedAssistantStyleInputAuthority(input: {

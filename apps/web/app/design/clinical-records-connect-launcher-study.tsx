@@ -15,6 +15,9 @@ export function ClinicalRecordsConnectLauncherStudy() {
       <StudyState label="Launcher needs sign-in">
         <RecordsConnectLauncherState state="authentication-required" />
       </StudyState>
+      <StudyState label="Launcher can be retried">
+        <RecordsConnectLauncherState state="launch-failed" />
+      </StudyState>
     </div>
   );
 }

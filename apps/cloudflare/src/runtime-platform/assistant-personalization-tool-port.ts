@@ -46,13 +46,16 @@ function buildAssistantPersonalizationAuthorityPath(
   authority: HostedRuntimeAssistantPersonalizationToolAuthority,
 ): string {
   if ('assistantInputId' in authority) {
-    return `${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=${
-      encodeURIComponent(authority.assistantInputId)
-    }`;
+    const search = new URLSearchParams({
+      assistantInputId: authority.assistantInputId,
+      ...(authority.toolCallId ? { toolCallId: authority.toolCallId } : {}),
+    });
+    return `${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?${search}`;
   }
   const search = new URLSearchParams({
     automationId: authority.automationId,
     occurrenceAt: authority.occurrenceAt,
+    ...(authority.toolCallId ? { toolCallId: authority.toolCallId } : {}),
   });
   return `${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?${search}`;
 }

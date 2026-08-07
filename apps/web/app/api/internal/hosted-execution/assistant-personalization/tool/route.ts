@@ -63,10 +63,12 @@ function readAssistantUpdateAuthority(request: Request):
   const assistantInputId = search.get("assistantInputId");
   const automationId = search.get("automationId");
   const occurrenceAt = search.get("occurrenceAt");
+  const toolCallId = search.get("toolCallId");
   if (
     assistantInputId === null
     && automationId === null
     && occurrenceAt === null
+    && toolCallId === null
   ) {
     return null;
   }
@@ -78,6 +80,7 @@ function readAssistantUpdateAuthority(request: Request):
     return {
       authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
         assistantInputId,
+        ...(toolCallId ? { toolCallId } : {}),
       }),
     };
   }
@@ -90,6 +93,7 @@ function readAssistantUpdateAuthority(request: Request):
       authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
         automationId,
         occurrenceAt,
+        ...(toolCallId ? { toolCallId } : {}),
       }),
     };
   }

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearClinicalRecordsConnectIntentFromBrowser,
   hasStagedClinicalRecordsConnectIntentForCurrentPath,
+  isClinicalRecordsConnectLauncherForCurrentPath,
+  stageClinicalRecordsConnectIntentInBrowser,
   takeClinicalRecordsConnectIntentFromBrowser,
 } from "@/src/lib/clinical-records/browser-connect-intent";
 
@@ -52,6 +54,40 @@ describe("Clinical Records browser connect intent", () => {
     clearClinicalRecordsConnectIntentFromBrowser();
     expect(hasStagedClinicalRecordsConnectIntentForCurrentPath()).toBe(false);
     expect(browser.history.state).toEqual({ __NA: true });
+  });
+
+  it("stages a newly created launcher claim without exposing it or replacing history state", () => {
+    const browser = installBrowser(
+      "https://join.example.test/records/connect?launch=clinical-records#return=keep",
+      { __NA: true },
+    );
+
+    expect(isClinicalRecordsConnectLauncherForCurrentPath()).toBe(true);
+    stageClinicalRecordsConnectIntentInBrowser(CLAIM);
+
+    expect(browser.location.href).toBe(
+      "https://join.example.test/records/connect?launch=clinical-records#return=keep",
+    );
+    expect(browser.history.state).toMatchObject({
+      __NA: true,
+      __murphClinicalRecordsConnectIntent: CLAIM,
+    });
+    expect(hasStagedClinicalRecordsConnectIntentForCurrentPath()).toBe(true);
+  });
+
+  it("recognizes only the exact generic Clinical Records launcher", () => {
+    const browser = installBrowser(
+      "https://join.example.test/records/connect?launch=clinical-records",
+      {},
+    );
+    expect(isClinicalRecordsConnectLauncherForCurrentPath()).toBe(true);
+
+    browser.setUrl(
+      "https://join.example.test/records/connect?launch=clinical-records&extra=1",
+    );
+    expect(isClinicalRecordsConnectLauncherForCurrentPath()).toBe(false);
+    browser.setUrl("https://join.example.test/records/connect?launch=other");
+    expect(isClinicalRecordsConnectLauncherForCurrentPath()).toBe(false);
   });
 
   it("scrubs malformed claims and clears an older staged bearer", () => {

@@ -157,6 +157,7 @@ describe("Clinical Records connect page", () => {
         }),
       ),
       {
+        historyState: { __NA: true },
         location: {
           hash: "",
           href: "https://join.example.test/records/connect?launch=clinical-records",
@@ -175,13 +176,72 @@ describe("Clinical Records connect page", () => {
         url: "/api/clinical-records/connect-intents",
       });
       expect(rendered.replaceState).toHaveBeenCalledWith(
-        null,
+        expect.objectContaining({
+          __NA: true,
+          __murphClinicalRecordsConnectIntent: claim,
+        }),
         "",
-        `/records/connect#clinicalRecordsIntent=${claim}`,
+        "https://join.example.test/records/connect?launch=clinical-records",
       );
+      expect(rendered.window.location.href).not.toContain(claim);
       expect(rendered.container.textContent).toContain(
         "Review how Murph uses your health data",
       );
+    });
+  });
+
+  it("retries a transient launcher failure in place", async () => {
+    const claim = `cr_${"r".repeat(32)}`;
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new Error("temporary connect-intent failure"))
+      .mockResolvedValueOnce({
+        claim,
+        expiresAt: "2026-07-16T18:15:00.000Z",
+        ok: true,
+      });
+    const { RecordsConnectClient } = await import(
+      "../app/(dashboard)/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, {
+        authenticated: true,
+        launchConnectIntent: true,
+      }),
+      {
+        historyState: {},
+        location: {
+          hash: "",
+          href: "https://join.example.test/records/connect?launch=clinical-records",
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "?launch=clinical-records",
+        },
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+      expect(rendered.container.textContent).toContain(
+        "Couldn't start Clinical Records",
+      );
+    });
+    const retryButton = Array.from(
+      rendered.container.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Try again"));
+    assert.ok(retryButton);
+    await act(async () => {
+      retryButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+      expect(rendered.container.textContent).toContain(
+        "Review how Murph uses your health data",
+      );
+      expect(rendered.window.location.href).not.toContain(claim);
     });
   });
 

@@ -113,9 +113,6 @@ export type AssistantHostedInvocationScope =
   | AssistantHostedAcceptedInputInvocationScope
   | AssistantHostedScheduledInvocationScope
 
-export type AssistantHostedProductFeedbackAuthority =
-  AssistantHostedAcceptedInputInvocationScope['origin']
-
 export type AssistantHostedVaultFileSendResult =
   | {
       approvalUrl: string
@@ -182,7 +179,7 @@ export interface AssistantHostedToolContext {
   }): void
   currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
-  currentProductFeedbackAuthority?(): AssistantHostedProductFeedbackAuthority | null
+  currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(
@@ -318,20 +315,6 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     })
   }
-  const readCurrentProductFeedbackAuthority =
-    (): AssistantHostedProductFeedbackAuthority | null => {
-      const acceptedInputId = (
-        input.getProductFeedbackAcceptedInputIds?.() ?? []
-      ).at(-1) ?? null
-      if (acceptedInputId) {
-        return {
-          assistantInputId: acceptedInputId,
-          kind: 'accepted_input',
-          sessionId: readDeliveryContext().session.sessionId,
-        }
-      }
-      return null
-    }
   let subscriptionActionClaimed = false
   let imessageContactActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
@@ -499,7 +482,8 @@ export function createAssistantHostedToolContext(input: {
     recordNewsletterSendResult: input.recordNewsletterSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
-    currentProductFeedbackAuthority: readCurrentProductFeedbackAuthority,
+    currentProductFeedbackAcceptedInputIds: () =>
+      input.getProductFeedbackAcceptedInputIds?.() ?? [],
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),

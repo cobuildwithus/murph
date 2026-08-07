@@ -2408,7 +2408,15 @@ occurrence is authority in its own right and is never represented as a message.
 Response cards, private Clinical Records connect links, route-eligible
 style/personalization, and synchronous image generation may use that exact
 occurrence authority. Their existing owners remain unchanged: Web owns Clinical
-Records intents and durable personalization writes. Ordinary product feedback and
+Records intents and durable personalization writes. A Clinical Records occurrence
+returns one stable authenticated launcher; the browser creates the short-lived intent
+only after current human navigation, stages its claim in the existing private history
+state, and can retry a transient intent-creation failure. Personalization writes append
+only the sparse fields that Web approves under the field-local `(occurredAt, source
+causal sequence)` order. The runtime applies those approved writes in their preference
+event append order, so delayed source callbacks cannot reorder canonical vault state.
+An exact provider tool-call id distinguishes multiple commands from one accepted input
+or scheduled occurrence without becoming authority. Ordinary product feedback and
 verified-private support escalation remain accepted-message capabilities; scheduled
 turns create neither a feedback candidate nor a delivery-linked feedback obligation.
 Background image completion and its physical-note continuation remain bound to a

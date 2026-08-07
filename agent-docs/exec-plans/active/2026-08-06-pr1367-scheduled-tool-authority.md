@@ -67,6 +67,15 @@ message-bound effects.
   scheduled ordinary feedback eligibility instead of adding another durable state
   or delivery owner. Focused proof covers both preference callback orders,
   Settings/event ordering, and scheduled feedback unavailability.
+- Final ReviewGPT round 3 found that Web's accepted source ordering could still
+  be undone when runtime applied raw source sequences, that the Clinical Records
+  launcher did not survive sign-in or transient intent-creation failure safely,
+  and that feedback authority retained an unnecessary wrapper. The candidate now
+  appends only Web-approved sparse preference fields and applies them in approved
+  event order, propagates exact provider tool-call identity for distinct same-turn
+  commands and replay dedupe, makes the exact launcher resumable and retryable while
+  staging the claim in the existing private browser-history owner, and restores the
+  accepted-input id list as the feedback boundary.
 - Focused owner suites pass, including 278 assistant-runtime phase tests and a
   Strict Mode launcher replay test. The full-stack scheduled-image scenario
   observed the expected image upload, attachment, and Linq delivery, then timed

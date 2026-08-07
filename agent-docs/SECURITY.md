@@ -851,6 +851,11 @@ additive exact scheduled pair. Web verifies the signed, member-bound runtime
 callback and active hosted access in both cases; accepted-input writes retain their
 mailbox and current-route causal checks, while scheduled writes never fabricate a
 conversation message or participant. Scheduled authority does not bypass existing
-channel or audience eligibility. Clinical Records links remain private and use an
-operation-scoped retry key. Ordinary feedback and verified-private support escalation
-both require accepted-message authority; scheduled turns receive neither capability.
+channel or audience eligibility. An optional exact provider tool-call id is retry and
+command identity only: it cannot supply, replace, or widen accepted-input or scheduled
+authority. Clinical Records links remain private and use an operation-scoped retry
+key. Only the exact authenticated launcher may resume through sign-in. Its one-time
+claim is staged in browser history state and removed from any legacy visible fragment
+without erasing unrelated state or URL context. Ordinary feedback and verified-private
+support escalation both require accepted-message authority; scheduled turns receive
+neither capability.

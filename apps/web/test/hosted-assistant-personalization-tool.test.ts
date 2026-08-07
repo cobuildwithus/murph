@@ -342,6 +342,38 @@ describe("hosted assistant personalization tool owner adapter", () => {
     );
   });
 
+  it("scopes accepted-turn retry identity to the provider tool call", async () => {
+    const assistantInputId = "ain_55555555555555555555555555555555";
+    await handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId, toolCallId: "call_style_one" },
+      memberId: "member_personalization_1",
+      request: { action: "update_personality", personality: { humor: 7 } },
+    });
+    await handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId, toolCallId: "call_style_two" },
+      memberId: "member_personalization_1",
+      request: { action: "update_personality", personality: { humor: 9 } },
+    });
+
+    const firstUpdateId = mocks.upsertHostedMemberAssistantPreferencesTx
+      .mock.calls[0]?.[0]?.updateId;
+    const secondUpdateId = mocks.upsertHostedMemberAssistantPreferencesTx
+      .mock.calls[1]?.[0]?.updateId;
+    expect(firstUpdateId).toBe(buildAcceptedPreferenceUpdateId({
+      assistantInputId,
+      operation: "personality",
+      requestedFields: ["humor"],
+      toolCallId: "call_style_one",
+    }));
+    expect(secondUpdateId).toBe(buildAcceptedPreferenceUpdateId({
+      assistantInputId,
+      operation: "personality",
+      requestedFields: ["humor"],
+      toolCallId: "call_style_two",
+    }));
+    expect(secondUpdateId).not.toBe(firstUpdateId);
+  });
+
   it("keeps a group style update bound to the synthetic room runtime", async () => {
     const routeAuthority = {
       channel: "linq",
@@ -469,7 +501,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
       causalOrigin: "turn",
       memberId: "member_group_runtime",
       occurredAt: expect.any(String),
-      preferenceCausalSeq: "42",
       preferences: {
         personality: {
           detail: 7,
@@ -479,6 +510,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
         },
       },
       prisma: expect.objectContaining({ tx: true }),
+      updateId: buildAcceptedPreferenceUpdateId({
+        assistantInputId: "ain_67676767676767676767676767676767",
+        operation: "personality",
+        requestedFields: ["detail", "humor", "push", "unhinged"],
+      }),
     });
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_group_runtime",
@@ -804,7 +840,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
       causalOrigin: "turn",
       memberId: "member_personalization_1",
       occurredAt: expect.any(String),
-      preferenceCausalSeq: "42",
       preferences: {
         personality: {
           detail: 9,
@@ -813,6 +848,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
         },
       },
       prisma: expect.objectContaining({ tx: true }),
+      updateId: buildAcceptedPreferenceUpdateId({
+        assistantInputId: "ain_99999999999999999999999999999999",
+        operation: "personality",
+        requestedFields: ["detail", "humor", "push"],
+      }),
     });
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_personalization_1",
@@ -894,9 +934,13 @@ describe("hosted assistant personalization tool owner adapter", () => {
       expect.objectContaining({
         causalOrigin: "turn",
         memberId: "member_personalization_1",
-        preferenceCausalSeq: "42",
         preferences: { voice: "warm" },
         prisma: expect.objectContaining({ tx: true }),
+        updateId: buildAcceptedPreferenceUpdateId({
+          assistantInputId: "ain_22222222222222222222222222222222",
+          operation: "tone-voice",
+          requestedFields: ["voice"],
+        }),
       }),
     );
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
@@ -965,11 +1009,35 @@ function buildScheduledPreferenceUpdateId(
 ): string {
   return createHash("sha256")
     .update(JSON.stringify({
-      automationId: "automation_daily_style",
-      occurrenceAt: "2026-08-06T14:30:00.000Z",
+      origin: {
+        automationId: "automation_daily_style",
+        kind: "automation_occurrence",
+        occurrenceAt: "2026-08-06T14:30:00.000Z",
+      },
       operation,
       requestedFields: [...requestedFields].sort(),
-      schema: "murph.scheduled-assistant-preference-update.v1",
+      schema: "murph.assistant-preference-update.v2",
+      toolCallId: null,
+    }))
+    .digest("hex");
+}
+
+function buildAcceptedPreferenceUpdateId(input: {
+  assistantInputId: string;
+  operation: "personality" | "tone-voice";
+  requestedFields: string[];
+  toolCallId?: string;
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      origin: {
+        assistantInputId: input.assistantInputId,
+        kind: "accepted_input",
+      },
+      operation: input.operation,
+      requestedFields: [...input.requestedFields].sort(),
+      schema: "murph.assistant-preference-update.v2",
+      toolCallId: input.toolCallId ?? null,
     }))
     .digest("hex");
 }

@@ -2459,6 +2459,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'personalization'
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
+      toolCallId?: string
     }
   | {
       kind: 'plan-usage'
@@ -2573,6 +2574,7 @@ export function readMurphDynamicToolRequest(
   const assistantStyleRequest = readAssistantStyleDynamicToolRequest({
     arguments: request.arguments,
     tool: request.tool,
+    toolCallId: request.toolCallId,
   })
   if (assistantStyleRequest) {
     return assistantStyleRequest
@@ -2793,6 +2795,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'personalization',
         request: parsed.request,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
@@ -3744,6 +3747,7 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executePersonalizationTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
+        toolCallId: input.request.toolCallId ?? null,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
@@ -4403,6 +4407,7 @@ function resolveHostedAssistantPersonalizationToolAuthority(
 async function executePersonalizationTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeAssistantPersonalizationModelToolRequest
+  toolCallId: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const personalizationTool = input.hostedToolContext?.personalizationTool ?? null
   if (!personalizationTool) {
@@ -4421,7 +4426,11 @@ async function executePersonalizationTool(input: {
   try {
     const result = await personalizationTool.request(
       input.request,
-      authority ?? undefined,
+      authority === null
+        ? undefined
+        : input.toolCallId
+          ? { ...authority, toolCallId: input.toolCallId }
+          : authority,
     )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {

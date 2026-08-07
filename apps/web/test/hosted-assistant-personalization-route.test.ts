@@ -125,6 +125,31 @@ describe("hosted assistant personalization internal route", () => {
     });
   });
 
+  it("binds an exact tool call identity to accepted-input authority", async () => {
+    const payload = JSON.stringify({ action: "update", tone: "casual" });
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool?assistantInputId=ain_0123456789abcdef0123456789abcdef&toolCallId=call_style_one",
+      {
+        body: payload,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).toHaveBeenCalledWith({
+      authority: {
+        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+        toolCallId: "call_style_one",
+      },
+      memberId: "member_personalization_route",
+      request: { action: "update", tone: "casual" },
+      scheduleMailboxWake: expect.any(Function),
+    });
+  });
+
   it("binds an exact scheduled occurrence to an update without changing the request body", async () => {
     const payload = JSON.stringify({ action: "update", tone: "casual" });
     const request = new Request(

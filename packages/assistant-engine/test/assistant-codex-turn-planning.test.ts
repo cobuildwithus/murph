@@ -102,8 +102,10 @@ import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
 } from '../src/assistant/turn-finalizer.js'
-import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
-import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.js'
+import type {
+  AssistantMessageInput,
+  AssistantTurnSharedPlan,
+} from '../src/assistant/service-contracts.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
@@ -3375,7 +3377,6 @@ describe('assistant Codex turn planning', () => {
         hostedToolContext: {
           ...createHostedToolContext(),
           clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
-          currentProductFeedbackAuthority: () => null,
           personalizationTool: { request: vi.fn() },
           phoneCalls: { start: vi.fn() },
           physicalNotes: { send: vi.fn() },

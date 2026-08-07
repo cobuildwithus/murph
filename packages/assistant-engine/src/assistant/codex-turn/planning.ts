@@ -817,7 +817,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
     })
   const productFeedbackAuthorized =
-    input.hostedToolContext?.currentProductFeedbackAuthority?.() != null ||
     resolveAssistantProductFeedbackAcceptedInputIds(
       input.acceptedInputItems ?? [],
     ).length > 0

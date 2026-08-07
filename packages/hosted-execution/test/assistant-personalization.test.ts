@@ -12,15 +12,19 @@ describe("hosted assistant personalization contract", () => {
   it("accepts only canonical accepted-input or scheduled-occurrence authority", () => {
     expect(parseHostedRuntimeAssistantPersonalizationToolAuthority({
       assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+      toolCallId: " call_style_one ",
     })).toEqual({
       assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+      toolCallId: "call_style_one",
     });
     expect(parseHostedRuntimeAssistantPersonalizationToolAuthority({
       automationId: "automation_daily_style",
       occurrenceAt: "2026-08-06T14:30:00.000Z",
+      toolCallId: "call_style_two",
     })).toEqual({
       automationId: "automation_daily_style",
       occurrenceAt: "2026-08-06T14:30:00.000Z",
+      toolCallId: "call_style_two",
     });
 
     for (const authority of [
@@ -41,6 +45,10 @@ describe("hosted assistant personalization contract", () => {
         assistantInputId: "ain_0123456789abcdef0123456789abcdef",
         automationId: "automation_daily_style",
         occurrenceAt: "2026-08-06T14:30:00.000Z",
+      },
+      {
+        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+        toolCallId: "",
       },
     ]) {
       expect(() => parseHostedRuntimeAssistantPersonalizationToolAuthority(

@@ -17,7 +17,11 @@ import {
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
 
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import {
+  appendHostedMailboxEnvelopeTx,
+  findHostedMailboxItemByDedupeKeyTx,
+  readHostedMailboxWakeByDedupeKey,
+} from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "./errors";
 import { lockHostedMemberRow } from "./shared";
 
@@ -110,105 +114,68 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
   }
   const currentOccurredAt =
     await readHostedAssistantPreferenceOccurredAtByCausalSeq({
-      currentCausalSeq: {
-        persona: member.assistantPersonaCausalSeq,
-        personality: {
-          detail: member.assistantDetailCausalSeq,
-          humor: member.assistantHumorCausalSeq,
-          push: member.assistantPushCausalSeq,
-          unhinged: member.assistantUnhingedCausalSeq,
-        },
-        tone: member.assistantToneCausalSeq,
-        voice: member.assistantVoiceCausalSeq,
-      },
+      currentCausalSeq: readHostedMemberAssistantPreferenceCausalSeq(member),
       memberId: input.memberId,
       prisma: input.prisma,
     });
 
-  let append: Awaited<ReturnType<typeof appendHostedMailboxEnvelopeTx>> | null =
-    null;
-  let requestedCausalSeq = input.preferenceCausalSeq === undefined
+  const currentCausalSeq = readHostedMemberAssistantPreferenceCausalSeq(member);
+  const eventId = input.updateId === undefined
     ? null
-    : BigInt(input.preferenceCausalSeq);
-  if (input.updateId !== undefined) {
-    const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
-      ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
-      eventId: buildHostedMemberPreferencesUpdatedEventId({
+    : buildHostedMemberPreferencesUpdatedEventId({
         memberId: input.memberId,
         updateId: input.updateId,
-      }),
-      memberId: input.memberId,
-      occurredAt: input.occurredAt,
-      preferences: input.preferences,
-      requestedFields: resolveHostedAssistantPreferenceRequestedFields(
-        input.preferences,
-      ),
-    });
-    append = await appendHostedMailboxEnvelopeTx({
-      envelope: wake,
+      });
+  if (eventId) {
+    const existing = await findHostedMailboxItemByDedupeKeyTx({
+      dedupeKey: eventId,
       tx: input.prisma,
+      userId: input.memberId,
     });
-    assertHostedMemberPreferenceWakeAppend(append);
-    requestedCausalSeq = BigInt(append.item.causalSeq!);
-  }
-  if (requestedCausalSeq === null) {
-    const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
-      ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
-      eventId: buildHostedMemberPreferencesUpdatedEventId({
+    if (existing) {
+      const existingWake = await readHostedMailboxWakeByDedupeKey({
+        dedupeKey: eventId,
+        prisma: input.prisma,
+        userId: input.memberId,
+      });
+      assertHostedMemberPreferenceWakeReplay({
+        causalOrigin: input.causalOrigin,
+        eventId,
         memberId: input.memberId,
-        updateId: randomUUID(),
-      }),
-      memberId: input.memberId,
-      occurredAt: input.occurredAt,
-      preferences: input.preferences,
-      requestedFields: resolveHostedAssistantPreferenceRequestedFields(
-        input.preferences,
-      ),
-    });
-    append = await appendHostedMailboxEnvelopeTx({
-      envelope: wake,
-      tx: input.prisma,
-    });
-    assertHostedMemberPreferenceWakeAppend(append);
-    requestedCausalSeq = BigInt(append.item.causalSeq!);
+        occurredAt: input.occurredAt,
+        preferences: input.preferences,
+        wake: existingWake,
+      });
+      return buildHostedMemberAssistantPreferencesUnchangedResult({
+        dispatch: { mailboxItemId: existing.id },
+        member,
+      });
+    }
   }
 
-  const applicablePreferences = resolveApplicableAssistantPreferences({
+  const requestedCausalSeq = input.preferenceCausalSeq === undefined
+    ? resolveHostedAssistantPreferenceNextCandidateCausalSeq(currentCausalSeq)
+    : BigInt(input.preferenceCausalSeq);
+
+  let applicablePreferences = resolveApplicableAssistantPreferences({
     preferences: input.preferences,
     causalSeq: requestedCausalSeq,
-    currentCausalSeq: {
-      persona: member.assistantPersonaCausalSeq,
-      personality: {
-        detail: member.assistantDetailCausalSeq,
-        humor: member.assistantHumorCausalSeq,
-        push: member.assistantPushCausalSeq,
-        unhinged: member.assistantUnhingedCausalSeq,
-      },
-      tone: member.assistantToneCausalSeq,
-      voice: member.assistantVoiceCausalSeq,
-    },
+    currentCausalSeq,
     currentOccurredAt,
     occurredAt: input.occurredAt,
   });
 
   if (!applicablePreferences) {
-    return {
-      appliedFields: [],
-      assistantPersona: normalizeStoredAssistantPersona(member.assistantPersona),
-      assistantPersonality: normalizeStoredAssistantPersonality(member),
-      assistantTone: normalizeStoredAssistantTone(member.assistantTone),
-      assistantVoice: normalizeStoredAssistantVoice(member.assistantVoice),
-      dispatch: append ? { mailboxItemId: append.item.id } : null,
-      updated: false,
-    };
+    return buildHostedMemberAssistantPreferencesUnchangedResult({
+      dispatch: null,
+      member,
+    });
   }
 
-  const preferences = applicablePreferences.preferences;
-
-  if (!append) {
-    const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
+  const append = await appendHostedMailboxEnvelopeTx({
+    envelope: buildHostedExecutionMemberPreferencesUpdatedWake({
       ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
-      eventId: buildHostedMemberPreferencesUpdatedEventId({
+      eventId: eventId ?? buildHostedMemberPreferencesUpdatedEventId({
         memberId: input.memberId,
         updateId: randomUUID(),
       }),
@@ -217,18 +184,46 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       ...(input.preferenceCausalSeq
         ? { preferenceCausalSeq: input.preferenceCausalSeq }
         : {}),
-      preferences,
+      preferences: applicablePreferences.preferences,
       requestedFields: resolveHostedAssistantPreferenceRequestedFields(
-        preferences,
+        input.preferences,
       ),
+    }),
+    tx: input.prisma,
+  });
+  assertHostedMemberPreferenceWakeAppend(append);
+  if (append.duplicate) {
+    return buildHostedMemberAssistantPreferencesUnchangedResult({
+      dispatch: { mailboxItemId: append.item.id },
+      member,
     });
-    append = await appendHostedMailboxEnvelopeTx({
-      envelope: wake,
-      tx: input.prisma,
-    });
-    assertHostedMemberPreferenceWakeAppend(append);
   }
-  const effectiveCausalSeq = requestedCausalSeq;
+
+  const appendedCausalSeq = requireHostedMemberPreferenceWakeCausalSeq(append);
+  if (input.preferenceCausalSeq === undefined) {
+    const finalizedPreferences = resolveApplicableAssistantPreferences({
+      preferences: input.preferences,
+      causalSeq: appendedCausalSeq,
+      currentCausalSeq,
+      currentOccurredAt,
+      occurredAt: input.occurredAt,
+    });
+    if (
+      !finalizedPreferences
+      ||
+      JSON.stringify(finalizedPreferences)
+      !== JSON.stringify(applicablePreferences)
+    ) {
+      throw new Error(
+        "Hosted mailbox causal allocation changed preference applicability.",
+      );
+    }
+    applicablePreferences = finalizedPreferences;
+  }
+  const preferences = applicablePreferences.preferences;
+  const effectiveCausalSeq = input.preferenceCausalSeq === undefined
+    ? appendedCausalSeq
+    : requestedCausalSeq;
   const projectedPersona = preferences.persona;
   const projectedTone = preferences.tone;
   const projectedVoice = preferences.voice;
@@ -338,6 +333,10 @@ function assertHostedMemberPreferenceWakeAppend(
   if (!append.dedupeConflict) {
     return;
   }
+  throwHostedMemberPreferenceWakeDedupeConflict();
+}
+
+function throwHostedMemberPreferenceWakeDedupeConflict(): never {
   throw hostedOnboardingError({
     code: "HOSTED_MEMBER_PREFERENCES_WAKE_DEDUPE_CONFLICT",
     httpStatus: 503,
@@ -412,6 +411,143 @@ export function buildHostedMemberPreferencesUpdatedEventId(input: {
     input.memberId,
     input.updateId,
   ].join(":");
+}
+
+type HostedMemberAssistantPreferenceCausalSeq = {
+  persona: bigint | null;
+  personality: Record<AssistantPersonalitySettingId, bigint | null>;
+  tone: bigint | null;
+  voice: bigint | null;
+};
+
+function readHostedMemberAssistantPreferenceCausalSeq(member: {
+  assistantPersonaCausalSeq: bigint | null;
+  assistantDetailCausalSeq: bigint | null;
+  assistantHumorCausalSeq: bigint | null;
+  assistantPushCausalSeq: bigint | null;
+  assistantUnhingedCausalSeq: bigint | null;
+  assistantToneCausalSeq: bigint | null;
+  assistantVoiceCausalSeq: bigint | null;
+}): HostedMemberAssistantPreferenceCausalSeq {
+  return {
+    persona: member.assistantPersonaCausalSeq,
+    personality: {
+      detail: member.assistantDetailCausalSeq,
+      humor: member.assistantHumorCausalSeq,
+      push: member.assistantPushCausalSeq,
+      unhinged: member.assistantUnhingedCausalSeq,
+    },
+    tone: member.assistantToneCausalSeq,
+    voice: member.assistantVoiceCausalSeq,
+  };
+}
+
+function resolveHostedAssistantPreferenceNextCandidateCausalSeq(
+  current: HostedMemberAssistantPreferenceCausalSeq,
+): bigint {
+  const currentValues = [
+    current.persona,
+    ...assistantPersonalitySettingIds.map(
+      (settingId) => current.personality[settingId],
+    ),
+    current.tone,
+    current.voice,
+  ];
+  let maximum = 0n;
+  for (const value of currentValues) {
+    if (value !== null && value > maximum) {
+      maximum = value;
+    }
+  }
+  return maximum + 1n;
+}
+
+function requireHostedMemberPreferenceWakeCausalSeq(
+  append: Awaited<ReturnType<typeof appendHostedMailboxEnvelopeTx>>,
+): bigint {
+  const causalSeq = append.item.causalSeq;
+  if (causalSeq === null || causalSeq === undefined) {
+    throw new Error("Hosted preference wake requires a causal sequence.");
+  }
+  return BigInt(causalSeq);
+}
+
+function buildHostedMemberAssistantPreferencesUnchangedResult(input: {
+  dispatch: HostedMailboxAppendDispatch | null;
+  member: HostedMemberPersonalityColumns & {
+    assistantPersona: string | null;
+    assistantTone: string | null;
+    assistantVoice: string | null;
+  };
+}): HostedMemberAssistantPreferencesResult {
+  return {
+    appliedFields: [],
+    assistantPersona: normalizeStoredAssistantPersona(input.member.assistantPersona),
+    assistantPersonality: normalizeStoredAssistantPersonality(input.member),
+    assistantTone: normalizeStoredAssistantTone(input.member.assistantTone),
+    assistantVoice: normalizeStoredAssistantVoice(input.member.assistantVoice),
+    dispatch: input.dispatch,
+    updated: false,
+  };
+}
+
+function assertHostedMemberPreferenceWakeReplay(input: {
+  causalOrigin?: "event" | "turn";
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  preferences: HostedMemberAssistantPreferencesUpdate;
+  wake: Awaited<ReturnType<typeof readHostedMailboxWakeByDedupeKey>>;
+}): void {
+  const wake = input.wake;
+  if (
+    !wake
+    || wake.kind !== "member.preferences.updated"
+    || wake.eventId !== input.eventId
+    || wake.userId !== input.memberId
+    || wake.occurredAt !== input.occurredAt
+    || wake.causalOrigin !== input.causalOrigin
+    || JSON.stringify(wake.requestedFields ?? [])
+      !== JSON.stringify(
+        resolveHostedAssistantPreferenceRequestedFields(input.preferences),
+      )
+    || JSON.stringify(wake.preferences)
+      !== JSON.stringify(projectHostedPreferenceReplayValues({
+        preferences: input.preferences,
+        stored: wake.preferences,
+      }))
+  ) {
+    throwHostedMemberPreferenceWakeDedupeConflict();
+  }
+}
+
+function projectHostedPreferenceReplayValues(input: {
+  preferences: HostedMemberAssistantPreferencesUpdate;
+  stored: HostedExecutionMemberPreferences;
+}): HostedExecutionMemberPreferences {
+  const personality: HostedMemberAssistantPersonalityUpdate = {};
+  for (const settingId of assistantPersonalitySettingIds) {
+    if (input.stored.personality?.[settingId] === undefined) {
+      continue;
+    }
+    const requested = input.preferences.personality?.[settingId];
+    if (requested !== undefined) {
+      personality[settingId] = requested;
+    }
+  }
+  return {
+    ...(input.stored.persona !== undefined
+      && input.preferences.persona !== undefined
+      ? { persona: input.preferences.persona }
+      : {}),
+    ...(Object.keys(personality).length > 0 ? { personality } : {}),
+    ...(input.stored.tone !== undefined && input.preferences.tone !== undefined
+      ? { tone: input.preferences.tone }
+      : {}),
+    ...(input.stored.voice !== undefined && input.preferences.voice !== undefined
+      ? { voice: input.preferences.voice }
+      : {}),
+  };
 }
 
 function resolveApplicableAssistantPreferences(input: {

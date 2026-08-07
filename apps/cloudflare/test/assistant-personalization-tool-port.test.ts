@@ -39,13 +39,16 @@ describe("hosted assistant personalization tool port", () => {
 
     await port.request(
       { action: "update", tone: "casual" },
-      { assistantInputId: "ain_0123456789abcdef0123456789abcdef" },
+      {
+        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+        toolCallId: "call_style_one",
+      },
     );
 
     expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith(
       expect.objectContaining({
         path: expect.stringContaining(
-          "?assistantInputId=ain_0123456789abcdef0123456789abcdef",
+          "?assistantInputId=ain_0123456789abcdef0123456789abcdef&toolCallId=call_style_one",
         ),
       }),
     );
@@ -64,6 +67,7 @@ describe("hosted assistant personalization tool port", () => {
       {
         automationId: "automation_daily_style",
         occurrenceAt: "2026-08-06T14:30:00.000Z",
+        toolCallId: "call_style_two",
       },
     );
 
@@ -72,6 +76,7 @@ describe("hosted assistant personalization tool port", () => {
     expect(request?.path).toContain(
       "occurrenceAt=2026-08-06T14%3A30%3A00.000Z",
     );
+    expect(request?.path).toContain("toolCallId=call_style_two");
     expect(request?.path).not.toContain("assistantInputId=");
   });
 });
