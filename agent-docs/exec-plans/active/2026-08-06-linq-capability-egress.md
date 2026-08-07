@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -103,6 +103,11 @@ Updated: 2026-08-06
   be replayed to a different recipient. The line-change tests retained the same
   participant and therefore did not exercise the requirement-level identity
   invariant.
+- Final ReviewGPT round 15 exposed a remaining interruption window in the
+  stale-chat correction: Web terminalized the original card fence before the
+  route-authority request and local fallback transition made the replacement
+  identity durable. Process loss in that interval left a local card intent but
+  no discoverable exact-card fence or fallback identity.
 
 ## Round 14 requirement retrospective
 
@@ -432,3 +437,12 @@ new participant fallback claims require the complete snapshot atomically.
   documentation gardening, diff whitespace, and private-field classification
   checks pass. Account deletion explicitly removes member-owned delivery rows,
   with the new foreign-key cascade as defense in depth.
+- Final ReviewGPT round 15 reproduced the stale-route ordering gap. The
+  correction resolves authority and commits the existing atomic local fallback
+  while the predecessor remains `provider_dispatch_started`, then makes the
+  fallback the in-memory owner before recording the predecessor rejection.
+  Authority or persistence interruption is marked ambiguous and cannot
+  terminalize the original fence. The complete hosted callback file passes all
+  240 tests, including ordering proof, a focused authority-interruption
+  regression, and predecessor-outcome failure ownership; the assistant-runtime
+  typecheck passes.

@@ -6044,7 +6044,7 @@ describe("hosted runtime callbacks", () => {
     expect(providerFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("settles a rejected card and resets its persisted fallback identity after pre-fallback yield", async () => {
+  it("persists a rejected card fallback before settling its predecessor", async () => {
     const idempotencyKey = "assistant-outbox:card-rejected-before-fallback-yield";
     const fallbackIdempotencyKey = `${idempotencyKey}:fallback`;
     const events: string[] = [];
@@ -6173,8 +6173,8 @@ describe("hosted runtime callbacks", () => {
       "provider:capability",
       `authority:claim:${idempotencyKey}`,
       "provider:card",
-      `outcome:${idempotencyKey}`,
       `persist:${fallbackIdempotencyKey}`,
+      `outcome:${idempotencyKey}`,
     ]);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -6185,6 +6185,79 @@ describe("hosted runtime callbacks", () => {
     );
     expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledOnce();
     expect(providerFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the persisted fallback as retry owner when predecessor settlement fails", async () => {
+    const idempotencyKey = "assistant-outbox:card-settlement-failure";
+    const fallbackIdempotencyKey = `${idempotencyKey}:fallback`;
+    const outcomeFailure = new Error("simulated predecessor settlement failure");
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const recordDeliveryOutcome = vi.fn(async () => {
+      throw outcomeFailure;
+    });
+    const messagePartTypes: string[] = [];
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(String(request));
+      if (url.pathname.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({
+          address: "+15550001",
+          available: true,
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const body = typeof init?.body === "string"
+        ? JSON.parse(init.body) as {
+            message?: { parts?: Array<{ type?: string }> };
+          }
+        : {};
+      const partType = body.message?.parts?.[0]?.type ?? "missing";
+      messagePartTypes.push(partType);
+      return new Response(JSON.stringify({ error: "unsupported app card" }), {
+        headers: { "content-type": "application/json" },
+        status: 400,
+      });
+    });
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+          buildClaimedLinqEngagementResult(request)),
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      providerFetch,
+    });
+    assert.ok(dependencies.sendLinq);
+
+    await expect(dependencies.sendLinq({
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550002",
+      idempotencyKey,
+      message: "Nutrition summary",
+      persistAppCardTextFallback,
+      target: "linq_chat_123",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED",
+      context: expect.objectContaining({ retryable: true }),
+    });
+
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: fallbackIdempotencyKey,
+    });
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failureCode: "ASSISTANT_LINQ_APP_CARD_REJECTED",
+        idempotencyKey,
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(messagePartTypes).toEqual(["imessage_app"]);
   });
 
   it("best-effort stops Linq typing when delivery throws terminally", async () => {
@@ -9612,8 +9685,8 @@ describe("hosted runtime callbacks", () => {
       "provider:capability",
       `authority:claim:${idempotencyKey}`,
       `provider:card:${idempotencyKey}`,
-      `outcome:failed:${idempotencyKey}`,
       `persist:${fallbackIdempotencyKey}`,
+      `outcome:failed:${idempotencyKey}`,
       `authority:claim:${fallbackIdempotencyKey}`,
       `provider:text:${fallbackIdempotencyKey}`,
       `outcome:accepted:${fallbackIdempotencyKey}`,
@@ -9784,9 +9857,9 @@ describe("hosted runtime callbacks", () => {
       "provider:capability",
       "authority:claim:" + idempotencyKey,
       "provider:card:" + idempotencyKey,
-      "outcome:failed:" + idempotencyKey,
       "authority:read:" + fallbackIdempotencyKey,
       "persist:" + fallbackIdempotencyKey,
+      "outcome:failed:" + idempotencyKey,
       "authority:claim:" + fallbackIdempotencyKey,
       "provider:create:" + fallbackIdempotencyKey,
       "outcome:accepted:" + fallbackIdempotencyKey,
@@ -12386,6 +12459,11 @@ describe("hosted runtime callbacks", () => {
     const persistAppCardTextFallback = vi.fn(async () => {
       observedOrder.push("persist-fallback");
     });
+    const recordDeliveryOutcome = vi.fn(async (request: {
+      idempotencyKey?: string | null;
+    }) => {
+      observedOrder.push(`outcome:${request.idempotencyKey ?? "missing"}`);
+    });
     const assertRecentInbound = vi.fn(async (request: {
       answeredMailboxItemIds?: readonly string[] | null;
       authorityCheckOnly: boolean;
@@ -12479,6 +12557,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
       platformEnv: {},
@@ -12518,7 +12597,92 @@ describe("hosted runtime callbacks", () => {
     expect(observedOrder.indexOf("authorize:assistant-outbox:intent_123:stale-chat-fallback:stale-direct-chat"))
       .toBeLessThan(observedOrder.indexOf("persist-fallback"));
     expect(observedOrder.indexOf("persist-fallback"))
+      .toBeLessThan(observedOrder.indexOf("outcome:assistant-outbox:intent_123"));
+    expect(observedOrder.indexOf("outcome:assistant-outbox:intent_123"))
+      .toBeLessThan(observedOrder.indexOf(
+        "claim:assistant-outbox:intent_123:stale-chat-fallback:current-direct-chat",
+      ));
+    expect(observedOrder.indexOf("persist-fallback"))
       .toBeLessThan(observedOrder.indexOf("provider:current-text"));
+  });
+
+  it("keeps the card fence unresolved when stale-route authority fails before fallback persistence", async () => {
+    const authorityFailure = new Error("simulated stale-route authority interruption");
+    let cardFenceStarted = false;
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const recordDeliveryOutcome = vi.fn().mockResolvedValue(undefined);
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+      idempotencyKey?: string | null;
+    }) => {
+      if (
+        request.authorityCheckOnly
+        && request.idempotencyKey?.endsWith(":stale-chat-fallback")
+      ) {
+        expect(cardFenceStarted).toBe(true);
+        throw authorityFailure;
+      }
+      if (request.authorityCheckOnly) {
+        return {};
+      }
+      cardFenceStarted = true;
+      return { providerDispatchClaimed: true };
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({
+          address: "+15550001",
+          available: true,
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/chats/stale-direct-chat/messages")) {
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+    mocks.useActualLinqMessage = true;
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      providerFetch,
+    });
+    assert.ok(dependencies.sendLinq);
+
+    await expect(dependencies.sendLinq({
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: "assistant-outbox:stale-route-interruption",
+      linqAppCardReplay: true,
+      message: "Nutrition summary",
+      persistAppCardTextFallback,
+      replyToMessageId: null,
+      target: "stale-direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).rejects.toMatchObject({
+      deliveryMayHaveSucceeded: true,
+    });
+
+    expect(cardFenceStarted).toBe(true);
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+    expect(recordDeliveryOutcome).not.toHaveBeenCalled();
+    expect(providerFetch.mock.calls.filter(([input]) =>
+      String(input).endsWith("/chats/stale-direct-chat/messages")
+    )).toHaveLength(1);
   });
 
   it("persists stale-card fallback before materializing a Web-authorized participant route", async () => {
