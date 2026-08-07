@@ -163,7 +163,7 @@ test("launch consent renders one explicit decision without checkboxes", async ()
       "Murph uses health data you share to personalize answers and insights.",
     );
     expect(container.textContent).toContain(
-      "AI providers process relevant data on Murph’s behalf to generate results.",
+      "AI providers process relevant data on Murph’s behalf.",
     );
   });
 
