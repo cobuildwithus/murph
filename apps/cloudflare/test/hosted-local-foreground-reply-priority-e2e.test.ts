@@ -600,6 +600,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       systemHandledThroughSeq: activationAppend.wake.seq,
       systemImportedSeq: activationAppend.wake.seq,
     });
+    await assertExactlyOneAcceptedReplyAfterBoundary({
+      identity,
+      label: "post-enrollment default owner",
+      replyText,
+    });
 
     await expect(readHostedMailboxItemForTest({
       dedupeKey: activationEventId,
@@ -636,7 +641,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     expect(requireLinqStub().countAcceptedSends(replyPath, replyMatcher)).toBe(
       replyBaseline + 1,
     );
-
+    await requireScenario().assertHealthyHostedRun(identity.userId);
   }, 600_000);
 
   it("pages one operator incident through the real cron, database, and Resend boundary", async () => {
