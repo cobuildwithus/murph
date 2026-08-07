@@ -61,7 +61,7 @@ export function GrowthSponsorships({
                 metrics.activeMonthlySponsorships,
                 "authorization",
               )} · maximum, not MRR`}
-              label="Active monthly cap"
+              label="Total active monthly cap"
               value={formatMonthlyCap(metrics.activeMonthlyCapUsdCents)}
             />
           </div>
