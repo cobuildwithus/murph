@@ -563,11 +563,14 @@ claim completion until the command reports it.
 ## First Personal Read
 
 On the ordinary foreground turn that satisfies every `user_answered` completion
-criterion, Murph asks the existing automation tool to create the fixed first
-personal read, then records completion and gives one truthful expectation-setting
-line only when that save succeeded. Failure to save never blocks or rolls back
-onboarding and never produces a promise Murph cannot keep. Saving the fixed
-identity again is idempotent and explicitly reactivates the bounded one-shot.
+criterion, Murph first records and verifies answered completion, then asks the
+existing automation tool to create the fixed first personal read on that same
+turn and gives one truthful expectation-setting line only when that save
+succeeded. The host accepts the action only when the trusted ordinary foreground
+turn began with onboarding open, canonical state now reports answered completion,
+the route is private, and no fixed first read exists. Failure to save never
+blocks or rolls back onboarding and never produces a promise Murph cannot keep;
+an archived read cannot be reactivated.
 
 The occurrence becomes due two minutes after creation and expires sixty minutes
 later. Foreground member messages retain priority through the existing runtime;
@@ -599,9 +602,12 @@ habit, plan, experiment, reminder, purchase, booking, or other effect.
 
 The turn reads the existing `weekly-health-insights` knowledge page before
 selection and best-effort records the exact outbound read there under a distinct
-first-read heading keyed by the exact scheduled occurrence instant. Only that
-same occurrence may reuse its settled outbound text; any other first-read
-heading suppresses another send. That reuses the weekly insight dedupe owner instead of
+first-read heading keyed by the exact scheduled occurrence instant. Its body
+uses one versioned schema, an exact UTF-8 byte count, and unique begin/end
+delimiters around the settled outbound text. Only that same occurrence may reuse
+text when the schema, count, and delimiters validate; missing, duplicate, or
+malformed replay fields fail closed. Any other first-read heading suppresses
+another send. That reuses the weekly insight dedupe owner instead of
 creating another insight table, page family, or lifecycle. Failure to update the
 ledger does not suppress an otherwise sound first read; the automation and
 outbox remain the delivery and replay owners.

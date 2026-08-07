@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util'
+
 import type {
   AssistantHostedAutomationToolRequest,
 } from './execution-context.js'
@@ -23,7 +25,7 @@ export const MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS = [
   '- Return skip unless the scheduled occurrence context and current route are for one private member conversation. A group or room occurrence is never eligible and must not read health evidence or send.',
   '- Return skip if the member asked not to receive this read, requested no follow-up, or otherwise revoked this proactive outreach. Do not reinterpret a cancellation as temporary hesitation.',
   '- Return skip when a substantive proactive health question, decision, or requested action from Murph is still waiting for the member. A generic closing invitation such as `anything else?` is not an unresolved task and does not block this promised first read.',
-  '- Read `vault-cli knowledge show weekly-health-insights`. Treat a genuinely missing page as no prior personal insights, but return skip if the page is malformed or unreadable. If a `First read <Occurrence instant>` section already exists, reuse only its exact stored outbound text for retry or replay of this occurrence when the current timing gates still pass. If any other section heading begins `First read `, return skip; this one-shot never sends a second first personal read. Otherwise do not repeat a finding already captured there.',
+  '- Read `vault-cli knowledge show weekly-health-insights`. Treat a genuinely missing page as no prior personal insights, but return skip if the page is malformed or unreadable. If a `First read <Occurrence instant>` section already exists for this occurrence, reuse its outbound text only when the body contains exactly one `schema: murph.first-personal-read.v1` line, exactly one decimal `outbound_text_utf8_bytes: <count>` line, and exactly one ordered `---BEGIN MURPH FIRST READ OUTBOUND---` / `---END MURPH FIRST READ OUTBOUND---` delimiter pair; the bytes strictly between the delimiters must match the declared UTF-8 count and contain neither delimiter. Missing, duplicate, malformed, or mismatched replay fields require skip. Reuse only those exact validated bytes and only when the current timing gates still pass. If any other section heading begins `First read `, return skip; this one-shot never sends a second first personal read. Otherwise do not repeat a finding already captured there.',
   '',
   'Targeted evidence pass:',
   '- Start from the member\'s named open threads, what progress means to them, and why it matters. Inspect only canonical evidence that could materially change those threads: movement and training, current protocols or experiments, supplements, medical and safety context, recent labs or durable raw records, connected wearable history, and directly relevant conversation context.',
@@ -49,7 +51,7 @@ export const MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS = [
   '- If even that would be generic or unsupported, return `{"kind":"skip","privateSummary":"No first personal read cleared the evidence and interestingness bars."}`.',
   '',
   'Durable dedupe:',
-  '- When a new send-worthy read exists, settle the complete outbound text first. Best-effort run `vault-cli knowledge append-section weekly-health-insights "First read <Occurrence instant>" --title "Weekly Health Insights" --position prepend --body <markdown> --source-path <path> ...`. Use the exact ISO instant from the Scheduled occurrence context so only a retry or replay of this occurrence can reuse the section. The body contains only the compact claim, evidence, uncertainty, and exact outbound text. Cite only canonical source paths actually used, never `derived/**` or `.runtime/**` paths.',
+  '- When a new send-worthy read exists, settle the complete outbound text first and compute its exact UTF-8 byte count. Best-effort run `vault-cli knowledge append-section weekly-health-insights "First read <Occurrence instant>" --title "Weekly Health Insights" --position prepend --body <markdown> --source-path <path> ...`. Use the exact ISO instant from the Scheduled occurrence context so only a retry or replay of this occurrence can reuse the section. The body must contain only `schema: murph.first-personal-read.v1`, the compact `claim:`, `evidence:`, and `uncertainty:` fields, `outbound_text_utf8_bytes: <exact decimal count>`, then exactly `---BEGIN MURPH FIRST READ OUTBOUND---<exact outbound bytes>---END MURPH FIRST READ OUTBOUND---`. Do not insert separator bytes inside the delimiters unless they are part of the settled outbound text. The outbound text must not contain either delimiter. Cite only canonical source paths actually used, never `derived/**` or `.runtime/**` paths.',
   '- Never create another page or another first-read section. A failed dedupe write must not make the member lose an otherwise sound first read. The automation and outbox remain the delivery and replay owners.',
   '',
   'Member-facing message:',
@@ -64,6 +66,25 @@ type AutomationSaveRequest = Extract<
   AssistantHostedAutomationToolRequest,
   { action: 'save' }
 >
+
+export function isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest(
+  request: AutomationSaveRequest,
+): boolean {
+  if (request.schedule.kind !== 'at') {
+    return false
+  }
+  const dueAt = new Date(request.schedule.at)
+  if (!Number.isFinite(dueAt.getTime())) {
+    return false
+  }
+
+  return isDeepStrictEqual(
+    request,
+    buildOnboardingFirstPersonalReadAutomationSaveRequest({
+      now: new Date(dueAt.getTime() - FIRST_PERSONAL_READ_DELAY_MS),
+    }),
+  )
+}
 
 export function buildOnboardingFirstPersonalReadAutomationSaveRequest(input: {
   now?: Date

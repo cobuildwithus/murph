@@ -18,6 +18,7 @@ import type {
 } from '../src/assistant/execution-context.js'
 import {
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
+  isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
@@ -75,6 +76,15 @@ describe('onboarding first personal read', () => {
       ],
       title: 'First personal health read',
     })
+    expect(
+      isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest(request),
+    ).toBe(true)
+    expect(
+      isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest({
+        ...request,
+        title: 'Model-authored replacement',
+      }),
+    ).toBe(false)
   })
 
   it('turns the fieldless action into the code-owned request', () => {
@@ -123,9 +133,13 @@ describe('onboarding first personal read', () => {
     }
 
     let received: AssistantHostedAutomationToolRequest | null = null
+    let receivedContext:
+      | Parameters<AssistantHostedAutomationTool['request']>[1]
+      | null = null
     const automationTool: AssistantHostedAutomationTool = {
-      async request(request) {
+      async request(request, context) {
         received = request
+        receivedContext = context
         return {
           action: 'save',
           automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
@@ -139,6 +153,7 @@ describe('onboarding first personal read', () => {
 
     const result = await executeAutomationDynamicTool({
       automationTool,
+      onboardingFirstReadCompletionTransitionAvailable: true,
       request: parsed,
     })
 
@@ -148,8 +163,37 @@ describe('onboarding first personal read', () => {
       }),
     )
     expect(result.rpcResult.success).toBe(true)
+    expect(receivedContext).toEqual({
+      onboardingFirstReadCompletionTransition: true,
+      signal: null,
+    })
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       '"routeBinding":"current_conversation"',
+    )
+  })
+
+  it('rejects the fieldless action outside a trusted completion transition', async () => {
+    const parsed = readAutomationDynamicToolRequest({
+      arguments: {
+        action: MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
+      },
+      tool: 'automation',
+    })
+    if (parsed?.kind !== 'automation') {
+      throw new TypeError('Expected a parsed automation request.')
+    }
+    const request = vi.fn<AssistantHostedAutomationTool['request']>()
+
+    const result = await executeAutomationDynamicTool({
+      automationTool: { request },
+      onboardingFirstReadCompletionTransitionAvailable: false,
+      request: parsed,
+    })
+
+    expect(request).not.toHaveBeenCalled()
+    expect(result.rpcResult.success).toBe(false)
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      'unavailable outside its completion transition',
     )
   })
 
@@ -244,10 +288,16 @@ describe('onboarding first personal read', () => {
       'Return skip if the member asked not to receive this read, requested no follow-up, or otherwise revoked this proactive outreach.',
       'A generic closing invitation such as `anything else?` is not an unresolved task',
       'return skip if the page is malformed or unreadable',
-      'If a `First read <Occurrence instant>` section already exists, reuse only its exact stored outbound text for retry or replay of this occurrence',
+      'reuse its outbound text only when the body contains exactly one `schema: murph.first-personal-read.v1` line',
+      'exactly one decimal `outbound_text_utf8_bytes: <count>` line',
+      'exactly one ordered `---BEGIN MURPH FIRST READ OUTBOUND---` / `---END MURPH FIRST READ OUTBOUND---` delimiter pair',
+      'Missing, duplicate, malformed, or mismatched replay fields require skip.',
+      'Reuse only those exact validated bytes',
       'If any other section heading begins `First read `, return skip; this one-shot never sends a second first personal read.',
       'vault-cli knowledge append-section weekly-health-insights',
       'Use the exact ISO instant from the Scheduled occurrence context so only a retry or replay of this occurrence can reuse the section.',
+      'outbound_text_utf8_bytes: <exact decimal count>',
+      'The outbound text must not contain either delimiter.',
       'A failed dedupe write must not make the member lose an otherwise sound first read.',
       'I took a deeper look across what you shared.',
       'at most one optional low-burden next action or question',
@@ -267,7 +317,7 @@ describe('onboarding first personal read', () => {
     )
 
     expect(firstReadIndex).toBeGreaterThan(-1)
-    expect(completionIndex).toBeGreaterThan(firstReadIndex)
+    expect(firstReadIndex).toBeGreaterThan(completionIndex)
     expect(
       onboarding.match(
         new RegExp(MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION, 'gu'),
@@ -276,7 +326,8 @@ describe('onboarding first personal read', () => {
     expectContainsAll(onboarding, [
       'The host owns the immutable automation identity, current-conversation route binding, two-minute delay, bounded active window, fresh continuity, Sol/high target, and complete first-read prompt.',
       'Do not call generic `save`, provide instructions, calculate timestamps, choose a model, or add fields.',
-      'do not retry, block completion, or mention the failure',
+      'The host accepts the action only on the single trusted ordinary foreground turn that began with onboarding open and has just completed it with `user_answered`',
+      'do not retry, block completion, roll back completion, or mention the failure',
       'If I find something genuinely useful—whether that\'s a pattern, a clearer interpretation, or something worth watching next—I\'ll send it over.',
     ])
     expect(onboarding).not.toContain(

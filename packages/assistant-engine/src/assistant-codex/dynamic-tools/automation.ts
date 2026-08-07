@@ -232,6 +232,7 @@ export const MURPH_AUTOMATION_TOOL = {
 export type AutomationDynamicToolRequest =
   | {
       kind: 'automation'
+      onboardingFirstReadCompletionRequested?: true
       request: AssistantHostedAutomationToolRequest
     }
   | {
@@ -280,6 +281,9 @@ export function readAutomationDynamicToolRequest(input: {
   return parsed.ok
     ? {
         kind: 'automation',
+        ...(parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
+          ? { onboardingFirstReadCompletionRequested: true as const }
+          : {}),
         request:
           parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
             ? buildOnboardingFirstPersonalReadAutomationSaveRequest()
@@ -310,6 +314,7 @@ export function readAutomationDynamicToolRequest(input: {
 export async function executeAutomationDynamicTool(input: {
   abortSignal?: AbortSignal | null
   automationTool: AssistantHostedAutomationTool
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   request: Extract<AutomationDynamicToolRequest, { kind: 'automation' }>
 }): Promise<{
   rpcResult: {
@@ -317,8 +322,21 @@ export async function executeAutomationDynamicTool(input: {
     success: boolean
   }
 }> {
+  if (
+    input.request.onboardingFirstReadCompletionRequested === true
+    && input.onboardingFirstReadCompletionTransitionAvailable !== true
+  ) {
+    return automationTextResult(
+      false,
+      'onboarding first read is unavailable outside its completion transition',
+    )
+  }
+
   try {
     const response = await input.automationTool.request(input.request.request, {
+      ...(input.request.onboardingFirstReadCompletionRequested === true
+        ? { onboardingFirstReadCompletionTransition: true as const }
+        : {}),
       signal: input.abortSignal ?? null,
     })
     if (response.action !== input.request.request.action) {
