@@ -4519,6 +4519,8 @@ exit 1
     expect(packPublishables).toContain("path.join(targetDir, 'package.json')")
     expect(packPublishables).toContain('shouldSkipExternalPayloadArtifact')
     expect(packPublishables).toContain("path.basename(sourcePath) === 'node_modules'")
+    expect(packPublishables).toContain('isNonRuntimeIncurPayloadPath')
+    expect(packPublishables).toContain('/(?:^|\\/)[^/]+\\.test\\.[cm]?[jt]sx?$/u')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)
@@ -4606,6 +4608,24 @@ exit 1
           'cli-surface-contract.generated.json',
         )
         expect(existsSync(installedArtifactPath)).toBe(true)
+
+        const installedIncurDirectory = path.join(
+          installRoot,
+          'package',
+          'node_modules',
+          'incur',
+        )
+        expect(existsSync(path.join(installedIncurDirectory, 'dist', 'index.js'))).toBe(true)
+        expect(existsSync(path.join(installedIncurDirectory, 'src', 'index.ts'))).toBe(true)
+        for (const testSource of [
+          'Cli.test.ts',
+          'Fetch.test.ts',
+          'Mcp.test.ts',
+          'Skill.test.ts',
+          'e2e.test.ts',
+        ]) {
+          expect(existsSync(path.join(installedIncurDirectory, 'src', testSource))).toBe(false)
+        }
 
         const installedArtifact = JSON.parse(
           readFileSync(installedArtifactPath, 'utf8'),
