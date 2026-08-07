@@ -131,6 +131,11 @@ export function inspectHostedStripeBillingWorkflow(
     "Live job must install the pinned Stripe CLI.",
   );
   requireText(
+    "missing-pinned-codex-path",
+    'echo "$GITHUB_WORKSPACE/packages/assistant-engine/node_modules/.bin" >> "$GITHUB_PATH"',
+    "Live hosted-local startup must expose the existing pinned workspace Codex CLI.",
+  );
+  requireText(
     "missing-always-cleanup",
     "- name: Clean up owned Stripe sandbox resources\n        if: always()",
     "Owned sandbox resources must be cleaned up even after failures.",

@@ -102,9 +102,11 @@ eligible trusted head enters the live lane; absent or malformed sandbox
 configuration fails closed. Fork and dependency-bot
 pull requests run only the credential-free hermetic lane. The always-present
 `Required hosted Stripe billing boundary` job checks the applicable result so
-branch protection has one stable required context. Keep the key on
-preflight/matrix/cleanup steps only;
-within the scenario it reaches the web Stripe client and harness-owned
+branch protection has one stable required context. The live job exposes the
+existing pinned `@openai/codex` workspace binary for
+hosted-local model-catalog preparation without adding another CLI dependency.
+Keep the key on preflight/matrix/cleanup steps only; within the scenario it
+reaches the web Stripe client and harness-owned
 `stripe listen` child, not the browser, Cloudflare, Temporal, setup, or runner
 children. Do not pass it as a CLI argument or write it to a repository file.
 

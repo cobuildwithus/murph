@@ -164,6 +164,14 @@ describe("hosted Stripe billing workflow guard", () => {
     expect(issueCodes(source)).toContain("missing-web-test-client-setup");
   });
 
+  it("rejects hiding the pinned Codex CLI from hosted-local startup", async () => {
+    const source = (await readWorkflow()).replace(
+      '        run: echo "$GITHUB_WORKSPACE/packages/assistant-engine/node_modules/.bin" >> "$GITHUB_PATH"\n',
+      "        run: echo skipped-pinned-codex-path\n",
+    );
+    expect(issueCodes(source)).toContain("missing-pinned-codex-path");
+  });
+
   it("rejects removing the public Privy client configuration", async () => {
     const source = (await readWorkflow()).replaceAll(
       "vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID",
