@@ -1151,10 +1151,24 @@ describe("HostedBillingSettings", () => {
       currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
       currentBillingPlanCode: "launch_monthly",
+      showGroupPlan: true,
+    }));
+    const pendingMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      canStartPaidPulse: true,
+      billingStatus: "paused",
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentBillingPlanCode: "launch_monthly",
+      pulseTrialBillingContinuationPending: true,
+      showGroupPlan: true,
     }));
 
     assert.match(markup, /Start Pulse plan/);
+    assert.doesNotMatch(markup, /Start Core/);
     assert.doesNotMatch(markup, /Pulse is not active/);
+    assert.doesNotMatch(pendingMarkup, /Start (?:Core|Pulse plan)/);
   });
 
   test("suppresses every Start Pulse action with action-neutral copy while continuation is pending", async () => {

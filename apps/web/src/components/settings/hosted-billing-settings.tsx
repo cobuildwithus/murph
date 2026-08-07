@@ -197,7 +197,7 @@ export function HostedBillingSettings(props: {
                           Choose {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
                         </HostedPlanChangeButton>
                       )
-                  : isPulseTrial && props.canStartPaidPulse === true
+                  : pulseTrialActive && props.canStartPaidPulse === true
                     ? (
                         <StartPaidPulseButton
                           block
