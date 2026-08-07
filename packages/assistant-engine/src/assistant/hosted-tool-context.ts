@@ -114,7 +114,7 @@ export type AssistantHostedInvocationScope =
   | AssistantHostedScheduledInvocationScope
 
 export type AssistantHostedProductFeedbackAuthority =
-  AssistantHostedInvocationScope['origin']
+  AssistantHostedAcceptedInputInvocationScope['origin']
 
 export type AssistantHostedVaultFileSendResult =
   | {
@@ -330,10 +330,7 @@ export function createAssistantHostedToolContext(input: {
           sessionId: readDeliveryContext().session.sessionId,
         }
       }
-      const invocationScope = readCurrentInvocationScope()
-      return invocationScope?.origin.kind === 'automation_occurrence'
-        ? invocationScope.origin
-        : null
+      return null
     }
   let subscriptionActionClaimed = false
   let imessageContactActionClaimed = false

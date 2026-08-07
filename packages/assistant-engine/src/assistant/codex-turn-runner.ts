@@ -605,12 +605,12 @@ async function executeAssistantCodexAttempt(input: {
                 getAuthority: () => {
                   const authority = executionPlan.hostedToolContext
                     ?.currentProductFeedbackAuthority?.() ?? null
-                  return authority?.kind === 'accepted_input'
+                  return authority
                     ? {
                         assistantInputId: authority.assistantInputId,
                         kind: authority.kind,
                       }
-                    : authority
+                    : null
                 },
               }
             : {}),

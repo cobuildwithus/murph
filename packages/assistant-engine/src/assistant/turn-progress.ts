@@ -50,16 +50,10 @@ export interface AssistantTurnProductFeedbackRecorder {
   readProductFeedback(): HostedRuntimeProductFeedbackRecord | null
 }
 
-export type AssistantProductFeedbackAuthority =
-  | {
-      assistantInputId: string
-      kind: 'accepted_input'
-    }
-  | {
-      automationId: string
-      kind: 'automation_occurrence'
-      occurrenceAt: string
-    }
+export type AssistantProductFeedbackAuthority = {
+  assistantInputId: string
+  kind: 'accepted_input'
+}
 
 export type AssistantProgressDeliverySource = 'model' | 'system'
 
@@ -142,11 +136,6 @@ export function createAssistantProductFeedbackRecorder(input: {
       const normalized = normalizeAssistantProductFeedback(feedback)
       const supportEscalation = isHostedProductSupportEscalationFeedback(normalized)
       const authority = input.getAuthority?.() ?? initialAuthority
-      if (supportEscalation && authority.kind !== 'accepted_input') {
-        throw new Error(
-          'Product support escalation requires current accepted input authority.',
-        )
-      }
       if (supportEscalation) {
         if (supportEscalationOutcome === 'delivered') {
           return { recorded: false }
@@ -338,12 +327,7 @@ export function buildAssistantProductFeedbackIdempotencyKey(input: {
 }): string {
   return createHash('sha256')
     .update(JSON.stringify({
-      authority: input.authority.kind === 'accepted_input'
-        ? {
-            assistantInputId: input.authority.assistantInputId,
-            kind: input.authority.kind,
-          }
-        : input.authority,
+      authority: input.authority,
       kind: input.feedback.kind,
       relatedChangelogItemIds: [...new Set(input.feedback.relatedChangelogItemIds)].sort(),
     }))

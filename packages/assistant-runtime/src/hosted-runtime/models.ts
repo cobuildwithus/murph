@@ -208,10 +208,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationPostScanTailElapsedMs?: number | null;
   assistantAutomationProductFeedbackCandidates?:
-    readonly {
-      disposition: "committed_non_reply" | "delivered" | "delivery_pending";
-      feedback: HostedRuntimeProductFeedbackRecord;
-    }[] | null;
+    readonly HostedRuntimeProductFeedbackRecord[] | null;
   assistantAutomationProgressed?: boolean | null;
   assistantAutomationReplyFailed?: number | null;
   assistantAutomationScanElapsedMs?: number | null;

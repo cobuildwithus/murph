@@ -29,10 +29,6 @@ import {
   type AssistantHostedScheduledInvocationScope,
   type AssistantHostedToolContext,
 } from "../src/assistant/hosted-tool-context.ts";
-import {
-  buildAssistantProductFeedbackIdempotencyKey,
-  createAssistantProductFeedbackRecorder,
-} from "../src/assistant/turn-progress.ts";
 
 const OCCURRENCE_AT = "2026-08-06T14:30:00.000Z";
 
@@ -76,51 +72,6 @@ describe("scheduled assistant tool authority", () => {
       },
       originSessionId: "session_scheduled_tools",
     })).toBeNull();
-  });
-
-  it("records product feedback against the exact occurrence", async () => {
-    const scope = scheduledScope();
-    const recorder = createAssistantProductFeedbackRecorder({
-      acceptedInputItems: [],
-      getAuthority: () => scope.origin,
-      productFeedbackCandidateSink: {
-        acceptProductFeedbackCandidate: vi.fn(),
-      },
-    });
-    if (!recorder) throw new Error("Expected scheduled feedback recorder.");
-    const feedback = {
-      kind: "feature_request" as const,
-      relatedChangelogItemIds: [],
-      summary: "Murph-observed: a scheduled tool path was unavailable.",
-    };
-
-    await recorder.recordProductFeedback(feedback);
-
-    expect(recorder.readProductFeedback()).toEqual({
-      ...feedback,
-      idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-        authority: scope.origin,
-        feedback,
-      }),
-    });
-  });
-
-  it("does not turn scheduled feedback authority into human support authority", async () => {
-    const recorder = createAssistantProductFeedbackRecorder({
-      acceptedInputItems: [],
-      getAuthority: () => scheduledScope().origin,
-      productFeedbackCandidateSink: {
-        acceptProductFeedbackCandidate: vi.fn(),
-        deliverProductSupportEscalation: vi.fn(),
-      },
-    });
-    if (!recorder) throw new Error("Expected scheduled feedback recorder.");
-
-    await expect(recorder.recordProductFeedback({
-      kind: "frustration",
-      relatedChangelogItemIds: [],
-      summary: "Support escalation: a scheduled observation needs human review.",
-    })).rejects.toThrow("requires current accepted input authority");
   });
 
   it("uses scheduled authority for Clinical Records and personalization mutations", async () => {
@@ -267,7 +218,7 @@ function scheduledScope(
 
 function hostedToolContext(
   scope: AssistantHostedScheduledInvocationScope,
-  additions: Partial<AssistantHostedToolContext>,
+  additions: Partial<AssistantHostedToolContext> = {},
 ): AssistantHostedToolContext {
   return {
     ...additions,

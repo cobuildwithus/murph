@@ -13,7 +13,8 @@ message-bound effects.
 - Scheduled effects reuse existing owners, causal ordering, idempotency, and
   retry boundaries.
 - Channel, audience, group, and verified-human restrictions remain authoritative.
-- Failed provider or delivery work does not commit misleading product feedback.
+- Scheduled turns cannot create ordinary product feedback or a delivery-linked
+  feedback obligation.
 - Scheduled Clinical Records delivery does not create or rotate an intent; the
   existing one-live, short-lived claim begins only after the member opens the
   authenticated launcher as current human action.
@@ -56,11 +57,16 @@ message-bound effects.
 - Final ReviewGPT round 1 found three correctness gaps: delayed scheduled
   preferences could overwrite newer state, queue-only feedback could be lost or
   accepted at the wrong boundary, and Clinical Records created a short-lived
-  intent before scheduled delivery. The candidate now orders scheduled fields
-  by trusted occurrence time while retaining only referenced structural causal
-  rows, stages feedback until confirmed delivery or committed no-reply, and
-  creates the Clinical Records intent only after the authenticated launcher is
-  opened.
+  intent before scheduled delivery. The candidate corrected the Clinical Records
+  launcher and added initial scheduled preference and feedback ordering.
+- Final ReviewGPT round 2 showed that callback sequence still could outrank a
+  logically later accepted input and that invocation-local feedback staging could
+  not survive a later durable outbox retry. The required retrospective was posted
+  on the PR. Its continue-with-redesign decision replaces the sequence watermark
+  with one owner-shared `(occurredAt, source causal sequence)` order and deletes
+  scheduled ordinary feedback eligibility instead of adding another durable state
+  or delivery owner. Focused proof covers both preference callback orders,
+  Settings/event ordering, and scheduled feedback unavailability.
 - Focused owner suites pass, including 278 assistant-runtime phase tests and a
   Strict Mode launcher replay test. The full-stack scheduled-image scenario
   observed the expected image upload, attachment, and Linq delivery, then timed

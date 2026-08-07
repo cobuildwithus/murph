@@ -18,9 +18,6 @@ import {
 import {
   buildAssistantSystemPrompt,
 } from "../src/assistant/system-prompt.js";
-import {
-  shouldAcceptAssistantProductFeedbackCandidate,
-} from "../src/assistant/local-service.js";
 
 describe("assistant product feedback", () => {
   it("is stable across related-item ordering and summary wording, and scoped to accepted input", () => {
@@ -80,43 +77,6 @@ describe("assistant product feedback", () => {
         acceptProductFeedbackCandidate: vi.fn(),
       },
     })).toBeNull();
-  });
-
-  it("stages scheduled feedback after a committed skip or queued delivery", () => {
-    const scheduledInput = {
-      scheduledInvocationAuthority: {
-        automationId: "automation_feedback",
-        occurrenceAt: "2026-08-06T14:30:00.000Z",
-      },
-      scheduledOccurrenceAt: "2026-08-06T14:30:00.000Z",
-      turnTrigger: "automation-cron" as const,
-    };
-
-    expect(shouldAcceptAssistantProductFeedbackCandidate({
-      input: scheduledInput,
-      outcome: { kind: "sent" },
-      responseDisposition: null,
-    })).toBe(true);
-    expect(shouldAcceptAssistantProductFeedbackCandidate({
-      input: scheduledInput,
-      outcome: { kind: "queued" },
-      responseDisposition: null,
-    })).toBe(true);
-    expect(shouldAcceptAssistantProductFeedbackCandidate({
-      input: scheduledInput,
-      outcome: { kind: "not-requested" },
-      responseDisposition: "none",
-    })).toBe(true);
-    expect(shouldAcceptAssistantProductFeedbackCandidate({
-      input: scheduledInput,
-      outcome: { kind: "failed" },
-      responseDisposition: null,
-    })).toBe(false);
-    expect(shouldAcceptAssistantProductFeedbackCandidate({
-      input: { ...scheduledInput, scheduledOccurrenceAt: "other" },
-      outcome: { kind: "failed" },
-      responseDisposition: null,
-    })).toBe(true);
   });
 
   it("exposes the dynamic tool only when the hosted recorder is available", () => {

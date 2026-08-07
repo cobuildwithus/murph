@@ -852,5 +852,5 @@ callback and active hosted access in both cases; accepted-input writes retain th
 mailbox and current-route causal checks, while scheduled writes never fabricate a
 conversation message or participant. Scheduled authority does not bypass existing
 channel or audience eligibility. Clinical Records links remain private and use an
-operation-scoped retry key; ordinary feedback may be observed from a scheduled turn,
-but verified-private support escalation still requires current human action.
+operation-scoped retry key. Ordinary feedback and verified-private support escalation
+both require accepted-message authority; scheduled turns receive neither capability.

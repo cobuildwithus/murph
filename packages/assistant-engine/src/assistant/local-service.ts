@@ -2058,22 +2058,11 @@ export async function sendAssistantMessageLocal(
           executionContext?.hosted?.productFeedbackCandidateSink ?? null
         if (
           productFeedbackCandidate &&
-          productFeedbackCandidateSink &&
-          shouldAcceptAssistantProductFeedbackCandidate({
-            input: currentInput,
-            outcome: finalDeliveryOutcome,
-            responseDisposition: finalResponseDisposition,
-          })
+          productFeedbackCandidateSink
         ) {
           try {
             productFeedbackCandidateSink.acceptProductFeedbackCandidate(
               productFeedbackCandidate,
-              {
-                disposition: resolveAssistantProductFeedbackCandidateDisposition({
-                  outcome: finalDeliveryOutcome,
-                  responseDisposition: finalResponseDisposition,
-                }),
-              },
             )
           } catch {
             // Optional feedback cannot affect the completed assistant turn.
@@ -2174,41 +2163,6 @@ export async function sendAssistantMessageLocal(
       )
     }
   }
-}
-
-export function shouldAcceptAssistantProductFeedbackCandidate(input: {
-  input: Pick<
-    AssistantMessageInput,
-    'scheduledInvocationAuthority' | 'scheduledOccurrenceAt' | 'turnTrigger'
-  >
-  outcome: { kind: AssistantDeliveryOutcome['kind'] }
-  responseDisposition: 'none' | null
-}): boolean {
-  const scheduledAuthority = input.input.scheduledInvocationAuthority ?? null
-  const exactScheduledOccurrence =
-    input.input.turnTrigger === 'automation-cron' &&
-    scheduledAuthority !== null &&
-    scheduledAuthority.occurrenceAt === input.input.scheduledOccurrenceAt
-  if (!exactScheduledOccurrence) {
-    return true
-  }
-  return input.outcome.kind === 'sent' || input.outcome.kind === 'queued' || (
-    input.outcome.kind === 'not-requested' &&
-    input.responseDisposition === 'none'
-  )
-}
-
-function resolveAssistantProductFeedbackCandidateDisposition(input: {
-  outcome: { kind: AssistantDeliveryOutcome['kind'] }
-  responseDisposition: 'none' | null
-}): 'committed_non_reply' | 'delivered' | 'delivery_pending' {
-  if (
-    input.outcome.kind === 'not-requested'
-    && input.responseDisposition === 'none'
-  ) {
-    return 'committed_non_reply'
-  }
-  return input.outcome.kind === 'sent' ? 'delivered' : 'delivery_pending'
 }
 
 function assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget(input: {

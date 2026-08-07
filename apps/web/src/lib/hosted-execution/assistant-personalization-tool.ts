@@ -43,8 +43,8 @@ import {
   requireHostedRuntimeActiveAccessForUpdateTx,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
-  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
   type HostedMailboxStoreClient,
 } from "@/src/lib/hosted-mailbox/store";
 import { assertHostedLinqRouteEgressAuthority } from "@/src/lib/hosted-routing/thread-route-store";
@@ -61,7 +61,6 @@ interface HostedRuntimeAssistantPersonalityTransactionResult {
 
 interface HostedRuntimeAssistantPreferenceWriteAuthority {
   occurredAt: string;
-  preferenceOrderOccurredAt?: string;
   preferenceCausalSeq?: string;
   updateId?: string;
 }
@@ -118,12 +117,6 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
           causalOrigin: "turn",
           memberId: input.memberId,
           occurredAt: writeAuthority.occurredAt,
-          ...(writeAuthority.preferenceOrderOccurredAt === undefined
-            ? {}
-            : {
-                preferenceOrderOccurredAt:
-                  writeAuthority.preferenceOrderOccurredAt,
-              }),
           ...(writeAuthority.preferenceCausalSeq === undefined
             ? {}
             : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
@@ -209,12 +202,6 @@ async function handleHostedRuntimeAssistantPersonalityUpdate(input: {
       causalOrigin: "turn",
       memberId: input.memberId,
       occurredAt: writeAuthority.occurredAt,
-      ...(writeAuthority.preferenceOrderOccurredAt === undefined
-        ? {}
-        : {
-            preferenceOrderOccurredAt:
-              writeAuthority.preferenceOrderOccurredAt,
-          }),
       ...(writeAuthority.preferenceCausalSeq === undefined
         ? {}
         : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
@@ -345,7 +332,6 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
   if ("automationId" in input.authority) {
     return {
       occurredAt: input.authority.occurrenceAt,
-      preferenceOrderOccurredAt: input.authority.occurrenceAt,
       updateId: createHash("sha256")
         .update(JSON.stringify({
           automationId: input.authority.automationId,
@@ -362,17 +348,18 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const causalSeq = await readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
-    assistantInputId: input.authority.assistantInputId,
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  if (causalSeq === null) {
+  const inputAuthority =
+    await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
+      assistantInputId: input.authority.assistantInputId,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+  if (!inputAuthority) {
     throw new TypeError("Assistant personalization input authority is invalid.");
   }
   return {
-    occurredAt: new Date().toISOString(),
-    preferenceCausalSeq: causalSeq,
+    occurredAt: inputAuthority.occurredAt,
+    preferenceCausalSeq: inputAuthority.causalSeq,
   };
 }
 

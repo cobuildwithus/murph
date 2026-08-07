@@ -58,15 +58,10 @@ type HostedMemberPersonalityColumns = {
   assistantUnhinged: number | null;
 };
 
-function maxCausalSeq(current: bigint | null, next: bigint): bigint {
-  return current !== null && current > next ? current : next;
-}
-
 export async function upsertHostedMemberAssistantPreferencesTx(input: {
   causalOrigin?: "event" | "turn";
   memberId: string;
   occurredAt: string;
-  preferenceOrderOccurredAt?: string;
   preferenceCausalSeq?: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
   prisma: Prisma.TransactionClient;
@@ -110,36 +105,25 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       "Assistant preference update cannot provide both source sequence and update identity.",
     );
   }
-  if (
-    input.preferenceOrderOccurredAt !== undefined
-    && input.updateId === undefined
-  ) {
-    throw new TypeError(
-      "Assistant preference logical ordering requires update identity.",
-    );
+  if (!Number.isFinite(Date.parse(input.occurredAt))) {
+    throw new TypeError("Assistant preference logical ordering time is invalid.");
   }
-
-  const preferenceLogicalOrder = input.preferenceOrderOccurredAt === undefined
-    ? {}
-    : {
-        currentOccurredAt:
-          await readHostedAssistantPreferenceOccurredAtByCausalSeq({
-            currentCausalSeq: {
-              persona: member.assistantPersonaCausalSeq,
-              personality: {
-                detail: member.assistantDetailCausalSeq,
-                humor: member.assistantHumorCausalSeq,
-                push: member.assistantPushCausalSeq,
-                unhinged: member.assistantUnhingedCausalSeq,
-              },
-              tone: member.assistantToneCausalSeq,
-              voice: member.assistantVoiceCausalSeq,
-            },
-            memberId: input.memberId,
-            prisma: input.prisma,
-          }),
-        preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
-      };
+  const currentOccurredAt =
+    await readHostedAssistantPreferenceOccurredAtByCausalSeq({
+      currentCausalSeq: {
+        persona: member.assistantPersonaCausalSeq,
+        personality: {
+          detail: member.assistantDetailCausalSeq,
+          humor: member.assistantHumorCausalSeq,
+          push: member.assistantPushCausalSeq,
+          unhinged: member.assistantUnhingedCausalSeq,
+        },
+        tone: member.assistantToneCausalSeq,
+        voice: member.assistantVoiceCausalSeq,
+      },
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
 
   let append: Awaited<ReturnType<typeof appendHostedMailboxEnvelopeTx>> | null =
     null;
@@ -167,32 +151,44 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     assertHostedMemberPreferenceWakeAppend(append);
     requestedCausalSeq = BigInt(append.item.causalSeq!);
   }
+  if (requestedCausalSeq === null) {
+    const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
+      eventId: buildHostedMemberPreferencesUpdatedEventId({
+        memberId: input.memberId,
+        updateId: randomUUID(),
+      }),
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+      preferences: input.preferences,
+      requestedFields: resolveHostedAssistantPreferenceRequestedFields(
+        input.preferences,
+      ),
+    });
+    append = await appendHostedMailboxEnvelopeTx({
+      envelope: wake,
+      tx: input.prisma,
+    });
+    assertHostedMemberPreferenceWakeAppend(append);
+    requestedCausalSeq = BigInt(append.item.causalSeq!);
+  }
 
   const applicablePreferences = resolveApplicableAssistantPreferences({
-    current: {
-      persona: member.assistantPersona,
-      personality: member,
-      tone: member.assistantTone,
-      voice: member.assistantVoice,
-    },
     preferences: input.preferences,
-    ...preferenceLogicalOrder,
-    ...(requestedCausalSeq === null
-      ? {}
-      : {
-          causalSeq: requestedCausalSeq,
-          currentCausalSeq: {
-            persona: member.assistantPersonaCausalSeq,
-            personality: {
-              detail: member.assistantDetailCausalSeq,
-              humor: member.assistantHumorCausalSeq,
-              push: member.assistantPushCausalSeq,
-              unhinged: member.assistantUnhingedCausalSeq,
-            },
-            tone: member.assistantToneCausalSeq,
-            voice: member.assistantVoiceCausalSeq,
-          },
-        }),
+    causalSeq: requestedCausalSeq,
+    currentCausalSeq: {
+      persona: member.assistantPersonaCausalSeq,
+      personality: {
+        detail: member.assistantDetailCausalSeq,
+        humor: member.assistantHumorCausalSeq,
+        push: member.assistantPushCausalSeq,
+        unhinged: member.assistantUnhingedCausalSeq,
+      },
+      tone: member.assistantToneCausalSeq,
+      voice: member.assistantVoiceCausalSeq,
+    },
+    currentOccurredAt,
+    occurredAt: input.occurredAt,
   });
 
   if (!applicablePreferences) {
@@ -232,7 +228,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     });
     assertHostedMemberPreferenceWakeAppend(append);
   }
-  const effectiveCausalSeq = requestedCausalSeq ?? BigInt(append.item.causalSeq!);
+  const effectiveCausalSeq = requestedCausalSeq;
   const projectedPersona = preferences.persona;
   const projectedTone = preferences.tone;
   const projectedVoice = preferences.voice;
@@ -273,64 +269,43 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
         ? {}
         : {
             assistantPersona: projectedPersona,
-            assistantPersonaCausalSeq: maxCausalSeq(
-              member.assistantPersonaCausalSeq,
-              effectiveCausalSeq,
-            ),
+            assistantPersonaCausalSeq: effectiveCausalSeq,
           }),
       ...(projectedTone === undefined
         ? {}
         : {
             assistantTone: projectedTone,
-            assistantToneCausalSeq: maxCausalSeq(
-              member.assistantToneCausalSeq,
-              effectiveCausalSeq,
-            ),
+            assistantToneCausalSeq: effectiveCausalSeq,
           }),
       ...(projectedVoice === undefined
         ? {}
         : {
             assistantVoice: projectedVoice,
-            assistantVoiceCausalSeq: maxCausalSeq(
-              member.assistantVoiceCausalSeq,
-              effectiveCausalSeq,
-            ),
+            assistantVoiceCausalSeq: effectiveCausalSeq,
           }),
       ...(preferences.personality?.humor === undefined
         ? {}
         : {
             assistantHumor: preferences.personality.humor,
-            assistantHumorCausalSeq: maxCausalSeq(
-              member.assistantHumorCausalSeq,
-              effectiveCausalSeq,
-            ),
+            assistantHumorCausalSeq: effectiveCausalSeq,
           }),
       ...(preferences.personality?.push === undefined
         ? {}
         : {
             assistantPush: preferences.personality.push,
-            assistantPushCausalSeq: maxCausalSeq(
-              member.assistantPushCausalSeq,
-              effectiveCausalSeq,
-            ),
+            assistantPushCausalSeq: effectiveCausalSeq,
           }),
       ...(preferences.personality?.detail === undefined
         ? {}
         : {
             assistantDetail: preferences.personality.detail,
-            assistantDetailCausalSeq: maxCausalSeq(
-              member.assistantDetailCausalSeq,
-              effectiveCausalSeq,
-            ),
+            assistantDetailCausalSeq: effectiveCausalSeq,
           }),
       ...(preferences.personality?.unhinged === undefined
         ? {}
         : {
             assistantUnhinged: preferences.personality.unhinged,
-            assistantUnhingedCausalSeq: maxCausalSeq(
-              member.assistantUnhingedCausalSeq,
-              effectiveCausalSeq,
-            ),
+            assistantUnhingedCausalSeq: effectiveCausalSeq,
           }),
     },
     select: {
@@ -440,26 +415,20 @@ export function buildHostedMemberPreferencesUpdatedEventId(input: {
 }
 
 function resolveApplicableAssistantPreferences(input: {
-  causalSeq?: bigint;
-  current: {
-    persona: string | null;
-    personality: HostedMemberPersonalityColumns;
-    tone: string | null;
-    voice: string | null;
-  };
+  causalSeq: bigint;
   currentCausalSeq?: {
     persona: bigint | null;
     personality: Record<AssistantPersonalitySettingId, bigint | null>;
     tone: bigint | null;
     voice: bigint | null;
   };
-  currentOccurredAt?: {
+  currentOccurredAt: {
     persona: Date | null | undefined;
     personality: Record<AssistantPersonalitySettingId, Date | null | undefined>;
     tone: Date | null | undefined;
     voice: Date | null | undefined;
   };
-  preferenceOrderOccurredAt?: string;
+  occurredAt: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
 }): {
   appliedFields: AssistantPreferenceFieldId[];
@@ -469,24 +438,21 @@ function resolveApplicableAssistantPreferences(input: {
     causalSeq: input.causalSeq,
     currentCausalSeq: input.currentCausalSeq?.persona,
     currentOccurredAt: input.currentOccurredAt?.persona,
-    currentValue: input.current.persona,
-    preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
+    occurredAt: input.occurredAt,
     requestedValue: input.preferences.persona,
   });
   const toneApplicable = isAssistantPreferenceFieldApplicable({
     causalSeq: input.causalSeq,
     currentCausalSeq: input.currentCausalSeq?.tone,
     currentOccurredAt: input.currentOccurredAt?.tone,
-    currentValue: input.current.tone,
-    preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
+    occurredAt: input.occurredAt,
     requestedValue: input.preferences.tone,
   });
   const voiceApplicable = isAssistantPreferenceFieldApplicable({
     causalSeq: input.causalSeq,
     currentCausalSeq: input.currentCausalSeq?.voice,
     currentOccurredAt: input.currentOccurredAt?.voice,
-    currentValue: input.current.voice,
-    preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
+    occurredAt: input.occurredAt,
     requestedValue: input.preferences.voice,
   });
   const persona = personaApplicable && input.preferences.persona !== undefined
@@ -514,11 +480,7 @@ function resolveApplicableAssistantPreferences(input: {
       causalSeq: input.causalSeq,
       currentCausalSeq: input.currentCausalSeq?.personality[settingId],
       currentOccurredAt: input.currentOccurredAt?.personality[settingId],
-      currentValue: readStoredAssistantPersonalityScore(
-        input.current.personality,
-        settingId,
-      ),
-      preferenceOrderOccurredAt: input.preferenceOrderOccurredAt,
+      occurredAt: input.occurredAt,
       requestedValue: requestedScore,
     })) {
       continue;
@@ -550,43 +512,27 @@ function resolveApplicableAssistantPreferences(input: {
 }
 
 function isAssistantPreferenceFieldApplicable<T>(input: {
-  causalSeq: bigint | undefined;
+  causalSeq: bigint;
   currentCausalSeq: bigint | null | undefined;
   currentOccurredAt: Date | null | undefined;
-  currentValue: T;
-  preferenceOrderOccurredAt: string | undefined;
+  occurredAt: string;
   requestedValue: T | undefined;
 }): boolean {
   if (input.requestedValue === undefined) {
     return false;
   }
-  if (input.preferenceOrderOccurredAt !== undefined) {
-    if (input.currentCausalSeq == null) {
-      return true;
-    }
-    if (!input.currentOccurredAt) {
-      return false;
-    }
-    const requestedAt = Date.parse(input.preferenceOrderOccurredAt);
-    const currentAt = input.currentOccurredAt.getTime();
-    if (!Number.isFinite(requestedAt)) {
-      throw new TypeError("Assistant preference logical ordering time is invalid.");
-    }
-    if (requestedAt !== currentAt) {
-      return requestedAt > currentAt;
-    }
-    return input.requestedValue === input.currentValue;
-  }
-  if (input.causalSeq === undefined || input.currentCausalSeq == null) {
+  if (input.currentCausalSeq == null) {
     return true;
   }
-  if (input.causalSeq > input.currentCausalSeq) {
-    return true;
+  if (!input.currentOccurredAt) {
+    return input.causalSeq > input.currentCausalSeq;
   }
-  if (input.causalSeq < input.currentCausalSeq) {
-    return false;
+  const requestedAt = Date.parse(input.occurredAt);
+  const currentAt = input.currentOccurredAt.getTime();
+  if (requestedAt !== currentAt) {
+    return requestedAt > currentAt;
   }
-  return input.requestedValue !== input.currentValue;
+  return input.causalSeq > input.currentCausalSeq;
 }
 
 async function readHostedAssistantPreferenceOccurredAtByCausalSeq(input: {
@@ -640,22 +586,6 @@ async function readHostedAssistantPreferenceOccurredAtByCausalSeq(input: {
     tone: readOccurredAt(input.currentCausalSeq.tone),
     voice: readOccurredAt(input.currentCausalSeq.voice),
   };
-}
-
-function readStoredAssistantPersonalityScore(
-  value: HostedMemberPersonalityColumns,
-  settingId: AssistantPersonalitySettingId,
-): number | null {
-  switch (settingId) {
-    case "detail":
-      return value.assistantDetail;
-    case "humor":
-      return value.assistantHumor;
-    case "push":
-      return value.assistantPush;
-    case "unhinged":
-      return value.assistantUnhinged;
-  }
 }
 
 function normalizeStoredAssistantPersona(

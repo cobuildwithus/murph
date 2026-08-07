@@ -473,7 +473,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Submit one structured Murph product-feedback candidate for the current accepted request or exact scheduled automation occurrence. Provide the feedback kind, a concise product-only summary, and optional related changelog item ids. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.',
+    'Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, a concise product-only summary, and optional related changelog item ids. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

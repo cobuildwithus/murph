@@ -1855,6 +1855,7 @@ export async function findHostedMailboxItemByDedupeKeyTx(input: {
 
 export interface HostedMailboxConversationInputAuthority {
   causalSeq: string;
+  occurredAt: string;
 }
 
 export type HostedMailboxSubscriptionActionClaimResult =
@@ -1991,6 +1992,7 @@ export async function readHostedMailboxConversationInputAuthorityByAssistantInpu
   const rows = await input.prisma.hostedMailboxItem.findMany({
     select: {
       causalSeq: true,
+      occurredAt: true,
     },
     take: 2,
     where: {
@@ -2008,24 +2010,20 @@ export async function readHostedMailboxConversationInputAuthorityByAssistantInpu
   });
 
   const causalSeq = rows[0]?.causalSeq;
-  if (rows.length !== 1 || causalSeq === undefined || causalSeq === null) {
+  const occurredAt = rows[0]?.occurredAt;
+  if (
+    rows.length !== 1
+    || causalSeq === undefined
+    || causalSeq === null
+    || occurredAt === undefined
+  ) {
     return null;
   }
 
   return {
     causalSeq: causalSeq.toString(),
+    occurredAt: occurredAt.toISOString(),
   };
-}
-
-export async function readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(input: {
-  assistantInputId: string;
-  memberId: string;
-  prisma: HostedMailboxStoreClient;
-}): Promise<string | null> {
-  const authority =
-    await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx(input);
-
-  return authority?.causalSeq ?? null;
 }
 
 export async function readHostedMailboxConversationWakeByAssistantInputId(input: {

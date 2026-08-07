@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberAssistantPreferences: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
-  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx: vi.fn(),
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx: vi.fn(),
   requireHostedRuntimeActiveAccess: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
   scheduleMailboxWake: vi.fn(),
@@ -34,8 +34,8 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
-  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx:
-    mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx:
+    mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
 }));
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
@@ -96,7 +96,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
       model: "gpt-5.6-terra",
       solAvailable: false,
     });
-    mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx.mockResolvedValue("42");
+    mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx.mockResolvedValue({
+      causalSeq: "42",
+      occurredAt: "2026-07-16T00:00:00.000Z",
+    });
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       appliedFields: ["voice"],
       assistantPersonality: {
@@ -189,7 +192,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       { prisma: expect.objectContaining({ tx: true }) },
     );
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
     expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
@@ -216,13 +219,12 @@ describe("hosted assistant personalization tool owner adapter", () => {
       );
     expect(mocks.readHostedMailboxConversationWakeByAssistantInputId)
       .not.toHaveBeenCalled();
-    expect(mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx)
+    expect(mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx)
       .not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
       causalOrigin: "turn",
       memberId: "member_personalization_1",
       occurredAt: "2026-08-06T14:30:00.000Z",
-      preferenceOrderOccurredAt: "2026-08-06T14:30:00.000Z",
       preferences: { tone: "casual" },
       prisma: expect.objectContaining({ tx: true }),
       updateId: buildScheduledPreferenceUpdateId("tone-voice", ["tone"]),
@@ -265,7 +267,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
       causalOrigin: "turn",
       memberId: "member_personalization_1",
       occurredAt: "2026-08-06T14:30:00.000Z",
-      preferenceOrderOccurredAt: "2026-08-06T14:30:00.000Z",
       preferences: { personality: { humor: 8 } },
       prisma: expect.objectContaining({ tx: true }),
       updateId: buildScheduledPreferenceUpdateId("personality", ["humor"]),
@@ -336,7 +337,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(
       mocks.requireHostedRuntimeActiveAccessForUpdateTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx
         .mock.invocationCallOrder[0]!,
     );
   });
@@ -385,7 +386,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       prisma: expect.objectContaining({ tx: true }),
     });
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_66666666666666666666666666666666",
       memberId: "member_group_runtime",
@@ -532,7 +533,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -571,7 +572,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledOnce();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -600,7 +601,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).rejects.toThrow("input authority is invalid");
 
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -632,7 +633,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).rejects.toThrow("input authority is invalid");
 
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -659,7 +660,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).rejects.toThrow("input authority is invalid");
 
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -703,7 +704,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledOnce();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -721,7 +722,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
 
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -737,7 +738,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
 
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
@@ -789,11 +790,11 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(
       mocks.requireHostedRuntimeActiveAccessForUpdateTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx
         .mock.invocationCallOrder[0]!,
     );
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_99999999999999999999999999999999",
       memberId: "member_personalization_1",
@@ -883,7 +884,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       prisma: expect.objectContaining({ tx: true }),
     });
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_22222222222222222222222222222222",
       memberId: "member_personalization_1",
@@ -938,7 +939,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
   });
 
   it("rejects an assistant input that has no canonical mailbox authority", async () => {
-    mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx.mockResolvedValue(null);
+    mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx.mockResolvedValue(null);
 
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       authority: { assistantInputId: "ain_44444444444444444444444444444444" },
@@ -947,7 +948,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).rejects.toThrow("input authority is invalid");
 
     expect(
-      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+      mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
     ).toHaveBeenCalledWith({
       assistantInputId: "ain_44444444444444444444444444444444",
       memberId: "member_personalization_1",

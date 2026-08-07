@@ -3375,11 +3375,7 @@ describe('assistant Codex turn planning', () => {
         hostedToolContext: {
           ...createHostedToolContext(),
           clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
-          currentProductFeedbackAuthority: () => ({
-            automationId: 'automation-scheduled-phone-call',
-            kind: 'automation_occurrence',
-            occurrenceAt,
-          }),
+          currentProductFeedbackAuthority: () => null,
           personalizationTool: { request: vi.fn() },
           phoneCalls: { start: vi.fn() },
           physicalNotes: { send: vi.fn() },
@@ -3419,6 +3415,7 @@ describe('assistant Codex turn planning', () => {
 
       const toolNames = plan.dynamicTools.map((tool) => tool.name)
       expect(toolNames.includes('create_phone_call')).toBe(expectedAvailable)
+      expect(toolNames).not.toContain('submit_product_feedback')
       if (expectedAvailable) {
         expect(toolNames).toEqual(expect.arrayContaining([
           'assistant_style',
@@ -3426,7 +3423,6 @@ describe('assistant Codex turn planning', () => {
           'create_clinical_records_connect_link',
           'personalization',
           'send_physical_note',
-          'submit_product_feedback',
         ]))
         expect(toolNames).not.toContain('send_progress_update')
       }
