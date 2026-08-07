@@ -53,9 +53,6 @@ import {
 } from "../hosted-routing/assistant-notification-destination";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
-import {
-  isHostedSignupReferralRewardEnabled,
-} from "./signup-referral-policy";
 
 export const HOSTED_USAGE_REFERRAL_POLICY_VERSION =
   "hosted-usage-referral-2026-07-v1";
@@ -358,7 +355,6 @@ export async function handleHostedUsageReferralGroupTool(input: {
     }
   >;
   prisma?: PrismaClient;
-  signupReferralRewardsEnabled?: boolean;
 }): Promise<HostedRuntimeGroupToolResponse> {
   if (!(input.enabled ?? isHostedUsageReferralEnabled())) {
     return unavailableToolResponse(
@@ -526,9 +522,7 @@ export async function handleHostedUsageReferralGroupTool(input: {
         return;
       }
       if (
-        (input.signupReferralRewardsEnabled
-          ?? isHostedSignupReferralRewardEnabled())
-        && await hasPendingHostedSignupReferralActivationTx({
+        await hasPendingHostedSignupReferralActivationTx({
           now,
           referrerMemberId: actor.referrerMemberId,
           tx,

@@ -536,7 +536,7 @@ describe("hosted usage referral tool", () => {
     expect(referrals).toHaveLength(0);
   });
 
-  it("does not arm a later mission while an attributed activation is pending", async () => {
+  it("reserves pending activation capacity while settlement is disabled", async () => {
     const { prisma, referrals } = buildPrisma({
       pendingSignupActivation: true,
     });
@@ -550,7 +550,6 @@ describe("hosted usage referral tool", () => {
         policyCodes: ["active_group_v1"],
         sourceConversation: PERSONAL_SOURCE,
       },
-      signupReferralRewardsEnabled: true,
     })).resolves.toEqual({
       action: "arm_usage_referral",
       result: {

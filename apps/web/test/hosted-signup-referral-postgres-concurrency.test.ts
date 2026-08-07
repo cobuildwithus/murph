@@ -413,7 +413,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     }, 60_000);
 
-    it("blocks a later group arm while an older signup activation owns cap capacity", async () => {
+    it("preserves pending signup capacity across the reward-gate transition", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for this proof.");
       }
@@ -525,7 +525,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             policyCodes: ["active_group_v1"],
             sourceConversation,
           },
-          signupReferralRewardsEnabled: true,
         })).resolves.toEqual({
           action: "arm_usage_referral",
           result: {
@@ -534,12 +533,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             unavailableReason: "usage_referral_not_available",
           },
         });
-        await expect(settleHostedSignupReferralReward({
-          activatedAt,
-          introducedMemberId,
+        await expect(recoverPendingHostedSignupReferralRewards({
+          enabled: true,
+          now,
           prisma,
-          referrerMemberId,
-        })).resolves.toMatchObject({ outcome: "rewarded" });
+        })).resolves.toEqual({ failed: 0, rewarded: 1, scanned: 1 });
         await expect(handleHostedUsageReferralGroupTool({
           enabled: true,
           memberId: referrerMemberId,
@@ -549,7 +547,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             policyCodes: ["active_group_v1"],
             sourceConversation,
           },
-          signupReferralRewardsEnabled: true,
         })).resolves.toMatchObject({
           result: {
             referral: null,

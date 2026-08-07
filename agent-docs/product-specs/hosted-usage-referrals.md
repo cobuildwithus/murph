@@ -9,14 +9,17 @@ evidence into the same provider-neutral state machine. Shareable signup links
 reuse the same receipt, cap, credit-ledger, recovery, and assistant-notification
 primitives without inventing a second mission lifecycle.
 
-There are two independent rollout gates:
+Two rollout gates control their respective mutations:
 
 - `HOSTED_USAGE_REFERRALS_ENABLED=1` enables conversational referral missions;
 - `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED=1` enables rewards for attributed
   signup-link activations.
 
 The stable referral link remains available to an eligible signed-in member when
-either reward gate is disabled.
+either reward gate is disabled. The paths still share one rolling cap: an
+exactly attributed activation in the bounded signup-recovery window reserves
+its place before settlement is enabled, so a later same-referrer conversational
+arm must wait for that older qualification to settle, disqualify, or age out.
 
 ## Product behavior
 
@@ -241,11 +244,13 @@ Recovery scans activation candidates oldest first; the existing referrer lock
 serializes every capacity decision and receipt for that referrer. If one
 candidate fails transiently, that pass skips later activations for the same
 referrer so recovery failure cannot let a later signup steal earlier capacity.
-While signup rewards are enabled, a conversational arm holding that same
-referrer lock also fails temporarily if an older, exactly attributed activation
-still lacks a receipt. Recovery must first settle or disqualify the older event;
-the arm then sees its durable cap result. This preserves activation-time order
-without another reservation table or queue.
+A conversational arm holding that same referrer lock fails temporarily if an
+older, exactly attributed activation in the 30-day recovery window still lacks
+a receipt, even while signup settlement is disabled. Recovery settles or
+disqualifies the older event after enablement; otherwise the pending event ages
+out with the same eligibility window. Existing missions continue. This bounded
+per-referrer pause preserves activation-time order without another reservation
+table or queue.
 
 The referrer cannot reward their own reconciled identity. Suspended referrers or
 introduced members are disqualified. One introduced member can own only one
@@ -386,6 +391,9 @@ enabling it:
    `pnpm public-routes:waf-check` to pass against the active configuration;
 2. run the count-only 30-day attributed-activation aggregate, explicitly accept
    the bounded backfill population and exposure, and otherwise keep the gate off;
+   after acceptance, enable recovery promptly because eligible pending
+   activations pause only new same-referrer conversational arms while the gate
+   remains off;
 3. confirm exact-head unit, typecheck, app, viewport, and design-proof checks;
 4. run the focused local-PostgreSQL concurrent settlement and replay proof,
    including delayed activation after invite expiry and `web` relabeling;
@@ -405,7 +413,10 @@ enabling it:
 
 Disabling the signup-reward gate immediately stops new activation scans. It does
 not revoke stable links, hide prior history, claw back existing credit, or
-suppress a notice for a reward that already committed.
+suppress a notice for a reward that already committed. An exactly attributed
+activation that remains eligible for the 30-day backfill continues to pause only
+new same-referrer conversational arms until recovery resumes or it ages out;
+operators must treat that bounded coupling as part of the gate transition.
 
 Once the first signup-link referral grant exists, Web must not roll back below a
 version that understands referral-backed entries and the signup policy version.
