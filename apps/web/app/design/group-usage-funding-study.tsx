@@ -33,6 +33,7 @@ const DESIGN_USAGE_OFFERS = [
   { amountLabel: "$25", offerCode: "usage_25_usd" },
 ] as const;
 const DESIGN_PAYER_MEMBER_ID = "design_usage_top_up_payer";
+const DESIGN_SIGNUP_REFERRAL_URL = "https://example.com/r/design-referral";
 
 const DESIGN_GROUP_SPONSORSHIP_OFFERS = [
   {
@@ -544,6 +545,7 @@ function PersonalUsageCreditOwnerStudy() {
               <HostedAiUsageActivity
                 activity={DESIGN_AI_USAGE_ACTIVITY}
                 missionContactOption={DESIGN_USAGE_MISSION_CONTACT_OPTION}
+                signupReferralUrl={DESIGN_SIGNUP_REFERRAL_URL}
               />
             </section>
           }
@@ -561,6 +563,7 @@ function PersonalUsageCreditOwnerStudy() {
             <HostedAiUsageActivity
               activity={DESIGN_AI_USAGE_ACTIVITY}
               missionContactOption={null}
+              signupReferralUrl={DESIGN_SIGNUP_REFERRAL_URL}
             />
           </div>
         </section>
@@ -572,6 +575,7 @@ function PersonalUsageCreditOwnerStudy() {
             <HostedAiUsageActivity
               activity={DESIGN_AI_USAGE_HISTORY_INTERACTION}
               missionContactOption={DESIGN_USAGE_MISSION_CONTACT_OPTION}
+              signupReferralUrl={DESIGN_SIGNUP_REFERRAL_URL}
             />
           </div>
         </section>
