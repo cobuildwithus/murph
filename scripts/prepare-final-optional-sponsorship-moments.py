@@ -110,6 +110,69 @@ if text.count(old_row) != 1:
     raise RuntimeError("hosted usage top-up index row changed")
 index.write_text(text.replace(old_row, new_row, 1))
 
+contract = "apps/web/src/lib/hosted-groups/group-sponsorship-contract.ts"
+replace_once(
+    contract,
+    '''export function buildHostedGroupSponsorshipDraftInput(
+  input: HostedGroupSponsorshipDraftInput,
+): HostedGroupSponsorshipDraft {
+  return {
+''',
+    '''export function buildHostedGroupSponsorshipDraftInput(
+  input: HostedGroupSponsorshipDraftInput,
+): HostedGroupSponsorshipDraft {
+  const runningBitRequest = input.runningBitAvailable
+    ? input.runningBitRequest
+    : null;
+  return {
+''',
+    "draft builder running-bit value",
+)
+replace_once(
+    contract,
+    '''    publicAlias: input.publicAlias,
+    runningBitRequest: input.runningBitAvailable
+      ? input.runningBitRequest
+      : null,
+''',
+    '''    publicAlias:
+      input.creativeEnabled || runningBitRequest?.trim()
+        ? input.publicAlias
+        : null,
+    runningBitRequest,
+''',
+    "unused sponsor alias",
+)
+
+component = "apps/web/src/components/hosted-groups/group-sponsorship-dialog.tsx"
+replace_once(
+    component,
+    '''                      <FieldDescription>
+                        Optional. Murph never guesses your public name.
+                      </FieldDescription>''',
+    '''                      <FieldDescription>
+                        Shown only with a creative response or temporary running
+                        bit. Murph never guesses your public name.
+                      </FieldDescription>''',
+    "sponsor alias description",
+)
+
+contract_test = "apps/web/test/hosted-group-sponsorship-contract.test.ts"
+replace_once(
+    contract_test,
+    '''    })).toEqual({
+      publicAlias: "The Group Historian",
+      runningBitRequest: null,
+      sponsorMessage: null,
+    });''',
+    '''    })).toEqual({
+      publicAlias: null,
+      runningBitRequest: null,
+      sponsorMessage: null,
+    });''',
+    "quiet sponsor alias test",
+)
+
 components = "apps/web/app/design/components-content.tsx"
 replace_once(
     components,
