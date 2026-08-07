@@ -182,34 +182,6 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
   });
 
-  it("threads destination-active bridge status through the production Durable Object constructor", async () => {
-    const destination = createBucketStore();
-    const harness = createUserRunnerDurableObject({
-      BUNDLES_ENAM: destination.api,
-      HOSTED_R2_CUTOVER_PHASE: "destination_active",
-    });
-    await harness.durableObject.bindUser("member_123");
-    installOidcJwksFetch(async (input: RequestInfo | URL) => {
-      const url = new URL(String(input));
-      if (url.origin === "https://web.example.test" && url.pathname === HOSTED_RUNTIME_STATUS_PATH) {
-        return Response.json({
-          mailboxLag: [],
-          userId: "member_123",
-          workspace: null,
-        });
-      }
-      throw new Error(`Unexpected fetch during R2 bridge status test: ${url.origin}${url.pathname}`);
-    });
-
-    await expect(harness.durableObject.runnerStatus()).resolves.toMatchObject({
-      r2Cutover: {
-        coexisting: true,
-        phase: "destination_active",
-        protocolVersion: "r2-oc-enam-v2",
-      },
-      userId: "member_123",
-    });
-  });
 });
 
 function createUserRunnerDurableObject(

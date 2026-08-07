@@ -12,13 +12,13 @@ export function mapStripeSubscriptionStatusToHostedBillingStatus(
     case "past_due":
       return HostedBillingStatus.past_due;
     case "canceled":
+    case "incomplete_expired":
       return HostedBillingStatus.canceled;
     case "unpaid":
       return HostedBillingStatus.unpaid;
     case "paused":
       return HostedBillingStatus.paused;
     case "incomplete":
-    case "incomplete_expired":
       return HostedBillingStatus.incomplete;
     default:
       return HostedBillingStatus.not_started;

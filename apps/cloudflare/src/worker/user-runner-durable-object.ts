@@ -21,9 +21,6 @@ import type {
   DurableObjectStateLike,
 } from "../user-runner.ts";
 import {
-  resolveHostedR2CutoverContext,
-} from "../r2-cutover.ts";
-import {
   asWorkerStringEnvironment,
 } from "../worker-contracts.ts";
 import type {
@@ -91,6 +88,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeWriteFence(input);
   }
 
+  async recordRuntimeCompletionFromContainer(
+    input: Parameters<HostedUserRunner["recordRuntimeCompletionFromContainer"]>[0],
+  ): ReturnType<HostedUserRunner["recordRuntimeCompletionFromContainer"]> {
+    return this.runner.recordRuntimeCompletionFromContainer(input);
+  }
+
   async validateRuntimeProviderEgressToken(input: {
     providerEgressToken: string;
     userId: string;
@@ -142,6 +145,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.recordHostedWorkspaceSnapshotOrphanCandidate(input);
   }
 
+  async recordHostedBrowserVaultReplicaOrphanCandidate(
+    input: Parameters<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]>[0],
+  ): ReturnType<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]> {
+    return this.runner.recordHostedBrowserVaultReplicaOrphanCandidate(input);
+  }
+
   async fetch(): Promise<Response> {
     return notFound();
   }
@@ -155,14 +164,12 @@ function createHostedUserRunner(
   state: DurableObjectStateLike,
   env: WorkerEnvironmentSource,
 ): HostedUserRunner {
-  const r2CutoverContext = resolveHostedR2CutoverContext(env);
   return new HostedUserRunner(
     state,
     readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
-    r2CutoverContext.bucket,
+    env.BUNDLES,
     env,
     env.RUNNER_CONTAINER,
-    r2CutoverContext,
     env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
   );
 }

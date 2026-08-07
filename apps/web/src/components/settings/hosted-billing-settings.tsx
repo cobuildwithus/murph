@@ -10,10 +10,9 @@ import { Progress } from "@/src/components/ui/progress";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
-  HOSTED_PULSE_TRIAL_OFFER,
   formatHostedBillingPrice,
   getHostedBillingPlanDefinition,
-  parseHostedBillingCheckoutOffer,
+  isHostedPulseTrialBillingState,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
@@ -46,7 +45,7 @@ const PULSE_FEATURES = [
   "Run experiments, see what changed",
   "Sync your health data",
   "Private before/after outcomes",
-  "Chat via iMessage, Telegram, or email",
+  "Chat with Murph via iMessage, Telegram, or email",
   "Access to the most capable AI models",
 ];
 
@@ -118,7 +117,6 @@ export function HostedBillingSettings(props: {
 
   const currentPlanCode = parseHostedBillingPlanCode(props.currentBillingPlanCode);
   const currentPhase = parseHostedBillingPhase(props.currentBillingPhase);
-  const currentOffer = parseHostedBillingCheckoutOffer(props.currentCheckoutOffer);
   const scheduledPlanCode = parseHostedBillingPlanCode(props.scheduledBillingPlanCode);
   const scheduledBillingEffectiveAt =
     props.scheduledBillingEffectiveAt instanceof Date ? props.scheduledBillingEffectiveAt : null;
@@ -127,14 +125,26 @@ export function HostedBillingSettings(props: {
   const familyState = props.familyState ?? "none";
   const familyCurrent = familyState === "owner" || familyState === "sponsored";
   const familyOwner = familyState === "owner";
+  const sponsoredMember = familyState === "sponsored";
+  const ownBillingActive = props.billingStatus === "active" && !familyCurrent;
+  const ownPaidBillingActive = ownBillingActive && currentPhase === "paid";
+  const pulseTrialActive =
+    ownBillingActive &&
+    currentPlanCode === "launch_monthly" &&
+    isHostedPulseTrialBillingState({
+      currentBillingPhase: props.currentBillingPhase,
+      currentCheckoutOffer: props.currentCheckoutOffer,
+    });
   const groupCurrent =
-    !familyCurrent && currentPlanCode === "launch_group_monthly";
-  const pulseCurrent = !familyCurrent && currentPlanCode === "launch_monthly";
-  const edgeCurrent = !familyCurrent && currentPlanCode === "launch_edge_monthly";
+    ownPaidBillingActive && currentPlanCode === "launch_group_monthly";
+  const pulseCurrent =
+    (ownPaidBillingActive && currentPlanCode === "launch_monthly") ||
+    pulseTrialActive;
+  const edgeCurrent =
+    ownPaidBillingActive && currentPlanCode === "launch_edge_monthly";
   const usageTopUpOffers = props.usageTopUpOffers ?? [];
 
-  const isPulseTrial =
-    pulseCurrent && currentPhase !== "paid" && currentOffer === HOSTED_PULSE_TRIAL_OFFER;
+  const isPulseTrial = pulseTrialActive;
   const pulseTrialBillingContinuationPending =
     props.pulseTrialBillingContinuationPending === true;
   const hasPendingGroupSwitch =
@@ -207,6 +217,8 @@ export function HostedBillingSettings(props: {
     {
       action: familyOwner
         ? <FamilyBillingChangeButton block targetPlanName="Pulse" />
+        : sponsoredMember
+          ? null
         : groupCurrent && props.canUpgradeToPulse === true
           ? (
               <HostedPlanChangeButton
@@ -258,6 +270,8 @@ export function HostedBillingSettings(props: {
     {
       action: familyOwner
         ? <FamilyBillingChangeButton block targetPlanName="Edge" />
+        : sponsoredMember
+          ? null
         : edgeCurrent
         ? <CurrentPlanButton />
         : props.canUpgradeToEdge === true
@@ -302,11 +316,13 @@ export function HostedBillingSettings(props: {
       ),
     },
     {
-      action: familyCurrent
-        ? <CurrentPlanButton />
-        : props.canStartFamily === true
-          ? <HostedFamilyStartButton block label="Choose Family" />
-          : null,
+      action: sponsoredMember
+        ? null
+        : familyOwner
+          ? <CurrentPlanButton />
+          : props.canStartFamily === true
+            ? <HostedFamilyStartButton block label="Choose Family" />
+            : null,
       current: familyCurrent,
       currentLabel: familyState === "sponsored" ? "Sponsored" : "Current plan",
       features: FAMILY_FEATURES,
@@ -320,12 +336,13 @@ export function HostedBillingSettings(props: {
   ];
 
   const planResolved = groupCurrent || pulseCurrent || edgeCurrent || familyCurrent;
-  const visibleCards = props.planChangePending === true
-    ? cards.filter((card) => card.current)
-    : cards;
-  const noPlanText =
-    props.billingStatus === "active"
-      ? "Your subscription is active."
+  const retainedPlan = currentPlanCode
+    ? getHostedBillingPlanDefinition(currentPlanCode)
+    : null;
+  const noPlanText = retainedPlan
+    ? `${retainedPlan.displayName} is not active. Choose a plan below or use Manage billing.`
+    : props.billingStatus === "active"
+      ? "Your billing status is still syncing. Use Manage billing if it does not resolve."
       : "You're not on a paid plan yet. Choose one below.";
 
   return (
@@ -347,7 +364,7 @@ export function HostedBillingSettings(props: {
           </div>
         </div>
       ) : null}
-      {!planResolved ? (
+      {!planResolved && !props.planChangePending && !props.groupPaymentMethodSaved ? (
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
       <PlanUsageBand
@@ -368,14 +385,12 @@ export function HostedBillingSettings(props: {
       <div
         className={cn(
           "grid items-stretch gap-3",
-          props.planChangePending === true
-            ? "sm:max-w-sm"
-            : props.showGroupPlan === true && !familyCurrent
+          props.showGroupPlan === true && !familyCurrent
             ? "sm:grid-cols-2 lg:grid-cols-4"
             : "sm:grid-cols-3",
         )}
       >
-        {visibleCards.map((card) => (
+        {cards.map((card) => (
           <PlanCard
             key={card.key}
             card={props.planChangePending === true
@@ -385,7 +400,7 @@ export function HostedBillingSettings(props: {
         ))}
       </div>
       <div className="flex justify-end">
-        {props.planChangePending === true ? null : familyState === "sponsored" ? (
+        {familyState === "sponsored" ? (
           <p className="text-sm text-muted-foreground">
             Billing is managed by your Family plan owner.
           </p>

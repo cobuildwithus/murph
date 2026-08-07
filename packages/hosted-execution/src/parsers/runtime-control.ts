@@ -5773,6 +5773,11 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(restore, "extractMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "encryptedBytes", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "plainBytes", restoreLabel),
+      ...requireOptionalNonNegativeInteger(
+        restore,
+        "replaySafeReadMaxAttempt",
+        restoreLabel,
+      ),
     };
   }
 
@@ -5835,12 +5840,16 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       preProviderLabel,
     );
     breakdown.preProvider = {
+      ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToAssistantPhaseMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationLaneToAssistantServiceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "executionTargetHydrateMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationBootstrapMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxScanBytesRead", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "outboxScanElapsedMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxScanFilesRead", preProviderLabel),
       ...requireOptionalBoolean(preProvider, "outboxScanPerformed", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanBytesRead", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanElapsedMs", preProviderLabel),
@@ -5885,17 +5894,20 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       providerLabel,
     );
     breakdown.provider = {
+      ...requireOptionalNonNegativeInteger(provider, "assistantServicePreLockMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerInitializeMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerPreProviderMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerSpawnReadyMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadResumeMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadStartMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerWarmReuseMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexProcessPreparationMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "turnLockWaitMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "sessionResolveMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "promptBuildMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "admissionMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "preProviderSetupMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "providerPlanAndGateMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "linqEgressGuardMs", providerLabel),
     };
   }
@@ -6628,64 +6640,9 @@ export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerSta
           recentLogs: requireArray(record.recentLogs, "Hosted runner status response recentLogs")
             .map((entry) => parseHostedRuntimeLogEntry(entry)),
         }),
-    ...(record.r2Cutover === undefined
-      ? {}
-      : { r2Cutover: parseHostedRunnerR2CutoverStatus(record.r2Cutover) }),
     userId: requireString(record.userId, "Hosted runner status response userId"),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
-}
-
-function parseHostedRunnerR2CutoverStatus(
-  value: unknown,
-): NonNullable<HostedRunnerStatusResponse["r2Cutover"]> {
-  const record = requireObject(value, "Hosted runner status response r2Cutover");
-  const phase = requireString(
-    record.phase,
-    "Hosted runner status response r2Cutover.phase",
-  );
-  if (phase !== "source_active" && phase !== "destination_active") {
-    throw new TypeError(
-      "Hosted runner status response r2Cutover.phase must be source_active or destination_active.",
-    );
-  }
-  return {
-    coexisting: requireBoolean(
-      record.coexisting,
-      "Hosted runner status response r2Cutover.coexisting",
-    ),
-    ...(record.pausedCanaryConfigured === undefined
-      ? {}
-      : {
-          pausedCanaryConfigured: requireBoolean(
-            record.pausedCanaryConfigured,
-            "Hosted runner status response r2Cutover.pausedCanaryConfigured",
-          ),
-        }),
-    phase,
-    protocolVersion: requireString(
-      record.protocolVersion,
-      "Hosted runner status response r2Cutover.protocolVersion",
-    ),
-    ...(record.writeAdmission === undefined
-      ? {}
-      : {
-          writeAdmission: parseHostedR2WriteAdmission(record.writeAdmission),
-        }),
-  };
-}
-
-function parseHostedR2WriteAdmission(value: unknown): "open" | "paused" {
-  const writeAdmission = requireString(
-    value,
-    "Hosted runner status response r2Cutover.writeAdmission",
-  );
-  if (writeAdmission !== "open" && writeAdmission !== "paused") {
-    throw new TypeError(
-      "Hosted runner status response r2Cutover.writeAdmission must be open or paused.",
-    );
-  }
-  return writeAdmission;
 }
 
 export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRuntimeWebStatusResponse {

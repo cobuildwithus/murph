@@ -47,7 +47,6 @@ export interface AssistantOutboxIntentMirrorState {
 export interface AssistantOutboxPreparedDispatchState {
   attemptCount: number
   deliveryConfirmationPending: boolean
-  deliveryIdempotencyKey: string | null
   deliveryTransportIdempotent: boolean
   lastAttemptAt: string | null
   lastError: AssistantDeliveryError | null
@@ -514,10 +513,56 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
   error: unknown
   sending: AssistantOutboxIntent
 }): boolean {
-  return isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
+  return isLinqAttachmentReservationAmbiguity(input) ||
+    isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
     isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
     isLinqPartialDeliveryWithoutProviderIds(input) ||
     isEmailGroupFanoutAmbiguityWithoutProviderIds(input)
+}
+
+function isLinqAttachmentReservationAmbiguity(input: {
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (input.sending.channel !== 'linq') {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  if (errorRecord?.deliveryMayHaveSucceeded === false) {
+    return false
+  }
+  if (errorRecord?.linqAttachmentReservationMayHaveSucceeded === true) {
+    return true
+  }
+  if (
+    readNonEmptyString(errorRecord?.code) !== 'LINQ_API_REQUEST_FAILED' ||
+    readNonEmptyString(context?.method) !== 'POST' ||
+    readNonEmptyString(context?.operation) !== 'create_attachment_upload'
+  ) {
+    return false
+  }
+  if (errorRecord?.deliveryMayHaveSucceeded === true) {
+    return true
+  }
+
+  const failureStage = readNonEmptyString(context?.failureStage)
+  if (failureStage === 'transport') {
+    return true
+  }
+
+  // The reservation POST has no idempotency key. A successful but unusable
+  // response, timeout, or server-side failure cannot prove that Linq did not
+  // create the reservation.
+  const status = context?.status
+  return failureStage === 'http' &&
+    typeof status === 'number' &&
+    (
+      (status >= 200 && status <= 299) ||
+      status === 408 ||
+      (status >= 500 && status <= 599)
+    )
 }
 
 function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
@@ -1213,7 +1258,6 @@ function readAssistantOutboxPreparedDispatchState(
   return {
     attemptCount: intent.attemptCount,
     deliveryConfirmationPending: intent.deliveryConfirmationPending,
-    deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
     deliveryTransportIdempotent: intent.deliveryTransportIdempotent,
     lastAttemptAt: intent.lastAttemptAt,
     lastError: intent.lastError,
@@ -1224,7 +1268,6 @@ function readAssistantOutboxPreparedDispatchState(
 }
 
 export async function resetAssistantOutboxPreparedDispatch(input: {
-  deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   intentPath: string
@@ -1258,11 +1301,6 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
     if (current.deliveryTransportIdempotent !== input.deliveryTransportIdempotent) {
       return null
     }
-    const deliveryIdempotencyKey = input.deliveryIdempotencyKey ?? input.intent.deliveryIdempotencyKey
-    if (current.deliveryIdempotencyKey !== deliveryIdempotencyKey) {
-      return null
-    }
-
     const resetAt = input.resetAt.toISOString()
     const restoreDispatchState = input.restoreDispatchState ?? null
     const restoredNextAttemptAt = restoreDispatchState
@@ -1278,9 +1316,7 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
         attemptCount: restoreDispatchState?.attemptCount ?? current.attemptCount,
         deliveryConfirmationPending:
           restoreDispatchState?.deliveryConfirmationPending ?? false,
-        deliveryIdempotencyKey: restoreDispatchState
-          ? restoreDispatchState.deliveryIdempotencyKey
-          : current.deliveryIdempotencyKey,
+        deliveryIdempotencyKey: current.deliveryIdempotencyKey,
         deliveryTransportIdempotent: restoreDispatchState
           ? restoreDispatchState.deliveryTransportIdempotent
           : current.deliveryTransportIdempotent,

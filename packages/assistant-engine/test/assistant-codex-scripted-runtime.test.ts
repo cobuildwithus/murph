@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createServer, type Server, type ServerResponse } from 'node:http'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,6 +17,10 @@ import {
 } from '@murphai/operator-config/assistant-backend'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
+import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+  resolveAssistantSkillsRoot,
+} from '../src/assistant-skill-assets.ts'
 import {
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
@@ -40,6 +44,12 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
+import type {
+  AssistantHostedAutomationToolRequest,
+} from '../src/assistant/execution-context.ts'
+import {
+  isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
+} from '../src/assistant/onboarding-first-personal-read-automation.ts'
 import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
 import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
@@ -47,6 +57,9 @@ import { resolveAssistantSession } from '../src/assistant/store.ts'
 import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
+import {
+  ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+} from '../src/assistant/first-contact-welcome.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
 // matching CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
@@ -185,6 +198,365 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('keeps a fresh onboarding greeting on the compact root and bounded resume read', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const skillsRoot = path.join(
+      scenario.turnInput.workingDirectory,
+      'skills',
+    )
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'murph-onboarding'),
+      path.join(skillsRoot, 'murph-onboarding'),
+      { recursive: true },
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    await writeFile(fakeVaultCli, `#!/bin/sh
+if [ "$*" = "assistant onboarding resume-context --format json" ]; then
+  printf '%s\\n' '{"status":"open","hasPriorSetupContext":false,"savedFacts":[]}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 1
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+
+    const laterStageMarker =
+      'Hosted onboarding must have capacity for at least three concurrent children.'
+    const completionMarker =
+      'Onboarding is complete with `user_answered` only when all of these are true:'
+    const recoveryMarker =
+      'A managed owner may invoke this skill at most once on each of the next three local days after the welcome.'
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/murph-onboarding/SKILL.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli assistant onboarding resume-context --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      prompt: 'Hey',
+      // This proof intentionally executes the staged skill and fake vault CLI.
+      // Match the existing scripted exec lane so GitHub's restricted Linux
+      // runner does not fail while bubblewrap configures loopback.
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toBe(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('## Progressive disclosure')
+    expect(toolOutputs).toContain(
+      'Never re-ask solely for optional demographics.',
+    )
+    expect(toolOutputs).toContain('"hasPriorSetupContext":false')
+    expect(toolOutputs).not.toContain(laterStageMarker)
+    expect(toolOutputs).not.toContain(completionMarker)
+    expect(toolOutputs).not.toContain(recoveryMarker)
+  })
+
+  it('completes onboarding without arming or promising a revoked first read', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const skillsRoot = path.join(scenario.turnInput.workingDirectory, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'murph-onboarding'),
+      path.join(skillsRoot, 'murph-onboarding'),
+      { recursive: true },
+    )
+    const commandLog = path.join(
+      scenario.turnInput.workingDirectory,
+      'onboarding-completion-commands.log',
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    await writeFile(fakeVaultCli, `#!/bin/sh
+if [ "$*" = "assistant onboarding complete --reason user_answered" ]; then
+  printf '%s\\n' "$*" >> "${commandLog}"
+  printf '%s\\n' '{"status":"completed","completedReason":"user_answered"}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 1
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/murph-onboarding/SKILL.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,360p' skills/murph-onboarding/references/return-launch-completion.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli assistant onboarding complete --reason user_answered",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "Understood — you're all set, and I won't send proactive follow-ups.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            throw new Error('The revoked first read must not be armed.')
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onboardingFirstReadCompletionTransitionAvailable: true,
+      prompt: [
+        'Every user_answered onboarding criterion is now satisfied.',
+        'Complete onboarding, but do not follow up or message me proactively.',
+      ].join(' '),
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toBe(
+      "Understood — you're all set, and I won't send proactive follow-ups.",
+    )
+    expect(automationRequests).toEqual([])
+    expect((await readFile(commandLog, 'utf8')).trim().split('\n')).toEqual([
+      'assistant onboarding complete --reason user_answered',
+    ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain(
+      'Never arm it when the current message says the member asked not to',
+    )
+    expect(result.finalMessage).not.toContain(
+      'If I find something genuinely useful',
+    )
+  })
+
+  it('completes onboarding before arming and promising one first read', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const skillsRoot = path.join(scenario.turnInput.workingDirectory, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'murph-onboarding'),
+      path.join(skillsRoot, 'murph-onboarding'),
+      { recursive: true },
+    )
+    const commandLog = path.join(
+      scenario.turnInput.workingDirectory,
+      'onboarding-positive-completion-commands.log',
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    await writeFile(fakeVaultCli, `#!/bin/sh
+if [ "$*" = "assistant onboarding complete --reason user_answered" ]; then
+  printf '%s\\n' "$*" >> "${commandLog}"
+  printf '%s\\n' '{"status":"completed","completedReason":"user_answered"}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 1
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/murph-onboarding/SKILL.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,360p' skills/murph-onboarding/references/return-launch-completion.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli assistant onboarding complete --reason user_answered",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save_onboarding_first_personal_read",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "You're all set. I'm going to take a proper look across what you shared and any data you connected. If I find something genuinely useful—whether that's a pattern, a clearer interpretation, or something worth watching next—I'll send it over. You can keep texting me normally in the meantime.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            expect((await readFile(commandLog, 'utf8')).trim()).toBe(
+              'assistant onboarding complete --reason user_answered',
+            )
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-first-personal-read',
+              created: true,
+              lookupId: 'onboarding-first-personal-read',
+              routeBinding: 'current_conversation',
+              status: 'active',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onboardingFirstReadCompletionTransitionAvailable: true,
+      prompt: [
+        'Every user_answered onboarding criterion is now satisfied.',
+        'Complete onboarding and follow the completion owner.',
+      ].join(' '),
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toContain(
+      'If I find something genuinely useful',
+    )
+    expect(automationRequests).toHaveLength(1)
+    const request = automationRequests[0]
+    expect(request?.action).toBe('save')
+    if (request?.action !== 'save') {
+      throw new Error('Expected the code-owned first-read save request.')
+    }
+    expect(
+      isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest(request),
+    ).toBe(true)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(5)
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs.replace(/\s+/gu, ' ')).toContain(
+      'post-completion first-personal-read one-shot',
+    )
+    expect(toolOutputs).toContain('routeBinding')
+    expect(toolOutputs).toContain('current_conversation')
   })
 
   it('carries a compact mixed-meal lookup through a grounded save and final reply', {
@@ -2076,6 +2448,7 @@ function createScriptedSongRuntime(
 
 function buildScriptedHostedSystemPrompt(
   conversationScope: 'direct' | 'group',
+  onboardingGuidance = false,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
@@ -2093,7 +2466,7 @@ function buildScriptedHostedSystemPrompt(
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
-    onboardingGuidance: false,
+    onboardingGuidance,
     ordinaryInboundTurn: true,
     turnTrigger: 'automation-auto-reply',
   })

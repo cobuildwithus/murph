@@ -1,4 +1,8 @@
+import type {
+  HostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/runtime-control";
 import type { R2BucketLike } from "./bundle-store.ts";
+import type { HostedBrowserVaultReplicaOrphanCandidate } from "./browser-vault-store.ts";
 import type {
   HostedPrivateMediaPublishInput,
   HostedPrivateMediaPublishResult,
@@ -90,6 +94,13 @@ export type WorkerActiveRuntimeUserFenceResult =
       userId: string;
     };
 
+export interface WorkerRuntimeCompletionReceipt {
+  attemptId: string;
+  generation: string;
+  result: HostedWorkspaceInvocationResult;
+  userId: string;
+}
+
 export interface WorkerRunnerContainerStubLike {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
@@ -143,11 +154,17 @@ export interface WorkerUserRunnerStubLike {
   recordHostedWorkspaceSnapshotOrphanCandidate?(
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
+  recordHostedBrowserVaultReplicaOrphanCandidate?(
+    input: HostedBrowserVaultReplicaOrphanCandidate,
+  ): Promise<HostedBrowserVaultReplicaOrphanCandidate>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
     userId: string;
   }): Promise<boolean>;
+  recordRuntimeCompletionFromContainer?(
+    input: WorkerRuntimeCompletionReceipt,
+  ): Promise<{ completed: boolean }>;
   validateRuntimeProviderEgressToken?(input: {
     providerEgressToken: string;
     userId: string;
@@ -189,7 +206,6 @@ export interface WorkerEnvironmentContract<
 > extends Readonly<Record<string, unknown>> {
   AI?: WorkerAiBindingLike;
   BUNDLES: R2BucketLike;
-  BUNDLES_ENAM?: R2BucketLike;
   CF_VERSION_METADATA?: {
     id?: string;
     tag?: string;
@@ -230,11 +246,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID?: string;
   HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;
   HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?: string;
-  HOSTED_R2_CUTOVER_PHASE?: string;
-  HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256?: string;
-  HOSTED_R2_WRITE_ADMISSION?: string;
   HOSTED_R2_PRESIGN_BUCKET_NAME?: string;
-  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME?: string;
   HOSTED_R2_PRESIGN_CONTROL_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY?: string;
