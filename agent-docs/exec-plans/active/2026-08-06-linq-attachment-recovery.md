@@ -107,11 +107,25 @@ Updated: 2026-08-06
   treat every successful but unusable reservation response as ambiguous. Both
   corrections reuse the existing prepared intent and terminal ambiguity owner;
   they add no state, queue, or transport-wide retry policy.
-- Accept the follow-up specialist's cumulative-provenance finding. A per-call
-  defer before a later attachment reservation cannot erase an earlier provider
-  entry in the same multi-image delivery. Promote that whole delivery through
-  the existing ambiguity owner and prove malformed successful responses at the
-  real hosted adapter boundary.
+- Accept the follow-up specialist's cumulative-provenance finding and the final
+  round-2 retrospective decision. `attemptedAt` remains the sole cumulative
+  provider-entry owner: before the first private-media reservation, fresh-input
+  preemption keeps the same intent pending; after that reservation enters, any
+  later defer—including between reservations or after the last upload before
+  the final message—carries only transient reservation provenance through the
+  Linq wrapper and terminalizes the existing occurrence through the outbox
+  ambiguity owner. The shared private-image/private-file seam gets one
+  production-owner fixture; no durable state or retry owner is added.
+- Parent verification found that Linq's ordinary idempotent message retry loop
+  initially treated the post-reservation foreground-preemption marker as a
+  network failure. Preserve the marker but classify that specific control-flow
+  exception non-retryable inside Linq, so it reaches the existing outbox
+  ambiguity owner immediately without changing ordinary message retry policy.
+- Product revalidation: the smallest complete experience remains silent and
+  single-owner. Before reservation, fresh foreground work pauses the same
+  prepared intent; after reservation, the occurrence fails closed rather than
+  risking a duplicate attachment. No user-facing failure notice, regeneration,
+  or new recovery surface is introduced.
 
 ## Verification
 
@@ -155,3 +169,15 @@ Updated: 2026-08-06
 - Follow-up engine owner proof ran 306 tests with 305 passing and one unrelated
   retention test timing out under concurrent load; the exact timed-out test
   passed in isolation on immediate rerun.
+- Final implementation proof:
+  `pnpm --filter @murphai/assistant-runtime exec vitest run test/hosted-runtime-linq-outbox-regression.test.ts --reporter=dot`:
+  7 tests passed, including private image and approved private file at the
+  post-upload/pre-final-message boundary with no later reservation.
+- Final Linq transport proof:
+  `pnpm --filter @murphai/operator-config exec vitest run test/http-linq-device-runtime.test.ts --reporter=dot`:
+  57 tests passed, including immediate propagation of post-reservation
+  foreground preemption without local message retry.
+- Final owner suites: hosted callbacks 215/215 and assistant-engine
+  outbox/retry/cron 306/306 passed.
+- Final package typechecks for operator-config, assistant-engine, and
+  assistant-runtime passed.

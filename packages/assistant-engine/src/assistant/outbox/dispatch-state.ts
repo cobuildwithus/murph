@@ -534,6 +534,9 @@ function isLinqAttachmentReservationAmbiguity(input: {
   if (errorRecord?.deliveryMayHaveSucceeded === false) {
     return false
   }
+  if (errorRecord?.linqAttachmentReservationMayHaveSucceeded === true) {
+    return true
+  }
   if (
     readNonEmptyString(errorRecord?.code) !== 'LINQ_API_REQUEST_FAILED' ||
     readNonEmptyString(context?.method) !== 'POST' ||

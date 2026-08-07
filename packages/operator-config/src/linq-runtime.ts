@@ -1738,6 +1738,11 @@ function createLinqRequestError(input: {
     input.details.operation === 'create_attachment_upload'
       ? readLinqProviderSkippedDeliveryProvenance(input.error)
       : null
+  const attachmentReservationMayHaveSucceeded =
+    readRecord(input.error)?.linqAttachmentReservationMayHaveSucceeded === true
+  const retryable = attachmentReservationMayHaveSucceeded
+    ? false
+    : input.retryable
   const baseMessage = input.timedOut
     ? `Linq request ${input.method} ${input.path} timed out after ${LINQ_HTTP_TIMEOUT_MS}ms.`
     : `Linq request ${input.method} ${input.path} failed before a response was returned.`
@@ -1764,18 +1769,23 @@ function createLinqRequestError(input: {
           }
         : {}),
       ...(input.requestOrigin ? { requestOrigin: input.requestOrigin } : {}),
-      retryable: input.retryable,
+      retryable,
       timeoutMs: LINQ_HTTP_TIMEOUT_MS,
       timedOut: input.timedOut,
     },
   )
 
-  return providerSkippedProvenance
+  const errorWithProviderSkippedProvenance = providerSkippedProvenance
     ? Object.assign(error, {
         ...providerSkippedProvenance,
         deliveryMayHaveSucceeded: false as const,
       })
     : error
+  return attachmentReservationMayHaveSucceeded
+    ? Object.assign(errorWithProviderSkippedProvenance, {
+        linqAttachmentReservationMayHaveSucceeded: true as const,
+      })
+    : errorWithProviderSkippedProvenance
 }
 
 type LinqProviderSkippedDeliveryProvenance = {

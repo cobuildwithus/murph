@@ -2181,6 +2181,17 @@ function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {
   });
 }
 
+function markHostedLinqAttachmentReservationMayHaveSucceeded(
+  error: unknown,
+): unknown {
+  const markedError = typeof error === "object" && error !== null
+    ? error
+    : new Error("Hosted Linq attachment reservation may have succeeded.");
+  return Object.assign(markedError, {
+    linqAttachmentReservationMayHaveSucceeded: true,
+  });
+}
+
 function markHostedDeliveryPreProviderRetryable(error: unknown): unknown {
   if (typeof error === "object" && error !== null) {
     return Object.assign(error, {
@@ -3647,7 +3658,19 @@ function createHostedAssistantLinqSendDependency(input: {
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
       fetchImplementation: createHostedProviderFetchBoundary({
-        assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+        assertProviderEntryLive: async () => {
+          try {
+            await assertHostedDeliveryCanEnterProvider(input);
+          } catch (error) {
+            if (
+              attemptedAt
+              && (verifiedVaultFiles.size > 0 || verifiedVaultImages.size > 0)
+            ) {
+              throw markHostedLinqAttachmentReservationMayHaveSucceeded(error);
+            }
+            throw error;
+          }
+        },
         onProviderDispatchEntered: async () => {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({

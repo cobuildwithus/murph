@@ -1990,6 +1990,44 @@ test('linq runtime preserves pre-provider yield provenance without retrying the 
   expect(publicFetch).not.toHaveBeenCalled()
 })
 
+test('linq runtime preserves post-reservation provenance without retrying the message locally', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () => {
+    throw Object.assign(new Error('foreground work owns provider entry'), {
+      linqAttachmentReservationMayHaveSucceeded: true as const,
+    })
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-post-reservation-yield',
+        idempotencyKey: 'post-reservation-yield',
+        message: 'Private media',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'transport' &&
+      error.context?.method === 'POST' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.retryable === false &&
+      (error as VaultCliError & {
+        linqAttachmentReservationMayHaveSucceeded?: unknown
+      }).linqAttachmentReservationMayHaveSucceeded === true,
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+})
+
 test.each([
   {
     label: 'missing required fields',
