@@ -138,13 +138,15 @@ test('foreground work preempts a lock retry and renews cleanup afterward', async
 async function startRuntimeLockHolder(
   vaultRoot: string,
 ): Promise<ChildProcessWithoutNullStreams> {
+  const repositoryRoot = fileURLToPath(new URL('../../..', import.meta.url))
   const child = spawn(process.execPath, [
-    '--import',
-    'tsx',
+    fileURLToPath(import.meta.resolve('tsx/cli')),
+    '--tsconfig',
+    path.join(repositoryRoot, 'tsconfig.base.json'),
     fileURLToPath(new URL('./fixtures/runtime-lock-holder.ts', import.meta.url)),
     vaultRoot,
   ], {
-    cwd: fileURLToPath(new URL('../../..', import.meta.url)),
+    cwd: repositoryRoot,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
   childProcesses.push(child)
