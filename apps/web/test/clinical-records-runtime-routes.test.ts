@@ -114,9 +114,10 @@ describe("Clinical Records internal runtime routes", () => {
 
   it("accepts canonical forwarded fences and preserves strict runtime response shapes", async () => {
     const headers = runtimeWriteFenceHeaders();
+    const requestKey = `scheduled_${"a".repeat(64)}`;
     const connectResponse = await connectLinkRoute.POST(jsonRequest(
       "/api/internal/clinical-records/connect-link",
-      {},
+      { requestKey },
       headers,
     ));
     const readResponse = await readRunRoute.POST(jsonRequest(
@@ -169,6 +170,7 @@ describe("Clinical Records internal runtime routes", () => {
     expect(mocks.createClinicalRecordConnectIntent).toHaveBeenCalledWith({
       memberId: "member_clinical_1",
       request: expect.any(Request),
+      requestKey,
     });
   });
 

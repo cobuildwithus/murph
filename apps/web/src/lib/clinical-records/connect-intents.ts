@@ -3,6 +3,9 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 
 import type { Prisma } from "@prisma/client";
+import type {
+  HostedClinicalRecordsConnectLinkRequest,
+} from "@murphai/hosted-execution/clinical-records";
 
 import { getPrisma } from "../prisma";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -29,6 +32,7 @@ export async function createClinicalRecordConnectIntent(input: {
   memberId: string;
   now?: Date;
   providerDirectoryEntryId?: string | null;
+  requestKey?: HostedClinicalRecordsConnectLinkRequest["requestKey"];
   request: Request;
 }): Promise<{ claim: string; connectUrl: string; expiresAt: string }> {
   const now = input.now ?? new Date();
@@ -40,13 +44,51 @@ export async function createClinicalRecordConnectIntent(input: {
       message: "The selected Clinical Records provider is unavailable.",
     });
   }
-  const claim = `${CLAIM_PREFIX}${randomBytes(CLAIM_BYTES).toString("base64url")}`;
+  const claim = input.requestKey
+    ? buildScheduledClinicalRecordConnectClaim({
+        memberId: input.memberId,
+        requestKey: input.requestKey,
+      })
+    : `${CLAIM_PREFIX}${randomBytes(CLAIM_BYTES).toString("base64url")}`;
   const claimHash = hashClaim(claim);
   const expiresAt = new Date(now.getTime() + CLAIM_TTL_MS);
   const prisma = getPrisma();
+  let effectiveExpiresAt = expiresAt;
 
   try {
     await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext(${input.memberId}),
+          hashtext('clinical-record-connect-intent')
+        )
+      `;
+      if (input.requestKey) {
+        const existing = await tx.clinicalRecordConnectIntent.findUnique({
+          where: { claimHash },
+        });
+        if (existing) {
+          if (existing.memberId !== input.memberId) {
+            throw clinicalRecordsError({
+              code: "CLINICAL_RECORD_CONNECT_INTENT_CONFLICT",
+              httpStatus: 409,
+              message: "Clinical Records connection setup changed. Try again.",
+              retryable: true,
+            });
+          }
+          if (existing.startedAt || existing.completedAt) {
+            throw clinicalRecordsError({
+              code: "CLINICAL_RECORD_CONNECT_INTENT_USED",
+              httpStatus: 409,
+              message: "This Clinical Records connection link has already been used.",
+            });
+          }
+          if (existing.expiresAt.getTime() > now.getTime()) {
+            effectiveExpiresAt = existing.expiresAt;
+            return;
+          }
+        }
+      }
       await tx.clinicalRecordOauthSession.updateMany({
         data: { consumedAt: now },
         where: { consumedAt: null, memberId: input.memberId },
@@ -85,7 +127,11 @@ export async function createClinicalRecordConnectIntent(input: {
   const baseUrl = resolveHostedPublicBaseUrl() ?? new URL(input.request.url).origin;
   const connectUrl = new URL("/records/connect", `${baseUrl}/`);
   connectUrl.hash = new URLSearchParams({ clinicalRecordsIntent: claim }).toString();
-  return { claim, connectUrl: connectUrl.toString(), expiresAt: expiresAt.toISOString() };
+  return {
+    claim,
+    connectUrl: connectUrl.toString(),
+    expiresAt: effectiveExpiresAt.toISOString(),
+  };
 }
 
 export async function claimClinicalRecordConnectIntentForStart(input: {
@@ -204,6 +250,19 @@ function normalizeClaimHash(claim: string): string | null {
 
 function hashClaim(claim: string): string {
   return createHash("sha256").update(claim).digest("hex");
+}
+
+function buildScheduledClinicalRecordConnectClaim(input: {
+  memberId: string;
+  requestKey: string;
+}): string {
+  const digest = createHash("sha256")
+    .update("murph.clinical-records.scheduled-connect-claim.v1\0")
+    .update(input.memberId)
+    .update("\0")
+    .update(input.requestKey)
+    .digest("base64url");
+  return `${CLAIM_PREFIX}${digest.slice(0, 32)}`;
 }
 
 function isUniqueConstraintError(error: unknown): boolean {

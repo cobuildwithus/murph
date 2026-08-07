@@ -2027,7 +2027,15 @@ export async function sendAssistantMessageLocal(
           providerResult.productFeedbackCandidate ?? null
         const productFeedbackCandidateSink =
           executionContext?.hosted?.productFeedbackCandidateSink ?? null
-        if (productFeedbackCandidate && productFeedbackCandidateSink) {
+        if (
+          productFeedbackCandidate &&
+          productFeedbackCandidateSink &&
+          shouldAcceptAssistantProductFeedbackCandidate({
+            input: currentInput,
+            outcome: finalDeliveryOutcome,
+            responseDisposition: finalResponseDisposition,
+          })
+        ) {
           try {
             productFeedbackCandidateSink.acceptProductFeedbackCandidate(
               productFeedbackCandidate,
@@ -2131,6 +2139,28 @@ export async function sendAssistantMessageLocal(
       )
     }
   }
+}
+
+export function shouldAcceptAssistantProductFeedbackCandidate(input: {
+  input: Pick<
+    AssistantMessageInput,
+    'scheduledInvocationAuthority' | 'scheduledOccurrenceAt' | 'turnTrigger'
+  >
+  outcome: { kind: AssistantDeliveryOutcome['kind'] }
+  responseDisposition: 'none' | null
+}): boolean {
+  const scheduledAuthority = input.input.scheduledInvocationAuthority ?? null
+  const exactScheduledOccurrence =
+    input.input.turnTrigger === 'automation-cron' &&
+    scheduledAuthority !== null &&
+    scheduledAuthority.occurrenceAt === input.input.scheduledOccurrenceAt
+  if (!exactScheduledOccurrence) {
+    return true
+  }
+  return input.outcome.kind === 'sent' || (
+    input.outcome.kind === 'not-requested' &&
+    input.responseDisposition === 'none'
+  )
 }
 
 function assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget(input: {

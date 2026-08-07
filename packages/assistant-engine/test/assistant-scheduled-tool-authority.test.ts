@@ -21,15 +21,13 @@ vi.mock("@murphai/vault-usecases/preferences", () => ({
 
 import {
   executeMurphDynamicToolRequest,
-  MURPH_SEND_PHYSICAL_NOTE_TOOL,
   readMurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
-import type {
-  AssistantHostedScheduledInvocationScope,
-  AssistantHostedToolContext,
-} from "../src/assistant/hosted-tool-context.ts";
 import {
+  createAssistantHostedScheduledRequestKey,
   resolveAssistantHostedScheduledInvocationScope,
+  type AssistantHostedScheduledInvocationScope,
+  type AssistantHostedToolContext,
 } from "../src/assistant/hosted-tool-context.ts";
 import {
   buildAssistantProductFeedbackIdempotencyKey,
@@ -39,14 +37,33 @@ import {
 const OCCURRENCE_AT = "2026-08-06T14:30:00.000Z";
 
 describe("scheduled assistant tool authority", () => {
-  it("derives one deterministic opaque effect anchor from an exact cron occurrence", () => {
+  it("represents an exact cron occurrence without fabricating an assistant input", () => {
     const exact = scheduledScope();
     const replay = scheduledScope();
     const next = scheduledScope("2026-08-07T14:30:00.000Z");
 
-    expect(exact.effectAnchorInputId).toMatch(/^ain_[0-9a-f]{32}$/u);
-    expect(replay.effectAnchorInputId).toBe(exact.effectAnchorInputId);
-    expect(next.effectAnchorInputId).not.toBe(exact.effectAnchorInputId);
+    expect(exact).toEqual(replay);
+    expect(exact.origin).toEqual({
+      automationId: "automation_scheduled_tools",
+      kind: "automation_occurrence",
+      occurrenceAt: OCCURRENCE_AT,
+    });
+    expect(next.origin).not.toEqual(exact.origin);
+    expect(JSON.stringify(exact)).not.toMatch(/ain_[0-9a-f]{32}/u);
+    expect(createAssistantHostedScheduledRequestKey({
+      operation: "clinical-records-connect-link",
+      origin: replay.origin,
+    })).toBe(createAssistantHostedScheduledRequestKey({
+      operation: "clinical-records-connect-link",
+      origin: exact.origin,
+    }));
+    expect(createAssistantHostedScheduledRequestKey({
+      operation: "clinical-records-connect-link",
+      origin: next.origin,
+    })).not.toBe(createAssistantHostedScheduledRequestKey({
+      operation: "clinical-records-connect-link",
+      origin: exact.origin,
+    }));
     expect(resolveAssistantHostedScheduledInvocationScope({
       conversationScope: "direct",
       messageInput: {
@@ -61,11 +78,11 @@ describe("scheduled assistant tool authority", () => {
     })).toBeNull();
   });
 
-  it("records product feedback against the occurrence anchor", async () => {
+  it("records product feedback against the exact occurrence", async () => {
     const scope = scheduledScope();
     const recorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [],
-      getAcceptedInputIds: () => [scope.effectAnchorInputId],
+      getAuthority: () => scope.origin,
       productFeedbackCandidateSink: {
         acceptProductFeedbackCandidate: vi.fn(),
       },
@@ -82,10 +99,28 @@ describe("scheduled assistant tool authority", () => {
     expect(recorder.readProductFeedback()).toEqual({
       ...feedback,
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-        acceptedInputIds: [scope.effectAnchorInputId],
+        authority: scope.origin,
         feedback,
       }),
     });
+  });
+
+  it("does not turn scheduled feedback authority into human support authority", async () => {
+    const recorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [],
+      getAuthority: () => scheduledScope().origin,
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate: vi.fn(),
+        deliverProductSupportEscalation: vi.fn(),
+      },
+    });
+    if (!recorder) throw new Error("Expected scheduled feedback recorder.");
+
+    await expect(recorder.recordProductFeedback({
+      kind: "frustration",
+      relatedChangelogItemIds: [],
+      summary: "Support escalation: a scheduled observation needs human review.",
+    })).rejects.toThrow("requires current accepted input authority");
   });
 
   it("uses scheduled authority for Clinical Records and personalization mutations", async () => {
@@ -122,7 +157,10 @@ describe("scheduled assistant tool authority", () => {
     const personalizationResult = await execute(personalization, context);
 
     expect(clinicalResult.rpcResult.success).toBe(true);
-    expect(createConnectLink).toHaveBeenCalledOnce();
+    expect(createConnectLink).toHaveBeenCalledWith({
+      requestKey: expect.stringMatching(/^scheduled_[0-9a-f]{64}$/u),
+      signal: null,
+    });
     expect(personalizationResult.rpcResult.success).toBe(true);
     expect(personalizationRequest).toHaveBeenCalledWith(
       { action: "update", tone: "casual" },
@@ -180,7 +218,7 @@ describe("scheduled assistant tool authority", () => {
     );
   });
 
-  it("marks scheduled generated artwork as exact authority for physical-note continuation", async () => {
+  it("keeps scheduled image generation synchronous and message-free", async () => {
     const scope = scheduledScope();
     const launch = vi.fn(() => "started" as const);
     const context = hostedToolContext(scope, {
@@ -194,14 +232,16 @@ describe("scheduled assistant tool authority", () => {
       vaultRoot: "/tmp/scheduled-image-vault",
     });
 
-    expect(result.rpcResult.success).toBe(true);
-    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
-      originAssistantInputId: scope.effectAnchorInputId,
-      originAssistantInputIdExact: true,
-      scopeId: "session_scheduled_tools",
-    }));
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      "exact scheduled automation occurrence",
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [{
+        text: "OPENAI_API_KEY is required for image generation",
+        type: "inputText",
+      }],
+    });
+    expect(launch).not.toHaveBeenCalled();
+    expect(JSON.stringify(launch.mock.calls)).not.toMatch(
+      /originAssistantInputId/u,
     );
   });
 });

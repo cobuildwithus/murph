@@ -15,7 +15,10 @@ describe("assistant product support escalation", () => {
       acceptedInputItems: [
         { id: "assistant_input_1", source: "assistant-input" },
       ],
-      getAcceptedInputIds: () => acceptedInputIds,
+      getAuthority: () => ({
+        assistantInputId: acceptedInputIds.at(-1)!,
+        kind: "accepted_input",
+      }),
       productFeedbackCandidateSink: {
         acceptProductFeedbackCandidate: vi.fn(),
       },
@@ -43,7 +46,10 @@ describe("assistant product support escalation", () => {
     expect(recorder.readProductFeedback()).toEqual({
       ...supportFeedback,
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-        acceptedInputIds,
+        authority: {
+          assistantInputId: acceptedInputIds.at(-1)!,
+          kind: "accepted_input",
+        },
         feedback: supportFeedback,
       }),
     });
@@ -109,7 +115,10 @@ describe("assistant product support escalation", () => {
     expect(deliverProductSupportEscalation).toHaveBeenCalledExactlyOnceWith({
       ...supportFeedback,
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-        acceptedInputIds: ["assistant_input_1"],
+        authority: {
+          assistantInputId: "assistant_input_1",
+          kind: "accepted_input",
+        },
         feedback: supportFeedback,
       }),
     });

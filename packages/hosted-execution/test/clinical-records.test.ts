@@ -8,6 +8,7 @@ import {
   HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES,
   HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
+  hostedClinicalRecordsConnectLinkRequestSchema,
   hostedClinicalRecordsFetchPageRequestSchema,
   hostedClinicalRecordsRetrievalScopeSchema,
   parseHostedClinicalRecordsFetchPageResponse,
@@ -39,6 +40,14 @@ describe("clinical records hosted execution contracts", () => {
       expiresAt: "2026-07-10T12:15:00.000Z",
       ok: true,
     };
+
+    expect(hostedClinicalRecordsConnectLinkRequestSchema.parse({})).toEqual({});
+    expect(hostedClinicalRecordsConnectLinkRequestSchema.parse({
+      requestKey: `scheduled_${HASH}`,
+    })).toEqual({ requestKey: `scheduled_${HASH}` });
+    expect(() => hostedClinicalRecordsConnectLinkRequestSchema.parse({
+      requestKey: `ain_${"b".repeat(32)}`,
+    })).toThrow();
 
     expect(parseHostedClinicalRecordsConnectLinkResponse(response)).toEqual(response);
     expect(parseHostedClinicalRecordsConnectLinkResponse({

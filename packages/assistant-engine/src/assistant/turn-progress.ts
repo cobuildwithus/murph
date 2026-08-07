@@ -50,6 +50,17 @@ export interface AssistantTurnProductFeedbackRecorder {
   readProductFeedback(): HostedRuntimeProductFeedbackRecord | null
 }
 
+export type AssistantProductFeedbackAuthority =
+  | {
+      assistantInputId: string
+      kind: 'accepted_input'
+    }
+  | {
+      automationId: string
+      kind: 'automation_occurrence'
+      occurrenceAt: string
+    }
+
 export type AssistantProgressDeliverySource = 'model' | 'system'
 
 export interface AssistantProgressDeliverySendOptions {
@@ -100,19 +111,23 @@ export { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 
 export function createAssistantProductFeedbackRecorder(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
-  getAcceptedInputIds?: (() => readonly string[]) | null
+  getAuthority?: (() => AssistantProductFeedbackAuthority | null) | null
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
 }): AssistantTurnProductFeedbackRecorder | null {
   const productFeedbackCandidateSink = input.productFeedbackCandidateSink ?? null
-  const acceptedInputIdsFromItems =
+  const initialAssistantInputId =
     resolveAssistantProductFeedbackAcceptedInputIds(
       input.acceptedInputItems ?? [],
-    )
-  const acceptedInputIdsFromContext = input.getAcceptedInputIds?.() ?? []
-  const initialAcceptedInputIds = acceptedInputIdsFromContext.length > 0
-    ? acceptedInputIdsFromContext
-    : acceptedInputIdsFromItems
-  if (!productFeedbackCandidateSink || initialAcceptedInputIds.length === 0) {
+    ).at(-1) ?? null
+  const initialAuthority = input.getAuthority?.() ?? (
+    initialAssistantInputId
+      ? {
+          assistantInputId: initialAssistantInputId,
+          kind: 'accepted_input' as const,
+        }
+      : null
+  )
+  if (!productFeedbackCandidateSink || initialAuthority === null) {
     return null
   }
 
@@ -126,6 +141,12 @@ export function createAssistantProductFeedbackRecorder(input: {
     async recordProductFeedback(feedback) {
       const normalized = normalizeAssistantProductFeedback(feedback)
       const supportEscalation = isHostedProductSupportEscalationFeedback(normalized)
+      const authority = input.getAuthority?.() ?? initialAuthority
+      if (supportEscalation && authority.kind !== 'accepted_input') {
+        throw new Error(
+          'Product support escalation requires current accepted input authority.',
+        )
+      }
       if (supportEscalation) {
         if (supportEscalationOutcome === 'delivered') {
           return { recorded: false }
@@ -143,14 +164,10 @@ export function createAssistantProductFeedbackRecorder(input: {
       ) {
         return { recorded: false }
       }
-      const currentAcceptedInputIds = input.getAcceptedInputIds?.() ?? []
-      const acceptedInputIds = currentAcceptedInputIds.length > 0
-        ? currentAcceptedInputIds
-        : initialAcceptedInputIds
       const candidate = {
         ...normalized,
         idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
-          acceptedInputIds,
+          authority,
           feedback: normalized,
         }),
       }
@@ -316,13 +333,17 @@ export function createAssistantProgressDelivery(input: {
 }
 
 export function buildAssistantProductFeedbackIdempotencyKey(input: {
-  acceptedInputIds: readonly string[]
+  authority: AssistantProductFeedbackAuthority
   feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
 }): string {
-  const effectAnchorInputId = input.acceptedInputIds.at(-1)
   return createHash('sha256')
     .update(JSON.stringify({
-      acceptedInputIds: effectAnchorInputId ? [effectAnchorInputId] : [],
+      authority: input.authority.kind === 'accepted_input'
+        ? {
+            assistantInputId: input.authority.assistantInputId,
+            kind: input.authority.kind,
+          }
+        : input.authority,
       kind: input.feedback.kind,
       relatedChangelogItemIds: [...new Set(input.feedback.relatedChangelogItemIds)].sort(),
     }))

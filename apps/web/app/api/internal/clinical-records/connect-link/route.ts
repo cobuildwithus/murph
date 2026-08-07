@@ -34,6 +34,7 @@ export const POST = withClinicalJsonError(async (request: Request) => {
   if (!parsed.success) throw invalidBodyError();
   const intent = await createClinicalRecordConnectIntent({
     memberId,
+    ...(parsed.data.requestKey ? { requestKey: parsed.data.requestKey } : {}),
     request,
   });
   return clinicalJsonOk({
@@ -47,6 +48,6 @@ function invalidBodyError() {
   return clinicalRecordsError({
     code: "CLINICAL_RECORD_CONNECT_LINK_REQUEST_INVALID",
     httpStatus: 400,
-    message: "Clinical Records connect-link does not accept provider data.",
+    message: "Clinical Records connect-link request is invalid.",
   });
 }

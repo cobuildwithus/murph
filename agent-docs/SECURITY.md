@@ -828,14 +828,16 @@ Last verified: 2026-08-05
 A scheduled tool action is authorized only by the trusted runtime's exact
 `automationId + occurrenceAt` pair when the turn trigger is `automation-cron` and
 the occurrence equals `scheduledOccurrenceAt`. Assistant Engine derives the opaque
-effect anchor itself; model arguments cannot choose, replay, or transform it. The
-anchor does not grant accepted-message targeting, participant identity, support
+typed occurrence scope itself; it never creates an `ain_` identifier. Model
+arguments cannot choose, replay, or transform that scope. It does not grant
+accepted-message targeting, participant identity, physical-mail continuation, support
 escalation, subscription changes, or any other fresh-human-input capability.
 
 Personalization transports either the existing accepted `assistantInputId` or the
 additive exact scheduled pair. Web verifies the signed, member-bound runtime
 callback and active hosted access in both cases; accepted-input writes retain their
 mailbox and current-route causal checks, while scheduled writes never fabricate a
-conversation message or participant. Clinical Records links remain private, and
-physical-note provider admission, request fingerprints, usage checks, and
-uncertain-outcome rules are unchanged.
+conversation message or participant. Scheduled authority does not bypass existing
+channel or audience eligibility. Clinical Records links remain private and use an
+operation-scoped retry key; ordinary feedback may be observed from a scheduled turn,
+but verified-private support escalation still requires current human action.

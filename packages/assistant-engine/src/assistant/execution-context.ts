@@ -20,6 +20,7 @@ import type {
   AutomationSupportKind,
 } from '@murphai/contracts'
 import type {
+  HostedClinicalRecordsConnectLinkRequest,
   HostedClinicalRecordsConnectLinkResponse,
 } from '@murphai/hosted-execution/clinical-records'
 import type {
@@ -271,7 +272,10 @@ export interface AssistantHostedSubscriptionTool {
 
 export interface AssistantHostedClinicalRecordsConnectLinkTool {
   createConnectLink(
-    options?: { signal?: AbortSignal | null },
+    options?: {
+      requestKey?: HostedClinicalRecordsConnectLinkRequest['requestKey']
+      signal?: AbortSignal | null
+    },
   ): Promise<HostedClinicalRecordsConnectLinkResponse>
 }
 

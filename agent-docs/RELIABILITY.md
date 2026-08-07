@@ -928,14 +928,20 @@ Last verified: 2026-08-05
 ## Scheduled tool parity and replay
 
 Canonical scheduled turns receive composable tools through one exact-occurrence
-resolver rather than per-tool cron exceptions. The derived effect anchor is stable
-across retries of the same occurrence and changes for the next occurrence, so
-product-feedback deduplication and generated-image/physical-note continuation keep
-deterministic identity without new persisted state. Existing Web owners still
-decide whether a write is saved, unchanged, unavailable, or ambiguous.
+resolver rather than per-tool cron exceptions. Each owner derives a deterministic
+retry key from the exact occurrence and operation without fabricating an assistant
+input. Scheduled images run synchronously; background image and physical-note
+continuation stays message-authorized. Existing Web owners still decide whether a
+write is saved, unchanged, unavailable, or ambiguous.
+
+Scheduled preference writes append through the existing mailbox causal sequence,
+with retry identity scoped by occurrence, operation, and requested fields. Clinical
+Records same-key retries serialize on the existing member boundary and reuse one
+live intent; a started or completed OAuth intent is never recreated. Scheduled
+feedback is flushed only after a committed skip or confirmed delivery.
 
 Progress updates are the deliberate exception: queue-only cron work has no active
 reader and an ephemeral update could arrive after the final outbox reply. The
 planner therefore continues to omit `send_progress_update` while exposing the
-durable/final-result tools. Additive personalization query parameters preserve the
-existing accepted-input route during a Web-first deployment window.
+durable/final-result tools. Accepted-input personalization retains its existing
+message and route checks.

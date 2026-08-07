@@ -530,8 +530,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : []
   const assistantStyleSettingsAvailable =
     (
-      scheduledInvocationScope !== null
-      || (
+      (
         privateInteractiveAudience &&
         input.input.assistantStyleSettingsAuthorized !== false &&
         (
@@ -817,14 +816,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       threadId: currentAudienceDeliveryFields.threadId,
       threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
     })
-  const hostedProductFeedbackAcceptedInputIds =
-    input.hostedToolContext?.currentProductFeedbackAcceptedInputIds?.() ?? []
-  const productFeedbackAcceptedInputIds =
-    hostedProductFeedbackAcceptedInputIds.length > 0
-      ? hostedProductFeedbackAcceptedInputIds
-      : resolveAssistantProductFeedbackAcceptedInputIds(
-          input.acceptedInputItems ?? [],
-        )
+  const productFeedbackAuthorized =
+    input.hostedToolContext?.currentProductFeedbackAuthority?.() != null ||
+    resolveAssistantProductFeedbackAcceptedInputIds(
+      input.acceptedInputItems ?? [],
+    ).length > 0
   const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
@@ -903,7 +899,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           assistantStyleSettingsAvailable &&
           input.hostedToolContext?.personalizationTool != null,
         productFeedbackAvailable:
-          productFeedbackAcceptedInputIds.length > 0 &&
+          productFeedbackAuthorized &&
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,

@@ -146,11 +146,14 @@ registration-only until that bounded traversal owner lands.
 ## Retrieval contract and limits
 
 Assistant link creation reuses the same signed Web control boundary through
-`/api/internal/clinical-records/connect-link`. It accepts only an empty object,
-derives the member from the active runtime fence, and returns the existing
-short-lived first-party connect URL. A verified private current request or exact
-scheduled automation occurrence may invoke that same owner; neither path can choose a
-member, provider, or destination in tool arguments. Once an import is queued, the retrieval
+`/api/internal/clinical-records/connect-link`. Message-authorized calls use an
+empty object; the route derives the member from the active runtime fence and
+returns the existing short-lived first-party connect URL. Scheduled calls may add only a typed
+`scheduled_<sha256>` request key derived from the exact occurrence. Same-key retries
+reuse one unstarted live intent, while a link whose OAuth flow started or completed
+is never resurrected. A verified private current request or exact scheduled
+automation occurrence may invoke that same owner; neither path can choose a member,
+provider, or destination in tool arguments. Once an import is queued, the retrieval
 runtime uses three signed POST operations:
 
 - `/api/internal/clinical-records/runtime/read-run`

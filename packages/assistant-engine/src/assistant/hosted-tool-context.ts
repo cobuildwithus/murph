@@ -88,26 +88,33 @@ export interface AssistantHostedScheduledPhoneCallScope
   originSessionId: string
 }
 
-export interface AssistantHostedInvocationScope {
+interface AssistantHostedInvocationScopeBase {
   conversationScope: AssistantConversationScope | null
-  effectAnchorInputId?: string
-  origin: HostedExecutionAssistantAskOrigin
   originSessionId?: string
 }
 
-export interface AssistantHostedScheduledInvocationScope
-  extends AssistantHostedInvocationScope {
-  conversationScope: Exclude<
-    AssistantConversationScope,
-    'unverified-external'
+export interface AssistantHostedAcceptedInputInvocationScope
+  extends AssistantHostedInvocationScopeBase {
+  origin: Extract<
+    HostedExecutionAssistantAskOrigin,
+    { kind: 'accepted_input' }
   >
-  effectAnchorInputId: string
+}
+
+export interface AssistantHostedScheduledInvocationScope
+  extends AssistantHostedInvocationScopeBase {
   origin: Extract<
     HostedExecutionAssistantAskOrigin,
     { kind: 'automation_occurrence' }
   >
-  originSessionId: string
 }
+
+export type AssistantHostedInvocationScope =
+  | AssistantHostedAcceptedInputInvocationScope
+  | AssistantHostedScheduledInvocationScope
+
+export type AssistantHostedProductFeedbackAuthority =
+  AssistantHostedInvocationScope['origin']
 
 export type AssistantHostedVaultFileSendResult =
   | {
@@ -175,7 +182,7 @@ export interface AssistantHostedToolContext {
   }): void
   currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
-  currentProductFeedbackAcceptedInputIds?(): readonly string[]
+  currentProductFeedbackAuthority?(): AssistantHostedProductFeedbackAuthority | null
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(
@@ -275,10 +282,13 @@ export function createAssistantHostedToolContext(input: {
   const readCurrentInvocationScope = (): AssistantHostedInvocationScope | null => {
     const userActionScope = readCurrentUserActionScope()
     const assistantInputId = userActionScope?.acceptedInputIds.at(-1) ?? null
-    if (userActionScope && assistantInputId) {
-      return {
+    if (
+      userActionScope &&
+      assistantInputId &&
+      userActionScope.conversationScope !== 'unverified-external'
+    ) {
+      const acceptedInputScope: AssistantHostedAcceptedInputInvocationScope = {
         conversationScope: userActionScope.conversationScope,
-        effectAnchorInputId: assistantInputId,
         origin: {
           assistantInputId,
           kind: 'accepted_input',
@@ -286,6 +296,7 @@ export function createAssistantHostedToolContext(input: {
         },
         originSessionId: userActionScope.originSessionId,
       }
+      return acceptedInputScope
     }
     const deliveryContext = readDeliveryContext()
     return resolveAssistantHostedScheduledInvocationScope({
@@ -305,6 +316,23 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     })
   }
+  const readCurrentProductFeedbackAuthority =
+    (): AssistantHostedProductFeedbackAuthority | null => {
+      const acceptedInputId = (
+        input.getProductFeedbackAcceptedInputIds?.() ?? []
+      ).at(-1) ?? null
+      if (acceptedInputId) {
+        return {
+          assistantInputId: acceptedInputId,
+          kind: 'accepted_input',
+          sessionId: readDeliveryContext().session.sessionId,
+        }
+      }
+      const invocationScope = readCurrentInvocationScope()
+      return invocationScope?.origin.kind === 'automation_occurrence'
+        ? invocationScope.origin
+        : null
+    }
   let subscriptionActionClaimed = false
   let imessageContactActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
@@ -466,18 +494,7 @@ export function createAssistantHostedToolContext(input: {
     recordNewsletterSendResult: input.recordNewsletterSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
-    currentProductFeedbackAcceptedInputIds: () => {
-      const acceptedInputIds =
-        input.getProductFeedbackAcceptedInputIds?.() ?? []
-      if (acceptedInputIds.length > 0) {
-        return acceptedInputIds
-      }
-      const scheduledScope = readCurrentInvocationScope()
-      return scheduledScope?.origin.kind === 'automation_occurrence' &&
-        scheduledScope.effectAnchorInputId
-        ? [scheduledScope.effectAnchorInputId]
-        : []
-    },
+    currentProductFeedbackAuthority: readCurrentProductFeedbackAuthority,
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
@@ -503,17 +520,8 @@ export function resolveAssistantHostedScheduledInvocationScope(input: {
     return null
   }
 
-  const effectAnchorInputId = `ain_${createHash('sha256')
-    .update(JSON.stringify({
-      automationId: authority.automationId,
-      occurrenceAt: authority.occurrenceAt,
-      schema: 'murph.assistant-scheduled-effect-anchor.v1',
-    }))
-    .digest('hex')
-    .slice(0, 32)}`
   return {
     conversationScope: input.conversationScope,
-    effectAnchorInputId,
     origin: {
       automationId: authority.automationId,
       kind: 'automation_occurrence',
@@ -521,6 +529,21 @@ export function resolveAssistantHostedScheduledInvocationScope(input: {
     },
     originSessionId: input.originSessionId,
   }
+}
+
+export function createAssistantHostedScheduledRequestKey(input: {
+  operation: 'clinical-records-connect-link'
+  origin: AssistantHostedScheduledInvocationScope['origin']
+}): `scheduled_${string}` {
+  const digest = createHash('sha256')
+    .update(JSON.stringify({
+      automationId: input.origin.automationId,
+      occurrenceAt: input.origin.occurrenceAt,
+      operation: input.operation,
+      schema: 'murph.assistant-scheduled-request-key.v1',
+    }))
+    .digest('hex')
+  return `scheduled_${digest}`
 }
 
 export function resolveAssistantHostedScheduledPhoneCallScope(input: {
@@ -543,7 +566,7 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   return {
     automationId: scope.origin.automationId,
     occurrenceAt: scope.origin.occurrenceAt,
-    originSessionId: scope.originSessionId,
+    originSessionId: scope.originSessionId ?? input.originSessionId,
   }
 }
 

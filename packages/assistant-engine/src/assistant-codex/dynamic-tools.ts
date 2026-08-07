@@ -126,9 +126,10 @@ import {
 } from '../assistant/group-shared-read-limits.js'
 import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
-import type {
-  AssistantHostedInvocationScope,
-  AssistantHostedToolContext,
+import {
+  createAssistantHostedScheduledRequestKey,
+  type AssistantHostedInvocationScope,
+  type AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
 import type {
   AssistantProviderUsageDraft,
@@ -3696,6 +3697,14 @@ export async function executeMurphDynamicToolRequest(input: {
 
       try {
         const result = await connectLinkTool.createConnectLink({
+          ...(invocationScope?.origin.kind === 'automation_occurrence'
+            ? {
+                requestKey: createAssistantHostedScheduledRequestKey({
+                  operation: 'clinical-records-connect-link',
+                  origin: invocationScope.origin,
+                }),
+              }
+            : {}),
           signal: input.abortSignal ?? null,
         })
         return toolTextResult(true, safeToolPayloadText({
@@ -3825,11 +3834,6 @@ export async function executeMurphDynamicToolRequest(input: {
         input.hostedToolContext?.currentUserActionScope?.() ?? null
       const invocationScope =
         input.hostedToolContext?.currentInvocationScope?.() ?? null
-      const scheduledDirectInvocationScope =
-        invocationScope?.origin.kind === 'automation_occurrence' &&
-          invocationScope.conversationScope === 'direct'
-          ? invocationScope
-          : null
       const explicitOriginAssistantInputId = input.request.messageRef
         && userActionScope?.acceptedInputIds.includes(input.request.messageRef)
         ? await authorizeDynamicToolEffectOrigin({
@@ -3846,14 +3850,19 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       const originAssistantInputId = explicitOriginAssistantInputId
-        ?? scheduledDirectInvocationScope?.effectAnchorInputId
-        ?? input.hostedToolContext?.currentAssistantInputId?.()
+        ?? (invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.origin.assistantInputId
+          : invocationScope === null
+            ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
+            : null)
         ?? null
-      const originAssistantInputIdExact =
-        explicitOriginAssistantInputId !== null ||
-        scheduledDirectInvocationScope !== null
+      const originAssistantInputIdExact = explicitOriginAssistantInputId !== null
+      const acceptedInvocationSessionId =
+        invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.originSessionId ?? null
+          : null
       const imageGenerationScopeId =
-        invocationScope?.originSessionId ??
+        acceptedInvocationSessionId ??
         userActionScope?.originSessionId ??
         null
       const providerRequestOrdinal = input.nextUsageOrdinal()

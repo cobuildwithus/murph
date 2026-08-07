@@ -2365,17 +2365,19 @@ authentication surface, or mutable message state.
 Ordinary canonical `automation-cron` turns reuse the hosted invocation authority
 already carried by the scheduler. Assistant Engine accepts that authority only
 when the automation id and occurrence timestamp exactly match
-`scheduledOccurrenceAt`, then derives one opaque `ain_`-shaped effect anchor from
-that immutable pair. The anchor is host-created metadata, never a model-supplied
-message reference and never evidence that a human sent a message.
+`scheduledOccurrenceAt`. The resulting invocation scope is one of two typed
+variants: a real accepted assistant input or an exact automation occurrence. An
+occurrence is authority in its own right and is never represented as a message.
 
-Response cards, private Clinical Records connect links, private scheduled
-physical-note image continuation, conversation style/personalization, and ordinary product-feedback
+Response cards, private Clinical Records connect links, route-eligible
+style/personalization, synchronous image generation, and ordinary product-feedback
 candidates may use that exact occurrence authority. Their existing owners remain
 unchanged: Web owns Clinical Records intents and durable personalization writes,
-the image-completion and physical-note owners retain provider/idempotency checks,
 and the product-feedback sink retains de-identification and bounded delivery.
+Background image completion and its physical-note continuation remain bound to a
+real accepted message because they must return through that durable message route.
 Ephemeral progress updates remain unavailable because queue-only background turns
 have no waiting audience and cannot durably order a progress send before the final
 reply. No scheduler-specific service, persisted authority row, queue, or second
-continuation lifecycle is introduced.
+continuation lifecycle is introduced. Occurrence-derived hashes are retry keys
+only; they are never accepted-input identities.

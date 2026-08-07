@@ -107,6 +107,10 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
         memberId: input.memberId,
         operation: "tone-voice",
         prisma: tx,
+        requestedFields: [
+          ...(request.tone === undefined ? [] : ["tone" as const]),
+          ...(request.voice === undefined ? [] : ["voice" as const]),
+        ],
       });
     const styleResult = request.tone !== undefined || request.voice !== undefined
       ? await upsertHostedMemberAssistantPreferencesTx({
@@ -190,6 +194,9 @@ async function handleHostedRuntimeAssistantPersonalityUpdate(input: {
         memberId: input.memberId,
         operation: "personality",
         prisma: tx,
+        requestedFields: assistantPersonalitySettingIds.filter(
+          (settingId) => input.personality[settingId] !== undefined,
+        ),
       });
     const styleResult = await upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
@@ -317,6 +324,7 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
   memberId: string;
   operation: "personality" | "tone-voice";
   prisma: HostedMailboxStoreClient;
+  requestedFields: readonly AssistantPreferenceFieldId[];
 }): Promise<HostedRuntimeAssistantPreferenceWriteAuthority> {
   await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, {
     prisma: input.prisma,
@@ -329,6 +337,7 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
           automationId: input.authority.automationId,
           occurrenceAt: input.authority.occurrenceAt,
           operation: input.operation,
+          requestedFields: [...input.requestedFields].sort(),
           schema: "murph.scheduled-assistant-preference-update.v1",
         }))
         .digest("hex"),

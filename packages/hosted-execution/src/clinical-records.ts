@@ -68,7 +68,9 @@ const errorCodeSchema = z
   .max(HOSTED_CLINICAL_RECORDS_ERROR_CODE_MAX_CHARS)
   .regex(HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN);
 
-export const hostedClinicalRecordsConnectLinkRequestSchema = z.object({}).strict();
+export const hostedClinicalRecordsConnectLinkRequestSchema = z.object({
+  requestKey: z.string().regex(/^scheduled_[a-f0-9]{64}$/u).optional(),
+}).strict();
 
 const hostedClinicalRecordsConnectUrlSchema = z.string().url().max(2_048).refine(
   isHostedClinicalRecordsConnectUrl,
@@ -202,6 +204,9 @@ export type HostedClinicalRecordsRetrievalSlice = z.infer<
 >;
 export type HostedClinicalRecordsConnectLinkResponse = z.infer<
   typeof hostedClinicalRecordsConnectLinkResponseSchema
+>;
+export type HostedClinicalRecordsConnectLinkRequest = z.infer<
+  typeof hostedClinicalRecordsConnectLinkRequestSchema
 >;
 export type HostedClinicalRecordsRunDescriptor = z.infer<
   typeof hostedClinicalRecordsLegacyRunDescriptorSchema

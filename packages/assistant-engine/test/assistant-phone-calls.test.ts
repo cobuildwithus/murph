@@ -196,7 +196,6 @@ describe("assistant phone calls", () => {
 
     expect(generic).toMatchObject({
       conversationScope: "direct",
-      effectAnchorInputId: expect.stringMatching(/^ain_[0-9a-f]{32}$/u),
       origin: {
         automationId: "automation-scheduled-tools",
         kind: "automation_occurrence",

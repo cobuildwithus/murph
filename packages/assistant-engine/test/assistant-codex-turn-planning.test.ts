@@ -1975,7 +1975,7 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('offers response cards to current private requests and managed closeout', async () => {
+  it('offers response cards to current private requests and exact scheduled occurrences', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -2026,7 +2026,7 @@ describe('assistant Codex turn planning', () => {
       },
       scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
       turnTrigger: 'automation-cron',
-    })).resolves.not.toContain('attach_response_card')
+    })).resolves.toContain('attach_response_card')
     await expect(toolNames(
       {
         ...createMessageInput(),
@@ -3375,6 +3375,11 @@ describe('assistant Codex turn planning', () => {
         hostedToolContext: {
           ...createHostedToolContext(),
           clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
+          currentProductFeedbackAuthority: () => ({
+            automationId: 'automation-scheduled-phone-call',
+            kind: 'automation_occurrence',
+            occurrenceAt,
+          }),
           personalizationTool: { request: vi.fn() },
           phoneCalls: { start: vi.fn() },
           physicalNotes: { send: vi.fn() },
@@ -3424,6 +3429,12 @@ describe('assistant Codex turn planning', () => {
           'submit_product_feedback',
         ]))
         expect(toolNames).not.toContain('send_progress_update')
+      }
+      if (channel === 'email') {
+        expect(toolNames).not.toContain('assistant_style')
+        expect(toolNames).not.toContain('personalization')
+        expect(toolNames).toContain('create_clinical_records_connect_link')
+        expect(toolNames).toContain('attach_response_card')
       }
     },
   )

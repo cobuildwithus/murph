@@ -1,4 +1,5 @@
 import type {
+  HostedClinicalRecordsConnectLinkRequest,
   HostedClinicalRecordsConnectLinkResponse,
   HostedClinicalRecordsFetchPageRequest,
   HostedClinicalRecordsFetchPageResponse,
@@ -454,7 +455,9 @@ export interface HostedRuntimeDeviceSyncPort {
 
 export interface HostedRuntimeClinicalRecordsPort {
   createConnectLink?(
-    options?: { signal?: AbortSignal | null },
+    options?: HostedClinicalRecordsConnectLinkRequest & {
+      signal?: AbortSignal | null
+    },
   ): Promise<HostedClinicalRecordsConnectLinkResponse>;
   fetchPage(
     request: HostedClinicalRecordsFetchPageRequest,

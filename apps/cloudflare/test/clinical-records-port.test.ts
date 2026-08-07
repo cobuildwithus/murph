@@ -124,7 +124,8 @@ describe("hosted clinical records runtime port", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.createConnectLink?.())
+    const requestKey = `scheduled_${"a".repeat(64)}`;
+    await expect(port.createConnectLink?.({ requestKey }))
       .resolves.toMatchObject({ ok: true });
     await expect(port.readRun({ generation: 1, runId: "run_1" }))
       .resolves.toMatchObject({ status: "ready" });
@@ -154,7 +155,7 @@ describe("hosted clinical records runtime port", () => {
 
     expect(received).toEqual([
       {
-        body: {},
+        body: { requestKey },
         path: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
       },
       {

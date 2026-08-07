@@ -224,7 +224,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       occurredAt: "2026-08-06T14:30:00.000Z",
       preferences: { tone: "casual" },
       prisma: expect.objectContaining({ tx: true }),
-      updateId: buildScheduledPreferenceUpdateId("tone-voice"),
+      updateId: buildScheduledPreferenceUpdateId("tone-voice", ["tone"]),
     });
   });
 
@@ -266,12 +266,62 @@ describe("hosted assistant personalization tool owner adapter", () => {
       occurredAt: "2026-08-06T14:30:00.000Z",
       preferences: { personality: { humor: 8 } },
       prisma: expect.objectContaining({ tx: true }),
-      updateId: buildScheduledPreferenceUpdateId("personality"),
+      updateId: buildScheduledPreferenceUpdateId("personality", ["humor"]),
     });
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_personalization_1",
       mailboxItemId: "mailbox_scheduled_personality",
     });
+  });
+
+  it("scopes scheduled personality identities to the requested dials", async () => {
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      appliedFields: [],
+      assistantPersona: null,
+      assistantPersonality: {
+        detail: null,
+        humor: null,
+        push: null,
+        unhinged: null,
+      },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      dispatch: null,
+      updated: false,
+    });
+    const authority = {
+      automationId: "automation_daily_style",
+      occurrenceAt: "2026-08-06T14:30:00.000Z",
+    };
+
+    await handleHostedRuntimeAssistantPersonalizationTool({
+      authority,
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: { humor: 8 },
+      },
+    });
+    await handleHostedRuntimeAssistantPersonalizationTool({
+      authority,
+      memberId: "member_personalization_1",
+      request: {
+        action: "update_personality",
+        personality: { push: 8 },
+      },
+    });
+
+    const firstUpdateId = mocks.upsertHostedMemberAssistantPreferencesTx
+      .mock.calls[0]?.[0]?.updateId;
+    const secondUpdateId = mocks.upsertHostedMemberAssistantPreferencesTx
+      .mock.calls[1]?.[0]?.updateId;
+    expect(firstUpdateId).toBe(
+      buildScheduledPreferenceUpdateId("personality", ["humor"]),
+    );
+    expect(secondUpdateId).toBe(
+      buildScheduledPreferenceUpdateId("personality", ["push"]),
+    );
+    expect(secondUpdateId).not.toBe(firstUpdateId);
   });
 
   it("checks runtime access before resolving causal input authority", async () => {
@@ -665,7 +715,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
       memberId: "member_personalization_1",
       request: { action: "update", tone: "casual" },
-    })).rejects.toThrow("requires assistant input authority");
+    })).rejects.toThrow("requires action authority");
 
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(
@@ -681,7 +731,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         action: "update_personality",
         personality: { push: null },
       },
-    })).rejects.toThrow("requires assistant input authority");
+    })).rejects.toThrow("requires action authority");
 
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(
@@ -908,12 +958,14 @@ describe("hosted assistant personalization tool owner adapter", () => {
 
 function buildScheduledPreferenceUpdateId(
   operation: "personality" | "tone-voice",
+  requestedFields: string[],
 ): string {
   return createHash("sha256")
     .update(JSON.stringify({
       automationId: "automation_daily_style",
       occurrenceAt: "2026-08-06T14:30:00.000Z",
       operation,
+      requestedFields: [...requestedFields].sort(),
       schema: "murph.scheduled-assistant-preference-update.v1",
     }))
     .digest("hex");

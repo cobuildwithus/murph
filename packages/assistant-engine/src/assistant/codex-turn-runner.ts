@@ -592,11 +592,18 @@ async function executeAssistantCodexAttempt(input: {
         productFeedbackRecorder: createAssistantProductFeedbackRecorder({
           acceptedInputItems: executionPlan.acceptedInputItems ?? [],
           ...(executionPlan.hostedToolContext
-              ?.currentProductFeedbackAcceptedInputIds
+              ?.currentProductFeedbackAuthority
             ? {
-                getAcceptedInputIds:
-                  executionPlan.hostedToolContext
-                    .currentProductFeedbackAcceptedInputIds,
+                getAuthority: () => {
+                  const authority = executionPlan.hostedToolContext
+                    ?.currentProductFeedbackAuthority?.() ?? null
+                  return authority?.kind === 'accepted_input'
+                    ? {
+                        assistantInputId: authority.assistantInputId,
+                        kind: authority.kind,
+                      }
+                    : authority
+                },
               }
             : {}),
           productFeedbackCandidateSink:

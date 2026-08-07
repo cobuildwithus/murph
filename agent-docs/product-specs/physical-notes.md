@@ -32,11 +32,9 @@ wallet or credit type.
 
 The assistant composes two existing-style primitives:
 
-1. `murph.generate_image` creates and saves one private portrait image. Live mail
-   flows pass the exact accepted `message_ref`; an exact scheduled automation
-   occurrence instead supplies the host-derived effect anchor. Generic image
-   generations without either authority remain composable but cannot authorize an
-   automatic physical send.
+1. `murph.generate_image` creates and saves one private portrait image. Mail
+   flows pass the exact accepted `message_ref`; generic image generations remain
+   composable but cannot authorize an automatic physical send.
 2. The existing hosted image completion re-enters the same Codex conversation as
    a trusted system input. No note workflow, polling loop, scheduler, automation,
    or second continuation owner is added.
@@ -153,10 +151,9 @@ configuration.
 
 ## Authority and safety
 
-One explicit user-authored send request or one exact private scheduled automation
-occurrence authorizes one note. In a group, any current activated participant may
-originate the request; the group runtime owns the benefit and usage. Scheduled group
-sends are not admitted without that participant boundary. The service uses the repository's canonical
+One explicit user-authored send request authorizes one note. In a group, any
+current activated participant may originate the request; the group runtime owns
+the benefit and usage. The service uses the repository's canonical
 participant-aware thread-container access derivation, so an inactive owner does
 not block an otherwise authorized active participant. It does not add a
 physical-note-specific entitlement path.
