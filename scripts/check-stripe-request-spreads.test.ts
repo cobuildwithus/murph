@@ -41,6 +41,17 @@ describe("check-stripe-request-spreads", () => {
     ].join("\n"))).toEqual([1]);
   });
 
+  it("blocks payload and option spreads at typed custom Stripe client boundaries", () => {
+    expect(blockedLines([
+      "interface HostedPulseTrialExtensionStripeClient {",
+      "  resumeSubscription(id: string, params: Stripe.SubscriptionResumeParams, options: Stripe.RequestOptions): Promise<Stripe.Subscription>;",
+      "}",
+      "async function resume(input: { stripe: HostedPulseTrialExtensionStripeClient }) {",
+      "  await input.stripe.resumeSubscription(subscriptionId, { ...params }, { ...options });",
+      "}",
+    ].join("\n"))).toEqual([5, 5]);
+  });
+
   it("blocks spreads hidden inside Stripe-typed parameter builders", () => {
     expect(blockedLines([
       "function buildCheckout(input: Input): Stripe.Checkout.SessionCreateParams {",

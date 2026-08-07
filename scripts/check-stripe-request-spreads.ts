@@ -99,7 +99,7 @@ export function findStripeRequestSpreadMatches(
   const matchesByPosition = new Map<number, StripeRequestSpreadMatch>();
 
   traverseFast(sourceFile, (node) => {
-    if (!isStripeSdkCall(node, stripeClientNames)) {
+    if (!isStripeRequestCall(node, stripeClientNames)) {
       return;
     }
 
@@ -164,12 +164,12 @@ export function findStripeRequestSpreadMatches(
 export async function main(): Promise<void> {
   const matches = await collectStripeRequestSpreadMatches();
   if (matches.length === 0) {
-    console.log("No object spreads were found in Stripe SDK request arguments.");
+    console.log("No object spreads were found in Stripe request arguments.");
     return;
   }
 
   throw new Error([
-    "Found object spreads in Stripe SDK request arguments.",
+    "Found object spreads in Stripe request arguments.",
     "Build an SDK-typed parameter object and assign optional fields explicitly so TypeScript checks every Stripe key:",
     ...matches.map(
       (match) =>
@@ -324,7 +324,7 @@ function resolveBinding(
   return resolved;
 }
 
-function isStripeSdkCall(
+function isStripeRequestCall(
   node: Node,
   stripeClientNames: ReadonlySet<string>,
 ): node is CallExpression | OptionalCallExpression {
@@ -335,10 +335,20 @@ function isStripeSdkCall(
   if (!pathParts || pathParts.length < 3) {
     return false;
   }
-  const stripeIndex = pathParts.findIndex(
+  const sdkClientIndex = pathParts.findIndex(
     (part) => /stripe/iu.test(part) || stripeClientNames.has(part),
   );
-  return stripeIndex >= 0 && stripeTopLevelResources.has(pathParts[stripeIndex + 1] ?? "");
+  if (
+    sdkClientIndex >= 0 &&
+    stripeTopLevelResources.has(pathParts[sdkClientIndex + 1] ?? "")
+  ) {
+    return true;
+  }
+
+  const customClientIndex = pathParts.findIndex(
+    (part) => part === "stripe" || stripeClientNames.has(part),
+  );
+  return customClientIndex >= 0 && pathParts.length === customClientIndex + 2;
 }
 
 function readMemberPath(node: Node): string[] | null {
