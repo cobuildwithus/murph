@@ -48,6 +48,9 @@ describe("hosted ops growth sponsorship metrics", () => {
     const queryText = queryParts.join("?");
     expect(queryText).toContain('purchase."status" = \'fulfilled\'');
     expect(queryText).toContain('purchase."stripe_live_mode" = TRUE');
+    expect(queryText).toContain(
+      'purchase."paid_at" < bounds.captured_at',
+    );
     expect(queryText).toContain('"hosted_thread_container"');
     expect(queryText).toContain('authorization."monthly_cap_minor"');
     expect(queryText).toContain(
