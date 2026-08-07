@@ -647,6 +647,19 @@ replies with bounded continuity, and each second turn resumes its replacement
 thread. Do not add a compatibility flag, dual schema, migration, or session
 reconciler around this safety boundary.
 
+The completed first-read turn also has a separate, occurrence-time continuity
+effect. Its high reasoning is a turn-scoped target override on the live private
+conversation session. After either a provider-completed send or normal silent
+skip, the turn finalizer preserves the member's selected provider and model but
+clears native resume; retaining a provider thread across different target
+options would make its contract ambiguous, while persisting high reasoning as
+the member's ordinary preference would change their selected authority. The
+next ordinary turn therefore receives the same bounded committed-history
+fallback—at most 24 messages, 4,000 bytes per message, and 12,000 bytes total—
+and later turns resume the replacement thread. Cancellation or foreground
+preemption before terminal turn persistence does not rotate the session. An
+outbound delivery failure after terminal persistence does not undo the reset.
+
 ## Finite Scheduled Continuation
 
 The onboarding follow-up automation is one finite three-day recovery window,
