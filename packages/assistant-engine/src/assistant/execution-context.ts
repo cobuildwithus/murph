@@ -398,9 +398,15 @@ export type AssistantGeneratedImageCapturePersistence = <T>(
 
 export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
+    // The durable assistant session that must receive the asynchronous
+    // completion. The host binds it; it is never derived from tool arguments
+    // and never doubles as the pending-image coordination scope.
+    continuationSessionId?: string | null
     operationId: string
     originAssistantInputId: string
     originAssistantInputIdExact: boolean
+    // Pending/queued duplicate prevention and cleanup scope. Unrelated to
+    // continuation identity.
     scopeId?: string | null
     run(
       signal: AbortSignal,
