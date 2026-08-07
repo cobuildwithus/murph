@@ -1,6 +1,6 @@
 # Recover first-contact container overlap without selecting an owner
 
-Status: active
+Status: completed
 Created: 2026-08-07
 Updated: 2026-08-07
 
@@ -151,5 +151,19 @@ Updated: 2026-08-07
   p50 improvement across six measured samples per variant.
 - Post-finding focused remediation proof: 189 RunnerContainer tests and 184 Web
   instant-start/direct-wake tests passed; Cloudflare and Web typechecks passed.
-- Preliminary `completion-specialists`, final ReviewGPT, and required exact-head
-  GitHub Actions.
+- Exact remediation head `b408b63f7115` passed the complete private Blacksmith
+  integration workflow: build plus all eleven hosted scenario groups and the
+  Temporal aggregate. The foreground-priority group proved the shell hint,
+  committed conversation, one fence, one provider request, and one reply.
+- Preliminary `completion-specialists` and final ReviewGPT completed. The
+  specialist pass and final round 1 accepted the same lifecycle-convoy finding;
+  both were fixed. Final round 2 required the recorded retrospective after the
+  repeated unbounded-state-read mechanism; the smaller no-state-read correction
+  landed. Final round 3 audited the full sensitive snapshot for 25 minutes and
+  returned `ROUND_OUTCOME: PASS` with no findings on the requested GPT-5.6 Sol
+  model (`gpt-5-6-pro` verification slug).
+- Broad public checks on the reviewed head passed except the repository-wide
+  live Stripe lane, which GitHub canceled before execution when newer PR runs
+  replaced its single pending concurrency slot. Final exact-head GitHub Actions
+  remain the post-plan merge gate after the plan archive/base reconciliation.
+Completed: 2026-08-07
