@@ -1,0 +1,457 @@
+import {
+  ArrowDown,
+  CheckCircle2,
+  Link2,
+  LockKeyhole,
+  MessageCircleMore,
+  Sparkles,
+  UsersRound,
+} from "lucide-react";
+
+import { ReferralShareAction } from "@/src/components/referrals/referral-share-action";
+import {
+  formatApproximateReferralMessages,
+  HOSTED_PUBLIC_REFERRAL_REWARDS,
+  type HostedPublicReferralRewardId,
+} from "@/src/lib/hosted-growth/referral-program";
+
+const HOW_IT_WORKS = [
+  {
+    description:
+      "Copy your personal link, or ask Murph to start one of the available group missions before you create the group.",
+    number: "01",
+    title: "Choose how to invite",
+  },
+  {
+    description:
+      "Your friend completes their own Murph setup, or the fresh group reaches the mission’s real-participation requirements.",
+    number: "02",
+    title: "They actually join in",
+  },
+  {
+    description:
+      "Murph applies the usage reward automatically and sends you a short confirmation. There is no claim form or payout setup.",
+    number: "03",
+    title: "Messages are added",
+  },
+] as const;
+
+const FAQS = [
+  {
+    answer:
+      "A qualifying signup through your personal link adds about 100 messages. The fresh-group mission with someone new is also about 100 messages, and the active-group mission is about 140. These are approximate because actual usage varies with the model, tools, media, task complexity, and response length.",
+    question: "How many messages do I earn?",
+  },
+  {
+    answer:
+      "Your personal referral link does not need to be armed first. Group missions do: ask Murph what referral missions are available, choose one, and wait for Murph to confirm it before creating the fresh group.",
+    question: "Do I need to start a mission first?",
+  },
+  {
+    answer:
+      "For a link referral, a genuinely new member must complete ordinary Murph setup through an invite attributed to you. Self-referrals, duplicate identities, and ambiguous attribution do not qualify.",
+    question: "What counts as a new member?",
+  },
+  {
+    answer:
+      "The active-group mission requires a fresh group with 15 qualifying human messages, including at least 8 messages from at least two people other than the referrer, spread across at least 10 minutes.",
+    question: "What makes a group active?",
+  },
+  {
+    answer:
+      "No. Murph tells you that someone completed setup through your link, but does not reveal who it was. You cannot see their conversations, health information, or anything they share with Murph.",
+    question: "Can I see who used my link?",
+  },
+  {
+    answer:
+      "Yes. Rolling limits and eligibility checks prevent abuse, and available group missions can change. Murph shows the options you can start right now. Rewards add usage capacity but do not extend a trial end date.",
+    question: "Are there limits?",
+  },
+] as const;
+
+const REWARD_ICONS: Record<HostedPublicReferralRewardId, typeof Link2> = {
+  "active-group": MessageCircleMore,
+  "new-person-group": UsersRound,
+  "signup-link": Link2,
+};
+
+export function ReferralPageContent({
+  authenticated,
+  identityKey,
+}: {
+  authenticated: boolean;
+  identityKey: string | null;
+}) {
+  return (
+    <main className="min-h-screen bg-[#f5f0e8] antialiased">
+      <section
+        className="relative isolate overflow-hidden bg-[#1d271b] px-5 pb-20 pt-32 sm:px-10 sm:pb-24 sm:pt-36 lg:px-16 lg:pb-28 lg:pt-40"
+        id="refer-top"
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 -z-10"
+          style={{
+            background:
+              "radial-gradient(circle at 16% 18%, rgba(196,168,130,0.22) 0%, transparent 36%), radial-gradient(circle at 82% 24%, rgba(90,110,50,0.42) 0%, transparent 42%), radial-gradient(circle at 58% 92%, rgba(196,149,106,0.13) 0%, transparent 36%)",
+          }}
+        />
+        <div className="mx-auto grid max-w-[1160px] items-center gap-14 lg:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)] lg:gap-16">
+          <div>
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.13em] text-[#d4b87a]">
+              Murph referrals
+            </p>
+            <h1 className="mt-5 max-w-[13ch] text-balance font-serif text-[clamp(2.65rem,7vw,5.4rem)] font-semibold leading-[0.94] tracking-[-0.055em] text-[#f5f0e8]">
+              Bring your people. Earn more time with Murph.
+            </h1>
+            <p className="mt-6 max-w-[58ch] text-pretty text-[1rem] leading-[1.75] text-[#f5f0e8]/75 sm:text-[1.0625rem]">
+              Share your personal link or start a qualifying group mission. When
+              a new member finishes setup or a fresh group gets genuinely
+              active, Murph adds usage to your account automatically.
+            </p>
+
+            <div className="mt-8">
+              <ReferralShareAction
+                authenticated={authenticated}
+                identityKey={identityKey}
+              />
+            </div>
+            <a
+              className="mt-5 inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-[#f5f0e8]/76 underline decoration-[#d4b87a]/45 underline-offset-4 transition-colors hover:text-[#f5f0e8]"
+              href="#how-it-works"
+            >
+              See how rewards qualify
+              <ArrowDown aria-hidden="true" className="size-4" />
+            </a>
+            <p className="mt-6 max-w-[56ch] text-xs leading-[1.7] text-[#f5f0e8]/55">
+              Rewards are usage, not cash. Message counts are approximate and
+              vary with the model, tools, media, and task complexity.
+            </p>
+          </div>
+
+          <ReferralHeroArtifact />
+        </div>
+      </section>
+
+      <section
+        className="px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
+        id="how-it-works"
+      >
+        <div className="mx-auto max-w-[1160px]">
+          <div className="max-w-[700px]">
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+              How it works
+            </p>
+            <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4.5vw,3.7rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#2d3436]">
+              Real introductions, rewarded automatically.
+            </h2>
+            <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.75] text-[#3a322a]">
+              Murph rewards people who bring someone into the product and help
+              them actually get started. Opening a link alone is never enough.
+            </p>
+          </div>
+
+          <div className="mt-12 grid gap-px overflow-hidden rounded-[1.75rem] border border-[#c4a882]/30 bg-[#c4a882]/30 lg:grid-cols-3">
+            {HOW_IT_WORKS.map((step) => (
+              <article
+                className="relative bg-[#faf7f1] p-7 sm:p-8 lg:min-h-[285px]"
+                key={step.number}
+              >
+                <p className="font-mono text-[0.6875rem] font-medium tracking-[0.12em] text-[#8a7254]">
+                  STEP {step.number}
+                </p>
+                <h3 className="mt-12 font-serif text-[1.65rem] font-semibold leading-[1.05] tracking-[-0.035em] text-[#2d3436]">
+                  {step.title}
+                </h3>
+                <p className="mt-4 text-[0.9375rem] leading-[1.72] text-[#4a4036]">
+                  {step.description}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section
+        className="border-y border-[#c4a882]/20 bg-[#ede5d8] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
+        id="ways-to-earn"
+      >
+        <div className="mx-auto max-w-[1160px]">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-[720px]">
+              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+                Ways to earn
+              </p>
+              <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4.5vw,3.7rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#2d3436]">
+                Three paths. One shared reward balance.
+              </h2>
+            </div>
+            <p className="max-w-[38ch] text-sm leading-[1.7] text-[#5a5045] lg:text-right">
+              Your personal link is always the simplest path. Group missions
+              must be confirmed by Murph before the new group is created.
+            </p>
+          </div>
+
+          <div className="mt-12 grid gap-5 lg:grid-cols-3">
+            {HOSTED_PUBLIC_REFERRAL_REWARDS.map((reward, index) => {
+              const Icon = REWARD_ICONS[reward.id];
+              return (
+                <article
+                  className={`flex min-h-[360px] flex-col rounded-[1.75rem] border p-7 sm:p-8 ${
+                    index === 0
+                      ? "border-[#5a6e32]/35 bg-[#253321] text-[#f5f0e8]"
+                      : "border-[#c4a882]/35 bg-[#faf7f1] text-[#2d3436]"
+                  }`}
+                  key={reward.id}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <span
+                      className={`inline-flex size-11 items-center justify-center rounded-2xl ${
+                        index === 0
+                          ? "bg-white/10 text-[#d4b87a]"
+                          : "bg-[#5a6e32]/10 text-[#5a6e32]"
+                      }`}
+                    >
+                      <Icon aria-hidden="true" className="size-5" />
+                    </span>
+                    <span
+                      className={`rounded-full border px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.09em] ${
+                        index === 0
+                          ? "border-white/15 bg-white/[0.05] text-[#f5f0e8]/70"
+                          : "border-[#c4a882]/35 bg-white/55 text-[#736a58]"
+                      }`}
+                    >
+                      {reward.availabilityLabel}
+                    </span>
+                  </div>
+
+                  <p
+                    className={`mt-9 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.12em] ${
+                      index === 0 ? "text-[#d4b87a]" : "text-[#8a7254]"
+                    }`}
+                  >
+                    {formatApproximateReferralMessages(
+                      reward.approximateMessageCount,
+                    )}
+                  </p>
+                  <h3 className="mt-3 text-balance font-serif text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.04em]">
+                    {reward.title}
+                  </h3>
+                  <p
+                    className={`mt-5 text-[0.9375rem] leading-[1.72] ${
+                      index === 0 ? "text-[#f5f0e8]/74" : "text-[#4a4036]"
+                    }`}
+                  >
+                    {reward.description}
+                  </p>
+                  <div
+                    className={`mt-auto flex items-start gap-2.5 border-t pt-5 text-xs leading-[1.6] ${
+                      index === 0
+                        ? "border-white/12 text-[#f5f0e8]/62"
+                        : "border-[#c4a882]/25 text-[#736a58]"
+                    }`}
+                  >
+                    <CheckCircle2
+                      aria-hidden="true"
+                      className="mt-0.5 size-4 shrink-0"
+                    />
+                    <span>{reward.detail}</span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28">
+        <div className="mx-auto grid max-w-[1160px] gap-12 lg:grid-cols-[0.82fr_1.18fr] lg:gap-20">
+          <div>
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+              Designed for trust
+            </p>
+            <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4vw,3.45rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#2d3436]">
+              Your referral should never expose their health.
+            </h2>
+            <p className="mt-5 max-w-[48ch] text-[1rem] leading-[1.75] text-[#4a4036]">
+              Murph tracks only the minimum attribution needed to apply the
+              reward. The person you invite gets their own private relationship
+              with Murph from the start.
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TrustCard
+              icon={LockKeyhole}
+              title="Private by default"
+              description="Your stable referral link contains no phone number, email address, health data, or recipient identity."
+            />
+            <TrustCard
+              icon={UsersRound}
+              title="No identity reveal"
+              description="You receive a generic reward confirmation, not the name of the person who joined or anything they shared."
+            />
+            <TrustCard
+              icon={Sparkles}
+              title="One usage balance"
+              description="Referral rewards appear in the same AI usage history as the rest of your Murph capacity."
+            />
+            <TrustCard
+              icon={CheckCircle2}
+              title="No claim flow"
+              description="Once a referral qualifies, Murph applies the reward automatically and tells you it is ready."
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-[#c4a882]/25 bg-[#faf7f1] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28">
+        <div className="mx-auto grid max-w-[1040px] gap-12 lg:grid-cols-[0.62fr_1fr] lg:gap-20">
+          <div>
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+              Questions
+            </p>
+            <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.3rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#2d3436]">
+              The useful details.
+            </h2>
+          </div>
+
+          <div className="divide-y divide-[#c4a882]/30 border-y border-[#c4a882]/30">
+            {FAQS.map((faq) => (
+              <details className="group py-1" key={faq.question}>
+                <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-5 py-4 text-left text-[1rem] font-semibold text-[#2d3436] marker:content-none [&::-webkit-details-marker]:hidden">
+                  <span>{faq.question}</span>
+                  <span
+                    aria-hidden="true"
+                    className="text-xl font-normal text-[#736a58] transition-transform group-open:rotate-45"
+                  >
+                    +
+                  </span>
+                </summary>
+                <p className="max-w-[68ch] pb-6 pr-10 text-[0.9375rem] leading-[1.75] text-[#4a4036]">
+                  {faq.answer}
+                </p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden bg-[#2a2520] px-5 py-20 text-center sm:px-10 sm:py-24 lg:px-16 lg:py-28">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(circle at 30% 60%, rgba(160,122,78,0.22) 0%, transparent 50%), radial-gradient(circle at 72% 32%, rgba(90,110,50,0.18) 0%, transparent 42%)",
+          }}
+        />
+        <div className="relative mx-auto flex max-w-[720px] flex-col items-center">
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]">
+            Bring someone with you
+          </p>
+          <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4.5vw,3.8rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#f5f0e8]">
+            Murph gets better when the people you care about are in it.
+          </h2>
+          <p className="mt-5 max-w-[52ch] text-[0.9375rem] leading-[1.75] text-[#f5f0e8]/70 sm:text-base">
+            Start with your personal link. Murph handles attribution, applies
+            qualifying rewards automatically, and keeps everyone’s health data
+            private.
+          </p>
+          <a
+            className="group mt-8 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#5a6e32] px-5 py-3.5 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#4d5f2a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]"
+            href="#refer-top"
+          >
+            Get my referral link
+            <span
+              aria-hidden="true"
+              className="transition-transform group-hover:-translate-y-0.5"
+            >
+              ↑
+            </span>
+          </a>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function ReferralHeroArtifact() {
+  return (
+    <div aria-hidden="true" className="relative mx-auto w-full max-w-[470px]">
+      <div className="absolute -left-5 top-12 hidden h-28 w-28 rounded-full border border-[#d4b87a]/25 sm:block" />
+      <div className="absolute -right-8 -top-7 h-40 w-40 rounded-full bg-[#5a6e32]/20 blur-3xl" />
+      <div className="relative rotate-[1.2deg] rounded-[2rem] border border-white/12 bg-[#f5f0e8] p-5 shadow-[0_30px_90px_-45px_rgba(0,0,0,0.85)] sm:p-6">
+        <div className="flex items-center gap-3 border-b border-[#c4a882]/25 pb-4">
+          <div className="flex size-10 items-center justify-center rounded-full bg-[#5a6e32] text-sm font-semibold text-white">
+            M
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-[#2d3436]">Murph</p>
+            <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
+              just now
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl rounded-tl-[6px] bg-white px-4 py-3.5 text-[0.9375rem] leading-[1.55] text-[#2d3436] ring-1 ring-[#c4a882]/15">
+          Your referral came through. About 100 messages are already added to
+          your Murph.
+        </div>
+
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          <div className="rounded-2xl bg-[#e7eedf] p-4">
+            <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#5a6e32]">
+              Reward
+            </p>
+            <p className="mt-2 font-serif text-3xl font-semibold tracking-[-0.05em] text-[#2d3436]">
+              +100
+            </p>
+            <p className="mt-1 text-xs text-[#5a5045]">approx. messages</p>
+          </div>
+          <div className="rounded-2xl bg-[#eee3d3] p-4">
+            <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#8a7254]">
+              Status
+            </p>
+            <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-[#2d3436]">
+              <CheckCircle2 className="size-4 text-[#5a6e32]" />
+              Applied
+            </p>
+            <p className="mt-2 text-xs leading-[1.5] text-[#5a5045]">
+              No claim needed
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[#c4a882]/25 px-4 py-3 text-xs text-[#5a5045]">
+          <LockKeyhole className="size-4 shrink-0 text-[#5a6e32]" />
+          Their conversations and health data stay private.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrustCard({
+  description,
+  icon: Icon,
+  title,
+}: {
+  description: string;
+  icon: typeof LockKeyhole;
+  title: string;
+}) {
+  return (
+    <article className="rounded-[1.5rem] border border-[#c4a882]/30 bg-[#faf7f1] p-6 sm:p-7">
+      <span className="inline-flex size-10 items-center justify-center rounded-2xl bg-[#5a6e32]/10 text-[#5a6e32]">
+        <Icon aria-hidden="true" className="size-5" />
+      </span>
+      <h3 className="mt-5 font-serif text-[1.35rem] font-semibold leading-[1.1] tracking-[-0.025em] text-[#2d3436]">
+        {title}
+      </h3>
+      <p className="mt-3 text-sm leading-[1.7] text-[#5a5045]">
+        {description}
+      </p>
+    </article>
+  );
+}
