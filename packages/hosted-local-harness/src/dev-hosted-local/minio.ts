@@ -9,7 +9,6 @@ import { StringDecoder } from "node:string_decoder";
 
 import {
   HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
-  HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME,
   HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
   repoRoot,
 } from "./constants.ts";
@@ -166,10 +165,6 @@ export async function maybeStartHostedLocalMinio(input: {
     mode: 0o700,
     recursive: true,
   });
-  await mkdir(path.join(dataDir, HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME), {
-    mode: 0o700,
-    recursive: true,
-  });
   const credentials = resolveHostedLocalMinioCredentials(input.env);
 
   const startContainer = async (
@@ -258,9 +253,6 @@ export async function maybeStartHostedLocalMinio(input: {
       HOSTED_R2_PRESIGN_ACCOUNT_ID: HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
-      HOSTED_R2_CUTOVER_PHASE: "source_active",
-      HOSTED_R2_WRITE_ADMISSION: "open",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME,
       HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: `http://${formatHostedLocalMinioUrlHost(controlHost)}:${port}`,
       HOSTED_R2_PRESIGN_ENDPOINT: `http://${formatHostedLocalMinioUrlHost(endpointHost)}:${port}`,
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: credentials.secretAccessKey,
@@ -364,8 +356,6 @@ function assertExplicitHostedLocalR2EndpointConfigured(env: NodeJS.ProcessEnv): 
     && env.HOSTED_R2_PRESIGN_ACCOUNT_ID?.trim()
     && env.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?.trim() === "1"
     && env.HOSTED_R2_PRESIGN_BUCKET_NAME?.trim()
-    && env.HOSTED_R2_CUTOVER_PHASE?.trim()
-    && env.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME?.trim()
     && env.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT?.trim()
     && env.HOSTED_R2_PRESIGN_ENDPOINT?.trim()
     && env.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY?.trim()
