@@ -1,9 +1,13 @@
+import { setTimeout as waitForTimeout } from 'node:timers/promises'
+
 export interface AssistantQuiescentMaintenanceOwner {
   foregroundCompleted(): void
   foregroundStarted(): void
   start(): void
   stop(): void
 }
+
+const ASSISTANT_RUNTIME_WRITE_LOCK_RETRY_DELAY_MS = 250
 
 export function createAssistantQuiescentMaintenanceOwner(input: {
   run(signal: AbortSignal): Promise<void>
@@ -25,7 +29,24 @@ export function createAssistantQuiescentMaintenanceOwner(input: {
     const nextController = new AbortController()
     controller = nextController
     const run = Promise.resolve()
-      .then(async () => await input.run(nextController.signal))
+      .then(async () => {
+        while (true) {
+          try {
+            await input.run(nextController.signal)
+            return
+          } catch (error) {
+            nextController.signal.throwIfAborted()
+            if (!isAssistantRuntimeWriteLockedError(error)) {
+              throw error
+            }
+            await waitForTimeout(
+              ASSISTANT_RUNTIME_WRITE_LOCK_RETRY_DELAY_MS,
+              undefined,
+              { signal: nextController.signal },
+            )
+          }
+        }
+      })
       .catch(() => undefined)
       .finally(() => {
         if (currentRun !== run) {
@@ -77,4 +98,10 @@ export function createAssistantQuiescentMaintenanceOwner(input: {
       ))
     },
   }
+}
+
+function isAssistantRuntimeWriteLockedError(error: unknown): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && error.code === 'ASSISTANT_RUNTIME_WRITE_LOCKED'
 }

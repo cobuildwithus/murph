@@ -156,7 +156,10 @@ export async function retireSentAssistantExportPacks(input: {
     input.signal?.throwIfAborted()
     if (
       error instanceof VaultCliError
-      && error.code === 'ASSISTANT_PATH_OUTSIDE_VAULT'
+      && (
+        error.code === 'ASSISTANT_PATH_OUTSIDE_VAULT'
+        || error.code === 'ASSISTANT_RUNTIME_WRITE_LOCKED'
+      )
     ) {
       throw error
     }
