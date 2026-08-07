@@ -203,10 +203,10 @@ describe('assistant Codex turn planning', () => {
       resolvePlan({ configured: true, scheduled: true }),
     ])) {
       expect(configuredPlan.systemPrompt).toContain(
-        'Configured Exa research capability:',
+        'Configured Exa research:',
       )
       expect(configuredPlan.systemPrompt).toContain(
-        '`resultIndex` maps to a returned result',
+        '`resultIndex` maps to a result',
       )
       expect(configuredPlan.systemPrompt).toContain(
         'no usable current source',
@@ -225,7 +225,7 @@ describe('assistant Codex turn planning', () => {
       resolvePlan({ configured: false, scheduled: true }),
     ])) {
       expect(unavailablePlan.systemPrompt).not.toContain(
-        'Configured Exa research capability:',
+        'Configured Exa research:',
       )
       expect(unavailablePlan.systemPrompt).not.toContain('`research scout`')
     }

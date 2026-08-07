@@ -757,6 +757,50 @@ text(result.output);
     expect(progressUpdates).toHaveLength(1)
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(2)
 
+    scenario.stub.markRequestBaseline()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli research payload-schema --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'I could not safely form that current-source lookup, so no current sources were checked. I can offer clearly labeled general background from existing knowledge, but not a current-research answer.',
+      },
+    )
+
+    const unrepresentable = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: directGuidance,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      progressDelivery,
+      prompt: 'What do the latest human studies say about semaglutide and gallbladder risk?',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(unrepresentable.finalMessage).toContain(
+      'could not safely form that current-source lookup',
+    )
+    expect(unrepresentable.finalMessage).toContain(
+      'no current sources were checked',
+    )
+    expect(unrepresentable.finalMessage).toContain('general background')
+    expect(unrepresentable.finalMessage).not.toContain('I found')
+    expect(unrepresentable.finalMessage).not.toContain('I checked')
+    expect(unrepresentable.finalMessage).not.toContain('I reviewed')
+    expect(unrepresentable.finalMessage).not.toContain('I verified')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+    expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(2)
+
     const managedResearchScout = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) =>
         seed.automationId ===
