@@ -1,6 +1,6 @@
 # Inactive group-sender recovery copy
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-06
 
@@ -67,9 +67,10 @@ Updated: 2026-08-06
 1. [x] Add reviewed canonical account-neutral group-setup variants.
 2. [x] Add focused rendering, planner, and dispatch coverage.
 3. [x] Run scoped tests, typecheck, diff checks, and identifier review.
-4. [ ] Push the exact candidate and complete the required specialist review and
-   exact-head CI.
-5. [ ] Close this plan through the scoped final commit.
+4. [x] Push the behavior candidate and complete the required specialist and
+   final ReviewGPT gates.
+5. [x] Rebase onto the merged base fix, rerun final local proof, and prepare
+   the scoped plan-closing commit. Exact-final-head CI remains the merge gate.
 
 ## Verification log
 
@@ -100,3 +101,27 @@ Updated: 2026-08-06
 - Scoped ESLint passed across all changed source and test files after the
   privacy remediation.
 - `git diff --check` passed.
+- Final ReviewGPT round 5 returned `ROUND_OUTCOME: PASS` with zero findings on
+  the complete delivery-owner candidate. The response verified the canonical
+  account-neutral room intent, authoritative completed-versus-concurrent
+  delivery classification, stable private identity, twice-attested private
+  recovery, and fail-closed fallback behavior.
+- A normal conflict-free rebase onto the advanced `main` touched no PR path and
+  used the documented base-update-only exception. The six focused suites still
+  passed with 525 tests, and the Hosted Web TypeScript check still passed on
+  the rebased candidate.
+- Base-updated exact-head CI passed app verification, build/typecheck,
+  assistant package coverage, fixture coverage, both CLI host matrices, repo
+  hygiene, frontend proof, and overflow checks. CLI and platform package
+  coverage remain blocked by pre-existing test expectations outside every PR
+  path: one exact-session participant-clear expectation and six conversation
+  fixtures that omit the now-present nullable session ID. Both failures
+  reproduce locally against base-equivalent package files, and their exact
+  test-only corrections are already green in PR #1389.
+- PR #1389 merged the exact test-only corrections. The final rebase applied
+  without manual conflict resolution; the formerly failing CLI file passed 34
+  tests, the two assistant-runtime files passed 286 tests, and the expanded
+  six-file onboarding suite passed 529 tests. Hosted Web TypeScript and scoped
+  ESLint passed again, and `git diff --check` remained clean. Exact-final-head
+  CI and merge follow the plan-closing commit.
+Completed: 2026-08-06
