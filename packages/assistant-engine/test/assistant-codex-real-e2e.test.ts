@@ -2157,6 +2157,32 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 
 describeRealCodex('real Codex Health Commons knowledge e2e', () => {
   it(
+    'keeps broad health-evidence intent in one focused knowledge search',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'What does the evidence say about Finnish dry sauna?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
+
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/--focus/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/health|benefit|evidence|outcome/iu)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
+      expect(result.finalMessage).toMatch(/health|benefit|cardiovascular|mortality/iu)
+    },
+    360_000,
+  )
+
+  it(
     'uses bounded same-topic evidence and safety packets without starting an experiment',
     async () => {
       const result = await runHealthCommonsKnowledgeProbe(

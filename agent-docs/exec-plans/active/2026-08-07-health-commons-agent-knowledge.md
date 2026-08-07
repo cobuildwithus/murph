@@ -89,7 +89,7 @@ Updated: 2026-08-07
   title can rank rows only after that step. Ordinary evidence and independent
   safety must share a resolved owner key.
 - Round 3 separated topic resolution from the user's question. The command now
-  resolves an exact normalized title or alias, then uses optional focus terms
+  resolves an exact normalized title or alias, then uses focus terms
   only to rank evidence and matching safety inside that owner set. Ambiguous
   topics return nothing, while an exact title wins over an alias. BM25 text
   relevance ranks before evidence priority.
@@ -127,6 +127,12 @@ Updated: 2026-08-07
 - Topic and focus normalization now remove combining marks after Unicode
   decomposition. This makes the authored `V̇O2max` alias usable. Focus searches
   also keep every term instead of silently dropping terms after the eighth.
+- Round 7 found that broad questions could omit focus and rank copied topic
+  labels instead of the member's intent. Every assistant lookup now requires a
+  short focus, including broad intent such as `health benefits`. It also found
+  reducer-only appraisals in member-facing results. Candidate-row and shard
+  bookkeeping is now excluded until source-level extraction creates readable
+  evidence.
 
 ## Verification
 

@@ -11,7 +11,7 @@ const knowledgeIndexPath = fileURLToPath(
   new URL("../generated/knowledge.sqlite", import.meta.url),
 );
 
-function search(query: string, focus?: string): HealthCommonsKnowledgeSearchResult {
+function search(query: string, focus: string): HealthCommonsKnowledgeSearchResult {
   return searchHealthCommonsKnowledgeIndex({
     databasePath: knowledgeIndexPath,
     focus,
@@ -59,17 +59,17 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("does not substitute nearby topics for unsupported queries", () => {
-    expect(search("magnesium sleep safety")).toMatchObject({ items: [], safety: null });
-    expect(search("unsupported quux topic")).toMatchObject({ items: [], safety: null });
-    expect(search("vitamin k")).toMatchObject({ items: [], safety: null });
-    expect(search("vitamin b")).toMatchObject({ items: [], safety: null });
-    expect(search("hepatitis b")).toMatchObject({ items: [], safety: null });
+    expect(search("magnesium sleep safety", "sleep safety")).toMatchObject({ items: [], safety: null });
+    expect(search("unsupported quux topic", "health evidence")).toMatchObject({ items: [], safety: null });
+    expect(search("vitamin k", "health evidence")).toMatchObject({ items: [], safety: null });
+    expect(search("vitamin b", "health evidence")).toMatchObject({ items: [], safety: null });
+    expect(search("hepatitis b", "health evidence")).toMatchObject({ items: [], safety: null });
   });
 
   it.each([
-    ["Daily Vitamin D3 Supplementation", undefined, /vitamin d/iu],
+    ["Daily Vitamin D3 Supplementation", "vitamin d", /vitamin d/iu],
     ["Walking After Every Meal", "type 2 diabetes", /type 2 diabet/iu],
-    ["Omega-3 Supplementation", undefined, /omega[- ]3|epa|dha/iu],
+    ["Omega-3 Supplementation", "omega 3", /omega[- ]3|epa|dha/iu],
   ])("preserves the qualifier for %s", (query, focus, expectedTopic) => {
     const result = search(query, focus);
 
@@ -85,7 +85,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("does not route vitamin C through a compound collagen alias", () => {
-    expect(search("vitamin c")).toMatchObject({ items: [], safety: null });
+    expect(search("vitamin c", "health evidence")).toMatchObject({ items: [], safety: null });
   });
 
   it.each([
@@ -103,16 +103,24 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("keeps broad canonical family retrieval and direct child retrieval", () => {
-    for (const query of ["Dry Sauna", "Collagen Supplementation", "Cold Water Immersion"]) {
-      expect(search(query).items.length).toBeGreaterThan(0);
+    for (const [query, focus] of [
+      ["Dry Sauna", "health benefits"],
+      ["Collagen Supplementation", "joint pain"],
+      ["Cold Water Immersion", "mood"],
+    ] as const) {
+      expect(search(query, focus).items.length).toBeGreaterThan(0);
     }
-    for (const query of ["Finnish Dry Sauna", "Caffeine Curfew", "Cold Plunge"]) {
-      expect(search(query).items.length).toBeGreaterThan(0);
+    for (const [query, focus] of [
+      ["Finnish Dry Sauna", "systematic review"],
+      ["Caffeine Curfew", "sleep"],
+      ["Cold Plunge", "cold shock"],
+    ] as const) {
+      expect(search(query, focus).items.length).toBeGreaterThan(0);
     }
   });
 
   it("normalizes combining-mark aliases without changing their topic", () => {
-    const combiningMark = search("V̇O2max");
+    const combiningMark = search("V̇O2max", "oxygen uptake");
 
     expect(combiningMark.items.length).toBeGreaterThan(0);
     expect(combiningMark.items.every((item) => item.entityKey === "biomarker:estimated-vo2max"))
@@ -121,12 +129,12 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("does not compose a topic from unrelated sauna citations", () => {
-    expect(search("pregnancy cold medicine")).toMatchObject({ items: [], safety: null });
-    expect(search("cold medicine pregnancy")).toMatchObject({ items: [], safety: null });
+    expect(search("pregnancy cold medicine", "pregnancy")).toMatchObject({ items: [], safety: null });
+    expect(search("cold medicine pregnancy", "pregnancy")).toMatchObject({ items: [], safety: null });
   });
 
   it("keeps water-fasting evidence and safety on the fasting topic", () => {
-    const direct = search("Prolonged Fasting");
+    const direct = search("Prolonged Fasting", "water fast");
     const naturalQuestionTerms = search("water fasting", "health");
 
     expect(packetText(direct)).toMatch(/water fast|prolonged fast/iu);
@@ -153,6 +161,15 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
 
     expect(result.items.length).toBeGreaterThan(0);
     expect(packetText(result)).toMatch(/immun/iu);
+  });
+
+  it("uses broad health intent to return direct Finnish-sauna evidence", () => {
+    const result = search("Finnish Dry Sauna", "health benefits");
+
+    expect(result.items.some((item) => item.sources.some((source) =>
+      source.pmid === "30077204" || source.pmid === "38577299"
+    ))).toBe(true);
+    expect(result.items.some((item) => /infrared|humidity control/iu.test(item.text))).toBe(false);
   });
 
   it("routes typed source findings to their related protocol", () => {
@@ -200,14 +217,14 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("resolves canonical family and protocol title collisions to the family owner", () => {
-    for (const title of [
-      "Consistent Wake Time",
-      "Daily Step Floor",
-      "High Protein Intake",
-      "Hyperbaric Oxygen Therapy",
-      "Norwegian 4x4",
-    ]) {
-      expect(search(title).items.length).toBeGreaterThan(0);
+    for (const [title, focus] of [
+      ["Consistent Wake Time", "sleep"],
+      ["Daily Step Floor", "daily steps"],
+      ["High Protein Intake", "protein intake"],
+      ["Hyperbaric Oxygen Therapy", "oxygen treatment"],
+      ["Norwegian 4x4", "vo2max"],
+    ] as const) {
+      expect(search(title, focus).items.length).toBeGreaterThan(0);
     }
     expect(search("Hyperbaric Oxygen Therapy", "untreated pneumothorax").safety?.text)
       .toMatch(/untreated pneumothorax|absolute contraindication/iu);
@@ -224,10 +241,10 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
 
   it("never returns an unsourced ordinary item or an overview row", async () => {
     for (const query of ["Finnish Dry Sauna", "Mean Corpuscular Hemoglobin", "Magnesium RBC"]) {
-      expect(search(query).items.every((item) => item.sources.length > 0)).toBe(true);
+      expect(search(query, "evidence").items.every((item) => item.sources.length > 0)).toBe(true);
     }
-    expect(search("Mean Corpuscular Hemoglobin").items).toEqual([]);
-    expect(search("Magnesium RBC").items).toEqual([]);
+    expect(search("Mean Corpuscular Hemoglobin", "evidence").items).toEqual([]);
+    expect(search("Magnesium RBC", "evidence").items).toEqual([]);
 
     const { DatabaseSync } = await import("node:sqlite");
     const database = new DatabaseSync(knowledgeIndexPath, { readOnly: true });
@@ -238,6 +255,13 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
         SELECT COUNT(*) AS count
         FROM chunks
         WHERE sources_json = '[]'
+      `).get()).toMatchObject({ count: 0 });
+      expect(database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM chunks
+        WHERE caveat = 'This source record preserves reducer classifications but does not replace source-level full-text extraction.'
+           OR text LIKE '%candidate row(s)%'
+           OR text LIKE '%shard(s)%'
       `).get()).toMatchObject({ count: 0 });
       expect(database.prepare(`
         SELECT COUNT(*) AS count
@@ -280,6 +304,16 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
       `).get()).toMatchObject({ count: 0 });
     } finally {
       database.close();
+    }
+  });
+
+  it("does not return reducer bookkeeping as IT band guidance", () => {
+    const result = search("IT Band Rehab", "red flags");
+    const text = packetText(result);
+
+    expect(text).not.toMatch(/candidate row|shard\(s\)|reducer classifications/iu);
+    if (result.safety) {
+      expect(result.safety.text).toMatch(/pain|stop|medical|clinician|diagnos|urgent|red flag/iu);
     }
   });
 });

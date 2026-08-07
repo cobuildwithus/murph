@@ -161,8 +161,14 @@ describe("Health Commons knowledge SQLite projection", () => {
   it("rejects empty search terms before opening broad content", () => {
     expect(() => searchHealthCommonsKnowledgeIndex({
       databasePath: "unused.sqlite",
+      focus: "health evidence",
       query: " - ",
     })).toThrow("at least one searchable term");
+    expect(() => searchHealthCommonsKnowledgeIndex({
+      databasePath: "unused.sqlite",
+      focus: " ",
+      query: "dry sauna",
+    })).toThrow("focus must not be blank");
   });
 
   it("requires every focus term instead of silently dropping terms after eight", async () => {
@@ -200,7 +206,11 @@ describe("Health Commons knowledge SQLite projection", () => {
 
     try {
       writeHealthCommonsKnowledgeIndex(databasePath, catalog);
-      expect(searchHealthCommonsKnowledgeIndex({ databasePath, query: "shared heat" }))
+      expect(searchHealthCommonsKnowledgeIndex({
+        databasePath,
+        focus: "heat",
+        query: "shared heat",
+      }))
         .toMatchObject({ items: [], safety: null });
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });

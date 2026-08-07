@@ -2335,8 +2335,10 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('Supported experiment protocols:')
     expect(prompt).toContain('Health Commons tools:')
     expect(prompt).toContain(
-      '`vault-cli commons knowledge search "<exact title or alias>" --focus "<question terms>" --format json`',
+      '`vault-cli commons knowledge search "<exact title or alias>" --focus "<short focus>" --format json`',
     )
+    expect(prompt).toContain('Focus is required')
+    expect(prompt).not.toContain('omit focus for broad evidence')
     expect(prompt).toContain(
       'Skip trivial/non-health;',
     )
@@ -2344,7 +2346,7 @@ describe('assistant experiment onboarding guidance', () => {
       'no experiments.',
     )
     expect(prompt).toContain(
-      'If empty, retry one topic.',
+      'Empty: retry one topic.',
     )
     expect(prompt).toContain(
       'No result/index: say no Commons evidence.',
@@ -2353,7 +2355,7 @@ describe('assistant experiment onboarding guidance', () => {
       'evidence+safety clauses may use 2 same-topic searches.',
     )
     expect(prompt).toContain(
-      'Across both, match catalogHash; keep 3 sourced items + 1 safety.',
+      'Across both: same catalogHash, 3 sourced + 1 safety.',
     )
     expect(prompt).toContain('Use 1 search;')
     expect(prompt).toContain(
