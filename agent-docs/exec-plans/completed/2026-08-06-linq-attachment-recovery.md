@@ -1,8 +1,8 @@
 # Linq attachment delivery recovery
 
-Status: active
+Status: completed
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -64,10 +64,10 @@ Updated: 2026-08-06
    provider ambiguity contracts.
 3. [complete] Run focused recovery, logging, typecheck, and direct call-path
    proof.
-4. [in progress] Resolve the accepted preliminary and final-round findings,
+4. [complete] Resolve the accepted preliminary and final-round findings,
    push the corrected candidate, and complete final ReviewGPT and exact-head CI
    gates.
-5. [pending] Close the plan through the scoped final commit path.
+5. [complete] Close the plan through the scoped final commit path.
 
 ## Decisions
 
@@ -141,6 +141,17 @@ Updated: 2026-08-06
   callback resets the same prepared intent immediately; unmarked transport
   failures retain the established confirmation-pending policy. This completes
   the retrospective's single before/after-reservation rule without new state.
+- Accept final round 5's successful-reservation header finding. Normalize and
+  reject empty or all-blank required upload headers inside the reservation
+  parser, where the actual 2xx status and attachment-POST provenance remain
+  available. Reuse the existing unusable-reservation wrapper and ambiguity
+  owner; add no cron exception or successor retry path.
+- Accept final round 6's complexity-collapse finding after current `main`
+  established exact pre-provider `Error` identity as the owner. Delete the
+  redundant field-by-field reconstruction for unsupported non-`Error` throws,
+  leaving `readPreProviderLinqRequestError` as the single pre-provider path and
+  retaining the independent post-reservation marker. ReviewGPT implemented the
+  one-file net deletion, and round 7 passed the exact remediation head.
 
 ## Verification
 
@@ -212,3 +223,23 @@ Updated: 2026-08-06
 - Final owner suites passed again after that patch: hosted callbacks 215/215,
   Linq transport 57/57, assistant-engine outbox/retry/cron 306/306, and all
   three package typechecks.
+- Empty/all-blank reservation-header remediation proof on the merged candidate:
+  Linq transport 64/64, real hosted Linq outbox 10/10, hosted provider effects
+  21/21, hosted callbacks 227/227, assistant cron 205/205, assistant outbox
+  runtime 95/95, retry policy 7/7, dispatch state 28/28, and all three package
+  typechecks passed.
+- ReviewGPT round 6 found only redundant pre-provider reconstruction introduced
+  by the current-main ownership direction. ReviewGPT's exact one-file
+  implementation removed 58 lines and added two direct references. Parent
+  validation passed Linq transport 64/64, hosted provider-effects plus real
+  hosted-outbox regressions 31/31, operator-config typecheck, assistant-runtime
+  typecheck, and `git diff --check`.
+- ReviewGPT round 7 returned `ROUND_OUTCOME: PASS` on exact source head
+  `d31fea80de229e022683e2d19d42cb5b871bfdcb`; no unresolved correctness,
+  reliability, privacy, product-experience, coverage, purpose-drift, or
+  material-simplification finding remained.
+- Every required GitHub check passed on that exact source head, including the
+  aggregate release gate, host matrices, package/app/fixture coverage, build
+  and typecheck, repository hygiene, frontend proof, viewport overflow, and
+  Vercel.
+Completed: 2026-08-07
