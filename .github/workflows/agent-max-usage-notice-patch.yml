@@ -24,6 +24,8 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           set +e
           git merge --no-commit --no-ff origin/main > /tmp/max-merge.log 2>&1
@@ -35,8 +37,6 @@ jobs:
           git diff --name-only --diff-filter=U || true
           echo "branch-owned files:"
           git diff --name-only origin/main...HEAD
-          if [[ $merge_status -eq 0 ]]; then
-            git reset --merge HEAD
-          else
-            git merge --abort || true
+          if [[ -f .git/MERGE_HEAD ]]; then
+            git merge --abort
           fi
