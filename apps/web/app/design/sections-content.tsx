@@ -11,6 +11,7 @@ import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
+import { ReferralSection } from "@/src/components/homepage/referral-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TogetherSection } from "@/src/components/homepage/together-section";
@@ -221,6 +222,19 @@ export function SectionsContent() {
         >
           <TogetherSection />
           <AsksGridSection />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage referral program">
+        <div
+          id="referral-program"
+          data-design-section="homepage-referral-program"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralSection />
         </div>
       </StudySection>
 

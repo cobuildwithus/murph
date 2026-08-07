@@ -18,6 +18,7 @@ import { MealPhotosSection } from "@/src/components/homepage/meal-photos-section
 import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { pickRandomMurphHeadshotSrc } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
+import { ReferralSection } from "@/src/components/homepage/referral-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
@@ -156,6 +157,7 @@ export default async function HomePage() {
         <HowItWorksSection />
         <SecurityTeaserSection />
         <FaqSection veniceAvailable={isHostedVeniceAssistantEnabled()} />
+        <ReferralSection />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
         <LocalRunSection installCommandUrl={installCommandUrl} />
       </main>
