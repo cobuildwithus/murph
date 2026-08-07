@@ -385,6 +385,21 @@ describe("prisma module", () => {
       message: "Connection terminated due to connection timeout; private-password",
       nested: true,
     },
+    {
+      category: "connection_limit",
+      message: "remaining connection slots are reserved for roles with the SUPERUSER attribute; private-password",
+      nested: false,
+    },
+    {
+      category: "connection_limit",
+      message: "too many connections for role \"private-user\"; private-password",
+      nested: true,
+    },
+    {
+      category: "connection_limit",
+      message: "sorry, too many clients already; private-password",
+      nested: false,
+    },
   ])("classifies $category driver messages without logging them", async ({
     category,
     message,
@@ -422,6 +437,50 @@ describe("prisma module", () => {
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain("private-password");
     expect(JSON.stringify(warn.mock.calls)).not.toContain(message);
+  });
+
+  it.each([
+    { nested: false },
+    { nested: true },
+  ])("classifies SQLSTATE 53300 codes without logging them (nested: $nested)", async ({
+    nested,
+  }) => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const extension = mocks.extensions[0];
+    if (!extension) {
+      throw new Error("Expected the Prisma query extension to be captured.");
+    }
+    // The message avoids every fallback phrasing so only the code classifies.
+    const driverFailure = Object.assign(
+      new Error("connection rejected; private-password"),
+      { code: "53300" },
+    );
+    const operationFailure = nested
+      ? Object.assign(new Error("adapter failure"), { cause: driverFailure })
+      : driverFailure;
+
+    await expect(extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query: async () => Promise.reject(operationFailure),
+    })).rejects.toBe(operationFailure);
+
+    expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", {
+      category: "connection_limit",
+      idleConnections: 0,
+      totalConnections: 0,
+      waitingRequests: 0,
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("private-password");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("53300");
   });
 
   it("classifies recognized operation failures without logging unknown errors", async () => {
