@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Goal
 
@@ -48,14 +48,19 @@ Updated: 2026-08-06
 ## Verification
 
 - The focused runtime-shape suite passes four tests, including exact retained
-  and removed paths; the container-image contract suite passes 11 tests.
+  and removed paths; the container-image contract suite passes 11 tests. Both
+  suites pass again after merging the current base (15 tests total).
 - Cloudflare typecheck, workspace-boundary verification, and workspace package
   cycle verification pass.
-- Exact production runner assembly succeeds with the same entry, static-boot,
-  and total JavaScript bytes as the clean base. The installed Zod directory is
-  1.7 MiB, down from 5.0 MiB, and the complete assembled bundle is about
-  3.3 MiB smaller.
-- A paired copied-bundle Docker build reduced image size by 881,759 bytes.
+- Exact production runner assembly succeeds after the current startup-graph
+  changes: 1,641,064 entry bytes, 8,054,791 static-boot bytes, and 9,886,264
+  total JavaScript bytes. This PR runs only after JavaScript emission, so those
+  values are identical to its clean base. The installed Zod directory is 1,780
+  KiB, down from 5,084 KiB, and the complete assembled bundle is 111,924 KiB,
+  exactly 3,304 KiB below the matching unpruned payload.
+- A paired copied-bundle Docker build reduced image size by 881,759 bytes. The
+  current exact candidate image is 486,037,498 bytes and repeats the Zod,
+  bundled-CLI, non-root, immutable-app, and path-shape proofs below.
 - The exact pruned image passes root `zod` and `zod/v4` parsing plus JSON Schema
   conversion, bundled `vault-cli` startup, non-root execution, immutable `/app`
   checks, and exact retained/removed path assertions.
