@@ -594,12 +594,17 @@ export async function sendLinqMessage(
         },
         {
           env,
-          fetchImplementation: dependencies.fetchImplementation,
+          fetchImplementation:
+            dependencies.appCardCapabilityFetchImplementation
+            ?? dependencies.fetchImplementation,
           ...(dependencies.signal ? { signal: dependencies.signal } : {}),
         },
       )
     } catch (error) {
-      if (dependencies.signal?.aborted) {
+      if (
+        dependencies.signal?.aborted
+        || providerRequestWasSkipped(error)
+      ) {
         throw error
       }
     }
@@ -701,7 +706,11 @@ export async function sendLinqMessage(
     },
     {
       env,
-      fetchImplementation: dependencies.fetchImplementation,
+      fetchImplementation:
+        appCardFallbackIdempotencyKey
+          ? dependencies.appCardTextFallbackFetchImplementation
+            ?? dependencies.fetchImplementation
+          : dependencies.fetchImplementation,
       ...(dependencies.signal ? { signal: dependencies.signal } : {}),
     },
   )
@@ -716,6 +725,13 @@ export async function sendLinqMessage(
     providerThreadId: null,
     target,
   }
+}
+
+function providerRequestWasSkipped(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'deliveryMayHaveSucceeded' in error
+    && error.deliveryMayHaveSucceeded === false
 }
 
 async function prepareLinqMessageMedia(
