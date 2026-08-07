@@ -606,7 +606,9 @@ export async function sendLinqMessage(
           },
           {
             env,
-            fetchImplementation: dependencies.fetchImplementation,
+            fetchImplementation:
+              dependencies.capabilityFetchImplementation
+              ?? dependencies.fetchImplementation,
             ...(dependencies.signal ? { signal: dependencies.signal } : {}),
           },
         )

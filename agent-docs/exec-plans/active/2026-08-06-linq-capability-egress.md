@@ -55,6 +55,13 @@ Updated: 2026-08-06
   fallback before resolving an authoritative current direct chat. A native
   card request whose three provider attempts all returned `429` was recorded
   as a definite failure even though provider dispatch had already begun.
+- Final ReviewGPT round 7 exposed two restart gaps. The atomic local fallback
+  transition cleared the card but retained the rejected chat binding, so a
+  fresh process could replay text to the stale predecessor instead of the
+  already-authorized current chat. The capability probe also created the Web
+  provider-dispatch fence before any message request, so an interruption after
+  an ordinary `available: false` result could incorrectly force exact card
+  replay on the next drain.
 
 ## Success criteria
 
@@ -80,6 +87,10 @@ Updated: 2026-08-06
 - A resumed non-replay card that encounters an existing Web provider claim
   becomes confirmation-pending before another capability or provider message
   request, so the next outbox drain can derive exact replay.
+- Capability probing remains read-only with respect to provider dispatch. Web
+  reports an existing exact fence during the authority-only check, and the
+  runtime creates or transfers a fence only when an actual Linq message request
+  begins.
 - Before promoted fallback text enters Linq, Web terminalizes the exact card
   dispatch and claims the fallback in one transaction. A retry from the
   already-persisted fallback repeats that exact transition, and completing the
@@ -87,9 +98,11 @@ Updated: 2026-08-06
 - Typed hosted delivery-control errors survive the Linq HTTP wrapper and are
   rethrown rather than logged or persisted as capability fallback.
 - A detached stale-chat replay authorizes a current direct chat before clearing
-  the card. The exact predecessor may be terminalized on its old chat while the
-  fallback fence is claimed on that current chat. Missing authority preserves
-  the card and confirmation-pending state.
+  the card. The same atomic outbox write stores that current chat binding and
+  recomputes the target fingerprint, so a process restart replays text to the
+  authorized chat. The exact predecessor may be terminalized on its old chat
+  while the fallback fence is claimed on that current chat. Missing authority
+  preserves the card and confirmation-pending state.
 - Exhausted provider-message `429` responses after dispatch admission are
   confirmation-pending; a capability-only `429` may still select deterministic
   text fallback before message dispatch.
@@ -201,3 +214,15 @@ Updated: 2026-08-06
   completed 3,162 tests before one worker exceeded its 4 GiB heap; the intended
   focused 63-test channel lane passed independently and exact-head CI owns the
   broad suite.
+- Final ReviewGPT round 7 found that the authorized stale-chat replacement was
+  process-local and that the capability request itself created the provider
+  fence. Both failing-first regressions reproduced the restart failures. The
+  fallback transition now persists the authorized binding and recomputed
+  fingerprint atomically, while a separate capability fetch boundary remains
+  read-only and an authority-only Web projection detects only an existing
+  exact message-dispatch fence.
+- Current correction proof passes: assistant outbox/channel integration 153,
+  hosted provider effects 26, hosted callbacks 217, Web Linq engagement 48,
+  Cloudflare Linq engagement parsing 1, and local PostgreSQL fence lifecycle 2.
+  Assistant engine, assistant runtime, Cloudflare, and prepared Web typechecks
+  pass. Documentation gardening and drift checks pass.

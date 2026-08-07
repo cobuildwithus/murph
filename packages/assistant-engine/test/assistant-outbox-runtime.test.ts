@@ -1162,7 +1162,7 @@ describe('assistant outbox runtime', () => {
     expect(sendLinq).toHaveBeenCalledTimes(2)
   })
 
-  it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
+  it('persists an authorized text-fallback target before restart replay', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-card-fallback-restart-',
     )
@@ -1181,6 +1181,7 @@ describe('assistant outbox runtime', () => {
     })
     const originalIdempotencyKey = `assistant-outbox:${intent.intentId}`
     const fallbackIdempotencyKey = `${originalIdempotencyKey}:fallback`
+    const recoveredTarget = 'thread-card-fallback-current'
     const processTerminated = new Error('simulated process termination')
     const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>()
     const providerRequests: Array<Record<string, unknown>> = []
@@ -1216,7 +1217,7 @@ describe('assistant outbox runtime', () => {
         card: NUTRITION_RESPONSE_CARD,
         idempotencyKey: originalIdempotencyKey,
       })
-      const delivered = await sendLinqMessage(request, {
+      await sendLinqMessage(request, {
         env: {
           LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
           LINQ_API_TOKEN: 'linq-token',
@@ -1224,19 +1225,18 @@ describe('assistant outbox runtime', () => {
         fetchImplementation,
         ...(request.persistAppCardTextFallback
           ? {
-              persistAppCardTextFallback:
-                request.persistAppCardTextFallback,
+              persistAppCardTextFallback: async (fallback) => {
+                await request.persistAppCardTextFallback?.({
+                  ...fallback,
+                  target: recoveredTarget,
+                  targetKind: 'thread',
+                })
+                throw processTerminated
+              },
             }
           : {}),
       })
-      await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId)).resolves
-        .toMatchObject({
-          card: null,
-          deliveryIdempotencyKey: fallbackIdempotencyKey,
-          status: 'sending',
-        })
-      expect(delivered.idempotencyKey).toBe(fallbackIdempotencyKey)
-      throw processTerminated
+      throw new Error('unreachable after simulated process termination')
     })
 
     await expect(dispatchAssistantOutboxIntent({
@@ -1253,10 +1253,15 @@ describe('assistant outbox runtime', () => {
     const interrupted = await readAssistantOutboxIntent(vaultRoot, intent.intentId)
     expect(interrupted).toMatchObject({
       card: null,
+      bindingDelivery: {
+        kind: 'thread',
+        target: recoveredTarget,
+      },
       delivery: null,
       deliveryIdempotencyKey: fallbackIdempotencyKey,
       status: 'sending',
     })
+    expect(interrupted?.targetFingerprint).not.toBe(intent.targetFingerprint)
 
     sendLinq.mockImplementationOnce(async (request) => {
       return await sendLinqMessage(request, {
@@ -1279,14 +1284,15 @@ describe('assistant outbox runtime', () => {
     expect(sendLinq.mock.calls[1]?.[0]).toMatchObject({
       idempotencyKey: fallbackIdempotencyKey,
       message: renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD),
+      target: recoveredTarget,
+      targetKind: 'thread',
     })
     expect(sendLinq.mock.calls[1]?.[0]).not.toHaveProperty('card')
-    expect(providerRequests).toHaveLength(4)
+    expect(providerRequests).toHaveLength(3)
     expect(providerRequests.slice(1).map((request) => (
       request.message as { idempotency_key?: string }
     ).idempotency_key)).toEqual([
       originalIdempotencyKey,
-      fallbackIdempotencyKey,
       fallbackIdempotencyKey,
     ])
     expect(replayed.intent).toMatchObject({

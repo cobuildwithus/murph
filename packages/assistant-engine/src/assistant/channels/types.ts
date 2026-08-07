@@ -62,6 +62,7 @@ export interface AssistantEmailDeliverySummary {
 }
 
 export interface LinqRuntimeDependencies {
+  capabilityFetchImplementation?: LinqFetch
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
   publicFetchImplementation?: LinqFetch
@@ -79,6 +80,8 @@ export interface LinqRuntimeDependencies {
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string
     staleTargetRecoveryRequired?: true
+    target?: string
+    targetKind?: 'thread'
   }) => Promise<{
     target: string
     targetKind: 'thread'
@@ -183,6 +186,8 @@ export interface AssistantChannelDependencies {
     persistAppCardTextFallback?: (input: {
       idempotencyKey: string
       staleTargetRecoveryRequired?: true
+      target?: string
+      targetKind?: 'thread'
     }) => Promise<{
       target: string
       targetKind: 'thread'
@@ -201,6 +206,8 @@ export interface AssistantChannelDependencies {
   persistLinqAppCardTextFallback?: (input: {
     idempotencyKey: string
     staleTargetRecoveryRequired?: true
+    target?: string
+    targetKind?: 'thread'
   }) => Promise<{
     target: string
     targetKind: 'thread'

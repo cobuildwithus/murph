@@ -3407,15 +3407,22 @@ function createHostedProviderFetchBoundary(input: {
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
   providerFetch: typeof fetch | null;
+  readProviderDispatchIdentity?: () => string | null;
+  providerDispatchEnabled?: boolean;
 }): typeof fetch {
   let providerEntryPromise: Promise<void> | null = null;
+  let providerEntryIdentity: string | null = null;
   const enterProviderDispatch = () => {
     if (!input.onProviderDispatchEntered) {
       return Promise.resolve();
     }
-    providerEntryPromise ??= Promise.resolve().then(
-      input.onProviderDispatchEntered,
-    );
+    const identity = input.readProviderDispatchIdentity?.() ?? "single-dispatch";
+    if (providerEntryPromise === null || providerEntryIdentity !== identity) {
+      providerEntryIdentity = identity;
+      providerEntryPromise = Promise.resolve().then(
+        input.onProviderDispatchEntered,
+      );
+    }
     return providerEntryPromise;
   };
 
@@ -3425,7 +3432,9 @@ function createHostedProviderFetchBoundary(input: {
       input.providerFetch,
       input.operation,
     );
-    await enterProviderDispatch();
+    if (input.providerDispatchEnabled !== false) {
+      await enterProviderDispatch();
+    }
     if (
       input.onTelegramVoiceMemoDispatchEntered &&
       isTelegramSendVoiceProviderFetchRequest(request)
@@ -3537,7 +3546,9 @@ function createHostedAssistantLinqSendDependency(input: {
     ) === true;
     const includesVaultFile =
       request.media?.some((media) => media.kind === "vault_file") === true;
-    const engagement = includesVaultFile || currentHomeRouteOnly
+    const initialNativeCard =
+      request.card != null && request.linqAppCardReplay !== true;
+    const engagement = includesVaultFile || currentHomeRouteOnly || initialNativeCard
       ? await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
           answeredMailboxItemIds: request.answeredMailboxItemIds,
           assistantAskFallback:
@@ -3560,6 +3571,13 @@ function createHostedAssistantLinqSendDependency(input: {
           targetKind: request.targetKind ?? null,
         })
       : {};
+    if (initialNativeCard && engagement.providerDispatchStarted === true) {
+      throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
+        "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        "Hosted iMessage app-card dispatch already started and requires exact replay reconciliation.",
+        { retryable: false },
+      ));
+    }
     let providerTarget =
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
     let providerTargetKind =
@@ -3592,6 +3610,8 @@ function createHostedAssistantLinqSendDependency(input: {
       vaultRoot: input.vaultRoot ?? null,
     });
     let attemptedAt: Date | null = null;
+    let providerDispatchRetrySafe =
+      request.card == null || request.linqAppCardReplay === true;
     const enterHostedLinqProviderDispatch = async (): Promise<void> => {
       const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
         ? await prepareHostedReviewedAssistantAskProviderEntry({
@@ -3623,7 +3643,7 @@ function createHostedAssistantLinqSendDependency(input: {
           providerDispatchPredecessorIdempotencyKey,
           replyToMessageId: request.replyToMessageId ?? null,
           providerDispatchRetrySafe:
-            request.card == null || request.linqAppCardReplay === true,
+            providerDispatchRetrySafe,
           signal: signal ?? null,
           target: providerTarget,
           targetKind: providerTargetKind,
@@ -3651,12 +3671,19 @@ function createHostedAssistantLinqSendDependency(input: {
       input.onProviderDispatchEntered?.();
     };
     const dependencies = requireHostedProviderFetchDependencies({
+      capabilityFetchImplementation: createHostedProviderFetchBoundary({
+        assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+        operation: "Hosted assistant Linq capability check",
+        providerFetch: input.providerFetch,
+        providerDispatchEnabled: false,
+      }),
       env: input.linqEnv,
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
         onProviderDispatchEntered: enterHostedLinqProviderDispatch,
         operation: "Hosted assistant Linq delivery",
         providerFetch: input.providerFetch,
+        readProviderDispatchIdentity: () => effectiveIdempotencyKey,
       }),
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
@@ -3765,9 +3792,13 @@ function createHostedAssistantLinqSendDependency(input: {
                     ));
                   }
                 }
-                await persistAppCardTextFallback(fallback);
+                await persistAppCardTextFallback({
+                  ...fallback,
+                  ...(recoveredTarget ?? {}),
+                });
                 const predecessorIdempotencyKey = effectiveIdempotencyKey;
                 effectiveIdempotencyKey = fallback.idempotencyKey;
+                providerDispatchRetrySafe = true;
                 if (recoveredTarget) {
                   providerTarget = recoveredTarget.target;
                   providerTargetKind = recoveredTarget.targetKind;
@@ -3784,8 +3815,6 @@ function createHostedAssistantLinqSendDependency(input: {
                   providerDispatchPredecessorIdempotencyKey =
                     predecessorIdempotencyKey;
                   attemptedAt = null;
-                  await assertHostedDeliveryCanEnterProvider(input);
-                  await enterHostedLinqProviderDispatch();
                 }
                 return recoveredTarget ?? undefined;
               },
@@ -4764,6 +4793,9 @@ function normalizeHostedAssistantLinqEngagementResult(
   }
   if (typeof result?.providerDispatchClaimed === "boolean") {
     normalized.providerDispatchClaimed = result.providerDispatchClaimed;
+  }
+  if (typeof result?.providerDispatchStarted === "boolean") {
+    normalized.providerDispatchStarted = result.providerDispatchStarted;
   }
   const targetOverride = result?.targetOverride ?? null;
   if (targetOverride?.target && targetOverride.targetKind === "thread") {

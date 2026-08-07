@@ -8944,7 +8944,11 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_123",
       transportIdempotent: true,
     });
-    const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+    }) => request.authorityCheckOnly
+      ? { providerDispatchStarted: true }
+      : await assertLinqEngagementWithExistingProviderClaim(request));
     const providerFetch = vi.fn<typeof fetch>();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     mocks.useActualLinqMessage = true;
@@ -8994,6 +8998,109 @@ describe("hosted runtime callbacks", () => {
         method: "DELETE",
       })],
     ]);
+  });
+
+  it("does not claim card dispatch until capability fallback enters message delivery", async () => {
+    let providerDispatchStarted = false;
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+    }) => {
+      if (request.authorityCheckOnly) {
+        return { providerDispatchStarted };
+      }
+      if (providerDispatchStarted) {
+        throw Object.assign(
+          new Error("Hosted Linq provider dispatch is already started."),
+          { code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED" },
+        );
+      }
+      providerDispatchStarted = true;
+      return { providerDispatchClaimed: true };
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({ available: false }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/chats/direct-card-thread/messages")) {
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as {
+              message?: { parts?: Array<{ type?: string }> };
+            }
+          : {};
+        expect(body.message?.parts?.[0]?.type).toBe("text");
+        return new Response(JSON.stringify({
+          message: { id: "capability-fallback-text" },
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+    const effectsPort = createHostedRuntimeEffectsPortStub({
+      assertLinqRecentInboundEngagement: assertRecentInbound,
+    });
+    const request = {
+      card: {
+        kind: "daily_nutrition" as const,
+        localDate: "2026-07-31",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "capability-fallback-restart",
+      message: "Nutrition summary",
+      target: "direct-card-thread",
+      targetKind: "thread" as const,
+      threadIsDirect: true,
+    };
+    mocks.useActualLinqMessage = true;
+    const interrupted = new Error("simulated fallback persistence interruption");
+    const firstDependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort,
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      providerFetch,
+    });
+    assert.ok(firstDependencies.sendLinq);
+
+    await expect(firstDependencies.sendLinq({
+      ...request,
+      persistAppCardTextFallback: async () => {
+        throw interrupted;
+      },
+    })).rejects.toBe(interrupted);
+
+    expect(providerDispatchStarted).toBe(false);
+    const retryDependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort,
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      providerFetch,
+    });
+    assert.ok(retryDependencies.sendLinq);
+    await expect(retryDependencies.sendLinq({
+      ...request,
+      persistAppCardTextFallback: async () => undefined,
+    })).resolves.toMatchObject({
+      providerMessageId: "capability-fallback-text",
+      target: "direct-card-thread",
+    });
+
+    expect(assertRecentInbound.mock.calls.map(([authority]) =>
+      authority.authorityCheckOnly
+    )).toEqual([true, true, false]);
+    expect(providerFetch.mock.calls.filter(([input]) =>
+      String(input).endsWith("/capability/check_imessage")
+    )).toHaveLength(2);
+    expect(providerFetch.mock.calls.filter(([input]) =>
+      String(input).endsWith("/chats/direct-card-thread/messages")
+    )).toHaveLength(1);
   });
 
   it("marks an exhausted native-card rate limit as confirmation-pending", async () => {
@@ -10562,6 +10669,10 @@ describe("hosted runtime callbacks", () => {
       await args[1]?.persistAppCardTextFallback?.({
         idempotencyKey: "assistant-outbox:intent_123:fallback",
       });
+      await args[1]?.fetchImplementation?.(
+        "https://linq.example.test/chats/linq_chat_123/messages",
+        { method: "POST" },
+      );
       throw providerError;
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
@@ -10864,6 +10975,8 @@ describe("hosted runtime callbacks", () => {
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123:fallback",
       staleTargetRecoveryRequired: true,
+      target: "current-direct-chat",
+      targetKind: "thread",
     });
     expect(observedOrder).toEqual(expect.arrayContaining([
       "claim:assistant-outbox:intent_123:stale-direct-chat",
@@ -11763,6 +11876,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread",
     }, {
+      capabilityFetchImplementation: expect.any(Function),
       env: {},
       fetchImplementation: expect.any(Function),
       onAppCardFallbackError: expect.any(Function),
@@ -13356,6 +13470,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_123",
       targetKind: "thread",
     }, {
+      capabilityFetchImplementation: expect.any(Function),
       env: {},
       fetchImplementation: expect.any(Function),
       onAppCardFallbackError: expect.any(Function),
@@ -13460,6 +13575,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread",
     }, {
+      capabilityFetchImplementation: expect.any(Function),
       env: {},
       fetchImplementation: expect.any(Function),
       onAppCardFallbackError: expect.any(Function),
@@ -13565,6 +13681,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread",
     }, {
+      capabilityFetchImplementation: expect.any(Function),
       env: {},
       fetchImplementation: expect.any(Function),
       onAppCardFallbackError: expect.any(Function),

@@ -327,6 +327,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;
   deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
   providerDispatchClaimed?: boolean | null;
+  providerDispatchStarted?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
   threadIsDirect?: boolean | null;
 }

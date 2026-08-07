@@ -43,6 +43,7 @@ import type {
 } from "./hosted-runtime/platform.ts";
 
 export interface HostedProviderEffectDependencies {
+  capabilityFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
@@ -52,6 +53,8 @@ export interface HostedProviderEffectDependencies {
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
     staleTargetRecoveryRequired?: true;
+    target?: string;
+    targetKind?: "thread";
   }) => Promise<{
     target: string;
     targetKind: "thread";
@@ -61,6 +64,7 @@ export interface HostedProviderEffectDependencies {
 }
 
 interface HostedProviderEffectContext {
+  capabilityFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
@@ -69,6 +73,8 @@ interface HostedProviderEffectContext {
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
     staleTargetRecoveryRequired?: true;
+    target?: string;
+    targetKind?: "thread";
   }) => Promise<{
     target: string;
     targetKind: "thread";
@@ -359,6 +365,9 @@ async function sendHostedProviderLinqMessageDirect(
       ? {}
       : { card: request.card, threadIsDirect: request.threadIsDirect ?? null }),
   }, {
+    ...(context.capabilityFetchImplementation
+      ? { capabilityFetchImplementation: context.capabilityFetchImplementation }
+      : {}),
     env: context.env,
     fetchImplementation: context.fetchImplementation,
     signal: context.signal,

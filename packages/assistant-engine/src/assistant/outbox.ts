@@ -976,17 +976,26 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
         ? dispatchDependencies
         : {
             ...(dispatchDependencies ?? {}),
-            persistLinqAppCardTextFallback: async ({ idempotencyKey }) => {
+            persistLinqAppCardTextFallback: async ({
+              idempotencyKey,
+              target,
+              targetKind,
+            }) => {
               const persisted =
                 await persistAssistantOutboxIntentLinqAppCardTextFallback({
                   idempotencyKey,
                   intentPath: dispatchIntentPath,
                   persistedAt: new Date(),
                   sending: dispatchIntent,
+                  ...(target === undefined ? {} : { target }),
+                  ...(targetKind === undefined ? {} : { targetKind }),
                   vault: input.vault,
                 })
               effectiveDispatchIntent = persisted
               dispatchFailureOwnerIntent = persisted
+              return target && targetKind === 'thread'
+                ? { target, targetKind }
+                : undefined
             },
           },
       ...dispatchIntent,

@@ -34,9 +34,11 @@ Last verified: 2026-08-06
   recipient phone; acceptance or provider deduplication closes the original
   Web fence. A resumed non-replay card that encounters an already-started Web
   claim becomes confirmation-pending before another capability or message
-  request. Only a definitive rejection, including a structurally classified
-  stale-chat `404`, can commit the text-only transition, clear the card, and
-  retry under one stable fallback identity. A caught
+  request. The capability probe is authority-checked but does not create that
+  irreversible claim; the claim is written only when the first provider
+  message request begins. Only a definitive rejection, including a
+  structurally classified stale-chat `404`, can commit the text-only
+  transition, clear the card, and retry under one stable fallback identity. A caught
   capability-check failure, including a capability-specific exhausted rate
   limit, or definitive
   app-card rejection emits one sanitized hosted warning before the existing
@@ -46,9 +48,11 @@ Last verified: 2026-08-06
   the bounded app-card rejection code and claims the fallback fence under the
   same runtime intent, source, and thread target. When a detached exact replay
   proves its old chat stale, Web must first authorize a current direct chat;
-  only then may the runtime persist the text transition and claim its fallback
-  fence on that current chat. Failure to resolve that target leaves the card
-  intact and confirmation-pending. A retry whose local
+  only then may the runtime atomically persist the text transition, current
+  chat binding, and matching target fingerprint before claiming its fallback
+  fence on that current chat. A restart therefore replays fallback text to the
+  authorized current chat rather than the stale predecessor. Failure to
+  resolve that target leaves the card intact and confirmation-pending. A retry whose local
   outbox already contains the fallback repeats that exact transition, so a
   lost control response cannot strand the original card fence or bypass
   provider-entry authority. Once the fallback outcome is terminal, no
@@ -878,12 +882,15 @@ Last verified: 2026-08-06
   exact card effect, even when detached execution cannot rehydrate a raw
   recipient phone. A resumed non-replay card that finds an existing Web claim
   must enter the same confirmation-pending state before capability or provider
-  message I/O. Text retry is safe only after a definitive rejection, including
-  a structured stale-chat app-card `404`, and the text-only transition commits
-  with `card: null` and a stable fallback identity. A detached replay must
-  resolve and authorize the current direct chat before that commit; if it
-  cannot, the card remains unchanged and confirmation-pending. Before the first fallback
-  provider request, the existing
+  message I/O. Capability probing itself does not create a provider-dispatch
+  fence; only the first message request does. Text retry is safe only after a
+  definitive rejection, including a structured stale-chat app-card `404`, and
+  the text-only transition commits with `card: null` and a stable fallback
+  identity. A detached replay must
+  resolve and authorize the current direct chat before that commit. The same
+  atomic outbox write replaces the stale binding and target fingerprint, so a
+  fresh process uses the authorized current chat; if it cannot, the card remains
+  unchanged and confirmation-pending. Before the first fallback provider request, the existing
   Web delivery transaction must also terminalize the exact card dispatch and
   claim that fallback identity on the authorized current chat, which may differ
   from the rejected predecessor chat; a persisted-fallback retry idempotently

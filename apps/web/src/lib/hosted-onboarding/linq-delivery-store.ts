@@ -659,6 +659,41 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   });
 }
 
+export async function hasHostedLinqRuntimeProviderDispatchFenceTx(input: {
+  idempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+  sourceRef: string;
+  targetKind: string | null;
+}): Promise<boolean> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    input.idempotencyKey,
+  );
+  const sourceRef = createHostedLinqDeliverySourceRefLookupKey(input.sourceRef);
+  if (!idempotencyKey || !sourceRef) {
+    return false;
+  }
+  const delivery = await input.prisma.hostedLinqDelivery.findUnique({
+    where: { idempotencyKey },
+    select: {
+      acceptedAt: true,
+      deliveredAt: true,
+      failureCode: true,
+      lastReceiptAt: true,
+      messageLookupKey: true,
+      source: true,
+      sourceRef: true,
+      status: true,
+      targetKind: true,
+    },
+  });
+  return delivery !== null
+    && delivery.source === "hosted_runtime_linq_delivery"
+    && delivery.sourceRef === sourceRef
+    && delivery.status === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
+    && delivery.targetKind === normalizeNullable(input.targetKind)
+    && !isHostedLinqDeliveryProviderCorrelated(delivery);
+}
+
 export async function transitionHostedLinqRuntimeAppCardFallbackFenceTx(input: {
   attemptedAt?: Date;
   fallbackIdempotencyKey: string;

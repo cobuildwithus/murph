@@ -779,7 +779,13 @@ written or emitted a card-bearing record or side effect must not be paired with
 an old Worker. Before the first card-bearing value exists, the prior bundle is
 a safe rollback. Afterward, the new bundle is the hard rollback floor for
 workspaces, checkpoints, retained outbox intents, and side effects; forward-fix
-instead of restoring an older reader. There is no Web deployment dependency.
+instead of restoring an older reader. The app-card provider-fence recovery
+extension does have a Web ordering dependency: deploy the tolerant Web
+consumer first so authority-only checks can report an existing exact dispatch
+and definitive fallback can transfer the predecessor fence. Then deploy
+Cloudflare and the runner bundle together with immediate rollout. The older
+runner ignores the optional Web response field, but the new runner must not
+precede the compatible Web endpoint.
 Preference sparse deltas and cross-lane causal sequencing are hard-cut. Web
 always produces the sequence-aware delta and supports the signed input-bound
 personality transaction; there is no complete-snapshot producer or disabled

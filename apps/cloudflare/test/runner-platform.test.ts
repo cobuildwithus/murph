@@ -4637,7 +4637,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               deliveryPosture: "cautious",
               providerDispatchClaimed: true,
             }
-          : {}),
+          : { providerDispatchStarted: true }),
         ...(responseCount === 1
           ? {}
           : {
@@ -4686,6 +4686,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       assistantAskFallbackRequired: true,
+      providerDispatchStarted: true,
       targetOverride: {
         conversationThreadId: "hid_current_chat",
         target: "chat_current",

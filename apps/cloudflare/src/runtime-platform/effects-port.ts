@@ -375,6 +375,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     deliveryBlockCode?: unknown;
     deliveryPosture?: unknown;
     providerDispatchClaimed?: unknown;
+    providerDispatchStarted?: unknown;
     targetOverride?: unknown;
     threadIsDirect?: unknown;
   };
@@ -399,6 +400,9 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   }
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;
+  }
+  if (typeof response.providerDispatchStarted === "boolean") {
+    result.providerDispatchStarted = response.providerDispatchStarted;
   }
   if (typeof response.threadIsDirect === "boolean") {
     result.threadIsDirect = response.threadIsDirect;

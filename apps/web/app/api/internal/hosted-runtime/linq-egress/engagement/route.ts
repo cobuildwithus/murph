@@ -9,6 +9,7 @@ import {
   resolveHostedLinqEgressPolicyForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
+  hasHostedLinqRuntimeProviderDispatchFenceTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   transitionHostedLinqRuntimeAppCardFallbackFenceTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -124,6 +125,16 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
 
+    const providerDispatchStarted =
+      authorityCheckOnly && idempotencyKey
+        ? await hasHostedLinqRuntimeProviderDispatchFenceTx({
+            idempotencyKey,
+            prisma: tx,
+            sourceRef: intentId ?? idempotencyKey,
+            targetKind: providerTargetKind,
+          })
+        : false;
+
     const health = await resolveHostedLinqEgressPolicyForRuntime({
       fromPhoneNumber,
       linePhoneNumberLookupKey:
@@ -139,6 +150,7 @@ export const POST = withJsonError(async (request: Request) => {
         deliveryBlockCode: health.policy.code,
         deliveryPosture: null,
         providerDispatchClaimed: null,
+        providerDispatchStarted,
       };
     }
 
@@ -211,6 +223,7 @@ export const POST = withJsonError(async (request: Request) => {
         ? null
         : health.policy.posture,
       providerDispatchClaimed,
+      providerDispatchStarted,
     };
   });
 
@@ -232,6 +245,9 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.providerDispatchClaimed === null
       ? {}
       : { providerDispatchClaimed: assertion.providerDispatchClaimed }),
+    ...(assertion.providerDispatchStarted
+      ? { providerDispatchStarted: true }
+      : {}),
   });
 });
 

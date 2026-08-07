@@ -555,9 +555,15 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       dependencies.persistLinqAppCardTextFallback
     const persistAppCardTextFallback =
       persistLinqAppCardTextFallback
-        ? async (input: { idempotencyKey: string }): Promise<void> => {
-            await persistLinqAppCardTextFallback(input)
+        ? async (input: {
+            idempotencyKey: string
+            staleTargetRecoveryRequired?: true
+            target?: string
+            targetKind?: 'thread'
+          }) => {
+            const persistedTarget = await persistLinqAppCardTextFallback(input)
             effectiveTextDelivery = input
+            return persistedTarget
           }
         : undefined
     const mediaInput = media.length > 0 ? media : undefined

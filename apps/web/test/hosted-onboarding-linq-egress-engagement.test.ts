@@ -1462,6 +1462,41 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
   });
 
+  it("reports an existing exact provider-dispatch fence during an authority-only check", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    prisma.hostedLinqDelivery.findUnique.mockResolvedValue(
+      buildHostedRuntimeProviderDispatchRow(),
+    );
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: true,
+          idempotencyKey: "assistant-outbox:intent_123",
+          intentId: "intent_123",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      providerDispatchStarted: true,
+      threadIsDirect: true,
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
   it("returns direct audience authority with a current home-route override", async () => {
     const homeLinePhone = "+15550100099";
     const memberPhone = "+15550100001";
