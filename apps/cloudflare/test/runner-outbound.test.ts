@@ -98,6 +98,10 @@ import {
   type R2PutValueLike,
 } from "../src/crypto.ts";
 import {
+  HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+  type HostedBrowserVaultReplicaOrphanCandidate,
+} from "../src/browser-vault-store.ts";
+import {
   writeHostedEmailRawMessage,
 } from "../src/hosted-email.ts";
 import {
@@ -151,6 +155,7 @@ import {
 } from "../src/r2-cutover.ts";
 import {
   hostedArtifactObjectKey,
+  hostedBrowserVaultReplicaUserPrefix,
   hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
 import {
@@ -9282,18 +9287,40 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
   it("writes browser-vault replicas after live lease validation", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner();
+    const events: string[] = [];
+    runner.recordHostedBrowserVaultReplicaOrphanCandidate.mockImplementation(async (candidate) => {
+      events.push(`record:${candidate.objectKey}`);
+      runner.browserVaultReplicaOrphanCandidates.set(candidate.objectKey, candidate);
+      return candidate;
+    });
+    const defaultEnv = createRunnerOutboundEnv();
+    const bucket = {
+      ...defaultEnv.BUNDLES,
+      async put(key: string, value: R2PutValueLike) {
+        events.push(`put:${key}`);
+        await defaultEnv.BUNDLES.put(key, value);
+      },
+    };
     const env = createRunnerOutboundEnv({
       ...fixture.env,
+      BUNDLES: bucket,
       USER_RUNNER: {
         getByName: runner.getByName,
       },
     });
     vi.stubGlobal("fetch", fixture.fetchMock);
     const sourceBundleHash = "c".repeat(64);
+    const replacedReplicaRef = {
+      ...createBrowserVaultReplicaRef("b".repeat(64)),
+      objectKey: `${await hostedBrowserVaultReplicaUserPrefix({
+        userId: "member_123",
+      })}${"a".repeat(48)}.json`,
+    };
 
     const response = await handleRunnerOutboundRequest(
       createBrowserVaultReplicaWriteRequest({
         replica: createBrowserVaultReplica(sourceBundleHash),
+        replacedReplicaRef,
         workspaceVersion: "5",
       }),
       env,
@@ -9310,6 +9337,25 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     });
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
+    expect(runner.recordHostedBrowserVaultReplicaOrphanCandidate).toHaveBeenCalledTimes(2);
+    expect(runner.recordHostedBrowserVaultReplicaOrphanCandidate).toHaveBeenNthCalledWith(1, {
+      createdAt: expect.any(String),
+      objectKey: replacedReplicaRef.objectKey,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: "member_123",
+    });
+    const plannedReplicaCandidate = runner.recordHostedBrowserVaultReplicaOrphanCandidate.mock
+      .calls[1]?.[0];
+    expect(plannedReplicaCandidate).toMatchObject({
+      createdAt: expect.any(String),
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: "member_123",
+    });
+    expect(events).toEqual([
+      `record:${replacedReplicaRef.objectKey}`,
+      `record:${plannedReplicaCandidate?.objectKey}`,
+      `put:${plannedReplicaCandidate?.objectKey}`,
+    ]);
   });
 
   it("accepts browser-vault replica writes when the workspace version header is stale", async () => {
@@ -10445,11 +10491,15 @@ function createBridgeWorkspaceSnapshotBucket(
 
 function createBrowserVaultReplicaWriteRequest(input: {
   replica: unknown;
+  replacedReplicaRef?: unknown;
   workspaceVersion: string;
 }): Request {
   return new Request("http://browser-vault.worker/replicas", {
     body: JSON.stringify({
       replica: input.replica,
+      ...(input.replacedReplicaRef === undefined
+        ? {}
+        : { replacedReplicaRef: input.replacedReplicaRef }),
     }),
     headers: createRunnerProxyHeaders({
       "content-type": "application/json; charset=utf-8",
@@ -10499,6 +10549,10 @@ function createWorkspaceVersionAwareUserRunner(input: {
   let userRunnerStub: WorkerUserRunnerStubLike;
   const workspaceSnapshotUploadSessions = new Map<string, HostedWorkspaceSnapshotUploadSession>();
   const workspaceSnapshotOrphanCandidates = new Map<string, HostedWorkspaceSnapshotOrphanCandidate>();
+  const browserVaultReplicaOrphanCandidates = new Map<
+    string,
+    HostedBrowserVaultReplicaOrphanCandidate
+  >();
   let currentWorkspaceSnapshotUploadSessionId: string | null = null;
   const assertSnapshotRpcReceiver = (receiver: WorkerUserRunnerStubLike) => {
     if (
@@ -10631,6 +10685,12 @@ function createWorkspaceVersionAwareUserRunner(input: {
     workspaceSnapshotOrphanCandidates.set(candidate.snapshotId, candidate);
     return candidate;
   });
+  const recordHostedBrowserVaultReplicaOrphanCandidate = vi.fn(async (
+    candidate: HostedBrowserVaultReplicaOrphanCandidate,
+  ) => {
+    browserVaultReplicaOrphanCandidates.set(candidate.objectKey, candidate);
+    return candidate;
+  });
   const validateRuntimeWriteFence = vi.fn(async (fence: {
     attemptId: string;
     generation: string;
@@ -10672,12 +10732,14 @@ function createWorkspaceVersionAwareUserRunner(input: {
     rememberHostedWorkspaceSnapshotReplacedRef,
     publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,
+    recordHostedBrowserVaultReplicaOrphanCandidate,
     recordHostedWorkspaceSnapshotOrphanCandidate,
     validateRuntimeWriteFence,
   };
 
   return {
     bindUser,
+    browserVaultReplicaOrphanCandidates,
     createHostedWorkspaceSnapshotUploadSession,
     deleteHostedWorkspaceSnapshotUploadSession,
     getByName() {
@@ -10686,6 +10748,7 @@ function createWorkspaceVersionAwareUserRunner(input: {
     ownsActiveInvocationLease,
     publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,
+    recordHostedBrowserVaultReplicaOrphanCandidate,
     recordHostedWorkspaceSnapshotOrphanCandidate,
     rememberHostedWorkspaceSnapshotPresignedPut,
     rememberHostedWorkspaceSnapshotReplacedRef,
