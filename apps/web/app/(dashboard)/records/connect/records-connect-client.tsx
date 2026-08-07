@@ -135,12 +135,17 @@ export function RecordsConnectClient({
       && !launchFailed
     )
   ) {
-    return <ConnectPageSkeleton />;
+    return <RecordsConnectLauncherState state="loading" />;
   }
 
   if (!intentClaim) {
     if (launchConnectIntent && !authenticated) {
-      return <AuthRequiredState onSignIn={openAuthDialog} />;
+      return (
+        <RecordsConnectLauncherState
+          onSignIn={openAuthDialog}
+          state="authentication-required"
+        />
+      );
     }
     return <UnavailableIntentState />;
   }
@@ -621,6 +626,17 @@ function ProviderResult({
       </Button>
     </li>
   );
+}
+
+export function RecordsConnectLauncherState({
+  onSignIn,
+  state,
+}: {
+  onSignIn?: () => void;
+  state: "authentication-required" | "loading";
+}) {
+  if (state === "loading") return <ConnectPageSkeleton />;
+  return <AuthRequiredState onSignIn={onSignIn ?? (() => undefined)} />;
 }
 
 function ConnectPageSkeleton() {

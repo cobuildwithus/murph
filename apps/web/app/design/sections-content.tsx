@@ -20,6 +20,7 @@ import { Separator } from "@/src/components/ui/separator";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
+import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
 import {
@@ -269,6 +270,12 @@ export function SectionsContent() {
 
       <StudySection title="Connected app authorization handoff">
         <ConnectedAppAuthorizationStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Clinical Records scheduled launcher">
+        <ClinicalRecordsConnectLauncherStudy />
       </StudySection>
 
       <Separator />
