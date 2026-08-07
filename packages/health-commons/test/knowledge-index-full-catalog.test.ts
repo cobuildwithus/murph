@@ -69,7 +69,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   it.each([
     ["Daily Vitamin D3 Supplementation", undefined, /vitamin d/iu],
     ["Walking After Every Meal", "type 2 diabetes", /type 2 diabet/iu],
-    ["Omega-3 Supplementation", undefined, /omega[- ]3/iu],
+    ["Omega-3 Supplementation", undefined, /omega[- ]3|epa|dha/iu],
   ])("preserves the qualifier for %s", (query, focus, expectedTopic) => {
     const result = search(query, focus);
 
@@ -123,6 +123,30 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     expect(packetText(result)).toMatch(/immun/iu);
   });
 
+  it("routes typed source findings to their related protocol", () => {
+    const result = search("Daily Vitamin D3 Supplementation", "pregnancy response");
+
+    expect(result.items.some((item) =>
+      item.kind === "source_finding"
+      && item.sources.some((source) => source.pmid === "21706518" || source.pmid === "27788053")
+      && /adjacent_variant/iu.test(item.caveat ?? "")
+    )).toBe(true);
+  });
+
+  it("resolves canonical family and protocol title collisions to the family owner", () => {
+    for (const title of [
+      "Consistent Wake Time",
+      "Daily Step Floor",
+      "High Protein Intake",
+      "Hyperbaric Oxygen Therapy",
+      "Norwegian 4x4",
+    ]) {
+      expect(search(title).items.length).toBeGreaterThan(0);
+    }
+    expect(search("Hyperbaric Oxygen Therapy", "untreated pneumothorax").safety?.text)
+      .toMatch(/untreated pneumothorax|absolute contraindication/iu);
+  });
+
   it("never returns an unsourced ordinary item or an overview row", async () => {
     for (const query of ["Finnish Dry Sauna", "Mean Corpuscular Hemoglobin", "Magnesium RBC"]) {
       expect(search(query).items.every((item) => item.sources.length > 0)).toBe(true);
@@ -140,6 +164,29 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
         FROM chunks
         WHERE kind <> 'safety' AND sources_json = '[]'
       `).get()).toMatchObject({ count: 0 });
+      expect(database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM chunks c
+        WHERE c.id LIKE 'finding:%'
+          AND NOT EXISTS (
+            SELECT 1 FROM topic_owners t WHERE t.entity_key = c.entity_key
+          )
+      `).get()).toMatchObject({ count: 0 });
+      for (const title of [
+        "consistent wake time",
+        "daily step floor",
+        "high protein intake",
+        "hyperbaric oxygen therapy",
+        "norwegian 4x4",
+      ]) {
+        expect(database.prepare(`
+          SELECT COUNT(DISTINCT owner_key) AS count
+          FROM topic_owners
+          WHERE phrase = ? AND match_priority = (
+            SELECT MIN(match_priority) FROM topic_owners WHERE phrase = ?
+          )
+        `).get(title, title)).toMatchObject({ count: 1 });
+      }
     } finally {
       database.close();
     }

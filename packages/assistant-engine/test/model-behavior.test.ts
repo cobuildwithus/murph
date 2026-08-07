@@ -2338,17 +2338,24 @@ describe('assistant experiment onboarding guidance', () => {
       '`vault-cli commons knowledge search "<exact title or alias>" --focus "<question terms>" --format json`',
     )
     expect(prompt).toContain(
-      'Skip trivial/non-health.',
+      'Skip trivial/non-health;',
     )
     expect(prompt).toContain(
-      'It never starts experiments.',
+      'no experiments.',
     )
     expect(prompt).toContain(
-      'If empty, retry once with another exact topic.',
+      'If empty, retry one topic.',
     )
     expect(prompt).toContain(
-      'If unavailable/empty, claim no Commons evidence.',
+      'No result/index: say no Commons evidence.',
     )
+    expect(prompt).toContain(
+      'evidence+safety clauses may use 2 same-topic searches.',
+    )
+    expect(prompt).toContain(
+      'Across both, match catalogHash; keep 3 sourced items + 1 safety.',
+    )
+    expect(prompt).toContain('Use 1 search;')
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
     )

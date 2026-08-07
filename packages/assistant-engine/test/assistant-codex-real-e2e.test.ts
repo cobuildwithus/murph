@@ -2157,20 +2157,25 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 
 describeRealCodex('real Codex Health Commons knowledge e2e', () => {
   it(
-    'uses a safety-only evidence packet without starting an experiment',
+    'uses bounded same-topic evidence and safety packets without starting an experiment',
     async () => {
-      const result = await runHealthCommonsKnowledgeProbe()
+      const result = await runHealthCommonsKnowledgeProbe(
+        'Does Finnish dry sauna improve immunity, and is it safe after I fainted recently?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
 
-      expect(
-        result.actions.some((action) =>
-          action.kind === 'command'
-          && action.command.includes('vault-cli commons knowledge search')
-          && action.command.includes('sauna')
-          && action.command.includes('fentanyl')
-          && action.command.includes('--focus')
-        ),
-        'Health Commons safety lookup',
-      ).toBe(true)
+      expect(knowledgeCommands).toHaveLength(2)
+      expect(knowledgeCommands.every((command) =>
+        /finnish dry sauna/iu.test(command)
+        && command.includes('--focus')
+      )).toBe(true)
+      expect(knowledgeCommands.some((command) => /immun/iu.test(command))).toBe(true)
+      expect(knowledgeCommands.some((command) => /faint/iu.test(command))).toBe(true)
       expect(
         result.actions.some((action) =>
           action.kind === 'command'
@@ -2178,8 +2183,33 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
         ),
         'no experiment command',
       ).toBe(false)
+      expect(result.finalMessage).toMatch(/immun/iu)
+      expect(result.finalMessage).toMatch(/faint|medical|clinician|doctor/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'keeps a simple safety question on one knowledge search',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'Is it safe to use Finnish dry sauna while I am wearing a fentanyl patch?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
+
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/fentanyl/iu)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
       expect(result.finalMessage).toMatch(/life-threatening|overdose|poison/iu)
-      expect(result.finalMessage).toMatch(/avoid|do not|don't/iu)
     },
     360_000,
   )
@@ -5134,9 +5164,6 @@ async function runNameFirstExperimentStartProbe(input: {
         buildExperimentOnboardingDeveloperInstructions(),
       env: {
         ...config.env,
-        HEALTH_COMMONS_E2E_CLI_ENTRYPOINT:
-          HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
-        HEALTH_COMMONS_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
         PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
       },
@@ -5170,7 +5197,7 @@ async function runNameFirstExperimentStartProbe(input: {
   }
 }
 
-async function runHealthCommonsKnowledgeProbe(): Promise<{
+async function runHealthCommonsKnowledgeProbe(prompt: string): Promise<{
   actions: CapabilityRoutingAction[]
   finalMessage: string
 }> {
@@ -5192,12 +5219,15 @@ async function runHealthCommonsKnowledgeProbe(): Promise<{
       developerInstructions: buildDirectConversationDeveloperInstructions(),
       env: {
         ...config.env,
+        HEALTH_COMMONS_E2E_CLI_ENTRYPOINT:
+          HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+        HEALTH_COMMONS_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
         PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
       },
       excludeResumeTurns: true,
       model: config.model,
       modelProvider: config.modelProvider,
-      prompt: 'Is it safe to use a sauna while I am wearing a fentanyl patch?',
+      prompt,
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
       workingDirectory,

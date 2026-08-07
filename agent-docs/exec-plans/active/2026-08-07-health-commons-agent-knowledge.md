@@ -99,6 +99,18 @@ Updated: 2026-08-07
 - The real assistant harness now forwards the model's command to the generated
   index through the actual CLI entrypoint. It no longer returns a fixed sauna
   fixture.
+- Round 4 found that source findings retained source-page keys after source
+  pages stopped acting as topic owners. Findings now inherit an authored
+  `related_protocol` target, or a `parent_family` fallback. Their direct source
+  locator and `evidenceUse` limit stay in the returned item. Untargeted findings
+  are not generated.
+- Direct families and child protocols with the same normalized title now share
+  the family owner. Unrelated equal aliases still return no packet.
+- Independent evidence and safety clauses may use two strict same-topic
+  searches. Murph combines at most three distinct evidence items and one safety
+  item only when both catalog hashes match. Simple questions stay on one call.
+- The real assistant harness now receives the actual CLI entrypoint variables
+  in the Health Commons probe itself. The public result ceiling is three items.
 
 ## Verification
 
