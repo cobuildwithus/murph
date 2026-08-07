@@ -118,7 +118,7 @@ beforeEach(() => {
 
 describe("runHostedIdleCheckpointMaintenance", () => {
   it("keeps idle-shutdown compaction below the hosted Codex auto-compact ceiling", () => {
-    expect(HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(60_000);
+    expect(HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(50_000);
     expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(100_000);
     expect(HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS).toBeLessThan(164_000);
     expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBeLessThan(164_000);
