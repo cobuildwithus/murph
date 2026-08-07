@@ -33,6 +33,7 @@ export function resolveVisibleHostedBillingPlanCodes(input: {
   currentPlanCode: HostedBillingPlanCode | null;
   groupPlanConfigured: boolean;
   hasConfirmedGroupMembership: boolean;
+  maxPlanConfigured?: boolean;
   scheduledPlanCode: HostedBillingPlanCode | null;
 }): HostedBillingPlanCode[] {
   const showGroup =
@@ -42,11 +43,16 @@ export function resolveVisibleHostedBillingPlanCodes(input: {
       input.groupPlanConfigured &&
       input.hasConfirmedGroupMembership
     );
+  const showMax =
+    input.currentPlanCode === "launch_max_monthly" ||
+    input.scheduledPlanCode === "launch_max_monthly" ||
+    input.maxPlanConfigured === true;
 
   return [
     ...(showGroup ? ["launch_group_monthly" as const] : []),
     "launch_monthly",
     "launch_edge_monthly",
+    ...(showMax ? ["launch_max_monthly" as const] : []),
   ];
 }
 
