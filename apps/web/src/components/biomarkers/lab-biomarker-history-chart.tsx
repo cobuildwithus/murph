@@ -34,7 +34,7 @@ export interface LabBiomarkerChartRange {
   low: number | null;
 }
 
-const LATEST_LAB_RANGE_TITLE = "Latest lab range";
+export type LabBiomarkerReferenceRangeTone = "context" | "lab";
 
 const chartConfig = {
   value: {
@@ -81,7 +81,8 @@ export function LabBiomarkerHistoryChart({
   referenceRange = null,
   referenceRangeLabel = null,
   referenceRangeSourceLabel = null,
-  referenceRangeTitle = LATEST_LAB_RANGE_TITLE,
+  referenceRangeTitle = "Latest lab range",
+  referenceRangeTone = "lab",
   unit,
 }: {
   ariaDescribedBy?: string;
@@ -91,6 +92,7 @@ export function LabBiomarkerHistoryChart({
   referenceRangeLabel?: string | null;
   referenceRangeSourceLabel?: string | null;
   referenceRangeTitle?: string;
+  referenceRangeTone?: LabBiomarkerReferenceRangeTone;
   unit: string | null;
 }) {
   const data = useMemo(
@@ -116,27 +118,22 @@ export function LabBiomarkerHistoryChart({
   const rangeLabel = range ? referenceRangeLabel?.trim() || null : null;
   const rangeSourceLabel = rangeLabel ? referenceRangeSourceLabel?.trim() || null : null;
   const rangeIsBand = range !== null && range.low !== null && range.high !== null;
-  const isLatestLabRange = referenceRangeTitle === LATEST_LAB_RANGE_TITLE;
-  const inRangeArea = isLatestLabRange ? resolveInRangeArea(range) : null;
-  const rangeLineStyle = isLatestLabRange
+  const isLabRange = referenceRangeTone === "lab";
+  const inRangeArea = isLabRange ? resolveInRangeArea(range) : null;
+  const rangeLineStyle = isLabRange
     ? LAB_RANGE_LINE_STYLE
     : CONTEXT_RANGE_LINE_STYLE;
+  const rangeLegendClassName = resolveRangeLegendClassName(
+    rangeIsBand,
+    referenceRangeTone,
+  );
   const yDomain = resolveYDomain(range);
 
   return (
     <div className="min-w-0">
       {rangeLabel ? (
         <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-          <span
-            aria-hidden="true"
-            className={rangeIsBand
-              ? isLatestLabRange
-                ? "h-2 w-5 shrink-0 rounded-[2px] border-y border-dashed border-primary/50 bg-primary/10"
-                : "h-2 w-5 shrink-0 border-y border-dashed border-muted-foreground/40"
-              : isLatestLabRange
-                ? "h-0 w-5 shrink-0 border-t border-dashed border-primary/50"
-                : "h-0 w-5 shrink-0 border-t border-dashed border-muted-foreground/40"}
-          />
+          <span aria-hidden="true" className={rangeLegendClassName} />
           <span>{referenceRangeTitle}</span>
           <span className="font-mono tabular-nums text-foreground">{rangeLabel}</span>
           {rangeSourceLabel ? (
@@ -160,13 +157,13 @@ export function LabBiomarkerHistoryChart({
           data={data}
           margin={{ bottom: 0, left: 0, right: 12, top: 12 }}
         >
-          {isLatestLabRange && range && range.low !== null ? (
+          {isLabRange && range && range.low !== null ? (
             <ReferenceArea
               {...OUT_OF_RANGE_AREA_STYLE}
               y1={range.low}
             />
           ) : null}
-          {isLatestLabRange && range && range.high !== null ? (
+          {isLabRange && range && range.high !== null ? (
             <ReferenceArea
               {...OUT_OF_RANGE_AREA_STYLE}
               y2={range.high}
@@ -285,6 +282,21 @@ function resolveInRangeArea(
     return { y2: range.low };
   }
   return range.high !== null ? { y1: range.high } : null;
+}
+
+function resolveRangeLegendClassName(
+  rangeIsBand: boolean,
+  tone: LabBiomarkerReferenceRangeTone,
+): string {
+  if (tone === "lab") {
+    return rangeIsBand
+      ? "h-2 w-5 shrink-0 rounded-[2px] border-y border-dashed border-primary/50 bg-primary/10"
+      : "h-0 w-5 shrink-0 border-t border-dashed border-primary/50";
+  }
+
+  return rangeIsBand
+    ? "h-2 w-5 shrink-0 border-y border-dashed border-muted-foreground/40"
+    : "h-0 w-5 shrink-0 border-t border-dashed border-muted-foreground/40";
 }
 
 function resolveYDomain(
