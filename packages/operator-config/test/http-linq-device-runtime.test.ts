@@ -165,6 +165,26 @@ test('http json helpers cover swallowed body read failures, caller abort passthr
     (error) => error === passthrough,
   )
 
+  const bodyAbort = new AbortController()
+  const bodyAbortReason = new Error('caller aborted during body consumption')
+  await assert.rejects(
+    () =>
+      fetchJsonResponse({
+        consumeResponse: async () => {
+          bodyAbort.abort(bodyAbortReason)
+          throw new Error('body read interrupted')
+        },
+        createTransportError: () => new Error('should not wrap'),
+        fetchImplementation: async () => createJsonResponse({ available: true }),
+        headers: {},
+        method: 'POST',
+        signal: bodyAbort.signal,
+        timeoutMs: 50,
+        url: 'https://example.test',
+      }),
+    (error) => error === bodyAbortReason,
+  )
+
   const terminalHttpError = new Error('stop retrying')
   let attempts = 0
   await assert.rejects(
@@ -537,6 +557,69 @@ test('linq iMessage capability uses its short read deadline without retrying', a
     await rejection
 
     expect(abortedAt).toBe(startedAt + 2_500)
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test.each([
+  { label: 'success', status: 200 },
+  { label: 'rate-limit error', status: 429 },
+])('linq iMessage capability keeps its deadline through a stalled $label body', async ({
+  status,
+}) => {
+  vi.useFakeTimers()
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  let bodyAbortedAt: number | null = null
+  const startedAt = Date.now()
+  const fetchImplementation = vi.fn<LinqFetch>(async (_url, init) => {
+    const responseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          status === 200 ? '{"available":' : '{"code":',
+        ))
+        const abortBody = () => {
+          bodyAbortedAt = Date.now()
+          controller.error(new DOMException('aborted', 'AbortError'))
+        }
+        if (init.signal?.aborted) {
+          abortBody()
+          return
+        }
+        init.signal?.addEventListener('abort', abortBody, { once: true })
+      },
+    })
+    return new Response(responseBody, {
+      headers: {
+        'content-type': 'application/json',
+        ...(status === 429 ? { 'retry-after': '30' } : {}),
+      },
+      status,
+    })
+  })
+  try {
+    const rejection = expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: expect.objectContaining({
+        operation: 'check_imessage_capability',
+        retryable: false,
+        timedOut: true,
+        timeoutMs: 2_500,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(2_499)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(bodyAbortedAt).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1)
+    await rejection
+
+    expect(bodyAbortedAt).toBe(startedAt + 2_500)
     expect(fetchImplementation).toHaveBeenCalledOnce()
     expect(vi.getTimerCount()).toBe(0)
   } finally {

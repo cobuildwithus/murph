@@ -672,7 +672,7 @@ export async function checkLinqIMessageCapability(
     path: '/capability/check_imessage',
     body,
     signal: dependencies.signal,
-    timeoutMs: LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS,
+    singleAttemptTimeoutMs: LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS,
   })
   return readRecord(response)?.available === true
 }
@@ -1429,7 +1429,7 @@ async function requestLinqJson<T>(input: {
   path: string
   body?: LinqJsonRequestBody
   signal?: AbortSignal
-  timeoutMs?: number
+  singleAttemptTimeoutMs?: number
 }): Promise<T> {
   return requestLinq<T>({
     ...input,
@@ -1466,7 +1466,7 @@ async function requestLinq<T>(input: {
   body?: LinqJsonRequestBody
   parseResponse(response: LinqFetchResponse): Promise<T>
   signal?: AbortSignal
-  timeoutMs?: number
+  singleAttemptTimeoutMs?: number
 }): Promise<T> {
   const request = resolveLinqRequest(input)
   const diagnosticPath = sanitizeLinqPathForDiagnostics(input.path)
@@ -1474,6 +1474,26 @@ async function requestLinq<T>(input: {
     ...input.details,
     ...buildLinqRequestBodyDiagnostics(input.body, request.body),
     path: diagnosticPath,
+  }
+  const fetchInput = {
+    allowDeleteRetries: input.allowDeleteRetries === true,
+    allowRateLimitRetries: input.allowRateLimitRetries !== false,
+    body: request.body,
+    details,
+    fetchImplementation: request.fetchImplementation,
+    headers: request.headers,
+    method: input.method,
+    path: diagnosticPath,
+    signal: input.signal,
+    url: request.url,
+  }
+
+  if (input.singleAttemptTimeoutMs !== undefined) {
+    return fetchCompleteLinqAttempt({
+      ...fetchInput,
+      parseResponse: input.parseResponse,
+      timeoutMs: input.singleAttemptTimeoutMs,
+    })
   }
 
   return requestJsonWithRetry<T, LinqFetchResponse>({
@@ -1486,20 +1506,10 @@ async function requestLinq<T>(input: {
         input.allowDeleteRetries === true,
         input.allowRateLimitRetries !== false,
       ),
-    fetchResponse: () =>
-      fetchLinqResponse({
-        allowDeleteRetries: input.allowDeleteRetries === true,
-        allowRateLimitRetries: input.allowRateLimitRetries !== false,
-        body: request.body,
-        details,
-        fetchImplementation: request.fetchImplementation,
-        headers: request.headers,
-        method: input.method,
-        path: diagnosticPath,
-        signal: input.signal,
-        timeoutMs: input.timeoutMs ?? LINQ_HTTP_TIMEOUT_MS,
-        url: request.url,
-      }),
+    fetchResponse: () => fetchLinqResponse({
+      ...fetchInput,
+      timeoutMs: LINQ_HTTP_TIMEOUT_MS,
+    }),
     isRetryableError: isRetryableLinqRequestError,
     maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
     parseResponse: input.parseResponse,
@@ -1569,7 +1579,7 @@ function createLinqConfigurationError(
   })
 }
 
-async function fetchLinqResponse(input: {
+type LinqFetchInput = {
   allowDeleteRetries: boolean
   allowRateLimitRetries: boolean
   details: LinqSafeRequestDetails
@@ -1581,25 +1591,13 @@ async function fetchLinqResponse(input: {
   body?: string
   signal?: AbortSignal
   timeoutMs: number
-}): Promise<LinqFetchResponse> {
+}
+
+async function fetchLinqResponse(input: LinqFetchInput): Promise<LinqFetchResponse> {
   return fetchJsonResponse({
     body: input.body,
     createTransportError: ({ error, timedOut }) =>
-      readPreProviderLinqRequestError(error)
-      ?? createLinqRequestError({
-          details: input.details,
-          error,
-          requestOrigin: readRequestOrigin(input.url),
-          method: input.method,
-          path: input.path,
-          timedOut,
-          timeoutMs: input.timeoutMs,
-          retryable: shouldRetryLinqTransportFailure(
-            input.method,
-            input.allowDeleteRetries,
-            input.details.hasIdempotencyKey === true,
-          ),
-        }),
+      createLinqTransportError(input, error, timedOut),
     fetchImplementation: input.fetchImplementation,
     headers: input.headers,
     method: input.method,
@@ -1607,6 +1605,59 @@ async function fetchLinqResponse(input: {
     timeoutMs: input.timeoutMs,
     url: input.url,
   })
+}
+
+async function fetchCompleteLinqAttempt<T>(
+  input: LinqFetchInput & {
+    parseResponse(response: LinqFetchResponse): Promise<T>
+  },
+): Promise<T> {
+  return fetchJsonResponse({
+    body: input.body,
+    consumeResponse: async (response) => {
+      if (!response.ok) {
+        throw await createLinqHttpError(
+          response,
+          input.details,
+          input.method,
+          input.path,
+          input.allowDeleteRetries,
+          input.allowRateLimitRetries,
+        )
+      }
+      return input.parseResponse(response)
+    },
+    createTransportError: ({ error, timedOut }) =>
+      createLinqTransportError(input, error, timedOut),
+    fetchImplementation: input.fetchImplementation,
+    headers: input.headers,
+    method: input.method,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+    url: input.url,
+  })
+}
+
+function createLinqTransportError(
+  input: LinqFetchInput,
+  error: unknown,
+  timedOut: boolean,
+): Error {
+  return readPreProviderLinqRequestError(error)
+    ?? createLinqRequestError({
+      details: input.details,
+      error,
+      requestOrigin: readRequestOrigin(input.url),
+      method: input.method,
+      path: input.path,
+      timedOut,
+      timeoutMs: input.timeoutMs,
+      retryable: shouldRetryLinqTransportFailure(
+        input.method,
+        input.allowDeleteRetries,
+        input.details.hasIdempotencyKey === true,
+      ),
+    })
 }
 
 async function createLinqHttpError(

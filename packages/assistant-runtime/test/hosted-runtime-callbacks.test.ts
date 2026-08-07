@@ -9325,13 +9325,20 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
-  it("starts the persisted text fallback at the short capability deadline", async () => {
+  it.each([
+    { label: "response headers never arrive", mode: "headers" as const },
+    { label: "the success body stalls", mode: "success_body" as const },
+    { label: "the rate-limit body stalls", mode: "rate_limit_body" as const },
+  ])("starts the persisted text fallback at the short capability deadline when $label", async ({
+    mode,
+  }) => {
     vi.useFakeTimers();
     try {
       const idempotencyKey = "assistant-outbox:card-capability-timeout";
       const events: string[] = [];
       const startedAt = Date.now();
       let capabilityAbortedAt: number | null = null;
+      let capabilityBodyAborted = false;
       let capabilityRequestCount = 0;
       let textStartedAt: number | null = null;
       const assertRecentInbound = vi.fn(async (request: {
@@ -9362,16 +9369,43 @@ describe("hosted runtime callbacks", () => {
         if (url.pathname.endsWith("/capability/check_imessage")) {
           capabilityRequestCount += 1;
           events.push("provider:capability");
-          return await new Promise<Response>((_resolve, reject) => {
-            const rejectOnAbort = () => {
-              capabilityAbortedAt = Date.now();
-              reject(new DOMException("aborted", "AbortError"));
-            };
-            if (init?.signal?.aborted) {
-              rejectOnAbort();
-              return;
-            }
-            init?.signal?.addEventListener("abort", rejectOnAbort, { once: true });
+          assert.ok(init?.signal);
+          if (mode === "headers") {
+            return await new Promise<Response>((_resolve, reject) => {
+              const rejectOnAbort = () => {
+                capabilityAbortedAt = Date.now();
+                reject(new DOMException("aborted", "AbortError"));
+              };
+              if (init.signal?.aborted) {
+                rejectOnAbort();
+                return;
+              }
+              init.signal?.addEventListener("abort", rejectOnAbort, { once: true });
+            });
+          }
+          const responseBody = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(
+                mode === "success_body" ? '{"available":' : '{"code":',
+              ));
+              const abortBody = () => {
+                capabilityAbortedAt = Date.now();
+                capabilityBodyAborted = true;
+                controller.error(new DOMException("aborted", "AbortError"));
+              };
+              if (init.signal?.aborted) {
+                abortBody();
+                return;
+              }
+              init.signal?.addEventListener("abort", abortBody, { once: true });
+            },
+          });
+          return new Response(responseBody, {
+            headers: {
+              "content-type": "application/json",
+              ...(mode === "rate_limit_body" ? { "retry-after": "30" } : {}),
+            },
+            status: mode === "rate_limit_body" ? 429 : 200,
           });
         }
         textStartedAt = Date.now();
@@ -9439,6 +9473,7 @@ describe("hosted runtime callbacks", () => {
       await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
       expect(capabilityAbortedAt).toBe(startedAt + 2_500);
+      expect(capabilityBodyAborted).toBe(mode !== "headers");
       expect(textStartedAt).toBe(startedAt + 2_500);
       expect(capabilityRequestCount).toBe(1);
       expect(providerFetch).toHaveBeenCalledTimes(2);

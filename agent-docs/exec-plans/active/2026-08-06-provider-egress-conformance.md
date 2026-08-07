@@ -28,9 +28,10 @@ Updated: 2026-08-07
     existing partial-delivery checkpoint and deterministic recovery path.
   - A capability HTTP 429 must skip capability retry delay and enter the
     deterministic text fallback immediately.
-  - A stalled optional capability read must stop at its 2.5-second deadline
-    and enter the deterministic text fallback without consuming the generic
-    Linq mutation timeout.
+  - A stalled optional capability read, including a success or error body that
+    stalls after response headers, must stop at its 2.5-second deadline and
+    enter the deterministic text fallback without consuming the generic Linq
+    mutation timeout.
   - A provider-classified app-card `chat_not_found` must settle the card,
     promote the fallback identity, and retain existing stale-direct recovery.
   - Real hosted Telegram client calls for `sendMessage`, `sendPhoto`,
@@ -69,9 +70,10 @@ Updated: 2026-08-07
   responses or let the card runtime convert them into text fallback.
 - Disable only rate-limit retries for the optional capability lookup. Message
   mutation retry behavior remains unchanged.
-- Give that optional capability lookup one 2.5-second attempt. Its timeout is
-  not the generic 30-second Linq mutation timeout, and timeout enters the same
-  deterministic text fallback without a retry.
+- Give that optional capability lookup one complete 2.5-second attempt across
+  fetch and response classification. Its timeout is not the generic 30-second
+  Linq mutation timeout, and timeout enters the same deterministic text
+  fallback without a retry.
 - Treat only an exact classified app-card HTTP 404 `chat_not_found` as a
   definitive no-effect rejection; generic 404, timeout, rate-limit, transport,
   and server failures remain outside the fallback path.
@@ -100,6 +102,11 @@ Updated: 2026-08-07
   entire foreground reply boundary. The correction threads one private timeout
   override through the existing request path and applies it only to the
   optional capability read.
+- Round five found that the round-four timer ended when response headers
+  arrived, leaving successful and error body consumption outside the deadline.
+  That review-induced gap is corrected by keeping the same single per-attempt
+  timeout alive through complete response classification; no second timer or
+  lifecycle was added.
 
 ## Verification
 
@@ -111,7 +118,8 @@ Updated: 2026-08-07
   capability-unavailable fallback ordering, definitive card rejection
   settlement and replacement-identity claim, pre-provider abort reset,
   promoted-identity reset, rich-link partial delivery, immediate capability-429
-  fallback, capability-deadline text fallback, and classified stale-card
-  recovery under the fallback identity.
+  fallback, capability-deadline text fallback before headers and during stalled
+  success or error bodies, and classified stale-card recovery under the
+  fallback identity.
 - Documentation drift/gardening and `git diff --check`.
 - Exact-head required GitHub Actions and final review before closing this plan.
