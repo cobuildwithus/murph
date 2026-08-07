@@ -833,16 +833,17 @@ describe("hosted provider effects", () => {
   });
 
   it("preserves provider-skipped provenance through direct-thread materialization", async () => {
+    const providerSkippedError = Object.assign(
+      new Error("Fresh input preempted the attachment reservation."),
+      {
+        assistantDeliveryFailureClass: "transient" as const,
+        assistantDeliveryResumeTrigger: "fresh_foreground_input" as const,
+        deliveryMayHaveSucceeded: false as const,
+        retryable: true as const,
+      },
+    );
     const fetchImplementation = vi.fn<typeof fetch>(async () => {
-      throw Object.assign(
-        new Error("Fresh input preempted the attachment reservation."),
-        {
-          assistantDeliveryFailureClass: "transient" as const,
-          assistantDeliveryResumeTrigger: "fresh_foreground_input" as const,
-          deliveryMayHaveSucceeded: false as const,
-          retryable: true as const,
-        },
-      );
+      throw providerSkippedError;
     });
 
     await expect(sendHostedProviderLinqMessage({
@@ -868,17 +869,11 @@ describe("hosted provider effects", () => {
       },
       fetchImplementation,
       loadVaultImage: async () => new Uint8Array(12),
-    })).rejects.toMatchObject({
+    })).rejects.toBe(providerSkippedError);
+
+    expect(providerSkippedError).toMatchObject({
       assistantDeliveryFailureClass: "transient",
       assistantDeliveryResumeTrigger: "fresh_foreground_input",
-      code: "LINQ_API_REQUEST_FAILED",
-      context: expect.objectContaining({
-        assistantDeliveryFailureClass: "transient",
-        assistantDeliveryResumeTrigger: "fresh_foreground_input",
-        failureStage: "transport",
-        operation: "create_attachment_upload",
-        retryable: false,
-      }),
       deliveryMayHaveSucceeded: false,
       retryable: true,
     });

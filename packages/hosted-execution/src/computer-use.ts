@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 import {
   HOSTED_RETURN_CONTACT_KINDS,

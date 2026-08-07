@@ -18,6 +18,8 @@ on:
       - "packages/hosted-execution/package.json"
       - "packages/hosted-execution/src/assistant-permissions.ts"
       - "packages/assistant-runtime/src/hosted-runtime/codex-config.ts"
+      - "packages/device-syncd/package.json"
+      - "packages/device-syncd/src/**"
       - "pnpm-lock.yaml"
   push:
     branches:
@@ -38,6 +40,8 @@ on:
       - "packages/hosted-execution/package.json"
       - "packages/hosted-execution/src/assistant-permissions.ts"
       - "packages/assistant-runtime/src/hosted-runtime/codex-config.ts"
+      - "packages/device-syncd/package.json"
+      - "packages/device-syncd/src/**"
       - "pnpm-lock.yaml"
   workflow_dispatch:
 

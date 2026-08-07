@@ -421,9 +421,6 @@ importers:
       '@murphai/vault-usecases':
         specifier: workspace:*
         version: link:../vault-usecases
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@openai/codex':
         specifier: 0.145.0
@@ -431,6 +428,9 @@ importers:
       openai:
         specifier: 6.45.0
         version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/assistant-runtime:
     dependencies:
@@ -497,9 +497,6 @@ importers:
       '@cfworker/json-schema':
         specifier: ^4.1.1
         version: 4.1.1
-      '@junction-api/sdk':
-        specifier: 1.2.0
-        version: 1.2.0
       '@modelcontextprotocol/server':
         specifier: ^2.0.0-alpha.2
         version: 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
@@ -612,6 +609,7 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -642,9 +640,6 @@ importers:
 
   packages/device-syncd:
     dependencies:
-      '@junction-api/sdk':
-        specifier: 1.2.0
-        version: 1.2.0
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -654,6 +649,10 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
+      '@junction-api/sdk':
+        specifier: 1.2.0
+        version: 1.2.0
 
   packages/exercise-library:
     devDependencies:
@@ -709,9 +708,6 @@ importers:
 
   packages/hosted-execution:
     dependencies:
-      '@junction-api/sdk':
-        specifier: 1.2.0
-        version: 1.2.0
       '@murphai/clinical-records':
         specifier: workspace:*
         version: link:../clinical-records
@@ -766,13 +762,13 @@ importers:
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:../health-metrics
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@medplum/fhirtypes':
         specifier: ^5.1.24
         version: 5.1.24
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/inbox-services:
     dependencies:
@@ -800,6 +796,7 @@ importers:
       '@murphai/vault-usecases':
         specifier: workspace:*
         version: link:../vault-usecases
+    devDependencies:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -852,13 +849,13 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@linqapp/sdk':
         specifier: 0.28.0
         version: 0.28.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/parsers:
     dependencies:
@@ -883,6 +880,7 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -949,6 +947,7 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
       zod:
         specifier: ^4.4.3
         version: 4.4.3

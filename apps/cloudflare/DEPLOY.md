@@ -24,7 +24,7 @@ The rendered deploy helper path is the canonical direct Wrangler deploy contract
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
-Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded.
+Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
@@ -499,7 +499,7 @@ channel and confirm the prepared row advances at provider entry.
 
 Before the first deploy:
 
-1. Create the Worker service and the two R2 buckets used for encrypted hosted runtime objects.
+1. Create the Worker service and the canonical runtime and preview R2 buckets.
 2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets, or run the normal worker deploy path, which reapplies it before deploying the Worker.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
@@ -525,15 +525,23 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
-- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` only during a declared destination-
-  active incident that requires paused-admission forward-repair validation; use
-  a lowercase SHA-256 digest of a quiescent operator-controlled member, never a
-  raw member ID
-- `HOSTED_R2_WRITE_ADMISSION=open` normally and throughout the healthy live
-  OC-to-ENAM cutover; `paused` is emergency incident containment only
 
 `CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
-`HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the Worker R2 binding. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
+`HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the canonical Worker R2 binding. Deploy preflight requires the canonical runtime and preview buckets to be ENAM Standard. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
+
+For the one-time single-region retirement release, update
+`CF_BUNDLES_BUCKET`, `CF_BUNDLES_PREVIEW_BUCKET`, and
+`HOSTED_R2_PRESIGN_BUCKET_NAME` to their existing ENAM bucket names as one
+candidate-deploy operation. Changing GitHub Environment values does not mutate
+the already deployed Worker, so do not run an older phase/fallback deploy after
+that change. Keep the Web account-deletion maintenance guard enabled. Deploy
+Cloudflare first and require 100 percent rollout, the ordinary direct-R2 and
+runtime smokes, and an API check proving that the live Worker has only the
+canonical `BUNDLES` R2 binding. Then rerun the final current-owner check, empty
+and delete only the exact retired production and preview OC buckets, and verify
+that both bucket APIs report them absent. Only after physical absence is proven
+may the post-retirement Web cleanup remove the maintenance guard. The former OC
+buckets are not Worker bindings or rollback targets.
 For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
@@ -749,25 +757,6 @@ Core execution tuning:
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting
   GitHub Environment value.
-- `HOSTED_R2_WRITE_ADMISSION` defaults to `open` and remains open throughout a
-  healthy live OC-to-ENAM cutover. First deploy bridge protocol v2 unchanged as
-  `source_active` and prove every runner reports it. Then promote
-  `HOSTED_R2_CUTOVER_PHASE` to `destination_active`; new writes target ENAM while
-  explicit reads prefer the phase-active bucket and use the other bucket only
-  after a definitive miss, and old source-bucket upload capabilities drain.
-  Both coexistence phases omit the fixed-source prepared snapshot URL; cold
-  restore uses the existing write-fenced `/presign-get` locator and presigns
-  the concrete bucket that contains the checkpoint.
-  `paused` is an incident-containment lever: it returns a bounded `retry_later`
-  from `runtime/ensure-processing` before any UserRunner Durable Object call.
-- `HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256` must be unset during the healthy live
-  cutover, while admission is open, or while the source is active. Configure it
-  only during a declared destination-active paused incident, for a quiescent
-  operator-controlled member with no pending mailbox work, retry/recheck/wake,
-  alarm, or member-facing ingress. It opens a per-member callback-signed window,
-  not a one-shot request; source-active pauses, other members, and direct OIDC
-  hints remain fenced. Status exposes only `pausedCanaryConfigured`, never the
-  digest or raw member ID.
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
   R2 S3 endpoint for direct snapshot presign URLs. Normally leave it unset. If
   set for deploys, it must be `https://<account-id>.r2.cloudflarestorage.com`.
@@ -1123,17 +1112,17 @@ Before the first preview Worker deploy:
    `staging`. Keep production database, crypto, persistent computer profile,
    messaging routes, and provider credentials out of this target.
 2. Configure the GitHub `Preview` Environment with the vars and secrets in this
-   document. Use a Worker name and both R2 bucket names containing a `preview`
-   or `staging` segment. `HOSTED_CRYPTO_ENV` must be `preview`.
+   document. Use a Worker name and both configured R2 bucket names containing
+   a `preview` or `staging` segment. `HOSTED_CRYPTO_ENV` must be `preview`.
    `HOSTED_WEB_BASE_URL` must be the isolated preview origin and
    `HOSTED_WEB_PRODUCTION_BASE_URL` must be the production origin used only for
    the inequality guard. The Worker and Web origins must be distinct. If device
    sync is enabled, `DEVICE_SYNC_PUBLIC_BASE_URL` must be a public staging HTTPS
    URL on the same hostname as preview `HOSTED_WEB_BASE_URL`; its callback path
    is allowed, but a separate callback hostname is not.
-3. Create only the staging R2 bucket or buckets, with the required location,
-   and issue the direct-R2 key against those buckets only. Apply the checked-in
-   lifecycle rules before stateful use.
+3. Use ENAM for both staging buckets. Issue the direct-R2 key against the
+   canonical buckets and apply the checked-in lifecycle rules before stateful
+   use. Preview has no OC binding or retirement role.
 4. Dispatch from protected `main`:
 
    ```bash

@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer'
 import { HOSTED_RUNTIME_PROCESS_ENV } from '@murphai/hosted-execution/env'
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 export const DEFAULT_HOSTED_DATA_API_LABEL_LIMIT = 5
 export const MAX_HOSTED_DATA_API_LABEL_LIMIT = 50
