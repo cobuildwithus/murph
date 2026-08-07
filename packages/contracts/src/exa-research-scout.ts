@@ -151,14 +151,19 @@ const unsafeResearchScoutTagPatterns = [
 
 const unsafePublicResearchQuestionPatterns = [
   /[\r\n\t\0]/u,
+  /[^\x20-\x7e]/u,
   /\b(?:https?:\/\/|www\.)\S+/iu,
   /[^\s@]+@[^\s@]+\.[^\s@]+/u,
+  /(?<![\w@])@[a-z0-9_]{2,32}\b/iu,
   /\b(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}(?:\/\S*)?\b/iu,
+  /\b(?:\d{1,3}\.){3}\d{1,3}\b/u,
   /(?<!\d)\+?(?:\d[\s().-]*){9,}\d(?!\d)/u,
+  /\b\d{3}-\d{2}-\d{4}\b/u,
   /\b(?:dob|date of birth|birthdate|born on)\b/iu,
-  /\b(?:member|patient|user)[-_ ]?id\b/iu,
+  /\b(?:account|case|member|medical record|mrn|patient|record|user)[-_ #]?(?:id|number)\b/iu,
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu,
-  /\b(?:appointment|medical record|clinical note|mychart|street address)\b/iu,
+  /\b(?:appointment|copied note|medical record|clinical note|mychart|street address)\b/iu,
+  /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,4}\s+(?:avenue|ave|boulevard|blvd|circle|court|ct|drive|dr|highway|hwy|lane|ln|parkway|pkwy|place|pl|road|rd|street|st|terrace|ter|trail|trl|way)\b/iu,
   /\b(?:bearer|api key|password|secret|access token|refresh token)\b/iu,
   /\b(?:sk|pk|rk|whsec)[-_][A-Za-z0-9_-]{8,}\b/u,
   /\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/u,
@@ -171,6 +176,18 @@ const unsafePublicResearchQuestionPatterns = [
 
 const unsafePublicResearchFirstPersonPattern =
   /\b(?:i|my|mine|me|i'm|i've|i have|i am|i was|i take|i use|i weigh|i should|i can|i could|i would|should i|can i|could i|would i)\b/iu;
+const unsafePublicResearchPersonReferencePattern =
+  /\b(?:we|our|ours|you|your|yours|he|him|his|she|her|hers|they|them|their|theirs|someone|somebody|person|individual|member|patient|client|case subject|wife|husband|spouse|partner|child|son|daughter|mother|father|mom|dad|parent|sibling|brother|sister|friend|coworker|colleague|mi|mis|esposa|esposo|hijo|hija|mon|ma|mes|mari|femme|mein|meine|meiner|ehefrau|ehemann)\b/iu;
+const unsafePublicResearchLowercaseUsPattern = /\bus\b/u;
+const publicResearchQuestionOpeningPattern =
+  /^(?:what|which|how|does|do|is|are|has|have|can|could|should|would|when|where|why)\b/iu;
+const publicResearchInstitutionPattern =
+  /\b(?:[A-Z][A-Za-z&'.-]*\s+){0,5}(?:Academy|Agency|Association|Center|Centre|Clinic|College|Department|Foundation|Hospital|Institute|Institutes|School|Society|University)(?:\s+of\s+(?:[A-Z][A-Za-z&'.-]*\s*){1,4})?\b/gu;
+const publicResearchScientificPossessivePattern =
+  /\b(?:Alzheimer|Crohn|Hodgkin|Parkinson)['’]s\b/gu;
+const unsafePublicResearchProperNounPattern = /\b[A-Z][a-z]{2,}\b/u;
+const unsafePublicResearchNamedAssertionPattern =
+  /\b(?:Dr|Doctor|Professor|Researcher)\.?\s+[A-Z][a-z]+\b|\b[A-Z][a-z]+(?:['’]s|\s+(?:experienced|has|had|is|reports?|started|takes?|uses?|was|weighs?))\b/u;
 const scientificRomanNumeralIPattern = /\b(?:phase|type|complex)\s+i\b/giu;
 
 const researchScoutCategoryTagPattern = /^[a-z0-9](?:[a-z0-9 /-]*[a-z0-9])?$/u;
@@ -194,7 +211,12 @@ export function isSafeResearchScoutProfileTag(value: string): boolean {
 
 export function isSafePublicResearchQuestion(value: string): boolean {
   const question = value.trim();
-  if (!question || question !== value || !/[A-Za-z]/u.test(question)) {
+  if (
+    !question
+    || question !== value
+    || !question.endsWith("?")
+    || !publicResearchQuestionOpeningPattern.test(question)
+  ) {
     return false;
   }
   if (question.split(/\s+/u).length > 80) {
@@ -207,15 +229,25 @@ export function isSafePublicResearchQuestion(value: string): boolean {
     scientificRomanNumeralIPattern,
     "",
   );
-  return !unsafePublicResearchFirstPersonPattern.test(
-    questionWithoutScientificRomanNumerals,
-  );
+  if (
+    unsafePublicResearchFirstPersonPattern.test(questionWithoutScientificRomanNumerals)
+    || unsafePublicResearchPersonReferencePattern.test(question)
+    || unsafePublicResearchLowercaseUsPattern.test(question)
+  ) {
+    return false;
+  }
+  const questionWithoutPublicAnchors = question
+    .replace(publicResearchInstitutionPattern, "")
+    .replace(publicResearchScientificPossessivePattern, "")
+    .replace(/^[A-Z][a-z]+\b/u, "");
+  return !unsafePublicResearchProperNounPattern.test(questionWithoutPublicAnchors)
+    && !unsafePublicResearchNamedAssertionPattern.test(questionWithoutPublicAnchors);
 }
 
 const unsafeResearchScoutTagMessage =
   "Research scout profile tags must be broad lowercase non-identifying categories, not raw values, dates, contacts, proper nouns, organizations, or notes.";
 const unsafePublicResearchQuestionMessage =
-  "Research questions must be focused public questions without first-person details, contacts, identifiers, credentials, dates of birth, raw labs, exact clinical measurements, or copied private notes.";
+  "Research questions must be focused English public questions without person names or personal framing, contacts, identifiers, credentials, dates of birth, raw labs, exact clinical measurements, or copied private notes.";
 
 const tagSchema = z
   .string()

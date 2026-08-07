@@ -2,43 +2,43 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildAssistantExecutionBehaviorText,
+  buildAssistantResearchScoutCapabilityText,
 } from '../src/assistant/model-behavior.js'
 
 describe('assistant research guidance', () => {
-  it('makes the existing Exa-backed scout an ordinary focused research capability', () => {
+  it('keeps research out of the always-resident behavior prompt', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
       progressUpdateMode: 'direct',
     })
 
-    expect(prompt).toContain('`vault-cli research scout`')
-    expect(prompt).toContain('interactive and scheduled turns')
-    expect(prompt).toContain('{"question":"..."}')
-    expect(prompt).toContain('`--input -` on stdin')
-    expect(prompt).toContain('`--input @file.json`')
-    expect(prompt).toContain('Let me pull the latest research on that.')
-    expect(prompt).toContain(
-      'Strip names or details that identify the member or another private person',
-    )
-    expect(prompt).toContain(
-      'Preserve public study titles, researcher names, institutions, and other public entities',
-    )
-    expect(prompt).toContain('Distinguish established evidence from early or conflicting evidence')
-    expect(prompt).not.toContain('always run research')
+    expect(prompt).not.toContain('vault-cli research')
+    expect(prompt).not.toContain('Configured Exa research capability')
   })
 
-  it('preserves the stricter progress threshold in groups', () => {
-    const prompt = buildAssistantExecutionBehaviorText({
-      profile: 'gpt5-agentic',
+  it('defines the configured direct-turn privacy, evidence, and stopping contract', () => {
+    const prompt = buildAssistantResearchScoutCapabilityText({
+      progressUpdateMode: 'direct',
+    })
+
+    expect(prompt).toContain('person-name-free public question')
+    expect(prompt).toContain('`resultIndex` maps to a returned result')
+    expect(prompt).toContain('source title, web URL')
+    expect(prompt).toContain('no usable current source')
+    expect(prompt).toContain('do not fabricate evidence')
+    expect(prompt).toContain('do not')
+    expect(prompt).toContain('repeat the lookup blindly')
+    expect(prompt).toContain('one short natural update')
+  })
+
+  it('preserves the stricter configured group progress threshold', () => {
+    const prompt = buildAssistantResearchScoutCapabilityText({
       progressUpdateMode: 'group',
     })
 
-    expect(prompt).toContain('`vault-cli research scout`')
     expect(prompt).toContain(
       'a research lookup alone does not justify a status message',
     )
-    expect(prompt).not.toContain(
-      'Let me pull the latest research on that.',
-    )
+    expect(prompt).not.toContain('one short natural update')
   })
 })

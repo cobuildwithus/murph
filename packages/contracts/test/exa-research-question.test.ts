@@ -26,12 +26,14 @@ const QUESTION_INPUT = {
 
 const ALLOWED_PUBLIC_QUESTIONS = [
   "What did the 2025 Stanford University review conclude about GLP-1 medicines and cardiovascular outcomes?",
+  "What do National Institutes of Health guidelines say about sleep duration?",
   "What do US guidelines recommend about creatine use in healthy adults?",
-  "What do studies tell us about sleep regularity and cardiometabolic risk?",
-  "How should we interpret conflicting evidence about morning light and sleep timing?",
+  "What do studies show about sleep regularity and cardiometabolic risk?",
+  "How can conflicting evidence about morning light and sleep timing be interpreted?",
   "What changed in human research from 2010-2020 about creatine and cognition?",
   "What changed in human research from 2010 - 2020 about creatine and cognition?",
-  "What should we do about sleep deprivation at a population level?",
+  "What interventions reduce sleep deprivation at a population level?",
+  "What does the study creatine supplementation and memory: a meta-analysis conclude?",
   "What do phase I trials show about a new insomnia treatment?",
   "What does type I interferon signaling indicate in human studies?",
   "What does mitochondrial complex I research show about Parkinson's disease?",
@@ -90,9 +92,19 @@ describe("focused public Exa research questions", () => {
     "What do phase I trials show, and should I take the treatment?",
     "Research the appointment from 2026-08-06.",
     "What does blood pressure 125/85 mean for my health?",
+    "What evidence applies to Example Person's recurring migraines?",
+    "What trials apply when Private Person reports a new skin reaction?",
+    "What does research on Avery show about sleep?",
+    "What should we do about a child's new seizures?",
+    "What evidence applies to our patient with persistent anxiety?",
+    "What does mi esposa's insomnia mean according to research?",
+    "What does the copied note say about persistent insomnia?",
+    "What does the research say about the resident at 123 Main Street?",
+    "What does the research say about record number ABC-123?",
+    "What does the research show about sleep.",
   ])("rejects private or identifying question text before provider work: %s", (question) => {
     expect(() => researchScoutProfileSchema.parse({ question })).toThrow(
-      /focused public questions/u,
+      /focused English public questions/u,
     );
   });
 

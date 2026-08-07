@@ -66,7 +66,7 @@ describe('focused public research questions', () => {
     expect(help).toContain('--input @file.json')
     expect(help).toContain('--input -')
     expect(help).toContain(
-      'Preserve public study titles, researcher names, institutions, and other public entities',
+      'Preserve institutions, person-name-free study titles, publication years, and scientific terms',
     )
   })
 
@@ -94,9 +94,10 @@ describe('focused public research questions', () => {
 
     expect(payloadSchema?.description).toContain('focused-question')
     expect(payloadSchema?.description).toContain('compact tag-profile')
-    expect(scout?.description).toContain('focused public question')
-    expect(scout?.description).toContain('compact non-identifying tag profile')
+    expect(scout?.description).toContain('person-name-free public question')
+    expect(scout?.description).toContain('compact non-identifying tags')
     expect(scout?.hint).toContain('{"question":"..."}')
+    expect(scout?.hint).toContain('resultIndex maps to usable returned source metadata')
     expect(scout?.hint).not.toContain('tag profile only')
   })
 
@@ -158,12 +159,18 @@ describe('focused public research questions', () => {
     expect(result.response).toEqual(providerPayload)
   })
 
-  it('rejects private question text before any Exa request', async () => {
+  it.each([
+    'What should I do about my LDL 181 mg/dL?',
+    "What evidence applies to Example Person's recurring migraines?",
+    'What evidence applies to our patient with persistent anxiety?',
+    "What does mi esposa's insomnia mean according to research?",
+    'What does the research say about the resident at 123 Main Street?',
+  ])('rejects private question text before any Exa request: %s', async (question) => {
     const fetchImpl = vi.fn<typeof fetch>()
 
     await expect(fetchExaResearchScoutCandidates({
       profile: {
-        question: 'What should I do about my LDL 181 mg/dL?',
+        question,
         topics: [],
         biomarkers: [],
         behaviors: [],
@@ -180,7 +187,7 @@ describe('focused public research questions', () => {
         EXA_API_KEY: 'exa-test-token',
       },
       fetchImpl,
-    })).rejects.toThrow(/focused public questions/u)
+    })).rejects.toThrow(/focused English public questions/u)
 
     expect(fetchImpl).not.toHaveBeenCalled()
   })

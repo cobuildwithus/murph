@@ -975,9 +975,9 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['research', 'scout'],
         description:
-          'Search Exa for bounded human-research candidates from one focused public question or a compact non-identifying tag profile without writing vault records.',
+          'Search Exa for bounded human-research candidates from one focused English, person-name-free public question or compact non-identifying tags without writing vault records.',
         hint:
-          'Requires EXA_API_KEY. Pass exactly one focused generalized public question as {"question":"..."}, or one compact non-identifying tag profile, through stdin or @file JSON. Exclude private notes, contacts, identifiers, credentials, and exact personal measurements. Returns the provider response without local candidate post-processing.',
+          'Requires EXA_API_KEY. Pass {"question":"..."} through stdin or @file JSON with no person names or personal framing. Trust only candidates whose resultIndex maps to usable returned source metadata; otherwise report no usable current source.',
         output: researchScoutResultSchema,
       },
     ],

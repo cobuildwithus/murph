@@ -47,6 +47,9 @@ import { resolveAssistantSession } from '../src/assistant/store.ts'
 import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
+import {
+  buildAssistantResearchScoutCapabilityText,
+} from '../src/assistant/model-behavior.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
 // matching CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
@@ -432,6 +435,183 @@ text(result.output);
     expect(invocations[1]).toContain('USDA fdc:oats-1 scaled from 100 g')
     expect(invocations[1]).toContain('label fdc:kefir-1 scaled to its 240 g serving')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
+  })
+
+  it('carries generalized Exa evidence through progress, source mapping, and empty recovery', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const requestLog = path.join(
+      scenario.turnInput.workingDirectory,
+      'research-request.log',
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    const sourcedResponse = JSON.stringify({
+      ok: true,
+      privacy: {
+        persistedByTool: false,
+        rawVaultValuesSent: false,
+        sentProfileKind: 'public_question',
+        tokenSource: 'env',
+      },
+      provider: {
+        endpoint: 'search',
+        mode: 'deep-reasoning',
+        name: 'exa',
+      },
+      response: {
+        output: {
+          content: JSON.stringify({
+            candidates: [{
+              actionOrQuestion: 'Treat this as a population-level result.',
+              doNotOverinterpret: 'The included trials were small and heterogeneous.',
+              evidenceStrength: 'moderate',
+              hypeRisk: 'medium',
+              keyFinding: 'The review found a small possible memory benefit.',
+              matchedProfileTags: [],
+              resultIndex: 0,
+              studyType: 'systematic_review',
+              whyItMayMatter: 'It directly addresses the generalized question.',
+            }],
+          }),
+        },
+        results: [{
+          publishedDate: '2025-02-03',
+          title: 'Creatine and cognitive performance: a systematic review',
+          url: 'https://example.test/research/creatine-cognition-review',
+        }],
+      },
+    })
+    const emptyResponse = JSON.stringify({
+      ok: true,
+      privacy: {
+        persistedByTool: false,
+        rawVaultValuesSent: false,
+        sentProfileKind: 'public_question',
+        tokenSource: 'env',
+      },
+      provider: {
+        endpoint: 'search',
+        mode: 'deep-reasoning',
+        name: 'exa',
+      },
+      response: {
+        output: { content: '{"candidates":[]}' },
+        results: [],
+      },
+    })
+    await writeFile(fakeVaultCli, `#!/bin/sh
+request="$(cat)"
+printf '%s\\n' "$request" >> "research-request.log"
+case "$request" in
+  *creatine*) printf '%s\\n' '${sourcedResponse}' ;;
+  *) printf '%s\\n' '${emptyResponse}' ;;
+esac
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+    const progressUpdates: string[] = []
+    const progressDelivery = {
+      send: async (text: string) => {
+        progressUpdates.push(text)
+        return { kind: 'sent' as const, source: 'model' as const }
+      },
+    }
+    const directGuidance = buildAssistantResearchScoutCapabilityText({
+      progressUpdateMode: 'direct',
+    })
+
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { text: 'I’m checking the current human evidence and its limits.' },
+          name: 'send_progress_update',
+          namespace: 'murph',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const input = JSON.stringify({question: "What do systematic reviews show about creatine and cognitive performance in adults?"});
+const result = await tools.exec_command({
+  cmd: "printf '%s' '" + input + "' | ./vault-cli research scout --input - --since 2020-01-01 --until 2026-08-06",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'A 2025 systematic review, “Creatine and cognitive performance,” found a small possible memory benefit, but the evidence is only moderate because the included trials were small and heterogeneous. Source: https://example.test/research/creatine-cognition-review. That is population-level evidence, not a personalized recommendation.',
+      },
+    )
+
+    const sourced = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: directGuidance,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      progressDelivery,
+      prompt: 'Check current creatine-and-memory evidence for <PRIVATE_PERSON>, then explain the useful result and its main limitation.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(progressUpdates).toEqual([
+      'I’m checking the current human evidence and its limits.',
+    ])
+    expect(sourced.finalMessage).toContain('2025 systematic review')
+    expect(sourced.finalMessage).toContain('evidence is only moderate')
+    expect(sourced.finalMessage).toContain('small and heterogeneous')
+    expect(sourced.finalMessage).toContain(
+      'https://example.test/research/creatine-cognition-review',
+    )
+    const providerQuestion = (await readFile(requestLog, 'utf8')).trim()
+    expect(providerQuestion).toContain(
+      'What do systematic reviews show about creatine and cognitive performance in adults?',
+    )
+    expect(providerQuestion).not.toContain('<PRIVATE_PERSON>')
+
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const input = JSON.stringify({question: "What do recent trials show about meal timing and sleep timing in adults?"});
+const result = await tools.exec_command({
+  cmd: "printf '%s' '" + input + "' | ./vault-cli research scout --input - --since 2025-01-01 --until 2026-08-06",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'That research pass found no usable current source, so I would not raise confidence or invent a current-evidence answer from it.',
+      },
+    )
+
+    const empty = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: directGuidance,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      progressDelivery,
+      prompt: 'Check current trial evidence on meal timing and sleep timing.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(empty.finalMessage).toBe(
+      'That research pass found no usable current source, so I would not raise confidence or invent a current-evidence answer from it.',
+    )
+    expect(progressUpdates).toHaveLength(1)
+    expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(2)
   })
 
   it.each(['direct', 'group'] as const)(

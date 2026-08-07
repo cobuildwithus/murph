@@ -110,7 +110,13 @@ describe('hosted Exa egress for focused public questions', () => {
     await expect(forwardedRequest.json()).resolves.toEqual(requestBody)
   })
 
-  it('fails closed before upstream fetch when the exact question recipe is mutated with private data', async () => {
+  it.each([
+    'What should I do about my LDL 181 mg/dL?',
+    "What evidence applies to Example Person's recurring migraines?",
+    'What evidence applies to our patient with persistent anxiety?',
+    "What does mi esposa's insomnia mean according to research?",
+    'What does the research say about the resident at 123 Main Street?',
+  ])('fails closed before upstream fetch when the recipe contains private data: %s', async (privateQuestion) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-06T12:00:00.000Z'))
 
@@ -119,7 +125,7 @@ describe('hosted Exa egress for focused public questions', () => {
       ...requestBody,
       query: requestBody.query.replace(
         QUESTION_PROFILE.question,
-        'What should I do about my LDL 181 mg/dL?',
+        privateQuestion,
       ),
     }
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('unexpected'))
