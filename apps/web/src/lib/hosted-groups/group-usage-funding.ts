@@ -1,13 +1,9 @@
 import "server-only";
 
-import { createHmac, timingSafeEqual } from "node:crypto";
-
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
-import { readHostedAppSessionHmacKey } from "../hosted-onboarding/app-session-config";
-import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
@@ -17,17 +13,28 @@ import {
   hasHostedGroupAutomaticRefillAvailable,
   readHostedGroupSponsorshipPublicState,
 } from "./group-sponsorship-authorization";
+import {
+  buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingPath,
+  buildHostedGroupUsageFundingUrl,
+  normalizeHostedGroupUsageJoinCode,
+  readHostedGroupUsageFundingLocatorRuntimeMemberId,
+} from "./group-usage-funding-locator";
+
+export {
+  buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingPath,
+  buildHostedGroupUsageFundingUrl,
+  normalizeHostedGroupUsageFundingLocator,
+  normalizeHostedGroupUsageJoinCode,
+  readHostedGroupUsageFundingLocatorRuntimeMemberId,
+} from "./group-usage-funding-locator";
 
 // A group funding locator is either the group's owner-created opaque join
 // code, or, for a group chat that never minted one, a signed funding-only
 // locator bound to the exact runtime member. The signed form is accepted only
 // by the funding page and checkout target resolution; it is not a join code,
 // resolves to no HostedGroup row, and grants no enrollment.
-const HOSTED_GROUP_USAGE_FUNDING_LOCATOR_PREFIX = "gf1";
-const HOSTED_GROUP_USAGE_FUNDING_LOCATOR_DOMAIN =
-  "murph.hosted-group-usage-funding-locator";
-const HOSTED_GROUP_USAGE_FUNDING_LOCATOR_VERSION = 1;
-
 export type HostedGroupUsageFundingClient =
   | PrismaClient
   | Prisma.TransactionClient;
@@ -173,67 +180,6 @@ export async function readHostedGroupFundingRecoveryStatus(input: {
   };
 }
 
-export function buildHostedGroupUsageFundingLocatorForRuntimeMember(
-  runtimeMemberId: string,
-): string | null {
-  const normalized = normalizeNullableString(runtimeMemberId);
-  if (!normalized) {
-    return null;
-  }
-
-  try {
-    return [
-      HOSTED_GROUP_USAGE_FUNDING_LOCATOR_PREFIX,
-      normalized,
-      buildHostedGroupUsageFundingLocatorSignature(normalized),
-    ].join(".");
-  } catch {
-    return null;
-  }
-}
-
-export function readHostedGroupUsageFundingLocatorRuntimeMemberId(
-  value: unknown,
-): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const parts = value.split(".");
-  if (
-    parts.length !== 3
-    || parts[0] !== HOSTED_GROUP_USAGE_FUNDING_LOCATOR_PREFIX
-    || !parts[1]
-    || !parts[2]
-  ) {
-    return null;
-  }
-
-  try {
-    const supplied = Buffer.from(parts[2], "utf8");
-    const expected = Buffer.from(
-      buildHostedGroupUsageFundingLocatorSignature(parts[1]),
-      "utf8",
-    );
-    if (supplied.byteLength !== expected.byteLength || !timingSafeEqual(supplied, expected)) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-
-  return parts[1];
-}
-
-export function normalizeHostedGroupUsageFundingLocator(value: unknown): string | null {
-  const joinCode = normalizeHostedGroupUsageJoinCode(value);
-  if (joinCode) {
-    return joinCode;
-  }
-  return readHostedGroupUsageFundingLocatorRuntimeMemberId(value) !== null
-    ? (value as string)
-    : null;
-}
-
 export async function readHostedGroupUsageFundingTargetByLocator(input: {
   locator: string;
   prisma?: PrismaClient;
@@ -274,50 +220,4 @@ export async function readHostedGroupUsageFundingTargetByLocator(input: {
     kind: group?.kind ?? "custom",
     runtimeMemberId,
   };
-}
-
-function buildHostedGroupUsageFundingLocatorSignature(runtimeMemberId: string): string {
-  const payload = JSON.stringify([
-    HOSTED_GROUP_USAGE_FUNDING_LOCATOR_DOMAIN,
-    HOSTED_GROUP_USAGE_FUNDING_LOCATOR_VERSION,
-    runtimeMemberId,
-  ]);
-  return createHmac("sha256", readHostedAppSessionHmacKey())
-    .update(payload, "utf8")
-    .digest("base64url");
-}
-
-export function buildHostedGroupUsageFundingUrl(input: {
-  joinCode: string;
-  publicBaseUrl?: string | null;
-}): string | null {
-  const locator = normalizeHostedGroupUsageFundingLocator(input.joinCode);
-  const publicBaseUrl = input.publicBaseUrl === undefined
-    ? resolveHostedPublicBaseUrl()
-    : input.publicBaseUrl;
-  if (!locator || !publicBaseUrl) {
-    return null;
-  }
-
-  try {
-    return new URL(
-      buildHostedGroupUsageFundingPath(locator),
-      `${publicBaseUrl.replace(/\/+$/u, "")}/`,
-    ).toString();
-  } catch {
-    return null;
-  }
-}
-
-export function buildHostedGroupUsageFundingPath(joinCode: string): string {
-  return `/groups/fund/${encodeURIComponent(joinCode)}`;
-}
-
-export function normalizeHostedGroupUsageJoinCode(value: unknown): string | null {
-  const normalized = typeof value === "string"
-    ? normalizeNullableString(value)
-    : null;
-  return normalized && /^[A-Za-z0-9_-]{16,128}$/u.test(normalized)
-    ? normalized
-    : null;
 }

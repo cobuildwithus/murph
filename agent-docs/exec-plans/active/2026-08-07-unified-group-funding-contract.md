@@ -39,7 +39,7 @@ Updated: 2026-08-07
 5. Risk: a refill already bound to its payment intent settles after its authorization is paused or canceled.
    Mitigation: treat an unresolved current-period payment as available recovery before testing whether a new refill may be admitted.
 6. Risk: any remaining exhaustion projection failure falls back to linkless copy and consumes the one capacity epoch.
-   Mitigation: make the link mandatory, derive it from only the runtime member and server configuration, and fail before claim/provider work instead of returning fallback copy.
+   Mitigation: make the link mandatory, preflight its configured origin and signing authority before production serves traffic, and fail before claim/provider work instead of returning fallback copy.
 
 ## Tasks
 
@@ -65,6 +65,7 @@ Updated: 2026-08-07
 - Delete randomized exhaustion funding prompts and their template machinery.
 - Remove group funding reads from referral eligibility.
 - Add direct privacy, pending-state, deterministic-copy, and prompt-contract coverage.
+- Validate delivery against the configured hosted origin, and extend the existing production predeploy guard to construct and parse the same signed funding-only URL before serving traffic.
 
 ## Review anomaly retrospective
 
@@ -72,7 +73,7 @@ Updated: 2026-08-07
 - First-reviewed authored-source churn was 407 lines; the first remediation head reached 538. The added shape came from the public/private projection split and pending-refill coverage, while the pressure-copy corpus and referral over-read were deleted.
 - Repeated mechanism: removing the private sponsor read did not remove every fallible dependency before the one-shot notice claim; a null or caught projection could still send linkless copy.
 - Decision: the link is mandatory. The delivery projector uses only the runtime member ID, configured first-party origin, and signing key. Capacity and exact-route authority remain with the existing claim owner; sponsor state, join-code preference, display data, and billing state are not delivery prerequisites.
-- Failure disposition: an unavailable or invalid mandatory URL fails before Linq or Telegram claim/provider work. It never degrades into a terminal linkless message. The existing denied-gate retry reprojects and sends the same capacity epoch after recovery.
+- Failure disposition: production predeploy must prove the configured HTTPS origin and signing authority can construct and parse the mandatory URL. Runtime projection validates against that same origin and fails before Linq or Telegram claim/provider work rather than sending terminal linkless copy. A completed crossing has no separate replay owner, so the pre-serve invariant—not a claimed retry—is what prevents this configuration dead end.
 - Architecture disposition: continue with the existing owners and no new state, queue, scheduler, replay lifecycle, or notification system.
 
 ## Verification

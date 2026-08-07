@@ -7,6 +7,7 @@ import {
   buildHostedGroupUsageFundingLocatorForRuntimeMember,
   buildHostedGroupUsageFundingUrl,
 } from "../hosted-groups/group-usage-funding";
+import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import type { HostedAiUsageLimitNoticeCode } from "./usage-allowance";
 import { readHostedPersonalAiUsageStatus } from "./usage-status";
 
@@ -25,22 +26,29 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
 }): Promise<string> {
   try {
     if (input.noticeCode === "thread_usage_limit_reached") {
+      const publicBaseUrl = resolveHostedPublicBaseUrl();
+      if (!publicBaseUrl) {
+        throw new TypeError(
+          "Hosted group usage-limit recovery URL is unavailable.",
+        );
+      }
       const locator = buildHostedGroupUsageFundingLocatorForRuntimeMember(
         input.memberId,
       );
       const projectedUrl = locator
-        ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
+        ? buildHostedGroupUsageFundingUrl({
+            joinCode: locator,
+            publicBaseUrl,
+          })
         : null;
       if (!projectedUrl) {
         throw new TypeError(
           "Hosted group usage-limit recovery URL is unavailable.",
         );
       }
-      const fundingUrl = new URL(
-        projectedUrl,
-        `${MURPH_PRODUCT_ORIGIN}/`,
-      );
-      if (fundingUrl.origin !== MURPH_PRODUCT_ORIGIN) {
+      const trustedOrigin = new URL(publicBaseUrl).origin;
+      const fundingUrl = new URL(projectedUrl);
+      if (fundingUrl.origin !== trustedOrigin) {
         throw new TypeError(
           "Hosted group usage-limit recovery URL is not first-party.",
         );

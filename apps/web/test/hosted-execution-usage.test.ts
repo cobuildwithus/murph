@@ -257,6 +257,12 @@ describe("recordHostedAiUsageRecords", () => {
         noticeMessage: "This thread has reached its Murph AI limit for now.",
       }),
     );
+    const linkedNotice =
+      "Murph is paused in this chat right now.\n"
+      + "https://join.example.test/groups/fund/gf1.member_123.signature";
+    noticeMocks.projectHostedAiUsageLimitNoticeForDelivery.mockResolvedValueOnce(
+      linkedNotice,
+    );
 
     await recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -269,6 +275,8 @@ describe("recordHostedAiUsageRecords", () => {
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
       .toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
         chatId: noticeDeliveryTarget.target,
+        message: linkedNotice,
+        noticeCode: "thread_usage_limit_reached",
         replyToMessageId: noticeDeliveryTarget.replyToMessageId,
         routeAuthority: noticeDeliveryTarget.routeAuthority,
       }));
@@ -375,7 +383,16 @@ describe("recordHostedAiUsageRecords", () => {
       target: "telegram_thread_usage_origin",
     };
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
-      buildUsageLimitNoticeCandidate(),
+      buildUsageLimitNoticeCandidate({
+        noticeCode: "thread_usage_limit_reached",
+        noticeMessage: "This thread has reached its Murph AI limit for now.",
+      }),
+    );
+    const linkedNotice =
+      "Murph is paused in this chat right now.\n"
+      + "https://join.example.test/groups/fund/gf1.member_123.signature";
+    noticeMocks.projectHostedAiUsageLimitNoticeForDelivery.mockResolvedValueOnce(
+      linkedNotice,
     );
     await recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -387,6 +404,8 @@ describe("recordHostedAiUsageRecords", () => {
 
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread)
       .toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        message: linkedNotice,
+        noticeCode: "thread_usage_limit_reached",
         replyToMessageId: noticeDeliveryTarget.replyToMessageId,
         target: noticeDeliveryTarget.target,
       }));

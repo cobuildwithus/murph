@@ -528,8 +528,12 @@ payment setup, name a payer, amount, cap, balance, or refill, claim that payment
 occurred, or add a separate scheduler or money-prompt lifecycle. If the
 mandatory locator, first-party origin, or signing configuration is unavailable,
 delivery fails before the capacity-epoch claim/provider path instead of sending
-linkless fallback copy. The existing denied-gate retry reprojects that same
-epoch after recovery.
+linkless fallback copy. The existing production predeploy guard must construct
+and parse this same signed URL from the configured HTTPS hosted origin and
+signing authority before serving traffic. Runtime validates against that same
+configured origin. A completed crossing has no separate replay owner, so this
+pre-serve invariant—not the denied-gate path—guarantees configuration cannot
+strand the one-shot notice.
 
 ## Non-Goals
 

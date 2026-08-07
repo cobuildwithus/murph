@@ -487,15 +487,19 @@ The mandatory URL is derived only from the runtime member and server
 configuration; funding-page sponsor state, group display data, and join-code
 preference are not delivery dependencies. Missing or invalid mandatory action
 data fails before claim/provider work and never becomes terminal linkless copy.
-The existing denied-gate retry can reproject the same capacity epoch after
-recovery. This is one branchless message contract; it exposes no payment setup,
-payer, cap, amount, balance, purchase, or refill facts.
+The production predeploy guard constructs and parses this exact signed URL from
+the configured HTTPS hosted origin and signing authority before serving
+traffic, and runtime validates against the same origin. A completed crossing
+has no separate replay owner, so the pre-serve invariant—not the denied-gate
+path—prevents configuration from stranding the one-shot notice. This is one
+branchless message contract; it exposes no payment setup, payer, cap, amount,
+balance, purchase, or refill facts.
 
-Immediately before both the exhaustion crossing send and a later denied-gate
-retry, delivery re-reads the current personal usage-status projection. It
-appends the canonical first-party **Add usage** action only when the recommended
-action is currently `add_usage`; a failed projection or any ineligible state
-sends the neutral copy unchanged.
+Immediately before a personal exhaustion crossing send and a later personal
+denied-gate retry, delivery re-reads the current personal usage-status
+projection. It appends the canonical first-party **Add usage** action only when
+the recommended action is currently `add_usage`; a failed projection or any
+ineligible state sends the neutral copy unchanged.
 
 A fulfilled grant invalidates a queued stale exhaustion notice. If credit is
 later exhausted again, at most one new reply-anchored notice is eligible for

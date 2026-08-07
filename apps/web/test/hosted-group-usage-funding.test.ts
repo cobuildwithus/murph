@@ -31,6 +31,7 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 
 import {
   buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingUrl,
   normalizeHostedGroupUsageFundingLocator,
   normalizeHostedGroupUsageJoinCode,
   readHostedGroupFundingRecoveryStatus,
@@ -277,6 +278,23 @@ describe("hosted group usage funding", () => {
       fundingUrl: `https://www.withmurph.ai/groups/fund/${encodeURIComponent(expectedLocator ?? "")}`,
     });
     expect(expectedLocator).toMatch(/^gf1\.member_group_runtime\./u);
+  });
+
+  it("constructs and parses a signed funding URL on a configured hosted alias", () => {
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue(
+      "https://join.example.test",
+    );
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+
+    expect(locator).not.toBeNull();
+    expect(buildHostedGroupUsageFundingUrl({
+      joinCode: locator ?? "",
+    })).toBe(
+      `https://join.example.test/groups/fund/${encodeURIComponent(locator ?? "")}`,
+    );
+    expect(readHostedGroupUsageFundingLocatorRuntimeMemberId(locator))
+      .toBe("member_group_runtime");
   });
 
   it("derives the locator URL for a group row without a join code", async () => {

@@ -563,7 +563,9 @@ supported provider credential.
   preview/non-main builds skip through the wrapper guard. The generic
   `pnpm --dir apps/web build` script is non-mutating and does not run production
   migrations. The guarded predeploy migration entrypoint uses
-  `DIRECT_DATABASE_URL` when present, requires it in Vercel production, rejects
+  `DIRECT_DATABASE_URL` when present, requires it in Vercel production,
+  preflights the app-session signing key plus configured HTTPS public origin by
+  constructing and parsing the signed group-funding recovery URL, rejects
   known pooled Postgres ports such as `6432` and `6543`, blocks destructive or
   incompatible Prisma migration SQL outside the frozen hosted web migration
   history set ending at `20260707170000_drop_stale_linq_recency_columns`,
