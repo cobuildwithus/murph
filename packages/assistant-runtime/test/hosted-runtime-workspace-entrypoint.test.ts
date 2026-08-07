@@ -18869,6 +18869,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   phaseInput.imageGenerationLauncher ?? null;
                 assert.equal(
                   phaseInput.imageGenerationLauncher?.launch({
+                    continuationSessionId: "asst_image_evidence_retry",
                     operationId: "image_operation_evidence_retry_1",
                     originAssistantInputId: assistantInputId,
                     originAssistantInputIdExact: false,
@@ -18903,6 +18904,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 assert.equal(
                   phaseInput.imageGenerationLauncher?.launch({
+                    continuationSessionId: "asst_image_evidence_retry",
                     operationId: "image_operation_evidence_retry_2",
                     originAssistantInputId: assistantInputId,
                     originAssistantInputIdExact: false,
@@ -18928,6 +18930,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 assert.equal(
                   phaseInput.imageGenerationLauncher?.launch({
+                    continuationSessionId: "asst_image_evidence_retry",
                     operationId: "image_operation_evidence_retry_2",
                     originAssistantInputId: assistantInputId,
                     originAssistantInputIdExact: false,
@@ -25315,6 +25318,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 });
               assert.equal(
                 phaseInput.imageGenerationLauncher?.launch({
+                  continuationSessionId: "asst_foreground_shutdown_handoff",
                   operationId: "image_operation_foreground_shutdown_handoff",
                   originAssistantInputId: assistantInputId,
                   originAssistantInputIdExact: true,
@@ -31439,6 +31443,7 @@ describe("hosted runtime shutdown signal", () => {
               retentionWakeAt: synchronousWakeAt,
             });
             assert.equal(input.imageGenerationLauncher?.launch({
+              continuationSessionId: "asst_retention_wake",
               operationId: "image_operation_retention_wake_later",
               originAssistantInputId: originInputId,
               originAssistantInputIdExact: true,
@@ -31451,6 +31456,7 @@ describe("hosted runtime shutdown signal", () => {
                 }),
             }), "started");
             assert.equal(input.imageGenerationLauncher?.launch({
+              continuationSessionId: "asst_retention_wake",
               operationId: "image_operation_retention_wake_earlier",
               originAssistantInputId: originInputId,
               originAssistantInputIdExact: true,
@@ -31605,6 +31611,7 @@ describe("hosted runtime shutdown signal", () => {
             });
             assert.equal(
               phaseInput.imageGenerationLauncher?.launch({
+                continuationSessionId: "asst_image_shutdown_handoff",
                 operationId: "image_operation_shutdown_handoff",
                 originAssistantInputId: originInputId,
                 originAssistantInputIdExact: true,
