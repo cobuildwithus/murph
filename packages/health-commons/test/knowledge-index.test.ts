@@ -88,6 +88,12 @@ function testCatalog(): HealthCommonsCatalog {
           strength: "moderate",
           sourceKeys: ["source_artifact:pmid-29849692"],
           caveats: ["Observational associations do not prove causality."],
+        }, {
+          claimId: "cardiovascular-safety",
+          type: "safety",
+          text: "Get guidance for unstable cardiovascular disease and stop for faintness.",
+          strength: "moderate",
+          sourceKeys: ["source_artifact:pmid-29849692"],
         }],
         safety: {
           cautionLevel: "moderate",

@@ -133,6 +133,40 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     )).toBe(true);
   });
 
+  it("omits ambiguous multi-target source findings instead of broadcasting them", () => {
+    for (const [topic, focus, excludedPmid] of [
+      ["Omega-3 Supplementation", "fractures infections", "33170239"],
+      ["No Added Sugar Diet", "protein intake", "28919842"],
+    ] as const) {
+      expect(search(topic, focus).items.some((item) =>
+        item.kind === "source_finding"
+        && item.sources.some((source) => source.pmid === excludedPmid)
+      )).toBe(false);
+    }
+  });
+
+  it.each([
+    ["REM Sleep", "consumer sleep trackers accuracy", /33378539|37917155/u],
+    ["HRV / RMSSD", "consumer wearables agreement", /40834291/u],
+  ])("routes measurement findings to %s", (topic, focus, expectedSource) => {
+    const result = search(topic, focus);
+
+    expect(result.items.some((item) =>
+      item.kind === "source_finding"
+      && item.sources.some((source) => expectedSource.test(source.pmid ?? ""))
+      && /measurement/iu.test(item.caveat ?? "")
+    )).toBe(true);
+  });
+
+  it("routes directly sourced SpO2 safety to its measurement owner", () => {
+    const result = search("Blood Oxygen Saturation (SpO₂)", "sleep apnea clinical testing");
+
+    expect(result.safety).toMatchObject({
+      kind: "safety",
+      sources: [expect.objectContaining({ pmid: "28162150" })],
+    });
+  });
+
   it("resolves canonical family and protocol title collisions to the family owner", () => {
     for (const title of [
       "Consistent Wake Time",
@@ -145,6 +179,15 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     }
     expect(search("Hyperbaric Oxygen Therapy", "untreated pneumothorax").safety?.text)
       .toMatch(/untreated pneumothorax|absolute contraindication/iu);
+  });
+
+  it("does not attach page-wide efficacy citations to aggregate safety text", () => {
+    expect(search("Norwegian 4x4", "fainting").safety).toBeNull();
+    const coldPlunge = search("Cold Plunge", "seizure").safety;
+    if (coldPlunge) {
+      expect(coldPlunge.sources.length).toBeGreaterThan(0);
+      expect(coldPlunge.text).not.toMatch(/\b[a-z]+(?:_[a-z]+)+\b/u);
+    }
   });
 
   it("never returns an unsourced ordinary item or an overview row", async () => {
@@ -162,7 +205,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
       expect(database.prepare(`
         SELECT COUNT(*) AS count
         FROM chunks
-        WHERE kind <> 'safety' AND sources_json = '[]'
+        WHERE sources_json = '[]'
       `).get()).toMatchObject({ count: 0 });
       expect(database.prepare(`
         SELECT COUNT(*) AS count
@@ -171,6 +214,12 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
           AND NOT EXISTS (
             SELECT 1 FROM topic_owners t WHERE t.entity_key = c.entity_key
           )
+      `).get()).toMatchObject({ count: 0 });
+      expect(database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM chunks
+        WHERE id LIKE 'finding:source_artifact:pmid-33170239:%'
+           OR id LIKE 'finding:source_artifact:pmid-28919842:%'
       `).get()).toMatchObject({ count: 0 });
       for (const title of [
         "consistent wake time",

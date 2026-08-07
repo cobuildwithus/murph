@@ -383,31 +383,17 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
           id: `finding:${entity.key}:${target.key}:${finding.findingId}:${findingIndex}`,
           kind: safetyFinding ? "safety" : "source_finding",
           priority: safetyFinding ? 10 : 25,
-          searchText: `${entityTopicText(target)} ${finding.summary ?? finding.outcome ?? ""}`,
+          searchText: [
+            entityTopicText(target),
+            entity.source?.title ?? "",
+            finding.population ?? "",
+            finding.exposure ?? "",
+            finding.outcome ?? "",
+            finding.summary ?? "",
+          ].join(" "),
           sources: resolveSources([entity.key], entitiesByKey),
           strength: null,
           text: finding.summary ?? finding.outcome ?? "",
-        });
-      }
-    }
-    if (entity.safety) {
-      const safetyText = [
-        ...(entity.safety.avoidOrGetClinicianGuidance ?? []),
-        ...(entity.safety.stopIf ?? []),
-        ...(entity.safety.notes ?? []),
-      ].join(" ");
-      if (safetyText) {
-        chunks.push({
-          caveat: null,
-          entityKey: entity.key,
-          entityTitle: entity.title,
-          id: `safety:${entity.key}`,
-          kind: "safety",
-          priority: 5,
-          searchText: `${entityTopic} ${safetyText}`,
-          sources: resolveSources(collectEntitySourceKeys(entity), entitiesByKey),
-          strength: entity.safety.cautionLevel,
-          text: safetyText,
         });
       }
     }
@@ -434,7 +420,7 @@ function buildKnowledgeChunks(catalog: HealthCommonsCatalog): KnowledgeChunk[] {
   }
 
   return chunks
-    .filter((chunk) => chunk.kind === "safety" || chunk.sources.length > 0)
+    .filter((chunk) => chunk.sources.length > 0)
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((chunk, index) => ({ ...chunk, id: `${chunk.id}:${index}` }));
 }
@@ -469,13 +455,6 @@ function openKnowledgeDatabase(filePath: string, readOnly = false): DatabaseSync
   return readOnly
     ? new NodeSqliteDatabaseSync(filePath, { readOnly: true })
     : new NodeSqliteDatabaseSync(filePath);
-}
-
-function collectEntitySourceKeys(entity: HealthCommonsCatalogEntity): string[] {
-  return [...new Set([
-    ...(entity.claims ?? []).flatMap((claim) => claim.sourceKeys ?? []),
-    ...(entity.relations ?? []).filter((relation) => relation.type === "cites").map((relation) => relation.target),
-  ])];
 }
 
 function evidencePriority(source: HealthCommonsCatalogEntity | undefined): number {
@@ -522,15 +501,17 @@ function sourceFindingTargets(
     return [entity];
   }
   const relations = entity.relations ?? [];
-  const relatedProtocols = relations.filter((relation) => relation.type === "related_protocol");
-  const selected = relatedProtocols.length > 0
-    ? relatedProtocols
-    : relations.filter((relation) => relation.type === "parent_family");
-  return [...new Set(selected.map((relation) => relation.target))]
-    .flatMap((targetKey) => {
-      const target = entitiesByKey.get(targetKey);
-      return target && target.entityType !== "source_artifact" ? [target] : [];
-    });
+  for (const relationType of ["related_protocol", "parent_family", "measures"] as const) {
+    const targetKeys = [...new Set(relations
+      .filter((relation) => relation.type === relationType)
+      .map((relation) => relation.target))];
+    if (targetKeys.length !== 1) {
+      continue;
+    }
+    const target = entitiesByKey.get(targetKeys[0] ?? "");
+    return target && target.entityType !== "source_artifact" ? [target] : [];
+  }
+  return [];
 }
 
 function toFtsQuery(query: string): string {
