@@ -2834,6 +2834,79 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("warns only for latency rows a trace row rejected, never for untraced inputs", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      mocks.recordHostedIngressProviderStarted.mockResolvedValue({
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+        untracedCount: 1,
+      });
+      const untracedResponse = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            assistantInputIds: ["input_untraced_1"],
+            at: FIXED_NOW,
+            providerRequestOrdinal: 0,
+            runtimeAttemptId: "attempt_routes_1",
+            source: "linq",
+            type: "provider_started",
+          },
+        },
+        runtimeWriteFenceHeaders(),
+      ));
+
+      expect(untracedResponse.status).toBe(200);
+      // The wire contract is unchanged so the runner's existing retry, which
+      // covers a staged callback still in flight, keeps working.
+      expect(parseHostedRuntimeLatencyTraceResponse(await untracedResponse.json())).toEqual({
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+      });
+      expect(warn).not.toHaveBeenCalled();
+
+      mocks.recordHostedIngressProviderStarted.mockResolvedValue({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 2,
+        untracedCount: 1,
+      });
+      const rejectedResponse = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            assistantInputIds: ["input_traced_1", "input_rejected_1", "input_untraced_1"],
+            at: FIXED_NOW,
+            providerRequestOrdinal: 0,
+            runtimeAttemptId: "attempt_routes_1",
+            source: "linq",
+            type: "provider_started",
+          },
+        },
+        runtimeWriteFenceHeaders(),
+      ));
+
+      expect(rejectedResponse.status).toBe(200);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted runtime latency trace callback had rejected rows.",
+        {
+          eventType: "provider_started",
+          matchedCount: 1,
+          rejectedCount: 1,
+          runtimeAttemptId: "attempt_routes_1",
+          source: "linq",
+          untracedCount: 1,
+        },
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("signals a stateless runtime recheck after an accepted runtime attempt failure log", async () => {
     mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
     mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);

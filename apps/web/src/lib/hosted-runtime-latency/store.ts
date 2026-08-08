@@ -92,6 +92,11 @@ export interface HostedIngressLatencyWriteResult {
   matchedCount: number;
   recorded: boolean;
   unmatchedCount: number;
+  // Subset of unmatchedCount whose assistant input has no ingress trace row at
+  // all. Traces exist only for inbound messaging wakes, so an assistant input
+  // the runtime created on its own (scheduled or follow-up turns) is untraced
+  // by construction rather than a write that lost its authority check.
+  untracedCount?: number;
 }
 
 export interface HostedIngressLatencyDeliveryLinkResult {
@@ -410,11 +415,11 @@ export async function recordHostedIngressProviderStarted(input: {
     .map((row) => row.assistantInputId)
     .filter((id): id is string => Boolean(id)));
 
-  return {
-    matchedCount: matchedIds.size,
-    recorded: matchedIds.size > 0,
-    unmatchedCount: assistantInputIds.filter((id) => !matchedIds.has(id)).length,
-  };
+  return buildHostedIngressLatencyWriteResult({
+    assistantInputIds,
+    matchedIds,
+    rows,
+  });
 }
 
 export async function recordHostedIngressAssistantMilestone(input: {
@@ -497,10 +502,29 @@ export async function recordHostedIngressAssistantMilestone(input: {
     .map((row) => row.assistantInputId)
     .filter((id): id is string => Boolean(id)));
 
+  return buildHostedIngressLatencyWriteResult({
+    assistantInputIds,
+    matchedIds,
+    rows,
+  });
+}
+
+function buildHostedIngressLatencyWriteResult(input: {
+  assistantInputIds: readonly string[];
+  matchedIds: ReadonlySet<string>;
+  rows: readonly { assistantInputId: string | null }[];
+}): HostedIngressLatencyWriteResult {
+  const tracedIds = new Set(input.rows
+    .map((row) => row.assistantInputId)
+    .filter((id): id is string => Boolean(id)));
+  const unmatchedIds = input.assistantInputIds.filter((id) => !input.matchedIds.has(id));
+  const untracedCount = unmatchedIds.filter((id) => !tracedIds.has(id)).length;
+
   return {
-    matchedCount: matchedIds.size,
-    recorded: matchedIds.size > 0,
-    unmatchedCount: assistantInputIds.filter((id) => !matchedIds.has(id)).length,
+    matchedCount: input.matchedIds.size,
+    recorded: input.matchedIds.size > 0,
+    unmatchedCount: unmatchedIds.length,
+    ...(untracedCount > 0 ? { untracedCount } : {}),
   };
 }
 

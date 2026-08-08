@@ -1129,6 +1129,74 @@ describe("hosted runtime latency dashboard store", () => {
     expect(trace?.providerRequestOrdinal).toBeNull();
   });
 
+  it("separates untraced assistant inputs from rejected provider start rows", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:11:20.000Z")),
+    });
+
+    await expect(recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_untraced_1"],
+      at: instant("2026-06-02T19:11:21.000Z"),
+      authenticatedUserId: "member_latency_1",
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_untraced_1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+      untracedCount: 1,
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_traced_1",
+      at: instant("2026-06-02T19:11:22.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_untraced_1",
+      source: "linq",
+    });
+
+    await expect(recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_traced_1", "input_untraced_1"],
+      at: instant("2026-06-02T19:11:23.000Z"),
+      authenticatedUserId: "member_latency_1",
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_untraced_1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 1,
+      untracedCount: 1,
+    });
+  });
+
+  it("reports assistant milestones for untraced assistant inputs as untraced", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:11:40.000Z")),
+    });
+
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_untraced_2"],
+      at: instant("2026-06-02T19:11:41.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "first_codex_output_observed",
+      prisma,
+      runtimeAttemptId: "attempt_untraced_2",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+      untracedCount: 1,
+    });
+  });
+
   it("transfers terminal refresh ownership to the recovery attempt", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:12:20.000Z")),
