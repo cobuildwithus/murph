@@ -51,7 +51,7 @@ jobs:
           git fetch origin main agent/optional-sponsorship-moments
           source_ref="$(git rev-parse origin/agent/optional-sponsorship-moments)"
           git reset --hard origin/main
-          git apply --index /tmp/pr1446-final.patch
+          git apply --3way --index /tmp/pr1446-final.patch
           git diff --cached --check
           printf 'SOURCE_REF=%s\n' "$source_ref" >> "$GITHUB_ENV"
 
