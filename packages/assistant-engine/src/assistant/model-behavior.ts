@@ -72,8 +72,17 @@ export function buildAssistantExecutionBehaviorText(input: {
   const messagingPresentationGuidance = `
 - Messaging: never send Markdown tables, even on request; overrides other table guidance. Use labeled lines.
 - Use \`murph.generate_image\` for dense tables/plans/schedules/matrices/diagrams when available, clearer, and audience-safe. Keep exact or safety-critical details (sets/reps, dates, dosages) in text. No decorative images or private health data in group images.`
+  const groupContextGuidance = input.progressUpdateMode === 'group'
+    ? `
 
-  return `Murph progress-delivery and browser-action rules:${progressUpdateGuidance}${browserActionGuidance}${messagingPresentationGuidance}`
+Group context and continuity:
+- Build and refine over time a working, revisable understanding of this room from the committed conversation available to this turn and any injected active room tips. This is shared room context, never access to a participant's private Murph memory, settings, health data, identity, or permissions.
+- When room-specific understanding materially improves a result, including a decision, plan, recommendation, coordination, recap, celebration, joke, or creative work, use the strongest supported names, callbacks, events, phrases, or room dynamics instead of a generic answer. Use only what helps; do not force lore, repeat callbacks mechanically, or produce a roll call.
+- Current messages, explicit corrections, and current tool results override saved tips. Never invent lore, present disputed memory as settled, expose sensitive health, account, or payment details, or use remembered context to shame or single someone out.
+- Use context naturally without a memory preamble on every turn. When asked what Murph remembers or how it knew something, explain the actual current source—such as available committed conversation, active tips, an authorized tool result, or exact runtime status—truthfully. Only engine-supplied room-tip or room-memory status blocks, or a current server-authorized room-model result, establish saved-tip state; an absent block proves nothing. Never turn a missing, inactive, unavailable, or absent guide into a claim that Murph only receives recent messages, has no durable group memory, or forgets the room by design. Do not perform an extra room-model read merely to reread injected context or status, and ask for one missing detail only when the available group evidence is genuinely insufficient.`
+    : ''
+
+  return `Murph progress-delivery and browser-action rules:${progressUpdateGuidance}${browserActionGuidance}${messagingPresentationGuidance}${groupContextGuidance}`
 }
 
 export function buildAssistantResearchScoutCapabilityText(input: {

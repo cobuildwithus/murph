@@ -5,11 +5,15 @@ import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
-import type {
-  HostedRuntimeLatencyPhaseBreakdown,
+import {
+  type HostedRuntimeLatencyPhaseBreakdown,
+  isHostedRuntimeDirectEnsureOrchestrationAttemptId,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
+import type {
+  WorkerAnalyticsEngineDatasetLike,
+} from "../worker-contracts.js";
 import {
   destroyHostedExecutionContainer,
   type HostedExecutionContainerNamespaceLike,
@@ -44,7 +48,7 @@ import {
 import {
   computeRuntimeProcessingOwnerRecheckAt as computeRuntimeProcessingOwnerRecheckAtValue,
   computeRuntimeProcessingRetryAt as computeRuntimeProcessingRetryAtValue,
-  createRuntimeProcessingRetryLater,
+  createRuntimeProcessingRetryLater as createRuntimeProcessingRetryLaterResponse,
 } from "./runtime-processing-responses.js";
 import {
   RuntimeInvocationService,
@@ -149,9 +153,20 @@ export class RuntimeProcessingController {
       invocationService: RuntimeInvocationService;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
+      runtimeRetryAnalytics?: WorkerAnalyticsEngineDatasetLike | null;
       stateStore: RunnerStateStore;
     },
   ) {}
+
+  private createRetryLater(input: {
+    reason: RuntimeProcessingRetryReason;
+    userId: string;
+  }): HostedRuntimeEnsureProcessingResponse {
+    return createRuntimeProcessingRetryLaterResponse({
+      ...input,
+      analytics: this.input.runtimeRetryAnalytics ?? null,
+    });
+  }
 
   async ensureForUser(
     input: RuntimeProcessingInput,
@@ -159,6 +174,7 @@ export class RuntimeProcessingController {
     const runtimeWakeStartedAt = Date.now();
     const processingInput = withRuntimeProcessingOrchestration(input, {
       userRunnerEnsureStartedAtEpochMs: runtimeWakeStartedAt,
+      runnerStateBindStartedAtEpochMs: Date.now(),
     });
     const commandBudget = createRuntimeProcessingCommandBudget({
       commandTimeoutMs: processingInput.commandTimeoutMs ?? null,
@@ -166,11 +182,18 @@ export class RuntimeProcessingController {
       webControlTimeoutMs: this.input.env.webControlTimeoutMs,
     });
     await this.input.stateStore.bindUser(processingInput.userId);
+    const stateReadInput = withRuntimeProcessingOrchestration(processingInput, {
+      runnerStateBindFinishedAtEpochMs: Date.now(),
+      runnerStateReadStartedAtEpochMs: Date.now(),
+    });
     const record = await this.input.stateStore.readState();
+    const stateReadyInput = withRuntimeProcessingOrchestration(stateReadInput, {
+      runnerStateReadFinishedAtEpochMs: Date.now(),
+    });
     if (record.writeFence) {
       return await this.ensureExistingRuntimeProcessing({
         commandBudget,
-        input: withRuntimeProcessingOrchestration(processingInput, {
+        input: withRuntimeProcessingOrchestration(stateReadyInput, {
           activeFenceObservedAtEpochMs: Date.now(),
         }),
         record,
@@ -180,7 +203,7 @@ export class RuntimeProcessingController {
     return await this.startRuntimeProcessing({
       action: "started",
       commandBudget,
-      input: processingInput,
+      input: stateReadyInput,
       runtimeWakeStartedAt,
     });
   }
@@ -285,7 +308,7 @@ export class RuntimeProcessingController {
     const record = input.record;
     if (!record.writeFence) {
       if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
-        return createRuntimeProcessingRetryLater({
+        return this.createRetryLater({
           reason: "command_budget_exhausted",
           userId: input.input.userId,
         });
@@ -300,7 +323,7 @@ export class RuntimeProcessingController {
 
     const activeFence = record.writeFence;
     if (activeFence.kind !== "runtime") {
-      return createRuntimeProcessingRetryLater({
+      return this.createRetryLater({
         reason: "container_busy",
         userId: input.input.userId,
       });
@@ -340,7 +363,7 @@ export class RuntimeProcessingController {
         });
       }
 
-      return createRuntimeProcessingRetryLater({
+      return this.createRetryLater({
         reason: "container_busy",
         userId: input.input.userId,
       });
@@ -363,7 +386,7 @@ export class RuntimeProcessingController {
         });
       }
       if (activeRuntimeState.outcome !== "exact-active") {
-        return createRuntimeProcessingRetryLater({
+        return this.createRetryLater({
           reason: "container_rpc_error",
           userId: input.input.userId,
         });
@@ -459,7 +482,7 @@ export class RuntimeProcessingController {
       });
     }
 
-    return createRuntimeProcessingRetryLater({
+    return this.createRetryLater({
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
       userId: input.input.userId,
     });
@@ -479,7 +502,7 @@ export class RuntimeProcessingController {
       input.preserveStartingFence !== false
       && this.shouldPreserveStartingWriteFence(activeFence)
     ) {
-      return createRuntimeProcessingRetryLater({
+      return this.createRetryLater({
         reason: "starting_fence_preserved",
         userId: input.input.userId,
       });
@@ -509,7 +532,7 @@ export class RuntimeProcessingController {
       });
     }
     if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
-      return createRuntimeProcessingRetryLater({
+      return this.createRetryLater({
         reason: "command_budget_exhausted",
         userId: input.input.userId,
       });
@@ -581,7 +604,7 @@ export class RuntimeProcessingController {
     if (!namespace || !containerName) {
       return {
         aborted: false,
-        response: createRuntimeProcessingRetryLater({
+        response: this.createRetryLater({
           reason: "container_rpc_error",
           userId: input.record.userId,
         }),
@@ -592,7 +615,7 @@ export class RuntimeProcessingController {
     if (!container.abortWorkspaceInvocation) {
       return {
         aborted: false,
-        response: createRuntimeProcessingRetryLater({
+        response: this.createRetryLater({
           reason: "container_busy",
           userId: input.record.userId,
         }),
@@ -618,7 +641,7 @@ export class RuntimeProcessingController {
       }
       return {
         aborted: false,
-        response: createRuntimeProcessingRetryLater({
+        response: this.createRetryLater({
           reason: abortStatus === "failed"
             ? "container_rpc_error"
             : "container_busy",
@@ -636,7 +659,7 @@ export class RuntimeProcessingController {
       });
       return {
         aborted: false,
-        response: createRuntimeProcessingRetryLater({
+        response: this.createRetryLater({
           reason: isRuntimeProcessingCommandBudgetTimeout(error)
             ? "container_rpc_timeout"
             : "container_rpc_error",
@@ -742,7 +765,7 @@ export class RuntimeProcessingController {
     });
 
     if (!this.input.runnerContainerNamespace) {
-      return createRuntimeProcessingRetryLater({
+      return this.createRetryLater({
         reason: "missing_container_binding",
         userId: processingInput.userId,
       });
@@ -766,8 +789,23 @@ export class RuntimeProcessingController {
         runnerContainerName,
         userId: processingInput.userId,
       });
+      // Launch identity belongs to the request that acquired this fresh fence.
+      // Active wakes never reach this point and therefore cannot claim it.
+      const triggeredByWebDirect =
+        processingInput.orchestration?.triggeredByWebDirect === true;
+      const runtimeInvocationOrchestrationAttemptId =
+        triggeredByWebDirect
+          && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+            processingInput.orchestrationAttemptId,
+          )
+          ? processingInput.orchestrationAttemptId
+          : null;
       processingInput = withRuntimeProcessingOrchestration(processingInput, {
         freshStartFenceBoundAtEpochMs: Date.now(),
+        triggeredByWebDirect,
+        ...(runtimeInvocationOrchestrationAttemptId === null
+          ? {}
+          : { runtimeInvocationOrchestrationAttemptId }),
       });
     } catch (error) {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
@@ -1021,7 +1059,7 @@ export class RuntimeProcessingController {
     if (!this.input.runnerContainerNamespace) {
       return {
         confirmed: false,
-        response: createRuntimeProcessingRetryLater({
+        response: this.createRetryLater({
           reason: "missing_container_binding",
           userId: input.input.userId,
         }),
@@ -1130,7 +1168,7 @@ export class RuntimeProcessingController {
     });
     return {
       confirmed: false,
-      response: createRuntimeProcessingRetryLater({
+      response: this.createRetryLater({
         reason: retryReason,
         userId: input.input.userId,
       }),

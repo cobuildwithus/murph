@@ -145,14 +145,23 @@ bounded seven-day tail of committed transcripts from those same authenticated
 group-chat channels. It fully rewrites the one page only when the evidence
 materially improves a compact list of room canon, likely person-specific comedy
 preferences, successful Murph formats, retired material, and open callbacks.
+Silent consolidation targets a compact 2-6 KiB guide and treats 20 KiB as a
+generous soft ceiling, never a write gate. When the page exceeds that ceiling,
+is materially bloated with duplicate or stale detail, or approaches the
+defensive 64 KiB serialized-page limit, the next evidence-supported rewrite
+merges duplicates, summarizes old examples into durable patterns, and prunes
+stale or completed detail while preserving explicit setup, current boundaries,
+unresolved loops, and high-confidence room or participant patterns.
 One dedicated owner reads, replaces, or deletes the fixed page. Generic
 knowledge show, list, search, append, upsert, and generated index surfaces
 exclude it. Every mutation passes the digest returned by the immediately prior
 show and compares that digest under the same fixed-page lock, so a concurrent
-rewrite cannot be lost. Replacement validates the normalized body and complete
-6 KiB advisory envelope before writing; ordinary prompts never truncate an
-accepted page. Raw `Sender:` handles remain transient evidence attribution and
-cannot be persisted in the page.
+rewrite cannot be lost. There is no separate authored-body byte cap. Replacement
+validates the complete serialized fixed page against the defensive 64 KiB raw
+file ceiling before writing. Ordinary prompts render the complete accepted page
+without revalidating it against a wrapper-dependent byte ceiling. Raw `Sender:`
+handles remain transient evidence attribution and cannot be persisted in the
+page.
 
 Ordinary authenticated hosted group-chat turns read that fixed page directly
 from the same group vault and append a bounded rendering to dynamic turn
@@ -163,14 +172,18 @@ the page nor contributes maintenance evidence, and its spoofable sender cannot
 receive the mutation tool. Silent consolidation receives that same dynamic tool
 only from the immutable managed-automation id, runs in a fresh one-shot Codex
 thread with workspace access denied and network disabled, and has no generic
-knowledge or shell write surface. Ordinary prompt reads fail open, but mutation reads
-distinguish a genuinely missing page from malformed, unreadable, or wrong-type
-fixed-slug state; conflicts stop both explicit and scheduled replacement. The
-rendering is quoted as fallible data and
-explicitly tells the model to skim it lightly: most turns should use none of it,
-and at most one naturally relevant tip should shape a reply. Current
-conversation, safety rules, authoritative tool results, and explicit canonical
-room style settings always outrank it. This adds no database table, mailbox
+knowledge or shell write surface.
+Ordinary prompt reads fail open by withholding every unusable page body and
+injecting only a compact trusted status for missing, inactive, or unavailable
+state. Mutation reads still distinguish a genuinely missing page from malformed,
+unreadable, or wrong-type fixed-slug state; conflicts stop both explicit and
+scheduled replacement. The rendering remains quoted as fallible data. The
+resident group-context principle uses the smallest relevant safe set, combines
+several details only when shared history is essential, and applies room context
+whenever it materially improves the current result without forcing callbacks or
+roll calls. Current messages, explicit corrections, safety rules, authoritative
+tool results, and explicit canonical room style settings always outrank it.
+This adds no database table, mailbox
 kind, roster service, cursor, vector index, per-participant page, or pruning
 workflow; the admitted committed transcript is evidence and the single page is
 the only durable room-intelligence owner.
@@ -1420,15 +1433,18 @@ existing direct Linq chat owns native-card delivery without a reverse map or a
 new-chat workaround. Same-route inputs accepted during the live turn may update
 the reply message, reaction capability, and delivery idempotency inputs, but do
 not recreate the explicit-target override or replace the turn's thread binding.
-Linq owns the
-noninteractive static transcript layout, which carries the date, meal count,
-available totals, an explicit partial marker, and the first available exact V2
-goal plus its frozen status in canonical metric order. Its required URL is a
-fixed, non-sensitive HTTPS product URL rather than encoded card state. The
+Linq explicitly requests interactive transcript rendering. A recipient with
+the shipping Messages extension sees the extension-owned SwiftUI balloon; a
+recipient without it sees the same provider-owned static layout carrying the
+date, meal count, available totals, explicit partial marker, and first
+available exact V2 goal plus its frozen status. The required HTTPS URL keeps
+the immutable V1 or V2 presentation snapshot in a bounded Base64URL fragment
+that the extension decodes offline. Encoding is not encryption, so that
+fragment may contain only the same private-direct card values and never member
+identity, canonical record references, credentials, or other authority. The
 fallback body remains value-free and names a truthful text-recovery action to
-avoid Apple data-detector downgrade; the installed extension does not own
-balloon visibility. No card API, database, auth path, cleanup owner, extension
-network read, or second queue exists.
+avoid Apple data-detector downgrade. No card API, database, auth path, cleanup
+owner, extension network read, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -2434,7 +2450,8 @@ flows inside the local TypeScript workspace.
 ## Tracked Compact Table Response Cards
 
 Compact table response cards reuse the existing outbox-owned immutable effect
-and provider-rendered static Linq balloon. A compact card is a bounded
+and interactive Messages-extension balloon, with Linq's static layout retained
+for recipients without the extension. A compact card is a bounded
 presentation snapshot, never a mutable tracker: canonical workout events remain
 the only workout authority, qualitative set annotations live on canonical set
 notes, and an update is complete only after a successful workout re-read
@@ -2453,10 +2470,11 @@ the same bounded health-related values visible in the immutable message, but it
 must never contain a member identity, canonical record reference, credential,
 or other authority. The provider request rejects encoded URLs at 2,048
 characters, while the contract applies the same aggregate bound before
-delivery. Nutrition cards keep their existing fixed HTTPS URL and
-provider-rendered summary layout. The Messages extension remains offline and
-read-only. This adds no card API, database, background synchronization owner,
-authentication surface, or mutable message state.
+delivery. Nutrition V1 and V2 cards use the same bounded fragment family
+without a tracking field, while the provider-rendered summary remains their
+fallback layout. The Messages extension remains offline and read-only. This
+adds no card API, database, background synchronization owner, authentication
+surface, or mutable message state.
 
 ## Scheduled assistant tool authority
 

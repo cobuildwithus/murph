@@ -1622,6 +1622,12 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(config.triggers).toEqual({
       crons: ["*/5 * * * *"],
     });
+    expect(config.analytics_engine_datasets).toEqual([
+      {
+        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
+        dataset: "murph_hosted_runtime_retries",
+      },
+    ]);
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.image_vars).toEqual({

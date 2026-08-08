@@ -1800,6 +1800,7 @@ export async function runHostedWorkspaceAssistantPhase(
             source: "linq",
           },
           linqDeliveryContexts: initialLinqDeliveryContexts,
+          platform: input.runtime.platform,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
           publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
@@ -6290,6 +6291,7 @@ async function drainHostedPostCheckpointDelivery(input: {
             yieldedEffectCount,
           );
         },
+        platform: input.input.runtime.platform,
         platformEnv: input.input.runtime.platformEnv,
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,
