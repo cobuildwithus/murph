@@ -1692,13 +1692,13 @@ function currentHostedMailboxItemId(
 
 function buildGeneratedImageCaptureIdempotencyKey(
   input: {
+    requestId: string | null
     scope: 'contact-card-avatar' | 'generate-image' | 'group-avatar'
-    toolCallId: string | null
   },
 ): string | null {
-  const toolCallId = normalizeNullableString(input.toolCallId)
-  return toolCallId
-    ? `murph.dynamic-tool.${input.scope}:${toolCallId}`
+  const requestId = normalizeNullableString(input.requestId)
+  return requestId
+    ? `murph.dynamic-tool.${input.scope}:${requestId}`
     : null
 }
 
@@ -2529,7 +2529,7 @@ export async function executeMurphDynamicToolRequest(input: {
       }
 
       const captureIdempotencyKey = buildGeneratedImageCaptureIdempotencyKey({
-        toolCallId: readGeneratedImageToolCallId(input.request),
+        requestId: readGeneratedImageToolCallId(input.request),
         scope: 'generate-image',
       })
       const imageGenerationLauncher =
@@ -3707,6 +3707,9 @@ async function executeGroupTool(input: {
     const contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
+      // The accepted request, not the tool call: a replay must reuse this
+      // capture rather than pay for a second stochastic generation.
+      captureRequestId: contactCardShareKey,
       captureScope: 'contact-card-avatar',
       env: input.env,
       fetchImpl: input.fetchImpl,
@@ -3717,7 +3720,6 @@ async function executeGroupTool(input: {
         action: 'set_chat_avatar',
         avatar: input.request.avatar,
       },
-      toolCallId: input.toolCallId,
       vaultRoot: input.vaultRoot,
     })
     if (!prepared.rpcSuccess) {
@@ -3775,6 +3777,7 @@ async function executeGroupTool(input: {
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
+      captureRequestId: input.toolCallId,
       captureScope: 'group-avatar',
       env: input.env,
       fetchImpl: input.fetchImpl,
@@ -3782,7 +3785,6 @@ async function executeGroupTool(input: {
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       nextUsageOrdinal: input.nextUsageOrdinal,
       request: input.request,
-      toolCallId: input.toolCallId,
       vaultRoot: input.vaultRoot,
     })
     if (!prepared.rpcSuccess) {
@@ -4198,6 +4200,12 @@ function isPreparedGroupAvatarRequest(
 
 async function prepareGroupAvatarRuntimeRequest(input: {
   abortSignal: AbortSignal | null
+  /**
+   * Identity that owns the generated capture. A replayed turn re-emits the
+   * tool call with a new id, so a caller whose effect must survive a replay
+   * passes its accepted-request id here instead.
+   */
+  captureRequestId: string | null
   captureScope: 'contact-card-avatar' | 'group-avatar'
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
@@ -4208,7 +4216,6 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     MurphGroupToolRequest,
     { action: 'set_chat_avatar'; avatar: unknown }
   >
-  toolCallId: string | null
   vaultRoot: string | null
 }): Promise<
   | {
@@ -4238,8 +4245,8 @@ async function prepareGroupAvatarRuntimeRequest(input: {
           }
         : avatar.args,
       captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
+        requestId: input.captureRequestId,
         scope: input.captureScope,
-        toolCallId: input.toolCallId,
       }),
       env: input.env,
       fetchImpl: input.fetchImpl,
