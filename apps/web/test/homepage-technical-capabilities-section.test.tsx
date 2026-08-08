@@ -12,8 +12,9 @@ test("TechnicalCapabilitiesSection renders the agent runtime and inference choic
   );
 
   assert.match(markup, /Under the hood/);
-  assert.match(markup, /There’s a computer on the other end\./);
+  assert.match(markup, /Built on Codex, with a computer of its own\./);
   assert.match(markup, /Codex CLI \+ App Server/);
+  assert.match(markup, /be the most capable health agent in the world/);
   assert.match(markup, /Its own computer/);
   assert.match(markup, /A real phone number/);
   assert.match(markup, /Bounded subagents/);

@@ -105,7 +105,7 @@ export function TechnicalCapabilitiesSection({
               className="mt-6 max-w-[16ch] text-balance font-serif text-[clamp(2rem,4.5vw,3.5rem)] font-semibold leading-[1.05] tracking-[-0.03em]"
               id="technical-capabilities-title"
             >
-              There&rsquo;s a computer on the other end.
+              Built on Codex, with&nbsp;a&nbsp;computer of&nbsp;its&nbsp;own.
             </h2>
             <p className="mt-6 max-w-[46ch] text-pretty text-base leading-[1.75] text-[#f5f0e8]/70 sm:text-[1.0625rem]">
               Murph can use a browser, place phone calls, operate tools, and
@@ -211,13 +211,13 @@ function RuntimeDossier() {
         </dl>
 
         <div className="mt-3 border-t border-white/8 pt-4 font-mono text-[0.75rem] leading-[1.9] text-[#f5f0e8]/60">
-          <p>
+          <p className="-indent-[2ch] pl-[2ch]">
             <span className="select-none text-[#d4b87a]" aria-hidden="true">
               {"> "}
             </span>
-            select the lightest capable path
+            be the most capable health agent in the world
           </p>
-          <p>
+          <p className="-indent-[2ch] pl-[2ch]">
             <span className="select-none text-[#d4b87a]" aria-hidden="true">
               {"> "}
             </span>
