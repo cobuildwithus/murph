@@ -1,0 +1,93 @@
+name: Publish non-expiring Starter usage without workflow file
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-export-starter-usage-split.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run reconstructed publisher without the workflow change
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          source_path = Path(
+              ".github/workflows/codex-export-starter-usage-final.yml"
+          )
+          lines = source_path.read_text().splitlines(keepends=True)
+          start = next(
+              index
+              for index, line in enumerate(lines)
+              if line == "        run: |\n"
+          )
+          end = next(
+              index
+              for index in range(start + 1, len(lines))
+              if lines[index].startswith(
+                  "      - name: Upload publish diagnostics"
+              )
+          )
+
+          script_lines: list[str] = []
+          for line in lines[start + 1 : end]:
+              if line.startswith("          "):
+                  script_lines.append(line[10:])
+              elif line.strip() == "":
+                  script_lines.append("\n")
+              else:
+                  raise RuntimeError(
+                      f"Unexpected publisher indentation: {line!r}"
+                  )
+
+          script = "".join(script_lines)
+          commit_line = (
+              'git commit -m "Replace timed trial with starter usage"\n'
+          )
+          if script.count(commit_line) != 1:
+              raise RuntimeError("Could not locate the publisher commit line")
+
+          split_workflow_change = (
+              "cp .github/workflows/hosted-stripe-billing.yml "
+              "/tmp/hosted-stripe-billing.yml\n"
+              "git restore --source=origin/main --staged --worktree -- "
+              ".github/workflows/hosted-stripe-billing.yml\n"
+              "git diff --cached --check\n"
+              + commit_line
+          )
+          script = script.replace(
+              commit_line,
+              split_workflow_change,
+              1,
+          )
+          Path("/tmp/publish.sh").write_text(script)
+          PY
+
+          bash /tmp/publish.sh
+
+      - name: Upload publish diagnostics and deferred workflow
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: starter-usage-split-publish
+          path: |
+            /tmp/publish-result.txt
+            /tmp/git-apply.log
+            /tmp/conflicts.patch
+            /tmp/hosted-stripe-billing.yml
+          if-no-files-found: warn
+          retention-days: 1
