@@ -1,0 +1,54 @@
+name: Repair PR 1446 patch transport
+
+on:
+  push:
+    branches:
+      - agent/pr1446-recover-finalizer
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repair-pr1446-patch-transport
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Rebuild the two transport files from verified small chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/pr1446-final-small/{00,01,02,03,04,05,06,07,08,09,10} \
+            | tr -d '\r\n ' \
+            > /tmp/pr1446-final.patch.gz.b64
+          echo 'd59454deba9e92ff61fcec2c6b2cab437d7f04bbf743ca7ffcea0261aff5f47d  /tmp/pr1446-final.patch.gz.b64' \
+            | sha256sum --check
+
+          head -c 18000 /tmp/pr1446-final.patch.gz.b64 \
+            > scripts/pr1446-final/00
+          tail -c +18001 /tmp/pr1446-final.patch.gz.b64 \
+            > scripts/pr1446-final/01
+
+          cat scripts/pr1446-final/{00,01} \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/pr1446-final.patch
+          echo '1d92ac0a305f0cef6fcb7bbf5405929fbe2b767e1a2e0dac3b0ac6f1d8cc7a04  /tmp/pr1446-final.patch' \
+            | sha256sum --check
+
+      - name: Commit the repaired transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add scripts/pr1446-final/00 scripts/pr1446-final/01
+          git diff --cached --check
+          git commit -m "Repair PR 1446 patch transport"
+          git push origin HEAD:agent/pr1446-recover-finalizer
