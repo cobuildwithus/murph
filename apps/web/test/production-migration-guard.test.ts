@@ -1371,7 +1371,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       releaseMigrationScript,
-      "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
+      "pnpm --dir ../.. exec tsx --tsconfig tsconfig.base.json apps/web/scripts/run-production-migrations.ts",
     );
     assert.equal(
       deploymentProtectionScript,
