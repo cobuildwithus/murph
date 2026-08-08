@@ -13,7 +13,10 @@ Let a member explicitly ask Murph in a personal iMessage conversation for a new 
 - This is a one-shot contact-card send, not a persistent Murph profile setting.
 - The personalized path requires fresh direct user input and an exact direct iMessage route.
 - Murph generates a low-quality square JPEG with `output_compression: 40` to reduce payload size against the existing vCard-photo envelope, durably captures it, publishes it through the existing short-lived private-image path, requires that photo to load, embeds it in the first-party vCard, and sends the vCard through the existing Linq attachment path.
-- Personalized sends reuse the existing durable contact-card reservation table under a separate blinded per-chat variant key, so automatic or canonical cards cannot suppress an explicit personalized request.
+- An unsupported route (direct SMS, or a missing or ambiguous direct route) is refused before any generation, capture, or publication work, so the member never waits out a slow tool for a card that could never be delivered.
+- Personalized sends reuse the existing durable contact-card reservation table under a separate blinded per-chat variant key, keyed additionally by the trusted accepted-request identity. Automatic or canonical cards cannot suppress an explicit personalized request, a retried or replayed turn still collapses to one card, and a genuinely new request inside the window is admitted.
+- The operation-scope Linq delivery-context producer carries the event's real `threadIsDirect` value instead of admitting group threads only, which is what makes the direct route reachable at all. Group resolvers select `false` and the direct resolver selects `true`, so neither reads the other's route.
+- The model chooses only the picture description. Photo quality and alt text are not member-visible choices, so the tool schema does not expose them.
 - Contact-card images and group-chat avatars use distinct generated-capture namespaces even when a provider retry reuses the same RPC call id.
 - iOS still owns whether the member saves or updates the contact.
 - Existing canonical group contact-card sharing remains owner-only and unchanged.

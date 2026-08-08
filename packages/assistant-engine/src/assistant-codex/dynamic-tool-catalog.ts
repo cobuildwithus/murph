@@ -933,22 +933,6 @@ export const MURPH_GROUP_TOOL = {
         description:
           'Optional only for action="share_contact_card" after an explicit request in a personal iMessage conversation. Generates a square Murph contact photo and sends a saveable vCard to that current conversation; omit it to share the canonical group card.',
       },
-      avatarAlt: {
-        anyOf: [
-          { type: 'string', minLength: 1, maxLength: 500 },
-          { type: 'null' },
-        ],
-        default: null,
-        description:
-          'Optional accessibility description for the generated contact photo.',
-      },
-      avatarQuality: {
-        type: 'string',
-        enum: ['low', 'medium', 'high'],
-        default: 'medium',
-        description:
-          'Optional generated contact-photo quality for action="share_contact_card".',
-      },
       avatarSource: {
         type: 'string',
         enum: ['generate', 'image_ref'],

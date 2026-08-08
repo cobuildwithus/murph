@@ -1000,29 +1000,45 @@ describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
     runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
       publicBaseUrl: "https://www.withmurph.ai",
     });
-    const bytes = new Uint8Array([1, 2, 3, 4]);
     const callerSignal = new AbortController().signal;
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      return new Response(bytes, {
-        headers: { "content-type": "image/png" },
-        status: 200,
-      });
-    });
+    const localTimeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValue(localTimeout.signal);
+    const fetchImpl = vi.fn((
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("Expected a photo-fetch abort signal."));
+        return;
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
 
-    await expect(fetchMurphHostedLinqContactCardVcfPhoto({
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      signal: callerSignal,
-    })).resolves.toEqual({
-      base64: Buffer.from(bytes).toString("base64"),
-      type: "PNG",
-    });
-    expect(fetchImpl).toHaveBeenCalledOnce();
-    const signal = fetchImpl.mock.calls[0]?.[1]?.signal;
-    if (!signal) {
-      throw new Error("Expected a composed photo-fetch abort signal.");
+    try {
+      const photoPromise = fetchMurphHostedLinqContactCardVcfPhoto({
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        signal: callerSignal,
+      });
+
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+      const signal = fetchImpl.mock.calls[0]?.[1]?.signal;
+      if (!signal) {
+        throw new Error("Expected a composed photo-fetch abort signal.");
+      }
+      expect(signal).not.toBe(callerSignal);
+      expect(signal.aborted).toBe(false);
+
+      localTimeout.abort();
+
+      await expect(photoPromise).resolves.toBeNull();
+      expect(signal.aborted).toBe(true);
+      expect(callerSignal.aborted).toBe(false);
+    } finally {
+      timeoutSpy.mockRestore();
     }
-    expect(signal).not.toBe(callerSignal);
-    expect(signal.aborted).toBe(false);
   });
 
   it("fails soft to null on provider errors and oversized bodies", async () => {

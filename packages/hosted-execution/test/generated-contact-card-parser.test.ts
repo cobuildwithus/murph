@@ -31,6 +31,31 @@ describe("generated contact-card runtime request", () => {
     });
   });
 
+  it("carries a bounded host-owned share key and rejects an oversized one", () => {
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "share_contact_card",
+      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+      contactCardShareKey: "asst_input_abc123",
+      linqThread: LINQ_THREAD,
+    }, {
+      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
+    })).toEqual({
+      action: "share_contact_card",
+      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+      contactCardShareKey: "asst_input_abc123",
+      linqThread: LINQ_THREAD,
+    });
+
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "share_contact_card",
+      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+      contactCardShareKey: "a".repeat(201),
+      linqThread: LINQ_THREAD,
+    }, {
+      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
+    })).toThrow(/contactCardShareKey/u);
+  });
+
   it("rejects untrusted image origins and model-supplied extra fields", () => {
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "share_contact_card",

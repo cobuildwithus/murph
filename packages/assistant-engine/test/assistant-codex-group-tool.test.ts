@@ -359,11 +359,25 @@ describe("murph.group dynamic tool", () => {
       request: { action: "share_contact_card" },
     });
 
+    // The vCard has no recipient-visible alt channel, so the schema must not
+    // offer the model an alt field that would be discarded before delivery.
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "share_contact_card",
       avatarAlt: "A friendly Murph portrait",
       avatarPrompt: "A friendly square portrait of Murph",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    // Photo quality is not a member-visible choice, so the schema must not
+    // offer the model a hidden latency/cost/fidelity control.
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "share_contact_card",
+      avatarPrompt: "A friendly square portrait of Murph",
       avatarQuality: "high",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "share_contact_card",
+      avatarPrompt: "A friendly square portrait of Murph",
     }))).toEqual({
       kind: "group",
       request: {
@@ -371,10 +385,10 @@ describe("murph.group dynamic tool", () => {
         avatar: {
           source: "generate",
           args: {
-            alt: "A friendly Murph portrait",
+            alt: null,
             outputFormat: "jpeg",
             prompt: "A friendly square portrait of Murph",
-            quality: "high",
+            quality: "medium",
             referenceImageRefs: [],
             size: "1024x1024",
           },
@@ -3529,9 +3543,7 @@ describe("murph.group dynamic tool", () => {
       }));
       const request = readMurphDynamicToolRequest(groupToolCall({
         action: "share_contact_card",
-        avatarAlt: "A friendly Murph portrait",
         avatarPrompt: "A friendly square portrait of Murph",
-        avatarQuality: "high",
       }));
       if (!request || request.kind !== "group") {
         throw new Error("Expected group request.");
@@ -3577,6 +3589,8 @@ describe("murph.group dynamic tool", () => {
       expect(groupRequest).toHaveBeenCalledExactlyOnceWith({
         action: "share_contact_card",
         contactCardImageUrl: SIGNED_PRIVATE_JPEG_URL,
+        // Host-owned accepted-input identity, never the tool call id.
+        contactCardShareKey: FRESH_ASSISTANT_INPUT_ID,
       });
       expect(result.usageDraft).toMatchObject({ providerRequestOrdinal: 9 });
     } finally {
@@ -3735,6 +3749,112 @@ describe("murph.group dynamic tool", () => {
           inboundMailboxItemIds: ["mailbox_group"],
           originSessionId: "session_group",
           recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult).toEqual({
+      contentItems: [{
+        text: "personalized contact cards require a fresh user request in a personal direct conversation",
+        type: "inputText",
+      }],
+      success: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(groupRequest).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "SMS",
+      status: {
+        status: "unavailable" as const,
+        unavailableReason: "sms_attachments_unsupported",
+      },
+    },
+    {
+      label: "a missing or ambiguous direct route",
+      status: {
+        status: "unavailable" as const,
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+    },
+  ])(
+    "refuses generated contact cards on $label before any generation work",
+    async ({ status }) => {
+      const groupRequest = vi.fn<GroupToolRequest>();
+      const fetchImpl = vi.fn();
+      const privateImageUrlPublish = vi.fn();
+      const persistGeneratedImageCapture = vi.fn();
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "share_contact_card",
+        avatarPrompt: "A friendly square portrait of Murph",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: { OPENAI_API_KEY: "openai-test-key" },
+        fetchImpl: fetchImpl as typeof fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_direct",
+            conversationScope: "direct",
+            inboundMailboxItemIds: ["mailbox_direct"],
+            originSessionId: "session_direct",
+            recipientKey: "recipient_direct",
+          }),
+          directAttachmentRouteStatus: () => status,
+          groupRequest,
+          persistGeneratedImageCapture,
+          privateImageUrlPublish,
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot: null,
+      });
+
+      expect(readGroupToolPayload(result)).toEqual({
+        action: "share_contact_card",
+        result: status,
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(persistGeneratedImageCapture).not.toHaveBeenCalled();
+      expect(privateImageUrlPublish).not.toHaveBeenCalled();
+      expect(groupRequest).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects generated contact cards without fresh accepted direct input", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>();
+    const fetchImpl = vi.fn();
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "share_contact_card",
+      avatarPrompt: "A friendly square portrait of Murph",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: "openai-test-key" },
+      fetchImpl: fetchImpl as typeof fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [],
+          conversationId: "conversation_direct",
+          conversationScope: "direct",
+          inboundMailboxItemIds: [],
+          originSessionId: "session_direct",
+          recipientKey: "recipient_direct",
         }),
         groupRequest,
       }),
@@ -5272,6 +5392,9 @@ function createGroupHostedToolContext(input: {
     AssistantHostedToolContext["currentHostedDeliveryContext"];
   currentInvocationScope?: AssistantHostedToolContext["currentInvocationScope"];
   currentUserActionScope?: AssistantHostedToolContext["currentUserActionScope"];
+  directAttachmentRouteStatus?: NonNullable<
+    AssistantHostedToolContext["groupTool"]
+  >["directAttachmentRouteStatus"];
   groupPermissionOfferRequest?: GroupPermissionOfferRequest;
   groupSharedReadRequest?: GroupSharedReadRequest;
   groupRequest?: GroupToolRequest;
@@ -5320,6 +5443,9 @@ function createGroupHostedToolContext(input: {
             action: "read_current" as const,
             result: { group: null, status: "none" as const },
           })),
+          ...(input.directAttachmentRouteStatus
+            ? { directAttachmentRouteStatus: input.directAttachmentRouteStatus }
+            : {}),
         },
     newsletterTool: null,
     phoneCalls: null,

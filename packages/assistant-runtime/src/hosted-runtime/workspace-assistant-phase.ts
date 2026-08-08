@@ -360,6 +360,20 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
   const emailIngressPresent = input.groupEmailIngress === true
     || (input.emailDeliveryContexts?.length ?? 0) > 0;
   return {
+    directAttachmentRouteStatus() {
+      const linqRoute = resolveHostedDirectToolLinqRouteContext(
+        input.linqDeliveryContexts,
+      );
+      if (linqRoute?.service === "imessage") {
+        return { status: "ok" };
+      }
+      return {
+        status: "unavailable",
+        unavailableReason: linqRoute?.service === "sms"
+          ? "sms_attachments_unsupported"
+          : "direct_attachment_route_unavailable",
+      };
+    },
     async request(request, context) {
       const forwardRequest = (forwardedRequest: HostedRuntimeGroupToolRequest) =>
         context
@@ -1073,15 +1087,19 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
   const event = input.event;
   const sourceMetadata = event?.sourceMetadata;
   const replyTarget = event?.replyTarget;
+  // Admit authoritative Linq events from either thread shape and carry the
+  // event's real value through. Group consumers select `false` and the direct
+  // consumer selects `true`, so neither can read the other's route.
   if (
     !event
     || sourceMetadata?.kind !== "linq"
     || sourceMetadata.externalThreadRouteAuthorityPresent !== true
-    || event.conversation?.threadIsDirect !== false
+    || typeof event.conversation?.threadIsDirect !== "boolean"
     || replyTarget?.channel !== "linq"
   ) {
     return null;
   }
+  const threadIsDirect = event.conversation.threadIsDirect;
   const threadId = normalizeAssistantRouteString(replyTarget.threadId);
   if (!threadId) {
     return null;
@@ -1098,7 +1116,7 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
     },
     service: normalizeAssistantRouteString(sourceMetadata.service),
     target: threadId,
-    threadIsDirect: false,
+    threadIsDirect,
   };
 }
 

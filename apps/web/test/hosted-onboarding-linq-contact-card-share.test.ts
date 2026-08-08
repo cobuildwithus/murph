@@ -563,6 +563,37 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
     expect(shareSendMocks.sendHostedLinqAttachmentMessage).toHaveBeenCalledTimes(2);
   });
 
+  it("sends a distinct personalized request inside the window but collapses its retries", async () => {
+    const prisma = createContactCardSharePrismaStub();
+    const imageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    shareSendMocks.fetchMurphHostedLinqContactCardVcfPhoto.mockResolvedValue({
+      base64: "aGVsbG8=",
+      type: "JPEG",
+    });
+    const share = (now: Date, shareKey: string) =>
+      shareMurphHostedLinqContactCardVcfToChat({
+        chatId: "chat_123",
+        idempotencyKeyPrefix: "personalized-contact-card",
+        imageUrl,
+        memberId: "member_123",
+        now,
+        prisma: prisma.client as never,
+        shareKey,
+      });
+
+    await expect(share(new Date("2026-07-24T12:00:00.000Z"), "input_first"))
+      .resolves.toEqual({ status: "sent" });
+    // A retry of that same accepted request must not send a second card.
+    await expect(share(new Date("2026-07-24T12:00:20.000Z"), "input_first"))
+      .resolves.toEqual({ status: "already_shared" });
+    // A different accepted request is a new intent, not a duplicate.
+    await expect(share(new Date("2026-07-24T12:00:45.000Z"), "input_second"))
+      .resolves.toEqual({ status: "sent" });
+
+    expect(shareSendMocks.sendHostedLinqAttachmentMessage).toHaveBeenCalledTimes(2);
+  });
+
   it("skips as provider_unavailable when the roster is empty or unreadable", async () => {
     const prisma = createContactCardSharePrismaStub();
 
@@ -664,14 +695,14 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
       memberId: "member_123",
       now: personalizedAt,
       prisma: prisma.client,
-      scope: "personalized-contact-card",
+      scope: { variant: "personalized-contact-card" },
     })).resolves.toEqual({ action: "share", attemptedAt: personalizedAt });
     await expect(reserveHostedLinqContactCardShareAttempt({
       chatId: "chat_123",
       memberId: "member_123",
       now: new Date("2026-07-24T12:01:00.000Z"),
       prisma: prisma.client,
-      scope: "personalized-contact-card",
+      scope: { variant: "personalized-contact-card" },
     })).resolves.toEqual({ action: "skip", reason: "recent_attempt" });
 
     expect(prisma.rows).toHaveLength(2);

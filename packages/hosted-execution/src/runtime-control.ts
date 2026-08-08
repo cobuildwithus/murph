@@ -1253,6 +1253,7 @@ export const HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS = 200
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS = 256;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS = 500;
 export const HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS = 48;
+export const HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS = 200;
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
@@ -1448,6 +1449,7 @@ export type HostedRuntimeGroupToolRequest =
   | {
       action: "share_contact_card";
       contactCardImageUrl?: string;
+      contactCardShareKey?: string;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
   | {

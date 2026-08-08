@@ -302,6 +302,16 @@ export interface AssistantHostedGroupTool {
     request: HostedRuntimeGroupToolRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>
+  /**
+   * Trusted-host answer for whether this turn can deliver an attachment to
+   * exactly one direct route, so a deterministically undeliverable request is
+   * refused before slow generation work. The model supplies no route
+   * authority. An absent implementation admits the request and leaves the
+   * existing post-generation route binding as the only gate.
+   */
+  directAttachmentRouteStatus?():
+    | { status: 'ok' }
+    | { status: 'unavailable'; unavailableReason: string }
 }
 
 export interface AssistantHostedGroupPermissionOfferRequest {

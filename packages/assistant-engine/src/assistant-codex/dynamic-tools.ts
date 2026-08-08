@@ -530,9 +530,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('share_contact_card'),
-      avatarAlt: z.string().trim().min(1).max(500).nullable().default(null),
       avatarPrompt: z.string().trim().min(1).max(4000).optional(),
-      avatarQuality: z.enum(['low', 'medium', 'high']).default('medium'),
     })
     .strict(),
   z
@@ -3696,6 +3694,17 @@ async function executeGroupTool(input: {
         'personalized contact cards require a fresh user request in a personal direct conversation',
       )
     }
+    // Refuse a route that can never carry the attachment before paying for
+    // generation, capture, and publication. The post-generation binding below
+    // still owns the authoritative thread.
+    const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null
+    if (routeStatus && routeStatus.status !== 'ok') {
+      return toolTextResult(true, safeToolPayloadText({
+        action: 'share_contact_card',
+        result: routeStatus,
+      }))
+    }
+    const contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
       captureScope: 'contact-card-avatar',
@@ -3723,6 +3732,11 @@ async function executeGroupTool(input: {
     request = {
       action: 'share_contact_card',
       contactCardImageUrl: prepared.request.groupChatIconUrl,
+      // Trusted-host request identity, so a retried or replayed turn collapses
+      // to one card while a genuinely new request inside the throttle window
+      // still sends. Deliberately not the tool call id: a retry re-emits the
+      // call with a new id but keeps the same accepted input.
+      ...(contactCardShareKey ? { contactCardShareKey } : {}),
     }
     usageDraft = prepared.usageDraft ?? null
     generatedAvatarCapture = prepared.savedImageRef
@@ -5589,11 +5603,14 @@ function parseGroupArguments(
         action: 'share_contact_card',
         avatar: {
           source: 'generate',
+          // One fixed configuration. The card has no recipient-visible alt
+          // channel, and photo quality is not a member-visible choice, so the
+          // schema asks the model only for the picture description.
           args: {
-            alt: parsed.data.avatarAlt,
+            alt: null,
             outputFormat: 'jpeg',
             prompt: parsed.data.avatarPrompt,
-            quality: parsed.data.avatarQuality,
+            quality: 'medium',
             referenceImageRefs: [],
             size: '1024x1024',
           },

@@ -144,6 +144,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
@@ -1511,7 +1512,12 @@ export function parseHostedRuntimeGroupToolRequest(
     const label = "Hosted runtime group tool share_contact_card request";
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "contactCardImageUrl", "linqThread"]),
+      new Set([
+        "action",
+        "contactCardImageUrl",
+        "contactCardShareKey",
+        "linqThread",
+      ]),
       label,
     );
     return {
@@ -1525,6 +1531,17 @@ export function parseHostedRuntimeGroupToolRequest(
               options.privateMediaDeliveryOrigin,
               `${label} contactCardImageUrl`,
             ),
+          }),
+      ...(record.contactCardShareKey === undefined
+        || record.contactCardShareKey === null
+        ? {}
+        : {
+            contactCardShareKey: parseHostedRuntimeGroupAskBoundedText({
+              label: `${label} contactCardShareKey`,
+              maxCodePoints:
+                HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+              value: record.contactCardShareKey,
+            }),
           }),
       ...(record.linqThread === undefined || record.linqThread === null
         ? {}

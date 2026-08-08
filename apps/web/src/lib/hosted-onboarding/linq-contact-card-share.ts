@@ -69,7 +69,19 @@ type HostedLinqContactCardShareFindManyInput = {
 // imperceptible to it while still covering the retry backoff.
 const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 90 * 1000;
 
-type HostedLinqContactCardShareScope = "personalized-contact-card";
+type HostedLinqContactCardShareVariant = "personalized-contact-card";
+
+/**
+ * Reservation scope for one share variant. `requestKey` is a trusted-host
+ * per-request token (never model-supplied): retries of one accepted request
+ * repeat it and collapse, while a distinct request carries a different token
+ * and reserves independently. Omitting it collapses the whole variant, which
+ * is the correct shape only for variants with no per-request identity.
+ */
+type HostedLinqContactCardShareScope = {
+  requestKey?: string;
+  variant: HostedLinqContactCardShareVariant;
+};
 
 type HostedLinqContactCardShareSkipReason =
   | "missing_chat_id"
@@ -192,7 +204,15 @@ function resolveHostedLinqContactCardShareLookup(
   chatId: string,
   scope?: HostedLinqContactCardShareScope,
 ): { readCandidates: readonly string[]; writeKey: string } | null {
-  const lookupValue = scope ? JSON.stringify([chatId, scope]) : chatId;
+  // Keep the keyless encodings byte-identical to their predecessors so live
+  // reservations keep matching across a deploy.
+  const lookupValue = scope
+    ? JSON.stringify(
+      scope.requestKey === undefined
+        ? [chatId, scope.variant]
+        : [chatId, scope.variant, scope.requestKey],
+    )
+    : chatId;
   const writeKey = createHostedLinqChatLookupKey(lookupValue);
   const readCandidates = createHostedLinqChatLookupKeyReadCandidates(lookupValue);
   if (!writeKey || readCandidates.length === 0) {
@@ -412,6 +432,7 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
   memberId: string;
   now?: Date;
   prisma: PrismaClient;
+  shareKey?: string;
   signal?: AbortSignal;
 }): Promise<MurphHostedLinqContactCardVcfShareOutcome> {
   let linePhoneNumber: string | null = null;
@@ -435,9 +456,13 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
     return { status: "skipped", reason: "line_unresolved" };
   }
 
-  const reservationScope = input.imageUrl
-    ? "personalized-contact-card" as const
-    : undefined;
+  const reservationScope: HostedLinqContactCardShareScope | undefined =
+    input.imageUrl
+      ? {
+        variant: "personalized-contact-card",
+        ...(input.shareKey ? { requestKey: input.shareKey } : {}),
+      }
+      : undefined;
   const reservation = await reserveHostedLinqContactCardShareAttempt({
     chatId: input.chatId,
     memberId: input.memberId,

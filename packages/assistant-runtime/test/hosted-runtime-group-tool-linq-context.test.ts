@@ -1383,4 +1383,89 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
+  it.each([
+    {
+      contexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: ROUTE_AUTHORITY,
+          service: "imessage",
+          threadIsDirect: true,
+        }),
+      ],
+      expected: { status: "ok" },
+      label: "exactly one direct iMessage route",
+    },
+    {
+      contexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: ROUTE_AUTHORITY,
+          service: "sms",
+          threadIsDirect: true,
+        }),
+      ],
+      expected: {
+        status: "unavailable",
+        unavailableReason: "sms_attachments_unsupported",
+      },
+      label: "a direct SMS route",
+    },
+    {
+      contexts: [],
+      expected: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+      label: "no direct route",
+    },
+    {
+      contexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: ROUTE_AUTHORITY,
+          service: "imessage",
+          target: "chat_direct_1",
+          threadIsDirect: true,
+        }),
+        buildLinqDeliveryContext({
+          routeAuthority: {
+            ...ROUTE_AUTHORITY,
+            threadId: "chat_direct_2",
+          },
+          service: "imessage",
+          target: "chat_direct_2",
+          threadIsDirect: true,
+        }),
+      ],
+      expected: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+      label: "an ambiguous direct route",
+    },
+    {
+      contexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: ROUTE_AUTHORITY,
+          service: "imessage",
+          threadIsDirect: false,
+        }),
+      ],
+      expected: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+      label: "only a group route",
+    },
+  ])(
+    "reports direct-attachment eligibility for $label without a host round trip",
+    ({ contexts, expected }) => {
+      const request = vi.fn();
+      const groupTool = createHostedGroupToolWithCurrentTurnContext({
+        groupToolPort: { request },
+        linqDeliveryContexts: contexts,
+      });
+
+      expect(groupTool.directAttachmentRouteStatus?.()).toEqual(expected);
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
 });

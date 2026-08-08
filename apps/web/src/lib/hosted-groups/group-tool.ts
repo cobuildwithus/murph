@@ -349,6 +349,7 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "share_contact_card") {
     return handleHostedRuntimeGroupShareContactCard({
       contactCardImageUrl: input.request.contactCardImageUrl ?? null,
+      contactCardShareKey: input.request.contactCardShareKey ?? null,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -2220,6 +2221,7 @@ function logHostedThreadContainerParticipantReconcileCapped(input: {
 
 async function handleHostedRuntimeGroupShareContactCard(input: {
   contactCardImageUrl: string | null;
+  contactCardShareKey: string | null;
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
@@ -2258,6 +2260,12 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
     ...(contactCardImageUrl ? { imageUrl: contactCardImageUrl } : {}),
     memberId: input.memberId,
     prisma,
+    // Host-owned per-request token. Retries of one accepted request collapse;
+    // a distinct request gets its own reservation instead of reading as a
+    // duplicate.
+    ...(contactCardImageUrl && input.contactCardShareKey
+      ? { shareKey: input.contactCardShareKey }
+      : {}),
   });
   if (outcome.status === "already_shared") {
     return {
