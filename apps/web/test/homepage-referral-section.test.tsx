@@ -14,9 +14,9 @@ test("ReferralSection presents the public referral program on the homepage", () 
   assert.match(markup, /Share your personal link or start a qualifying group mission/);
   assert.match(markup, /Invite someone to Murph/);
   assert.match(markup, /Start an active group/);
-  assert.match(markup, /About 10 more days of usage/);
-  assert.match(markup, /About 14 more days of usage/);
+  assert.match(markup, /About 10 days’ worth of usage/);
+  assert.match(markup, /About 14 days’ worth of usage/);
   assert.match(markup, /href="\/refer"/);
   assert.match(markup, /See the referral program/);
-  assert.match(markup, /Qualifying rewards appear in your existing AI usage balance/);
+  assert.match(markup, /Qualifying rewards are applied automatically to the Murph they/);
 });

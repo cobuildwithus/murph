@@ -43,9 +43,9 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /data-identity-key="member_referrer"/);
   assert.match(markup, /Real introductions, rewarded automatically\./);
   assert.match(markup, /Opening a link alone is never enough\./);
-  assert.match(markup, /Three paths\. One shared reward balance\./);
-  assert.match(markup, /About 10 more days of usage/);
-  assert.match(markup, /About 14 more days of usage/);
+  assert.match(markup, /Three ways to earn\./);
+  assert.match(markup, /About 10 days’ worth of usage/);
+  assert.match(markup, /About 14 days’ worth of usage/);
   assert.match(markup, /15 human messages/);
   assert.match(markup, /8 from at least 2 other people/);
   assert.match(markup, /at least 10 minutes/);

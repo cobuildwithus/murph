@@ -86,8 +86,8 @@ export function ReferralSection() {
                 className="mt-0.5 size-4 shrink-0 text-[#d4b87a]"
               />
               <p>
-                Qualifying rewards appear in your existing AI usage balance.
-                Day estimates are approximate.
+                Qualifying rewards are applied automatically to the Murph they
+                were earned for. Day estimates assume about 10 messages a day.
               </p>
             </div>
           </div>

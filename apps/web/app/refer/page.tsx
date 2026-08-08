@@ -35,7 +35,10 @@ export default async function ReferPage() {
     ]);
 
   return (
-    <HomepageAuthRuntimeProvider authenticated={authenticated}>
+    <HomepageAuthRuntimeProvider
+      authenticated={authenticated}
+      authenticatedDestination="/refer"
+    >
       <StickyNav
         authenticated={authenticated}
         darkTop
