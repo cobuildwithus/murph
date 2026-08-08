@@ -1,0 +1,321 @@
+name: Verify and push PR 1446 final fixes
+
+on:
+  push:
+    branches:
+      - agent/pr1446-recover-finalizer
+
+permissions:
+  contents: write
+
+concurrency:
+  group: verify-and-push-pr1446
+  cancel-in-progress: true
+
+env:
+  CI: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify-and-push:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Reconstruct and apply the audited patch to current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            scripts/pr1446-final/00 \
+            scripts/pr1446-final/01 \
+            | tr -d '\r\n ' \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/pr1446-final.patch
+          echo '1d92ac0a305f0cef6fcb7bbf5405929fbe2b767e1a2e0dac3b0ac6f1d8cc7a04  /tmp/pr1446-final.patch' \
+            | sha256sum --check
+
+          git fetch origin main agent/optional-sponsorship-moments
+          source_ref="$(git rev-parse origin/agent/optional-sponsorship-moments)"
+          git reset --hard origin/main
+          git apply --index /tmp/pr1446-final.patch
+          git diff --cached --check
+          printf 'SOURCE_REF=%s\n' "$source_ref" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck hosted Web
+        run: pnpm --dir apps/web typecheck
+
+      - name: Lint changed hosted Web files
+        run: >-
+          pnpm --dir apps/web exec eslint
+          app/design/group-usage-funding-study.tsx
+          app/design/sections-content.tsx
+          src/components/hosted-groups/group-sponsorship-dialog.tsx
+          src/lib/hosted-groups/group-sponsorship-contract.ts
+          src/lib/hosted-groups/group-sponsorship-notification.ts
+          src/lib/hosted-groups/group-sponsorship-store.ts
+          test/hosted-group-sponsorship-contract.test.ts
+          test/hosted-group-sponsorship-notification.test.ts
+          test/hosted-group-sponsorship-store.test.ts
+
+      - name: Run focused hosted Web regressions
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/hosted-group-sponsorship-contract.test.ts
+          apps/web/test/hosted-group-sponsorship-store.test.ts
+          apps/web/test/hosted-group-sponsorship-notification.test.ts
+          apps/web/test/hosted-group-funding-page.test.tsx
+          apps/web/test/hosted-usage-credit-purchase-service.test.ts
+          apps/web/test/hosted-usage-top-up-product-spec.test.ts
+          apps/web/test/hosted-onboarding-stripe-event-reconciliation.test.ts
+          apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts
+
+      - name: Verify assistant engine
+        run: |
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/assistant-creative-notification-prompt.test.ts \
+            test/assistant-notification-turn-runtime.test.ts \
+            test/assistant-codex-turn-planning.test.ts
+
+      - name: Verify hosted execution contract
+        run: |
+          pnpm --dir packages/hosted-execution typecheck
+          pnpm --dir packages/hosted-execution exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/hosted-execution-sponsorship-contract.test.ts
+
+      - name: Verify assistant runtime notification handling
+        run: |
+          pnpm --dir packages/assistant-runtime typecheck
+          pnpm --dir packages/assistant-runtime exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/hosted-runtime-events.test.ts
+
+      - name: Check billing, documentation, and repository boundaries
+        run: |
+          pnpm hosted-billing:ci-guard
+          pnpm docs:drift
+          pnpm no-js
+          pnpm test:frontend-design-proof
+          node --test scripts/check-pr-architecture-summary.test.mjs
+          git diff --cached --check
+          git diff --exit-code
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Capture desktop and mobile design proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > apps/web/.tmp-pr1446-design-proof.mjs <<'EOF'
+          import { chromium } from "playwright";
+
+          const scenarios = [
+            {
+              isMobile: false,
+              output: "/tmp/pr1446-desktop.png",
+              viewport: { height: 1200, width: 1440 },
+            },
+            {
+              isMobile: true,
+              output: "/tmp/pr1446-mobile.png",
+              viewport: { height: 1200, width: 390 },
+            },
+          ];
+
+          const browser = await chromium.launch({ headless: true });
+          try {
+            for (const scenario of scenarios) {
+              const context = await browser.newContext({
+                deviceScaleFactor: 2,
+                isMobile: scenario.isMobile,
+                reducedMotion: "reduce",
+                viewport: scenario.viewport,
+              });
+              const page = await context.newPage();
+              await page.goto(
+                "http://127.0.0.1:3000/design?tab=sections#group-one-time-contribution",
+                { waitUntil: "domcontentloaded" },
+              );
+              const surface = page.getByRole("dialog");
+              await surface.waitFor({ state: "visible", timeout: 30_000 });
+
+              await page.locator("[inert]").evaluateAll((elements) => {
+                for (const element of elements) element.removeAttribute("inert");
+              });
+              await page.locator("[data-inert]").evaluateAll((elements) => {
+                for (const element of elements) element.removeAttribute("data-inert");
+              });
+
+              await surface
+                .getByRole("button", { name: "Personalize (optional)" })
+                .click();
+              await surface
+                .getByRole("checkbox", { name: /Send something to the group/ })
+                .check();
+
+              const messageOption = surface.getByRole("radio", {
+                name: /^Message\b/,
+              });
+              if (!(await messageOption.isChecked())) {
+                throw new Error("Message was not the default creative format.");
+              }
+
+              await surface.getByRole("radio", { name: /^Song\b/ }).check();
+              await surface
+                .getByLabel("What should it be about?")
+                .fill("Make this the group’s theme song and use our latest running joke.");
+              await surface
+                .getByLabel("Genre or style reference")
+                .fill("Warm ensemble-sitcom theme with a bright acoustic intro");
+              await surface
+                .getByLabel("Credit it as")
+                .fill("The Group Historian");
+
+              await page.evaluate(async () => {
+                await document.fonts.ready;
+              });
+              await page.waitForTimeout(250);
+
+              const dimensions = await page.evaluate(() => ({
+                clientWidth: document.documentElement.clientWidth,
+                scrollWidth: document.documentElement.scrollWidth,
+              }));
+              if (dimensions.scrollWidth > dimensions.clientWidth + 1) {
+                throw new Error(
+                  `Document horizontal overflow: ${dimensions.scrollWidth} > ${dimensions.clientWidth}`,
+                );
+              }
+              const surfaceDimensions = await surface.evaluate((element) => ({
+                clientWidth: element.clientWidth,
+                scrollWidth: element.scrollWidth,
+              }));
+              if (
+                surfaceDimensions.scrollWidth >
+                surfaceDimensions.clientWidth + 1
+              ) {
+                throw new Error(
+                  `Dialog horizontal overflow: ${surfaceDimensions.scrollWidth} > ${surfaceDimensions.clientWidth}`,
+                );
+              }
+
+              await surface.screenshot({
+                animations: "disabled",
+                caret: "hide",
+                path: scenario.output,
+              });
+              await context.close();
+            }
+          } finally {
+            await browser.close();
+          }
+          EOF
+
+          server_pid=""
+          cleanup() {
+            rm -f apps/web/.tmp-pr1446-design-proof.mjs
+            if [[ -n "$server_pid" ]]; then
+              kill "$server_pid" 2>/dev/null || true
+              wait "$server_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          pnpm --dir apps/web dev:local-env --hostname 127.0.0.1 --port 3000 \
+            >/tmp/pr1446-design-server.log 2>&1 &
+          server_pid=$!
+          for attempt in $(seq 1 180); do
+            if curl --fail --silent http://127.0.0.1:3000/api/internal/health >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat /tmp/pr1446-design-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3000/api/internal/health >/dev/null
+          pnpm --dir apps/web exec node .tmp-pr1446-design-proof.mjs
+          test -s /tmp/pr1446-desktop.png
+          test -s /tmp/pr1446-mobile.png
+
+      - name: Upload hosted design proof
+        shell: bash
+        env:
+          CLOUDFLARE_IMAGES_ACCOUNT_ID: ${{ vars.CLOUDFLARE_IMAGES_ACCOUNT_ID || secrets.CLOUDFLARE_IMAGES_ACCOUNT_ID }}
+          CLOUDFLARE_IMAGES_API_KEY: ${{ secrets.CLOUDFLARE_IMAGES_API_KEY }}
+        run: |
+          set -euo pipefail
+          pnpm exec tsx --tsconfig tsconfig.base.json \
+            scripts/upload-design-proof-image.ts \
+            /tmp/pr1446-desktop.png \
+            /tmp/pr1446-mobile.png \
+            > /tmp/pr1446-design-proof-urls.txt
+          mapfile -t urls < /tmp/pr1446-design-proof-urls.txt
+          if [[ "${#urls[@]}" -ne 2 ]]; then
+            cat /tmp/pr1446-design-proof-urls.txt
+            echo "Expected exactly two design-proof URLs." >&2
+            exit 1
+          fi
+          for url in "${urls[@]}"; do
+            [[ "$url" =~ ^https:// ]] || {
+              echo "Invalid design-proof URL: $url" >&2
+              exit 1
+            }
+          done
+          {
+            echo "Desktop: ${urls[0]}"
+            echo "Mobile: ${urls[1]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload verification proof artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pr1446-final-verification
+          path: |
+            /tmp/pr1446-desktop.png
+            /tmp/pr1446-mobile.png
+            /tmp/pr1446-design-proof-urls.txt
+            /tmp/pr1446-design-server.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Commit and push the verified result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --cached --check
+          git diff --exit-code
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git commit -m "Harden optional sponsorship creative responses"
+          final_commit="$(git rev-parse HEAD)"
+          git push \
+            --force-with-lease=refs/heads/agent/optional-sponsorship-moments:${SOURCE_REF} \
+            origin HEAD:agent/optional-sponsorship-moments
+          echo "Pushed ${final_commit}" >> "$GITHUB_STEP_SUMMARY"
