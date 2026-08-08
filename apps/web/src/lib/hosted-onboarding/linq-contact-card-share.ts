@@ -69,6 +69,8 @@ type HostedLinqContactCardShareFindManyInput = {
 // imperceptible to it while still covering the retry backoff.
 const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 90 * 1000;
 
+type HostedLinqContactCardShareScope = "personalized-contact-card";
+
 type HostedLinqContactCardShareSkipReason =
   | "missing_chat_id"
   | "recent_attempt";
@@ -88,18 +90,23 @@ type HostedLinqContactCardShareReserveDecision =
 
 /**
  * Shared per-chat share throttle. Callers own their eligibility/authority
- * checks; this only dedupes duplicate attempts within one turn/wake (one per
- * chat per 90 seconds). A requested re-share outside that window must go
- * through.
+ * checks; this dedupes duplicate attempts within one turn/wake per chat and
+ * share variant. The default variant preserves the existing canonical/native
+ * key; personalized cards use a separate blinded key. A requested re-share
+ * outside the window must go through.
  */
 export async function reserveHostedLinqContactCardShareAttempt(input: {
   chatId: string;
   memberId: string;
   now?: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
+  scope?: HostedLinqContactCardShareScope;
 }): Promise<HostedLinqContactCardShareReserveDecision> {
   const now = input.now ?? new Date();
-  const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
+  const chatLookup = resolveHostedLinqContactCardShareLookup(
+    input.chatId,
+    input.scope,
+  );
   if (!chatLookup) {
     return {
       action: "skip",
@@ -183,9 +190,11 @@ export async function reserveHostedLinqContactCardShareAttempt(input: {
 
 function resolveHostedLinqContactCardShareLookup(
   chatId: string,
+  scope?: HostedLinqContactCardShareScope,
 ): { readCandidates: readonly string[]; writeKey: string } | null {
-  const writeKey = createHostedLinqChatLookupKey(chatId);
-  const readCandidates = createHostedLinqChatLookupKeyReadCandidates(chatId);
+  const lookupValue = scope ? JSON.stringify([chatId, scope]) : chatId;
+  const writeKey = createHostedLinqChatLookupKey(lookupValue);
+  const readCandidates = createHostedLinqChatLookupKeyReadCandidates(lookupValue);
   if (!writeKey || readCandidates.length === 0) {
     return null;
   }
@@ -236,8 +245,12 @@ export async function releaseHostedLinqContactCardShareAttempt(input: {
   chatId: string;
   memberId: string;
   prisma: HostedLinqContactCardSharePersistenceClient;
+  scope?: HostedLinqContactCardShareScope;
 }): Promise<void> {
-  const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
+  const chatLookup = resolveHostedLinqContactCardShareLookup(
+    input.chatId,
+    input.scope,
+  );
   if (!chatLookup) {
     return;
   }
@@ -275,7 +288,11 @@ export type MurphHostedLinqContactCardVcfShareOutcome =
   | { status: "sent" }
   | {
       status: "skipped";
-      reason: "line_unresolved" | "missing_chat_id" | "provider_unavailable";
+      reason:
+        | "line_unresolved"
+        | "missing_chat_id"
+        | "photo_unavailable"
+        | "provider_unavailable";
     }
   | { status: "failed"; reason: "send_failed"; error: unknown };
 
@@ -391,6 +408,7 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
 export async function shareMurphHostedLinqContactCardVcfToChat(input: {
   chatId: string;
   idempotencyKeyPrefix: string;
+  imageUrl?: string;
   memberId: string;
   now?: Date;
   prisma: PrismaClient;
@@ -417,11 +435,15 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
     return { status: "skipped", reason: "line_unresolved" };
   }
 
+  const reservationScope = input.imageUrl
+    ? "personalized-contact-card" as const
+    : undefined;
   const reservation = await reserveHostedLinqContactCardShareAttempt({
     chatId: input.chatId,
     memberId: input.memberId,
     ...(input.now ? { now: input.now } : {}),
     prisma: input.prisma,
+    ...(reservationScope ? { scope: reservationScope } : {}),
   });
   if (reservation.action !== "share") {
     return reservation.reason === "recent_attempt"
@@ -430,12 +452,36 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
   }
 
   const [photo, backupPhoneNumber] = await Promise.all([
-    fetchMurphHostedLinqContactCardVcfPhoto(),
+    input.imageUrl
+      ? fetchMurphHostedLinqContactCardVcfPhoto({
+          imageUrl: input.imageUrl,
+          ...(input.signal ? { signal: input.signal } : {}),
+        })
+      : fetchMurphHostedLinqContactCardVcfPhoto(
+          input.signal ? { signal: input.signal } : {},
+        ),
     resolveMurphHostedLinqContactCardBackupPhoneNumber({
       excludePhoneNumber: linePhoneNumber,
       prisma: input.prisma,
     }),
   ]);
+  if (input.imageUrl && !photo) {
+    // A personalized card without its generated photo would falsely report
+    // success for the exact thing the member requested. Nothing reached the
+    // chat, so release the reservation and let a later retry proceed.
+    try {
+      await releaseHostedLinqContactCardShareAttempt({
+        attemptedAt: reservation.attemptedAt,
+        chatId: input.chatId,
+        memberId: input.memberId,
+        prisma: input.prisma,
+        ...(reservationScope ? { scope: reservationScope } : {}),
+      });
+    } catch {
+      // Best effort: a stuck reservation only delays the next attempt.
+    }
+    return { status: "skipped", reason: "photo_unavailable" };
+  }
   const vcf = buildMurphHostedLinqContactCardVcf({
     backupPhoneNumber,
     phoneNumber: linePhoneNumber,
@@ -463,6 +509,7 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
           chatId: input.chatId,
           memberId: input.memberId,
           prisma: input.prisma,
+          ...(reservationScope ? { scope: reservationScope } : {}),
         });
       } catch {
         // Best effort: a stuck reservation only delays the next attempt.

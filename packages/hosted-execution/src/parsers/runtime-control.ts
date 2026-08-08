@@ -1490,11 +1490,11 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
-  if (action === "read_chat_participants" || action === "share_contact_card") {
+  if (action === "read_chat_participants") {
     assertAllowedObjectKeys(
       record,
       new Set(["action", "linqThread"]),
-      `Hosted runtime group tool ${action} request`,
+      "Hosted runtime group tool read_chat_participants request",
     );
     if (record.linqThread === undefined || record.linqThread === null) {
       return { action };
@@ -1503,8 +1503,37 @@ export function parseHostedRuntimeGroupToolRequest(
       action,
       linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
         record.linqThread,
-        `Hosted runtime group tool ${action} request linqThread`,
+        "Hosted runtime group tool read_chat_participants request linqThread",
       ),
+    };
+  }
+  if (action === "share_contact_card") {
+    const label = "Hosted runtime group tool share_contact_card request";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "contactCardImageUrl", "linqThread"]),
+      label,
+    );
+    return {
+      action,
+      ...(record.contactCardImageUrl === undefined
+        || record.contactCardImageUrl === null
+        ? {}
+        : {
+            contactCardImageUrl: parseHostedRuntimeGroupChatIconUrl(
+              record.contactCardImageUrl,
+              options.privateMediaDeliveryOrigin,
+              `${label} contactCardImageUrl`,
+            ),
+          }),
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              `${label} linqThread`,
+            ),
+          }),
     };
   }
   if (action === "revoke_own_email_share") {
@@ -1574,31 +1603,29 @@ function parseHostedRuntimeGroupUpdateDisplayNameRequest(
 function parseHostedRuntimeGroupChatIconUrl(
   value: unknown,
   privateMediaDeliveryOrigin?: string | null,
+  label = "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
 ): string {
-  const iconUrl = requireString(
-    value,
-    "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
-  ).trim();
+  const iconUrl = requireString(value, label).trim();
   if (
     iconUrl.length === 0 ||
     iconUrl.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
   ) {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   let parsed: URL;
   try {
     parsed = new URL(iconUrl);
   } catch {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
+    throw new TypeError(`${label} must be HTTPS.`);
   }
   if (!isHostedRuntimePrivateImageDeliveryUrl(
     parsed,
     privateMediaDeliveryOrigin ?? undefined,
   )) {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   return parsed.toString();
 }

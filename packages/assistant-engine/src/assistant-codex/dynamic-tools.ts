@@ -530,6 +530,9 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('share_contact_card'),
+      avatarAlt: z.string().trim().min(1).max(500).nullable().default(null),
+      avatarPrompt: z.string().trim().min(1).max(4000).optional(),
+      avatarQuality: z.enum(['low', 'medium', 'high']).default('medium'),
     })
     .strict(),
   z
@@ -976,6 +979,13 @@ type MurphGroupToolRequest =
             alt: string | null
             imageRef: string
           }
+    }
+  | {
+      action: 'share_contact_card'
+      avatar: {
+        source: 'generate'
+        args: GenerateImageToolArgs
+      }
     }
 
 export type MurphDynamicToolRequest =
@@ -1684,7 +1694,7 @@ function currentHostedMailboxItemId(
 
 function buildGeneratedImageCaptureIdempotencyKey(
   input: {
-    scope: 'generate-image' | 'group-avatar'
+    scope: 'contact-card-avatar' | 'generate-image' | 'group-avatar'
     toolCallId: string | null
   },
 ): string | null {
@@ -3674,6 +3684,53 @@ async function executeGroupTool(input: {
     | null = null
   if (input.request.action === 'offer_access') {
     request = buildGroupAccessOfferHostRequest(input.request)
+  } else if (isPreparedContactCardRequest(input.request)) {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (
+      userActionScope?.conversationScope !== 'direct'
+      || userActionScope.acceptedInputIds.length === 0
+    ) {
+      return toolTextResult(
+        false,
+        'personalized contact cards require a fresh user request in a personal direct conversation',
+      )
+    }
+    const prepared = await prepareGroupAvatarRuntimeRequest({
+      abortSignal: input.abortSignal,
+      captureScope: 'contact-card-avatar',
+      env: input.env,
+      fetchImpl: input.fetchImpl,
+      hostedToolContext: input.hostedToolContext,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      nextUsageOrdinal: input.nextUsageOrdinal,
+      request: {
+        action: 'set_chat_avatar',
+        avatar: input.request.avatar,
+      },
+      toolCallId: input.toolCallId,
+      vaultRoot: input.vaultRoot,
+    })
+    if (!prepared.rpcSuccess) {
+      return {
+        rpcResult: {
+          contentItems: [{ text: prepared.rpcText, type: 'inputText' }],
+          success: false,
+        },
+        usageDraft: prepared.usageDraft ?? null,
+      }
+    }
+    request = {
+      action: 'share_contact_card',
+      contactCardImageUrl: prepared.request.groupChatIconUrl,
+    }
+    usageDraft = prepared.usageDraft ?? null
+    generatedAvatarCapture = prepared.savedImageRef
+      ? {
+          savedCaptureId: prepared.savedCaptureId ?? null,
+          savedImageRef: prepared.savedImageRef,
+        }
+      : null
   } else if (isPreparedGroupAvatarRequest(input.request)) {
     let preflight: Extract<
       HostedRuntimeGroupToolResponse,
@@ -3704,6 +3761,7 @@ async function executeGroupTool(input: {
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
+      captureScope: 'group-avatar',
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedToolContext: input.hostedToolContext,
@@ -4104,6 +4162,17 @@ async function executeGroupPermissionOffer(input: {
   }
 }
 
+const MURPH_CONTACT_CARD_IMAGE_OUTPUT_COMPRESSION = 40
+
+function isPreparedContactCardRequest(
+  request: MurphGroupToolRequest,
+): request is Extract<
+  MurphGroupToolRequest,
+  { action: 'share_contact_card'; avatar: unknown }
+> {
+  return request.action === 'share_contact_card' && 'avatar' in request
+}
+
 function isPreparedGroupAvatarRequest(
   request: MurphGroupToolRequest,
 ): request is Extract<
@@ -4115,6 +4184,7 @@ function isPreparedGroupAvatarRequest(
 
 async function prepareGroupAvatarRuntimeRequest(input: {
   abortSignal: AbortSignal | null
+  captureScope: 'contact-card-avatar' | 'group-avatar'
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
@@ -4147,9 +4217,14 @@ async function prepareGroupAvatarRuntimeRequest(input: {
   if (avatar.source === 'generate') {
     const generated = await executeGenerateImageTool({
       abortSignal: input.abortSignal,
-      args: avatar.args,
+      args: input.captureScope === 'contact-card-avatar'
+        ? {
+            ...avatar.args,
+            outputCompression: MURPH_CONTACT_CARD_IMAGE_OUTPUT_COMPRESSION,
+          }
+        : avatar.args,
       captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
-        scope: 'group-avatar',
+        scope: input.captureScope,
         toolCallId: input.toolCallId,
       }),
       env: input.env,
@@ -5504,6 +5579,28 @@ function parseGroupArguments(
       },
     }
   }
+  if (parsed.data.action === 'share_contact_card') {
+    if (!parsed.data.avatarPrompt) {
+      return { ok: true, request: { action: 'share_contact_card' } }
+    }
+    return {
+      ok: true,
+      request: {
+        action: 'share_contact_card',
+        avatar: {
+          source: 'generate',
+          args: {
+            alt: parsed.data.avatarAlt,
+            outputFormat: 'jpeg',
+            prompt: parsed.data.avatarPrompt,
+            quality: parsed.data.avatarQuality,
+            referenceImageRefs: [],
+            size: '1024x1024',
+          },
+        },
+      },
+    }
+  }
   if (parsed.data.action === 'set_chat_avatar') {
     if (parsed.data.avatarSource === 'generate') {
       if (!parsed.data.prompt) {
@@ -5590,7 +5687,6 @@ function parseGroupArguments(
     || parsed.data.action === 'read_chat_name'
     || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_chat_participants'
-    || parsed.data.action === 'share_contact_card'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
   }

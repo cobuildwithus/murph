@@ -465,6 +465,23 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         return await forwardRequest(request);
       }
       if (
+        request.action === "share_contact_card"
+        && request.contactCardImageUrl !== undefined
+      ) {
+        const linqRoute = resolveHostedDirectToolLinqRouteContext(
+          input.linqDeliveryContexts,
+        );
+        if (linqRoute?.service === "imessage") {
+          return await forwardRequest({
+            ...request,
+            linqThread: linqRoute.thread,
+          });
+        }
+        return linqRoute?.service === "sms"
+          ? buildHostedGroupSmsUnsupportedResponse(request)
+          : await forwardRequest(request);
+      }
+      if (
         request.action !== "update_display_name"
         && request.action !== "post_disclosure_request"
         && request.action !== "preflight_set_chat_avatar"
@@ -755,15 +772,37 @@ type HostedGroupToolLinqRouteContext = {
 function resolveHostedGroupToolLinqRouteContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
 ): HostedGroupToolLinqRouteContext | null {
+  return resolveHostedToolLinqRouteContext({
+    contexts,
+    threadIsDirect: false,
+  });
+}
+
+function resolveHostedDirectToolLinqRouteContext(
+  contexts: readonly HostedAssistantLinqDeliveryContext[],
+): HostedGroupToolLinqRouteContext | null {
+  return resolveHostedToolLinqRouteContext({
+    contexts,
+    threadIsDirect: true,
+  });
+}
+
+function resolveHostedToolLinqRouteContext(input: {
+  contexts: readonly HostedAssistantLinqDeliveryContext[];
+  threadIsDirect: boolean;
+}): HostedGroupToolLinqRouteContext | null {
   const eligible = new Map<string, HostedGroupToolLinqRouteContext>();
   let hasInvalidAuthoritativeCandidate = false;
-  for (const context of contexts) {
+  for (const context of input.contexts) {
     const authority = context.routeAuthority;
-    if (!authority || context.threadIsDirect === true) {
-      continue;
-    }
-    if (context.threadIsDirect !== false) {
-      hasInvalidAuthoritativeCandidate = true;
+    if (!authority || context.threadIsDirect !== input.threadIsDirect) {
+      if (
+        authority
+        && context.threadIsDirect !== true
+        && context.threadIsDirect !== false
+      ) {
+        hasInvalidAuthoritativeCandidate = true;
+      }
       continue;
     }
     const service = normalizeHostedGroupToolLinqService(context.service);

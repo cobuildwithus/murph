@@ -99,6 +99,8 @@ const EARLIER_ASSISTANT_INPUT_ID = `ain_${"1".repeat(32)}`;
 const FRESH_ASSISTANT_INPUT_ID = `ain_${"2".repeat(32)}`;
 const SIGNED_PRIVATE_IMAGE_URL =
   `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
+const SIGNED_PRIVATE_JPEG_URL =
+  SIGNED_PRIVATE_IMAGE_URL.replace("group-avatar.png", "group-avatar.jpg");
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
@@ -200,6 +202,8 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
     expect(MURPH_GROUP_TOOL.description)
       .toContain("authorized direct, group, or scheduled context");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("share_contact_card + avatarPrompt");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("trusted host binds member, group, route, input, and occurrence");
     expect(MURPH_GROUP_TOOL.description)
@@ -353,6 +357,29 @@ describe("murph.group dynamic tool", () => {
     }))).toEqual({
       kind: "group",
       request: { action: "share_contact_card" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "share_contact_card",
+      avatarAlt: "A friendly Murph portrait",
+      avatarPrompt: "A friendly square portrait of Murph",
+      avatarQuality: "high",
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "share_contact_card",
+        avatar: {
+          source: "generate",
+          args: {
+            alt: "A friendly Murph portrait",
+            outputFormat: "jpeg",
+            prompt: "A friendly square portrait of Murph",
+            quality: "high",
+            referenceImageRefs: [],
+            size: "1024x1024",
+          },
+        },
+      },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
@@ -3465,6 +3492,267 @@ describe("murph.group dynamic tool", () => {
         text: "group tools are unavailable for this turn",
       }],
     });
+  });
+
+  it("generates and sends a personalized Murph contact card from fresh direct input", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-contact-card-"));
+    try {
+      await initializeVault({ vaultRoot });
+      const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+      const groupRequest = vi.fn<GroupToolRequest>(async (hostRequest) => {
+        if (hostRequest.action !== "share_contact_card") {
+          throw new Error(`Unexpected group request: ${hostRequest.action}`);
+        }
+        return {
+          action: "share_contact_card",
+          result: { status: "sent" },
+        };
+      });
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse({
+          data: [{ b64_json: Buffer.from(jpegBytes).toString("base64") }],
+          usage: {
+            input_tokens: 4,
+            output_tokens: 6,
+            total_tokens: 10,
+          },
+        }, {
+          headers: {
+            "x-request-id": "req_contact_card_image",
+          },
+        }));
+      const privateImageUrlPublish = vi.fn<
+        AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+      >(async () => ({
+        expiresAt: "2033-05-18T03:33:20.000Z",
+        url: SIGNED_PRIVATE_JPEG_URL,
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "share_contact_card",
+        avatarAlt: "A friendly Murph portrait",
+        avatarPrompt: "A friendly square portrait of Murph",
+        avatarQuality: "high",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const nextUsageOrdinal = vi.fn(() => 9);
+      const result = await executeMurphDynamicToolRequest({
+        env: { OPENAI_API_KEY: "openai-test-key" },
+        fetchImpl,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_contact_card",
+            conversationScope: "direct",
+            inboundMailboxItemIds: ["mailbox_contact_card"],
+            originSessionId: "session_contact_card",
+            recipientKey: "recipient_contact_card",
+          }),
+          groupRequest,
+          privateImageUrlPublish,
+        }),
+        nextUsageOrdinal,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult.success).toBe(true);
+      expect(readGroupToolPayload(result)).toMatchObject({
+        action: "share_contact_card",
+        generatedImage: {
+          savedCaptureId: expect.any(String),
+          savedImageRef: expect.stringMatching(/^raw\/captures\//u),
+        },
+        result: { status: "sent" },
+      });
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(nextUsageOrdinal).toHaveBeenCalledOnce();
+      expect(privateImageUrlPublish).toHaveBeenCalledWith({
+        bytes: expect.any(Uint8Array),
+        contentType: "image/jpeg",
+      });
+      expect(groupRequest).toHaveBeenCalledExactlyOnceWith({
+        action: "share_contact_card",
+        contactCardImageUrl: SIGNED_PRIVATE_JPEG_URL,
+      });
+      expect(result.usageDraft).toMatchObject({ providerRequestOrdinal: 9 });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps contact-card and group-avatar generated captures in separate retry scopes", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-avatar-scope-"));
+    try {
+      await initializeVault({ vaultRoot });
+      const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) => {
+        if (request.action === "share_contact_card") {
+          return {
+            action: "share_contact_card",
+            result: { status: "sent" },
+          };
+        }
+        if (request.action === "preflight_set_chat_avatar") {
+          return {
+            action: "preflight_set_chat_avatar",
+            result: { status: "ok" },
+          };
+        }
+        if (request.action === "set_chat_avatar") {
+          return {
+            action: "set_chat_avatar",
+            result: { status: "requested" },
+          };
+        }
+        throw new Error(`Unexpected group request: ${request.action}`);
+      });
+      let generationOrdinal = 0;
+      const fetchImpl = vi.fn(async (
+        _input: string | URL | Request,
+        _init?: RequestInit,
+      ) => {
+        generationOrdinal += 1;
+        const bytes = generationOrdinal === 1 ? jpegBytes : webpBytes;
+        return jsonResponse({
+          data: [{ b64_json: Buffer.from(bytes).toString("base64") }],
+          usage: {
+            input_tokens: 4,
+            output_tokens: 6,
+            total_tokens: 10,
+          },
+        });
+      });
+      const privateImageUrlPublish = vi.fn<
+        AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+      >(async ({ contentType }) => ({
+        expiresAt: "2033-05-18T03:33:20.000Z",
+        url: contentType === "image/jpeg"
+          ? SIGNED_PRIVATE_JPEG_URL
+          : SIGNED_PRIVATE_IMAGE_URL,
+      }));
+      const callId = "call_shared_generated_avatar_scope";
+      const contactRequest = readMurphDynamicToolRequest(groupToolCall({
+        action: "share_contact_card",
+        avatarPrompt: "A friendly square portrait of Murph",
+      }, { callId, id: 210 }));
+      const groupAvatarRequest = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        avatarSource: "generate",
+        prompt: "A clean square badge for our group",
+      }, { callId, id: 211 }));
+      if (
+        !contactRequest
+        || !groupAvatarRequest
+        || contactRequest.kind !== "group"
+        || groupAvatarRequest.kind !== "group"
+      ) {
+        throw new Error("Expected generated avatar requests.");
+      }
+      const hostedToolContext = createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_avatar_scope",
+          conversationScope: "direct",
+          inboundMailboxItemIds: ["mailbox_avatar_scope"],
+          originSessionId: "session_avatar_scope",
+          recipientKey: "recipient_avatar_scope",
+        }),
+        groupRequest,
+        privateImageUrlPublish,
+      });
+      let usageOrdinal = 1;
+
+      const contactResult = await executeMurphDynamicToolRequest({
+        env: { OPENAI_API_KEY: "openai-test-key" },
+        fetchImpl,
+        hostedToolContext,
+        nextUsageOrdinal: () => usageOrdinal++,
+        progressDelivery: null,
+        request: contactRequest,
+        vaultRoot,
+      });
+      const groupAvatarResult = await executeMurphDynamicToolRequest({
+        env: { OPENAI_API_KEY: "openai-test-key" },
+        fetchImpl,
+        hostedToolContext,
+        nextUsageOrdinal: () => usageOrdinal++,
+        progressDelivery: null,
+        request: groupAvatarRequest,
+        vaultRoot,
+      });
+
+      expect(contactResult.rpcResult.success).toBe(true);
+      expect(groupAvatarResult.rpcResult.success).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      const contactCardRequestBody = JSON.parse(String(
+        fetchImpl.mock.calls[0]?.[1]?.body,
+      ));
+      const groupAvatarRequestBody = JSON.parse(String(
+        fetchImpl.mock.calls[1]?.[1]?.body,
+      ));
+      expect(contactCardRequestBody).toMatchObject({
+        output_compression: 40,
+        output_format: "jpeg",
+      });
+      expect(groupAvatarRequestBody).not.toHaveProperty("output_compression");
+      expect(privateImageUrlPublish).toHaveBeenNthCalledWith(1, {
+        bytes: expect.any(Uint8Array),
+        contentType: "image/jpeg",
+      });
+      expect(privateImageUrlPublish).toHaveBeenNthCalledWith(2, {
+        bytes: expect.any(Uint8Array),
+        contentType: "image/webp",
+      });
+      expect(groupRequest).toHaveBeenCalledTimes(3);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects generated contact cards outside fresh direct input", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>();
+    const fetchImpl = vi.fn();
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "share_contact_card",
+      avatarPrompt: "A friendly square portrait of Murph",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: "openai-test-key" },
+      fetchImpl: fetchImpl as typeof fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult).toEqual({
+      contentItems: [{
+        text: "personalized contact cards require a fresh user request in a personal direct conversation",
+        type: "inputText",
+      }],
+      success: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(groupRequest).not.toHaveBeenCalled();
   });
 
   it("uploads a user-sent image ref before setting the group avatar", async () => {

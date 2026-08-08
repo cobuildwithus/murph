@@ -1445,7 +1445,11 @@ export type HostedRuntimeGroupToolRequest =
       groupChatIconUrl: string;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
-  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "share_contact_card";
+      contactCardImageUrl?: string;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
   | {
       action: "revoke_own_email_share";
       participant?: HostedExecutionAcceptedGroupMessageParticipant | null;

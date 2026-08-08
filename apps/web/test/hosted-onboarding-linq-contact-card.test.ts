@@ -996,6 +996,35 @@ describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
     );
   });
 
+  it("keeps a local photo timeout when caller cancellation is supplied", async () => {
+    runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
+      publicBaseUrl: "https://www.withmurph.ai",
+    });
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const callerSignal = new AbortController().signal;
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(bytes, {
+        headers: { "content-type": "image/png" },
+        status: 200,
+      });
+    });
+
+    await expect(fetchMurphHostedLinqContactCardVcfPhoto({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      signal: callerSignal,
+    })).resolves.toEqual({
+      base64: Buffer.from(bytes).toString("base64"),
+      type: "PNG",
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const signal = fetchImpl.mock.calls[0]?.[1]?.signal;
+    if (!signal) {
+      throw new Error("Expected a composed photo-fetch abort signal.");
+    }
+    expect(signal).not.toBe(callerSignal);
+    expect(signal.aborted).toBe(false);
+  });
+
   it("fails soft to null on provider errors and oversized bodies", async () => {
     runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
       publicBaseUrl: "https://www.withmurph.ai",

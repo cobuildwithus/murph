@@ -550,7 +550,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_shared: "participant_aware",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
-      share_contact_card: "owner_active",
+      share_contact_card: "participant_aware",
       update_display_name: "owner_active",
     });
   });
@@ -4638,6 +4638,55 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         memberId: "member_container",
       }),
     );
+  });
+
+  it("shares a generated contact card in a direct-authorized chat without requiring group ownership", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.hostedThreadContainerFindUnique).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_group_1",
+        idempotencyKeyPrefix: "personalized-contact-card",
+        imageUrl: contactCardImageUrl,
+        memberId: "member_container",
+      }),
+    );
+  });
+
+  it("rejects an untrusted generated contact-card image URL before fetching it", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl: "https://example.invalid/avatar.png",
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "contact_card_image_url_unavailable",
+      },
+    });
+
+    expect(mocks.hostedThreadContainerFindUnique).not.toHaveBeenCalled();
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
   });
 
   it("does not share the contact card when the owner lacks active access even if participant-aware access is active", async () => {

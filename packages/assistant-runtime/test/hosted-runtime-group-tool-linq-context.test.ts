@@ -536,6 +536,124 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
+  it("binds personalized contact cards to the exact direct iMessage route", async () => {
+    const directAuthority = {
+      ...ROUTE_AUTHORITY,
+      threadId: "chat_direct_1",
+    };
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    const request = vi.fn().mockResolvedValue({
+      action: "share_contact_card",
+      result: { status: "sent" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: directAuthority,
+          target: "chat_direct_1",
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    await groupTool.request({
+      action: "share_contact_card",
+      contactCardImageUrl,
+    });
+
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      action: "share_contact_card",
+      contactCardImageUrl,
+      linqThread: {
+        authority: directAuthority,
+        chatId: "chat_direct_1",
+      },
+    });
+  });
+
+  it("rejects personalized contact cards on direct SMS before Web delivery", async () => {
+    const directAuthority = {
+      ...ROUTE_AUTHORITY,
+      threadId: "chat_direct_sms",
+    };
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: directAuthority,
+          service: "sms",
+          target: "chat_direct_sms",
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    await expect(groupTool.request({
+      action: "share_contact_card",
+      contactCardImageUrl,
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "sms_attachments_unsupported",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("does not choose between two direct iMessage routes for a personalized card", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    const request = vi.fn().mockResolvedValue({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: {
+            ...ROUTE_AUTHORITY,
+            threadId: "chat_direct_1",
+          },
+          target: "chat_direct_1",
+          threadIsDirect: true,
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000002",
+          routeAuthority: {
+            ...ROUTE_AUTHORITY,
+            threadId: "chat_direct_2",
+          },
+          target: "chat_direct_2",
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    await groupTool.request({
+      action: "share_contact_card",
+      contactCardImageUrl,
+    });
+
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      action: "share_contact_card",
+      contactCardImageUrl,
+    });
+  });
+
   it("fails closed when the turn carries two distinct route-authorized threads", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "share_contact_card",

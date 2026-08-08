@@ -56,6 +56,7 @@ export async function generateOpenAiImage(input: {
   abortSignal?: AbortSignal | null
   apiKey: string
   fetchImpl: typeof fetch
+  outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
   quality: OpenAiImageQuality
@@ -75,6 +76,7 @@ async function generateOpenAiImageFromPrompt(input: {
   abortSignal?: AbortSignal | null
   apiKey: string
   fetchImpl: typeof fetch
+  outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
   quality: OpenAiImageQuality
@@ -97,6 +99,7 @@ async function editOpenAiImageWithReferences(input: {
   abortSignal?: AbortSignal | null
   apiKey: string
   fetchImpl: typeof fetch
+  outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
   quality: OpenAiImageQuality
@@ -109,6 +112,9 @@ async function editOpenAiImageWithReferences(input: {
   form.set('quality', input.quality)
   form.set('size', input.size)
   form.set('output_format', input.outputFormat)
+  if (input.outputCompression !== undefined) {
+    form.set('output_compression', String(input.outputCompression))
+  }
 
   for (const reference of input.referenceImages) {
     form.append(
@@ -236,6 +242,7 @@ async function readOpenAiImageGenerationResult(
 }
 
 function buildOpenAiImageGenerationRequest(input: {
+  outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
   quality: OpenAiImageQuality
@@ -243,6 +250,9 @@ function buildOpenAiImageGenerationRequest(input: {
 }): ImageGenerateParamsNonStreaming {
   return {
     model: OPENAI_IMAGE_GENERATION_MODEL,
+    ...(input.outputCompression !== undefined
+      ? { output_compression: input.outputCompression }
+      : {}),
     output_format: input.outputFormat,
     prompt: input.prompt,
     quality: input.quality,

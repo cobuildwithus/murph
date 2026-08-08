@@ -197,7 +197,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
-  share_contact_card: "owner_active",
+  share_contact_card: "participant_aware",
   update_display_name: "owner_active",
 } as const satisfies Record<
   HostedRuntimeGroupToolAction,
@@ -348,6 +348,7 @@ export async function handleHostedRuntimeGroupTool(input: {
 
   if (input.request.action === "share_contact_card") {
     return handleHostedRuntimeGroupShareContactCard({
+      contactCardImageUrl: input.request.contactCardImageUrl ?? null,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -2218,6 +2219,7 @@ function logHostedThreadContainerParticipantReconcileCapped(input: {
 }
 
 async function handleHostedRuntimeGroupShareContactCard(input: {
+  contactCardImageUrl: string | null;
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
@@ -2232,17 +2234,28 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
   }
 
   const prisma = getPrisma();
-  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
-    memberId: input.memberId,
-    prisma,
-  });
-  if (ownerAccess.status !== "ok") {
-    return unavailable(ownerAccess.unavailableReason);
+  const contactCardImageUrl = input.contactCardImageUrl === null
+    ? null
+    : normalizeHostedGroupChatIconUrl(input.contactCardImageUrl);
+  if (input.contactCardImageUrl !== null && contactCardImageUrl === null) {
+    return unavailable("contact_card_image_url_unavailable");
+  }
+  if (contactCardImageUrl === null) {
+    const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+      memberId: input.memberId,
+      prisma,
+    });
+    if (ownerAccess.status !== "ok") {
+      return unavailable(ownerAccess.unavailableReason);
+    }
   }
 
   const outcome = await shareMurphHostedLinqContactCardVcfToChat({
     chatId: authorized.chatId,
-    idempotencyKeyPrefix: "group-contact-card",
+    idempotencyKeyPrefix: contactCardImageUrl
+      ? "personalized-contact-card"
+      : "group-contact-card",
+    ...(contactCardImageUrl ? { imageUrl: contactCardImageUrl } : {}),
     memberId: input.memberId,
     prisma,
   });
