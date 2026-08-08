@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import {
   parseHostedRuntimeLogRequest,
@@ -21,6 +21,12 @@ import {
   isHostedRuntimeLogDatabaseConfigured,
 } from "./database";
 import { getPrisma } from "../prisma";
+import {
+  hostedRuntimeLogLockKey,
+  hostedRuntimeLogSubjectKey,
+} from "./subject-key";
+
+export { hostedRuntimeLogLockKey, hostedRuntimeLogSubjectKey } from "./subject-key";
 
 const HOSTED_RUNTIME_LOG_TABLE = "hosted_runtime_log";
 const HOSTED_RUNTIME_LOG_FIELD_COUNT = 17;
@@ -469,24 +475,6 @@ function projectHostedRuntimeLogRow(
     userId,
     workspaceVersion: parsed.workspaceVersion ?? null,
   };
-}
-
-export function hostedRuntimeLogSubjectKey(userId: string): string {
-  return createHash("sha256")
-    .update(`murph:hosted-runtime-log-subject:${requireHostedRuntimeLogUserId(userId)}`)
-    .digest("hex");
-}
-
-export function hostedRuntimeLogLockKey(subjectKey: string): string {
-  const boundedSubjectKey = requireOpaqueString(
-    subjectKey,
-    "Hosted runtime log subject key",
-  );
-  if (!/^[0-9a-f]{64}$/u.test(boundedSubjectKey)) {
-    throw new TypeError("Hosted runtime log subject key must be a SHA-256 hex digest.");
-  }
-  return BigInt.asIntN(64, BigInt(`0x${boundedSubjectKey.slice(0, 16)}`))
-    .toString();
 }
 
 async function withHostedRuntimeLogTransaction<Result>(

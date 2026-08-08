@@ -76,7 +76,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import { Client } from "pg";
 
-import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/store";
+import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject-key";
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
 
