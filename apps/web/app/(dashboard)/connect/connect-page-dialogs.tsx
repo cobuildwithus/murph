@@ -46,27 +46,18 @@ export function VitalConnectionDialog({
             {sourceName}
           </span>
           <DialogTitle className="font-serif text-2xl font-semibold tracking-normal text-foreground">
-            Vital connects {sourceName} for Murph
+            Vital connects {sourceName} to Murph
           </DialogTitle>
           <DialogDescription className="leading-6">
-            The next authorization screen may name Vital instead of Murph. That
-            is expected.
+            The next screen may say Vital. That is expected.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 text-sm leading-6 text-muted-foreground">
-          <p>
-            Vital acts as Murph&apos;s health-sync provider. It processes the
-            data you approve to operate this connection and send it to Murph; it
-            is not the health assistant using the data.
-          </p>
-          <p>
-            Murph does not authorize Vital to sell this data, use it for
-            advertising, train models on it, or use it for unrelated purposes.
-            You can disconnect
-            {` ${sourceName}`} at any time.
-          </p>
-        </div>
+        <p className="text-sm leading-6 text-muted-foreground">
+          Vital processes the data you approve only to sync it to Murph. Murph
+          does not allow Vital to sell it, use it for ads or model training, or
+          use it for anything unrelated. Disconnect anytime.
+        </p>
 
         {showGarminHistoricalData ? (
           <>

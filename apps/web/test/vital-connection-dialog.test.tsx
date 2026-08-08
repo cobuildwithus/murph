@@ -49,12 +49,12 @@ test("Vital handoff explains the processor boundary for a standard source", asyn
     }),
   );
 
-  assert.match(markup, /Vital connects Fitbit for Murph/u);
-  assert.match(markup, /may name Vital instead of Murph/u);
-  assert.match(markup, /health-sync provider/u);
-  assert.match(markup, /does not authorize Vital to sell this data/u);
-  assert.match(markup, /train models on it/u);
-  assert.match(markup, /disconnect Fitbit at any time/u);
+  assert.match(markup, /Vital connects Fitbit to Murph/u);
+  assert.match(markup, /may say Vital/u);
+  assert.match(markup, /processes the data you approve/u);
+  assert.match(markup, /does not allow Vital to sell it/u);
+  assert.match(markup, /model training/u);
+  assert.match(markup, /Disconnect anytime/u);
   assert.match(markup, />Continue to Fitbit<\/button>/u);
   assert.doesNotMatch(markup, /Turn on Historical Data/u);
 });
@@ -72,7 +72,7 @@ test("Vital handoff keeps Garmin's first-connect Historical Data reminder", asyn
     }),
   );
 
-  assert.match(markup, /Vital connects Garmin for Murph/u);
+  assert.match(markup, /Vital connects Garmin to Murph/u);
   assert.match(markup, /Turn on Historical Data/u);
   assert.match(
     markup,
@@ -94,7 +94,7 @@ test("Vital handoff omits Garmin's Historical Data reminder during reconnect", a
     }),
   );
 
-  assert.match(markup, /Vital connects Garmin for Murph/u);
+  assert.match(markup, /Vital connects Garmin to Murph/u);
   assert.doesNotMatch(markup, /Turn on Historical Data/u);
   assert.doesNotMatch(markup, /Garmin Historical Data reminder/u);
 });

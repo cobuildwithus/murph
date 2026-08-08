@@ -1316,7 +1316,7 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
   assert.equal(fetch.mock.calls.length, 0);
   assert.match(
     rendered.container.textContent ?? "",
-    /Vital connects Dexcom for Murph/u,
+    /Vital connects Dexcom to Murph/u,
   );
 
   const continueButton = [
@@ -5263,14 +5263,14 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
   assert.equal(fetch.mock.calls.length, 0);
   assert.match(
     rendered.container.textContent ?? "",
-    /Vital connects Fitbit for Murph/u,
+    /Vital connects Fitbit to Murph/u,
   );
-  assert.match(rendered.container.textContent ?? "", /health-sync provider/u);
+  assert.match(rendered.container.textContent ?? "", /processes the data you approve/u);
   assert.match(
     rendered.container.textContent ?? "",
-    /does not authorize Vital to sell/u,
+    /does not allow Vital to sell it/u,
   );
-  assert.match(rendered.container.textContent ?? "", /train models on it/u);
+  assert.match(rendered.container.textContent ?? "", /model training/u);
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
     /Turn on Historical Data/u,
