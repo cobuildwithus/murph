@@ -54,5 +54,9 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /Can I see who used my link\?/);
   assert.match(markup, /does not reveal who it was/);
   assert.match(markup, /Rewards are usage, not cash\./);
-  assert.match(markup, /href="#refer-top"/);
+  assert.match(markup, /Bring someone with you\./);
+  assert.equal(
+    (markup.match(/data-identity-key="member_referrer"/g) ?? []).length,
+    2,
+  );
 });

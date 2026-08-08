@@ -6,6 +6,10 @@ import {
   UsersRound,
 } from "lucide-react";
 
+import {
+  DEFAULT_MURPH_HEADSHOT,
+  MurphHeadshotAvatar,
+} from "@/src/components/homepage/murph-headshot-avatar";
 import { ReferralShareAction } from "@/src/components/referrals/referral-share-action";
 import {
   formatApproximateReferralMessages,
@@ -329,7 +333,7 @@ export function ReferralPageContent({
         </div>
       </section>
 
-      <section className="relative overflow-hidden bg-[#2a2520] px-5 py-20 text-center sm:px-10 sm:py-24 lg:px-16 lg:py-28">
+      <section className="relative overflow-hidden bg-[#2a2520] px-5 py-16 sm:px-10 sm:py-20 lg:px-16">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0"
@@ -338,30 +342,21 @@ export function ReferralPageContent({
               "radial-gradient(circle at 30% 60%, rgba(160,122,78,0.22) 0%, transparent 50%), radial-gradient(circle at 72% 32%, rgba(90,110,50,0.18) 0%, transparent 42%)",
           }}
         />
-        <div className="relative mx-auto flex max-w-[720px] flex-col items-center">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]">
-            Bring someone with you
-          </p>
-          <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4.5vw,3.8rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#f5f0e8]">
-            Murph gets better when the people you care about are in it.
-          </h2>
-          <p className="mt-5 max-w-[52ch] text-[0.9375rem] leading-[1.75] text-[#f5f0e8]/70 sm:text-base">
-            Start with your personal link. Murph handles attribution, applies
-            qualifying rewards automatically, and keeps everyone’s health data
-            private.
-          </p>
-          <a
-            className="group mt-8 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#5a6e32] px-5 py-3.5 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#4d5f2a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]"
-            href="#refer-top"
-          >
-            Get my referral link
-            <span
-              aria-hidden="true"
-              className="transition-transform group-hover:-translate-y-0.5"
-            >
-              ↑
-            </span>
-          </a>
+        <div className="relative mx-auto flex max-w-[1160px] flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="font-serif text-[clamp(1.9rem,3.6vw,3rem)] font-semibold leading-[1.02] tracking-[-0.04em] text-[#f5f0e8]">
+              Bring someone with you.
+            </h2>
+            <p className="mt-3 max-w-[46ch] text-[0.9375rem] leading-[1.7] text-[#f5f0e8]/70">
+              Murph handles attribution, rewards, and privacy automatically.
+            </p>
+          </div>
+          <div className="shrink-0">
+            <ReferralShareAction
+              authenticated={authenticated}
+              identityKey={identityKey}
+            />
+          </div>
         </div>
       </section>
     </main>
@@ -375,9 +370,10 @@ function ReferralHeroArtifact() {
       <div className="absolute -right-8 -top-7 h-40 w-40 rounded-full bg-[#5a6e32]/20 blur-3xl" />
       <div className="relative rotate-[1.2deg] rounded-[2rem] border border-white/12 bg-[#f5f0e8] p-5 shadow-[0_30px_90px_-45px_rgba(0,0,0,0.85)] sm:p-6">
         <div className="flex items-center gap-3 border-b border-[#c4a882]/25 pb-4">
-          <div className="flex size-10 items-center justify-center rounded-full bg-[#5a6e32] text-sm font-semibold text-white">
-            M
-          </div>
+          <MurphHeadshotAvatar
+            className="size-10"
+            src={DEFAULT_MURPH_HEADSHOT}
+          />
           <div>
             <p className="text-sm font-semibold text-[#2d3436]">Murph</p>
             <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
