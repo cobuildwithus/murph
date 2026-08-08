@@ -43,7 +43,61 @@ jobs:
           rm -rf /tmp/pr1446-candidate
           git worktree add --detach /tmp/pr1446-candidate origin/main
           cd /tmp/pr1446-candidate
+
+          set +e
           git apply --3way --index /tmp/pr1446-final.patch
+          apply_status=$?
+          set -e
+
+          mapfile -t unmerged < <(git diff --name-only --diff-filter=U)
+          if [[ "$apply_status" -ne 0 ]]; then
+            if [[ "${#unmerged[@]}" -ne 1 || "${unmerged[0]}" != "agent-docs/index.md" ]]; then
+              printf 'Unexpected patch conflicts:\n' >&2
+              printf '  %s\n' "${unmerged[@]}" >&2
+              exit "$apply_status"
+            fi
+
+            # The index is an inventory, not an implementation owner. Preserve
+            # every newer mainline entry and update only this product-spec row.
+            git show HEAD:agent-docs/index.md > agent-docs/index.md
+            python - <<'PY'
+          from pathlib import Path
+
+          index = Path('agent-docs/index.md')
+          lines = index.read_text().splitlines(keepends=True)
+          matches = [
+              offset
+              for offset, line in enumerate(lines)
+              if '`agent-docs/product-specs/hosted-usage-topups.md`' in line
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f'expected one hosted-usage-topups index row, found {len(matches)}'
+              )
+
+          offset = matches[0]
+          row = lines[offset]
+          old = (
+              'and a single room-specific roughly 15-second song on activation '
+              'with later refills silent.'
+          )
+          new = (
+              'and an optional participant-authorized message, poem, or '
+              '15-second song on activation with later refills silent.'
+          )
+          if new not in row:
+              if old not in row:
+                  raise SystemExit('hosted-usage-topups index row shape changed')
+              row = row.replace(old, new, 1)
+              lines[offset] = row
+              index.write_text(''.join(lines))
+          PY
+            git add agent-docs/index.md
+          elif [[ "${#unmerged[@]}" -ne 0 ]]; then
+            printf 'Patch reported success with unresolved conflicts:\n' >&2
+            printf '  %s\n' "${unmerged[@]}" >&2
+            exit 1
+          fi
 
           python - <<'PY'
           from pathlib import Path
@@ -78,6 +132,10 @@ jobs:
           PY
 
           git add -A
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
           git diff --cached --check
           git config user.name "OpenAI"
           git config user.email "noreply@openai.com"
