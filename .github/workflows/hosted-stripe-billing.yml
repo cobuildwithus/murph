@@ -48,10 +48,11 @@ jobs:
       - name: Generate hosted web test client
         run: pnpm --dir apps/web prisma:generate
 
-      - name: Test billing resume contract and live support
+      - name: Test Starter checkout, migration, and live support
         run: >-
           pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
-          apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts
+          apps/web/test/hosted-onboarding-billing-checkout-route.test.ts
+          apps/web/test/hosted-starter-usage-migration.test.ts
           apps/web/test/hosted-billing-live-support.test.ts
 
       - name: Test workflow guard mutations
