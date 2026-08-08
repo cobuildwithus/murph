@@ -1,6 +1,6 @@
 # Growth monthly revenue chart
 
-Status: active
+Status: completed
 Created: 2026-08-07
 
 ## Outcome
@@ -41,3 +41,5 @@ Created: 2026-08-07
 - Desktop and mobile Playwright proof from `/design?tab=sections`.
 - Preliminary `completion-specialists` ReviewGPT pass with product-experience, frontend, and coverage lenses.
 - Exact-head required CI and parent final review.
+Updated: 2026-08-08
+Completed: 2026-08-08
