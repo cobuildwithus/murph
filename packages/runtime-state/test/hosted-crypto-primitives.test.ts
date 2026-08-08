@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { expect, test } from "vitest";
 
 import {
+  assertHostedCryptoCompleteStandbyKeyringJsons,
   assertHostedCryptoStandbyKeyringJsons,
   attachHostedDomainRootEnvelopeSignature,
   buildHostedDomainRootEnvelopeSigningPayload,
@@ -199,7 +200,7 @@ test("hosted crypto standby acceptance matches complete Cloudflare keypairs", as
     },
   });
 
-  expect(() => assertHostedCryptoStandbyKeyringJsons({
+  await expect(assertHostedCryptoCompleteStandbyKeyringJsons({
     activeAuthorityKeyVersionName: ACTIVE_AUTHORITY_KEY_VERSION,
     activeCloudflareRecipientKeyId: ACTIVE_CLOUDFLARE_KEY_ID,
     authorityVerifyKeyringJson,
@@ -207,8 +208,7 @@ test("hosted crypto standby acceptance matches complete Cloudflare keypairs", as
     cloudflarePublicKeyringJson,
     proposedAuthorityKeyVersionName: STANDBY_AUTHORITY_KEY_VERSION,
     proposedCloudflareRecipientKeyId: STANDBY_CLOUDFLARE_KEY_ID,
-    requireCompletePreload: true,
-  })).not.toThrow();
+  })).resolves.toBeUndefined();
 
   const authorityKeyring = createHostedAuthorityVerifyKeyring({
     activeKeyVersionName: ACTIVE_AUTHORITY_KEY_VERSION,
@@ -308,6 +308,128 @@ test("hosted crypto standby acceptance matches complete Cloudflare keypairs", as
     proposedCloudflareRecipientKeyId: STANDBY_CLOUDFLARE_KEY_ID,
     requireCompletePreload: true,
   })).toThrow(HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR);
+});
+
+test("complete standby acceptance rejects unusable exact key material", async () => {
+  const standbyRecipient = await generateHostedUserRecipientKeyPair();
+  const otherRecipient = await generateHostedUserRecipientKeyPair();
+  const standbySigner = await generateP256SigningKeyPair();
+  const authorityVerifyKeyringJson = JSON.stringify({
+    [STANDBY_AUTHORITY_KEY_VERSION]: {
+      publicKeyPem: standbySigner.publicKeyPem,
+      status: "verify_only",
+    },
+  });
+  const cloudflarePublicKeyringJson = JSON.stringify({
+    [STANDBY_CLOUDFLARE_KEY_ID]: {
+      publicJwk: standbyRecipient.publicKeyJwk,
+      recipient: "cloudflare-automation-secret",
+      status: "disabled",
+    },
+  });
+  const cloudflarePrivateKeyringJson = JSON.stringify({
+    [STANDBY_CLOUDFLARE_KEY_ID]: {
+      privateJwk: standbyRecipient.privateKeyJwk,
+      recipient: "cloudflare-automation-secret",
+      status: "decrypt_only",
+    },
+  });
+  const completeInput = {
+    activeAuthorityKeyVersionName: ACTIVE_AUTHORITY_KEY_VERSION,
+    activeCloudflareRecipientKeyId: ACTIVE_CLOUDFLARE_KEY_ID,
+    authorityVerifyKeyringJson,
+    cloudflarePrivateKeyringJson,
+    cloudflarePublicKeyringJson,
+    proposedAuthorityKeyVersionName: STANDBY_AUTHORITY_KEY_VERSION,
+    proposedCloudflareRecipientKeyId: STANDBY_CLOUDFLARE_KEY_ID,
+  } as const;
+
+  const unusableInputs = [
+    {
+      expectedError: HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+      input: {
+        ...completeInput,
+        authorityVerifyKeyringJson: JSON.stringify({
+          [STANDBY_AUTHORITY_KEY_VERSION]: {
+            publicKeyPem:
+              "-----BEGIN PUBLIC KEY-----\nauthority-private-canary\n-----END PUBLIC KEY-----",
+            status: "verify_only",
+          },
+        }),
+      },
+    },
+    {
+      expectedError: HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR,
+      input: {
+        ...completeInput,
+        cloudflarePrivateKeyringJson: JSON.stringify({
+          [STANDBY_CLOUDFLARE_KEY_ID]: {
+            privateJwk: {
+              ...standbyRecipient.privateKeyJwk,
+              d: "private-scalar-canary",
+            },
+            recipient: "cloudflare-automation-secret",
+            status: "decrypt_only",
+          },
+        }),
+      },
+    },
+    {
+      expectedError: HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR,
+      input: {
+        ...completeInput,
+        cloudflarePrivateKeyringJson: JSON.stringify({
+          [STANDBY_CLOUDFLARE_KEY_ID]: {
+            privateJwk: {
+              ...standbyRecipient.privateKeyJwk,
+              d: otherRecipient.privateKeyJwk.d,
+            },
+            recipient: "cloudflare-automation-secret",
+            status: "decrypt_only",
+          },
+        }),
+      },
+    },
+    {
+      expectedError: HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR,
+      input: {
+        ...completeInput,
+        cloudflarePrivateKeyringJson: JSON.stringify({
+          [STANDBY_CLOUDFLARE_KEY_ID]: {
+            privateJwk: {
+              ...standbyRecipient.privateKeyJwk,
+              x: "invalid-public-coordinate-canary",
+              y: "invalid-public-coordinate-canary",
+            },
+            recipient: "cloudflare-automation-secret",
+            status: "decrypt_only",
+          },
+        }),
+        cloudflarePublicKeyringJson: JSON.stringify({
+          [STANDBY_CLOUDFLARE_KEY_ID]: {
+            publicJwk: {
+              ...standbyRecipient.publicKeyJwk,
+              x: "invalid-public-coordinate-canary",
+              y: "invalid-public-coordinate-canary",
+            },
+            recipient: "cloudflare-automation-secret",
+            status: "disabled",
+          },
+        }),
+      },
+    },
+  ];
+
+  for (const { expectedError, input } of unusableInputs) {
+    let message = "";
+    try {
+      await assertHostedCryptoCompleteStandbyKeyringJsons(input);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toBe(expectedError);
+    expect(message).not.toMatch(/canary/u);
+  }
 });
 
 test.each([

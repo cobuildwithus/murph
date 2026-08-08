@@ -835,10 +835,11 @@ IDs and the operator-only
 `HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID`. Run the Web
 `hosted-crypto:env-check` script with `--require-complete-preload`; complete
 mode requires the intended `verify_only` / `disabled` / `decrypt_only` entries
-to survive under distinct proposed IDs and matches every Cloudflare
-public/private entry by key id and P-256 public coordinates. The two proposed
-ID inputs are non-secret one-shot validation metadata; do not add them to a
-provider runtime.
+to survive under distinct proposed IDs, imports the exact proposed authority
+PEM as a P-256 ECDSA verification key, and wraps then unwraps an ephemeral
+challenge through the exact proposed Cloudflare public/private JWKs. The two
+proposed ID inputs are non-secret one-shot validation metadata; do not add them
+to a provider runtime.
 Validation errors identify only the configuration field. Do not put values in
 arguments or bypass either gate.
 

@@ -136,6 +136,15 @@ Updated: 2026-08-07
    object members before the first ordinary parse, retain field-only errors, and
    cover top-level and nested duplicate private canaries in normal and complete
    Web validation.
+9. Risk: structurally valid exact payloads contain a malformed authority PEM,
+   invalid public point, or corrupt/mismatched private scalar, while complete
+   preload reports success because it compares only public coordinates.
+   Mitigation: final ReviewGPT round 6 identified this as review-induced. Keep
+   normal provider gates synchronous and structural, but make the one-shot
+   complete command import the exact authority PEM and wrap then unwrap an
+   ephemeral challenge through the exact proposed Cloudflare JWKs. Mask every
+   failure with the existing field-only errors and retain the same stateless
+   runtime-state owner.
 
 ## Tasks
 
@@ -171,6 +180,9 @@ Updated: 2026-08-07
 - Continue it after round 5: duplicate-aware scanning completes that same raw
   acceptance boundary without substring matching, a dependency, or a new
   lifecycle owner.
+- Continue it after round 6: the asynchronous exact-material challenge belongs
+  only to the one-shot complete command, reuses production crypto primitives,
+  and adds no provider state or lifecycle owner.
 - Generate and preload keys only after the exact pushed implementation head has
   passed focused proof, CI, and both ReviewGPT gates. Merge the reviewed
   contract to public `main`, deploy from the protected private workflow's

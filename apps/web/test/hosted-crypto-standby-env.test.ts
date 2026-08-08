@@ -1,9 +1,11 @@
+import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 
 import {
   generateHostedUserRecipientKeyPair,
   HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
   HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR,
+  HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR,
   HOSTED_CRYPTO_COMPLETE_STANDBY_PRELOAD_ERROR,
 } from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
@@ -15,8 +17,8 @@ import {
 } from "../scripts/check-hosted-crypto-standby-env";
 
 describe("hosted crypto standby environment preflight", () => {
-  it("accepts structurally valid Web standby keyrings", () => {
-    expect(listHostedCryptoStandbyEnvErrors({
+  it("accepts structurally valid Web standby keyrings", async () => {
+    await expect(listHostedCryptoStandbyEnvErrors({
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
         "cloudflare-automation:v1",
       HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
@@ -41,11 +43,11 @@ describe("hosted crypto standby environment preflight", () => {
           },
         }),
       HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "authority-v1",
-    })).toEqual([]);
+    })).resolves.toEqual([]);
   });
 
-  it("fails with a field-only error before a malformed Vercel ring can build", () => {
-    const errors = listHostedCryptoStandbyEnvErrors({
+  it("fails with a field-only error before a malformed Vercel ring can build", async () => {
+    const errors = await listHostedCryptoStandbyEnvErrors({
       HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON:
         '{"vercel-keyring-secret-canary"',
     });
@@ -54,8 +56,8 @@ describe("hosted crypto standby environment preflight", () => {
     expect(errors.join(" ")).not.toContain("vercel-keyring-secret-canary");
   });
 
-  it("rejects a private keyring in the Web runtime", () => {
-    const errors = listHostedCryptoStandbyEnvErrors({
+  it("rejects a private keyring in the Web runtime", async () => {
+    const errors = await listHostedCryptoStandbyEnvErrors({
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
         "web-private-keyring-secret-canary",
     });
@@ -74,13 +76,13 @@ describe("hosted crypto standby environment preflight", () => {
         status: "disabled",
       },
     });
-    const normalErrors = listHostedCryptoStandbyEnvErrors({
+    const normalErrors = await listHostedCryptoStandbyEnvErrors({
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
         "cloudflare-automation:v1",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON:
         publicRingWithPrivateSibling,
     });
-    const completeErrors = listHostedCryptoStandbyEnvErrors({
+    const completeErrors = await listHostedCryptoStandbyEnvErrors({
       HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
         "authority-v2": {
           publicKeyPem:
@@ -150,19 +152,16 @@ describe("hosted crypto standby environment preflight", () => {
     };
 
     for (const rawPublicRing of rawPublicRings) {
-      const normalErrors = listHostedCryptoStandbyEnvErrors({
+      const normalErrors = await listHostedCryptoStandbyEnvErrors({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
           "cloudflare-automation:v1",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON: rawPublicRing,
       });
-      const completeErrors = listHostedCryptoStandbyEnvErrors(
-        {
-          ...completeBase,
-          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON:
-            rawPublicRing,
-        },
-        { requireCompletePreload: true },
-      );
+      const completeErrors = await listHostedCryptoStandbyEnvErrors({
+        ...completeBase,
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON:
+          rawPublicRing,
+      }, { requireCompletePreload: true });
 
       expect(normalErrors).toEqual([
         HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR,
@@ -206,15 +205,15 @@ describe("hosted crypto standby environment preflight", () => {
         },
       },
     ],
-  ])("rejects %s before a Vercel build", (_name, keyring) => {
-    expect(listHostedCryptoStandbyEnvErrors({
+  ])("rejects %s before a Vercel build", async (_name, keyring) => {
+    await expect(listHostedCryptoStandbyEnvErrors({
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON:
         JSON.stringify(keyring),
-    })).toEqual([HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR]);
+    })).resolves.toEqual([HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR]);
   });
 
-  it("rejects a public standby that collides with the active recipient", () => {
-    expect(listHostedCryptoStandbyEnvErrors({
+  it("rejects a public standby that collides with the active recipient", async () => {
+    await expect(listHostedCryptoStandbyEnvErrors({
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
         "cloudflare-automation:v1",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON:
@@ -230,50 +229,87 @@ describe("hosted crypto standby environment preflight", () => {
             status: "disabled",
           },
         }),
-    })).toEqual([HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR]);
+    })).resolves.toEqual([HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR]);
   });
 
   it("requires and matches all three payloads for pre-mutation acceptance", async () => {
-    expect(() => assertHostedCryptoStandbyEnv(
-      {},
-      { requireCompletePreload: true },
-    )).toThrow(HOSTED_CRYPTO_COMPLETE_STANDBY_PRELOAD_ERROR);
+    await expect(
+      assertHostedCryptoStandbyEnv({}, { requireCompletePreload: true }),
+    ).rejects.toThrow(HOSTED_CRYPTO_COMPLETE_STANDBY_PRELOAD_ERROR);
 
     const standbyRecipient = await generateHostedUserRecipientKeyPair();
-    expect(() => assertHostedCryptoStandbyEnv(
-      {
-        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
-          "cloudflare-automation:v1",
+    const authorityPublicKeyPem = await generateP256SigningPublicKeyPem();
+    const completeEnv = {
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+        "cloudflare-automation:v1",
+      HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+        "authority-v2": {
+          publicKeyPem: authorityPublicKeyPem,
+          status: "verify_only",
+        },
+      }),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+        JSON.stringify({
+          "cloudflare-automation:v2": {
+            privateJwk: standbyRecipient.privateKeyJwk,
+            recipient: "cloudflare-automation-secret",
+            status: "decrypt_only",
+          },
+        }),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON:
+        JSON.stringify({
+          "cloudflare-automation:v2": {
+            publicJwk: standbyRecipient.publicKeyJwk,
+            recipient: "cloudflare-automation-secret",
+            status: "disabled",
+          },
+        }),
+      HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "authority-v1",
+      HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION: "authority-v2",
+      HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID:
+        "cloudflare-automation:v2",
+    };
+    await expect(
+      assertHostedCryptoStandbyEnv(
+        completeEnv,
+        { requireCompletePreload: true },
+      ),
+    ).resolves.toBeUndefined();
+
+    const invalidAuthorityErrors =
+      await listHostedCryptoStandbyEnvErrors({
+        ...completeEnv,
         HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
           "authority-v2": {
             publicKeyPem:
-              "-----BEGIN PUBLIC KEY-----\nstandby\n-----END PUBLIC KEY-----",
+              "-----BEGIN PUBLIC KEY-----\noperator-private-canary\n-----END PUBLIC KEY-----",
             status: "verify_only",
           },
         }),
+      }, { requireCompletePreload: true });
+    const invalidPrivateErrors =
+      await listHostedCryptoStandbyEnvErrors({
+        ...completeEnv,
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
           JSON.stringify({
             "cloudflare-automation:v2": {
-              privateJwk: standbyRecipient.privateKeyJwk,
+              privateJwk: {
+                ...standbyRecipient.privateKeyJwk,
+                d: "operator-private-canary",
+              },
               recipient: "cloudflare-automation-secret",
               status: "decrypt_only",
             },
           }),
-        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON:
-          JSON.stringify({
-            "cloudflare-automation:v2": {
-              publicJwk: standbyRecipient.publicKeyJwk,
-              recipient: "cloudflare-automation-secret",
-              status: "disabled",
-            },
-          }),
-        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "authority-v1",
-        HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION: "authority-v2",
-        HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID:
-          "cloudflare-automation:v2",
-      },
-      { requireCompletePreload: true },
-    )).not.toThrow();
+      }, { requireCompletePreload: true });
+    expect(invalidAuthorityErrors).toEqual([
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+    ]);
+    expect(invalidPrivateErrors).toEqual([
+      HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR,
+    ]);
+    expect([...invalidAuthorityErrors, ...invalidPrivateErrors].join(" "))
+      .not.toContain("operator-private-canary");
   });
 
   it("runs the standby check before the production Next build", async () => {
@@ -291,3 +327,14 @@ describe("hosted crypto standby environment preflight", () => {
     expect(nextBuildIndex).toBeGreaterThan(preflightIndex);
   });
 });
+
+async function generateP256SigningPublicKeyPem(): Promise<string> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const spki = await crypto.subtle.exportKey("spki", keyPair.publicKey);
+  const base64 = Buffer.from(spki).toString("base64");
+  return `-----BEGIN PUBLIC KEY-----\n${base64}\n-----END PUBLIC KEY-----`;
+}

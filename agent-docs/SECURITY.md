@@ -476,7 +476,10 @@ Last verified: 2026-08-07
   closed raw schemas so sibling private material or another ignored field cannot
   enter Vercel. All three ring strings must reject duplicate JSON object members
   before the first ordinary parse, so discarded earlier members cannot remain
-  in provider-bound text;
+  in provider-bound text. Before provider mutation, the complete-only command
+  must import the exact proposed authority PEM as a P-256 ECDSA verification
+  key and prove the exact Cloudflare public/private JWKs by wrapping and
+  unwrapping an ephemeral challenge;
   errors may name fields but must never reproduce values. Proposed IDs are
   non-secret one-shot operator validation metadata, not provider runtime
   configuration. Record the current

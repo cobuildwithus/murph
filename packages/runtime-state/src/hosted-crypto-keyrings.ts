@@ -1,5 +1,10 @@
-import type {
-  HostedCryptoEcdhRecipientKind,
+import {
+  assertHostedAuthorityVerifyPublicKeyPem,
+  buildHostedDomainRootWrapContext,
+  generateHostedDomainRootKey,
+  type HostedCryptoEcdhRecipientKind,
+  unwrapHostedDomainRootKeyWithP256Ecdh,
+  wrapHostedDomainRootKeyWithP256Ecdh,
 } from "./hosted-domain-crypto.ts";
 import {
   parseHostedUserRecipientPrivateKeyJwk,
@@ -186,6 +191,88 @@ export function assertHostedCryptoStandbyKeyringJsons(input: {
     })
   ) {
     throw new TypeError(HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR);
+  }
+}
+
+export async function assertHostedCryptoCompleteStandbyKeyringJsons(input: {
+  activeAuthorityKeyVersionName?: string | null;
+  activeCloudflareRecipientKeyId?: string | null;
+  authorityVerifyKeyringJson?: string | null;
+  cloudflarePrivateKeyringJson?: string | null;
+  cloudflarePublicKeyringJson?: string | null;
+  proposedAuthorityKeyVersionName?: string | null;
+  proposedCloudflareRecipientKeyId?: string | null;
+}): Promise<void> {
+  assertHostedCryptoStandbyKeyringJsons({
+    ...input,
+    requireCompletePreload: true,
+  });
+
+  const proposedAuthorityKeyVersionName = normalizeOptionalString(
+    input.proposedAuthorityKeyVersionName,
+  );
+  const proposedCloudflareRecipientKeyId = normalizeOptionalString(
+    input.proposedCloudflareRecipientKeyId,
+  );
+  if (!proposedAuthorityKeyVersionName || !proposedCloudflareRecipientKeyId) {
+    throw new TypeError(HOSTED_CRYPTO_COMPLETE_STANDBY_IDENTIFIERS_ERROR);
+  }
+  const authorityEntry = readHostedAuthorityStandbyEntries(
+    input.authorityVerifyKeyringJson,
+  ).find(
+    (entry) => entry.keyVersionName === proposedAuthorityKeyVersionName,
+  );
+  if (!authorityEntry) {
+    throw new TypeError(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
+  }
+  const publicEntry = readHostedCloudflarePublicStandbyEntries(
+    input.cloudflarePublicKeyringJson,
+  ).find((entry) => entry.recipientKeyId === proposedCloudflareRecipientKeyId);
+  const privateEntry = readHostedCloudflarePrivateStandbyEntries(
+    input.cloudflarePrivateKeyringJson,
+  ).find((entry) => entry.recipientKeyId === proposedCloudflareRecipientKeyId);
+  if (!publicEntry || !privateEntry) {
+    throw new TypeError(HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR);
+  }
+
+  try {
+    await assertHostedAuthorityVerifyPublicKeyPem(authorityEntry.publicKeyPem);
+  } catch {
+    throw new TypeError(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
+  }
+
+  const challenge = generateHostedDomainRootKey();
+  let unwrapped: Uint8Array | null = null;
+  try {
+    const wrap = await wrapHostedDomainRootKeyWithP256Ecdh({
+      encryptionContext: buildHostedDomainRootWrapContext({
+        domain: "runtime",
+        env: "standby-preload",
+        recipient: publicEntry.recipient,
+        rootKeyId: "udrk:runtime:standby-preload",
+        userId: "standby-preload",
+      }),
+      recipient: publicEntry.recipient,
+      recipientKeyId: publicEntry.recipientKeyId,
+      recipientPublicJwk: publicEntry.publicJwk,
+      rootKey: challenge,
+      teePolicyId: publicEntry.teePolicyId,
+    });
+    unwrapped = await unwrapHostedDomainRootKeyWithP256Ecdh({
+      privateJwk: privateEntry.privateJwk,
+      wrap,
+    });
+    if (
+      unwrapped.length !== challenge.length
+      || unwrapped.some((byte, index) => byte !== challenge[index])
+    ) {
+      throw new TypeError(HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR);
+    }
+  } catch {
+    throw new TypeError(HOSTED_CLOUDFLARE_STANDBY_KEYPAIR_MISMATCH_ERROR);
+  } finally {
+    challenge.fill(0);
+    unwrapped?.fill(0);
   }
 }
 

@@ -794,9 +794,10 @@ Hosted managed crypto:
   `HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID`, then run
   `pnpm --dir apps/web hosted-crypto:env-check -- --require-complete-preload`;
   complete mode rejects active-ID collisions, requires the intended
-  `verify_only` / `disabled` / `decrypt_only` entries, and matches the
-  Cloudflare public/private pair. Do not add the two operator-only identifiers
-  to Vercel runtime.
+  `verify_only` / `disabled` / `decrypt_only` entries, imports the exact
+  authority PEM as a P-256 ECDSA verification key, and wraps then unwraps an
+  ephemeral challenge through the exact Cloudflare public/private pair. Do not
+  add the two operator-only identifiers to Vercel runtime.
 - Record the current ready Vercel production deployment before preload. Deploy
   Web first and prove that its active hosted crypto context still reads the
   current ingress/runtime envelopes before changing the Worker. A failed Web
