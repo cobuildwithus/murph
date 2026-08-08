@@ -491,11 +491,13 @@ export class HostedDeviceSyncPublicIngressService {
 
   async handleWebhook(provider: string, rawBody?: Buffer): Promise<HandleWebhookResult> {
     const resolvedRawBody = rawBody ?? (await this.readWebhookRawBody());
-    // One webhook request opens several secure-box fields under the same
-    // domain root (account lookup, then admission work inside the transaction).
-    // Scope the unwrap memo to the request so the KMS round trip happens once,
-    // before the admission transaction opens, instead of per field while a
-    // pooled connection is held. Hosted-onboarding webhooks use the same seam.
+    // One webhook request opens and seals several secure-box fields under the
+    // member's device domain roots. Scope the unwrap memo to the request so
+    // each distinct root key costs at most one KMS round trip per request
+    // instead of one per field: the concrete root is unwrapped by the account
+    // lookup before the admission transaction, while the @active root used for
+    // sealing payloads is a separate cache key whose first unwrap still runs
+    // inside the transaction. Hosted-onboarding webhooks use the same seam.
     return runWithHostedDomainRootUnwrapCache(() =>
       this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody),
     );

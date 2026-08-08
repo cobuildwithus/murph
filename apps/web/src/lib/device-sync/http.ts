@@ -105,8 +105,11 @@ function matchDeviceSyncError(error: unknown): JsonErrorMapping | null {
 // Prisma reports every transaction-API fault as P2028, covering both a
 // transaction that expired mid-flight and one that never started in time.
 const PRISMA_TRANSACTION_FAULT_CODE = "P2028";
+// Raw queries fail with P2010; @prisma/adapter-pg nests the original Postgres
+// code under meta.driverAdapterError.cause.
+const PRISMA_RAW_QUERY_FAULT_CODE = "P2010";
 // Postgres raises 55P03 when a bounded `lock_timeout` wait gives up, which is
-// how the admission member-row lock fails fast under webhook fan-out bursts.
+// how the webhook admission member-row lock fails fast under fan-out bursts.
 const POSTGRES_LOCK_TIMEOUT_CODE = "55P03";
 const DATABASE_CONTENTION_CAUSE_CHAIN_LIMIT = 5;
 
@@ -154,11 +157,9 @@ function isDatabaseContentionError(error: unknown): boolean {
     if (record.code === PRISMA_TRANSACTION_FAULT_CODE || record.code === POSTGRES_LOCK_TIMEOUT_CODE) {
       return true;
     }
-    const meta = record.meta;
     if (
-      meta !== null
-      && typeof meta === "object"
-      && (meta as { code?: unknown }).code === POSTGRES_LOCK_TIMEOUT_CODE
+      record.code === PRISMA_RAW_QUERY_FAULT_CODE
+      && isAdapterPgLockTimeoutMeta(record.meta)
     ) {
       return true;
     }
@@ -167,6 +168,28 @@ function isDatabaseContentionError(error: unknown): boolean {
   }
 
   return false;
+}
+
+/**
+ * The production adapter-pg shape for a raw-query lock timeout: P2010 with the
+ * Postgres code at meta.driverAdapterError.cause.originalCode (or .code). The
+ * hosted member billing store decodes this exact shape for its own lock bound.
+ */
+function isAdapterPgLockTimeoutMeta(meta: unknown): boolean {
+  if (meta === null || typeof meta !== "object") {
+    return false;
+  }
+  const driverAdapterError = (meta as { driverAdapterError?: unknown }).driverAdapterError;
+  if (driverAdapterError === null || typeof driverAdapterError !== "object") {
+    return false;
+  }
+  const cause = (driverAdapterError as { cause?: unknown }).cause;
+  if (cause === null || typeof cause !== "object") {
+    return false;
+  }
+  const causeRecord = cause as { code?: unknown; originalCode?: unknown };
+  return causeRecord.originalCode === POSTGRES_LOCK_TIMEOUT_CODE
+    || causeRecord.code === POSTGRES_LOCK_TIMEOUT_CODE;
 }
 
 const deviceSyncJsonRouteHelpers = createJsonRouteHelpers({

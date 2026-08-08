@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -87,6 +88,31 @@ vi.mock("next/server", () => {
 type HttpModule = typeof import("../src/lib/device-sync/http");
 
 let httpModule: HttpModule;
+
+// Mirrors the production @prisma/adapter-pg raw-query lock-timeout shape, as
+// encoded by the hosted member billing store fixtures.
+function createAdapterPgLockTimeout(
+  codeField: "code" | "originalCode",
+): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    "Raw query failed. Code: `55P03`.",
+    {
+      clientVersion: "7.8.0",
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          cause: {
+            [codeField]: "55P03",
+            kind: "postgres",
+            message: "canceling statement due to lock timeout",
+            severity: "ERROR",
+          },
+          name: "DriverAdapterError",
+        },
+      },
+    },
+  );
+}
 
 describe("device sync callback redirect helpers", () => {
   beforeAll(async () => {
@@ -229,30 +255,26 @@ describe("device sync callback redirect helpers", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it("maps bounded lock-timeout raw-query faults to the retryable 503", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const lockTimeoutError = Object.assign(
-      new Error("canceling statement due to lock timeout"),
-      {
-        code: "P2010",
-        meta: { code: "55P03" },
-        name: "PrismaClientKnownRequestError",
-      },
-    );
+  it.each(["originalCode", "code"] as const)(
+    "maps adapter-pg P2010 lock timeouts from the nested cause %s to the retryable 503",
+    async (codeField) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const lockTimeoutError = createAdapterPgLockTimeout(codeField);
 
-    const response = httpModule.jsonError(lockTimeoutError);
+      const response = httpModule.jsonError(lockTimeoutError);
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "STORE_CONTENTION",
-        message: "The device-sync store timed out under contention. Retry later.",
-        retryable: true,
-      },
-    });
-    expect(errorSpy).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "STORE_CONTENTION",
+          message: "The device-sync store timed out under contention. Retry later.",
+          retryable: true,
+        },
+      });
+      expect(errorSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps unrelated Prisma errors on the internal 500 path", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});

@@ -194,9 +194,9 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       httpStatus: 403,
     });
 
-    expect(lockHostedMemberRowMock).toHaveBeenCalledWith(tx, "user-123", {
-      timeoutMs: 5_000,
-    });
+    // Callers that pass no options keep the unbounded member-row wait; only
+    // webhook acceptance opts into a lock bound.
+    expect(lockHostedMemberRowMock).toHaveBeenCalledWith(tx, "user-123", {});
     expect(readHostedHealthDataConsentStateMock).toHaveBeenCalledWith({
       memberId: "user-123",
       prisma: tx,
@@ -205,7 +205,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(callback).not.toHaveBeenCalled();
   });
 
-  it("bounds the member-row lock wait before taking the admission advisory lock", async () => {
+  it("bounds the member-row lock wait only for callers that request it", async () => {
     const executeRaw = vi.fn(async () => 0);
     const tx = { $executeRaw: executeRaw };
     const callback = vi.fn(async () => "admitted");
@@ -221,6 +221,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       "user-123",
       "dsc_123",
       callback,
+      { memberRowLockTimeoutMs: 5_000 },
     )).resolves.toBe("admitted");
 
     // A queued webhook burst must fail fast with a retryable error instead of
@@ -233,6 +234,35 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(callback).toHaveBeenCalledWith(tx);
     expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]!)
       .toBeLessThan(executeRaw.mock.invocationCallOrder[0]!);
+  });
+
+  it("propagates bounded lock-wait faults without taking the advisory lock", async () => {
+    const executeRaw = vi.fn(async () => 0);
+    const tx = { $executeRaw: executeRaw };
+    const callback = vi.fn();
+    const lockTimeout = Object.assign(new Error("Raw query failed. Code: `55P03`."), {
+      code: "P2010",
+    });
+    lockHostedMemberRowMock.mockRejectedValueOnce(lockTimeout);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $transaction: async <TResult>(
+          transactionCallback: (transaction: typeof tx) => Promise<TResult>,
+        ) => transactionCallback(tx),
+      } as never,
+    });
+
+    // The fault must reach the route unwrapped so the shared device-sync JSON
+    // helper can map it to a retryable 503 and the provider redelivers.
+    await expect(store.withHealthDataAdmissionLock(
+      "user-123",
+      "dsc_123",
+      callback,
+      { memberRowLockTimeoutMs: 5_000 },
+    )).rejects.toBe(lockTimeout);
+
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(callback).not.toHaveBeenCalled();
   });
 
   it("creates new hosted connections without creating a Prisma secret row", async () => {

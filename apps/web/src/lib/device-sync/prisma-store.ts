@@ -94,16 +94,6 @@ export type {
   UpsertHostedDeviceSyncDirtyConnectionResult,
 } from "./prisma-store/types";
 
-/**
- * Webhook fan-out bursts queue many admissions on one member row. Without a
- * lock bound, each queued transaction burns its whole 15s budget waiting and
- * then expires mid-callback; with one, waiters fail fast with a retryable
- * error the provider redelivers. The bound rides the transaction-local
- * `lock_timeout` set by `lockHostedMemberRow`, which also covers the
- * advisory-lock step in the same transaction.
- */
-const HEALTH_DATA_ADMISSION_LOCK_TIMEOUT_MS = 5_000;
-
 export class PrismaDeviceSyncControlPlaneStore
   implements DeviceSyncPublicIngressStore, HostedBrowserAssertionNonceStore
 {
@@ -499,13 +489,29 @@ export class PrismaDeviceSyncControlPlaneStore
     userId: string,
     connectionId: string,
     callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+    options: {
+      /**
+       * Bounds the member-row lock wait via a transaction-local
+       * `lock_timeout`, which also covers the advisory-lock step in the same
+       * transaction. Only callers whose failure is absorbed by an external
+       * redelivery loop (webhook acceptance) should pass this: a bounded
+       * waiter fails fast with a retryable error and the provider redelivers.
+       * Journeys without redelivery (connection establishment, companion
+       * ingestion, scheduled wakes) keep the full transaction budget.
+       */
+      memberRowLockTimeoutMs?: number;
+    } = {},
   ): Promise<TResult> {
     return this.prisma.$transaction(async (tx) => {
       // Member first is the repository-wide consent serialization order.
       // Connection state is locked only after withdrawal authority is current.
-      await lockHostedMemberRow(tx, userId, {
-        timeoutMs: HEALTH_DATA_ADMISSION_LOCK_TIMEOUT_MS,
-      });
+      await lockHostedMemberRow(
+        tx,
+        userId,
+        options.memberRowLockTimeoutMs !== undefined
+          ? { timeoutMs: options.memberRowLockTimeoutMs }
+          : {},
+      );
       if (await readHostedHealthDataConsentState({
         memberId: userId,
         prisma: tx,
