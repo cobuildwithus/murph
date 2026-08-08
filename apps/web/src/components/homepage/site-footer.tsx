@@ -2,6 +2,8 @@ import Link from "next/link";
 
 import { MURPH_SUPPORT_EMAIL } from "@/src/components/support/contact-support-action";
 
+import { SiteFooterVitals } from "./site-footer-vitals";
+
 function GitHubIcon() {
   return (
     <svg
@@ -66,17 +68,23 @@ export function SiteFooter({ id = "site-footer" }: { id?: string }) {
       <div className="mx-auto max-w-[1080px]">
         {/* Logo + link columns */}
         <div className="flex flex-col gap-10 py-10 sm:flex-row sm:justify-between">
-          <Link href="/" aria-label="Murph home">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.svg" alt="Murph" width={125} height={28} className="h-7 w-auto" />
-          </Link>
+          <div className="flex flex-col items-start gap-8">
+            <Link href="/" aria-label="Murph home">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.svg" alt="Murph" width={125} height={28} className="h-7 w-auto" />
+            </Link>
+            <SiteFooterVitals />
+          </div>
 
           <div className="grid grid-cols-2 gap-x-20 gap-y-8 sm:gap-x-28">
             <div className="flex flex-col gap-3">
               <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-[#736a58]">
                 Murph
               </span>
-              <nav className="flex flex-col gap-2" aria-label="Product links">
+              <nav
+                className="grid gap-2 sm:grid-flow-col sm:grid-rows-4 sm:gap-x-12"
+                aria-label="Product links"
+              >
                 {footerLinks.murph.map((link) => (
                   <a
                     key={link.href}
