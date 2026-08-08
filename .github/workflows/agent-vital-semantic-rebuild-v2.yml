@@ -1,0 +1,203 @@
+name: Agent Vital Semantic Rebuild V2
+
+on:
+  push:
+    branches:
+      - agent/explain-vital-garmin-handoff
+    paths:
+      - .github/workflows/agent-vital-semantic-rebuild-v2.yml
+
+concurrency:
+  group: agent-vital-semantic-rebuild-v2
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Rebuild from main with a three-way semantic patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(
+            'apps/web/app/(dashboard)/connect/connect-page-client.tsx'
+            'apps/web/app/(dashboard)/connect/connect-page-content.tsx'
+            'apps/web/app/(dashboard)/connect/connect-page-dialogs.tsx'
+            'apps/web/app/(dashboard)/connect/connect-page-types.ts'
+            'apps/web/app/design/components-content.tsx'
+            'apps/web/test/connect-page.test.ts'
+            'apps/web/test/vital-connection-dialog.test.tsx'
+          )
+
+          git fetch origin main
+          git diff \
+            --ignore-all-space \
+            --ignore-blank-lines \
+            --full-index \
+            --binary \
+            origin/main...HEAD \
+            -- "${paths[@]}" > /tmp/vital-semantic.patch
+          test -s /tmp/vital-semantic.patch
+
+          git reset --hard origin/main
+          git apply --3way --ignore-space-change --ignore-whitespace /tmp/vital-semantic.patch
+          git diff --check
+
+          python - <<'PY'
+          import subprocess
+
+          output = subprocess.check_output(
+              ["git", "diff", "--numstat", "origin/main"],
+              text=True,
+          )
+          added = deleted = 0
+          paths = []
+          for line in output.splitlines():
+              left, right, path = line.split("\t", 2)
+              paths.append(path)
+              if left.isdigit():
+                  added += int(left)
+              if right.isdigit():
+                  deleted += int(right)
+          print(f"semantic diff: +{added} -{deleted}")
+          print("changed paths:")
+          print("\n".join(paths))
+          allowed = {
+              "apps/web/app/(dashboard)/connect/connect-page-client.tsx",
+              "apps/web/app/(dashboard)/connect/connect-page-content.tsx",
+              "apps/web/app/(dashboard)/connect/connect-page-dialogs.tsx",
+              "apps/web/app/(dashboard)/connect/connect-page-types.ts",
+              "apps/web/app/design/components-content.tsx",
+              "apps/web/test/connect-page.test.ts",
+              "apps/web/test/vital-connection-dialog.test.tsx",
+          }
+          unexpected = set(paths) - allowed
+          if unexpected:
+              raise SystemExit(f"Unexpected changed paths: {sorted(unexpected)}")
+          if added + deleted > 700:
+              raise SystemExit(
+                  f"Semantic diff is still disproportionate: +{added} -{deleted}"
+              )
+          PY
+          git diff --stat origin/main
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate required artifacts
+        run: |
+          pnpm health-commons:generate
+          pnpm --dir apps/web prisma:generate
+
+      - name: Run focused Web tests
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/connect-page.test.ts
+          apps/web/test/vital-connection-dialog.test.tsx
+
+      - name: Typecheck hosted Web
+        run: pnpm --dir apps/web typecheck:prepared
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Render the standard and Garmin variants
+        shell: bash
+        run: |
+          mkdir -p apps/web/.agent-vital-semantic-v2
+          cat > apps/web/agent-vital-semantic-v2.config.ts <<'TS'
+          import { defineConfig, devices } from "@playwright/test";
+          import baseConfig from "./playwright.config";
+
+          export default defineConfig(baseConfig, {
+            fullyParallel: false,
+            projects: [
+              {
+                name: "desktop",
+                use: {
+                  ...devices["Desktop Chrome"],
+                  deviceScaleFactor: 2,
+                  viewport: { height: 1000, width: 1440 },
+                },
+              },
+              {
+                name: "mobile",
+                use: {
+                  ...devices["Desktop Chrome"],
+                  deviceScaleFactor: 2,
+                  isMobile: true,
+                  viewport: { height: 780, width: 390 },
+                },
+              },
+            ],
+            reporter: [["list"]],
+            retries: 0,
+            testDir: "./.agent-vital-semantic-v2",
+            workers: 1,
+          });
+          TS
+          cat > apps/web/.agent-vital-semantic-v2/vital-handoff.spec.ts <<'TS'
+          import { expect, test } from "@playwright/test";
+
+          for (const variant of ["standard", "garmin"] as const) {
+            test(`renders the ${variant} Vital handoff`, async ({ page }) => {
+              await page.goto("/design?tab=components");
+              const buttonName = variant === "standard"
+                ? "Preview standard handoff"
+                : "Preview Garmin handoff";
+              const preview = page.getByRole("button", { name: buttonName });
+              await preview.scrollIntoViewIfNeeded();
+              await preview.click();
+
+              const dialog = page.getByRole("dialog");
+              await expect(dialog).toBeVisible();
+              await expect(dialog).toContainText("Vital connects");
+              await expect(dialog).toContainText("health-sync provider");
+              await expect(dialog).toContainText("train models on it");
+              if (variant === "garmin") {
+                await expect(dialog).toContainText("Turn on Historical Data");
+              } else {
+                await expect(dialog).not.toContainText("Turn on Historical Data");
+              }
+            });
+          }
+          TS
+          pnpm --dir apps/web exec playwright test --config agent-vital-semantic-v2.config.ts
+
+      - name: Commit and replace the branch with one clean commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- \
+            'apps/web/app/(dashboard)/connect/connect-page-client.tsx' \
+            'apps/web/app/(dashboard)/connect/connect-page-content.tsx' \
+            'apps/web/app/(dashboard)/connect/connect-page-dialogs.tsx' \
+            'apps/web/app/(dashboard)/connect/connect-page-types.ts' \
+            apps/web/app/design/components-content.tsx \
+            apps/web/test/connect-page.test.ts \
+            apps/web/test/vital-connection-dialog.test.tsx
+          git commit -m "Explain Vital before health-source connections"
+          git push \
+            --force-with-lease=refs/heads/agent/explain-vital-garmin-handoff:${GITHUB_SHA} \
+            origin HEAD:agent/explain-vital-garmin-handoff
