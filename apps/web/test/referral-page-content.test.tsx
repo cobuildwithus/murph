@@ -47,7 +47,7 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /About 100 more messages/);
   assert.match(markup, /About 140 more messages/);
   assert.match(markup, /15 human messages/);
-  assert.match(markup, /8 from at least two other people/);
+  assert.match(markup, /8 from at least 2 other people/);
   assert.match(markup, /at least 10 minutes/);
   assert.match(markup, /Your referral should never expose their health\./);
   assert.match(markup, /contains no phone number, email address, health data, or recipient identity/);

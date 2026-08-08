@@ -44,7 +44,7 @@ export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
     approximateMessageCount: 140,
     availabilityLabel: "Supported group chats",
     description:
-      "Ask Murph to start the mission, then make a fresh group genuinely active: 15 human messages, including 8 from at least two other people, across at least 10 minutes.",
+      "Ask Murph to start the mission, then make a fresh group genuinely active: 15 human messages, including 8 from at least 2 other people, across at least 10 minutes.",
     detail: "Start the mission before creating the group.",
     id: "active-group",
     title: "Start an active group",
