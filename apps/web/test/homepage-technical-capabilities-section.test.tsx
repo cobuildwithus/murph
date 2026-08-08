@@ -8,13 +8,13 @@ import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technica
 
 test("TechnicalCapabilitiesSection renders the agent runtime and inference choices", () => {
   const markup = renderToStaticMarkup(
-    createElement(TechnicalCapabilitiesSection),
+    createElement(TechnicalCapabilitiesSection, { veniceAvailable: true }),
   );
 
   assert.match(markup, /Under the hood/);
-  assert.match(markup, /A real agent runtime behind a simple text\./);
+  assert.match(markup, /You send a text\. A whole computer goes to work\./);
   assert.match(markup, /Codex CLI \+ App Server/);
-  assert.match(markup, /Its own browser/);
+  assert.match(markup, /Its own computer/);
   assert.match(markup, /A real phone number/);
   assert.match(markup, /Bounded subagents/);
   assert.match(markup, /low · medium · high · xhigh/);
@@ -27,4 +27,18 @@ test("TechnicalCapabilitiesSection renders the agent runtime and inference choic
   assert.match(markup, /href="\/security#model-provider"/);
   assert.doesNotMatch(markup, /unlimited/i);
   assert.doesNotMatch(markup, /fully autonomous/i);
+});
+
+test("TechnicalCapabilitiesSection hides Venice and its security anchor when the provider flag is off", () => {
+  const markup = renderToStaticMarkup(
+    createElement(TechnicalCapabilitiesSection, { veniceAvailable: false }),
+  );
+
+  assert.doesNotMatch(markup, /Venice/);
+  assert.doesNotMatch(markup, /privacy model fits you better/);
+  assert.doesNotMatch(markup, /model-provider/);
+  assert.match(markup, /OpenAI/);
+  assert.match(markup, /compatible model endpoint and key/);
+  assert.match(markup, /Endpoint \+ key/);
+  assert.match(markup, /Local OSS/);
 });

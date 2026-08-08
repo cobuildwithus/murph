@@ -155,7 +155,9 @@ export default async function HomePage() {
         <IntegrationsSection authenticated={authenticated} />
         <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
         <HowItWorksSection />
-        <TechnicalCapabilitiesSection />
+        <TechnicalCapabilitiesSection
+          veniceAvailable={isHostedVeniceAssistantEnabled()}
+        />
         <SecurityTeaserSection />
         <FaqSection veniceAvailable={isHostedVeniceAssistantEnabled()} />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />

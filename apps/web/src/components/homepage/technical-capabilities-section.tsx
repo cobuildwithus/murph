@@ -10,8 +10,8 @@ const CAPABILITIES = [
   {
     detail:
       "Murph can research, compare options, fill forms, and complete web tasks in a real browser.",
-    label: "Computer",
-    title: "Its own browser",
+    label: "Workspace",
+    title: "Its own computer",
   },
   {
     detail:
@@ -39,6 +39,9 @@ const CAPABILITIES = [
   },
 ] as const;
 
+const INFERENCE_DETAIL_WITHOUT_VENICE =
+  "Use managed models, connect your own compatible model endpoint and key, or run an open-source model locally.";
+
 const RUNTIME_FACTS = [
   ["runtime", "Codex CLI + App Server"],
   ["tools", "browser · phone · integrations"],
@@ -65,7 +68,24 @@ const INFERENCE_OPTIONS = [
   },
 ] as const;
 
-export function TechnicalCapabilitiesSection() {
+export function TechnicalCapabilitiesSection({
+  veniceAvailable,
+}: {
+  veniceAvailable: boolean;
+}) {
+  // Venice and the provider-choice security anchor render behind the same flag
+  // that gates the FAQ and the /security#model-provider section, so the
+  // homepage never claims a provider path the rest of the site hides.
+  const capabilities = veniceAvailable
+    ? CAPABILITIES
+    : CAPABILITIES.map((capability) =>
+        capability.label === "Inference"
+          ? { ...capability, detail: INFERENCE_DETAIL_WITHOUT_VENICE }
+          : capability,
+      );
+  const inferenceOptions = veniceAvailable
+    ? INFERENCE_OPTIONS
+    : INFERENCE_OPTIONS.filter((option) => option.detail !== "Venice");
   return (
     <section
       aria-labelledby="technical-capabilities-title"
@@ -87,7 +107,7 @@ export function TechnicalCapabilitiesSection() {
               className="mt-6 max-w-[16ch] text-balance font-serif text-[clamp(2rem,4.5vw,3.5rem)] font-semibold leading-[1.05] tracking-[-0.03em]"
               id="technical-capabilities-title"
             >
-              A real agent runtime behind a simple text.
+              You send a text. A whole computer goes to work.
             </h2>
             <p className="mt-6 max-w-[46ch] text-pretty text-base leading-[1.75] text-[#f5f0e8]/70 sm:text-[1.0625rem]">
               Murph can use a browser, place phone calls, operate tools, and
@@ -100,7 +120,7 @@ export function TechnicalCapabilitiesSection() {
         </div>
 
         <div className="mt-14 grid gap-px overflow-hidden rounded-[1.25rem] border border-[#c4a882]/20 bg-[#c4a882]/20 sm:grid-cols-2 lg:mt-20 lg:grid-cols-3">
-          {CAPABILITIES.map((capability, index) => (
+          {capabilities.map((capability, index) => (
             <article
               className="bg-[#2a2520] p-6 sm:p-7 lg:p-8"
               key={capability.title}
@@ -135,18 +155,23 @@ export function TechnicalCapabilitiesSection() {
               <h3 className="mt-5 max-w-[22ch] text-balance font-serif text-[clamp(1.625rem,3vw,2.25rem)] font-semibold leading-[1.1] tracking-[-0.02em]">
                 The agent stays. The inference path is yours.
               </h3>
-              <Link
-                className="-my-2 mt-4 inline-flex items-center gap-2 py-2 text-sm font-medium text-[#f5f0e8] underline decoration-[#d4b87a]/45 underline-offset-4 transition-colors hover:text-[#d4b87a] hover:decoration-[#d4b87a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:[outline-color:#d4b87a]"
-                href="/security#model-provider"
-              >
-                See how provider choice works
-                <span aria-hidden="true">→</span>
-              </Link>
+              {veniceAvailable ? (
+                <Link
+                  className="-my-2 mt-4 inline-flex items-center gap-2 py-2 text-sm font-medium text-[#f5f0e8] underline decoration-[#d4b87a]/45 underline-offset-4 transition-colors hover:text-[#d4b87a] hover:decoration-[#d4b87a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:[outline-color:#d4b87a]"
+                  href="/security#model-provider"
+                >
+                  See how provider choice works
+                  <span aria-hidden="true">→</span>
+                </Link>
+              ) : null}
             </div>
 
             <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#c4a882]/20 bg-[#c4a882]/20">
-              {INFERENCE_OPTIONS.map((option) => (
-                <div className="bg-[#1f1a16] px-4 py-4 sm:px-5 sm:py-5" key={option.label}>
+              {inferenceOptions.map((option) => (
+                <div
+                  className="bg-[#1f1a16] px-4 py-4 odd:last:col-span-2 sm:px-5 sm:py-5"
+                  key={option.label}
+                >
                   <dt className="font-mono text-[9px] font-medium uppercase tracking-[0.16em] text-[#c4a882]/85">
                     {option.label}
                   </dt>

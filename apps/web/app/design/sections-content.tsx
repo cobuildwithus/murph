@@ -118,7 +118,19 @@ export function SectionsContent() {
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
-          <TechnicalCapabilitiesSection />
+          <TechnicalCapabilitiesSection veniceAvailable />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage technical runtime · Venice unavailable">
+        <div
+          data-design-section="homepage-technical-runtime-no-venice"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <TechnicalCapabilitiesSection veniceAvailable={false} />
         </div>
       </StudySection>
 
