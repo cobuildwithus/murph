@@ -9,6 +9,22 @@ import { isAllowedKernelManagedAuthHostedUrl } from "./managed-auth-origin";
 const KERNEL_REQUEST_TIMEOUT_MS = 30_000;
 const KERNEL_PLAYWRIGHT_DIAGNOSTIC_MAX_LENGTH = 4_000;
 
+type KernelClickMouseParams = Parameters<
+  Kernel["browsers"]["computer"]["clickMouse"]
+>[1];
+type KernelDragMouseParams = Parameters<
+  Kernel["browsers"]["computer"]["dragMouse"]
+>[1];
+type KernelMoveMouseParams = Parameters<
+  Kernel["browsers"]["computer"]["moveMouse"]
+>[1];
+type KernelPressKeyParams = Parameters<
+  Kernel["browsers"]["computer"]["pressKey"]
+>[1];
+type KernelScrollParams = Parameters<
+  Kernel["browsers"]["computer"]["scroll"]
+>[1];
+
 export interface KernelBrowserHandle {
   liveViewUrl: string;
   sessionId: string;
@@ -284,57 +300,83 @@ export class KernelComputerClient implements ComputerKernelClient {
     const { action, sessionId } = input;
     try {
       switch (action.action) {
-        case "clickMouse":
-          await this.kernel.browsers.computer.clickMouse(sessionId, {
+        case "clickMouse": {
+          const params: KernelClickMouseParams = {
             button: action.button,
             click_type: action.clickType,
-            ...kernelHoldKeys(action.holdKeys),
             num_clicks: action.numClicks,
             x: action.x,
             y: action.y,
-          });
+          };
+          if (action.holdKeys.length > 0) {
+            params.hold_keys = [...action.holdKeys];
+          }
+          await this.kernel.browsers.computer.clickMouse(sessionId, params);
           return;
-        case "moveMouse":
-          await this.kernel.browsers.computer.moveMouse(sessionId, {
-            ...kernelDurationMs(action.durationMs),
-            ...kernelHoldKeys(action.holdKeys),
+        }
+        case "moveMouse": {
+          const params: KernelMoveMouseParams = {
             smooth: action.smooth,
             x: action.x,
             y: action.y,
-          });
+          };
+          if (action.durationMs > 0) {
+            params.duration_ms = action.durationMs;
+          }
+          if (action.holdKeys.length > 0) {
+            params.hold_keys = [...action.holdKeys];
+          }
+          await this.kernel.browsers.computer.moveMouse(sessionId, params);
           return;
+        }
         case "typeText":
           await this.kernel.browsers.computer.typeText(sessionId, {
             text: action.text,
           });
           return;
-        case "pressKey":
-          await this.kernel.browsers.computer.pressKey(sessionId, {
-            ...kernelDuration(action.durationMs),
+        case "pressKey": {
+          const params: KernelPressKeyParams = {
             keys: [...action.keys],
-          });
+          };
+          if (action.durationMs > 0) {
+            params.duration = action.durationMs;
+          }
+          await this.kernel.browsers.computer.pressKey(sessionId, params);
           return;
-        case "scroll":
-          await this.kernel.browsers.computer.scroll(sessionId, {
+        }
+        case "scroll": {
+          const params: KernelScrollParams = {
             delta_x: action.deltaX,
             delta_y: action.deltaY,
-            ...kernelHoldKeys(action.holdKeys),
             x: action.x,
             y: action.y,
-          });
+          };
+          if (action.holdKeys.length > 0) {
+            params.hold_keys = [...action.holdKeys];
+          }
+          await this.kernel.browsers.computer.scroll(sessionId, params);
           return;
-        case "dragMouse":
-          await this.kernel.browsers.computer.dragMouse(sessionId, {
+        }
+        case "dragMouse": {
+          const params: KernelDragMouseParams = {
             button: action.button,
-            ...kernelDelay(action.delayMs),
-            ...kernelDurationMs(action.durationMs),
-            ...kernelHoldKeys(action.holdKeys),
             path: action.path.map(([x, y]) => [x, y]),
             smooth: action.smooth,
             step_delay_ms: action.stepDelayMs,
             steps_per_segment: action.stepsPerSegment,
-          });
+          };
+          if (action.delayMs > 0) {
+            params.delay = action.delayMs;
+          }
+          if (action.durationMs > 0) {
+            params.duration_ms = action.durationMs;
+          }
+          if (action.holdKeys.length > 0) {
+            params.hold_keys = [...action.holdKeys];
+          }
+          await this.kernel.browsers.computer.dragMouse(sessionId, params);
           return;
+        }
       }
     } catch {
       throw computerUseError({
@@ -465,24 +507,6 @@ function isComputerUseDomainError(error: unknown): boolean {
       typeof error.code === "string" &&
       error.code.startsWith("HOSTED_COMPUTER_"),
   );
-}
-
-function kernelHoldKeys(
-  holdKeys: readonly string[],
-): { hold_keys?: string[] } {
-  return holdKeys.length > 0 ? { hold_keys: [...holdKeys] } : {};
-}
-
-function kernelDurationMs(durationMs: number): { duration_ms?: number } {
-  return durationMs > 0 ? { duration_ms: durationMs } : {};
-}
-
-function kernelDuration(durationMs: number): { duration?: number } {
-  return durationMs > 0 ? { duration: durationMs } : {};
-}
-
-function kernelDelay(delayMs: number): { delay?: number } {
-  return delayMs > 0 ? { delay: delayMs } : {};
 }
 
 function buildKernelPlaywrightFailureDetails(response: {

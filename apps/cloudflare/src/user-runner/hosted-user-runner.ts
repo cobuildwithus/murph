@@ -35,6 +35,7 @@ import {
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import { withSerializedLock } from "../serialized-lock.js";
 import type {
+  WorkerAnalyticsEngineDatasetLike,
   WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
 } from "../worker-contracts.js";
@@ -72,7 +73,6 @@ import {
   RuntimeProcessingController,
   type RuntimeProcessingInput,
 } from "./runtime-processing-controller.js";
-
 export type { DurableObjectStateLike } from "./types.js";
 
 export interface HostedRuntimeHealthDataConsentReconcileResult {
@@ -96,6 +96,7 @@ export class HostedUserRunner {
   private readonly privateMediaBucket: R2BucketLike;
   private readonly privateMediaCapabilitySecret: string | null;
   private readonly privateMediaDeliveryOrigin: string;
+  private readonly runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null;
   private privateMediaMutationLock: Promise<void> | null = null;
   private runtimeConsentMutationLock: Promise<void> | null = null;
 
@@ -109,6 +110,7 @@ export class HostedUserRunner {
         runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
       }
     ).runnerContainerNamespace ?? null,
+    runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null = null,
   ) {
     this.stateStore = new RunnerStateStore(state);
     this.privateMediaBucket = bucket;
@@ -116,6 +118,7 @@ export class HostedUserRunner {
       readHostedPrivateMediaCapabilitySecret(runnerRuntimeEnvSource);
     this.privateMediaDeliveryOrigin =
       readHostedPrivateMediaDeliveryOrigin(runnerRuntimeEnvSource);
+    this.runtimeRetryAnalytics = runtimeRetryAnalytics;
     this.runnerStoreCache = new RunnerStoreCache({
       bucket,
       env,
@@ -141,6 +144,7 @@ export class HostedUserRunner {
       invocationService: runtimeInvocation,
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
+      runtimeRetryAnalytics,
       stateStore: this.stateStore,
     });
     this.runtimeProcessing = runtimeProcessing;
@@ -257,9 +261,16 @@ export class HostedUserRunner {
     input: RuntimeProcessingInput,
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     return await this.withRuntimeConsentMutationLock(async () => {
+      const lockInput = withRuntimeOrchestration(input, {
+        runtimeConsentLockAcquiredAtEpochMs: Date.now(),
+        healthDataAdmissionReadStartedAtEpochMs: Date.now(),
+      });
       const admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
-        input.userId,
+        lockInput.userId,
       );
+      const processingInput = withRuntimeOrchestration(lockInput, {
+        healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
+      });
       if (!admission.processingAllowed) {
         return {
           kind: "retry_later",
@@ -268,7 +279,7 @@ export class HostedUserRunner {
           ).toISOString(),
         };
       }
-      return await this.runtimeProcessing.ensureForUser(input);
+      return await this.runtimeProcessing.ensureForUser(processingInput);
     });
   }
 
@@ -581,4 +592,17 @@ export class HostedUserRunner {
   private readHostedWebControlBaseUrl(): string {
     return this.env.hostedWebBaseUrl;
   }
+}
+
+function withRuntimeOrchestration(
+  input: RuntimeProcessingInput,
+  orchestration: NonNullable<RuntimeProcessingInput["orchestration"]>,
+): RuntimeProcessingInput {
+  return {
+    ...input,
+    orchestration: {
+      ...(input.orchestration ?? {}),
+      ...orchestration,
+    },
+  };
 }

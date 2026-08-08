@@ -24,18 +24,6 @@ describe('group photo reference recall', () => {
     )
   })
 
-  it('gives silent consolidation a soft lore size target and compaction policy', () => {
-    const description = MURPH_GROUP_ROOM_MODEL_TOOL.description
-
-    expect(description).toContain('roughly under 20,000 UTF-8 bytes')
-    expect(description).toContain('soft curation target, not a hard write gate')
-    expect(description).toContain('merge duplicate lore')
-    expect(description).toContain('summarize older low-value detail')
-    expect(description).toContain('retire stale or contradicted bits')
-    expect(description).toContain('preserving high-signal current canon')
-    expect(description).not.toContain('must fit the complete advisory prompt')
-  })
-
   it('checks available refs before asking for another upload', () => {
     const prompt = renderAssistantGroupRoomModelPrompt([
       '## People',

@@ -51,6 +51,7 @@ import {
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
+  isHostedRuntimeDirectEnsureOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
@@ -5661,9 +5662,10 @@ function readOptionalHostedRuntimeLatencyPhaseBreakdown(
 }
 
 // Secret-safety trust boundary: this parser is the only path through which a
-// phaseBreakdown reaches storage. It rejects any non-number/non-boolean leaf and
-// any unknown top-level or sub key so secrets (ids/tokens/paths/urls) cannot ride
-// this channel into the trace JSON.
+// phaseBreakdown reaches storage. It rejects unknown keys and all strings except
+// the two exact UUID-shaped direct-wake correlation leaves plus the bounded
+// runtime lease generation, so secrets/tokens/paths/URLs cannot ride this
+// channel into the trace JSON.
 function parseHostedRuntimeLatencyPhaseBreakdown(
   value: unknown,
 ): HostedRuntimeLatencyPhaseBreakdown {
@@ -5697,11 +5699,21 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "tokenAcquiredAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureRequestStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureResponseReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "directEnsureOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "runtimeInvocationOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalBoolean(orchestration, "triggeredByWebDirect", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerRpcStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runtimeConsentLockAcquiredAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "healthDataAdmissionReadStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "healthDataAdmissionReadFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "userRunnerEnsureStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateBindStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateBindFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateReadStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateReadFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeFenceObservedAtEpochMs", orchestrationLabel),
       ...requireOptionalBoolean(orchestration, "activeFenceTargetWasPriorVersion", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeWakeStartedAtEpochMs", orchestrationLabel),
@@ -5901,6 +5913,23 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
   }
 
   return breakdown;
+}
+
+function requireOptionalDirectEnsureOrchestrationAttemptId<
+  Key extends "directEnsureOrchestrationAttemptId" | "runtimeInvocationOrchestrationAttemptId",
+>(
+  record: Record<string, unknown>,
+  key: Key,
+  label: string,
+): Partial<Record<Key, string>> {
+  const value = record[key];
+  if (value === undefined) {
+    return {};
+  }
+  if (!isHostedRuntimeDirectEnsureOrchestrationAttemptId(value)) {
+    throw new TypeError(`${label}.${key} must be a direct-wake orchestration attempt id.`);
+  }
+  return { [key]: value } as Record<Key, string>;
 }
 
 function parseHostedRuntimeLatencyTraceProviderStartedEvent(

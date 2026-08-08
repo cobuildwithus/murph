@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 
 import { afterEach, expect, test, vi } from 'vitest'
 
+import { buildLinqIMessageAppCardUrl } from '../src/assistant-response-cards.ts'
 import {
   fetchJsonResponse,
   readJsonErrorResponse,
@@ -453,7 +454,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             team_id: 'G9DJH2XUMK',
           },
           fallback_text: 'Ask Murph for this card in text',
-          interactive: false,
+          interactive: true,
           layout: {
             caption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
             subcaption: '1,490.25 cal',
@@ -461,7 +462,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             trailing_subcaption: '34.75g fat · 26.5g fiber',
           },
           type: 'imessage_app',
-          url: 'https://murph.ai',
+          url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),
         }],
         preferred_service: 'iMessage',
       },
