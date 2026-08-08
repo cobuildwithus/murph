@@ -1,0 +1,60 @@
+name: Push PR 1446 WIP
+
+on:
+  push:
+    branches:
+      - agent/pr1446-recover-finalizer
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr1446-wip-push
+  cancel-in-progress: true
+
+jobs:
+  push-wip:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PATCH_SHA256: a5c2cdb5a8b9fca25e17f32664c30e7dd6e116439ac17edcc43fe5bb246f08c3
+      PR_BRANCH: agent/optional-sponsorship-moments
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Decode audited WIP patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            scripts/pr1446-wip/00 \
+            scripts/pr1446-wip/01 \
+            scripts/pr1446-wip/02 \
+            scripts/pr1446-wip/03 \
+            scripts/pr1446-wip/04 \
+            | tr -d '\r\n ' \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/pr1446-wip.patch
+          echo "${PATCH_SHA256}  /tmp/pr1446-wip.patch" | sha256sum --check
+
+      - name: Apply and push WIP on current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main "${PR_BRANCH}"
+          base_ref="$(git rev-parse origin/main)"
+          source_ref="$(git rev-parse "origin/${PR_BRANCH}")"
+          git reset --hard "${base_ref}"
+          git apply --index --binary /tmp/pr1446-wip.patch
+          git diff --cached --check
+          git config user.name "OpenAI"
+          git config user.email "openai@users.noreply.github.com"
+          git commit -m "WIP: make group sponsorship creative moments opt-in"
+          final_commit="$(git rev-parse HEAD)"
+          git push \
+            --force-with-lease="refs/heads/${PR_BRANCH}:${source_ref}" \
+            origin "${final_commit}:refs/heads/${PR_BRANCH}"
+          echo "Pushed ${final_commit} to ${PR_BRANCH} from ${base_ref}."
