@@ -1,10 +1,8 @@
 import {
   ArrowDown,
-  CheckCircle2,
+  Heart,
   Link2,
-  LockKeyhole,
   MessageCircleMore,
-  Sparkles,
   UsersRound,
 } from "lucide-react";
 
@@ -19,20 +17,35 @@ const HOW_IT_WORKS = [
   {
     description:
       "Copy your personal link, or ask Murph to start one of the available group missions before you create the group.",
-    number: "01",
     title: "Choose how to invite",
   },
   {
     description:
       "Your friend completes their own Murph setup, or the fresh group reaches the mission’s real-participation requirements.",
-    number: "02",
     title: "They actually join in",
   },
   {
     description:
       "Murph applies the usage reward automatically and sends you a short confirmation. There is no claim form or payout setup.",
-    number: "03",
     title: "Messages are added",
+  },
+] as const;
+
+const TRUST_POINTS = [
+  {
+    description:
+      "Your stable link contains no phone number, email address, health data, or recipient identity. It attributes the introduction to you, nothing more.",
+    title: "The link is only a code.",
+  },
+  {
+    description:
+      "When a referral qualifies you get a short confirmation, never the name of the person who joined or anything they told Murph.",
+    title: "Rewards never name anyone.",
+  },
+  {
+    description:
+      "The person you invite gets their own private relationship with Murph from the first message. Their conversations are never visible to you.",
+    title: "Their Murph starts private.",
   },
 ] as const;
 
@@ -101,8 +114,8 @@ export function ReferralPageContent({
             <p className="font-mono text-[10px] font-medium uppercase tracking-[0.13em] text-[#d4b87a]">
               Murph referrals
             </p>
-            <h1 className="mt-5 max-w-[13ch] text-balance font-serif text-[clamp(2.65rem,7vw,5.4rem)] font-semibold leading-[0.94] tracking-[-0.055em] text-[#f5f0e8]">
-              Bring your people. Earn more time with Murph.
+            <h1 className="mt-5 max-w-[12ch] text-balance font-serif text-[clamp(2.75rem,7.5vw,5.8rem)] font-semibold leading-[0.98] tracking-[-0.045em] text-[#f5f0e8]">
+              Earn more Murph time.
             </h1>
             <p className="mt-6 max-w-[58ch] text-pretty text-[1rem] leading-[1.75] text-[#f5f0e8]/75 sm:text-[1.0625rem]">
               Share your personal link or start a qualifying group mission. When
@@ -151,19 +164,16 @@ export function ReferralPageContent({
             </p>
           </div>
 
-          <div className="mt-12 grid gap-px overflow-hidden rounded-[1.75rem] border border-[#c4a882]/30 bg-[#c4a882]/30 lg:grid-cols-3">
+          <div className="mt-12 grid gap-10 sm:mt-14 lg:grid-cols-3 lg:gap-8">
             {HOW_IT_WORKS.map((step) => (
               <article
-                className="relative bg-[#faf7f1] p-7 sm:p-8 lg:min-h-[285px]"
-                key={step.number}
+                className="border-t border-[#2d3436]/55 pt-6"
+                key={step.title}
               >
-                <p className="font-mono text-[0.6875rem] font-medium tracking-[0.12em] text-[#8a7254]">
-                  STEP {step.number}
-                </p>
-                <h3 className="mt-12 font-serif text-[1.65rem] font-semibold leading-[1.05] tracking-[-0.035em] text-[#2d3436]">
+                <h3 className="font-serif text-[1.55rem] font-semibold leading-[1.08] tracking-[-0.035em] text-[#2d3436]">
                   {step.title}
                 </h3>
-                <p className="mt-4 text-[0.9375rem] leading-[1.72] text-[#4a4036]">
+                <p className="mt-3 max-w-[44ch] text-[0.9375rem] leading-[1.72] text-[#4a4036]">
                   {step.description}
                 </p>
               </article>
@@ -197,7 +207,7 @@ export function ReferralPageContent({
               const Icon = REWARD_ICONS[reward.id];
               return (
                 <article
-                  className={`flex min-h-[360px] flex-col rounded-[1.75rem] border p-7 sm:p-8 ${
+                  className={`rounded-[1.75rem] border p-7 sm:p-8 ${
                     index === 0
                       ? "border-[#5a6e32]/35 bg-[#253321] text-[#f5f0e8]"
                       : "border-[#c4a882]/35 bg-[#faf7f1] text-[#2d3436]"
@@ -244,19 +254,6 @@ export function ReferralPageContent({
                   >
                     {reward.description}
                   </p>
-                  <div
-                    className={`mt-auto flex items-start gap-2.5 border-t pt-5 text-xs leading-[1.6] ${
-                      index === 0
-                        ? "border-white/12 text-[#f5f0e8]/62"
-                        : "border-[#c4a882]/25 text-[#736a58]"
-                    }`}
-                  >
-                    <CheckCircle2
-                      aria-hidden="true"
-                      className="mt-0.5 size-4 shrink-0"
-                    />
-                    <span>{reward.detail}</span>
-                  </div>
                 </article>
               );
             })}
@@ -264,7 +261,10 @@ export function ReferralPageContent({
         </div>
       </section>
 
-      <section className="px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28">
+      <section
+        className="px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
+        id="privacy"
+      >
         <div className="mx-auto grid max-w-[1160px] gap-12 lg:grid-cols-[0.82fr_1.18fr] lg:gap-20">
           <div>
             <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
@@ -275,32 +275,24 @@ export function ReferralPageContent({
             </h2>
             <p className="mt-5 max-w-[48ch] text-[1rem] leading-[1.75] text-[#4a4036]">
               Murph tracks only the minimum attribution needed to apply the
-              reward. The person you invite gets their own private relationship
-              with Murph from the start.
+              reward.
             </p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TrustCard
-              icon={LockKeyhole}
-              title="Private by default"
-              description="Your stable referral link contains no phone number, email address, health data, or recipient identity."
-            />
-            <TrustCard
-              icon={UsersRound}
-              title="No identity reveal"
-              description="You receive a generic reward confirmation, not the name of the person who joined or anything they shared."
-            />
-            <TrustCard
-              icon={Sparkles}
-              title="One usage balance"
-              description="Referral rewards appear in the same AI usage history as the rest of your Murph capacity."
-            />
-            <TrustCard
-              icon={CheckCircle2}
-              title="No claim flow"
-              description="Once a referral qualifies, Murph applies the reward automatically and tells you it is ready."
-            />
+          <div className="lg:pt-3">
+            {TRUST_POINTS.map((point) => (
+              <div
+                className="border-t border-[#c4a882]/35 py-7 first:border-t-0 first:pt-0 lg:py-8"
+                key={point.title}
+              >
+                <h3 className="font-serif text-[1.45rem] font-semibold leading-[1.1] tracking-[-0.03em] text-[#2d3436]">
+                  {point.title}
+                </h3>
+                <p className="mt-3 max-w-[56ch] text-[0.9375rem] leading-[1.72] text-[#4a4036]">
+                  {point.description}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -394,64 +386,18 @@ function ReferralHeroArtifact() {
           </div>
         </div>
 
-        <div className="mt-6 rounded-2xl rounded-tl-[6px] bg-white px-4 py-3.5 text-[0.9375rem] leading-[1.55] text-[#2d3436] ring-1 ring-[#c4a882]/15">
+        <div className="relative mt-7 w-fit max-w-[88%] rounded-2xl rounded-tl-[6px] bg-white px-4 py-3.5 text-[0.9375rem] leading-[1.55] text-[#2d3436] ring-1 ring-[#c4a882]/15">
           Your referral came through. About 100 messages are already added to
           your Murph.
+          <span className="absolute -right-2.5 -top-3.5 flex size-7 items-center justify-center rounded-full bg-[#5a6e32] ring-2 ring-[#f5f0e8]">
+            <Heart className="size-3.5 fill-current text-[#f5f0e8]" />
+          </span>
         </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-3">
-          <div className="rounded-2xl bg-[#e7eedf] p-4">
-            <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#5a6e32]">
-              Reward
-            </p>
-            <p className="mt-2 font-serif text-3xl font-semibold tracking-[-0.05em] text-[#2d3436]">
-              +100
-            </p>
-            <p className="mt-1 text-xs text-[#5a5045]">approx. messages</p>
-          </div>
-          <div className="rounded-2xl bg-[#eee3d3] p-4">
-            <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#8a7254]">
-              Status
-            </p>
-            <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-[#2d3436]">
-              <CheckCircle2 className="size-4 text-[#5a6e32]" />
-              Applied
-            </p>
-            <p className="mt-2 text-xs leading-[1.5] text-[#5a5045]">
-              No claim needed
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[#c4a882]/25 px-4 py-3 text-xs text-[#5a5045]">
-          <LockKeyhole className="size-4 shrink-0 text-[#5a6e32]" />
-          Their conversations and health data stay private.
+        <div className="mt-2.5 w-fit max-w-[88%] rounded-2xl rounded-tl-[6px] bg-white px-4 py-3.5 text-[0.9375rem] leading-[1.55] text-[#2d3436] ring-1 ring-[#c4a882]/15">
+          No claim needed. Who joined and what they share stays private.
         </div>
       </div>
     </div>
-  );
-}
-
-function TrustCard({
-  description,
-  icon: Icon,
-  title,
-}: {
-  description: string;
-  icon: typeof LockKeyhole;
-  title: string;
-}) {
-  return (
-    <article className="rounded-[1.5rem] border border-[#c4a882]/30 bg-[#faf7f1] p-6 sm:p-7">
-      <span className="inline-flex size-10 items-center justify-center rounded-2xl bg-[#5a6e32]/10 text-[#5a6e32]">
-        <Icon aria-hidden="true" className="size-5" />
-      </span>
-      <h3 className="mt-5 font-serif text-[1.35rem] font-semibold leading-[1.1] tracking-[-0.025em] text-[#2d3436]">
-        {title}
-      </h3>
-      <p className="mt-3 text-sm leading-[1.7] text-[#5a5045]">
-        {description}
-      </p>
-    </article>
   );
 }

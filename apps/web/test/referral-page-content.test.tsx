@@ -38,7 +38,7 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   );
 
   assert.equal((markup.match(/<h1\b/g) ?? []).length, 1);
-  assert.match(markup, /Bring your people\. Earn more time with Murph\./);
+  assert.match(markup, /Earn more Murph time\./);
   assert.match(markup, /data-authenticated="true"/);
   assert.match(markup, /data-identity-key="member_referrer"/);
   assert.match(markup, /Real introductions, rewarded automatically\./);
