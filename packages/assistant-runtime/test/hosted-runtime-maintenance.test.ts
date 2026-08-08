@@ -3689,8 +3689,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       inboxServices: expect.anything(),
       inputSource: expect.any(Object),
-      maxInputPerScan: 50,
-      maxPerScan: 1,
+      maxPerScan: 50,
       onEvent: expect.any(Function),
       onProviderEvent: expect.any(Function),
       onProviderRequestStarted: expect.any(Function),
@@ -4284,7 +4283,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
-  it("reserves bounded batch capacity for input discovered during pre-scan refresh", async () => {
+  it("reserves bounded pass capacity for input discovered during pre-scan refresh", async () => {
     const selectedInputIds: string[] = [];
     mocks.createHostedAssistantInputSource.mockReturnValueOnce({
       listInputCandidates: vi.fn(async (query) => ({
@@ -4311,7 +4310,7 @@ describe("runHostedAssistantAutomationLane", () => {
     });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       await input.inputSource?.refresh();
-      expect(input.maxInputPerScan).toBe(50);
+      expect(input.maxPerScan).toBe(50);
       expect(input.shouldDeferCron?.()).toBe(true);
       return {
         nextWakeAt: null,
@@ -4347,8 +4346,7 @@ describe("runHostedAssistantAutomationLane", () => {
 
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
-        maxInputPerScan: 50,
-        maxPerScan: 1,
+        maxPerScan: 50,
       }),
     );
     expect(result).toMatchObject({
@@ -4356,6 +4354,53 @@ describe("runHostedAssistantAutomationLane", () => {
       assistantAutomationSelectedInputIds: selectedInputIds,
       nextWakeAt: "2026-04-08T00:00:00.000Z",
     });
+  });
+
+  it("processes multiple already-due cron automations in one inputless background pass", async () => {
+    const dueAutomationIds = [
+      "older-due-automation",
+      "later-exact-time-reminder",
+    ];
+    const processedAutomationIds: string[] = [];
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      const limit = input.maxPerScan ?? Number.POSITIVE_INFINITY;
+      processedAutomationIds.push(...dueAutomationIds.slice(0, limit));
+      expect(input.shouldDeferCron?.()).toBe(false);
+      return {
+        cronProcessed: processedAutomationIds.length,
+        nextWakeAt: processedAutomationIds.length === dueAutomationIds.length
+          ? null
+          : "2026-04-08T00:08:00.000Z",
+        progressed: processedAutomationIds.length > 0,
+      };
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_multiple_due_cron",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:05:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      idleCheckpointDelayMs: 180_000,
+      requestId: "req_multiple_due_cron",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ maxPerScan: 50 }),
+    );
+    expect(processedAutomationIds).toEqual(dueAutomationIds);
+    expect(result.assistantAutomationCronProcessed).toBe(2);
+    expect(result.nextWakeAt).toBeNull();
   });
 
   it("selects a background causal batch once after readiness and sizes the scan to it", async () => {
@@ -4714,7 +4759,7 @@ describe("runHostedAssistantAutomationLane", () => {
 
       expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
         expect.objectContaining({
-          maxPerScan: 1,
+          maxPerScan: 50,
         }),
       );
       expect(result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");

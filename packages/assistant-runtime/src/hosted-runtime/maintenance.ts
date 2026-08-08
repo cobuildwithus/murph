@@ -431,9 +431,8 @@ export async function runHostedAssistantAutomation(
   let passStartedAt: number | null = null;
   try {
     passStartedAt = Date.now();
-    const maxPerScan = Math.max(1, selectedInputIds.inputIds.length);
-    const maxInputPerScan = selectedInputIds.inputIds.length > 0
-      ? maxPerScan
+    const maxPerScan = selectedInputIds.inputIds.length > 0
+      ? selectedInputIds.inputIds.length
       : DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT;
     const buildBackgroundDynamicContextPrompt =
       selectedInputIds.mode === "background"
@@ -459,7 +458,6 @@ export async function runHostedAssistantAutomation(
       executionContext,
       ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
-      ...(maxInputPerScan === maxPerScan ? {} : { maxInputPerScan }),
       onEvent: (event) => {
         automationEventCounts.set(
           event.type,

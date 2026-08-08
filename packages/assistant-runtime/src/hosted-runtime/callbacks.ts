@@ -40,6 +40,7 @@ import {
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
   isAssistantOutboxReplyBubbleSuccessor,
+  listAssistantCronPendingDeliveryIntentIds,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
@@ -314,13 +315,40 @@ export async function collectHostedAssistantDeliverySideEffects(
       intents,
       vaultRoot: request.vaultRoot,
     });
-  const cappedBackgroundCandidates = filteredBackgroundCandidates.slice(
-    0,
-    Math.max(
-      0,
-      HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS - foregroundCandidates.length,
-    ),
+  // The scheduled-delivery cohort is derived from durable owner state at
+  // every call, so it survives foreground preemption: whichever pass drains
+  // next re-selects the whole remainder. Membership is either a cron job's
+  // persisted pendingDeliveryIntentId (direct scheduled deliveries, including
+  // local jobs whose authority is intentionally null) or a durable
+  // automationAuthority on the intent itself (canonical scheduled outputs and
+  // the recipient children that newsletter fanout copies it to after the
+  // parent manifest clears the job reference). Provider entry still
+  // revalidates that authority before any irreversible send. Cohort members
+  // keep their comparator position and background classification; only
+  // unrelated backlog competes for the single background slot.
+  const scheduledCohortIntentIds = new Set(
+    filteredBackgroundCandidates.length > 0
+      ? await listAssistantCronPendingDeliveryIntentIds(request.vaultRoot)
+      : [],
   );
+  let backgroundBacklogBudget = Math.max(
+    0,
+    HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS - foregroundCandidates.length,
+  );
+  const cappedBackgroundCandidates: AssistantOutboxIntent[] = [];
+  for (const intent of filteredBackgroundCandidates) {
+    if (
+      scheduledCohortIntentIds.has(intent.intentId)
+      || intent.automationAuthority != null
+    ) {
+      cappedBackgroundCandidates.push(intent);
+      continue;
+    }
+    if (backgroundBacklogBudget > 0) {
+      cappedBackgroundCandidates.push(intent);
+      backgroundBacklogBudget -= 1;
+    }
+  }
   const effects = [
     ...foregroundCandidates.map((intent) =>
       buildHostedAssistantDeliveryEffectFromIntent(intent, "foreground_current_turn")
