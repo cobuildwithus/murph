@@ -1,4 +1,4 @@
-name: Codex export starter usage implementation
+name: Publish non-expiring Starter usage
 
 on:
   push:
@@ -6,26 +6,114 @@ on:
       - codex/starter-usage-export-final
     paths:
       - .github/workflows/codex-export-starter-usage-final.yml
+      - .github/codex/starter-patch-part-*
+      - .github/codex/starter-changed-paths.txt
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Build git bundle
+      - name: Reconstruct and publish the exact candidate
+        id: publish
         shell: bash
-        run: git bundle create murph-starter-usage-main.bundle --all
+        run: |
+          set -euo pipefail
 
-      - name: Upload git bundle
+          if ! command -v zstd >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y zstd
+          fi
+
+          cat .github/codex/starter-patch-part-* > /tmp/starter.patch.zst.b64
+          echo "5d971642b44d30f7b3ca43c994b4cae0628559d02c1b663456e908c2f9b4b3b8  /tmp/starter.patch.zst.b64" | sha256sum --check
+          base64 --decode /tmp/starter.patch.zst.b64 > /tmp/starter.patch.zst
+          echo "cc23a8f7aef1eb6a34d1b2ec1dde13db3bd8171300b3b3eda3b1ad03d6443c13  /tmp/starter.patch.zst" | sha256sum --check
+
+          python3 <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          base = "15c126c77f92104ddc318c53fb7304d7929c408c"
+          paths = Path(".github/codex/starter-changed-paths.txt").read_text().splitlines()
+          output_path = Path("/tmp/starter-diff-reference.bin")
+          with output_path.open("wb") as output:
+              for path in sorted(paths):
+                  try:
+                      data = subprocess.check_output(["git", "show", f"{base}:{path}"])
+                  except subprocess.CalledProcessError:
+                      continue
+                  output.write(f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n".encode())
+                  output.write(data)
+                  if data and not data.endswith(b"\n"):
+                      output.write(b"\n")
+                  lines = data.splitlines(keepends=True)
+                  for prefix in (b"-", b" "):
+                      for line in lines:
+                          output.write(prefix)
+                          output.write(line)
+                      if lines and not lines[-1].endswith(b"\n"):
+                          output.write(b"\n")
+          PY
+
+          zstd --decompress \
+            --patch-from=/tmp/starter-diff-reference.bin \
+            /tmp/starter.patch.zst \
+            --output=/tmp/starter.patch
+          echo "35c4efbb2c540edec5ed5b9231956dc00465f820662765c3586862e1b163534a  /tmp/starter.patch" | sha256sum --check
+
+          git fetch origin main
+          git switch --force-create agent/non-expiring-starter-usage origin/main
+
+          set +e
+          git apply --3way --index /tmp/starter.patch 2>&1 | tee /tmp/git-apply.log
+          apply_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ "$apply_status" -ne 0 ]]; then
+            {
+              echo "git apply exit: $apply_status"
+              echo
+              echo "Unmerged paths:"
+              git diff --name-only --diff-filter=U || true
+              echo
+              echo "Status:"
+              git status --short || true
+            } > /tmp/publish-result.txt
+            git diff --cc > /tmp/conflicts.patch || true
+            exit "$apply_status"
+          fi
+
+          git diff --cached --check
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          git commit -m "Replace timed trial with starter usage"
+          candidate_sha=$(git rev-parse HEAD)
+          git push --force origin HEAD:refs/heads/agent/non-expiring-starter-usage
+
+          {
+            echo "candidate_sha=$candidate_sha"
+            echo "base_sha=$(git rev-parse HEAD^)"
+            echo "branch=agent/non-expiring-starter-usage"
+            echo
+            git show --stat --oneline --summary HEAD
+          } > /tmp/publish-result.txt
+          echo "candidate_sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Upload publish diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: murph-starter-usage-main-bundle
-          path: murph-starter-usage-main.bundle
-          if-no-files-found: error
+          name: starter-usage-publish-diagnostics
+          path: |
+            /tmp/publish-result.txt
+            /tmp/git-apply.log
+            /tmp/conflicts.patch
+          if-no-files-found: warn
           retention-days: 1
