@@ -29,7 +29,13 @@ describe('private experiment deep links', () => {
     const skill = await readExperimentOnboardingSkill()
 
     expect(skill).toContain(
-      'After successfully persisting a custom unlinked run in a verified-private conversation',
+      'Do not send an experiment page link proactively. Creating a run is not a reason to send one',
+    )
+    expect(skill).toContain(
+      'Send a link only when the user asks for one or clearly wants more detail on the experiment',
+    )
+    expect(skill).toContain(
+      'When a link is warranted for a successfully persisted custom unlinked run in a verified-private conversation',
     )
     expect(skill).toContain(
       `${MURPH_PRODUCT_ORIGIN}/experiments/runs/<experimentId>`,
