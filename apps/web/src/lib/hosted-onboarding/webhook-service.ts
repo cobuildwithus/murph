@@ -95,7 +95,7 @@ import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
 import {
-  startHostedDirectRuntimeWakeBestEffort,
+  startHostedRuntimeShellPrewarmBestEffort,
 } from "../hosted-execution/direct-runtime-wake";
 import {
   assertHostedThreadRouteEgressAuthority,
@@ -614,6 +614,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
+        // The member row is committed, so issue only the deterministic
+        // container start command while enrollment runs. This does not resolve
+        // a runtime owner, inspect workspace state, create a fence, or process
+        // mailbox work; the ordinary post-Temporal ensure owns those steps.
+        void startHostedRuntimeShellPrewarmBestEffort({
+          source: "linq-instant-start",
+          userId: instantStartEnrollment.memberId,
+        });
         let enrollmentFailed = false;
         try {
           const enrollment = await ensureHostedLinqInstantStartPulseTrialEnrollment({
@@ -646,15 +654,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
             },
           );
-        }
-        if (!enrollmentFailed) {
-          // Enrollment has now activated access. Start the container before
-          // the active-member replan so this best-effort hint warms the same
-          // foreground mode that will consume the appended conversation item.
-          void startHostedDirectRuntimeWakeBestEffort({
-            source: "linq-instant-start",
-            userId: instantStartEnrollment.memberId,
-          });
         }
         plan = await runPlan(!enrollmentFailed);
         if (plan.instantStartEnrollment) {

@@ -54,6 +54,9 @@ import {
   createCloudflareHostedControlClient,
 } from "@murphai/cloudflare-hosted-control/client";
 import {
+  buildCloudflareHostedControlRuntimeShellPrewarmPath,
+} from "@murphai/cloudflare-hosted-control/routes";
+import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
@@ -72,9 +75,6 @@ import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
-import {
-  ensureProcessingAfterSyntheticMailboxAppendForTest,
-} from "./helpers/hosted-local-wake.js";
 import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
@@ -122,8 +122,8 @@ const systemMailboxProbe = createProbeIdentity("system-mailbox");
 const retentionProbe = createProbeIdentity("retention");
 const stuckInvocationProbe = createProbeIdentity("stuck-invocation");
 const activeTurnProbe = createProbeIdentity("active-turn");
-const postEnrollmentPrewarmProbe = createProbeIdentity(
-  "post-enrollment-prewarm",
+const postEnrollmentConversationProbe = createProbeIdentity(
+  "post-enrollment-conversation",
 );
 const interruptedSnapshotOrderingProbe = createProbeIdentity(
   "interrupted-snapshot-ordering",
@@ -164,7 +164,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
           String(productionIdleCheckpointDelayMs),
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
-          [...allProbeIdentities, postEnrollmentPrewarmProbe]
+          [...allProbeIdentities, postEnrollmentConversationProbe]
             .map((identity) => identity.memberPhone)
             .join(","),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -430,8 +430,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     writeLatencyProof("active_default", latencyMs);
   }, 180_000);
 
-  it("keeps one live default owner across post-enrollment-equivalent signals", async () => {
-    const identity = postEnrollmentPrewarmProbe;
+  it("starts the first live owner from the post-enrollment conversation signal", async () => {
+    const identity = postEnrollmentConversationProbe;
     const activationEventId = "member.activated:instant-start";
     const inboundEventId = `evt_priority_post_enrollment_${runId}`;
     const inboundText = "Start the first synthetic post-enrollment conversation.";
@@ -484,26 +484,18 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       inserted: true,
     });
 
-    const prewarm = await ensureProcessingAfterSyntheticMailboxAppendForTest({
-      harness: requireScenario().harness,
-      userId: identity.userId,
-    });
-    expect(prewarm).toMatchObject({
-      action: "started",
-      kind: "runtime_processing_accepted",
-    });
-    await waitForRuntimeInFlight(
-      identity.userId,
-      "post-enrollment prewarm",
-      "default",
+    const shellPrewarmResponsePromise = requireScenario().harness.request(
+      buildCloudflareHostedControlRuntimeShellPrewarmPath(identity.userId),
+      {
+        body: "{}",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_USER_ID_HEADER]: identity.userId,
+        },
+        method: "POST",
+      },
     );
-    const initialFence = await readActiveRuntimeFenceForTest(identity.userId);
-    expect(initialFence).toMatchObject({
-      processingMode: "default",
-    });
-    if (!initialFence) {
-      throw new Error("Post-enrollment prewarm did not bind a runtime fence.");
-    }
+    await expect(readActiveRuntimeFenceForTest(identity.userId)).resolves.toBeNull();
 
     const providerRequestBaseline = countAssistantProviderInputs(inboundText);
     const replyBaseline = requireLinqStub().countAcceptedSends(
@@ -529,6 +521,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
+    const shellPrewarmResponse = await shellPrewarmResponsePromise;
+    expect(shellPrewarmResponse.status).toBe(202);
+    await expect(shellPrewarmResponse.json()).resolves.toEqual({
+      accepted: true,
+    });
 
     const conversationItem = await readHostedMailboxItemForTest({
       dedupeKey: inboundEventId,
@@ -539,21 +536,31 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       kind: "conversation.message",
       lane: "conversation",
     });
-    const fenceAfterConversation = await readActiveRuntimeFenceForTest(
+    await waitForRuntimeInFlight(
+      identity.userId,
+      "post-enrollment conversation signal",
+      "default",
+    );
+    const conversationFence = await readActiveRuntimeFenceForTest(
       identity.userId,
     );
-    expect(fenceAfterConversation).toEqual(initialFence);
+    expect(conversationFence).toMatchObject({
+      processingMode: "default",
+    });
+    if (!conversationFence) {
+      throw new Error("Conversation signal did not bind the first runtime fence.");
+    }
 
     // Production runs this activation continuation only after the ordinary
-    // conversation signal. Recreate that final handoff while the prewarmed
-    // default owner is still active.
+    // conversation signal. Recreate that final handoff while the conversation
+    // owner is still active.
     await signalHostedMailboxAppendRuntimeForTest({
       environment: requireScenario().runtimeEnv,
       expectedUserId: identity.userId,
       mailboxItemId: activationAppend.wake.id,
     });
     expect(await readActiveRuntimeFenceForTest(identity.userId)).toEqual(
-      initialFence,
+      conversationFence,
     );
 
     await waitForAssistantProviderInput(inboundText, identity.userId, 60_000);
@@ -593,7 +600,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       interval: 250,
       timeout: 60_000,
     }).toEqual({
-      activeFence: initialFence,
+      activeFence: conversationFence,
       conversationConsumed: true,
       lastErrorCode: null,
       mailboxCaughtUp: true,

@@ -179,6 +179,13 @@ class HostedRunnerContainerShuttingDownError extends Error {
   }
 }
 
+class RunnerContainerShellPrewarmSupersededError extends Error {
+  constructor() {
+    super("Hosted runner shell prewarm was superseded by authoritative readiness.");
+    this.name = "RunnerContainerShellPrewarmSupersededError";
+  }
+}
+
 interface HostedExecutionContainerInvokeRequest {
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -197,6 +204,16 @@ export interface RunnerContainerEnsureReadyForProcessingResult {
   action?: "already_warm" | "started";
   kind: "ready";
 }
+
+export type RunnerContainerPrewarmShellResult =
+  | {
+      action: "start_issued";
+      kind: "started";
+    }
+  | {
+      action: "superseded";
+      kind: "superseded";
+    };
 
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
@@ -218,6 +235,9 @@ export interface HostedExecutionContainerStubLike {
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
+  prewarmShell?(
+    input: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerPrewarmShellResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
@@ -475,6 +495,10 @@ export class RunnerContainer extends Container {
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
+  private shellPrewarmOperation: {
+    abortController: AbortController;
+    result: Promise<RunnerContainerPrewarmShellResult>;
+  } | null = null;
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
   private warmShellInvalidatedByUnsettledDestroy = false;
@@ -710,6 +734,8 @@ export class RunnerContainer extends Container {
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
     this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    const supersededShellPrewarm =
+      this.supersedeShellPrewarmForAuthoritativeReadiness();
     return await this.withLifecycleLock(async () => {
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
@@ -719,6 +745,7 @@ export class RunnerContainer extends Container {
         const action = await this.ensureContainerReady(
           input,
           AbortSignal.timeout(input.timeoutMs),
+          { completeSupersededShellPrewarm: supersededShellPrewarm },
         );
         return { action, kind: "ready" };
       } finally {
@@ -727,6 +754,81 @@ export class RunnerContainer extends Container {
         }
       }
     });
+  }
+
+  /**
+   * Issues only the platform container start command. The ordinary processing
+   * owner later performs port and health readiness before invoking workspace
+   * work; this hint never reads a workspace or creates a runtime fence.
+   */
+  async prewarmShell(
+    payload: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerPrewarmShellResult> {
+    this.noteContainerInteraction();
+    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    const existing = this.shellPrewarmOperation;
+    if (existing) {
+      return await existing.result;
+    }
+
+    const abortController = new AbortController();
+    let retainForAuthoritativeReadiness = false;
+    const result = this.withLifecycleLock(
+      async (): Promise<RunnerContainerPrewarmShellResult> => {
+        const signal = combineRunnerContainerAbortSignals(
+          abortController.signal,
+          AbortSignal.timeout(input.timeoutMs),
+        );
+        try {
+          throwIfRunnerContainerOperationAborted(signal);
+          const logContext: RunnerContainerLogContext = {
+            userId: input.userId,
+          };
+          this.currentLogContext = logContext;
+          try {
+            await this.start(undefined, {
+              portToCheck: RUNNER_PORT,
+              signal,
+            });
+            return { action: "start_issued", kind: "started" };
+          } finally {
+            if (this.currentLogContext === logContext) {
+              this.currentLogContext = null;
+            }
+          }
+        } catch (error) {
+          if (
+            abortController.signal.reason
+              instanceof RunnerContainerShellPrewarmSupersededError
+          ) {
+            return { action: "superseded", kind: "superseded" };
+          }
+          // start() can issue the platform command before a later wait fails.
+          // Preserve that uncertain attempt so authoritative readiness finishes
+          // the canonical lifecycle path instead of trusting warm health alone.
+          retainForAuthoritativeReadiness = true;
+          throw error;
+        }
+      },
+      {
+        blockPointerlessWake: false,
+      },
+    );
+    const operation = {
+      abortController,
+      result,
+    };
+    this.shellPrewarmOperation = operation;
+    try {
+      return await result;
+    } finally {
+      if (
+        this.shellPrewarmOperation === operation
+        && !retainForAuthoritativeReadiness
+      ) {
+        this.shellPrewarmOperation = null;
+      }
+    }
   }
 
   async abortWorkspaceInvocation(input: {
@@ -1934,6 +2036,9 @@ export class RunnerContainer extends Container {
   private async ensureContainerReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
     operationAbortSignal: AbortSignal,
+    options: {
+      completeSupersededShellPrewarm?: boolean;
+    } = {},
   ): Promise<"already_warm" | "started"> {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
@@ -1962,7 +2067,10 @@ export class RunnerContainer extends Container {
         failClosed: true,
         reason: "warm-invalidated",
       });
-    } else if (!isRunnerContainerStopped(status)) {
+    } else if (
+      !isRunnerContainerStopped(status)
+      && !options.completeSupersededShellPrewarm
+    ) {
       if (isRunnerContainerRunning(status)) {
         const recentReadinessProof = this.readRecentReadinessProof(
           Date.now(),
@@ -2590,6 +2698,20 @@ export class RunnerContainer extends Container {
       () => undefined,
     );
     return next;
+  }
+
+  private supersedeShellPrewarmForAuthoritativeReadiness(): boolean {
+    const operation = this.shellPrewarmOperation;
+    if (!operation) {
+      return false;
+    }
+    this.shellPrewarmOperation = null;
+    if (!operation.abortController.signal.aborted) {
+      operation.abortController.abort(
+        new RunnerContainerShellPrewarmSupersededError(),
+      );
+    }
+    return true;
   }
 
   private recordRecentReadinessProof(userId: string): void {

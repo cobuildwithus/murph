@@ -53,6 +53,7 @@ import {
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlRuntimeHealthDataConsentPath,
+  buildCloudflareHostedControlRuntimeShellPrewarmPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -157,6 +158,9 @@ export interface CloudflareHostedControlClient {
     orchestrationAttemptId: string;
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
+  prewarmRuntimeShell(
+    userId: string,
+  ): Promise<CloudflareHostedControlRuntimeShellPrewarmAcceptedAck>;
   reconcileRuntimeHealthDataConsent(
     userId: string,
   ): Promise<CloudflareHostedControlRuntimeHealthDataConsentResult>;
@@ -186,6 +190,10 @@ export interface CloudflareHostedControlClient {
 }
 
 export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
+  accepted: true;
+}
+
+export interface CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
   accepted: true;
 }
 
@@ -379,6 +387,27 @@ export function createCloudflareHostedControlClient(
         },
         runtimeEnsureProcessingOrchestrationAttemptId:
           input.orchestrationAttemptId,
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    prewarmRuntimeShell(userId) {
+      const expectedUserId = requireCloudflareHostedControlUserId(userId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: expectedUserId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "runtime shell prewarm",
+        parse: parseCloudflareHostedControlRuntimeShellPrewarmResponse,
+        path: buildCloudflareHostedControlRuntimeShellPrewarmPath(expectedUserId),
+        request: {
+          body: "{}",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -1027,6 +1056,18 @@ function parseCloudflareHostedControlRuntimeEnsureProcessingResponse(
   }
 
   return parseHostedRuntimeEnsureProcessingResponse(value);
+}
+
+function parseCloudflareHostedControlRuntimeShellPrewarmResponse(
+  value: unknown,
+): CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
+  const record = requireRecord(value, "Cloudflare runtime shell prewarm response");
+  if (record.accepted !== true) {
+    throw new TypeError(
+      "Cloudflare runtime shell prewarm response accepted must be true.",
+    );
+  }
+  return { accepted: true };
 }
 
 function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(

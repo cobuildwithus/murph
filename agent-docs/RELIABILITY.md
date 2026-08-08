@@ -22,7 +22,14 @@ Last verified: 2026-08-07
   binding while updating only accepted-message and idempotency context. Native
   reply and reaction authorization rechecks the accepted event against the same
   thread binding, so deleting the duplicate does not remove those tools or
-  change the provider contract. Transport ambiguity, timeouts, rate
+  change the provider contract. A capability-check exception or definitive
+  app-card rejection writes one bounded warn entry to the durable hosted
+  runtime log before the existing text recovery, because container
+  stdout/stderr never reaches a queryable sink; an ordinary `available: false`
+  result is expected and silent. The entry is fire-and-forget,
+  allowlist-projected observability: it adds no state, retry, or user latency,
+  never copies error messages, and contains no message, route, delivery-key,
+  credential, or provider body values. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.

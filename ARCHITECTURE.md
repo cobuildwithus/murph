@@ -145,6 +145,13 @@ bounded seven-day tail of committed transcripts from those same authenticated
 group-chat channels. It fully rewrites the one page only when the evidence
 materially improves a compact list of room canon, likely person-specific comedy
 preferences, successful Murph formats, retired material, and open callbacks.
+Silent consolidation targets a compact 2-6 KiB guide and treats 20 KiB as a
+generous soft ceiling, never a write gate. When the page exceeds that ceiling,
+is materially bloated with duplicate or stale detail, or approaches the
+defensive 64 KiB serialized-page limit, the next evidence-supported rewrite
+merges duplicates, summarizes old examples into durable patterns, and prunes
+stale or completed detail while preserving explicit setup, current boundaries,
+unresolved loops, and high-confidence room or participant patterns.
 One dedicated owner reads, replaces, or deletes the fixed page. Generic
 knowledge show, list, search, append, upsert, and generated index surfaces
 exclude it. Every mutation passes the digest returned by the immediately prior
@@ -165,14 +172,18 @@ the page nor contributes maintenance evidence, and its spoofable sender cannot
 receive the mutation tool. Silent consolidation receives that same dynamic tool
 only from the immutable managed-automation id, runs in a fresh one-shot Codex
 thread with workspace access denied and network disabled, and has no generic
-knowledge or shell write surface. Ordinary prompt reads fail open, but mutation reads
-distinguish a genuinely missing page from malformed, unreadable, or wrong-type
-fixed-slug state; conflicts stop both explicit and scheduled replacement. The
-rendering is quoted as fallible data and
-explicitly tells the model to skim it lightly: most turns should use none of it,
-and at most one naturally relevant tip should shape a reply. Current
-conversation, safety rules, authoritative tool results, and explicit canonical
-room style settings always outrank it. This adds no database table, mailbox
+knowledge or shell write surface.
+Ordinary prompt reads fail open by withholding every unusable page body and
+injecting only a compact trusted status for missing, inactive, or unavailable
+state. Mutation reads still distinguish a genuinely missing page from malformed,
+unreadable, or wrong-type fixed-slug state; conflicts stop both explicit and
+scheduled replacement. The rendering remains quoted as fallible data. The
+resident group-context principle uses the smallest relevant safe set, combines
+several details only when shared history is essential, and applies room context
+whenever it materially improves the current result without forcing callbacks or
+roll calls. Current messages, explicit corrections, safety rules, authoritative
+tool results, and explicit canonical room style settings always outrank it.
+This adds no database table, mailbox
 kind, roster service, cursor, vector index, per-participant page, or pruning
 workflow; the admitted committed transcript is evidence and the single page is
 the only durable room-intelligence owner.
