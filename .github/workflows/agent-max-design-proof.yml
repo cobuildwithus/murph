@@ -1,0 +1,221 @@
+name: Agent Max design proof
+
+on:
+  push:
+    branches:
+      - agent/add-murph-max-plan
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-max-design-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    if: github.actor == 'rocketman-21'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Write isolated design-proof capture
+        shell: bash
+        run: |
+          cat > apps/web/playwright.agent-max-design-proof.config.ts <<'EOF'
+          import { defineConfig } from "@playwright/test";
+
+          import { createHostedWebSmokeEnvironment } from "./next-artifacts";
+
+          const host = "127.0.0.1";
+          const port = 3212;
+          const baseURL = `http://${host}:${port}`;
+
+          export default defineConfig({
+            testDir: "./e2e",
+            testMatch: "agent-max-design-proof.spec.ts",
+            fullyParallel: false,
+            retries: 0,
+            workers: 1,
+            timeout: 60_000,
+            expect: { timeout: 15_000 },
+            reporter: [["list"]],
+            use: {
+              baseURL,
+              reducedMotion: "reduce",
+              trace: "off",
+            },
+            projects: [
+              {
+                name: "desktop",
+                use: {
+                  browserName: "chromium",
+                  deviceScaleFactor: 2,
+                  viewport: { width: 1_440, height: 1_200 },
+                },
+              },
+              {
+                name: "mobile",
+                use: {
+                  browserName: "chromium",
+                  deviceScaleFactor: 2,
+                  viewport: { width: 390, height: 1_200 },
+                },
+              },
+            ],
+            webServer: {
+              command: `pnpm dev:local-env --hostname ${host} --port ${port}`,
+              url: `${baseURL}/api/internal/health`,
+              env: {
+                ...createHostedWebSmokeEnvironment(process.env),
+                NEXT_DIST_DIR_SUFFIX: "max-design-proof",
+                NEXT_TELEMETRY_DISABLED: "1",
+              },
+              reuseExistingServer: false,
+              timeout: 240_000,
+              stdout: "pipe",
+              stderr: "pipe",
+            },
+          });
+          EOF
+
+          cat > apps/web/e2e/agent-max-design-proof.spec.ts <<'EOF'
+          import { expect, test } from "@playwright/test";
+          import path from "node:path";
+
+          const proofDirectory = process.env.AGENT_MAX_PROOF_DIR;
+          if (!proofDirectory) {
+            throw new Error("AGENT_MAX_PROOF_DIR is required");
+          }
+
+          test("captures the Max plan comparison states", async ({ page }, testInfo) => {
+            await page.addInitScript(() => {
+              const style = document.createElement("style");
+              style.textContent = "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}";
+              document.documentElement.appendChild(style);
+            });
+
+            await page.goto("/design?tab=sections#group-member-plan-section", {
+              waitUntil: "domcontentloaded",
+            });
+            await page.evaluate(async () => {
+              await document.fonts.ready;
+            });
+
+            const mobile = testInfo.project.name === "mobile";
+            const stateName = mobile
+              ? "edge-upgrade-max"
+              : "active-max-scheduled-edge";
+            const state = page.locator(`[data-design-state="${stateName}"]`);
+            await expect(state).toBeVisible();
+
+            await state.evaluate((element, isMobile) => {
+              const node = element as HTMLElement;
+              node.style.boxSizing = "border-box";
+              node.style.background = "#fffcf6";
+              node.style.borderRadius = "16px";
+              node.style.padding = isMobile ? "16px" : "20px";
+              node.style.width = isMobile ? "390px" : "1120px";
+              node.style.maxWidth = isMobile ? "390px" : "1120px";
+              node.style.margin = "0 auto";
+            }, mobile);
+
+            if (mobile) {
+              const grid = state.locator("div.grid.items-stretch.gap-3").first();
+              await expect(grid).toBeVisible();
+              await grid.locator(":scope > div").evaluateAll((cards) => {
+                const retained = new Set(["Edge", "Max"]);
+                for (const card of cards) {
+                  const name = Array.from(card.querySelectorAll("p"))
+                    .map((element) => element.textContent?.trim() ?? "")
+                    .find((text) => ["Pulse", "Edge", "Max", "Family"].includes(text));
+                  if (!name || !retained.has(name)) {
+                    (card as HTMLElement).style.display = "none";
+                  }
+                }
+              });
+              await grid.evaluate((element) => {
+                const node = element as HTMLElement;
+                node.style.gridTemplateColumns = "minmax(0, 1fr)";
+              });
+            }
+
+            const outputPath = path.join(
+              proofDirectory,
+              mobile ? "max-mobile.png" : "max-desktop.png",
+            );
+            await state.screenshot({
+              animations: "disabled",
+              path: outputPath,
+              type: "png",
+            });
+          });
+          EOF
+
+      - name: Capture lossless desktop and mobile PNGs
+        env:
+          AGENT_MAX_PROOF_DIR: ${{ runner.temp }}/agent-max-design-proof
+        run: |
+          mkdir -p "$AGENT_MAX_PROOF_DIR"
+          pnpm --dir apps/web exec playwright test \
+            --config=playwright.agent-max-design-proof.config.ts
+
+      - name: Validate proof dimensions
+        env:
+          AGENT_MAX_PROOF_DIR: ${{ runner.temp }}/agent-max-design-proof
+        run: |
+          node <<'EOF'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          for (const name of ["max-desktop.png", "max-mobile.png"]) {
+            const bytes = fs.readFileSync(path.join(process.env.AGENT_MAX_PROOF_DIR, name));
+            const width = bytes.readUInt32BE(16);
+            const height = bytes.readUInt32BE(20);
+            if (width < 700 || width > 2400 || height > 2400) {
+              throw new Error(`${name} has invalid design-proof dimensions ${width}x${height}`);
+            }
+            console.log(`${name}: ${width}x${height}`);
+          }
+          EOF
+
+      - name: Upload proof to Cloudflare Images
+        env:
+          AGENT_MAX_PROOF_DIR: ${{ runner.temp }}/agent-max-design-proof
+          CLOUDFLARE_IMAGES_ACCOUNT_ID: ${{ vars.CLOUDFLARE_IMAGES_ACCOUNT_ID || secrets.CLOUDFLARE_IMAGES_ACCOUNT_ID }}
+          CLOUDFLARE_IMAGES_API_KEY: ${{ secrets.CLOUDFLARE_IMAGES_API_KEY }}
+        run: |
+          test -n "$CLOUDFLARE_IMAGES_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_IMAGES_API_KEY"
+          pnpm design-proof:upload -- \
+            "$AGENT_MAX_PROOF_DIR/max-desktop.png" \
+            "$AGENT_MAX_PROOF_DIR/max-mobile.png" \
+            | tee "$AGENT_MAX_PROOF_DIR/design-proof-urls.txt"
+
+      - name: Upload local proof package
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: agent-max-design-proof-${{ github.sha }}
+          path: ${{ runner.temp }}/agent-max-design-proof
+          retention-days: 1
+          if-no-files-found: error
