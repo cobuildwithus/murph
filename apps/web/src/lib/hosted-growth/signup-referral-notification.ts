@@ -165,7 +165,7 @@ export function buildHostedSignupReferralRewardNoticeWake(input: {
         `The member has already received ${input.rewardLabel}.`,
         "Celebrate in one concise sentence and make clear that the reward is already applied.",
         "Do not identify, name, or guess who joined.",
-        "Do not mention dollars, internal accounting, qualification checks, caps, or server policy.",
+        "Do not mention internal accounting, qualification checks, caps, or server policy.",
         "Do not ask the member to complete another step.",
       ].join(" "),
       responsePolicy: { kind: "require_send" },

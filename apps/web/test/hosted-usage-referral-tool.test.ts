@@ -176,13 +176,15 @@ describe("hosted usage referral tool", () => {
               code: "new_person_activation_v1",
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
-              rewardLabel: "about 100 more messages for your Murph",
+              rewardLabel:
+                "$2.00 of cost-weighted usage credit for your Murph",
             },
             {
               code: "active_group_v1",
               requirementsLabel:
                 "Start a fresh group and make it genuinely active, with multiple people actually talking.",
-              rewardLabel: "about 140 more messages for your Murph",
+              rewardLabel:
+                "$3.50 of cost-weighted usage credit for your Murph",
             },
           ],
         },
@@ -191,7 +193,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("frames personal referral rewards as approximate messages", async () => {
+  it("frames personal referral rewards as cost-weighted credit", async () => {
     const { prisma } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
@@ -210,11 +212,13 @@ describe("hosted usage referral tool", () => {
               code: "new_person_activation_v1",
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
-              rewardLabel: "about 100 more messages for your Murph",
+              rewardLabel:
+                "$2.00 of cost-weighted usage credit for your Murph",
             },
             {
               code: "active_group_v1",
-              rewardLabel: "about 140 more messages for your Murph",
+              rewardLabel:
+                "$3.50 of cost-weighted usage credit for your Murph",
             },
           ],
         },
@@ -222,7 +226,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("frames group referral rewards as approximate messages", async () => {
+  it("frames group referral rewards as cost-weighted credit", async () => {
     const { prisma } = buildPrisma({
       containerMemberId: "member_group",
     });
@@ -241,7 +245,8 @@ describe("hosted usage referral tool", () => {
         referral: {
           availablePolicies: [{
             code: "active_group_v1",
-            rewardLabel: "about 140 more messages for this room",
+            rewardLabel:
+              "$3.50 of cost-weighted usage credit for this room",
           }],
         },
         status: "ok",

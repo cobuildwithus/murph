@@ -94,7 +94,7 @@ describe("hosted signup referral reward notice", () => {
       },
     });
     mocks.buildHostedUsageReferralRewardLabel.mockReturnValue(
-      "about 100 more messages for your Murph",
+      "$2.00 of cost-weighted usage credit for your Murph",
     );
   });
 
@@ -103,7 +103,7 @@ describe("hosted signup referral reward notice", () => {
       beneficiaryMemberId: "member_referrer",
       destination: DIRECT_LINQ_DESTINATION,
       notificationKey: "usage-referral-reward:hur_signup",
-      rewardLabel: "about 100 more messages for your Murph",
+      rewardLabel: "$2.00 of cost-weighted usage credit for your Murph",
       rewardedAt: REWARDED_AT,
     });
 
@@ -115,7 +115,7 @@ describe("hosted signup referral reward notice", () => {
       "someone completed Murph setup through their referral link",
     );
     expect(wake.notification.instructions).toContain(
-      "already received about 100 more messages for your Murph",
+      "already received $2.00 of cost-weighted usage credit for your Murph",
     );
     expect(wake.notification.instructions).toContain(
       "Do not identify, name, or guess who joined",
@@ -123,7 +123,9 @@ describe("hosted signup referral reward notice", () => {
     expect(wake.notification.instructions).toContain(
       "Do not ask the member to complete another step",
     );
-    expect(wake.notification.instructions).not.toContain("$2");
+    expect(wake.notification.instructions).not.toContain(
+      "Do not mention dollars",
+    );
   });
 
   it("queues the notice and marks the existing receipt atomically", async () => {

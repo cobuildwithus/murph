@@ -85,7 +85,6 @@ const EXPECTED_REFERRAL_UNAVAILABLE_ERRORS = new Set([
 ]);
 
 type HostedUsageReferralPolicyDefinition = {
-  approximateMessageCount: number;
   code: HostedUsageReferralPolicyCode;
   requirementsLabel: string;
   rewardUsdMicros: bigint;
@@ -94,7 +93,6 @@ type HostedUsageReferralPolicyDefinition = {
 
 const POLICIES = {
   new_person_activation_v1: {
-    approximateMessageCount: 100,
     code: "new_person_activation_v1",
     requirementsLabel:
       "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
@@ -102,7 +100,6 @@ const POLICIES = {
     title: "Bring someone new to Murph",
   },
   active_group_v1: {
-    approximateMessageCount: 140,
     code: "active_group_v1",
     requirementsLabel:
       "Start a fresh group and make it genuinely active, with multiple people actually talking.",
@@ -148,9 +145,18 @@ export function buildHostedUsageReferralRewardLabel(input: {
   const subject = input.destinationKind === "group"
     ? "this room"
     : "your Murph";
-  const approximateMessageCount =
-    POLICIES[input.policyCode].approximateMessageCount;
-  return `about ${approximateMessageCount} more messages for ${subject}`;
+  const rewardUsdMicros = POLICIES[input.policyCode].rewardUsdMicros;
+  return `${formatHostedUsageCreditUsd(rewardUsdMicros)} of cost-weighted usage credit for ${subject}`;
+}
+
+function formatHostedUsageCreditUsd(usdMicros: bigint): string {
+  const cents = Number(usdMicros / 10_000n);
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+    style: "currency",
+  }).format(cents / 100);
 }
 
 function outstandingHostedUsageReferralCommitmentWhere(
