@@ -37,6 +37,7 @@ import {
   buildAssistantProviderShellCommandCall,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
+  buildHostedLocalRuntimeLogDatabaseNameForTest,
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -838,9 +839,16 @@ async function createSharedProbeDatabase(): Promise<{
 
   return {
     cleanup: async () => {
-      await execFileAsync("dropdb", ["--if-exists", "--force", ...commandArgs], {
-        env: commandEnv,
-      });
+      await Promise.all([
+        databaseName,
+        buildHostedLocalRuntimeLogDatabaseNameForTest(databaseName),
+      ].map(async (name) =>
+        await execFileAsync("dropdb", [
+          "--if-exists",
+          "--force",
+          ...buildPostgresDatabaseCommandArgs(adminUrl, name),
+        ], { env: commandEnv })
+      ));
     },
     url: targetUrl.toString(),
   };

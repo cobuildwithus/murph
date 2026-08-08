@@ -250,7 +250,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMailboxPayload",
   "HostedComputerHandoff",
   "HostedComputerRun",
-  "HostedRuntimeLog",
   "HostedWorkspace",
   "HostedUserCryptoAudit",
   "HostedUserCryptoEnvelope",

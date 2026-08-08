@@ -319,7 +319,7 @@ The hosted Prisma schema keeps ownership sharp and nested:
   action; the claim leaves with the row under existing mailbox retention.
 - `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted
   status projection
-- `HostedRuntimeLog` owns bounded redacted observability events
+- The dedicated runtime-log Postgres database owns bounded redacted observability events
 - Temporal orchestrates per-user execution wakeups; Cloudflare only executes or
   wakes a bound runtime and does not own a queue, mailbox cursor, or web-visible
   run recovery ledger

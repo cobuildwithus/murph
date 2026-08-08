@@ -3,10 +3,7 @@ import {
   deleteHostedRuntimeLogDataForUsers,
   hostedRuntimeLogLockKey,
   hostedRuntimeLogSubjectKey,
-  mergeHostedRuntimeLogRecords,
-  mergeHostedRuntimeTurnTimingLogs,
   recordHostedRuntimeLogs,
-  type HostedRuntimeLogRecord,
   type HostedRuntimeLogSqlClient,
   type HostedRuntimeLogSqlDatabase,
   type HostedRuntimeLogSqlResult,
@@ -347,44 +344,6 @@ describe("dedicated hosted runtime log store", () => {
       expect(compactSql(call.text)).toContain("ORDER BY at ASC, id ASC LIMIT $3");
     }
   });
-
-  it("merges legacy and dedicated read windows without duplicate rows", () => {
-    const older = runtimeRecord("log_older", "2026-07-28T01:00:00.000Z");
-    const newer = runtimeRecord("log_newer", "2026-07-28T02:00:00.000Z");
-
-    expect(mergeHostedRuntimeLogRecords([
-      [older, newer],
-      [older],
-    ], 2)).toEqual([newer, older]);
-  });
-
-  it("globally bounds merged timing rows from the migration window", () => {
-    const merged = mergeHostedRuntimeTurnTimingLogs([
-      [{
-        at: "2026-07-28T01:00:00.000Z",
-        attemptId: "attempt_1",
-        id: "timing_1",
-        redactedJson: {},
-      }],
-      [
-        {
-          at: "2026-07-28T03:00:00.000Z",
-          attemptId: "attempt_3",
-          id: "timing_3",
-          redactedJson: {},
-        },
-        {
-          at: "2026-07-28T02:00:00.000Z",
-          attemptId: "attempt_2",
-          id: "timing_2",
-          redactedJson: {},
-        },
-      ],
-    ], 2);
-
-    expect(merged.truncated).toBe(true);
-    expect(merged.rows.map((row) => row.id)).toEqual(["timing_3", "timing_2"]);
-  });
 });
 
 function runtimeEntry(eventCode: "mailbox.imported"): HostedRuntimeLogEntry {
@@ -394,29 +353,6 @@ function runtimeEntry(eventCode: "mailbox.imported"): HostedRuntimeLogEntry {
     eventCode,
     level: "info",
     phase: "import",
-  };
-}
-
-function runtimeRecord(id: string, at: string): HostedRuntimeLogRecord {
-  return {
-    at,
-    attemptId: null,
-    checkpointVersion: null,
-    component: "mailbox",
-    createdAt: at,
-    errorCode: null,
-    eventCode: "mailbox.imported",
-    id,
-    leaseGeneration: null,
-    level: "info",
-    mailboxLane: null,
-    mailboxSeqEnd: null,
-    mailboxSeqStart: null,
-    outboxIntentRef: null,
-    phase: "import",
-    redactedJson: null,
-    userId: "member_runtime_logs_1",
-    workspaceVersion: null,
   };
 }
 
