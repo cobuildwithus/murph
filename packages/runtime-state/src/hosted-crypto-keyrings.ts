@@ -576,6 +576,7 @@ function parseOptionalJsonRecord(
   if (!normalized) {
     return null;
   }
+  assertNoDuplicateJsonObjectMembers(normalized);
 
   let parsed: unknown;
   try {
@@ -587,6 +588,141 @@ function parseOptionalJsonRecord(
   }
 
   return requireRecord(parsed, label);
+}
+
+function assertNoDuplicateJsonObjectMembers(value: string): void {
+  const cursor = { index: 0 };
+  readJsonValue(value, cursor);
+  skipJsonWhitespace(value, cursor);
+  if (cursor.index !== value.length) {
+    throw new TypeError("Hosted crypto keyring JSON must be unambiguous.");
+  }
+}
+
+function readJsonValue(value: string, cursor: { index: number }): void {
+  skipJsonWhitespace(value, cursor);
+  const token = value[cursor.index];
+  if (token === "{") {
+    readJsonObject(value, cursor);
+    return;
+  }
+  if (token === "[") {
+    readJsonArray(value, cursor);
+    return;
+  }
+  if (token === '"') {
+    readJsonString(value, cursor);
+    return;
+  }
+  if (token === "t" && value.startsWith("true", cursor.index)) {
+    cursor.index += 4;
+    return;
+  }
+  if (token === "f" && value.startsWith("false", cursor.index)) {
+    cursor.index += 5;
+    return;
+  }
+  if (token === "n" && value.startsWith("null", cursor.index)) {
+    cursor.index += 4;
+    return;
+  }
+  const number = value.slice(cursor.index).match(
+    /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/u,
+  );
+  if (number) {
+    cursor.index += number[0].length;
+    return;
+  }
+  throw new TypeError("Hosted crypto keyring JSON must be unambiguous.");
+}
+
+function readJsonObject(value: string, cursor: { index: number }): void {
+  cursor.index += 1;
+  const memberNames = new Set<string>();
+  skipJsonWhitespace(value, cursor);
+  if (value[cursor.index] === "}") {
+    cursor.index += 1;
+    return;
+  }
+
+  while (cursor.index < value.length) {
+    skipJsonWhitespace(value, cursor);
+    const memberName = readJsonString(value, cursor);
+    if (memberNames.has(memberName)) {
+      throw new TypeError("Hosted crypto keyring JSON must be unambiguous.");
+    }
+    memberNames.add(memberName);
+    skipJsonWhitespace(value, cursor);
+    requireJsonToken(value, cursor, ":");
+    readJsonValue(value, cursor);
+    skipJsonWhitespace(value, cursor);
+    if (value[cursor.index] === "}") {
+      cursor.index += 1;
+      return;
+    }
+    requireJsonToken(value, cursor, ",");
+  }
+  throw new TypeError("Hosted crypto keyring JSON must be unambiguous.");
+}
+
+function readJsonArray(value: string, cursor: { index: number }): void {
+  cursor.index += 1;
+  skipJsonWhitespace(value, cursor);
+  if (value[cursor.index] === "]") {
+    cursor.index += 1;
+    return;
+  }
+
+  while (cursor.index < value.length) {
+    readJsonValue(value, cursor);
+    skipJsonWhitespace(value, cursor);
+    if (value[cursor.index] === "]") {
+      cursor.index += 1;
+      return;
+    }
+    requireJsonToken(value, cursor, ",");
+  }
+  throw new TypeError("Hosted crypto keyring JSON must be unambiguous.");
+}
+
+function readJsonString(value: string, cursor: { index: number }): string {
+  const start = cursor.index;
+  requireJsonToken(value, cursor, '"');
+  while (cursor.index < value.length) {
+    const token = value[cursor.index];
+    if (token === '"') {
+      cursor.index += 1;
+      const parsed: unknown = JSON.parse(value.slice(start, cursor.index));
+      if (typeof parsed !== "string") {
+        break;
+      }
+      return parsed;
+    }
+    cursor.index += token === "\\" ? 2 : 1;
+  }
+  throw new TypeError("Hosted crypto keyring JSON must be unambiguous.");
+}
+
+function requireJsonToken(
+  value: string,
+  cursor: { index: number },
+  expected: string,
+): void {
+  if (value[cursor.index] !== expected) {
+    throw new TypeError("Hosted crypto keyring JSON must be unambiguous.");
+  }
+  cursor.index += 1;
+}
+
+function skipJsonWhitespace(value: string, cursor: { index: number }): void {
+  while (
+    value[cursor.index] === " "
+    || value[cursor.index] === "\n"
+    || value[cursor.index] === "\r"
+    || value[cursor.index] === "\t"
+  ) {
+    cursor.index += 1;
+  }
 }
 
 function assertOneActiveAuthorityVerifyKey(

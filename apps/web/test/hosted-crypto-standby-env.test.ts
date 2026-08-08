@@ -117,6 +117,65 @@ describe("hosted crypto standby environment preflight", () => {
     );
   });
 
+  it("rejects private material hidden by duplicate raw JSON members", async () => {
+    const standbyRecipient = await generateHostedUserRecipientKeyPair();
+    const publicJwkJson = JSON.stringify(standbyRecipient.publicKeyJwk);
+    const safeEntry = `{"publicJwk":${publicJwkJson},"recipient":"cloudflare-automation-secret","status":"disabled"}`;
+    const rawPublicRings = [
+      `{"cloudflare-automation:v2":{"privateJwk":{"d":"duplicate-json-private-canary"},"publicJwk":${publicJwkJson},"recipient":"cloudflare-automation-secret","status":"disabled"},"cloudflare-automation:v2":${safeEntry}}`,
+      `{"cloudflare-automation:v2":{"publicJwk":{"d":"duplicate-json-private-canary"},"publicJwk":${publicJwkJson},"recipient":"cloudflare-automation-secret","status":"disabled"}}`,
+    ];
+    const completeBase = {
+      HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+        "authority-v2": {
+          publicKeyPem:
+            "-----BEGIN PUBLIC KEY-----\nstandby\n-----END PUBLIC KEY-----",
+          status: "verify_only",
+        },
+      }),
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+        "cloudflare-automation:v1",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+        JSON.stringify({
+          "cloudflare-automation:v2": {
+            privateJwk: standbyRecipient.privateKeyJwk,
+            recipient: "cloudflare-automation-secret",
+            status: "decrypt_only",
+          },
+        }),
+      HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: "authority-v1",
+      HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION: "authority-v2",
+      HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID:
+        "cloudflare-automation:v2",
+    };
+
+    for (const rawPublicRing of rawPublicRings) {
+      const normalErrors = listHostedCryptoStandbyEnvErrors({
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+          "cloudflare-automation:v1",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON: rawPublicRing,
+      });
+      const completeErrors = listHostedCryptoStandbyEnvErrors(
+        {
+          ...completeBase,
+          HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON:
+            rawPublicRing,
+        },
+        { requireCompletePreload: true },
+      );
+
+      expect(normalErrors).toEqual([
+        HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR,
+      ]);
+      expect(completeErrors).toEqual([
+        HOSTED_CLOUDFLARE_PUBLIC_STANDBY_KEYRING_ERROR,
+      ]);
+      expect([...normalErrors, ...completeErrors].join(" ")).not.toContain(
+        "duplicate-json-private-canary",
+      );
+    }
+  });
+
   it.each([
     [
       "an active public standby",

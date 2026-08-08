@@ -474,7 +474,9 @@ Last verified: 2026-08-07
   IDs, reject duplicate normalized IDs, and match the Cloudflare public/private
   P-256 coordinates by key id. Web public entries and public JWKs must use
   closed raw schemas so sibling private material or another ignored field cannot
-  enter Vercel;
+  enter Vercel. All three ring strings must reject duplicate JSON object members
+  before the first ordinary parse, so discarded earlier members cannot remain
+  in provider-bound text;
   errors may name fields but must never reproduce values. Proposed IDs are
   non-secret one-shot operator validation metadata, not provider runtime
   configuration. Record the current

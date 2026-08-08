@@ -786,8 +786,9 @@ Hosted managed crypto:
   any private keyring configured in Web runtime, and reports field-only errors
   without echoing key material. Public-ring entries and JWKs use closed schemas,
   so a sibling `privateJwk` or another ignored field cannot ride into Vercel;
-  every ring also rejects identifiers that collide after trimming. Before changing
-  a provider, load the three proposed payloads from their approved secret
+  a duplicate-aware scan runs before `JSON.parse`, and every ring also rejects
+  duplicate raw members or identifiers that collide after trimming. Before
+  changing a provider, load the three proposed payloads from their approved secret
   stores into the process environment together with the current active IDs and
   the operator-only `HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION` and
   `HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID`, then run

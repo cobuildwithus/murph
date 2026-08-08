@@ -445,6 +445,26 @@ test("complete standby acceptance requires intended usable statuses and identifi
       },
     }),
   })).toThrow(HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR);
+  expect(() => assertHostedCryptoStandbyKeyringJsons({
+    ...completeInput,
+    authorityVerifyKeyringJson:
+      `{"${STANDBY_AUTHORITY_KEY_VERSION}":{"publicKeyPem":"standby","status":"verify_only"},"${STANDBY_AUTHORITY_KEY_VERSION}":{"publicKeyPem":"disabled","status":"disabled"}}`,
+  })).toThrow(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
+  expect(() => assertHostedCryptoStandbyKeyringJsons({
+    ...completeInput,
+    authorityVerifyKeyringJson:
+      '{"authority-v2":{"publicKeyPem":"standby","status":"verify_only"},"authority-\\u00762":{"publicKeyPem":"disabled","status":"disabled"}}',
+  })).toThrow(HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR);
+  const privateEntryJson = JSON.stringify({
+    privateJwk: standbyRecipient.privateKeyJwk,
+    recipient: "cloudflare-automation-secret",
+    status: "decrypt_only",
+  });
+  expect(() => assertHostedCryptoStandbyKeyringJsons({
+    ...completeInput,
+    cloudflarePrivateKeyringJson:
+      `{"${STANDBY_CLOUDFLARE_KEY_ID}":${privateEntryJson},"${STANDBY_CLOUDFLARE_KEY_ID}":${privateEntryJson}}`,
+  })).toThrow(HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR);
 });
 
 async function generateP256SigningKeyPair(): Promise<{

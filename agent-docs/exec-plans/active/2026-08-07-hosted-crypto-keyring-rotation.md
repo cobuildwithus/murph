@@ -128,6 +128,14 @@ Updated: 2026-08-07
    reject duplicate normalized identifiers in every ring, and resolve proposed
    entries only from the resulting unique maps. Field-only errors and the
    effective-ring proposed-generation proof remain unchanged.
+8. Risk: duplicate raw JSON member names are collapsed before closed-schema
+   validation, leaving an earlier private-bearing member in provider-bound text
+   while the parsed projection appears public-only.
+   Mitigation: final ReviewGPT round 5 identified this continuation of the same
+   review-induced mechanism. Scan all three raw ring strings for duplicate JSON
+   object members before the first ordinary parse, retain field-only errors, and
+   cover top-level and nested duplicate private canaries in normal and complete
+   Web validation.
 
 ## Tasks
 
@@ -160,6 +168,9 @@ Updated: 2026-08-07
 - Continue it after round 4 as well: exact raw-payload validation and unique
   normalized IDs tighten the existing boundary without creating another owner
   or compatibility mechanism.
+- Continue it after round 5: duplicate-aware scanning completes that same raw
+  acceptance boundary without substring matching, a dependency, or a new
+  lifecycle owner.
 - Generate and preload keys only after the exact pushed implementation head has
   passed focused proof, CI, and both ReviewGPT gates. Merge the reviewed
   contract to public `main`, deploy from the protected private workflow's
