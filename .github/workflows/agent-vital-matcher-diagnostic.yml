@@ -1,0 +1,83 @@
+name: Agent Vital Matcher Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/explain-vital-garmin-handoff
+    paths:
+      - .github/workflows/agent-vital-matcher-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+      - name: Check targeted rebuild matchers against current main
+        shell: bash
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          failures = []
+          def exact(label, path, value):
+              count = Path(path).read_text().count(value)
+              print(f"{label}: {count}")
+              if count != 1:
+                  failures.append(f"{label}={count}")
+
+          exact("content_map", "apps/web/app/(dashboard)/connect/connect-page-content.tsx", '''  const connectTargetBySourceId = new Map(
+            listConfiguredDeviceSyncConnectTargets(
+              readConfiguredDeviceSyncConnectTargetConfigs(process.env),
+            ).map((target) => [target.connectSourceId, target.connectTarget] as const),
+          );'''.replace("          ", ""))
+          exact("content_lookup", "apps/web/app/(dashboard)/connect/connect-page-content.tsx", "      const connectTarget = connectTargetBySourceId.get(source.id);")
+          exact("content_target", "apps/web/app/(dashboard)/connect/connect-page-content.tsx", '''      const resolvedConnectTarget = connectionAvailable
+            ? reconnectTarget ?? connectTarget
+            : undefined;'''.replace("            ", "        "))
+          exact("content_projection", "apps/web/app/(dashboard)/connect/connect-page-content.tsx", "        ...(requiresReconnect ? { requiresReconnect } : {}),\n")
+
+          dialogs = Path("apps/web/app/(dashboard)/connect/connect-page-dialogs.tsx").read_text()
+          dialog_count = len(re.findall(r'export function GarminHistoricalDataDialog\(\{.*?\n\}\n\nexport function ConnectDisconnectDialog', dialogs, re.S))
+          print(f"dialog_regex: {dialog_count}")
+          if dialog_count != 1: failures.append(f"dialog_regex={dialog_count}")
+
+          client = Path("apps/web/app/(dashboard)/connect/connect-page-client.tsx").read_text()
+          for old in ["GarminHistoricalDataDialog", "garminHistoricalDataConfirmed", "GarminHistoricalDataRequest", "garminHistoricalDataRequest", "setGarminHistoricalDataRequest", "requiresGarminHistoricalDataPreflight"]:
+              count = client.count(old)
+              print(f"client_{old}: {count}")
+              if count < 1: failures.append(f"client_{old}=0")
+          exact("client_open_prop", "apps/web/app/(dashboard)/connect/connect-page-client.tsx", '        open={Boolean(garminHistoricalDataRequest)}')
+          exact("client_predicate", "apps/web/app/(dashboard)/connect/connect-page-client.tsx", '''export function requiresGarminHistoricalDataPreflight(source: ConnectSource): boolean {
+            return source.id === "garmin" && source.requiresReconnect !== true;
+          }'''.replace("          ", ""))
+
+          exact("design_import", "apps/web/app/design/components-content.tsx", 'import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";')
+          exact("design_state", "apps/web/app/design/components-content.tsx", "  const [garminHistoricalDataDialogOpen, setGarminHistoricalDataDialogOpen] = useState(false);")
+          design = Path("apps/web/app/design/components-content.tsx").read_text()
+          section_count = len(re.findall(r'        <Section title="Garmin Historical Data Preflight">.*?        </Section>', design, re.S))
+          print(f"design_section: {section_count}")
+          if section_count != 1: failures.append(f"design_section={section_count}")
+
+          tests = Path("apps/web/test/connect-page.test.ts").read_text()
+          for name in ["ConnectSourcesGrid posts mapped Junction connect targets"]:
+              count = tests.count(f'test("{name}"')
+              print(f"test_{name}: {count}")
+              if count != 1: failures.append(f"test_{name}={count}")
+          helper_count = tests.count("\nfunction readSupportMailto")
+          print(f"test_helper_boundary: {helper_count}")
+          if helper_count != 1: failures.append(f"test_helper_boundary={helper_count}")
+
+          if failures:
+              message = ", ".join(failures)
+              print(f"::error title=Vital matcher failures::{message}")
+              raise SystemExit(1)
+          print("All matchers found")
+          PY
