@@ -1,4 +1,5 @@
 name: Agent Max final audit
+# One-shot final audit; the successful job removes this workflow and its patch script.
 
 on:
   push:
