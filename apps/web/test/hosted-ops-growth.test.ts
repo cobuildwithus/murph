@@ -1929,6 +1929,7 @@ describe("hosted ops growth metrics", () => {
         groupSponsorshipUsdCents: 1_500,
         individualSubscriptionsUsdCents: null,
         month: "2026-07",
+        monthToDate: false,
         subscriptionsUnsplitUsdCents: 17_100,
         totalUsdCents: 26_100,
         usageTopUpsUsdCents: 7_500,
@@ -1938,6 +1939,7 @@ describe("hosted ops growth metrics", () => {
         groupSponsorshipUsdCents: 2_000,
         individualSubscriptionsUsdCents: 14_400,
         month: "2026-08",
+        monthToDate: true,
         subscriptionsUnsplitUsdCents: null,
         totalUsdCents: 25_500,
         usageTopUpsUsdCents: 3_000,
@@ -1945,7 +1947,36 @@ describe("hosted ops growth metrics", () => {
     ]);
   });
 
-  it("keeps purchase-only months after trimming months without revenue evidence", () => {
+  it("falls back to the unsplit subscription value when a recorded split does not sum to the MRR total", () => {
+    const series = buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: 1,
+      purchases: [],
+      snapshots: [
+        {
+          familyMrrUsdCents: 6_100,
+          individualMrrUsdCents: 14_400,
+          mrrUsdCents: 21_700,
+          snapshotDate: new Date("2026-08-07T00:00:00.000Z"),
+        },
+      ],
+      windowEnd: new Date("2026-08-07T12:00:00.000Z"),
+    });
+
+    expect(series).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: 21_700,
+        totalUsdCents: 21_700,
+        usageTopUpsUsdCents: 0,
+      },
+    ]);
+  });
+
+  it("withholds the total for months without a subscription snapshot", () => {
     const series = buildHostedGrowthMonthlyRevenueSeries({
       monthCount: 3,
       purchases: [
@@ -1965,8 +1996,9 @@ describe("hosted ops growth metrics", () => {
         groupSponsorshipUsdCents: 0,
         individualSubscriptionsUsdCents: null,
         month: "2026-06",
+        monthToDate: false,
         subscriptionsUnsplitUsdCents: null,
-        totalUsdCents: 1_000,
+        totalUsdCents: null,
         usageTopUpsUsdCents: 1_000,
       },
       {
@@ -1974,8 +2006,9 @@ describe("hosted ops growth metrics", () => {
         groupSponsorshipUsdCents: 0,
         individualSubscriptionsUsdCents: null,
         month: "2026-07",
+        monthToDate: false,
         subscriptionsUnsplitUsdCents: null,
-        totalUsdCents: 0,
+        totalUsdCents: null,
         usageTopUpsUsdCents: 0,
       },
       {
@@ -1983,8 +2016,9 @@ describe("hosted ops growth metrics", () => {
         groupSponsorshipUsdCents: 0,
         individualSubscriptionsUsdCents: null,
         month: "2026-08",
+        monthToDate: true,
         subscriptionsUnsplitUsdCents: null,
-        totalUsdCents: 0,
+        totalUsdCents: null,
         usageTopUpsUsdCents: 0,
       },
     ]);
@@ -2004,8 +2038,9 @@ describe("hosted ops growth metrics", () => {
         groupSponsorshipUsdCents: 0,
         individualSubscriptionsUsdCents: null,
         month: "2026-08",
+        monthToDate: true,
         subscriptionsUnsplitUsdCents: null,
-        totalUsdCents: 0,
+        totalUsdCents: null,
         usageTopUpsUsdCents: 0,
       },
     ]);
@@ -2016,22 +2051,14 @@ describe("hosted ops growth metrics", () => {
     queueCurrentMetricMocks();
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
     mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
-    mocks.hostedGrowthDailySnapshot.findMany
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          familyMrrUsdCents: null,
-          individualMrrUsdCents: null,
-          mrrUsdCents: 17_100,
-          snapshotDate: new Date("2026-07-31T00:00:00.000Z"),
-        },
-        {
-          familyMrrUsdCents: 6_100,
-          individualMrrUsdCents: 14_400,
-          mrrUsdCents: 20_500,
-          snapshotDate: new Date("2026-08-07T00:00:00.000Z"),
-        },
-      ]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
+      snapshotRow("2026-07-31", 17_100),
+      {
+        ...snapshotRow("2026-08-07", 20_500),
+        familyMrrUsdCents: 6_100,
+        individualMrrUsdCents: 14_400,
+      },
+    ]);
     mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
       {
         cashAmountMinor: 1_500,
@@ -2076,6 +2103,7 @@ describe("hosted ops growth metrics", () => {
         groupSponsorshipUsdCents: 1_500,
         individualSubscriptionsUsdCents: null,
         month: "2026-07",
+        monthToDate: false,
         subscriptionsUnsplitUsdCents: 17_100,
         totalUsdCents: 26_100,
         usageTopUpsUsdCents: 7_500,
@@ -2085,6 +2113,7 @@ describe("hosted ops growth metrics", () => {
         groupSponsorshipUsdCents: 2_000,
         individualSubscriptionsUsdCents: 14_400,
         month: "2026-08",
+        monthToDate: true,
         subscriptionsUnsplitUsdCents: null,
         totalUsdCents: 25_500,
         usageTopUpsUsdCents: 3_000,
@@ -2110,8 +2139,9 @@ describe("hosted ops growth metrics", () => {
         stripeLiveMode: true,
       },
     });
+    expect(mocks.hostedGrowthDailySnapshot.findMany).toHaveBeenCalledTimes(1);
     expect(
-      mocks.hostedGrowthDailySnapshot.findMany.mock.calls[1]?.[0],
+      mocks.hostedGrowthDailySnapshot.findMany.mock.calls[0]?.[0],
     ).toMatchObject({
       where: {
         snapshotDate: {

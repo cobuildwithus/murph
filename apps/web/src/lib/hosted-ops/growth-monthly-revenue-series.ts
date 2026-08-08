@@ -18,19 +18,24 @@ export interface HostedGrowthMonthlyRevenuePoint {
   groupSponsorshipUsdCents: number;
   individualSubscriptionsUsdCents: number | null;
   month: string;
+  monthToDate: boolean;
   subscriptionsUnsplitUsdCents: number | null;
-  totalUsdCents: number;
+  totalUsdCents: number | null;
   usageTopUpsUsdCents: number;
 }
 
 /**
- * Subscription revenue per month is the MRR recorded by that month's latest
- * daily snapshot; there is no local subscription invoice ledger to sum.
- * Snapshot rows written before the split columns existed only carry the MRR
- * total, so those months report one unsplit subscription value instead of the
- * individual/family split. Top-up and sponsorship revenue sums fulfilled
- * purchase cash by the UTC month of payment. Months before the first snapshot
- * or purchase are trimmed; the window-end month always renders.
+ * An operational estimate, not an invoice ledger: subscription revenue per
+ * month is the MRR recorded by that month's latest daily snapshot, and top-up
+ * and sponsorship revenue sums fulfilled purchase cash by the UTC month of
+ * payment. Snapshot rows written before the split columns existed only carry
+ * the MRR total, so those months report one unsplit subscription value. A
+ * recorded split is trusted only when it sums to the row's MRR total, so a
+ * stale or half-written split falls back to the honest unsplit value. A month
+ * with no snapshot has an unknown subscription component and therefore an
+ * unknown total, even when its purchase cash is known. Months before the
+ * first snapshot or purchase are trimmed; the window-end month always renders
+ * and is marked month-to-date.
  */
 export function buildHostedGrowthMonthlyRevenueSeries(input: {
   monthCount: number;
@@ -39,6 +44,7 @@ export function buildHostedGrowthMonthlyRevenueSeries(input: {
   windowEnd: Date;
 }): HostedGrowthMonthlyRevenuePoint[] {
   const endMonthStart = startOfUtcMonth(input.windowEnd);
+  const endMonth = formatUtcMonthKey(endMonthStart);
   const latestSnapshotByMonth = new Map<
     string,
     HostedGrowthRevenueSnapshotInput
@@ -91,18 +97,22 @@ export function buildHostedGrowthMonthlyRevenueSeries(input: {
     const purchases = purchaseTotalsByMonth.get(month);
     const groupSponsorshipUsdCents = purchases?.groupSponsorshipUsdCents ?? 0;
     const usageTopUpsUsdCents = purchases?.usageTopUpsUsdCents ?? 0;
+    const subscriptionsUsdCents = subscriptions.unsplitUsdCents
+      ?? (subscriptions.individualUsdCents === null
+        || subscriptions.familyUsdCents === null
+        ? null
+        : subscriptions.individualUsdCents + subscriptions.familyUsdCents);
 
     return {
       familySubscriptionsUsdCents: subscriptions.familyUsdCents,
       groupSponsorshipUsdCents,
       individualSubscriptionsUsdCents: subscriptions.individualUsdCents,
       month,
+      monthToDate: month === endMonth,
       subscriptionsUnsplitUsdCents: subscriptions.unsplitUsdCents,
-      totalUsdCents: (subscriptions.individualUsdCents ?? 0)
-        + (subscriptions.familyUsdCents ?? 0)
-        + (subscriptions.unsplitUsdCents ?? 0)
-        + groupSponsorshipUsdCents
-        + usageTopUpsUsdCents,
+      totalUsdCents: subscriptionsUsdCents === null
+        ? null
+        : subscriptionsUsdCents + groupSponsorshipUsdCents + usageTopUpsUsdCents,
       usageTopUpsUsdCents,
     };
   });
@@ -126,6 +136,8 @@ function readMonthSubscriptions(
   if (
     snapshot.individualMrrUsdCents !== null
     && snapshot.familyMrrUsdCents !== null
+    && snapshot.individualMrrUsdCents + snapshot.familyMrrUsdCents
+      === snapshot.mrrUsdCents
   ) {
     return {
       familyUsdCents: snapshot.familyMrrUsdCents,

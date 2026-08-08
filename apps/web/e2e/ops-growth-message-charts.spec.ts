@@ -147,11 +147,12 @@ for (const viewport of VIEWPORTS) {
       ".recharts-tooltip-wrapper",
     );
     await chartSurfaces.nth(5).focus();
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       await page.keyboard.press("ArrowRight");
     }
     await expect(monthlyRevenueTooltip).toBeVisible();
     await expect(monthlyRevenueTooltip).toContainText("July 2026");
+    await expect(monthlyRevenueTooltip).toContainText("month to date");
     await expect(monthlyRevenueTooltip).toContainText("Personal subscriptions");
     await expect(monthlyRevenueTooltip).toContainText("$118");
     await expect(monthlyRevenueTooltip).toContainText("Family subscriptions");
@@ -171,6 +172,12 @@ for (const viewport of VIEWPORTS) {
     );
     await expect(monthlyRevenueTooltip).toContainText("$62");
     await expect(monthlyRevenueTooltip).toContainText("$72");
+    await page.keyboard.press("ArrowLeft");
+    await expect(monthlyRevenueTooltip).toContainText("March 2026");
+    await expect(monthlyRevenueTooltip).not.toContainText("month to date");
+    await expect(monthlyRevenueTooltip).toContainText("No snapshot");
+    await expect(monthlyRevenueTooltip).toContainText("$8");
+    await expect(monthlyRevenueTooltip).toContainText("Unavailable");
 
     await page.emulateMedia({ forcedColors: "active" });
     await expect(activityLines.nth(1)).toHaveAttribute("stroke-dasharray", "6 4");

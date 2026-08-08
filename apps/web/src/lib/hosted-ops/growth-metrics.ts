@@ -1207,7 +1207,6 @@ export async function readHostedGrowthDashboard(
     activeUsersTrailing30DayDirectRows,
     activeUsersGroupRows,
     activeUsersTodayDirectRows,
-    monthlyRevenueSnapshots,
     monthlyRevenuePurchases,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
@@ -1254,6 +1253,10 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
+    // One snapshot read serves both the 30-day chart series and the
+    // six-month revenue projection; the message-history aggregate below
+    // still ends at dailyStart, so widening this window double-counts
+    // nothing.
     prisma.hostedGrowthDailySnapshot.findMany({
       orderBy: {
         snapshotDate: "asc",
@@ -1261,7 +1264,7 @@ export async function readHostedGrowthDashboard(
       select: growthSnapshotSelect,
       where: {
         snapshotDate: {
-          gte: dailyStart,
+          gte: monthlyRevenueStart,
           lte: todayStart,
         },
       },
@@ -1379,23 +1382,6 @@ export async function readHostedGrowthDashboard(
         createdAt: {
           gte: todayStart,
           lt: now,
-        },
-      },
-    }),
-    prisma.hostedGrowthDailySnapshot.findMany({
-      orderBy: {
-        snapshotDate: "asc",
-      },
-      select: {
-        familyMrrUsdCents: true,
-        individualMrrUsdCents: true,
-        mrrUsdCents: true,
-        snapshotDate: true,
-      },
-      where: {
-        snapshotDate: {
-          gte: monthlyRevenueStart,
-          lte: todayStart,
         },
       },
     }),
@@ -1544,7 +1530,7 @@ export async function readHostedGrowthDashboard(
           paidAt: purchase.paidAt,
         }]
       ),
-      snapshots: monthlyRevenueSnapshots,
+      snapshots,
       windowEnd: now,
     }),
     mrrWowPercent: comparableSnapshot === null
@@ -1561,7 +1547,9 @@ export async function readHostedGrowthDashboard(
           current.payingCustomers,
           comparableSnapshot.payingCustomers,
         ),
-    snapshotSeries: snapshots.map(serializeSnapshotPoint),
+    snapshotSeries: snapshots
+      .filter((row) => row.snapshotDate.getTime() >= dailyStart.getTime())
+      .map(serializeSnapshotPoint),
     trialCohorts: buildTrialCohortRows({
       rowCount: WEEKLY_ROWS,
       trialStartRows,

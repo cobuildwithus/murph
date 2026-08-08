@@ -79,11 +79,18 @@ const SNAPSHOT_SERIES = GROWTH_DATES.map((date, index) => ({
   trialingMembers: 16 + (index % 7),
 }));
 
-// April predates the subscription split columns, so it renders as one
-// unsplit subscription value; February and March have no data and are trimmed.
+// March has purchase cash but no snapshot, so its total is withheld; April
+// predates the subscription split columns, so it renders as one unsplit
+// subscription value; February has no data and is trimmed; July is the
+// window-end month, so it renders as month to date.
 const MONTHLY_REVENUE_SERIES = buildHostedGrowthMonthlyRevenueSeries({
   monthCount: 6,
   purchases: [
+    {
+      cashAmountMinor: 800,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-03-12T15:00:00.000Z"),
+    },
     {
       cashAmountMinor: 1_000,
       isGroupSponsorship: false,

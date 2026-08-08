@@ -103,9 +103,15 @@ export function GrowthCharts(input: GrowthChartsProps) {
     mrrUsd: point.mrrUsdCents / 100,
     payingCustomers: point.payingCustomers,
   }));
+  // A month with a withheld total renders no bar, and a bar-less month would
+  // also produce no tooltip payload. The zero-height anchor series keeps the
+  // breakdown tooltip reachable for those months without drawing anything.
   const monthlyRevenueSeries = input.monthlyRevenueSeries.map((point) => ({
     ...point,
-    totalRevenueUsd: point.totalUsdCents / 100,
+    tooltipAnchor: 0,
+    totalRevenueUsd: point.totalUsdCents === null
+      ? null
+      : point.totalUsdCents / 100,
   }));
 
   return (
@@ -458,12 +464,14 @@ export function GrowthCharts(input: GrowthChartsProps) {
             Monthly revenue
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
-            Each bar totals one UTC month: subscriptions at the month&apos;s
-            latest daily snapshot plus fulfilled usage top-ups and group
-            sponsorships paid that month. Hover or focus a bar for the source
-            breakdown. Months before August 2026 show subscriptions without the
-            personal and family split, and account deletion removes past
-            top-ups from these bars.
+            An estimate of each UTC month&apos;s revenue, not summed invoices:
+            the subscription rate at the month&apos;s latest daily snapshot
+            plus usage top-up and group sponsorship cash paid that month, with
+            refunds not subtracted. The newest bar covers only the month so
+            far. Hover or focus a bar for the source breakdown. Months recorded
+            before the subscription split show one combined subscriptions line,
+            a month with no snapshot withholds its total, and account deletion
+            removes that account&apos;s past top-ups from these bars.
           </p>
         </div>
         <ChartContainer
@@ -500,11 +508,20 @@ export function GrowthCharts(input: GrowthChartsProps) {
               cursor={{ fill: "var(--color-muted)", fillOpacity: 0.35 }}
             />
             <Bar
+              dataKey="tooltipAnchor"
+              fill="transparent"
+              isAnimationActive={false}
+              legendType="none"
+              maxBarSize={64}
+              stackId="revenue"
+            />
+            <Bar
               dataKey="totalRevenueUsd"
               fill="var(--color-totalRevenueUsd)"
               maxBarSize={64}
               name="Monthly revenue"
               radius={[3, 3, 0, 0]}
+              stackId="revenue"
             />
           </BarChart>
         </ChartContainer>
@@ -554,7 +571,10 @@ function MonthlyRevenueTooltip(props: {
 
   return (
     <div className="grid min-w-52 items-start gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-      <div className="font-medium">{formatMonthLabel(point.month)}</div>
+      <div className="font-medium">
+        {formatMonthLabel(point.month)}
+        {point.monthToDate ? " · month to date" : ""}
+      </div>
       <div className="grid gap-1">
         {rows.map((row) => (
           <div className="flex w-full justify-between gap-4" key={row.label}>
@@ -568,7 +588,9 @@ function MonthlyRevenueTooltip(props: {
       <div className="flex w-full justify-between gap-4 border-t border-border/50 pt-1 font-medium">
         <span>Total</span>
         <span className="font-mono tabular-nums">
-          {formatUsdFromCents(point.totalUsdCents)}
+          {point.totalUsdCents === null
+            ? "Unavailable"
+            : formatUsdFromCents(point.totalUsdCents)}
         </span>
       </div>
     </div>
@@ -585,7 +607,8 @@ function isMonthlyRevenuePoint(
   const candidate: Partial<Record<keyof HostedGrowthMonthlyRevenuePoint, unknown>> =
     value;
   return typeof candidate.month === "string"
-    && typeof candidate.totalUsdCents === "number"
+    && typeof candidate.monthToDate === "boolean"
+    && isNullableNumber(candidate.totalUsdCents)
     && typeof candidate.groupSponsorshipUsdCents === "number"
     && typeof candidate.usageTopUpsUsdCents === "number"
     && isNullableNumber(candidate.individualSubscriptionsUsdCents)
