@@ -1,0 +1,36 @@
+name: Export PR 1446 follow-up patch
+
+on:
+  push:
+    branches:
+      - agent/pr1446-recover-finalizer
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Decode follow-up patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/pr1446-followup/00 \
+            | tr -d '\r\n ' \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/pr1446-followup.patch
+          echo 'e71fc74ff14f0dc00b11564fd916bc71de55739df782ff90f5f712dcc2b42697  /tmp/pr1446-followup.patch' \
+            | sha256sum --check
+
+      - name: Upload follow-up patch
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pr1446-followup-patch
+          path: /tmp/pr1446-followup.patch
+          retention-days: 1
+          if-no-files-found: error
