@@ -1,5 +1,4 @@
-name: Agent Max final audit
-# One-shot verification workflow. A successful run removes itself and all audit scaffolding.
+name: Agent Max sync main
 
 on:
   push:
@@ -12,9 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  finalize:
+  sync:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -28,10 +27,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
+
           set +e
           git merge --no-commit --no-ff origin/main
           merge_status=$?
           set -e
+
           if [[ $merge_status -ne 0 ]]; then
             mapfile -t conflicts < <(git diff --name-only --diff-filter=U | sort)
             expected=(
@@ -45,117 +46,16 @@ jobs:
             git checkout --theirs -- "${expected[@]}"
             git add -- "${expected[@]}"
           fi
-          test -z "$(git diff --name-only --diff-filter=U)"
 
-      - name: Apply audited Max integration
-        shell: bash
-        run: |
-          set -euo pipefail
-          python <<'PY'
-          from pathlib import Path
-          import base64
-          import hashlib
-          import zlib
+          if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
+            echo "Unresolved merge conflicts remain." >&2
+            exit 1
+          fi
 
-          payload = "".join(
-              Path(f"scripts/agent-max-finalize.part{index}")
-              .read_text(encoding="utf-8")
-              .strip()
-              for index in range(1, 5)
-          )
-          source = zlib.decompress(base64.b64decode(payload, validate=True))
-          expected_source_hash = (
-              "debd4acc0a1219869ff1d08f83013093c9f458983b0ce8c1574c10ced4361aef"
-          )
-          actual_source_hash = hashlib.sha256(source).hexdigest()
-          if actual_source_hash != expected_source_hash:
-              raise SystemExit(
-                  f"Finalizer source hash mismatch: {actual_source_hash}"
-              )
-          exec(
-              compile(source, "scripts/agent-max-finalize.py", "exec"),
-              {"__name__": "__main__"},
-          )
-          PY
+          if git diff --cached --quiet && git diff --quiet; then
+            echo "Branch is already current with main."
+            exit 0
+          fi
 
-      - name: Check patch hygiene
-        shell: bash
-        run: |
-          set -euo pipefail
-          git add -A
-          git diff --cached --check
-          git status --short
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate hosted web Prisma client
-        run: pnpm --dir apps/web prisma:generate
-
-      - name: Run focused hosted web tests
-        run: >-
-          pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
-          apps/web/test/hosted-max-plan.test.ts
-          apps/web/test/hosted-max-plan-transition-migration.test.ts
-          apps/web/test/settings-billing-upgrade-plan-route.test.ts
-          apps/web/test/settings-billing-switch-plan-route.test.ts
-          apps/web/test/hosted-billing-settings.test.tsx
-          apps/web/test/usage-limit-banner.test.tsx
-          apps/web/test/user-facing-messages.test.ts
-          apps/web/test/hosted-usage-status.test.ts
-          apps/web/test/hosted-execution-usage-allowance.test.ts
-          apps/web/test/hosted-ops-growth.test.ts
-          apps/web/test/hosted-billing-plan-quote.test.ts
-          apps/web/test/hosted-onboarding-billing-plan-change-service.test.ts
-          apps/web/test/hosted-onboarding-billing-plan-switch-to-pulse-service.test.ts
-          apps/web/test/hosted-personal-usage-credit-eligibility.test.ts
-          apps/web/test/hosted-onboarding-runtime.test.ts
-          apps/web/test/hosted-onboarding-env.test.ts
-          apps/web/test/settings-page.test.ts
-
-      - name: Run assistant Max behavior tests
-        run: >-
-          pnpm --dir packages/assistant-engine exec vitest run
-          --config vitest.config.ts --no-coverage
-          test/assistant-hosted-low-usage-skill.test.ts
-          test/assistant-hosted-max-plan-skill.test.ts
-          test/assistant-plan-usage.test.ts
-          test/assistant-subscription-tool.test.ts
-
-      - name: Run shared contract and local Stripe tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm --dir packages/hosted-execution exec vitest run --config vitest.config.ts --no-coverage test/plan-usage.test.ts test/subscription.test.ts
-          pnpm --dir packages/hosted-local-harness exec vitest run --config vitest.config.ts --no-coverage test/dev-hosted-local/stripe.test.ts test/stripe-billing-live-config.test.ts
-
-      - name: Typecheck workspace
-        run: pnpm typecheck
-
-      - name: Run repository diff verification
-        run: pnpm test:diff:local
-
-      - name: Remove audit scaffolding and publish verified merge
-        shell: bash
-        run: |
-          set -euo pipefail
-          git rm .github/workflows/agent-max-usage-notice-patch.yml
-          git rm scripts/agent-max-final-audit.py
-          git rm scripts/agent-max-finalize.py.zlib.b64
-          git rm scripts/agent-max-finalize.part1
-          git rm scripts/agent-max-finalize.part2
-          git rm scripts/agent-max-finalize.part3
-          git rm scripts/agent-max-finalize.part4
-          git add -A
-          git diff --cached --check
-          git commit -m "fix: finalize Max plan integration"
+          git commit -m "chore: sync Max plan with main"
           git push origin HEAD:agent/add-murph-max-plan
