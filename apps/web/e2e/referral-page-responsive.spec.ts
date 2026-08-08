@@ -55,7 +55,7 @@ test("referral page stays contained and actionable at every marketing breakpoint
 
     await expect(
       page.getByRole("heading", {
-        name: "Bring your people. Earn more time with Murph.",
+        name: "Earn more Murph time.",
       }),
     ).toBeVisible();
     const primaryAction = page.getByRole("button", {
