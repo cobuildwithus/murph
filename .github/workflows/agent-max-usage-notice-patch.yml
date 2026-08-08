@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
+          git config user.name "github-actions[bot]]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           set +e
@@ -57,17 +57,32 @@ jobs:
           import hashlib
           import zlib
 
-          payload = Path(
-              "scripts/agent-max-finalize.py.zlib.b64"
-          ).read_text(encoding="utf-8").strip()
-          source = zlib.decompress(base64.b64decode(payload))
-          expected_sha256 = (
+          expected_part_hashes = (
+              "a5070efc6d0f55ae04205976cbe04da1fc893cee8c2a9ba3c5f847817fa99310",
+              "a2cbc9e3bbd9fb7416037899c82a7f3f5e6752b3ec34949cea8e33a06018ee8f",
+              "e908243db364f11c15843c80cabbed2cdef475c1036741855380de80f8421c4e",
+              "e9e1c790556d3d76a4f4f8123d9e5eeab5b7bcfa35a188c71c8434f2ae97f3d4",
+          )
+          parts = []
+          for index, expected_hash in enumerate(expected_part_hashes, start=1):
+              part = Path(
+                  f"scripts/agent-max-finalize.part{index}"
+              ).read_text(encoding="utf-8").strip()
+              actual_hash = hashlib.sha256(part.encode("ascii")).hexdigest()
+              if actual_hash != expected_hash:
+                  raise SystemExit(
+                      f"Finalizer part {index} hash mismatch: {actual_hash}"
+                  )
+              parts.append(part)
+
+          source = zlib.decompress(base64.b64decode("".join(parts), validate=True))
+          expected_source_hash = (
               "0fc7b0e629bb45d6392cd7b8dd2e0fa7135ec1ea48029aaa715477d365267dab"
           )
-          actual_sha256 = hashlib.sha256(source).hexdigest()
-          if actual_sha256 != expected_sha256:
+          actual_source_hash = hashlib.sha256(source).hexdigest()
+          if actual_source_hash != expected_source_hash:
               raise SystemExit(
-                  f"Finalizer payload hash mismatch: {actual_sha256}"
+                  f"Finalizer source hash mismatch: {actual_source_hash}"
               )
           exec(
               compile(source, "scripts/agent-max-finalize.py", "exec"),
@@ -148,6 +163,10 @@ jobs:
           git rm .github/workflows/agent-max-usage-notice-patch.yml
           git rm scripts/agent-max-final-audit.py
           git rm scripts/agent-max-finalize.py.zlib.b64
+          git rm scripts/agent-max-finalize.part1
+          git rm scripts/agent-max-finalize.part2
+          git rm scripts/agent-max-finalize.part3
+          git rm scripts/agent-max-finalize.part4
           git add -A
           git diff --cached --check
           git commit -m "fix: finalize Max plan integration"
