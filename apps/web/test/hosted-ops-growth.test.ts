@@ -2152,6 +2152,66 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("moves a one-time group gift to usage top-ups when payer deletion removes its sponsorship moment", async () => {
+    // Payer-only account deletion retains the fulfilled cross-owner purchase
+    // but cascades away its HostedGroupSponsorshipMoment, so the same cash is
+    // classified as a plain top-up on the next read. The card copy discloses
+    // this; the total must not change.
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    const giftRow = {
+      cashAmountMinor: 2_000,
+      groupSponsorshipAuthorizationId: null,
+      paidAt: new Date("2026-08-03T09:00:00.000Z"),
+    };
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
+      snapshotRow("2026-08-07", 2_900),
+    ]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
+      {
+        ...giftRow,
+        groupSponsorshipMoment: { purchaseId: "purchase_group_gift" },
+      },
+    ]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const beforeDeletion = await readHostedGrowthDashboard(now);
+
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
+      snapshotRow("2026-08-07", 2_900),
+    ]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
+      {
+        ...giftRow,
+        groupSponsorshipMoment: null,
+      },
+    ]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const afterDeletion = await readHostedGrowthDashboard(now);
+
+    const beforePoint = beforeDeletion.monthlyRevenueSeries.at(-1);
+    const afterPoint = afterDeletion.monthlyRevenueSeries.at(-1);
+    expect(beforePoint).toMatchObject({
+      groupSponsorshipUsdCents: 2_000,
+      usageTopUpsUsdCents: 0,
+    });
+    expect(afterPoint).toMatchObject({
+      groupSponsorshipUsdCents: 0,
+      usageTopUpsUsdCents: 2_000,
+    });
+    expect(afterPoint?.totalUsdCents).toEqual(beforePoint?.totalUsdCents);
+  });
+
   it("records the subscription split in the daily snapshot", async () => {
     const now = new Date("2026-08-07T12:00:00.000Z");
     mocks.hostedAccountGroup.findMany.mockResolvedValueOnce([

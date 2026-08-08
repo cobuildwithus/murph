@@ -464,14 +464,14 @@ export function GrowthCharts(input: GrowthChartsProps) {
             Monthly revenue
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
-            An estimate of each UTC month&apos;s revenue, not summed invoices:
-            the subscription rate at the month&apos;s latest daily snapshot
-            plus usage top-up and group sponsorship cash paid that month, with
-            refunds not subtracted. The newest bar covers only the month so
-            far. Hover or focus a bar for the source breakdown. Months recorded
-            before the subscription split show one combined subscriptions line,
-            a month with no snapshot withholds its total, and account deletion
-            removes that account&apos;s past top-ups from these bars.
+            An estimate, not invoices: the month&apos;s latest recorded
+            subscription rate plus top-up and group sponsorship cash paid that
+            UTC month. Refunds are not subtracted, and account deletion can
+            remove past purchase cash or leave an old group gift counted as a
+            regular top-up. The newest bar is month to date, a month with no
+            snapshot withholds its total, and months from before the
+            subscription split show subscriptions as one combined line. Hover,
+            tap, or focus a bar for the breakdown.
           </p>
         </div>
         <ChartContainer
