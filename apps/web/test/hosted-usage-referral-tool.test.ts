@@ -176,13 +176,13 @@ describe("hosted usage referral tool", () => {
               code: "new_person_activation_v1",
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
-              rewardLabel: "about 10 more days of usage for your Murph",
+              rewardLabel: "about 10 days’ worth of extra usage for your Murph",
             },
             {
               code: "active_group_v1",
               requirementsLabel:
                 "Start a fresh group and make it genuinely active, with multiple people actually talking.",
-              rewardLabel: "about 14 more days of usage for your Murph",
+              rewardLabel: "about 14 days’ worth of extra usage for your Murph",
             },
           ],
         },
@@ -210,11 +210,11 @@ describe("hosted usage referral tool", () => {
               code: "new_person_activation_v1",
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
-              rewardLabel: "about 10 more days of usage for your Murph",
+              rewardLabel: "about 10 days’ worth of extra usage for your Murph",
             },
             {
               code: "active_group_v1",
-              rewardLabel: "about 14 more days of usage for your Murph",
+              rewardLabel: "about 14 days’ worth of extra usage for your Murph",
             },
           ],
         },
@@ -241,7 +241,7 @@ describe("hosted usage referral tool", () => {
         referral: {
           availablePolicies: [{
             code: "active_group_v1",
-            rewardLabel: "about 14 more days of usage for this room",
+            rewardLabel: "about 140 more messages for this room",
           }],
         },
         status: "ok",

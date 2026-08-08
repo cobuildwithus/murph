@@ -47,7 +47,7 @@ describe("public referral program projection", () => {
         computeHostedUsageReferralRewardDays(
           newPersonGroup.approximateMessageCount,
         )
-      } more days of usage`,
+      } days’ worth of extra usage`,
     );
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
@@ -57,13 +57,13 @@ describe("public referral program projection", () => {
         computeHostedUsageReferralRewardDays(
           activeGroup.approximateMessageCount,
         )
-      } more days of usage`,
+      } days’ worth of extra usage`,
     );
     expect(signup.approximateMessageCount).toBe(
       newPersonGroup.approximateMessageCount,
     );
     expect(formatApproximateReferralUsageDays(100)).toBe(
-      "About 10 more days of usage",
+      "About 10 days’ worth of usage",
     );
   });
 

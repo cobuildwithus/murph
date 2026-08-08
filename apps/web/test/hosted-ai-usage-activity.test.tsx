@@ -79,7 +79,9 @@ beforeEach(() => {
     const subject = input.destinationKind === "group"
       ? "this room"
       : "your Murph";
-    return `about ${count / 10} more days of usage for ${subject}`;
+    return subject === "this room"
+      ? `about ${count} more messages for ${subject}`
+      : `about ${count / 10} days’ worth of extra usage for ${subject}`;
   });
 });
 
@@ -243,7 +245,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_pending",
-        rewardLabel: "about 14 more days of usage for this room",
+        rewardLabel: "about 140 more messages for this room",
         selectedLabel: "Jul 28, 2026",
         status: "reward_pending",
         statusLabel: "Reward pending",
@@ -252,7 +254,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_checking_final",
-        rewardLabel: "about 14 more days of usage for this room",
+        rewardLabel: "about 140 more messages for this room",
         selectedLabel: "Jul 28, 2026",
         status: "checking_final_activity",
         statusLabel: "Checking final activity",
@@ -261,7 +263,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_in_progress",
-        rewardLabel: "about 14 more days of usage for this room",
+        rewardLabel: "about 140 more messages for this room",
         selectedLabel: "Jul 27, 2026",
         status: "in_progress",
         statusLabel: "In progress",
@@ -270,7 +272,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "your Murph",
         id: "hur_waiting",
-        rewardLabel: "about 10 more days of usage for your Murph",
+        rewardLabel: "about 10 days’ worth of extra usage for your Murph",
         selectedLabel: "Jul 26, 2026",
         status: "waiting_for_group",
         statusLabel: "Waiting for a new group",
@@ -279,7 +281,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "your Murph",
         id: "hur_completed",
-        rewardLabel: "about 10 more days of usage for your Murph",
+        rewardLabel: "about 10 days’ worth of extra usage for your Murph",
         selectedLabel: "Jul 10, 2026",
         status: "completed",
         statusLabel: "Completed",
@@ -319,7 +321,7 @@ describe("readHostedAiUsageActivity", () => {
         id: "hur_signup_link",
         requirementsLabel:
           "A new member completed Murph setup through your referral link.",
-        rewardLabel: "about 10 more days of usage for your Murph",
+        rewardLabel: "about 10 days’ worth of extra usage for your Murph",
         title: "Invite someone to Murph",
       }),
     ]);
@@ -477,7 +479,7 @@ describe("HostedAiUsageActivity", () => {
             destinationLabel: "the group",
             id: "mission_1",
             requirementsLabel: "Start a fresh group and get people talking.",
-            rewardLabel: "about 14 more days of usage for this room",
+            rewardLabel: "about 140 more messages for this room",
             selectedLabel: "Jul 27, 2026",
             status: "in_progress",
             statusLabel: "In progress",
@@ -488,7 +490,7 @@ describe("HostedAiUsageActivity", () => {
             destinationLabel: "your Murph",
             id: "mission_completed",
             requirementsLabel: "Invite someone.",
-            rewardLabel: "about 10 more days of usage for your Murph",
+            rewardLabel: "about 10 days’ worth of extra usage for your Murph",
             selectedLabel: "Jul 10, 2026",
             status: "completed",
             statusLabel: "Completed",
@@ -515,7 +517,7 @@ describe("HostedAiUsageActivity", () => {
     );
     assert.match(markup, /aria-label="Current usage referrals"/);
     assert.match(markup, /Start an active group/);
-    assert.match(markup, /about 14 more days of usage for this room/);
+    assert.match(markup, /about 140 more messages for this room/);
     assert.match(markup, />History</);
     assert.match(markup, /aria-label="Usage activity history"/);
     assert.match(markup, /Invite someone to Murph/);
@@ -546,7 +548,7 @@ describe("HostedAiUsageActivity", () => {
       destinationLabel: "the group",
       id,
       requirementsLabel: `Requirements for ${statusLabel}`,
-      rewardLabel: "about 14 more days of usage for this room",
+      rewardLabel: "about 140 more messages for this room",
       selectedLabel: "Jul 27, 2026",
       status,
       statusLabel,
@@ -592,7 +594,7 @@ describe("HostedAiUsageActivity", () => {
           destinationLabel: "your Murph",
           id: "mission_completed",
           requirementsLabel: "Complete the selected mission.",
-          rewardLabel: "about 10 more days of usage for your Murph",
+          rewardLabel: "about 10 days’ worth of extra usage for your Murph",
           selectedLabel: "Jul 10, 2026",
           status: "completed",
           statusLabel: "Completed",

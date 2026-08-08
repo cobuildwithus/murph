@@ -147,13 +147,17 @@ export function buildHostedUsageReferralRewardLabel(input: {
   destinationKind: "group" | "personal";
   policyCode: HostedUsageReferralPolicyCode;
 }): string {
-  const subject = input.destinationKind === "group"
-    ? "this room"
-    : "your Murph";
-  const approximateRewardDays = computeHostedUsageReferralRewardDays(
-    POLICIES[input.policyCode].approximateMessageCount,
-  );
-  return `about ${approximateRewardDays} more days of usage for ${subject}`;
+  const approximateMessageCount =
+    POLICIES[input.policyCode].approximateMessageCount;
+  // Day estimates divide by one person's typical daily messages, so they only
+  // hold for a personal Murph; a room shares the same fixed credit among
+  // several people and keeps the message-equivalent wording.
+  if (input.destinationKind === "group") {
+    return `about ${approximateMessageCount} more messages for this room`;
+  }
+  return `about ${
+    computeHostedUsageReferralRewardDays(approximateMessageCount)
+  } days’ worth of extra usage for your Murph`;
 }
 
 function outstandingHostedUsageReferralCommitmentWhere(

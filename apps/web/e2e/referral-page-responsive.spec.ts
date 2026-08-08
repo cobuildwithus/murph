@@ -69,11 +69,11 @@ test("referral page stays contained and actionable at every marketing breakpoint
     ).toBeGreaterThanOrEqual(44);
     await expect(
       page.getByRole("heading", {
-        name: "Three paths. One shared reward balance.",
+        name: "Three ways to earn.",
       }),
     ).toBeVisible();
     await expect(
-      page.getByText("About 14 more days of usage", { exact: true }),
+      page.getByText("About 14 days’ worth of usage", { exact: true }),
     ).toBeVisible();
   }
 });

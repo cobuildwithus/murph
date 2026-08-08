@@ -40,7 +40,7 @@ describe("hosted usage referral policy", () => {
         },
       },
       notificationKey: "usage-referral-reward:referral_1",
-      rewardLabel: "about 14 more days of usage for this room",
+      rewardLabel: "about 140 more messages for this room",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
       styleBand: {
         humor: 8,
@@ -61,7 +61,7 @@ describe("hosted usage referral policy", () => {
       "Keep any edge aimed at Murph",
     );
     expect(wake.notification.instructions).toContain(
-      "about 14 more days of usage for this room",
+      "about 140 more messages for this room",
     );
   });
 
@@ -69,15 +69,15 @@ describe("hosted usage referral policy", () => {
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "group",
       policyCode: "new_person_activation_v1",
-    })).toBe("about 10 more days of usage for this room");
+    })).toBe("about 100 more messages for this room");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
       policyCode: "active_group_v1",
-    })).toBe("about 14 more days of usage for your Murph");
+    })).toBe("about 14 days’ worth of extra usage for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
       policyCode: "new_person_activation_v1",
-    })).toBe("about 10 more days of usage for your Murph");
+    })).toBe("about 10 days’ worth of extra usage for your Murph");
   });
 
   it("shares display copy and outstanding semantics with read-only projections", () => {
@@ -174,7 +174,7 @@ describe("hosted usage referral policy", () => {
       beneficiaryMemberId: "member_personal",
       destination,
       notificationKey: "usage-referral-reward:referral_personal",
-      rewardLabel: "about 10 more days of usage for your Murph",
+      rewardLabel: "about 10 days’ worth of extra usage for your Murph",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
       styleBand: {
         humor: 3,
@@ -233,7 +233,7 @@ describe("hosted usage referral policy", () => {
       beneficiaryMemberId: "member_personal",
       destination: linqDestination,
       notificationKey: "usage-referral-reward:referral_personal_linq",
-      rewardLabel: "about 10 more days of usage for your Murph",
+      rewardLabel: "about 10 days’ worth of extra usage for your Murph",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
       styleBand: {
         humor: 3,

@@ -31,7 +31,7 @@ const HOW_IT_WORKS = [
   {
     description:
       "Murph applies the usage reward automatically and sends you a short confirmation. There is no claim form or payout setup.",
-    title: "Messages are added",
+    title: "Usage is added",
   },
 ] as const;
 
@@ -56,7 +56,7 @@ const TRUST_POINTS = [
 const FAQS = [
   {
     answer:
-      "A qualifying signup through your personal link adds about 10 days of typical usage. The fresh-group mission with someone new is also about 10 days, and the active-group mission is about 14. Estimates assume about 10 messages a day, and actual usage varies with the model, tools, media, task complexity, and response length.",
+      "A qualifying signup adds about 10 days’ worth of typical usage, and the group missions about 10 and 14 days’ worth, measured against one person sending about 10 messages a day. Signup rewards go to your Murph; mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the same credit faster.",
     question: "How much usage do I earn?",
   },
   {
@@ -124,7 +124,7 @@ export function ReferralPageContent({
             <p className="mt-6 max-w-[58ch] text-pretty text-[1rem] leading-[1.75] text-[#f5f0e8]/75 sm:text-[1.0625rem]">
               Share your personal link or start a qualifying group mission. When
               a new member finishes setup or a fresh group gets genuinely
-              active, Murph adds usage to your account automatically.
+              active, Murph adds the usage reward automatically.
             </p>
 
             <div className="mt-8">
@@ -198,12 +198,13 @@ export function ReferralPageContent({
                 Ways to earn
               </p>
               <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4.5vw,3.7rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#2d3436]">
-                Three paths. One shared reward balance.
+                Three ways to earn.
               </h2>
             </div>
-            <p className="max-w-[38ch] text-sm leading-[1.7] text-[#5a5045] lg:text-right">
-              Your personal link is always the simplest path. Group missions
-              must be confirmed by Murph before the new group is created.
+            <p className="max-w-[40ch] text-sm leading-[1.7] text-[#5a5045] lg:text-right">
+              Link rewards go to your personal Murph. Mission rewards go to the
+              personal or group Murph the mission was accepted for, once Murph
+              confirms the mission.
             </p>
           </div>
 
@@ -242,7 +243,7 @@ export function ReferralPageContent({
 
                   <p
                     className={`mt-9 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.12em] ${
-                      index === 0 ? "text-[#d4b87a]" : "text-[#8a7254]"
+                      index === 0 ? "text-[#d4b87a]" : "text-[#736a58]"
                     }`}
                   >
                     {formatApproximateReferralUsageDays(
@@ -385,7 +386,7 @@ function ReferralHeroArtifact() {
         </div>
 
         <div className="relative mt-7 w-fit max-w-[88%] rounded-2xl rounded-tl-[6px] bg-white px-4 py-3.5 text-[0.9375rem] leading-[1.55] text-[#2d3436] ring-1 ring-[#c4a882]/15">
-          Your referral came through. About 10 more days of usage are already
+          Your referral came through. About 10 days’ worth of usage is already
           added to your Murph.
           <span className="absolute -right-2.5 -top-3.5 flex size-7 items-center justify-center rounded-full bg-[#5a6e32] ring-2 ring-[#f5f0e8]">
             <Heart className="size-3.5 fill-current text-[#f5f0e8]" />

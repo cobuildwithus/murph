@@ -53,5 +53,5 @@ export function formatApproximateReferralUsageDays(
 ): string {
   return `About ${
     computeHostedUsageReferralRewardDays(approximateMessageCount)
-  } more days of usage`;
+  } days’ worth of usage`;
 }
