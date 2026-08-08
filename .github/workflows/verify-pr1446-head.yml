@@ -20,7 +20,7 @@ jobs:
       CI: "1"
       NEXT_TELEMETRY_DISABLED: "1"
       PR_BRANCH: agent/optional-sponsorship-moments
-      EXPECTED_PR_HEAD: 256c2f90be6960a3c8135e81f67b5ec70cb2f210
+      EXPECTED_PR_HEAD: 9d50753353226d74c0064f953aebcee446cf6a5d
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
