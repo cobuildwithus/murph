@@ -13,8 +13,12 @@ import {
 import { buildCodexResumeState } from '@murphai/operator-config/assistant/codex-resume-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  doesAssistantResumeBindingMatchRoute,
+} from './codex-resume-binding.js'
+import {
   readAssistantCodexResume,
 } from './conversation-persistence.js'
+import { resolveAssistantExecutionPlan } from './execution-plan.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   buildAssistantProviderTranscriptAuditEntries,
@@ -342,6 +346,10 @@ export async function persistAssistantTurnAndSession(input: {
     turnId: input.turnId,
     vault: input.input.vault,
   })
+  const turnCommittedConversationHistory =
+    persistUserPromptToTranscript ||
+    assistantTranscriptEntries.length > 0 ||
+    noReplyMarkerDeliveryContextOrdinals.length > 0
 
   const updatedAt = new Date().toISOString()
   const hasTurnScopedTargetOverride =
@@ -368,19 +376,23 @@ export async function persistAssistantTurnAndSession(input: {
         assistantBackendTargetToProviderConfigInput(nextTarget),
       )
     : input.session.providerOptions
-  const nextResumeState =
-    hasTurnScopedTargetOverride
-      ? null
-      : resolveAssistantNextResumeState({
-          action: input.providerResumeStateAction,
-          assistantContractFingerprint: input.providerResult.assistantContractFingerprint,
-          codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
-          codexThreadId: input.providerResult.codexThreadId,
-          routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
-          threadCompatibilityFingerprint:
-            readCodexThreadCompatibilityFingerprint(input.providerResult.route),
-          sessionResumeState: readAssistantCodexResume(input.session),
-        })
+  const resumeStateInput: AssistantNextResumeStateInput = {
+    action: input.providerResumeStateAction,
+    assistantContractFingerprint: input.providerResult.assistantContractFingerprint,
+    codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
+    codexThreadId: input.providerResult.codexThreadId,
+    routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
+    threadCompatibilityFingerprint:
+      readCodexThreadCompatibilityFingerprint(input.providerResult.route),
+    sessionResumeState: readAssistantCodexResume(input.session),
+  }
+  const nextResumeState = hasTurnScopedTargetOverride
+    ? resolveAssistantTurnScopedOverrideResumeState({
+        ...resumeStateInput,
+        durableTarget: nextTarget,
+        turnCommittedConversationHistory,
+      })
+    : resolveAssistantNextResumeState(resumeStateInput)
 
   const savedSession = await state.sessions.save({
     ...input.session,
@@ -398,7 +410,7 @@ export async function persistAssistantTurnAndSession(input: {
   return savedSession
 }
 
-function resolveAssistantNextResumeState(input: {
+type AssistantNextResumeStateInput = {
   action: AssistantProviderResumeStateAction
   assistantContractFingerprint?: string | null
   codexRolloutRelativePath?: string | null
@@ -406,7 +418,41 @@ function resolveAssistantNextResumeState(input: {
   routeFingerprint: string
   threadCompatibilityFingerprint?: string | null
   sessionResumeState: AssistantSession['resumeState']
-}): AssistantSession['resumeState'] {
+}
+
+function resolveAssistantTurnScopedOverrideResumeState(
+  input: AssistantNextResumeStateInput & {
+    durableTarget: AssistantSession['target']
+    turnCommittedConversationHistory: boolean
+  },
+): AssistantSession['resumeState'] {
+  if (!input.turnCommittedConversationHistory) {
+    return input.sessionResumeState
+  }
+  if (input.action !== 'persist-from-provider-turn') {
+    return null
+  }
+
+  const candidate = resolveAssistantNextResumeState(input)
+  if (!candidate) {
+    return null
+  }
+
+  const durableRoute = resolveAssistantExecutionPlan({
+    defaults: null,
+    sessionTarget: input.durableTarget,
+  }).codexRoute
+  return doesAssistantResumeBindingMatchRoute({
+    resumeState: candidate,
+    route: durableRoute,
+  })
+    ? candidate
+    : null
+}
+
+function resolveAssistantNextResumeState(
+  input: AssistantNextResumeStateInput,
+): AssistantSession['resumeState'] {
   switch (input.action) {
     case 'clear':
       return null

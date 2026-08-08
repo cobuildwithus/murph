@@ -1094,10 +1094,7 @@ describe("connected-app service", () => {
       {
         body: null,
         pathname: "/api/v3.1/connected_accounts",
-        toolkitSlugs: [
-          "gmail",
-          "googlecalendar",
-        ],
+        toolkitSlugs: ["googlecalendar"],
         userIds: ["hbm_member"],
       },
       {

@@ -53,6 +53,7 @@ import {
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlRuntimeHealthDataConsentPath,
+  buildCloudflareHostedControlRuntimeShellPrewarmPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -157,6 +158,9 @@ export interface CloudflareHostedControlClient {
     orchestrationAttemptId: string;
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
+  prewarmRuntimeShell(
+    userId: string,
+  ): Promise<CloudflareHostedControlRuntimeShellPrewarmAcceptedAck>;
   reconcileRuntimeHealthDataConsent(
     userId: string,
   ): Promise<CloudflareHostedControlRuntimeHealthDataConsentResult>;
@@ -189,6 +193,10 @@ export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
   accepted: true;
 }
 
+export interface CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
+  accepted: true;
+}
+
 export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
   | HostedRuntimeEnsureProcessingResponse
   | CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck;
@@ -196,6 +204,7 @@ export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
 export interface CloudflareHostedControlRuntimeEnsureProcessingTiming {
   directEnsureRequestStartedAtEpochMs: number;
   directEnsureResponseReceivedAtEpochMs: number;
+  orchestrationAttemptId: string;
   tokenAcquiredAtEpochMs: number;
   tokenAcquireStartedAtEpochMs: number;
 }
@@ -371,6 +380,29 @@ export function createCloudflareHostedControlClient(
           body: JSON.stringify({
             orchestrationAttemptId: input.orchestrationAttemptId,
           }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        runtimeEnsureProcessingOrchestrationAttemptId:
+          input.orchestrationAttemptId,
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    prewarmRuntimeShell(userId) {
+      const expectedUserId = requireCloudflareHostedControlUserId(userId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: expectedUserId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "runtime shell prewarm",
+        parse: parseCloudflareHostedControlRuntimeShellPrewarmResponse,
+        path: buildCloudflareHostedControlRuntimeShellPrewarmPath(expectedUserId),
+        request: {
+          body: "{}",
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -1026,6 +1058,18 @@ function parseCloudflareHostedControlRuntimeEnsureProcessingResponse(
   return parseHostedRuntimeEnsureProcessingResponse(value);
 }
 
+function parseCloudflareHostedControlRuntimeShellPrewarmResponse(
+  value: unknown,
+): CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
+  const record = requireRecord(value, "Cloudflare runtime shell prewarm response");
+  if (record.accepted !== true) {
+    throw new TypeError(
+      "Cloudflare runtime shell prewarm response accepted must be true.",
+    );
+  }
+  return { accepted: true };
+}
+
 function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(
   value: unknown,
 ): CloudflareHostedControlTelegramUsageLimitNoticeResponse {
@@ -1256,6 +1300,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
   onRequestAttempted?: () => Promise<void> | void;
+  runtimeEnsureProcessingOrchestrationAttemptId?: string;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -1338,11 +1383,14 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     && tokenAcquiredAtEpochMs !== null
     && directEnsureRequestStartedAtEpochMs !== null
     && directEnsureResponseReceivedAtEpochMs !== null
+    && input.runtimeEnsureProcessingOrchestrationAttemptId !== undefined
   ) {
     try {
       input.onRuntimeEnsureProcessingTiming?.({
         directEnsureRequestStartedAtEpochMs,
         directEnsureResponseReceivedAtEpochMs,
+        orchestrationAttemptId:
+          input.runtimeEnsureProcessingOrchestrationAttemptId,
         tokenAcquiredAtEpochMs,
         tokenAcquireStartedAtEpochMs,
       });

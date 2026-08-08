@@ -5,7 +5,6 @@ import { useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import {
-  ACTION_APPROVAL_PENDING_CAVEAT,
   ActionApprovalDecisionFallback,
   ActionApprovalScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
@@ -125,7 +124,6 @@ export function ActionApprovalCard({
     <ActionApprovalScreen
       badgeIcon={ShieldCheck}
       body={<p className="break-words">{approval.presentation.body}</p>}
-      caveat={ACTION_APPROVAL_PENDING_CAVEAT}
       title={approval.presentation.title}
     >
       {surfacedError ? (

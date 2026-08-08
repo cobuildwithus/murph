@@ -175,7 +175,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Secure approval pending and recorded states">
-        <ActionApprovalLifecycleStudy />
+        <div id="action-approval-lifecycle">
+          <ActionApprovalLifecycleStudy />
+        </div>
       </StudySection>
 
       <Separator />
@@ -318,7 +320,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription and sponsored billing">
+      <StudySection title="Subscription recovery, sponsored billing, and usage limits">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -384,7 +386,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with message-volume history and retention-limited sender evidence">
+      <StudySection title="Ops weekly growth compass with sponsorship accounting, messaging-activity, and message-volume history">
         <div inert>
           <GrowthScorecardStudy />
         </div>
@@ -405,7 +407,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Biomarker result detail">
-        <BiomarkerDetailStudy />
+        <div id="biomarker-result-range-bands">
+          <BiomarkerDetailStudy />
+        </div>
       </StudySection>
 
       <Separator />

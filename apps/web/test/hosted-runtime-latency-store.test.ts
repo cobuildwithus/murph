@@ -988,6 +988,8 @@ describe("hosted runtime latency dashboard store", () => {
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
           directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+          directEnsureOrchestrationAttemptId:
+            "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         },
       },
       prisma,
@@ -1005,6 +1007,45 @@ describe("hosted runtime latency dashboard store", () => {
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        directEnsureOrchestrationAttemptId:
+          "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+    });
+
+    await expect(recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_latency_1",
+      at: instant("2026-06-09T10:00:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        orchestration: {
+          cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
+          freshStartRequestedAtEpochMs: 1_777_000_000_030,
+          runtimeInvocationOrchestrationAttemptId:
+            "web-ingress-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          triggeredByWebDirect: true,
+        },
+        schemaVersion: 1,
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    })).resolves.toEqual({ matchedCount: 1, recorded: true, unmatchedCount: 0 });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      orchestration: {
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+        tokenAcquiredAtEpochMs: 1_777_000_000_010,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        directEnsureOrchestrationAttemptId:
+          "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
+        freshStartRequestedAtEpochMs: 1_777_000_000_030,
+        runtimeInvocationOrchestrationAttemptId:
+          "web-ingress-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        triggeredByWebDirect: true,
       },
     });
     expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");

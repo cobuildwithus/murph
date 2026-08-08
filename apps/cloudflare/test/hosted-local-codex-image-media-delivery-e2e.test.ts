@@ -145,6 +145,7 @@ describe("hosted local Codex image media delivery e2e", () => {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       messageTargetingAvailable: true,
+      pendingVaultFilesAvailable: true,
       phoneCallsAvailable: true,
       progressUpdatesAvailable: true,
       responseCardAvailable: true,

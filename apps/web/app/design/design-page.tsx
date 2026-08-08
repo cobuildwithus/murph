@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BrandContent } from "./brand-content";
 import { ComponentsContent } from "./components-content";
 import { ConsentContent } from "./consent-content";
+import { ExperimentCadenceStudy } from "./experiment-cadence-study";
 import { SectionsContent } from "./sections-content";
 
 const TABS = [
@@ -54,7 +55,10 @@ export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
       ) : selectedTab === "consent" ? (
         <ConsentContent />
       ) : (
-        <ComponentsContent />
+        <>
+          <ExperimentCadenceStudy />
+          <ComponentsContent />
+        </>
       )}
     </main>
   );

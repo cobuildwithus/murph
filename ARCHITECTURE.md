@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-05
+Last verified: 2026-08-07
 
 ## Accepted-Message Targeting
 
@@ -145,14 +145,23 @@ bounded seven-day tail of committed transcripts from those same authenticated
 group-chat channels. It fully rewrites the one page only when the evidence
 materially improves a compact list of room canon, likely person-specific comedy
 preferences, successful Murph formats, retired material, and open callbacks.
+Silent consolidation targets a compact 2-6 KiB guide and treats 20 KiB as a
+generous soft ceiling, never a write gate. When the page exceeds that ceiling,
+is materially bloated with duplicate or stale detail, or approaches the
+defensive 64 KiB serialized-page limit, the next evidence-supported rewrite
+merges duplicates, summarizes old examples into durable patterns, and prunes
+stale or completed detail while preserving explicit setup, current boundaries,
+unresolved loops, and high-confidence room or participant patterns.
 One dedicated owner reads, replaces, or deletes the fixed page. Generic
 knowledge show, list, search, append, upsert, and generated index surfaces
 exclude it. Every mutation passes the digest returned by the immediately prior
 show and compares that digest under the same fixed-page lock, so a concurrent
-rewrite cannot be lost. Replacement validates the normalized body and complete
-6 KiB advisory envelope before writing; ordinary prompts never truncate an
-accepted page. Raw `Sender:` handles remain transient evidence attribution and
-cannot be persisted in the page.
+rewrite cannot be lost. There is no separate authored-body byte cap. Replacement
+validates the complete serialized fixed page against the defensive 64 KiB raw
+file ceiling before writing. Ordinary prompts render the complete accepted page
+without revalidating it against a wrapper-dependent byte ceiling. Raw `Sender:`
+handles remain transient evidence attribution and cannot be persisted in the
+page.
 
 Ordinary authenticated hosted group-chat turns read that fixed page directly
 from the same group vault and append a bounded rendering to dynamic turn
@@ -163,14 +172,18 @@ the page nor contributes maintenance evidence, and its spoofable sender cannot
 receive the mutation tool. Silent consolidation receives that same dynamic tool
 only from the immutable managed-automation id, runs in a fresh one-shot Codex
 thread with workspace access denied and network disabled, and has no generic
-knowledge or shell write surface. Ordinary prompt reads fail open, but mutation reads
-distinguish a genuinely missing page from malformed, unreadable, or wrong-type
-fixed-slug state; conflicts stop both explicit and scheduled replacement. The
-rendering is quoted as fallible data and
-explicitly tells the model to skim it lightly: most turns should use none of it,
-and at most one naturally relevant tip should shape a reply. Current
-conversation, safety rules, authoritative tool results, and explicit canonical
-room style settings always outrank it. This adds no database table, mailbox
+knowledge or shell write surface.
+Ordinary prompt reads fail open by withholding every unusable page body and
+injecting only a compact trusted status for missing, inactive, or unavailable
+state. Mutation reads still distinguish a genuinely missing page from malformed,
+unreadable, or wrong-type fixed-slug state; conflicts stop both explicit and
+scheduled replacement. The rendering remains quoted as fallible data. The
+resident group-context principle uses the smallest relevant safe set, combines
+several details only when shared history is essential, and applies room context
+whenever it materially improves the current result without forcing callbacks or
+roll calls. Current messages, explicit corrections, safety rules, authoritative
+tool results, and explicit canonical room style settings always outrank it.
+This adds no database table, mailbox
 kind, roster service, cursor, vector index, per-participant page, or pruning
 workflow; the admitted committed transcript is evidence and the single page is
 the only durable room-intelligence owner.
@@ -398,7 +411,7 @@ fan-out, scheduler, policy engine, result table, or second service.
 
 ## Hosted Connected Apps
 
-Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, agent-approved calendar-create write allowlist, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation keeps its separate agent-approved direct-execute path, rejects unsupported write arguments before provider execution, and marks failed or ambiguous provider outcomes non-retryable.
+Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, server-owned fixed-write allowlist for primary-calendar creation and bounded Gmail/Outlook email sending, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation and bounded Gmail/Outlook email sends share one exact server-owned direct-execute policy table. Every route pins its toolkit and provider version, requires agent approval plus an active owned account from that toolkit, rejects missing, blank, unsupported, or server-owned model arguments before egress, and forces provider-owned fields such as the primary calendar, sender, and Outlook Sent-copy behavior. Email sends additionally require current accepted user input in a private direct turn at the assistant runtime boundary; scheduled, group, maintenance, system-notification, and output-only turns fail closed before provider egress. Failed or ambiguous writes are non-retryable; ambiguous email outcomes are reconciled only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and uncertain results remain unknown.
 
 Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, newsletters, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. One structured automation write creates the single group newsletter and stores its delivery choice as a system-owned tag: current-chat editions use the ordinary bound-route conversation outbox, while email editions alone receive the one-shot prepare/send capability. Email preparation derives the group from the signed runtime member rather than a model-supplied group id and persists the private authorization proof plus HTML on the existing assistant outbox parent. The outbox reports an accepted parent to cron immediately, so even a later provider, validation, or persistence error leaves the occurrence in its existing pending-delivery state while retaining the error on the run record. Web marks that parent sent only after durably persisting recipient fanout, and the existing cron reconciler settles the occurrence from the parent state. Recipient intents use only the generic outbox retry lifecycle, so newsletter retries never recompose the body or create a second recipient budget. Because newsletter email `From` identity is spoofable, group-email replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
 
@@ -415,7 +428,31 @@ remains authoritative over analytics: the projection never decrypts a row after
 its content-retirement marker is set, reports any affected rolling count as a
 lower bound, and withholds a week-over-week comparison when either weekly
 window has incomplete group-sender evidence. Missing unretired content remains
-an integrity failure.
+an integrity failure. The existing authenticated daily growth snapshot is the
+only durable history owner for these anonymous aggregates: at each UTC date it
+stores the completed prior-day and completed trailing-seven-day distinct-sender
+counts only when their group evidence is complete. These windows use durable
+mailbox receipt (`HostedMailboxItem.createdAt`) so a provider event delivered
+after the daily capture cannot later rewrite a completed day; provider event
+time remains payload/decryption and conversation evidence only. The date-keyed
+upsert makes
+same-day cron and ops-page retries idempotent. An attribution integrity failure
+is reported and creates null activity values only when no same-date row exists;
+on retry it leaves any existing activity values untouched while still updating
+the snapshot's revenue, member, and message aggregates. The cron returns a
+failure after that legacy snapshot write so monitoring and an authenticated
+manual rerun can recover the same date; Vercel does not retry failed cron
+invocations automatically. The ops-page snapshot-capture branch may also
+recover the date before the normal live dashboard read. That read retains its
+existing integrity-fail behavior for missing unretired group evidence. Legacy
+or incomplete windows stay null, and the existing 30-day snapshot projection
+shifts each row onto the completed day its
+windows ended instead of reconstructing identities after mailbox expiry. These
+metrics count the retained sender population received by Murph at read or
+capture time. Account
+deletion removes personal and owned group-container rows; activity retained in
+another member's shared-group container follows normal content retention
+instead of a durable deletion-timestamp trail in anonymous analytics.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
@@ -895,16 +932,21 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   entitlement, and separate daily Linq anti-abuse gates, remain enforceable.
 
   The group-tool privacy projection has one bounded rolling-deploy reader seam.
-  A compatible runtime accepts both the current exact
-  `{fundingNeeded,fundingUrl,sponsorshipStatus}` response and the immediately
-  preceding exact `{capacityState,fundingUrl,periodEnd,remainingPercent?}`
-  response. It maps the preceding shape to `not_sponsored`, derives only the
-  funding boolean, and discards period and percentage fields before they reach
-  assistant policy. In the current shape, `fundingNeeded` expresses urgency
-  while `fundingUrl` remains the capability for an explicit contribution at
-  any valid group-capacity state. Assistant policy uses the boolean only for
-  proactive depletion messaging and may share the returned URL after an
-  explicit funding request even when the boolean is false. Deploy that reader
+  A compatible runtime accepts the current exact `{fundingNeeded,fundingUrl}`
+  response, strips the immediately preceding optional `sponsorshipStatus`
+  field, and also accepts the older exact
+  `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response. It derives
+  only the funding boolean from that oldest shape and discards period,
+  percentage, and funding-setup fields before they reach assistant policy. In
+  the current shape, `fundingNeeded` is false for healthy capacity and for low
+  capacity with an available or pending automatic refill; it is true for low
+  capacity without automatic recovery and for every exhausted room.
+  `fundingUrl` remains the capability for an explicit contribution at any valid
+  group-capacity state. Assistant policy has one contract regardless of payment
+  setup: it uses the boolean only for proactive depletion messaging and may
+  share the returned URL after an explicit funding request even when the
+  boolean is false. A Web-owned exhaustion projection always appends that
+  current URL to the ordinary group pause copy. Deploy that reader
   throughout Cloudflare/runner before Web begins emitting the current shape.
   Because the preceding producer cannot represent an active monthly
   sponsorship, the Web switch becomes a forward-only tandem cutover once
@@ -1396,15 +1438,18 @@ existing direct Linq chat owns native-card delivery without a reverse map or a
 new-chat workaround. Same-route inputs accepted during the live turn may update
 the reply message, reaction capability, and delivery idempotency inputs, but do
 not recreate the explicit-target override or replace the turn's thread binding.
-Linq owns the
-noninteractive static transcript layout, which carries the date, meal count,
-available totals, an explicit partial marker, and the first available exact V2
-goal plus its frozen status in canonical metric order. Its required URL is a
-fixed, non-sensitive HTTPS product URL rather than encoded card state. The
+Linq explicitly requests interactive transcript rendering. A recipient with
+the shipping Messages extension sees the extension-owned SwiftUI balloon; a
+recipient without it sees the same provider-owned static layout carrying the
+date, meal count, available totals, explicit partial marker, and first
+available exact V2 goal plus its frozen status. The required HTTPS URL keeps
+the immutable V1 or V2 presentation snapshot in a bounded Base64URL fragment
+that the extension decodes offline. Encoding is not encryption, so that
+fragment may contain only the same private-direct card values and never member
+identity, canonical record references, credentials, or other authority. The
 fallback body remains value-free and names a truthful text-recovery action to
-avoid Apple data-detector downgrade; the installed extension does not own
-balloon visibility. No card API, database, auth path, cleanup owner, extension
-network read, or second queue exists.
+avoid Apple data-detector downgrade. No card API, database, auth path, cleanup
+owner, extension network read, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -1480,6 +1525,46 @@ durably bound to the purchase, re-fetches its amount, Customer, environment,
 purpose/version metadata, status, and Charge, and then calls the same grant,
 refund, and dispute owners. Browser state and synchronous PaymentIntent
 responses never grant credit.
+
+Stripe failure email is a best-effort observability projection at these shared
+Web-owned boundaries, not a billing owner. A provider rejection that aborts
+the complete website or assistant billing action, a new verified canonical
+payment-failure event, and the first failed local event-reconciliation attempt
+schedule a plain-text Resend alert through the existing operational sender and
+recipient allowlist. Checkout ownership spans its mandatory price read,
+customer provisioning, saved-card preparation, and Checkout Session
+creation/resume. Paid-plan upgrades, paid-trial transitions, and scheduled plan
+switches own their complete provider-backed action in the same way; individual
+SDK calls do not independently own email. The
+Family direct-paid action derives one complete provider-effect identity from
+the current plan, current Price, target Price, and seat count, and a stale
+Session restart rebinds reporting to the replacement checkout attempt. Paid
+Family capacity changes reuse the exact capacity-update idempotency identity;
+member-tier swaps reuse their persisted transition identity. Provider failures
+abort those complete actions and alert once, while already-applied capacity,
+successful updates, and domain-only conflicts remain silent. Explicit
+group-sponsorship recovery is another checkout action owner; a capacity-only
+reactivation makes no provider request and remains silent. Family checkout
+returns a Murph redirect that performs one final mandatory Session read; a
+provider rejection there reports only after the unique blind Session key still
+resolves to a current checkout attempt, so unknown or stale public IDs remain
+silent. The
+central Stripe diagnostic logger is not alert eligibility because cleanup races
+and recovery reads also log safely absorbed rejections. Alert content is
+limited to bounded error tokens, operation/event type, an opaque stable
+operation-attempt or Stripe request/event correlation, HTTP status, and
+live/test mode. When an SDK adapter replaces a raw provider error with a hosted
+error, only the validated opaque Stripe request id crosses that internal
+boundary in a frozen non-serialized correlation record; client-visible details
+retain only request-id presence. Member identity, contact details, checkout
+contents, raw errors, and provider payloads are excluded. The correlation
+parser is a dependency-free Stripe
+field boundary: the general onboarding runtime stays free of `server-only`,
+Next request-lifecycle, and alert-delivery imports because production migration
+line sync and standalone Stripe tooling also import that runtime. Stripe
+receipts retain retry authority, and alert configuration or delivery failure
+cannot alter checkout results, webhook
+acknowledgement, entitlement, or reconciliation state.
 
 Established Linq direct messages and established external-thread group messages
 resolve only a narrow blind-index/member-id preflight target and unwrap the
@@ -2370,7 +2455,8 @@ flows inside the local TypeScript workspace.
 ## Tracked Compact Table Response Cards
 
 Compact table response cards reuse the existing outbox-owned immutable effect
-and provider-rendered static Linq balloon. A compact card is a bounded
+and interactive Messages-extension balloon, with Linq's static layout retained
+for recipients without the extension. A compact card is a bounded
 presentation snapshot, never a mutable tracker: canonical workout events remain
 the only workout authority, qualitative set annotations live on canonical set
 notes, and an update is complete only after a successful workout re-read
@@ -2389,10 +2475,11 @@ the same bounded health-related values visible in the immutable message, but it
 must never contain a member identity, canonical record reference, credential,
 or other authority. The provider request rejects encoded URLs at 2,048
 characters, while the contract applies the same aggregate bound before
-delivery. Nutrition cards keep their existing fixed HTTPS URL and
-provider-rendered summary layout. The Messages extension remains offline and
-read-only. This adds no card API, database, background synchronization owner,
-authentication surface, or mutable message state.
+delivery. Nutrition V1 and V2 cards use the same bounded fragment family
+without a tracking field, while the provider-rendered summary remains their
+fallback layout. The Messages extension remains offline and read-only. This
+adds no card API, database, background synchronization owner, authentication
+surface, or mutable message state.
 
 ## Scheduled assistant tool authority
 

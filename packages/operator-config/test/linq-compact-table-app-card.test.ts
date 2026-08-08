@@ -31,7 +31,7 @@ const CARD: CompactTableResponseCardV1 = {
 }
 
 describe('Linq compact-table app cards', () => {
-  it('uses the provider-owned static bubble with a generic tap-through label', async () => {
+  it('uses the installed extension with a truthful static fallback layout', async () => {
     const requests: Array<{ body: unknown; url: string }> = []
     const fetchImplementation: LinqFetch = async (url, init) => {
       requests.push({
@@ -66,7 +66,7 @@ describe('Linq compact-table app cards', () => {
         parts: [
           {
             fallback_text: 'Ask Murph for this card in text',
-            interactive: false,
+            interactive: true,
             layout: {
               caption: 'Murph',
               subcaption: 'Workout table',

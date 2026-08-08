@@ -2,12 +2,15 @@ name: Hosted Stripe Billing
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'main-push' }}
   cancel-in-progress: false
 
 jobs:
@@ -56,38 +59,11 @@ jobs:
           pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage
           scripts/check-hosted-stripe-billing-ci.test.ts
 
-  live-eligibility:
-    name: Classify live Stripe trust boundary
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      run_live: ${{ steps.classify.outputs.run_live }}
-    steps:
-      - id: classify
-        name: Require trusted same-repository head
-        env:
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          REPOSITORY: ${{ github.repository }}
-          ACTOR: ${{ github.actor }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$PR_AUTHOR" != "dependabot[bot]" && "$ACTOR" != "dependabot[bot]" ]]; then
-            echo "run_live=true" >> "$GITHUB_OUTPUT"
-            echo "### Live Stripe lane: eligible trusted head" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "run_live=false" >> "$GITHUB_OUTPUT"
-          echo "### Live Stripe lane: ineligible" >> "$GITHUB_STEP_SUMMARY"
-          echo "Writable sandbox authority is never exposed to fork or dependency-bot code." >> "$GITHUB_STEP_SUMMARY"
-
   live-stripe-browser:
     name: Live hosted-local Stripe browser matrix
     needs:
       - billing-hermetic
-      - live-eligibility
-    if: ${{ needs.live-eligibility.outputs.run_live == 'true' }}
+    if: ${{ github.event_name == 'push' }}
     environment: hosted-stripe-billing-sandbox
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -139,7 +115,7 @@ jobs:
           MURPH_HOSTED_STRIPE_BILLING_LIVE: "1"
           MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY: ${{ secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY }}
           MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID: ${{ vars.HOSTED_STRIPE_BILLING_SANDBOX_ACCOUNT_ID }}
-          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
+          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_main_${{ github.run_id }}_${{ github.run_attempt }}
           NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_PULSE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
@@ -153,7 +129,7 @@ jobs:
           MURPH_HOSTED_STRIPE_BILLING_LIVE: "1"
           MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY: ${{ secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY }}
           MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID: ${{ vars.HOSTED_STRIPE_BILLING_SANDBOX_ACCOUNT_ID }}
-          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
+          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_main_${{ github.run_id }}_${{ github.run_attempt }}
           NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_PULSE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
@@ -171,7 +147,7 @@ jobs:
           MURPH_HOSTED_STRIPE_BILLING_LIVE: "1"
           MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY: ${{ secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY }}
           MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID: ${{ vars.HOSTED_STRIPE_BILLING_SANDBOX_ACCOUNT_ID }}
-          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
+          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_main_${{ github.run_id }}_${{ github.run_attempt }}
           NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_PULSE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
@@ -193,40 +169,38 @@ jobs:
     name: Required hosted Stripe billing boundary
     needs:
       - billing-hermetic
-      - live-eligibility
       - live-stripe-browser
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Enforce hermetic proof and trusted-head live result
+      - name: Enforce hermetic proof and event-scoped live result
         env:
+          EVENT_NAME: ${{ github.event_name }}
           HERMETIC_RESULT: ${{ needs.billing-hermetic.result }}
-          ELIGIBILITY_RESULT: ${{ needs.live-eligibility.result }}
-          LIVE_ELIGIBLE: ${{ needs.live-eligibility.outputs.run_live }}
           LIVE_RESULT: ${{ needs.live-stripe-browser.result }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$HERMETIC_RESULT" != "success" || "$ELIGIBILITY_RESULT" != "success" ]]; then
-            echo "Hosted Stripe prerequisite proof failed." >&2
+          if [[ "$HERMETIC_RESULT" != "success" ]]; then
+            echo "Hosted Stripe hermetic proof failed." >&2
             exit 1
           fi
-          case "$LIVE_ELIGIBLE" in
-            true)
+          case "$EVENT_NAME" in
+            push)
               if [[ "$LIVE_RESULT" != "success" ]]; then
-                echo "Trusted heads require the live hosted-local Stripe matrix; missing or malformed sandbox configuration fails closed." >&2
+                echo "Main merges require the live hosted-local Stripe matrix; missing or malformed sandbox configuration fails closed." >&2
                 exit 1
               fi
               ;;
-            false)
+            pull_request)
               if [[ "$LIVE_RESULT" != "skipped" ]]; then
-                echo "Untrusted heads must not start the secret-bearing live job." >&2
+                echo "Pull requests must not start the secret-bearing live job." >&2
                 exit 1
               fi
               ;;
             *)
-              echo "Live Stripe eligibility produced no valid trust classification." >&2
+              echo "Unexpected event for the hosted Stripe billing boundary." >&2
               exit 1
               ;;
           esac

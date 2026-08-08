@@ -3,11 +3,13 @@ import {
   type HostedGrowthMessageSnapshot,
 } from "@/src/lib/hosted-ops/growth-message-series";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
+import type { HostedGrowthSponsorshipMetrics } from "@/src/lib/hosted-ops/growth-sponsorship-metrics";
 import {
   GrowthScorecard,
   type GrowthScorecardProps,
 } from "../(dashboard)/ops/growth/growth-scorecard";
 import { GrowthCharts } from "../(dashboard)/ops/growth/growth-charts";
+import { GrowthSponsorships } from "../(dashboard)/ops/growth/growth-sponsorships";
 import { GrowthWeeklyTable } from "../(dashboard)/ops/growth/growth-weekly-table";
 import { TrialStartAttribution } from "../(dashboard)/ops/growth/trial-start-attribution";
 
@@ -32,8 +34,18 @@ const MESSAGE_SNAPSHOTS = GROWTH_DATES
     snapshotDate.setUTCDate(snapshotDate.getUTCDate() + 1);
     const messages = DAILY_MESSAGE_VOLUMES[messageIndex] ?? 0;
     const trackingAvailable = messageIndex >= MESSAGE_TRACKING_START_INDEX;
+    const activityIndex = messageIndex - 10;
+    const activeUsersTrailing7Days = activityIndex >= 0 && activityIndex !== 13
+      ? 68 + activityIndex * 2
+      : null;
 
     return [{
+      activeUsersPriorDay: activeUsersTrailing7Days === null
+        ? null
+        : activityIndex === 8
+          ? activeUsersTrailing7Days
+          : 12 + ((activityIndex * 5) % 17),
+      activeUsersTrailing7Days,
       inboundMessagesPriorDay: trackingAvailable
         ? Math.floor(messages * 0.45)
         : null,
@@ -130,8 +142,28 @@ const WEEKLY_ROWS: HostedGrowthDashboard["weeklyRows"] = [
   },
 ];
 
+const SPONSORSHIP_METRICS = {
+  activeMonthlyCapUsdCents: 3_000,
+  activeMonthlySponsorships: 2,
+  available: true,
+  monthlyPaidPurchasesThisMonth: 3,
+  monthlyPaidThisMonthUsdCents: 1_500,
+  oneTimePaidPurchasesThisMonth: 1,
+  oneTimePaidThisMonthUsdCents: 2_000,
+  paidPurchasesThisMonth: 4,
+  paidThisMonthUsdCents: 3_500,
+  remainingUsageUsdMicros: 11_750_000,
+  usageConsumedThisMonthUsdMicros: 4_250_000,
+} satisfies HostedGrowthSponsorshipMetrics;
+
+const UNAVAILABLE_SPONSORSHIP_METRICS = {
+  available: false,
+} satisfies HostedGrowthSponsorshipMetrics;
+
 const STUDY_INPUT = {
   activeUsers: {
+    today: 22,
+    todayComplete: true,
     trailing30Days: 143,
     trailing30DaysComplete: true,
     trailing7Days: 87,
@@ -163,6 +195,8 @@ const STUDY_INPUT = {
 const NO_SUPPORTING_BASELINES_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 0,
+    todayComplete: true,
     trailing30Days: 0,
     trailing30DaysComplete: true,
     trailing7Days: 0,
@@ -191,6 +225,8 @@ const NO_SUPPORTING_BASELINES_INPUT = {
 const PARTIAL_MAU_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 22,
+    todayComplete: true,
     trailing30Days: 119,
     trailing30DaysComplete: false,
     trailing7Days: 87,
@@ -203,6 +239,8 @@ const PARTIAL_MAU_INPUT = {
 const PARTIAL_WEEKLY_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 19,
+    todayComplete: false,
     trailing30Days: 119,
     trailing30DaysComplete: false,
     trailing7Days: 82,
@@ -219,7 +257,7 @@ export function GrowthScorecardStudy() {
       data-design-study="ops-weekly-growth-compass"
       id="ops-weekly-growth-compass"
     >
-      <div id="growth-message-volume-charts">
+      <div id="growth-charts">
         <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Thirty-day movement
         </div>
@@ -245,6 +283,24 @@ export function GrowthScorecardStudy() {
         <TrialStartAttribution
           attribution={EMPTY_TRIAL_START_ATTRIBUTION}
           titleId="design-empty-trial-start-attribution-title"
+        />
+      </div>
+      <div id="growth-sponsorships">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Group sponsorship accounting
+        </div>
+        <GrowthSponsorships
+          metrics={SPONSORSHIP_METRICS}
+          titleId="design-growth-sponsorship-title"
+        />
+      </div>
+      <div id="growth-sponsorships-unavailable">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Group sponsorship telemetry unavailable
+        </div>
+        <GrowthSponsorships
+          metrics={UNAVAILABLE_SPONSORSHIP_METRICS}
+          titleId="design-growth-sponsorship-unavailable-title"
         />
       </div>
       <div id="growth-weekly-intake-and-activation">
