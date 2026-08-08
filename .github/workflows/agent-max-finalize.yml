@@ -23,16 +23,12 @@ jobs:
           fetch-depth: 0
 
       - name: Archive exact source tree
-        run: |
-          tar \
-            --exclude=.git \
-            --exclude=agent-max-source.tar.gz \
-            -czf agent-max-source.tar.gz .
+        run: git archive --format=tar HEAD | gzip > "$RUNNER_TEMP/agent-max-source.tar.gz"
 
       - name: Upload source archive
         uses: actions/upload-artifact@v4
         with:
           name: agent-max-source-${{ github.sha }}
-          path: agent-max-source.tar.gz
+          path: ${{ runner.temp }}/agent-max-source.tar.gz
           if-no-files-found: error
           retention-days: 1
