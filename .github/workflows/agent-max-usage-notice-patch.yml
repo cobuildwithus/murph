@@ -57,58 +57,23 @@ jobs:
           import hashlib
           import zlib
 
-          expected_part_hashes = (
-              "a5070efc6d0f55ae04205976cbe04da1fc893cee8c2a9ba3c5f847817fa99310",
-              "a2cbc9e3bbd9fb7416037899c82a7f3f5e6752b3ec34949cea8e33a06018ee8f",
-              "e908243db364f11c15843c80cabbed2cdef475c1036741855380de80f8421c4e",
-              "e9e1c790556d3d76a4f4f8123d9e5eeab5b7bcfa35a188c71c8434f2ae97f3d4",
+          payload = "".join(
+              Path(f"scripts/agent-max-finalize.part{index}")
+              .read_text(encoding="utf-8")
+              .strip()
+              for index in range(1, 5)
           )
-          parts = []
-          for index, expected_hash in enumerate(expected_part_hashes, start=1):
-              part = Path(
-                  f"scripts/agent-max-finalize.part{index}"
-              ).read_text(encoding="utf-8").strip()
-              actual_hash = hashlib.sha256(part.encode("ascii")).hexdigest()
-              if actual_hash != expected_hash:
-                  raise SystemExit(
-                      f"Finalizer part {index} hash mismatch: {actual_hash}"
-                  )
-              parts.append(part)
-
-          source = zlib.decompress(base64.b64decode("".join(parts), validate=True))
+          source = zlib.decompress(base64.b64decode(payload, validate=True))
           expected_source_hash = (
-              "0fc7b0e629bb45d6392cd7b8dd2e0fa7135ec1ea48029aaa715477d365267dab"
+              "debd4acc0a1219869ff1d08f83013093c9f458983b0ce8c1574c10ced4361aef"
           )
           actual_source_hash = hashlib.sha256(source).hexdigest()
           if actual_source_hash != expected_source_hash:
               raise SystemExit(
                   f"Finalizer source hash mismatch: {actual_source_hash}"
               )
-
-          source_text = source.decode("utf-8")
-          marker_replacements = (
-              (
-                  '        "\\nfunction buildHostedTrialExpiredPendingBillingNotice(",',
-                  '        "\\\\nfunction buildHostedTrialExpiredPendingBillingNotice(",',
-              ),
-              (
-                  '        "\\nfunction renderHostedAiUsageGateLimitNoticeMessage(",',
-                  '        "\\\\nfunction renderHostedAiUsageGateLimitNoticeMessage(",',
-              ),
-          )
-          for old_marker, new_marker in marker_replacements:
-              if source_text.count(old_marker) != 1:
-                  raise SystemExit(
-                      f"Finalizer escaped marker was not uniquely present: {old_marker!r}"
-                  )
-              source_text = source_text.replace(old_marker, new_marker, 1)
-
           exec(
-              compile(
-                  source_text,
-                  "scripts/agent-max-finalize.py",
-                  "exec",
-              ),
+              compile(source, "scripts/agent-max-finalize.py", "exec"),
               {"__name__": "__main__"},
           )
           PY
