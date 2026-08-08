@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { AlertCircleIcon, MessageCircleIcon } from "lucide-react";
 import { defaultAssistantVoiceOptionId } from "@murphai/contracts";
 
@@ -31,7 +32,7 @@ export function VitalConnectionDialog({
 }: {
   onContinue: () => void;
   onOpenChange: (open: boolean) => void;
-  source: Pick<ConnectSource, "id" | "name" | "requiresReconnect"> | null;
+  source: Pick<ConnectSource, "id" | "logo" | "name" | "requiresReconnect"> | null;
   voiceMemoSrc?: string | null;
 }) {
   const sourceName = source?.name ?? "your health source";
@@ -41,23 +42,51 @@ export function VitalConnectionDialog({
   return (
     <Dialog open={Boolean(source)} onOpenChange={onOpenChange}>
       <DialogContent className="gap-5 p-6 sm:max-w-md md:p-7">
-        <DialogHeader className="pr-10">
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-            {sourceName}
-          </span>
-          <DialogTitle className="font-serif text-2xl font-semibold tracking-normal text-foreground">
-            Vital connects {sourceName} to Murph
-          </DialogTitle>
-          <DialogDescription className="leading-6">
-            The next screen may say Vital. That is expected.
-          </DialogDescription>
+        <DialogHeader className="items-center gap-4 pt-2 text-center">
+          {source ? (
+            <div aria-hidden="true" className="flex items-center gap-3">
+              <span className="flex size-16 items-center justify-center rounded-2xl bg-background ring-1 ring-border">
+                <Image
+                  src={source.logo.src}
+                  alt=""
+                  width={source.logo.width}
+                  height={source.logo.height}
+                  className="size-10 object-contain"
+                />
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-1 rounded-full bg-muted-foreground/40" />
+                <span className="size-1 rounded-full bg-muted-foreground/40" />
+                <span className="size-1 rounded-full bg-muted-foreground/40" />
+              </span>
+              <span className="flex h-16 items-center rounded-2xl bg-background px-4 ring-1 ring-border">
+                <Image
+                  src="/logo.svg"
+                  alt=""
+                  width={197}
+                  height={44}
+                  className="h-5 w-auto"
+                />
+              </span>
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-2">
+            <DialogTitle className="font-serif text-2xl font-semibold tracking-normal text-foreground">
+              Connect {sourceName} to Murph
+            </DialogTitle>
+            <DialogDescription className="leading-6">
+              We use{" "}
+              <a
+                href="https://www.junction.com"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Vital
+              </a>{" "}
+              to connect your wearable to Murph.
+            </DialogDescription>
+          </div>
         </DialogHeader>
-
-        <p className="text-sm leading-6 text-muted-foreground">
-          Vital processes the data you approve only to sync it to Murph. Murph
-          does not allow Vital to sell it, use it for ads or model training, or
-          use it for anything unrelated. Disconnect anytime.
-        </p>
 
         {showGarminHistoricalData ? (
           <>
@@ -85,19 +114,14 @@ export function VitalConnectionDialog({
           </>
         ) : null}
 
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button
-            type="button"
-            size="lg"
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </Button>
-          <Button type="button" size="lg" onClick={onContinue}>
-            Continue to {sourceName}
-          </Button>
-        </div>
+        <Button
+          type="button"
+          size="xl"
+          className="w-full"
+          onClick={onContinue}
+        >
+          Continue to {sourceName}
+        </Button>
       </DialogContent>
     </Dialog>
   );

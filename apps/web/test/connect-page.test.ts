@@ -1316,7 +1316,7 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
   assert.equal(fetch.mock.calls.length, 0);
   assert.match(
     rendered.container.textContent ?? "",
-    /Vital connects Dexcom to Murph/u,
+    /Connect Dexcom to Murph/u,
   );
 
   const continueButton = [
@@ -3168,7 +3168,7 @@ test("ConnectSourcesGrid explains Garmin Historical Data before starting the con
   const dialogButtons = [...rendered.container.querySelectorAll("button")]
     .map((button) => button.textContent?.trim())
     .filter((label) => label === "Cancel" || label === "Continue to Garmin");
-  assert.deepEqual(dialogButtons, ["Cancel", "Continue to Garmin"]);
+  assert.deepEqual(dialogButtons, ["Continue to Garmin"]);
 
   const continueButton = [
     ...rendered.container.querySelectorAll("button"),
@@ -5263,14 +5263,12 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
   assert.equal(fetch.mock.calls.length, 0);
   assert.match(
     rendered.container.textContent ?? "",
-    /Vital connects Fitbit to Murph/u,
+    /Connect Fitbit to Murph/u,
   );
-  assert.match(rendered.container.textContent ?? "", /processes the data you approve/u);
   assert.match(
     rendered.container.textContent ?? "",
-    /does not allow Vital to sell it/u,
+    /We use Vital to connect your wearable to Murph\./u,
   );
-  assert.match(rendered.container.textContent ?? "", /model training/u);
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
     /Turn on Historical Data/u,
@@ -5346,7 +5344,7 @@ test("ConnectSourcesGrid keeps a direct integration one-click", async () => {
       "https://whoop.example.test/oauth",
     );
   });
-  assert.doesNotMatch(rendered.container.textContent ?? "", /Vital connects/u);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /We use Vital/u);
 
   await rendered.cleanup();
 });

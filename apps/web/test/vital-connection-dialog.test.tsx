@@ -37,7 +37,7 @@ vi.mock("@/src/components/ui/voice-memo-player", () => ({
     createElement("div", { "aria-label": accessibleLabel, "data-src": src }),
 }));
 
-test("Vital handoff explains the processor boundary for a standard source", async () => {
+test("Vital handoff leads with the connection and credits Vital underneath", async () => {
   const { VitalConnectionDialog } = await import(
     "../app/(dashboard)/connect/connect-page-dialogs"
   );
@@ -45,16 +45,26 @@ test("Vital handoff explains the processor boundary for a standard source", asyn
     createElement(VitalConnectionDialog, {
       onContinue: vi.fn(),
       onOpenChange: vi.fn(),
-      source: { id: "fitbit", name: "Fitbit" },
+      source: {
+        id: "fitbit",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/fitbit.svg",
+          width: 44,
+        },
+        name: "Fitbit",
+      },
     }),
   );
 
-  assert.match(markup, /Vital connects Fitbit to Murph/u);
-  assert.match(markup, /may say Vital/u);
-  assert.match(markup, /processes the data you approve/u);
-  assert.match(markup, /does not allow Vital to sell it/u);
-  assert.match(markup, /model training/u);
-  assert.match(markup, /Disconnect anytime/u);
+  assert.match(markup, /Connect Fitbit to Murph/u);
+  assert.match(markup, /brand-logos\/connect\/fitbit\.svg/u);
+  assert.match(markup, /logo\.svg/u);
+  assert.match(
+    markup,
+    /We use <a href="https:\/\/www\.junction\.com"[^>]*>Vital<\/a> to connect your wearable to Murph\./u,
+  );
   assert.match(markup, />Continue to Fitbit<\/button>/u);
   assert.doesNotMatch(markup, /Turn on Historical Data/u);
 });
@@ -67,12 +77,21 @@ test("Vital handoff keeps Garmin's first-connect Historical Data reminder", asyn
     createElement(VitalConnectionDialog, {
       onContinue: vi.fn(),
       onOpenChange: vi.fn(),
-      source: { id: "garmin", name: "Garmin" },
+      source: {
+        id: "garmin",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/garmin.png",
+          width: 44,
+        },
+        name: "Garmin",
+      },
       voiceMemoSrc: "/test/garmin-history.mp3",
     }),
   );
 
-  assert.match(markup, /Vital connects Garmin to Murph/u);
+  assert.match(markup, /Connect Garmin to Murph/u);
   assert.match(markup, /Turn on Historical Data/u);
   assert.match(
     markup,
@@ -90,11 +109,21 @@ test("Vital handoff omits Garmin's Historical Data reminder during reconnect", a
     createElement(VitalConnectionDialog, {
       onContinue: vi.fn(),
       onOpenChange: vi.fn(),
-      source: { id: "garmin", name: "Garmin", requiresReconnect: true },
+      source: {
+        id: "garmin",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/garmin.png",
+          width: 44,
+        },
+        name: "Garmin",
+        requiresReconnect: true,
+      },
     }),
   );
 
-  assert.match(markup, /Vital connects Garmin to Murph/u);
+  assert.match(markup, /Connect Garmin to Murph/u);
   assert.doesNotMatch(markup, /Turn on Historical Data/u);
   assert.doesNotMatch(markup, /Garmin Historical Data reminder/u);
 });

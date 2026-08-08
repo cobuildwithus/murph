@@ -661,7 +661,16 @@ export function ComponentsContent() {
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
   const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
   const [vitalConnectionDialogSource, setVitalConnectionDialogSource] =
-    useState<{ id: string; name: string } | null>(null);
+    useState<{
+      id: string;
+      logo: {
+        className: string;
+        height: number;
+        src: string;
+        width: number;
+      };
+      name: string;
+    } | null>(null);
   const [assistantStylePickerStep, setAssistantStylePickerStep] = useState<
     "tone" | "voice" | null
   >(null);
@@ -1805,16 +1814,22 @@ export function ComponentsContent() {
         <Section title="Vital-backed health source handoff">
           <div className="flex flex-col items-start gap-3">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Reusable trust handoff shown before every Vital-backed
-              authorization. It explains Vital&apos;s limited health-sync role
-              and keeps Garmin&apos;s Historical Data reminder inside the same
-              dialog.
+              Reusable handoff shown before every Vital-backed authorization.
+              It leads with the connection, credits Vital underneath with a
+              link, and keeps Garmin&apos;s Historical Data reminder inside
+              the same dialog.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
                 onClick={() =>
                   setVitalConnectionDialogSource({
                     id: "fitbit",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/fitbit.svg",
+                      width: 44,
+                    },
                     name: "Fitbit",
                   })
                 }
@@ -1826,6 +1841,12 @@ export function ComponentsContent() {
                 onClick={() =>
                   setVitalConnectionDialogSource({
                     id: "garmin",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/garmin.png",
+                      width: 44,
+                    },
                     name: "Garmin",
                   })
                 }
