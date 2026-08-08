@@ -203,7 +203,6 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationCronProcessed?: number | null;
   assistantAutomationCronStatusDeferred?: boolean | null;
   assistantAutomationCronStatusElapsedMs?: number | null;
-  assistantAutomationCronPendingDeliveryIntentIds?: string[] | null;
   assistantAutomationCurrentTurnDeliveryIntentIds?: string[] | null;
   assistantAutomationElapsedMs?: number | null;
   assistantAutomationPassElapsedMs?: number | null;

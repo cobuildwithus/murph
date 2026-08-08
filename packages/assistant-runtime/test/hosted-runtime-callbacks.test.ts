@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   findAssistantAutoReplyDeliveryIntentIds: vi.fn(),
   hasAssistantAutoReplyChannel: vi.fn(),
+  listAssistantCronPendingDeliveryIntentIds: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
@@ -96,6 +97,8 @@ vi.mock("@murphai/assistant-engine", async () => {
     findAssistantAutoReplyDeliveryIntentIds:
       mocks.findAssistantAutoReplyDeliveryIntentIds,
     hasAssistantAutoReplyChannel: mocks.hasAssistantAutoReplyChannel,
+    listAssistantCronPendingDeliveryIntentIds:
+      mocks.listAssistantCronPendingDeliveryIntentIds,
     listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
     markAssistantOutboxIntentMirrorTerminalById:
       mocks.markAssistantOutboxIntentMirrorTerminalById,
@@ -466,6 +469,7 @@ beforeEach(() => {
     }),
   );
   mocks.readAssistantOutboxIntent.mockResolvedValue(null);
+  mocks.listAssistantCronPendingDeliveryIntentIds.mockResolvedValue([]);
   mocks.listAssistantOutboxIntents.mockResolvedValue([]);
   mocks.readAssistantVaultFileMedia.mockReturnValue(null);
   mocks.readVerifiedAssistantVaultFileBytes.mockResolvedValue(
@@ -2555,7 +2559,7 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects[0]?.payload.message).toBe("fresh reply");
   });
 
-  it("selects the whole current-pass cron cohort while unrelated backlog stays capped", async () => {
+  it("drains the durable scheduled-delivery cohort across passes while unrelated backlog stays capped", async () => {
     const buildIntent = (input: {
       createdAt: string;
       intentId: string;
@@ -2606,22 +2610,61 @@ describe("hosted runtime callbacks", () => {
         status: "pending",
       }),
     ]);
+    mocks.listAssistantCronPendingDeliveryIntentIds.mockResolvedValue([
+      "intent_cron_a",
+      "intent_cron_b",
+    ]);
 
     const sideEffects = await collectHostedAssistantDeliverySideEffects({
-      currentPassCronIntentIds: ["intent_cron_b", "intent_cron_a"],
       includeBackgroundDueIntents: true,
       preferredIntentIds: [],
       vaultRoot: "/tmp/vault",
     });
 
-    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
-      "intent_cron_b",
-      "intent_cron_a",
+    expect(sideEffects.map((effect) => effect.effectId).sort()).toEqual([
       "intent_backlog_fresh",
+      "intent_cron_a",
+      "intent_cron_b",
     ]);
     for (const effect of sideEffects) {
       expect(effect.deliveryPhase).toBe("background_retry");
     }
+
+    // A later pass (for example after a foreground yield interrupted the
+    // drain) re-derives the remaining cohort from durable cron owner state:
+    // once the first reminder's job is reconciled sent, only the residual
+    // cohort member is exempt from the backlog cap.
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      buildIntent({
+        createdAt: "2026-04-08T00:00:00.000Z",
+        intentId: "intent_backlog_stale",
+        status: "retryable",
+      }),
+      buildIntent({
+        createdAt: "2026-04-08T00:00:30.000Z",
+        intentId: "intent_backlog_fresh",
+        status: "pending",
+      }),
+      buildIntent({
+        createdAt: "2026-04-08T00:02:00.000Z",
+        intentId: "intent_cron_b",
+        status: "pending",
+      }),
+    ]);
+    mocks.listAssistantCronPendingDeliveryIntentIds.mockResolvedValue([
+      "intent_cron_b",
+    ]);
+
+    const residualSideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(residualSideEffects.map((effect) => effect.effectId).sort()).toEqual([
+      "intent_backlog_fresh",
+      "intent_cron_b",
+    ]);
   });
 
   it("orders background delivery candidates by instant when createdAt offsets differ", async () => {

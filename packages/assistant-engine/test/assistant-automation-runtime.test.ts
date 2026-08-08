@@ -6851,17 +6851,7 @@ describe('assistant auto-reply runtime', () => {
         }
       }),
     }
-    runLoopMocks.processDueAssistantCronJobs.mockResolvedValueOnce({
-      failed: 0,
-      pendingDeliveryIntentIds: [
-        'outbox_cron_first',
-        'outbox_cron_second',
-      ],
-      processed: 2,
-      succeeded: 0,
-    })
-
-    const result = await runLoop.runAssistantAutomationPass({
+    await runLoop.runAssistantAutomationPass({
       inputSource,
       maxPerScan: 50,
       requestId: 'request-inputless-cron-capacity',
@@ -6878,11 +6868,6 @@ describe('assistant auto-reply runtime', () => {
         limit: 50,
       }),
     )
-    expect(result.cronProcessed).toBe(2)
-    expect(result.cronPendingDeliveryIntentIds).toEqual([
-      'outbox_cron_first',
-      'outbox_cron_second',
-    ])
   })
 
   it('skips dynamic context builder when the canonical refresh ingests input', async () => {

@@ -10598,37 +10598,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
   });
 
-  it("hands the current-pass cron intent cohort to delivery selection", async () => {
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationCronPendingDeliveryIntentIds: [
-        "outbox_reminder_one",
-        "outbox_reminder_two",
-      ],
-      assistantAutomationCronProcessed: 2,
-      assistantAutomationProgressed: true,
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-      nextWakeAt: null,
-      parserProcessed: 0,
-      postCheckpointRecord: null,
-      redactedLogEntries: [],
-    });
-    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([]);
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      now: () => "2026-05-08T16:00:00.000Z",
-    }));
-
-    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
-      expect.objectContaining({
-        currentPassCronIntentIds: [
-          "outbox_reminder_one",
-          "outbox_reminder_two",
-        ],
-      }),
-    );
-  });
-
   it.each([
     {
       cronStatus: {
@@ -13291,7 +13260,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
-      currentPassCronIntentIds: [],
       includeBackgroundDueIntents: true,
       preferredIntentIds: [],
       vaultRoot: expect.any(String),

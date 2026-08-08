@@ -500,7 +500,6 @@ interface ExecuteClaimedAssistantCronJobInput {
 
 interface AssistantCronRunExecutionResult {
   job: AssistantCronJob
-  pendingDeliveryIntentId: string | null
   removedAfterRun: boolean
   run: AssistantCronRunRecord
   runErrorCode: string | null
@@ -1422,7 +1421,6 @@ export async function executeClaimedAssistantCronJob(
 
   return {
     job: finalized.job,
-    pendingDeliveryIntentId,
     removedAfterRun: finalized.removedAfterRun,
     run,
     // Typed failure class (e.g. ASSISTANT_CODEX_USAGE_LIMIT) for runtime-log

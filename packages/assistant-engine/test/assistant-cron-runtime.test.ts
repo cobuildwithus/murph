@@ -172,6 +172,7 @@ import {
   getAssistantCronJob,
   getAssistantCronStatus,
   listAssistantCronJobs,
+  listAssistantCronPendingDeliveryIntentIds,
   listAssistantCronRuns,
   processDueAssistantCronJobsLocal,
   reconcileAssistantCronDeliveryIntent,
@@ -4908,7 +4909,6 @@ describe('assistant cron runtime orchestration', () => {
 
       expect(summary).toEqual({
         failed: 0,
-        pendingDeliveryIntentIds: [queuedIntentId],
         processed: 1,
         succeeded: 0,
       })
@@ -7742,7 +7742,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(updatedCanonical.state.runningAt).toBeNull()
   })
 
-  it('reports queued delivery-intent ids for every job processed in one pass', async () => {
+  it('derives the durable scheduled-delivery cohort from every job processed in one pass', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T08:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -7809,7 +7809,6 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(summary).toEqual({
       failed: 0,
-      pendingDeliveryIntentIds: queuedIntentIds,
       processed: 2,
       succeeded: 0,
     })
@@ -7820,6 +7819,12 @@ describe('assistant cron runtime orchestration', () => {
     const updatedSecond = await getAssistantCronJob(vaultRoot, secondJob.jobId)
     expect(updatedSecond.state.pendingDeliveryIntentId).toBe(queuedIntentIds[1])
     expect(updatedSecond.state.nextRunAt).toBeNull()
+
+    // The cohort is derived from durable owner state, so any later pass can
+    // reconstruct it without pass-local bookkeeping.
+    await expect(
+      listAssistantCronPendingDeliveryIntentIds(vaultRoot),
+    ).resolves.toEqual(expect.arrayContaining(queuedIntentIds))
   })
 
   it('reclaims stale canonical running jobs while preserving fresh running claims', async () => {
@@ -10703,7 +10708,6 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(summary).toEqual({
       failed: 0,
-      pendingDeliveryIntentIds: [queuedIntentId],
       processed: 1,
       succeeded: 0,
     })
@@ -10983,7 +10987,6 @@ describe('assistant cron runtime orchestration', () => {
       }),
     ).resolves.toEqual({
       failed: 0,
-      pendingDeliveryIntentIds: [queuedIntentId],
       processed: 1,
       succeeded: 0,
     })
@@ -11094,7 +11097,6 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })).resolves.toEqual({
       failed: 0,
-      pendingDeliveryIntentIds: [firstIntentId],
       processed: 1,
       succeeded: 0,
     })
@@ -11161,7 +11163,6 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })).resolves.toEqual({
       failed: 0,
-      pendingDeliveryIntentIds: [secondIntentId],
       processed: 1,
       succeeded: 0,
     })
@@ -11269,7 +11270,6 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })).resolves.toEqual({
       failed: 0,
-      pendingDeliveryIntentIds: [queuedIntentId],
       processed: 1,
       succeeded: 0,
     })
@@ -11856,7 +11856,6 @@ describe('assistant cron runtime orchestration', () => {
       }),
     ).resolves.toEqual({
       failed: 0,
-      pendingDeliveryIntentIds: [queuedIntentId],
       processed: 1,
       succeeded: 0,
     })
@@ -12772,7 +12771,6 @@ async function createRequiredLinqAttachmentDeliveryFixture(input: {
     vault: vaultRoot,
   })).resolves.toEqual({
     failed: 0,
-    pendingDeliveryIntentIds: [intent.intentId],
     processed: 1,
     succeeded: 0,
   })
