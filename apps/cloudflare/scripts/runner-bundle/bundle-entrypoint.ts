@@ -163,7 +163,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // its five-field local predicate leaves entry and static startup bytes unchanged
 // while reducing total lazy output to 9,851,385B. Ratchet the total ceiling to
 // retain that removal without changing the startup tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_851_385 + 32_768;
+// Sent export-pack retirement adds bounded archive inspection and restart-safe
+// deletion to idle snapshot cleanup. A clean macOS assembly measured
+// 9,936,495B total; retain the existing cross-platform tolerance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_936_495 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

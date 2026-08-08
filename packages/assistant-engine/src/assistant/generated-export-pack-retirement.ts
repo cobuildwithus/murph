@@ -10,6 +10,7 @@ import {
   readBoundedZipEntry,
   type BoundedZipEntry,
 } from '@murphai/core'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantVaultFileMaxBytes,
   type AssistantOutboxIntent,
@@ -17,7 +18,6 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
-import { z } from 'zod'
 import { isAssistantGeneratedDeliveryRef } from './generated-delivery-files.js'
 import { isActiveAssistantOutboxDeliveryIntent } from './outbox/intents.js'
 import { readAssistantOutboxIntentInventory } from './outbox/store.js'
