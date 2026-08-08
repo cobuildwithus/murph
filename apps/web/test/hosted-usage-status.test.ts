@@ -129,7 +129,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       hasStripeSubscriptionId: true,
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
-      allowanceSource: "direct_trial",
+      allowanceSource: "direct_starter",
       limitUsdMicros: 4_500_000n,
       remainingUsdMicros: 2_250_000n,
       spentUsdMicros: 2_250_000n,
@@ -142,7 +142,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       prisma: prisma as never,
       publicBaseUrl: "https://example.test",
     })).resolves.toEqual({
-      accessKind: "trial",
+      accessKind: "starter",
       availablePlans: [
         {
           code: "launch_monthly",
@@ -157,10 +157,10 @@ describe("readHostedPersonalAiUsageStatus", () => {
       },
       generatedAt: NOW.toISOString(),
       periodEnd: PERIOD_END.toISOString(),
-      periodKind: "trial",
+      periodKind: "lifetime",
       periodStart: PERIOD_START.toISOString(),
       planCode: "launch_monthly",
-      planName: "Pulse Trial",
+      planName: "Starter",
       recommendedPlanCode: "launch_monthly",
       recommendedAction: {
         kind: "change_plan",
@@ -489,7 +489,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       hasStripeSubscriptionId: true,
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
-      allowanceSource: "direct_trial",
+      allowanceSource: "direct_starter",
       limitUsdMicros: 10_000_000n,
       remainingUsdMicros: 9_000_000n,
       spentUsdMicros: 1_000_000n,
@@ -507,7 +507,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
         action: "change_plan",
         label: "Keep Pulse after your trial ($8/month)",
         targetPlanCode: "launch_monthly",
-        timing: "at_trial_end",
+        timing: "now",
       },
       usedPercent: 10,
     });
@@ -523,7 +523,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowed: false,
-      allowanceSource: "direct_trial",
+      allowanceSource: "direct_starter",
       reason: "ai_usage_limit_exceeded",
       remainingUsdMicros: 0n,
       spentUsdMicros: 10_000_000n,
@@ -543,7 +543,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       status: "exhausted",
       subscriptionActionQuote: {
         targetPlanCode: "launch_group_monthly",
-        timing: "at_trial_end",
+        timing: "now",
       },
     });
   });
@@ -558,7 +558,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowed: false,
-      allowanceSource: "direct_trial",
+      allowanceSource: "direct_starter",
       reason: "ai_usage_limit_exceeded",
       remainingUsdMicros: 0n,
       spentUsdMicros: 10_000_000n,
@@ -631,23 +631,23 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledTimes(1);
   });
 
-  it("avoids trial action-state fanout without a public action URL", async () => {
+  it("avoids billing action-state fanout for inactive access", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowed: false,
-      allowanceSource: "direct_trial",
-      reason: "trial_expired_pending_billing",
+      allowanceSource: "direct_starter",
+      reason: "hosted_access_inactive",
       spentUsdMicros: 0n,
     }));
 
     const result = await readHostedPersonalAiUsageStatus({
-      memberId: "member_trial_no_public_url",
+      memberId: "member_inactive_no_public_url",
       now: NOW,
       prisma: buildPrisma(null) as never,
       publicBaseUrl: null,
     });
 
     expect(result).toMatchObject({
-      reason: "trial_conversion_pending",
+      reason: "hosted_access_inactive",
       recommendedAction: null,
       status: "unavailable",
     });
@@ -927,138 +927,6 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
   });
 
-  it("returns a conversion path for an ended trial without inventing usage", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValue({
-      billingStatus: "paused",
-      suspendedAt: null,
-    });
-    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
-      currentBillingPhase: null,
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      hasStripeCustomerId: true,
-      hasStripeSubscriptionId: true,
-    });
-    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
-      allowed: false,
-      allowanceSource: "direct_trial",
-      reason: "trial_expired_pending_billing",
-      spentUsdMicros: 0n,
-    }));
-
-    await expect(readHostedPersonalAiUsageStatus({
-      includeSubscriptionActionQuote: true,
-      memberId: "member_trial_ended",
-      now: NOW,
-      prisma: buildPrisma(null) as never,
-      publicBaseUrl: "https://example.test",
-    })).resolves.toMatchObject({
-      availablePlans: [
-        {
-          code: "launch_monthly",
-          displayName: "Pulse",
-          monthlyPriceUsdCents: 800,
-          selectable: true,
-        },
-      ],
-      generatedAt: NOW.toISOString(),
-      reason: "trial_conversion_pending",
-      recommendedPlanCode: "launch_monthly",
-      recommendedAction: {
-        kind: "change_plan",
-        label: "Start Pulse now ($8/month)",
-        targetPlanCode: "launch_monthly",
-        url: "https://example.test/settings#subscription",
-      },
-      subscriptionActionQuote: {
-        action: "change_plan",
-        label: "Start Pulse now ($8/month)",
-        monthlyPriceUsdCents: 800,
-        targetPlanCode: "launch_monthly",
-        timing: "now",
-      },
-      status: "unavailable",
-    });
-  });
-
-  it("does not recommend trial conversion without complete billing references", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValue({
-      billingStatus: "paused",
-      suspendedAt: null,
-    });
-    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
-      currentBillingPhase: null,
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      hasStripeCustomerId: true,
-      hasStripeSubscriptionId: false,
-    });
-    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
-      allowed: false,
-      allowanceSource: "direct_trial",
-      reason: "trial_expired_pending_billing",
-      spentUsdMicros: 0n,
-    }));
-
-    await expect(readHostedPersonalAiUsageStatus({
-      includeSubscriptionActionQuote: true,
-      memberId: "member_trial_incomplete",
-      now: NOW,
-      prisma: buildPrisma(null) as never,
-      publicBaseUrl: "https://example.test",
-    })).resolves.toEqual({
-      generatedAt: NOW.toISOString(),
-      reason: "trial_conversion_pending",
-      recommendedAction: null,
-      subscriptionActionQuote: null,
-      status: "unavailable",
-    });
-  });
-
-  it("keeps trial conversion available when billing action state cannot be read", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.readHostedMemberCoreState.mockResolvedValue({
-      billingStatus: "paused",
-      suspendedAt: null,
-    });
-    mocks.readHostedMemberBillingEligibilityState.mockRejectedValueOnce(
-      new Error("private billing read failed"),
-    );
-
-    try {
-      await expect(projectHostedPersonalAiUsageStatus({
-        decision: buildDecision({
-          allowed: false,
-          allowanceSource: "direct_trial",
-          reason: "trial_expired_pending_billing",
-          spentUsdMicros: 0n,
-        }),
-        memberId: "member_trial_action_failure",
-        now: NOW,
-        prisma: buildPrisma(null) as never,
-        publicBaseUrl: "https://example.test",
-      })).resolves.toEqual({
-        generatedAt: NOW.toISOString(),
-        reason: "trial_conversion_pending",
-        recommendedAction: null,
-        status: "unavailable",
-      });
-      expect(warn).toHaveBeenCalledWith(
-        "Hosted plan usage action resolution failed.",
-        {
-          accessKind: "trial",
-          errorName: "Error",
-          planCode: "launch_monthly",
-        },
-      );
-      expect(JSON.stringify(warn.mock.calls)).not.toMatch(
-        /member_trial_action_failure|private billing read failed/u,
-      );
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
   it("projects an already-resolved exhausted allowance without re-reading it", async () => {
     const decision = buildDecision({
       allowed: false,
@@ -1290,7 +1158,7 @@ function buildDecision(input: {
   allowed?: boolean;
   allowanceSource?:
     | "direct_paid_member_plan"
-    | "direct_trial"
+    | "direct_starter"
     | "family_sponsored_plan"
     | "thread_container";
   billingPlanCode?:
@@ -1300,8 +1168,7 @@ function buildDecision(input: {
   limitUsdMicros?: bigint;
   reason?:
     | "ai_usage_limit_exceeded"
-    | "hosted_access_inactive"
-    | "trial_expired_pending_billing";
+    | "hosted_access_inactive";
   remainingUsdMicros?: bigint;
   planResetAt?: Date | null;
   spentUsdMicros?: bigint;
@@ -1337,8 +1204,8 @@ function buildDecision(input: {
       reason,
       retryAfter: PERIOD_END,
       userNotice: {
-        code: common.allowanceSource === "direct_trial"
-          ? "trial_usage_limit_reached"
+        code: common.allowanceSource === "direct_starter"
+          ? "starter_usage_limit_reached"
           : common.billingPlanCode === "launch_edge_monthly"
             ? "edge_usage_limit_reached"
             : common.billingPlanCode === "launch_group_monthly"

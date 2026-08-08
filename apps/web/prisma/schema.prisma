@@ -443,6 +443,7 @@ enum HostedGroupSponsorshipAuthorizationStatus {
 }
 
 enum HostedUsageCreditEntryKind {
+  starter_grant
   purchase_grant
   referral_grant
   usage_debit

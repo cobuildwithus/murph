@@ -2070,89 +2070,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
 
-  it("marks usage rows as allowance-denied when trial billing state is stale", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
-    const tx = createAllowanceTx({
-      billingPhase: "trial",
-      checkoutOffer: "pulse_trial_7d",
-      executeRaw,
-      hostedAiUsageUpdateMany: updateMany,
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
-    });
-
-    await accountHostedAiUsageForAllowanceTx({
-      memberId: "member_123",
-      now: new Date("2026-04-08T12:00:05.000Z"),
-      record: {
-        ...BASE_USAGE_RECORD,
-        occurredAt: "2026-04-08T12:00:01.000Z",
-      },
-      tx: tx as never,
-    });
-
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        allowanceAccountedAt: new Date("2026-04-08T12:00:05.000Z"),
-        allowanceCostUsdMicros: 0n,
-        allowanceCounted: false,
-        allowancePeriodEnd: new Date("2026-04-08T12:00:00.000Z"),
-        allowancePeriodStart: new Date("2026-04-01T12:00:00.000Z"),
-        allowancePricingSnapshotJson: expect.objectContaining({
-          reason: "trial_expired_pending_billing",
-          schema: "murph.hosted-ai-usage-allowance-denied.v1",
-          tokenPricingBasis: "standard",
-        }),
-        allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
-      }),
-    }));
-    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
-    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
-  });
-
-  it("marks stale-trial image usage denied when provider usage pricing basis is missing", async () => {
-    for (const record of buildMalformedOpenAiImageUsageRecords({
-      occurredAt: "2026-04-08T12:00:01.000Z",
-    })) {
-      const updateMany = vi.fn(async () => ({ count: 1 }));
-      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
-      const tx = createAllowanceTx({
-        billingPhase: "trial",
-        checkoutOffer: "pulse_trial_7d",
-        executeRaw,
-        hostedAiUsageUpdateMany: updateMany,
-        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-        trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-        trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
-      });
-
-      await accountHostedAiUsageForAllowanceTx({
-        memberId: "member_123",
-        now: new Date("2026-04-08T12:00:05.000Z"),
-        record,
-        tx: tx as never,
-      });
-
-      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({
-          allowanceAccountedAt: new Date("2026-04-08T12:00:05.000Z"),
-          allowanceCostUsdMicros: 0n,
-          allowanceCounted: false,
-          allowancePricingSnapshotJson: expect.objectContaining({
-            reason: "trial_expired_pending_billing",
-            schema: "murph.hosted-ai-usage-allowance-denied.v1",
-            tokenPricingBasis: "standard",
-          }),
-          allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
-        }),
-      }));
-      expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
-    }
-  });
-
-  it("uses Family-sponsored allowance instead of stale direct trial state", async () => {
+  it("uses Family-sponsored allowance instead of direct starter state", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
@@ -2241,71 +2159,6 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
-  it("validates OpenAI flex evidence before marking stale-trial usage denied", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
-    const tx = createAllowanceTx({
-      billingPhase: "trial",
-      checkoutOffer: "pulse_trial_7d",
-      executeRaw,
-      hostedAiUsageUpdateMany: updateMany,
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
-    });
-
-    await expect(accountHostedAiUsageForAllowanceTx({
-      memberId: "member_123",
-      now: new Date("2026-04-08T12:00:05.000Z"),
-      record: {
-        ...BASE_USAGE_RECORD,
-        occurredAt: "2026-04-08T12:00:01.000Z",
-        providerName: "venice",
-        tokenPricingBasis: "openai-flex",
-      },
-      tx: tx as never,
-    })).rejects.toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
-
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
-  });
-
-  it("records OpenAI flex basis in stale-trial denied snapshots", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
-    const tx = createAllowanceTx({
-      billingPhase: "trial",
-      checkoutOffer: "pulse_trial_7d",
-      executeRaw,
-      hostedAiUsageUpdateMany: updateMany,
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
-    });
-
-    await accountHostedAiUsageForAllowanceTx({
-      memberId: "member_123",
-      now: new Date("2026-04-08T12:00:05.000Z"),
-      record: {
-        ...BASE_USAGE_RECORD,
-        occurredAt: "2026-04-08T12:00:01.000Z",
-        tokenPricingBasis: "openai-flex",
-      },
-      tx: tx as never,
-    });
-
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        allowancePricingSnapshotJson: expect.objectContaining({
-          reason: "trial_expired_pending_billing",
-          schema: "murph.hosted-ai-usage-allowance-denied.v1",
-          tokenPricingBasis: "openai-flex",
-        }),
-      }),
-    }));
-    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
-  });
-
   it("does not update period metadata for member credentials", async () => {
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
@@ -2335,22 +2188,20 @@ function countPeriodMetadataUpdateCalls(tx: { $executeRaw: ReturnType<typeof vi.
 }
 
 describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
-  const trialStartedAt = new Date("2026-07-02T12:00:00.000Z");
-  const extendedTrialEnd = new Date("2026-07-16T12:00:00.000Z");
+  const periodStart = new Date("2026-07-01T00:00:00.000Z");
+  const periodEnd = new Date("2026-08-01T00:00:00.000Z");
   const now = new Date("2026-07-09T12:00:00.000Z");
 
-  it("creates a missing lazy trial usage period from current billing", async () => {
+  it("creates a missing structural period for starter usage", async () => {
     const tx = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
       findUniquePeriod: null,
-      limitUsdMicros: 4_500_000n,
-      periodEnd: extendedTrialEnd,
-      periodStart: trialStartedAt,
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      periodEnd,
+      periodStart,
       spentUsdMicros: 0n,
-      trialEndsAt: extendedTrialEnd,
-      trialStartedAt,
+      usageCreditBalanceUsdMicros: 4_500_000n,
+      usageCreditLedgerVersion: 1n,
     });
 
     await expect(reconcileHostedAiUsageAllowancePeriodForMemberTx({
@@ -2363,10 +2214,10 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
       data: {
         billingPlanCode: "launch_monthly",
         highestBillingPlanCode: "launch_monthly",
-        limitUsdMicros: 4_500_000n,
+        limitUsdMicros: 0n,
         memberId: "member_123",
-        periodEnd: extendedTrialEnd,
-        periodStart: trialStartedAt,
+        periodEnd,
+        periodStart,
         spentUsdMicros: 0n,
       },
       skipDuplicates: true,
@@ -2374,8 +2225,8 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
     expect(tx.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
-  it("repairs only owner-controlled fields while preserving spend and block state", async () => {
-    const originalTrialEnd = new Date("2026-07-09T12:00:00.000Z");
+  it("repairs starter-owned period fields while preserving spend and block state", async () => {
+    const stalePeriodEnd = new Date("2026-07-09T12:00:00.000Z");
     const blockedAt = new Date("2026-07-08T12:00:00.000Z");
     const update = vi.fn(async (args: {
       data: {
@@ -2391,7 +2242,7 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
       highestBillingPlanCode: args.data.highestBillingPlanCode,
       limitUsdMicros: args.data.limitUsdMicros,
       periodEnd: args.data.periodEnd,
-      periodStart: trialStartedAt,
+      periodStart,
       planResetAt: null,
       spentUsdMicros: 4_500_000n,
     }));
@@ -2402,18 +2253,16 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
         billingPlanCode: "launch_monthly",
         blockedAt,
         limitUsdMicros: 4_500_000n,
-        periodEnd: originalTrialEnd,
-        periodStart: trialStartedAt,
+        periodEnd: stalePeriodEnd,
+        periodStart,
         spentUsdMicros: 4_500_000n,
       },
-      limitUsdMicros: 4_500_000n,
-      periodEnd: extendedTrialEnd,
-      periodStart: trialStartedAt,
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      periodEnd,
+      periodStart,
       spentUsdMicros: 4_500_000n,
-      trialEndsAt: extendedTrialEnd,
-      trialStartedAt,
       update,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 2n,
     });
 
     await expect(reconcileHostedAiUsageAllowancePeriodForMemberTx({
@@ -2427,8 +2276,8 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
         billingPlanCode: "launch_monthly",
         blockedAt,
         highestBillingPlanCode: "launch_monthly",
-        limitUsdMicros: 4_500_000n,
-        periodEnd: extendedTrialEnd,
+        limitUsdMicros: 0n,
+        periodEnd,
         updatedAt: now,
       },
     }));
@@ -2708,151 +2557,67 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("uses the Pulse Trial allowance while the active trial period is current", async () => {
+  it("uses non-expiring starter credit regardless of legacy trial timestamps", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
-      limitUsdMicros: 4_500_000n,
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      limitUsdMicros: 0n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
       spentUsdMicros: 2_000_000n,
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+      trialEndsAt: new Date("2026-04-02T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-03-19T12:00:00.000Z"),
+      usageCreditBalanceUsdMicros: 2_500_000n,
+      usageCreditLedgerVersion: 2n,
     });
 
     await expect(resolveHostedAiUsageGate({
       memberId: "member_123",
-      now: "2026-04-03T12:00:00.000Z",
+      now: "2026-04-20T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: true,
+      allowanceSource: "direct_starter",
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 4_500_000n,
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      limitUsdMicros: 0n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
       remainingUsdMicros: 2_500_000n,
-      spentUsdMicros: 2_000_000n,
+      usageCreditBalanceUsdMicros: 2_500_000n,
+      usageCreditLedgerVersion: 2n,
     });
   });
 
-  it("uses trial-specific copy when Pulse Trial spend reaches the trial cap", async () => {
+  it("uses starter-specific copy when non-expiring starter credit is exhausted", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
-      limitUsdMicros: 4_500_000n,
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      limitUsdMicros: 0n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
       spentUsdMicros: 4_500_000n,
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+      trialEndsAt: new Date("2026-04-02T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-03-19T12:00:00.000Z"),
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 2n,
     });
 
     await expect(resolveHostedAiUsageGate({
       memberId: "member_123",
-      now: "2026-04-03T12:00:00.000Z",
+      now: "2026-04-20T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: false,
+      allowanceSource: "direct_starter",
       reason: "ai_usage_limit_exceeded",
-      retryAfter: new Date("2026-04-08T12:00:00.000Z"),
       userNotice: {
-        code: "trial_usage_limit_reached",
+        code: "starter_usage_limit_reached",
         message: expect.stringContaining("https://withmurph.ai/home"),
       },
     });
   });
 
-  it("uses Pulse Trial period spend and updates only usage-limit metadata", async () => {
-    const aggregate = vi.fn(async () => ({
-      _max: {
-        occurredAt: new Date("2026-04-03T13:00:00.000Z"),
-      },
-      _sum: {
-        allowanceCostUsdMicros: 6_500_000n,
-      },
-    }));
-    const update = vi.fn(async (args?: unknown) => {
-      void args;
-      return {
-        billingPlanCode: "launch_monthly",
-        limitUsdMicros: 4_500_000n,
-        periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-        periodStart: new Date("2026-04-01T12:00:00.000Z"),
-        spentUsdMicros: 4_500_000n,
-      };
-    });
-    const prisma = createGatePrisma({
-      aggregate,
-      billingPhase: "trial",
-      checkoutOffer: "pulse_trial_7d",
-      limitUsdMicros: 4_500_000n,
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      spentUsdMicros: 4_500_000n,
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
-      update,
-    });
-
-    await expect(resolveHostedAiUsageGate({
-      memberId: "member_123",
-      now: "2026-04-03T13:05:00.000Z",
-      prisma: prisma as never,
-    })).resolves.toMatchObject({
-      allowed: false,
-      reason: "ai_usage_limit_exceeded",
-      spentUsdMicros: 4_500_000n,
-      userNotice: {
-        code: "trial_usage_limit_reached",
-      },
-    });
-
-    expect(aggregate).not.toHaveBeenCalled();
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        blockedAt: new Date("2026-04-03T13:05:00.000Z"),
-      }),
-    }));
-    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
-      ?.data;
-    expect(updateData).not.toHaveProperty("lastUsageAt");
-    expect(updateData).not.toHaveProperty("spentUsdMicros");
-  });
-
-  it("denies stale Pulse Trial billing state instead of falling back to the paid Pulse allowance", async () => {
-    const prisma = createGatePrisma({
-      billingPhase: "trial",
-      checkoutOffer: "pulse_trial_7d",
-      limitUsdMicros: 4_500_000n,
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      spentUsdMicros: 2_000_000n,
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
-    });
-
-    await expect(resolveHostedAiUsageGate({
-      memberId: "member_123",
-      now: "2026-04-08T12:00:01.000Z",
-      prisma: prisma as never,
-    })).resolves.toMatchObject({
-      allowed: false,
-      limitUsdMicros: 4_500_000n,
-      reason: "trial_expired_pending_billing",
-      retryAfter: new Date("2026-04-08T12:15:01.000Z"),
-      userNotice: {
-        code: "trial_conversion_pending",
-        message: expect.stringContaining("https://withmurph.ai/home"),
-      },
-    });
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
-  });
-
-  it("allows Family-sponsored members with expired direct trial billing state", async () => {
+  it("allows Family-sponsored members regardless of legacy direct trial timestamps", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
@@ -2971,132 +2736,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("keeps pending Pulse Trial billing notices stable when no trial start exists", async () => {
-    const firstPrisma = createGatePrisma({
-      billingPhase: "trial",
-      checkoutOffer: "pulse_trial_7d",
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      spentUsdMicros: 0n,
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: null,
-    });
-    const secondPrisma = createGatePrisma({
-      billingPhase: "trial",
-      checkoutOffer: "pulse_trial_7d",
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      spentUsdMicros: 0n,
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: null,
-    });
-
-    const first = await resolveHostedAiUsageGate({
-      memberId: "member_123",
-      now: "2026-04-03T12:00:00.000Z",
-      prisma: firstPrisma as never,
-    });
-    const second = await resolveHostedAiUsageGate({
-      memberId: "member_123",
-      now: "2026-04-03T12:05:00.000Z",
-      prisma: secondPrisma as never,
-    });
-
-    if (first.allowed || second.allowed) {
-      throw new Error("Expected stale Pulse Trial billing state to be denied.");
-    }
-
-    expect(first.userNotice).toMatchObject({
-      code: "trial_conversion_pending",
-    });
-    expect(second.userNotice).toMatchObject({
-      code: "trial_conversion_pending",
-    });
-    expect(first.userNotice?.message).toBe(second.userNotice?.message);
-  });
-
-  it.each([
-    [
-      "unknown policy",
-      {
-        pulseTrialPolicyVersion: "old-policy",
-        trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-        trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
-      },
-      0n,
-    ],
-    [
-      "missing trial end",
-      {
-        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-        trialEndsAt: null,
-        trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
-      },
-      4_500_000n,
-    ],
-    [
-      "reversed trial bounds",
-      {
-        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-        trialEndsAt: new Date("2026-04-01T12:00:00.000Z"),
-        trialStartedAt: new Date("2026-04-08T12:00:00.000Z"),
-      },
-      4_500_000n,
-    ],
-  ])("denies malformed Pulse Trial billing state for %s", async (_name, trialState, limitUsdMicros) => {
-    const prisma = createGatePrisma({
-      billingPhase: "trial",
-      checkoutOffer: "pulse_trial_7d",
-      limitUsdMicros: 4_500_000n,
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      spentUsdMicros: 0n,
-      ...trialState,
-    });
-
-    await expect(resolveHostedAiUsageGate({
-      memberId: "member_123",
-      now: "2026-04-03T12:00:00.000Z",
-      prisma: prisma as never,
-    })).resolves.toMatchObject({
-      allowed: false,
-      limitUsdMicros,
-      reason: "trial_expired_pending_billing",
-      userNotice: {
-        code: "trial_conversion_pending",
-        message: expect.stringContaining("https://withmurph.ai/home"),
-      },
-    });
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
-  });
-
-  it("denies Pulse Trial offers with no persisted trial phase instead of using paid fallback", async () => {
-    const prisma = createGatePrisma({
-      billingPhase: null,
-      checkoutOffer: "pulse_trial_7d",
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      spentUsdMicros: 0n,
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
-    });
-
-    await expect(resolveHostedAiUsageGate({
-      memberId: "member_123",
-      now: "2026-04-03T12:00:00.000Z",
-      prisma: prisma as never,
-    })).resolves.toMatchObject({
-      allowed: false,
-      limitUsdMicros: 4_500_000n,
-      reason: "trial_expired_pending_billing",
-    });
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
-  });
-
-  it("reports inactive access before stale-trial retry semantics for canceled trial members", async () => {
+  it("reports inactive access for canceled legacy trial members", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       billingStatus: HostedBillingStatus.canceled,
@@ -4325,47 +3965,46 @@ describe("readHostedAiUsageGate", () => {
     expect(aggregate).not.toHaveBeenCalled();
   });
 
-  it("uses Pulse Trial period spend without aggregating historical usage rows", async () => {
+  it("uses non-expiring starter credit without aggregating historical usage rows", async () => {
     const aggregate = vi.fn(async () => ({
-      _max: {
-        occurredAt: new Date("2026-04-03T13:00:00.000Z"),
-      },
-      _sum: {
-        allowanceCostUsdMicros: 6_500_000n,
-      },
+      _max: { occurredAt: null },
+      _sum: { allowanceCostUsdMicros: 0n },
     }));
+    const periodStart = new Date("2026-04-01T00:00:00.000Z");
+    const periodEnd = new Date("2026-05-01T00:00:00.000Z");
     const prisma = createGatePrisma({
       aggregate,
-      billingPhase: "trial",
-      checkoutOffer: "pulse_trial_7d",
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
-        limitUsdMicros: 4_500_000n,
-        periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-        periodStart: new Date("2026-04-01T12:00:00.000Z"),
-        spentUsdMicros: 1_700_000n,
+        limitUsdMicros: 0n,
+        periodEnd,
+        periodStart,
+        spentUsdMicros: 0n,
       },
-      limitUsdMicros: 4_500_000n,
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      spentUsdMicros: 1_700_000n,
-      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
-      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+      limitUsdMicros: 0n,
+      periodEnd,
+      periodStart,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 2_800_000n,
+      usageCreditLedgerVersion: 2n,
     });
 
     await expect(readHostedAiUsageGate({
       memberId: "member_123",
-      now: "2026-04-03T13:05:00.000Z",
+      now: "2026-04-20T13:05:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: true,
-      spentUsdMicros: 1_700_000n,
+      allowanceSource: "direct_starter",
+      remainingUsdMicros: 2_800_000n,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 2_800_000n,
     });
 
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(aggregate).not.toHaveBeenCalled();
   });
+
 });
 
 describe("readHostedAiUsageGateSnapshots", () => {

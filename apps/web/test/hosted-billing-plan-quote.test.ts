@@ -62,14 +62,14 @@ describe("hosted billing plan quotes", () => {
         currentCheckoutOffer: "pulse_trial_7d",
       },
       targetPlanCode: "launch_group_monthly",
-      timing: "at_trial_end",
+      timing: "now",
     });
 
     expect(quote).toMatchObject({
       label: "Choose Core after your trial ($3.50/month)",
       monthlyPriceUsdCents: 350,
       targetPlanCode: "launch_group_monthly",
-      timing: "at_trial_end",
+      timing: "now",
     });
   });
 

@@ -11,14 +11,14 @@ import type { JoinInvitePageModel } from "./join-invite-page-model";
 import { JoinInviteStatusRefreshIsland } from "./join-invite-islands";
 import { JoinInviteCenteredShell, JoinInviteShell } from "./join-invite-shell";
 import {
-  isJoinInviteAutoPulseTrialReady,
+  isJoinInviteStarterUsageReady,
   JoinInviteStageServer,
 } from "./join-invite-stage-server";
 
 export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
-  const autoPulseTrialStarting = !model.launchConsent.gateActive
+  const starterUsageStarting = !model.launchConsent.gateActive
     && model.status.stage === "checkout"
-    && isJoinInviteAutoPulseTrialReady(
+    && isJoinInviteStarterUsageReady(
       model.status,
       model.familyBillingRecovery,
     );
@@ -38,7 +38,7 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
     || model.familyBillingRecovery === "syncing";
   const useCenteredShell = model.launchConsent.gateActive
     || model.status.stage === "verify"
-    || autoPulseTrialStarting
+    || starterUsageStarting
     || messagingSetupCheckout
     || focusedFamilyBillingRecovery;
   const Shell = useCenteredShell ? JoinInviteCenteredShell : JoinInviteShell;
@@ -64,7 +64,7 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
             ? "max-w-5xl"
             : "max-w-md",
       ].join(" ")}>
-        {autoPulseTrialStarting ? null : (
+        {starterUsageStarting ? null : (
           <PageHeader
             eyebrow={<JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />}
             title={title}

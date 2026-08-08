@@ -169,30 +169,6 @@ describe("hosted Stripe provider boundary guard", () => {
     })).toContain("protected-provider-submit:completeStripeCheckout");
   });
 
-  it("rejects a protected Invoice interaction hidden inside an observer", async () => {
-    const sources = await readProviderSources();
-    expect(providerIssueCodes({
-      ...sources,
-      browserDriver: sources.browserDriver.replace(
-        'assertStripeSurface(actor.page.url(), "invoice");',
-        'assertStripeSurface(actor.page.url(), "invoice");\n      await actor.page.getByRole("button").click();',
-      ),
-    })).toContain(
-      "protected-provider-interaction:assertStripeHostedInvoiceReady",
-    );
-  });
-
-  it("rejects widening Trial Portal proof beyond its navigation link", async () => {
-    const sources = await readProviderSources();
-    expect(providerIssueCodes({
-      ...sources,
-      browserDriver: sources.browserDriver.replace(
-        "await navigation.click();",
-        'await navigation.click();\n  await page.getByRole("button").click();',
-      ),
-    })).toContain("unsafe-portal-observer-navigation");
-  });
-
   it("rejects private browser artifact capture", async () => {
     const sources = await readProviderSources();
     expect(providerIssueCodes({

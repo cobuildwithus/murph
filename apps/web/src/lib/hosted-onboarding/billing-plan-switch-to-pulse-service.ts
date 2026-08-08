@@ -7,12 +7,13 @@ import { coerceStripeObjectId } from "./billing";
 import {
   canScheduleHostedBillingPlanChange,
   HOSTED_STANDARD_CHECKOUT_OFFER,
-  isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
   type HostedBillingPlanCode,
 } from "./billing-plans";
 import { assertHostedBillingPlanSelectable } from "./billing-plan-eligibility";
-import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
+import {
+  assertHostedMemberOwnPaidBillingAllowed,
+} from "./entitlement";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -29,9 +30,6 @@ import {
   requireHostedStripeBillingPlanConfig,
   requireValidatedHostedStripeBillingPlanConfig,
 } from "./runtime";
-import {
-  hasHostedStripeSubscriptionPaymentMethod,
-} from "./stripe-subscription-payment-method";
 import {
   buildHostedStripeAlertCorrelationCause,
   describeHostedStripeErrorDetails,
@@ -52,10 +50,6 @@ const STRIPE_TRIAL_METADATA_KEYS = [
 ] as const;
 
 export type HostedBillingPlanSwitchResult =
-  | {
-    billingPlanCode: "launch_group_monthly";
-    status: "payment_method_required";
-  }
   | {
     effectiveAt: string;
     scheduledBillingPlanCode: HostedBillingPlanCode;
@@ -89,7 +83,6 @@ export async function scheduleHostedBillingPlanSwitch(input: {
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
-  requiredSourceBillingPhase?: "trial";
   targetPlanCode: HostedBillingPlanCode;
 }): Promise<HostedBillingPlanSwitchResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -102,7 +95,6 @@ export async function scheduleHostedBillingPlanSwitch(input: {
       scheduleHostedBillingPlanSwitchWithLockedOwner({
         memberId: input.memberId,
         now,
-        requiredSourceBillingPhase: input.requiredSourceBillingPhase,
         targetPlanCode: input.targetPlanCode,
         tx,
       }),
@@ -123,7 +115,6 @@ export function scheduleHostedBillingPlanSwitchToPulse(input: {
 async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
   memberId: string;
   now: Date;
-  requiredSourceBillingPhase?: "trial";
   targetPlanCode: HostedBillingPlanCode;
   tx: Prisma.TransactionClient;
 }): Promise<HostedBillingPlanSwitchResult> {
@@ -140,23 +131,14 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     });
   }
 
-  assertHostedMemberOwnActiveBillingAllowed(member);
-
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
     prisma: input.tx,
   });
-  const sourceIsPulseTrial = isHostedPulseTrialBillingState({
-    currentBillingPhase: billingRef?.currentBillingPhase,
-    currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+  assertHostedMemberOwnPaidBillingAllowed({
+    ...member,
+    billingRef,
   });
-
-  if (
-    input.requiredSourceBillingPhase
-    && !sourceIsPulseTrial
-  ) {
-    throw buildHostedBillingPlanSwitchSourceChangedError();
-  }
 
   assertHostedBillingPlanSwitchSourceState({
     billingRef,
@@ -207,14 +189,7 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
       stripeCustomerId,
       subscription,
     });
-    if (
-      sourceIsPulseTrial
-      && subscription.status !== "trialing"
-    ) {
-      throw buildHostedBillingPlanSwitchSourceChangedError();
-    }
     assertHostedStripeSubscriptionScheduleableState({
-      allowTrialing: sourceIsPulseTrial,
       now: input.now,
       subscription,
     });
@@ -222,17 +197,6 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
       sourceConfig,
       subscription,
     });
-
-    if (
-      sourceIsPulseTrial
-      && input.targetPlanCode === "launch_group_monthly"
-      && !hasHostedStripeSubscriptionPaymentMethod(subscription)
-    ) {
-      return {
-        billingPlanCode: "launch_group_monthly",
-        status: "payment_method_required",
-      };
-    }
 
     const currentPeriodEnd = requireHostedStripeSubscriptionCurrentPeriodEnd({
       now: input.now,
@@ -542,14 +506,10 @@ function assertHostedStripeSubscriptionMatchesCustomer(input: {
 }
 
 function assertHostedStripeSubscriptionScheduleableState(input: {
-  allowTrialing: boolean;
   now: Date;
   subscription: Stripe.Subscription;
 }): void {
-  if (
-    input.subscription.status !== "active"
-    && !(input.allowTrialing && input.subscription.status === "trialing")
-  ) {
+  if (input.subscription.status !== "active") {
     throw buildHostedStripeSubscriptionStateUnsupportedError("status");
   }
 

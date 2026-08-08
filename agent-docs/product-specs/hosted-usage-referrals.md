@@ -75,7 +75,7 @@ Available policies use the current fixed offer. Arming freezes that amount on
 the referral receipt; every active-mission snapshot, grant, completion notice,
 and Settings projection thereafter uses the persisted receipt amount.
 
-Trial rewards add usage capacity but never extend the trial end date.
+Referral rewards add usage capacity but never mint another Starter grant.
 
 ## Stable signup referral links
 

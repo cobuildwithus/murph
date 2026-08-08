@@ -169,10 +169,7 @@ type HostedLinqPersistedAiUsageQuotaClaimToken =
     usageCreditLedgerVersion?: string;
   };
 
-type HostedLinqUsageLimitNoticeCode = Exclude<
-  HostedAiUsageGateNoticeCode,
-  "trial_conversion_pending"
->;
+type HostedLinqUsageLimitNoticeCode = HostedAiUsageGateNoticeCode;
 
 type HostedLinqAiUsageQuotaBasePayload = {
   chatId: string;

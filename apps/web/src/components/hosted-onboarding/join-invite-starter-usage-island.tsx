@@ -14,29 +14,29 @@ import {
 
 import {
   HostedOnboardingApiError,
-  requestHostedAutoPulseTrialEnrollment,
   requestHostedBillingCheckout,
+  requestHostedStarterUsageEnrollment,
 } from "./client-api";
 
-type AutoTrialErrorAction = "checkout" | "retry" | "setup" | "support";
+type StarterUsageErrorAction = "checkout" | "retry" | "setup" | "support";
 
-type AutoTrialErrorState = {
-  action: AutoTrialErrorAction;
+type StarterUsageErrorState = {
+  action: StarterUsageErrorAction;
   checkoutErrorMessage: string | null;
   message: string;
 };
 
-export function JoinInviteAutoTrialIsland({
+export function JoinInviteStarterUsageIsland({
   inviteCode,
 }: {
   inviteCode: string;
 }) {
   const { refresh, replace } = useRouter();
   const startedRef = useRef(false);
-  const [errorState, setErrorState] = useState<AutoTrialErrorState | null>(null);
+  const [errorState, setErrorState] = useState<StarterUsageErrorState | null>(null);
   const [checkoutPending, setCheckoutPending] = useState(false);
 
-  const startTrial = useCallback(async () => {
+  const activateStarterUsage = useCallback(async () => {
     if (startedRef.current) {
       return;
     }
@@ -45,9 +45,7 @@ export function JoinInviteAutoTrialIsland({
     setErrorState(null);
 
     try {
-      const enrollment = await requestHostedAutoPulseTrialEnrollment({
-        inviteCode,
-      });
+      const enrollment = await requestHostedStarterUsageEnrollment({ inviteCode });
       replace(
         consumeHostedGroupStartHandoff()
           ? HOSTED_GROUP_START_PATH
@@ -55,13 +53,13 @@ export function JoinInviteAutoTrialIsland({
       );
     } catch (error) {
       startedRef.current = false;
-      setErrorState(buildAutoTrialErrorState(error));
+      setErrorState(buildStarterUsageErrorState(error));
     }
   }, [inviteCode, replace]);
 
   const startPaidCheckout = useCallback(async () => {
     setCheckoutPending(true);
-    setErrorState((current) => current
+    setErrorState((current: StarterUsageErrorState | null) => current
       ? { ...current, checkoutErrorMessage: null }
       : current);
 
@@ -79,23 +77,23 @@ export function JoinInviteAutoTrialIsland({
         }
         return;
       }
-
       if (checkout.url) {
         window.location.assign(checkout.url);
         return;
       }
 
-      setErrorState((current) => current
+      setErrorState((current: StarterUsageErrorState | null) => current
         ? {
             ...current,
             checkoutErrorMessage: "Could not open Pulse checkout right now.",
           }
         : current);
     } catch (error) {
-      setErrorState((current) => current
+      setErrorState((current: StarterUsageErrorState | null) => current
         ? {
             ...current,
-            checkoutErrorMessage: error instanceof Error ? error.message : String(error),
+            checkoutErrorMessage:
+              error instanceof Error ? error.message : String(error),
           }
         : current);
     } finally {
@@ -104,11 +102,11 @@ export function JoinInviteAutoTrialIsland({
   }, [inviteCode, refresh, replace]);
 
   useEffect(() => {
-    void startTrial();
-  }, [startTrial]);
+    void activateStarterUsage();
+  }, [activateStarterUsage]);
 
   if (errorState) {
-    const copy = resolveAutoTrialErrorCopy(errorState.action);
+    const copy = resolveStarterUsageErrorCopy(errorState.action);
     return (
       <div className="w-full rounded-2xl border border-border bg-card/80 p-6">
         <div className="space-y-4">
@@ -122,10 +120,10 @@ export function JoinInviteAutoTrialIsland({
           </div>
 
           <Alert variant="destructive">
-            <AlertTitle>Unable to start your trial</AlertTitle>
+            <AlertTitle>Unable to finish setup</AlertTitle>
             <AlertDescription>
               {errorState.action === "checkout"
-                ? "This account cannot use the trial, but you can continue with paid Pulse."
+                ? "This account has prior billing history, so it cannot receive starter usage again."
                 : errorState.message}
             </AlertDescription>
           </Alert>
@@ -133,7 +131,7 @@ export function JoinInviteAutoTrialIsland({
           {errorState.action === "retry" ? (
             <Button
               type="button"
-              onClick={() => void startTrial()}
+              onClick={() => void activateStarterUsage()}
               variant="outline"
               size="lg"
             >
@@ -149,7 +147,7 @@ export function JoinInviteAutoTrialIsland({
                 disabled={checkoutPending}
                 size="lg"
               >
-                {checkoutPending ? "Opening checkout..." : "Continue with paid Pulse"}
+                {checkoutPending ? "Opening checkout..." : "Continue with Pulse"}
               </Button>
               {errorState.checkoutErrorMessage ? (
                 <p role="alert" className="text-sm text-destructive">
@@ -175,11 +173,11 @@ export function JoinInviteAutoTrialIsland({
               body={[
                 "Hi Murph support,",
                 "",
-                "I need help starting Pulse from my invite.",
+                "I need help activating Murph from my invite.",
                 "",
                 `Context: ${errorState.message}`,
               ].join("\n")}
-              subject="Murph Pulse setup support"
+              subject="Murph setup support"
             />
           ) : null}
         </div>
@@ -202,12 +200,12 @@ export function JoinInviteAutoTrialIsland({
   );
 }
 
-function buildAutoTrialErrorState(error: unknown): AutoTrialErrorState {
+function buildStarterUsageErrorState(error: unknown): StarterUsageErrorState {
   const message = error instanceof Error ? error.message : String(error);
 
   if (error instanceof HostedOnboardingApiError) {
     return {
-      action: resolveAutoTrialErrorAction(error),
+      action: resolveStarterUsageErrorAction(error),
       checkoutErrorMessage: null,
       message,
     };
@@ -220,53 +218,45 @@ function buildAutoTrialErrorState(error: unknown): AutoTrialErrorState {
   };
 }
 
-function resolveAutoTrialErrorAction(error: HostedOnboardingApiError): AutoTrialErrorAction {
+function resolveStarterUsageErrorAction(
+  error: HostedOnboardingApiError,
+): StarterUsageErrorAction {
   if (error.retryable) {
     return "retry";
   }
-
-  if (
-    error.code === "HOSTED_PULSE_TRIAL_ALREADY_REDEEMED" ||
-    error.code === "HOSTED_AUTO_PULSE_TRIAL_BLOCKED" ||
-    error.code === "HOSTED_AUTO_PULSE_TRIAL_DISABLED"
-  ) {
+  if (error.code === "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED") {
     return "checkout";
   }
-
   if (error.code === "HOSTED_MESSAGING_CHANNEL_REQUIRED") {
     return "setup";
   }
-
   return "support";
 }
 
-function resolveAutoTrialErrorCopy(action: AutoTrialErrorAction): {
+function resolveStarterUsageErrorCopy(action: StarterUsageErrorAction): {
   description: string;
   title: string;
 } {
   if (action === "checkout") {
     return {
-      description: "You can continue with the paid Pulse plan instead.",
-      title: "Trial unavailable",
+      description: "Continue with a paid plan or restore the existing subscription.",
+      title: "Choose your access",
     };
   }
-
   if (action === "support") {
     return {
       description: "Contact support and we will help restore access.",
-      title: "Pulse setup needs support",
+      title: "Murph setup needs support",
     };
   }
-
   if (action === "setup") {
     return {
       description: "Finish setup so Murph can message you.",
       title: "Continue setup",
     };
   }
-
   return {
-    description: "We could not start your Pulse trial.",
-    title: "Trial setup paused",
+    description: "We could not activate your starter usage.",
+    title: "Setup paused",
   };
 }

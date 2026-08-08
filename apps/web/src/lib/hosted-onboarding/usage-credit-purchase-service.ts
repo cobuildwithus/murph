@@ -13,7 +13,7 @@ import {
   createHostedStripePriceLookupKey,
 } from "./contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
-import { hasHostedMemberOwnActiveBilling } from "./entitlement";
+import { hasHostedMemberOwnPaidBilling } from "./entitlement";
 import { ensureHostedMemberStripeCustomer } from "./hosted-member-stripe-customer";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
 import { readHostedMemberBillingSnapshot } from "./hosted-member-store";
@@ -1346,7 +1346,10 @@ async function resolveHostedUsageCreditSavedCardBillingAuthority(input: {
     subscription:
       member?.billingRef?.stripeCustomerId === input.stripeCustomerId &&
       member.billingRef.stripeSubscriptionId &&
-      hasHostedMemberOwnActiveBilling(member.core)
+      hasHostedMemberOwnPaidBilling({
+        ...member.core,
+        billingRef: member.billingRef,
+      })
         ? {
             billingStatus: member.core.billingStatus,
             lastStripeEventCreatedAt:

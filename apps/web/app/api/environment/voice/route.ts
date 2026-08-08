@@ -81,10 +81,8 @@ export const POST = withJsonError(async (request: Request) => {
     if (usageGate.status === "denied") {
       const message =
         usageGate.decision.reason === "ai_usage_limit_exceeded"
-          ? "Murph has reached your current AI usage limit. Keep the recording and try again after it resets."
-          : usageGate.decision.reason === "trial_expired_pending_billing"
-            ? "Your Murph trial has ended. Keep the recording and try again after renewing access."
-            : "Your Murph access is not active. Keep the recording and try again after restoring access.";
+          ? "Murph has reached your current AI usage limit. Keep the recording and try again after more usage is available."
+          : "Your Murph access is not active. Keep the recording and try again after restoring access.";
       throw hostedOnboardingError({
         code: "ENVIRONMENT_VOICE_AI_USAGE_DENIED",
         httpStatus:

@@ -53,9 +53,9 @@ describe("hosted plan usage contract", () => {
     });
   });
 
-  it("parses the trial display name", () => {
+  it("parses the starter-usage display name", () => {
     expect(parseHostedPlanUsageStatus({
-      accessKind: "trial",
+      accessKind: "starter",
       availablePlans: [
         {
           code: "launch_group_monthly",
@@ -73,27 +73,27 @@ describe("hosted plan usage contract", () => {
       forecast: null,
       generatedAt: "2026-07-03T12:00:00.000Z",
       periodEnd: "2026-07-10T12:00:00.000Z",
-      periodKind: "trial",
+      periodKind: "lifetime",
       periodStart: "2026-07-01T12:00:00.000Z",
       planCode: "launch_monthly",
-      planName: "Pulse Trial",
+      planName: "Starter",
       recommendedPlanCode: "launch_group_monthly",
       recommendedAction: null,
       subscriptionActionQuote: {
         action: "change_plan",
         expiresAt: "2026-07-03T12:10:00.000Z",
-        label: "Start Group after trial ($3.50/month)",
+        label: "Start Group ($3.50/month)",
         monthlyPriceUsdCents: 350,
         quoteId: "quote_test_group",
         targetPlanCode: "launch_group_monthly",
-        timing: "at_trial_end",
+        timing: "now",
       },
       remainingPercent: 75,
       status: "active",
       usedPercent: 25,
     })).toMatchObject({
-      accessKind: "trial",
-      planName: "Pulse Trial",
+      accessKind: "starter",
+      planName: "Starter",
       recommendedPlanCode: "launch_group_monthly",
       subscriptionActionQuote: {
         action: "change_plan",

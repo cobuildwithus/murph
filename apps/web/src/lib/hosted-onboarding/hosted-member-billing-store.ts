@@ -607,6 +607,49 @@ export async function clearHostedMemberStripeCheckoutAttemptTx(input: {
   return updated.count === 1;
 }
 
+export async function clearHostedMemberLegacyTrialBillingUnderLockTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutIntentHash: null,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      currentPeriodEnd: null,
+      currentPeriodStart: null,
+      currentTrialEndsAt: null,
+      currentTrialStartedAt: null,
+      pulseTrialPolicyVersion: null,
+      pulseTrialRedeemedAt: null,
+      pulseTrialStartSource: null,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripeSubscriptionIdEncrypted: null,
+      stripeSubscriptionLookupKey: null,
+      stripeSubscriptionScheduleIdEncrypted: null,
+      stripeSubscriptionScheduleLookupKey: null,
+      usagePlanTransitionAt: null,
+      usagePlanTransitionFromCode: null,
+      usagePlanTransitionKind: null,
+      usagePlanTransitionToCode: null,
+    },
+    where: { memberId: input.memberId },
+  });
+  await input.tx.hostedMemberSubscriptionCheckout.deleteMany({
+    where: { memberId: input.memberId },
+  });
+  await input.tx.hostedMember.update({
+    data: { billingStatus: HostedBillingStatus.active },
+    where: { id: input.memberId },
+  });
+}
+
 export async function clearHostedMemberStripeCheckoutAttemptForSessionTx(input: {
   memberId: string;
   sessionId: string;

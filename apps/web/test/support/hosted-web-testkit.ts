@@ -1,7 +1,6 @@
 export {
   HostedBillingBrowserDriver,
   type HostedBillingBrowserActor,
-  type HostedBillingBrowserApiResult,
   type HostedBillingBrowserDiagnostic,
   type HostedBillingCheckoutStart,
   type HostedFamilyInviteStart,
@@ -28,7 +27,6 @@ export {
   type HostedStripeCleanupSummary,
   type HostedStripeBillingSandboxInput,
   type HostedStripeCheckoutOwnership,
-  type HostedStripeResumeEventTrace,
   type HostedStripeScheduleTruth,
   type HostedStripeSubscriptionFixture,
   type HostedStripeSubscriptionTruth,

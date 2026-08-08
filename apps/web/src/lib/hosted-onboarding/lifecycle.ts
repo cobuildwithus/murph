@@ -1,6 +1,6 @@
 import { HostedBillingStatus } from "@prisma/client";
 
-import { hasHostedMemberOwnActiveBilling, isHostedMemberSuspended } from "./entitlement";
+import { hasHostedMemberOwnActiveAccess, isHostedMemberSuspended } from "./entitlement";
 import {
   resolveHostedAccessibleOnboardingStage,
   type HostedOnboardingStage,
@@ -106,7 +106,7 @@ function hasHostedOnboardingRecoverySurfaceAccess(input: {
   // dead end.
   return !isHostedMemberSuspended(input.suspendedAt)
     && (
-      hasHostedMemberOwnActiveBilling(input)
+      hasHostedMemberOwnActiveAccess(input)
       || input.sponsoredAccessActive === true
       || hasHostedRecoverableBilling(input)
     );

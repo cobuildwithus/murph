@@ -14,6 +14,8 @@ import {
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
+  clearHostedMemberLegacyTrialBillingUnderLockTx,
+  readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
   withHostedMemberStripeMutationLockForOps,
 } from "./hosted-member-billing-store";
@@ -21,6 +23,85 @@ import {
   readHostedMemberBillingSnapshot,
 } from "./hosted-member-store";
 import { logHostedStripeFailure } from "./stripe-error-log";
+
+const HOSTED_LEGACY_TRIAL_RETIRABLE_STATUSES = new Set<Stripe.Subscription.Status>([
+  "canceled",
+  "incomplete",
+  "incomplete_expired",
+  "paused",
+  "trialing",
+]);
+
+/**
+ * Retires the obsolete no-card Stripe trial before a member starts an ordinary
+ * paid Checkout. The member lock serializes provider cancellation, local
+ * identity release, and any competing webhook or billing mutation. A provider
+ * state that could represent paid service fails closed instead of risking a
+ * duplicate subscription.
+ */
+export async function retireHostedLegacyPulseTrialForCheckout(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  priceId: string;
+  stripe: Pick<Stripe, "subscriptions">;
+}): Promise<boolean> {
+  return withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    run: async (tx) => {
+      const billingRef = await readHostedMemberStripeBillingRef({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      const subscriptionId = billingRef?.stripeSubscriptionId ?? null;
+      if (!subscriptionId) {
+        return false;
+      }
+      if (billingRef?.currentBillingPhase === "paid") {
+        throw buildHostedLegacyTrialRetirementBlockedError();
+      }
+
+      const subscription = await retrieveHostedPulseTrialCleanupTarget({
+        expectedCustomerId: billingRef?.stripeCustomerId ?? undefined,
+        memberId: input.memberId,
+        priceId: input.priceId,
+        stripe: input.stripe,
+        subscriptionId,
+      });
+      if (
+        subscription
+        && !HOSTED_LEGACY_TRIAL_RETIRABLE_STATUSES.has(subscription.status)
+      ) {
+        throw buildHostedLegacyTrialRetirementBlockedError();
+      }
+      if (
+        subscription
+        && subscription.status !== "canceled"
+        && subscription.status !== "incomplete_expired"
+      ) {
+        await cancelHostedPulseTrialLoserSubscription({
+          stripe: input.stripe,
+          subscriptionId,
+        });
+      }
+
+      await clearHostedMemberLegacyTrialBillingUnderLockTx({
+        memberId: input.memberId,
+        tx,
+      });
+      return true;
+    },
+  });
+}
+
+function buildHostedLegacyTrialRetirementBlockedError() {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
+    httpStatus: 409,
+    message:
+      "This hosted account already has a subscription. Manage it from Settings instead of starting a new one.",
+  });
+}
 
 export type HostedPulseTrialCandidateDisposition =
   | "current"

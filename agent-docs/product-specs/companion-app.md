@@ -154,9 +154,10 @@ before status, token exchange, or any health setup:
    alternate-sign-in recovery. On typed `HOSTED_CONSENT_REQUIRED`, use the
    existing bearer-only legal-consent `GET` and `POST` boundary to render and
    record the required launch grants, then retry admission. On typed
-   `HOSTED_ACCESS_REQUIRED`—including normalized unavailable, blocked, or
-   already-used automatic-trial outcomes—enter the existing billing/activation
-   access recovery instead of falling through to health setup. Typed
+   `HOSTED_ACCESS_REQUIRED`—including a member whose prior billing history
+   makes automatic starter enrollment unsafe—enter the existing
+   billing/activation access recovery instead of falling through to health
+   setup. Typed
    `HOSTED_MEMBER_SUSPENDED` enters suspended-account support recovery.
    `COMPANION_ADMISSION_RETRYABLE` keeps the account gate visible with an
    explicit retry, while `COMPANION_ADMISSION_SUPPORT_REQUIRED` enters support
@@ -172,7 +173,7 @@ must not request a sign-in token, sign in to the Junction SDK, or create or
 resume a hosted connection before the member explicitly chooses **Connect
 Health Connect**. Account-only admission also suppresses the ordinary hosted
 signup welcome: it must not assign a Linq home line, queue a signup-welcome
-notification, or send a welcome email. Canonical Pulse trial activation,
+notification, or send a welcome email. Canonical starter-usage activation,
 active-access proof, and the internal `member.activated` fact remain intact.
 Existing established-member session restoration retains its separate
 documented `resume` path and cannot turn admission itself into health

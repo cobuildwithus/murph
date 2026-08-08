@@ -108,8 +108,6 @@ function resolveHostedRecognizedInboundNoticeReason(
   switch (code) {
     case "health_data_consent_withdrawn":
       return "sent-health-data-consent-withdrawn-notice";
-    case "trial_conversion_pending":
-      return "sent-trial-conversion-notice";
     case "billing_inactive":
       return "sent-billing-inactive-notice";
   }

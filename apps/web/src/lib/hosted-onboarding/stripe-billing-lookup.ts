@@ -355,7 +355,7 @@ function canUseHostedStripeBillingLookupCandidate(input: {
   }
 
   const boundSubscriptionId = input.member.billingRef?.stripeSubscriptionId ?? null;
-  return !boundSubscriptionId || boundSubscriptionId === input.subscriptionId;
+  return boundSubscriptionId === input.subscriptionId;
 }
 
 function listHostedStripeUniqueMemberIds(values: readonly (string | null | undefined)[]): string[] {

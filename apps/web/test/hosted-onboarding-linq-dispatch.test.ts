@@ -39,7 +39,7 @@ const mocks = vi.hoisted(() => {
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
     classifyHostedLinqFirstContactAdmission: vi.fn(),
-    ensureHostedLinqInstantStartPulseTrialEnrollment: vi.fn(),
+    ensureHostedLinqInstantStartStarterUsageEnrollment: vi.fn(),
     runHostedLinqInstantStartDeferredActivationWakeBestEffort: vi.fn(),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
     releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
@@ -293,14 +293,14 @@ vi.mock("@/src/lib/hosted-onboarding/linq-first-contact-admission", async () => 
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/auto-trial-enrollment-service", async () => {
+vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", async () => {
   const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/auto-trial-enrollment-service")
-  >("@/src/lib/hosted-onboarding/auto-trial-enrollment-service");
+    typeof import("@/src/lib/hosted-onboarding/starter-usage-enrollment-service")
+  >("@/src/lib/hosted-onboarding/starter-usage-enrollment-service");
   return {
     ...actual,
-    ensureHostedLinqInstantStartPulseTrialEnrollment:
-      mocks.ensureHostedLinqInstantStartPulseTrialEnrollment,
+    ensureHostedLinqInstantStartStarterUsageEnrollment:
+      mocks.ensureHostedLinqInstantStartStarterUsageEnrollment,
     runHostedLinqInstantStartDeferredActivationWakeBestEffort:
       mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort,
   };
@@ -601,7 +601,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       kind: "allow",
       source: "model",
     });
-    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockResolvedValue({
+    mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockResolvedValue({
       deferredActivationWake: {
         hostedExecutionEventId: "member.activated:instant-start",
         memberId: "member_123",
@@ -4834,7 +4834,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
     );
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .not.toHaveBeenCalled();
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
@@ -5020,7 +5020,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(hostedMemberCreate).not.toHaveBeenCalled();
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -5134,7 +5134,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         });
       },
     );
-    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
+    mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockImplementationOnce(
       async () => {
         // Model the only request-local loss window: the transaction committed
         // active access and its mailbox row, but the process disappeared before
@@ -5210,7 +5210,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .toHaveBeenCalledOnce();
     expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledOnce();
     expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledWith({
@@ -5345,7 +5345,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         return typingResult.promise;
       },
     );
-    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
+    mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockImplementationOnce(
       async () => {
         callOrder.push("enrollment");
         trialActive = true;
@@ -5542,7 +5542,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.startHostedLinqChatTypingIndicator.mockRejectedValueOnce(
       new Error("typing unavailable"),
     );
-    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockRejectedValueOnce(
+    mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockRejectedValueOnce(
       new Error("stripe unavailable"),
     );
 
@@ -5676,7 +5676,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.startHostedLinqChatTypingIndicator.mockReturnValueOnce(
       typingStart.promise,
     );
-    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockRejectedValueOnce(
+    mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockRejectedValueOnce(
       hostedOnboardingError({
         code: "HOSTED_STRIPE_UNAVAILABLE",
         httpStatus: 503,
@@ -5822,7 +5822,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       id: "mailbox_item_123",
       userId: memberId,
     });
-    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
+    mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockImplementationOnce(
       async () => {
         trialActive = true;
         invite.instantStartAdmissionEventId = null;
@@ -6009,7 +6009,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .not.toHaveBeenCalled();
     expect(hostedInviteUpdate).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
@@ -6253,7 +6253,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         userId: createdMemberId ?? "member_123",
       }),
     );
-    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
+    mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockImplementationOnce(
       async ({ inviteCode, memberId, prisma: enrollmentPrisma }) => {
         expect(transactionOpen).toBe(false);
         expect(inviteCode).toEqual(expect.any(String));
@@ -6316,7 +6316,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
         skipDuplicates: true,
       });
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .toHaveBeenCalledOnce();
     expect(hostedMemberCreate).toHaveBeenCalledOnce();
     expect(hostedInviteCreate).toHaveBeenCalledOnce();
@@ -6491,7 +6491,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(createdMemberId).toEqual(expect.any(String));
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledOnce();
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .not.toHaveBeenCalled();
     expect(hostedMemberCreate).toHaveBeenCalledOnce();
     expect(hostedInviteCreate).toHaveBeenCalledOnce();
@@ -6517,8 +6517,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it.each([
     {
       configureEnrollment: () => {
-        mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockRejectedValueOnce(
-          new Error("Synthetic trial enrollment failure."),
+        mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockRejectedValueOnce(
+          new Error("Synthetic starter enrollment failure."),
         );
       },
       activationCommitted: false,
@@ -6527,7 +6527,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
     {
       configureEnrollment: () => {
-        mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockResolvedValueOnce({
+        mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockResolvedValueOnce({
           deferredActivationWake: {
             hostedExecutionEventId: "member.activated:instant-start",
             memberId: "member_instant_start_fallback",
@@ -6542,11 +6542,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
     {
       configureEnrollment: () => {
-        mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockRejectedValueOnce(
+        mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockRejectedValueOnce(
           hostedOnboardingError({
             code: "HOSTED_AUTO_PULSE_TRIAL_STRIPE_UNAVAILABLE",
             httpStatus: 503,
-            message: "Stripe is still confirming this trial. Try again.",
+            message: "Starter access is still being confirmed. Try again.",
             retryable: true,
           }),
         );
@@ -6555,7 +6555,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       outcome: "is retryable",
       retryable: true,
     },
-  ])("handles instant-start trial enrollment when it $outcome", async ({
+  ])("handles instant-start starter enrollment when it $outcome", async ({
     activationCommitted,
     configureEnrollment,
     retryable,
@@ -6643,7 +6643,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         code: "HOSTED_AUTO_PULSE_TRIAL_STRIPE_UNAVAILABLE",
         retryable: true,
       });
-      expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+      expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
         .toHaveBeenCalledOnce();
       expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
       expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -6660,7 +6660,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
 
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .toHaveBeenCalledOnce();
     expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -6762,7 +6762,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledOnce();
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -7962,7 +7962,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       [recoveredEventId, "model"],
     ]);
 
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment).not.toHaveBeenCalled();
     const inviteCreate = requireMock(
       prisma.hostedInvite?.create,
       "hostedInvite.create",
@@ -8209,7 +8209,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect([...decisionRows.keys()]).toEqual([groupAdmissionEventId]);
     // No instant-start entitlement: no trial enrollment, no admission id on the
     // invite, and no phone verified off the back of a group classification.
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(inviteCreate).toHaveBeenCalledTimes(attempts.length);
     for (const [{ data }] of inviteCreate.mock.calls as [
       { data: { instantStartAdmissionEventId?: string | null } },
@@ -8541,7 +8541,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+    expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .not.toHaveBeenCalled();
   });
 

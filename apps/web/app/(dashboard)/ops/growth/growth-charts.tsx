@@ -58,7 +58,7 @@ const acquisitionChartConfig = {
   },
   trialStarts: {
     color: "#D4C4A8",
-    label: "Trial starts",
+    label: "Starter activations",
   },
 } satisfies ChartConfig;
 
@@ -332,7 +332,7 @@ export function GrowthCharts(input: GrowthChartsProps) {
             Intake and activation
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
-            Daily member records created and Pulse trials started by UTC date.
+            Daily member records created and starter usage activated by UTC date.
           </p>
         </div>
         <ChartContainer
@@ -381,7 +381,7 @@ export function GrowthCharts(input: GrowthChartsProps) {
               dataKey="trialStarts"
               fill="var(--color-trialStarts)"
               fillOpacity={0.16}
-              name="Trial starts"
+              name="Starter activations"
               stroke="var(--color-trialStarts)"
               strokeWidth={2}
               type="monotone"

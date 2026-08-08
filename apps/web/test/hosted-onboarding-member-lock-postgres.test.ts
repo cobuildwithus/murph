@@ -113,7 +113,7 @@ const stripeProvider = vi.hoisted(() => ({
 
 const companionBoundaries = vi.hoisted(() => ({
   consentedMemberIds: new Set<string>(),
-  ensureAutoTrial: vi.fn(async () => ({
+  ensureStarterUsage: vi.fn(async () => ({
     redirectPath: "/home?initialVisit=true",
     status: "enrolled" as const,
   })),
@@ -135,8 +135,8 @@ vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
   }),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/auto-trial-enrollment-service", () => ({
-  ensureHostedAutoPulseTrialEnrollment: companionBoundaries.ensureAutoTrial,
+vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", () => ({
+  ensureHostedStarterUsageEnrollment: companionBoundaries.ensureStarterUsage,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => ({

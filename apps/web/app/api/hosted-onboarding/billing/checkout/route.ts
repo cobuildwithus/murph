@@ -1,7 +1,6 @@
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
 import {
   parseHostedPublicBillingPlanCode,
-  parseHostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -27,21 +26,11 @@ export const POST = withJsonError(async (request: Request) => {
     const billingPlanCode = parseHostedPublicBillingPlanCode(
       body.billingPlanCode,
     );
-    const checkoutOffer = parseHostedPublicBillingCheckoutOffer(body.checkoutOffer);
-
     if (body.billingPlanCode !== undefined && !billingPlanCode) {
       throw hostedOnboardingError({
         code: "HOSTED_BILLING_PLAN_INVALID",
         httpStatus: 400,
         message: "billingPlanCode must be one of the configured Murph billing plans.",
-      });
-    }
-
-    if (body.checkoutOffer !== undefined && !checkoutOffer) {
-      throw hostedOnboardingError({
-        code: "HOSTED_BILLING_CHECKOUT_OFFER_INVALID",
-        httpStatus: 400,
-        message: "checkoutOffer must be pulse_trial_7d when present.",
       });
     }
 
@@ -52,7 +41,6 @@ export const POST = withJsonError(async (request: Request) => {
 
     const checkout = await createHostedBillingCheckout({
       ...(billingPlanCode ? { billingPlanCode } : {}),
-      ...(checkoutOffer ? { checkoutOffer } : {}),
       inviteCode,
       member: {
         id: auth.member.id,

@@ -13,8 +13,8 @@ import {
   withHostedVisibleSecondaryLinqOutcomes,
 } from "@/src/lib/hosted-onboarding/visible-secondary-webhooks";
 
-const TRIAL_CONVERSION_MESSAGE =
-  "Your Murph trial ended. Continue in Subscription settings: https://withmurph.ai/settings#subscription";
+const BILLING_INACTIVE_MESSAGE =
+  "Murph can't use this account right now. Check your account settings or contact support: https://withmurph.ai/settings";
 const SIGNUP_MESSAGE =
   "Murph isn't fully set up on this account yet. Finish setup here:\nhttps://withmurph.ai/join/invite-123";
 const GROUP_SENDER_PHONE = "+15551234567";
@@ -68,9 +68,9 @@ describe("Linq group-chat visible access recovery", () => {
       }) as never),
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });
@@ -100,7 +100,7 @@ describe("Linq group-chat visible access recovery", () => {
       idempotencyKey: expect.stringMatching(
         /^visible-secondary-private:[0-9a-f]{32}$/u,
       ),
-      message: `${TRIAL_CONVERSION_MESSAGE}\n\nOnce that's sorted, send me another message in the group and I'll try again.`,
+      message: `${BILLING_INACTIVE_MESSAGE}\n\nOnce that's sorted, send me another message in the group and I'll try again.`,
       replyToMessageId: null,
     }));
   });
@@ -158,9 +158,9 @@ describe("Linq group-chat visible access recovery", () => {
               }
             : {
                 kind: "access_notice" as const,
-                message: TRIAL_CONVERSION_MESSAGE,
-                noticeCode: "trial_conversion_pending" as const,
-                responseReason: "sent-trial-conversion-notice",
+                message: BILLING_INACTIVE_MESSAGE,
+                noticeCode: "billing_inactive" as const,
+                responseReason: "sent-billing-inactive-notice",
               };
         }),
         sendHostedLinqChatMessage,
@@ -235,9 +235,9 @@ describe("Linq group-chat visible access recovery", () => {
       }) as never),
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });
@@ -318,9 +318,9 @@ describe("Linq group-chat visible access recovery", () => {
       });
     const resolveHostedRecognizedInboundAccess = vi.fn(async () => ({
       kind: "access_notice" as const,
-      message: TRIAL_CONVERSION_MESSAGE,
-      noticeCode: "trial_conversion_pending" as const,
-      responseReason: "sent-trial-conversion-notice",
+      message: BILLING_INACTIVE_MESSAGE,
+      noticeCode: "billing_inactive" as const,
+      responseReason: "sent-billing-inactive-notice",
     }));
     const dependencies = buildLinqDependencies({
       event,
@@ -366,7 +366,7 @@ describe("Linq group-chat visible access recovery", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_private_member",
       idempotencyKey: `visible-secondary-private:evt_private_${reason}`,
-      message: `${TRIAL_CONVERSION_MESSAGE}\n\nOnce that's sorted, send me another message in the group and I'll try again.`,
+      message: `${BILLING_INACTIVE_MESSAGE}\n\nOnce that's sorted, send me another message in the group and I'll try again.`,
       replyToMessageId: null,
     }));
   });
@@ -452,9 +452,9 @@ describe("Linq group-chat visible access recovery", () => {
       readHostedMemberRoutingState: vi.fn(async () => routing as never),
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });
@@ -477,7 +477,7 @@ describe("Linq group-chat visible access recovery", () => {
     }));
   });
 
-  it("does not misclassify an allowed active trial as setup-incomplete", async () => {
+  it("does not misclassify an allowed active starter account as setup-incomplete", async () => {
     const event = buildGroupLinqEvent("evt_active_trial");
     const sendHostedLinqChatMessage = vi.fn(async () => ({
       chatId: "chat_group_visible",
@@ -670,9 +670,9 @@ describe("Linq group-chat visible access recovery", () => {
       readHostedMemberRoutingState: vi.fn(async () => routing as never),
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });
@@ -761,9 +761,9 @@ describe("Linq group-chat visible access recovery", () => {
       readHostedMemberRoutingState,
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });
@@ -814,9 +814,9 @@ describe("Linq group-chat visible access recovery", () => {
       readHostedMemberRoutingState,
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });
@@ -863,9 +863,9 @@ describe("Linq group-chat visible access recovery", () => {
       }) as never),
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });
@@ -917,9 +917,9 @@ describe("Linq group-chat visible access recovery", () => {
       }) as never),
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });
@@ -1096,9 +1096,9 @@ describe("Linq group-chat visible access recovery", () => {
       readHostedMemberRoutingState,
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });
@@ -1156,9 +1156,9 @@ describe("Linq group-chat visible access recovery", () => {
       readHostedMemberRoutingState,
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         kind: "access_notice" as const,
-        message: TRIAL_CONVERSION_MESSAGE,
-        noticeCode: "trial_conversion_pending" as const,
-        responseReason: "sent-trial-conversion-notice",
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
       })),
       sendHostedLinqChatMessage,
     });

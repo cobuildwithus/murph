@@ -70,7 +70,7 @@ describe("hosted usage status transaction reads", () => {
 function buildTrialDecision(): HostedAiUsageGateDecisionWithSource {
   return {
     allowed: true,
-    allowanceSource: "direct_trial",
+    allowanceSource: "direct_starter",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: "member_usage_transaction",

@@ -1,13 +1,7 @@
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import type {
   HostedBillingPlanCode,
-  HostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
-import {
-  HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_HEADER,
-  HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
-  type HostedPulseTrialContinuationAction,
-} from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 
 interface ApiErrorPayload {
   error: {
@@ -42,56 +36,10 @@ export interface HostedBillingCheckoutResponse {
   url: string | null;
 }
 
-export interface HostedAutoPulseTrialEnrollmentResponse {
+export interface HostedStarterUsageEnrollmentResponse {
   redirectPath: string;
   status: "already_active" | "already_enrolled" | "enrolled";
 }
-
-export interface HostedPulseTrialStartPaidResponse {
-  billingPlanCode?: "launch_group_monthly" | "launch_monthly";
-  effectiveAt?: string;
-  paymentUrl?: string;
-  scheduledBillingPlanCode?: HostedBillingPlanCode;
-  status:
-    | "already_scheduled"
-    | "billing_pending"
-    | "continuing"
-    | "payment_required"
-    | "scheduled"
-    | "started";
-}
-
-export type HostedPulseTrialStartPaidClientResult =
-  | {
-    status: "billing_pending";
-  }
-  | {
-    status: "redirecting";
-  }
-  | {
-    status: "payment_required";
-  }
-  | {
-    status: "started";
-  };
-
-export type HostedPulseTrialContinuationClientResult =
-  | HostedPulseTrialStartPaidClientResult
-  | {
-    status: "continuing";
-  };
-
-export type HostedTrialPaidPlanCode = Extract<
-  HostedBillingPlanCode,
-  "launch_group_monthly" | "launch_monthly"
->;
-
-export type HostedTrialPaidPlanStartClientResult =
-  | HostedPulseTrialStartPaidClientResult
-  | {
-    effectiveAt?: string;
-    status: "already_scheduled" | "continuing" | "scheduled";
-  };
 
 export async function requestHostedOnboardingJson<T>(input: {
   credentials?: RequestCredentials;
@@ -159,148 +107,25 @@ export async function requestHostedOnboardingJson<T>(input: {
 
 export async function requestHostedBillingCheckout(input: {
   billingPlanCode?: HostedBillingPlanCode | null;
-  checkoutOffer?: HostedPublicBillingCheckoutOffer | null;
   inviteCode: string;
 }): Promise<HostedBillingCheckoutResponse> {
   return requestHostedOnboardingJson<HostedBillingCheckoutResponse>({
     payload: {
       ...(input.billingPlanCode ? { billingPlanCode: input.billingPlanCode } : {}),
-      ...(input.checkoutOffer ? { checkoutOffer: input.checkoutOffer } : {}),
       inviteCode: input.inviteCode,
     },
     url: "/api/hosted-onboarding/billing/checkout",
   });
 }
 
-export async function requestHostedAutoPulseTrialEnrollment(input: {
+export async function requestHostedStarterUsageEnrollment(input: {
   inviteCode: string;
-}): Promise<HostedAutoPulseTrialEnrollmentResponse> {
-  return requestHostedOnboardingJson<HostedAutoPulseTrialEnrollmentResponse>({
+}): Promise<HostedStarterUsageEnrollmentResponse> {
+  return requestHostedOnboardingJson<HostedStarterUsageEnrollmentResponse>({
     payload: {
       inviteCode: input.inviteCode,
     },
-    url: "/api/hosted-onboarding/trial/enroll",
-  });
-}
-
-export async function requestHostedPulseTrialStartPaid(): Promise<HostedPulseTrialStartPaidClientResult> {
-  return requestHostedTrialPlanStartPaid({
-    targetPlanCode: "launch_monthly",
-    timing: "now",
-    useLegacyEmptyBody: true,
-  });
-}
-
-export function requestHostedTrialPlanStartPaid(input: {
-  targetPlanCode: "launch_monthly";
-  timing: "now";
-  useLegacyEmptyBody: true;
-}): Promise<HostedPulseTrialStartPaidClientResult>;
-export function requestHostedTrialPlanStartPaid(input: {
-  targetPlanCode: HostedTrialPaidPlanCode;
-  timing: "at_trial_end" | "now";
-  useLegacyEmptyBody?: boolean;
-}): Promise<HostedTrialPaidPlanStartClientResult>;
-export async function requestHostedTrialPlanStartPaid(input: {
-  targetPlanCode: HostedTrialPaidPlanCode;
-  timing: "at_trial_end" | "now";
-  useLegacyEmptyBody?: boolean;
-}): Promise<HostedTrialPaidPlanStartClientResult> {
-  const response = await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
-    method: "POST",
-    ...(input.useLegacyEmptyBody
-      ? {}
-      : {
-          payload: {
-            targetPlanCode: input.targetPlanCode,
-            timing: input.timing,
-          },
-        }),
-    url: "/api/settings/billing/start-paid-pulse",
-  });
-
-  if (response.status === "payment_required") {
-    if (typeof response.paymentUrl !== "string" || response.paymentUrl.length === 0) {
-      throw new HostedOnboardingApiError({
-        code: null,
-        message: "Payment link missing.",
-      });
-    }
-
-    window.location.assign(response.paymentUrl);
-    return {
-      status: "redirecting",
-    };
-  }
-
-  if (response.status === "billing_pending" || response.status === "started") {
-    return {
-      status: response.status,
-    };
-  }
-  if (
-    response.status === "already_scheduled"
-    || response.status === "continuing"
-    || response.status === "scheduled"
-  ) {
-    return {
-      ...(typeof response.effectiveAt === "string"
-        ? { effectiveAt: response.effectiveAt }
-        : {}),
-      status: response.status,
-    };
-  }
-
-  throw new HostedOnboardingApiError({
-    code: null,
-    message: "Request returned an unexpected response.",
-  });
-}
-
-export async function requestHostedPulseTrialContinuation(input: {
-  action: HostedPulseTrialContinuationAction;
-  redirectIfPaymentRequired?: boolean;
-}): Promise<
-  HostedPulseTrialContinuationClientResult
-> {
-  const response = await requestHostedOnboardingJson<
-    HostedPulseTrialStartPaidResponse | {
-      billingPlanCode: "launch_monthly";
-      paymentUrl?: string;
-      status: "continuing";
-    }
-  >({
-    headers: {
-      [HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_HEADER]: input.action,
-    },
-    method: "POST",
-    url: HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
-  });
-
-  if (response.status === "payment_required") {
-    if (input.redirectIfPaymentRequired) {
-      if (typeof response.paymentUrl !== "string" || response.paymentUrl.length === 0) {
-        throw new HostedOnboardingApiError({
-          code: null,
-          message: "Payment link missing.",
-        });
-      }
-      window.location.assign(response.paymentUrl);
-      return { status: "redirecting" };
-    }
-    return { status: "payment_required" };
-  }
-  if (
-    response.status === "billing_pending"
-    || response.status === "continuing"
-    || response.status === "started"
-  ) {
-    return { status: response.status };
-  }
-
-  throw new HostedOnboardingApiError({
-    code: null,
-    message: "Request returned an unexpected response.",
+    url: "/api/hosted-onboarding/starter/enroll",
   });
 }
 

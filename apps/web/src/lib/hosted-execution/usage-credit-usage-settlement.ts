@@ -17,6 +17,7 @@ export interface HostedUsageCreditSettlementResult
 
 interface LockedHostedUsageCreditGrant {
   entryId: string;
+  kind: "purchase_grant" | "referral_grant" | "starter_grant";
   purchaseId: string | null;
   referralId: string | null;
   remainingUsdMicros: bigint;
@@ -106,10 +107,10 @@ export async function settleHostedUsageCreditForUsageTx(input: {
     if (remainingDebitUsdMicros === 0n || projection.balanceUsdMicros === 0n) {
       break;
     }
-    if (
-      grant.remainingUsdMicros <= 0n
-      || (grant.purchaseId === null) === (grant.referralId === null)
-    ) {
+    const sourceIdsValid = grant.kind === "starter_grant"
+      ? grant.purchaseId === null && grant.referralId === null
+      : (grant.purchaseId === null) !== (grant.referralId === null);
+    if (grant.remainingUsdMicros <= 0n || !sourceIdsValid) {
       throw new TypeError("Hosted usage-credit eligible grant invariant failed.");
     }
 
@@ -200,6 +201,7 @@ async function lockHostedUsageCreditAvailableGrantsTx(input: {
   return input.tx.$queryRaw<LockedHostedUsageCreditGrant[]>`
     SELECT
       entry."id" AS "entryId",
+      entry."kind"::text AS "kind",
       entry."purchase_id" AS "purchaseId",
       entry."referral_id" AS "referralId",
       grant_projection."remaining_usd_micros" AS "remainingUsdMicros"
@@ -207,7 +209,7 @@ async function lockHostedUsageCreditAvailableGrantsTx(input: {
     INNER JOIN "hosted_usage_credit_grant" AS grant_projection
       ON grant_projection."entry_id" = entry."id"
     WHERE entry."beneficiary_member_id" = ${input.beneficiaryMemberId}
-      AND entry."kind" IN ('purchase_grant', 'referral_grant')
+      AND entry."kind" IN ('starter_grant', 'purchase_grant', 'referral_grant')
       AND grant_projection."remaining_usd_micros" > 0
     ORDER BY entry."beneficiary_sequence" ASC
     FOR UPDATE OF entry, grant_projection

@@ -1,6 +1,6 @@
 # Hosted Scheduled Plan Changes
 
-Last verified: 2026-07-30
+Last verified: 2026-08-08
 
 ## Goal
 
@@ -22,7 +22,7 @@ The app supports immediate upgrades and explicit renewal-bound changes:
 - `POST /api/settings/billing/upgrade-plan` accepts Pulse or Edge targets.
 - `upgradeHostedBillingPlan` permits Group to Pulse or Edge and Pulse to Edge.
 - `POST /api/settings/billing/switch-plan` schedules an eligible Group or Pulse
-  target at the current paid period or active trial end.
+  target at the current paid period end.
 - the historical Edge-to-Pulse route and service remain compatibility delegates;
 - `/settings` computes and renders only transitions admitted by the shared
   server policy.
@@ -263,7 +263,6 @@ Keep the implemented transition graph intentionally narrow.
 
 Supported scheduled transitions:
 
-- active Pulse trial to eligible Group at trial end;
 - paid Pulse to eligible Group at renewal;
 - paid Edge to Pulse or eligible Group at renewal.
 
@@ -302,7 +301,7 @@ Relevant Stripe docs:
 
 Supported scheduled transitions:
 
-- `launch_monthly -> launch_group_monthly` while trialing or paid;
+- `launch_monthly -> launch_group_monthly` while paid;
 - `launch_edge_monthly -> launch_monthly`;
 - `launch_edge_monthly -> launch_group_monthly`.
 
@@ -310,7 +309,8 @@ Unsupported transitions:
 
 - same-plan changes
 - Group to a lower plan
-- trial-state switches other than Pulse trial to Group at trial end
+- Starter members scheduling a future plan change; Starter begins an eligible paid
+  plan through ordinary checkout instead
 - Group selection without confirmed current membership
 - switches without a Stripe customer and subscription
 - switches while a conflicting Stripe schedule is already attached

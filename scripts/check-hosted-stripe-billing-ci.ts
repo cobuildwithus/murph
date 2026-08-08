@@ -14,10 +14,7 @@ export interface HostedStripeBillingProviderBoundarySources {
 }
 
 const REQUIRED_MATRIX_MARKERS = [
-  "proveNewMemberPulseTrialCheckout",
-  "proveTrialStartsPaidPulseAfterInvoiceReconciliation",
-  "provePausedTrialUpdateBeforeResumeIncidentRegression",
-  "proveTrialUpgradesToEdgeThroughPortal",
+  "proveStarterUsageStartsPaidPulseThroughCheckout",
   "provePaidPulseUpgradesToEdgeThroughPortal",
   "proveEdgeSchedulesPulseAtRenewal",
   "proveIndividualStartsFamilyThroughCheckout",
@@ -59,9 +56,14 @@ export function inspectHostedStripeBillingWorkflow(
     "Every pull request requires a hermetic billing job.",
   );
   requireText(
-    "missing-resume-proof",
-    "apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts",
-    "Hermetic proof must retain the paid-Pulse resume contract test.",
+    "missing-starter-checkout-proof",
+    "apps/web/test/hosted-onboarding-billing-checkout-route.test.ts",
+    "Hermetic proof must retain Starter-to-paid Checkout coverage.",
+  );
+  requireText(
+    "missing-starter-migration-proof",
+    "apps/web/test/hosted-starter-usage-migration.test.ts",
+    "Hermetic proof must retain the legacy trial-to-Starter migration contract.",
   );
   requireText(
     "missing-config-proof",
@@ -213,12 +215,9 @@ export function inspectHostedStripeBillingProviderBoundary(
 
   for (const [source, marker, label] of [
     [sources.matrix, "assertStripeCheckoutReady", "real Checkout surface"],
-    [sources.matrix, "assertStripeHostedInvoiceReady", "real Invoice surface"],
-    [sources.matrix, "openEdgeFromTrialPortal", "Trial Portal surface"],
     [sources.matrix, "openPaidPulseEdgeConfirmation", "paid Portal confirmation"],
     [sources.matrix, "assertHostedStripeListenerAlive", "live stripe listen ownership"],
     [sources.sandbox, "completeCheckoutSessionWithOfficialFixture", "exact Checkout completion"],
-    [sources.sandbox, "this.stripe.invoices.pay", "hosted Invoice completion"],
     [sources.sandbox, "this.stripe.subscriptions.update", "Portal-equivalent mutation"],
   ] as const) {
     requireSourceText(
@@ -245,9 +244,7 @@ export function inspectHostedStripeBillingProviderBoundary(
   }
 
   for (const [method, endMarker] of [
-    ["assertStripeCheckoutReady", "async startPaidPulse("],
-    ["assertStripeHostedInvoiceReady", "async openEdgeFromTrialPortal("],
-    ["openEdgeFromTrialPortal", "async openPaidPulseEdgeConfirmation("],
+    ["assertStripeCheckoutReady", "async openPaidPulseEdgeConfirmation("],
     ["openPaidPulseEdgeConfirmation", "async schedulePulseAtRenewal("],
   ] as const) {
     const segment = readSourceSegment(
@@ -266,23 +263,6 @@ export function inspectHostedStripeBillingProviderBoundary(
     }
   }
 
-  const portalObserver = readSourceSegment(
-    sources.browserDriver,
-    "async function assertStripePortalPlanAvailable(",
-    "\n}",
-  );
-  if (
-    portalObserver === null
-    || !portalObserver.includes('name: "Update subscription"')
-    || !portalObserver.includes("await navigation.click();")
-    || (portalObserver.match(/\.click\s*\(/gu)?.length ?? 0) !== 1
-    || /\.(?:check|fill|press)\s*\(/u.test(portalObserver)
-  ) {
-    issues.push({
-      code: "unsafe-portal-observer-navigation",
-      message: "Trial Portal proof may click only the non-final Update subscription navigation.",
-    });
-  }
   if (/\b(?:page|context)\.route\s*\(/u.test(sources.browserDriver)) {
     issues.push({
       code: "provider-request-interception",

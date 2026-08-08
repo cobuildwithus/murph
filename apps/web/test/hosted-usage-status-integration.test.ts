@@ -44,42 +44,6 @@ describe("hosted plan usage production gate integration", () => {
     });
   });
 
-  it("projects a Start Pulse path from the real paused expired-trial gate", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValue({
-      billingStatus: HostedBillingStatus.paused,
-      suspendedAt: null,
-    });
-
-    await expect(readHostedPersonalAiUsageStatus({
-      memberId: "member_trial",
-      now: NOW,
-      prisma: buildPrisma({
-        billingStatus: HostedBillingStatus.paused,
-        suspendedAt: null,
-      }) as never,
-      publicBaseUrl: "https://example.test",
-    })).resolves.toEqual({
-      availablePlans: [
-        {
-          code: "launch_monthly",
-          displayName: "Pulse",
-          monthlyPriceUsdCents: 800,
-          selectable: true,
-        },
-      ],
-      generatedAt: NOW.toISOString(),
-      reason: "trial_conversion_pending",
-      recommendedPlanCode: "launch_monthly",
-      recommendedAction: {
-        kind: "change_plan",
-        label: "Start Pulse now ($8/month)",
-        targetPlanCode: "launch_monthly",
-        url: "https://example.test/settings#subscription",
-      },
-      status: "unavailable",
-    });
-  });
-
   it.each([
     {
       billingStatus: HostedBillingStatus.canceled,
@@ -91,7 +55,7 @@ describe("hosted plan usage production gate integration", () => {
       name: "suspended",
       suspendedAt: new Date("2026-04-09T11:00:00.000Z"),
     },
-  ])("keeps $name trial access generic and action-free", async ({
+  ])("keeps $name legacy billing access generic and action-free", async ({
     billingStatus,
     suspendedAt,
   }) => {

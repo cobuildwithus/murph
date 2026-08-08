@@ -81,6 +81,10 @@ const mocks = vi.hoisted(() => ({
     count: vi.fn(),
     findMany: vi.fn(),
   },
+  hostedUsageCreditEntry: {
+    count: vi.fn(),
+    findMany: vi.fn(),
+  },
   hostedUsageCreditPurchase: {
     findMany: vi.fn(),
   },
@@ -139,6 +143,7 @@ const prisma = {
   hostedMemberRouting: mocks.hostedMemberRouting,
   hostedMember: mocks.hostedMember,
   hostedMemberBillingRef: mocks.hostedMemberBillingRef,
+  hostedUsageCreditEntry: mocks.hostedUsageCreditEntry,
   hostedUsageCreditPurchase: mocks.hostedUsageCreditPurchase,
 };
 
@@ -381,6 +386,7 @@ describe("hosted ops growth metrics", () => {
     expect(attribution).toEqual({
       counts: {
         companion_onboarding: 1,
+        legacy_trial_migration: 0,
         linq_instant_start: 1,
         unknown: 1,
         web_onboarding: 1,
@@ -653,9 +659,9 @@ describe("hosted ops growth metrics", () => {
       snapshotRow("2026-07-06", 2_900),
     );
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(3)
       .mockResolvedValueOnce(1);
 
@@ -676,9 +682,9 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toMatch(
       /Tracked fulfilled usage top-ups<\/td><td[^>]*>12<\/td><td[^>]*>One-time<\/td>/u,
     );
-    expect(mocks.hostedMemberBillingRef.findMany.mock.calls[0]?.[0]).toMatchObject({
+    expect(mocks.hostedUsageCreditEntry.findMany.mock.calls[0]?.[0]).toMatchObject({
       select: {
-        member: {
+        beneficiary: {
           select: {
             accountGroupMemberships: {
               select: {
@@ -701,6 +707,11 @@ describe("hosted ops growth metrics", () => {
                 status: "active",
               },
             },
+            billingRef: {
+              select: {
+                currentBillingPhase: true,
+              },
+            },
             createdAt: true,
             identity: {
               select: {
@@ -710,45 +721,56 @@ describe("hosted ops growth metrics", () => {
             suspendedAt: true,
           },
         },
-        pulseTrialStartSource: true,
+        effectiveAt: true,
+        sourceReferenceLookupKey: true,
+      },
+      where: {
+        effectiveAt: {
+          gte: expect.any(Date),
+          lte: expect.any(Date),
+        },
+        kind: "starter_grant",
       },
     });
-    expect(mocks.hostedMemberBillingRef.count.mock.calls[1]?.[0]).toMatchObject({
+    expect(mocks.hostedUsageCreditEntry.count.mock.calls[1]?.[0]).toMatchObject({
       where: {
-        member: {
-          OR: [
-            {
-              billingRef: {
-                is: {
-                  currentBillingPhase: "paid",
-                },
-              },
-            },
-            {
-              accountGroupMemberships: {
-                some: {
-                  group: {
-                    billingRef: {
-                      is: {
-                        billedSeatCount: {
-                          gte: 1,
-                        },
-                        currentBillingPhase: "paid",
-                      },
-                    },
-                    billingStatus: HostedBillingStatus.active,
-                    suspendedAt: null,
+        beneficiary: {
+          is: {
+            OR: [
+              {
+                billingRef: {
+                  is: {
+                    currentBillingPhase: "paid",
                   },
-                  status: "active",
                 },
               },
-            },
-          ],
-          suspendedAt: null,
+              {
+                accountGroupMemberships: {
+                  some: {
+                    group: {
+                      billingRef: {
+                        is: {
+                          billedSeatCount: {
+                            gte: 1,
+                          },
+                          currentBillingPhase: "paid",
+                        },
+                      },
+                      billingStatus: HostedBillingStatus.active,
+                      suspendedAt: null,
+                    },
+                    status: "active",
+                  },
+                },
+              },
+            ],
+            suspendedAt: null,
+          },
         },
-        pulseTrialRedeemedAt: {
+        effectiveAt: {
           lt: expect.any(Date),
         },
+        kind: "starter_grant",
       },
     });
   });
@@ -763,9 +785,9 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedMember.findMany.mockResolvedValueOnce([
       { createdAt: new Date("2026-07-06T11:00:00.000Z") },
     ]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -880,7 +902,7 @@ describe("hosted ops growth metrics", () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     queueCurrentMetricMocks();
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce(
       Array.from({ length: 30 }, (_, index) => {
         const snapshotDate = addUtcDays(
@@ -910,7 +932,7 @@ describe("hosted ops growth metrics", () => {
         outboundMessagesPriorDay: 200,
       },
     });
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1035,9 +1057,9 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 12,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1158,9 +1180,9 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1235,9 +1257,9 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1283,9 +1305,9 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1326,9 +1348,9 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1365,9 +1387,9 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1413,9 +1435,9 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1462,9 +1484,9 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1519,9 +1541,9 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1557,9 +1579,9 @@ describe("hosted ops growth metrics", () => {
       }),
     ]);
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1596,9 +1618,9 @@ describe("hosted ops growth metrics", () => {
       }),
     }]);
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-    mocks.hostedMemberBillingRef.count
+    mocks.hostedUsageCreditEntry.count
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -1650,9 +1672,9 @@ describe("hosted ops growth metrics", () => {
         trackedFulfilledUsageTopUps: 12,
       });
       mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-      mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+      mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
       mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-      mocks.hostedMemberBillingRef.count
+      mocks.hostedUsageCreditEntry.count
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
 
@@ -1679,9 +1701,9 @@ describe("hosted ops growth metrics", () => {
         trackedFulfilledUsageTopUps: 12,
       });
       mocks.hostedMember.findMany.mockResolvedValueOnce([]);
-      mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+      mocks.hostedUsageCreditEntry.findMany.mockResolvedValueOnce([]);
       mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
-      mocks.hostedMemberBillingRef.count
+      mocks.hostedUsageCreditEntry.count
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
 
@@ -1768,7 +1790,7 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toContain(
       "Each retained distinct sender counts once when Murph receives a message in the UTC window, across personal + group chats",
     );
-    expect(markup).toContain("8 of 20 mature trials");
+    expect(markup).toContain("8 of 20 mature starter activations");
 
     const targetHitMarkup = renderToStaticMarkup(
       createElement(GrowthScorecard, {

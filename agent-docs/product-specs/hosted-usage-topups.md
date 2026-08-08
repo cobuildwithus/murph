@@ -308,12 +308,11 @@ The first release permits purchases only when all of these are true:
   group; and
 - the selected offer is active in the server-owned catalog.
 
-Pulse Trial keeps **Start Pulse** rather than selling top-ups. Sponsored Family
+Starter keeps **Start a paid plan** rather than selling top-ups. Sponsored Family
 owners and members are excluded because their payer/beneficiary policy belongs
 with the separate Family funding rules below. An inactive, unpaid, or suspended
 group relationship does not exclude an otherwise eligible direct paid member.
-Cancellation,
-past-due, suspension, malformed billing state, and an expired trial fail closed.
+Cancellation, past-due, suspension, and malformed billing state fail closed.
 
 One read-only server projection owns these rules and returns only currently
 authorized offer codes. Settings presentation, plan-usage `add_usage`

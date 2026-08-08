@@ -263,34 +263,3 @@ function isHostedTelegramControlPreProviderFailure(
     || error?.status === 401
     || error?.status === 404;
 }
-
-export async function sendHostedTrialConversionNoticeToLinqChat(input: {
-  chatId: string;
-  memberId: string;
-  message: string;
-  occurredAt: string;
-  prisma: HostedAiUsageLimitNoticeClient;
-  replyToMessageId?: string | null;
-  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
-  signal?: AbortSignal;
-  sourceEventId: string;
-}): Promise<void> {
-  await drainHostedLinqSideEffectsDirect({
-    prisma: input.prisma,
-    sideEffects: [
-      createHostedWebhookLinqMessageSideEffect({
-        chatId: input.chatId,
-        claimToken: null,
-        memberId: input.memberId,
-        message: input.message,
-        noticeCode: "trial_conversion_pending",
-        occurredAt: input.occurredAt,
-        replyToMessageId: input.replyToMessageId ?? null,
-        ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
-        sourceEventId: input.sourceEventId,
-        template: "ai_usage_quota",
-      }),
-    ],
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
-}

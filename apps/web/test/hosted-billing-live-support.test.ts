@@ -38,8 +38,6 @@ describe("hosted billing live browser support", () => {
       .toBe("checkout");
     expect(readStripeSurfaceForTest(new URL("https://billing.stripe.com/p/session/test")))
       .toBe("portal");
-    expect(readStripeSurfaceForTest(new URL("https://invoice.stripe.com/i/test")))
-      .toBe("invoice");
     expect(readStripeSurfaceForTest(new URL("https://example.invalid/settings")))
       .toBeNull();
   });
@@ -58,9 +56,9 @@ describe("hosted billing live browser support", () => {
 
   it("passes only the fixture contract and allowlisted process values to Stripe CLI", () => {
     expect(buildStripeFixtureChildEnvironmentForTest({
-      expectedAmount: 1_400,
+      expectedAmount: 800,
       runId: "billing_pr_123_run_456",
-      scenario: "pulse-trial-checkout",
+      scenario: "starter-pulse-checkout",
       secretKey: "sk_test_fixture",
       sessionId: "cs_test_fixture",
       sourceEnv: {
@@ -72,9 +70,9 @@ describe("hosted billing live browser support", () => {
       },
     })).toEqual({
       HOME: "/tmp/opaque-home",
-      MURPH_HOSTED_STRIPE_FIXTURE_EXPECTED_AMOUNT: "1400",
+      MURPH_HOSTED_STRIPE_FIXTURE_EXPECTED_AMOUNT: "800",
       MURPH_HOSTED_STRIPE_FIXTURE_RUN_ID: "billing_pr_123_run_456",
-      MURPH_HOSTED_STRIPE_FIXTURE_SCENARIO: "pulse-trial-checkout",
+      MURPH_HOSTED_STRIPE_FIXTURE_SCENARIO: "starter-pulse-checkout",
       MURPH_HOSTED_STRIPE_FIXTURE_SESSION_ID: "cs_test_fixture",
       NODE_ENV: "test",
       PATH: "/bin",

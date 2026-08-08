@@ -246,33 +246,6 @@ describe("environment voice upload route", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("explains an expired trial instead of calling it an AI usage limit", async () => {
-    const bytes = createWebmBytes();
-    const captureId = await sha256Hex(bytes);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: {
-        allowed: false,
-        reason: "trial_expired_pending_billing",
-      },
-      status: "denied",
-    });
-
-    const response = await POST(createRequest({
-      bytes,
-      captureId,
-      capturedAt: new Date().toISOString(),
-    }));
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        message:
-          "Your Murph trial has ended. Keep the recording and try again after renewing access.",
-      },
-    });
-    expect(mocks.stageEnvironmentVoice).not.toHaveBeenCalled();
-  });
-
   it("allows only one distinct pending environment recording", async () => {
     const bytes = createWebmBytes();
     const captureId = await sha256Hex(bytes);
