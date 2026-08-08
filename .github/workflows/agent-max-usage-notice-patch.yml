@@ -1,5 +1,6 @@
 name: Agent Max final audit
 # One-shot final audit; the successful job removes this workflow and its patch script.
+# Rerun after making already-satisfied cleanup checks idempotent.
 
 on:
   push:
@@ -142,6 +143,22 @@ jobs:
           replace_exact(
               "    '  assert.match(markup, /included monthly AI usage/);\\n'",
               "    '  assert.match(markup, /included AI usage/);\\n'",
+          )
+          replace_exact(
+              '''unsupported_claim = " and priority access to new frontier models as they become available"
+          if skill_text.count(unsupported_claim) != 1:
+              raise RuntimeError(
+                  f"{skill}: expected one unsupported future-model claim, found {skill_text.count(unsupported_claim)}"
+              )
+          write(skill, skill_text.replace(unsupported_claim, "", 1))''',
+              '''unsupported_claim = " and priority access to new frontier models as they become available"
+          unsupported_claim_count = skill_text.count(unsupported_claim)
+          if unsupported_claim_count > 1:
+              raise RuntimeError(
+                  f"{skill}: expected at most one unsupported future-model claim, found {unsupported_claim_count}"
+              )
+          if unsupported_claim_count == 1:
+              write(skill, skill_text.replace(unsupported_claim, "", 1))''',
           )
 
           path.write_text(text, encoding="utf-8")
