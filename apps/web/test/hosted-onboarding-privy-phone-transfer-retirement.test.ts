@@ -396,7 +396,6 @@ describe("Privy phone-transfer source retirement", () => {
     fixture.sourceShape._count.hostedMailboxItems = 4;
     fixture.sourceShape._count.hostedMailboxLaneCounters = 3;
     fixture.sourceShape._count.hostedMailboxPayloads = 2;
-    fixture.sourceShape._count.hostedRuntimeLogs = 43;
     fixture.sourceShape._count.aiUsage = 2;
     fixture.sourceShape._count.linqDailyStates = 1;
 
@@ -1029,7 +1028,6 @@ function makeRelationCounts(autoTrial: boolean) {
     hostedMailboxItems: autoTrial ? 3 : 0,
     hostedMailboxLaneCounters: autoTrial ? 2 : 0,
     hostedMailboxPayloads: 0,
-    hostedRuntimeLogs: 0,
     linqContactCardShares: 0,
     linqDailyStates: 0,
     mealPhotoCaptureEnrollments: 0,

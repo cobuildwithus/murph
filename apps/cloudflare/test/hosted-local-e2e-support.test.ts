@@ -515,6 +515,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
       && name !== "murph.newsletter"
+      && name !== "murph.pending_vault_files"
       && name !== "murph.send_physical_note"
       && name !== "murph.send_vault_file"
       && name !== "murph.ask_grok"
@@ -547,6 +548,18 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       buildResponsesRequest(baseToolNames, "code-mode"),
     ]);
     expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.pending_vault_files"])],
+      {
+        pendingVaultFilesAvailable: true,
+      },
+    );
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.send_vault_file"])],
+      {
+        vaultFileSendAvailable: true,
+      },
+    );
+    expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(baseToolNamesWithoutProgress)],
       {
         progressUpdatesAvailable: false,
@@ -562,6 +575,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         imessageContactAvailable: true,
         messageTargetingAvailable: true,
         newsletterAvailable: true,
+        pendingVaultFilesAvailable: true,
         physicalNotesAvailable: true,
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,

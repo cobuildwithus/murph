@@ -1505,10 +1505,22 @@ describe("hosted runtime control contracts", () => {
         tokenAcquiredAtEpochMs: 1_777_000_000_012,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
+        directEnsureOrchestrationAttemptId:
+          "web-ingress-123e4567-e89b-42d3-a456-426614174000",
         runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
         runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
+        runtimeInvocationOrchestrationAttemptId:
+          "web-ingress-123e4567-e89b-42d3-a456-426614174000",
+        userRunnerRpcStartedAtEpochMs: 1_777_000_000_021,
+        runtimeConsentLockAcquiredAtEpochMs: 1_777_000_000_022,
+        healthDataAdmissionReadStartedAtEpochMs: 1_777_000_000_023,
+        healthDataAdmissionReadFinishedAtEpochMs: 1_777_000_000_024,
         userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
+        runnerStateBindStartedAtEpochMs: 1_777_000_000_031,
+        runnerStateBindFinishedAtEpochMs: 1_777_000_000_032,
+        runnerStateReadStartedAtEpochMs: 1_777_000_000_033,
+        runnerStateReadFinishedAtEpochMs: 1_777_000_000_034,
         activeFenceObservedAtEpochMs: 1_777_000_000_035,
         activeFenceTargetWasPriorVersion: true,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
@@ -1716,11 +1728,13 @@ describe("hosted runtime control contracts", () => {
     }
 
     // Orchestration diagnostics are the same metadata-only boundary: epoch-ms
-    // numbers plus explicit booleans only.
+    // numbers, explicit booleans, and two exact UUID-shaped correlation ids.
     for (const unsafeOrchestration of [
       { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
       { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
       { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
+      { directEnsureOrchestrationAttemptId: "web-ingress-not-a-uuid" }, // correlation id must be bounded
+      { runtimeInvocationOrchestrationAttemptId: "attempt_1" }, // arbitrary attempt ids are forbidden
       { runtimeControlAuthStartedAtEpochMs: "1777000000015" }, // CF-side string leaf
       { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
       { userRunnerEnsureStartedAtEpochMs: -1 }, // negative leaf

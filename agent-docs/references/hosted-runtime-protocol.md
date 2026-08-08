@@ -966,16 +966,28 @@ canonical live active access; Assistant Ask first completes its normal
 server-bound append checks. Web always awaits the applicable Temporal
 `signalWithStart`; only after Temporal accepts that durable signal does Web
 start the direct ensure. An access failure or Temporal acceptance failure starts
-no direct wake. One narrow prewarm exception exists: on the Linq instant-start
-path, the webhook handler fires one additional best-effort payloadless ensure
-immediately after trial enrollment atomically activates the new member, before
-the active-member replan or conversation-mailbox Temporal signal. Enrollment
-returns the newly committed activation as an explicit per-request wake
-continuation instead of signaling it first. Web starts the direct ensure, then
-the replan durably appends the original conversation item and Web awaits that
-conversation-mailbox Temporal signal; the signal reconciles both the foreground
-conversation lane and the already-durable activation item. Web then runs the
-deferred activation continuation so the existing best-effort activation signal
+no direct wake. Linq instant start follows the same rule: enrollment returns the
+newly committed activation as an explicit per-request wake continuation instead
+of signaling it first. Once the instant-start planner has committed the member
+row, Web may fire one best-effort `runtime/shell-prewarm` request while trial
+enrollment runs. That endpoint maps the member id directly to the deterministic
+container name and issues only the platform start command. It does not resolve
+a `UserRunner`, read access or workspace state, select a mailbox owner, create a
+fence, wait for readiness, or invoke work. The active-member replan durably
+appends the original conversation item and Web awaits that conversation-mailbox
+Temporal signal; only then may the ordinary Linq direct ensure start and own
+readiness plus all runtime authority. The shell hint does not read the persisted
+container state; it delegates the already-running check and concurrent-start
+coalescing to Cloudflare's `Container.start()`. Concurrent shell hints coalesce.
+Authoritative readiness aborts an in-progress hint before entering the container
+lifecycle queue; if a start wait fails after the platform command may have been
+issued, the uncertain hint remains claimable so that owner completes the
+canonical port and health path within its own budget. A stalled platform wait
+therefore relinquishes the existing lifecycle boundary without leaving a stale
+hint or partially initialized start ahead of foreground work. The signal
+reconciles both the foreground conversation lane and the already-durable
+activation item. Web then
+runs the deferred activation continuation so the existing best-effort activation signal
 and pending group-join confirmation reconciliation remain intact. If replan,
 delivery, or the conversation wake fails after activation commits, Web runs the
 same continuation immediately. A process death between the activation commit
@@ -986,11 +998,9 @@ minutes to redeliver. That exact-event retry observes active access, and its
 ordinary active-member conversation signal imports the pending activation item.
 If the provider exhausts its retry campaign, only later member traffic provides
 another wake, with no finite application-owned recovery bound. Enrollment
-failure starts neither prewarm nor a continuation. The same successful request
-also performs the ordinary Temporal-then-direct wake; the prewarm grants no
-authority, may be dropped, and a racing or duplicate ensure lands on the
-existing fence/active-wake path. This is a latency hint only, not a second
-durable wake authority:
+failure returns no continuation; a previously issued shell command may leave an
+idle container to expire, but it cannot process runtime work. Both direct
+requests are latency hints, not a second durable wake authority:
 accepted Linq reply delivery stamps `consumedAt` on the exact
 `HostedMailboxItem`, while Assistant Ask uses deterministic request/completion
 ids, mailbox dedupe, and idempotent continuation delivery. Do not add
@@ -1119,10 +1129,10 @@ concurrent first-failure callbacks produce at most one immediate recheck and
 cannot all suppress each other. Recovery therefore does not depend on the
 diagnostic row having been written or read back: runtime logs stay purely
 diagnostic and remain subject to ordinary retention. The callback reports the
-number of rows actually persisted. If account deletion removes the member
-before a draining runtime's diagnostic batch arrives, Web treats only the exact
-`hosted_runtime_log_user_id_fkey` failure as a successful zero-row diagnostic
-drop; every other database failure remains visible.
+number of rows actually persisted. If account deletion removes or suspends the
+member before a draining runtime's diagnostic batch arrives, the dedicated
+writer returns a successful zero-row diagnostic result after rechecking primary
+member authority under the subject lock; database failures remain visible.
 Cloudflare only reports the accepted-attempt failure through the existing
 signed runtime-log callback; it does not schedule retries or become a recovery
 orchestrator.
@@ -2268,7 +2278,7 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - `HostedMailboxPayload`
 - `HostedMailboxLaneCounter`
 - `HostedWorkspace`
-- `HostedRuntimeLog`
+- the dedicated hosted runtime-log Postgres store
 - `hosted_user_crypto_envelope` signed wrapped domain-root envelopes
 - `hosted_user_crypto_audit` append-only hosted crypto authority audit events
 - runtime status projection from `HostedWorkspace.redactedStatusJson`, mailbox lag, and bounded logs
@@ -2370,7 +2380,7 @@ explicitly appends one.
 
 ## Observability
 
-`HostedRuntimeLog` is redacted observability, not correctness state. Logs may be
+The dedicated hosted runtime-log store is redacted observability, not correctness state. Logs may be
 lossy and must not contain plaintext messages, transcripts, vault data,
 provider payloads, secrets, local paths, or direct personal identifiers. The
 hosted onboarding-follow-up path emits distinct metadata-only records when the

@@ -720,7 +720,9 @@ describe("hostedRunnerIntercept", () => {
         phase: "wake.running",
       }),
     );
-    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    const serializedLogs = JSON.stringify(
+      mocks.emitHostedExecutionStructuredLog.mock.calls,
+    );
     expect(serializedLogs).not.toContain(rawPath);
     expect(serializedLogs).not.toContain("snapshot_sensitive");
     expect(serializedLogs).not.toContain("member_123");
@@ -6961,7 +6963,9 @@ describe("hostedRunnerIntercept", () => {
         message: "Hosted runner provider egress completed.",
       }),
     );
-    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    const serializedLogs = JSON.stringify(
+      mocks.emitHostedExecutionStructuredLog.mock.calls,
+    );
     expect(serializedLogs).not.toContain(responseBody);
     expect(serializedLogs).not.toContain(requestBody);
     expect(serializedLogs).not.toContain("private_chat_id");
@@ -7314,6 +7318,26 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(403);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "runner",
+      details: {
+        method: "POST",
+        providerEgressPolicyRejectReason: "operation_not_allowed",
+        providerKind: "linq",
+        providerRequestAuthorized: false,
+        runtimeAuthorityHeadersPresent: true,
+        userIdPresent: true,
+      },
+      level: "warn",
+      message: "Hosted runner Linq provider egress rejected by policy.",
+      phase: "wake.running",
+    });
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain("webhook-subscriptions");
+    expect(serializedLogs).not.toContain("target_url");
+    expect(serializedLogs).not.toContain("web.example.test");
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain("linq-worker-secret");
   });
 
   it.each([
@@ -7541,6 +7565,26 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(403);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "runner",
+      details: {
+        method: "POST",
+        providerEgressPolicyRejectReason: "credential_sentinel_missing",
+        providerKind: "linq",
+        providerOperation: "message_send",
+        providerRequestAuthorized: false,
+        runtimeAuthorityHeadersPresent: true,
+        userIdPresent: true,
+      },
+      level: "warn",
+      message: "Hosted runner Linq provider egress rejected by policy.",
+      phase: "wake.running",
+    });
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain("chat_1");
+    expect(serializedLogs).not.toContain("hello");
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain("linq-worker-secret");
   });
 
   it("rejects Linq credential injection on a nonconfigured port for the same provider host", async () => {

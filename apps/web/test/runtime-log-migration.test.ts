@@ -16,19 +16,8 @@ import {
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("hosted runtime log database migration", () => {
-  it("requires an explicit storage mode for production", () => {
-    expect(() => resolveHostedRuntimeLogMigrationDatabaseUrl({
-      HOSTED_RUNTIME_LOG_DATABASE_URL:
-        "postgresql://logs.example.test:5432/runtime_logs",
-      HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL:
-        "postgresql://logs.example.test:5432/runtime_logs",
-      VERCEL_ENV: "production",
-    })).toThrow(/HOSTED_RUNTIME_LOG_STORAGE must be explicitly set/u);
-  });
-
   it("requires the pooled runtime endpoint for production", () => {
     expect(() => resolveHostedRuntimeLogMigrationDatabaseUrl({
-      HOSTED_RUNTIME_LOG_STORAGE: "primary",
       HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL:
         "postgresql://logs.example.test:5432/runtime_logs",
       VERCEL_ENV: "production",
@@ -37,7 +26,6 @@ describe("hosted runtime log database migration", () => {
 
   it("requires a direct endpoint for production", () => {
     expect(() => resolveHostedRuntimeLogMigrationDatabaseUrl({
-      HOSTED_RUNTIME_LOG_STORAGE: "primary",
       HOSTED_RUNTIME_LOG_DATABASE_URL:
         "postgresql://logs.example.test:5432/runtime_logs",
       VERCEL_ENV: "production",
@@ -51,7 +39,6 @@ describe("hosted runtime log database migration", () => {
         "postgresql://logs-pool.example.test:6543/runtime_logs",
       HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL:
         "postgresql://logs-direct.example.test:5432/runtime_logs",
-      HOSTED_RUNTIME_LOG_STORAGE: "primary",
       VERCEL_ENV: "production",
     })).toThrow(/DIRECT_DATABASE_URL is required/u);
   });
@@ -101,7 +88,6 @@ describe("hosted runtime log database migration", () => {
         DATABASE_URL: "postgresql://primary.example.test:5432/murph",
         DIRECT_DATABASE_URL:
           "postgresql://primary.example.test:5432/murph",
-        HOSTED_RUNTIME_LOG_STORAGE: "primary",
         HOSTED_RUNTIME_LOG_DATABASE_URL:
           "postgresql://logs-pool.example.test:5432/runtime_logs",
         HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL:
@@ -229,8 +215,10 @@ describe("hosted runtime log database migration", () => {
   });
 
   it("keeps the diagnostic schema isolated and free of raw member ids", async () => {
-    const [schema, migration, cleanupMigration] = await Promise.all([
+    const [schema, primarySchema, migration, cleanupMigration, contractMigration] =
+      await Promise.all([
       readFile(path.join(appRoot, "prisma/runtime-logs/schema.prisma"), "utf8"),
+      readFile(path.join(appRoot, "prisma/schema.prisma"), "utf8"),
       readFile(path.join(
         appRoot,
         "prisma/runtime-logs/migrations/20260729000000_init/migration.sql",
@@ -239,12 +227,18 @@ describe("hosted runtime log database migration", () => {
         appRoot,
         "prisma/migrations/20260729010000_hosted_account_cleanup_runtime_logs/migration.sql",
       ), "utf8"),
+      readFile(path.join(
+        appRoot,
+        "prisma/contract-migrations/20260807162546_drop_hosted_runtime_log_after_drain/migration.sql",
+      ), "utf8"),
     ]);
 
     expect(schema).toContain("model HostedRuntimeLog");
     expect(schema).not.toContain("model HostedRuntimeLogSubject");
     expect(schema).toContain("subjectKey");
     expect(schema).not.toContain("userId");
+    expect(primarySchema).not.toContain("model HostedRuntimeLog {");
+    expect(primarySchema).not.toContain("hostedRuntimeLogs");
     expect(migration).not.toContain('CREATE TABLE "hosted_runtime_log_subject"');
     expect(migration).toContain('CREATE TABLE "hosted_runtime_log"');
     expect(migration).toContain('"subject_key" TEXT NOT NULL');
@@ -264,6 +258,9 @@ describe("hosted runtime log database migration", () => {
     expect(cleanupMigration).toContain(
       'IF OLD."runtime_logs_completed_at" IS NULL THEN',
     );
+    expect(contractMigration.trim()).toBe(
+      'DROP TABLE IF EXISTS "hosted_runtime_log";',
+    );
   });
 
   it("routes every live producer through the new owner and keeps hot status reads log-free", async () => {
@@ -272,7 +269,7 @@ describe("hosted runtime log database migration", () => {
       callbackRoute,
       computerLog,
       deviceAuthority,
-      legacyWorkspaceStore,
+      workspaceStore,
       mailboxStore,
       runner,
     ] =
@@ -307,10 +304,10 @@ describe("hosted runtime log database migration", () => {
       expect(producer).toContain("hosted-runtime-log/write");
       expect(producer).not.toContain("recordHostedRuntimeLogTx");
     }
-    expect(legacyWorkspaceStore).not.toContain(
+    expect(workspaceStore).not.toContain(
       "function recordHostedRuntimeLog(",
     );
-    expect(legacyWorkspaceStore).not.toContain(
+    expect(workspaceStore).not.toContain(
       "function recordHostedRuntimeLogTx(",
     );
     expect(mailboxStore).not.toContain("recordHostedRuntimeLog");

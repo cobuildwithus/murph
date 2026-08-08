@@ -338,6 +338,7 @@ describe("cloudflare worker routes", () => {
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -367,6 +368,7 @@ describe("cloudflare worker routes", () => {
       "test-direct-r2-locator-marker",
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -2930,6 +2932,107 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
+    it("issues shell startup through only the deterministic named container", async () => {
+      const prewarmShell = vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      }));
+      const containerStub: HostedExecutionContainerStubLike = {
+        destroyInstance: vi.fn(async () => undefined),
+        invoke: vi.fn(async () => {
+          throw new Error("Shell prewarm must not invoke runtime work.");
+        }),
+        prewarmShell,
+        smokeHealth: vi.fn(async () => ({
+          ok: true,
+          runnerBundle: null,
+          service: "runner",
+          status: 200,
+        })),
+      };
+      const runnerContainerGetByName = vi.fn(() => containerStub);
+      const userRunnerGetByName = vi.fn(() => createUserRunnerStub());
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        CF_VERSION_METADATA: { id: "version-123" },
+        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
+        USER_RUNNER: { getByName: userRunnerGetByName },
+      });
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+          {
+            body: "{}",
+            headers: { "content-type": "application/json; charset=utf-8" },
+            method: "POST",
+          },
+        )),
+        env,
+      );
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({ accepted: true });
+      expect(runnerContainerGetByName).toHaveBeenCalledWith(
+        "test-user--v-version-123",
+      );
+      expect(prewarmShell).toHaveBeenCalledWith({
+        timeoutMs: 20_000,
+        userId: "test-user",
+      });
+      expect(userRunnerGetByName).not.toHaveBeenCalled();
+      expect(containerStub.invoke).not.toHaveBeenCalled();
+    });
+
+    it("rejects nonempty shell-prewarm bodies without resolving a runtime owner", async () => {
+      const runnerContainerGetByName = vi.fn();
+      const userRunnerGetByName = vi.fn(() => createUserRunnerStub());
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
+        USER_RUNNER: { getByName: userRunnerGetByName },
+      });
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+          {
+            body: JSON.stringify({ wake: true }),
+            headers: { "content-type": "application/json; charset=utf-8" },
+            method: "POST",
+          },
+        )),
+        env,
+      );
+
+      expect(response.status).toBe(400);
+      expect(runnerContainerGetByName).not.toHaveBeenCalled();
+      expect(userRunnerGetByName).not.toHaveBeenCalled();
+    });
+
+    it("rejects shell prewarm when the only credential is a web callback signature", async () => {
+      const runnerContainerGetByName = vi.fn();
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
+      });
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request(
+            "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+            {
+              body: "{}",
+              headers: { "content-type": "application/json; charset=utf-8" },
+              method: "POST",
+            },
+          ),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(401);
+      expect(runnerContainerGetByName).not.toHaveBeenCalled();
+    });
+
     it("starts runtime processing without an active fence", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
@@ -2943,7 +3046,9 @@ describe("cloudflare worker routes", () => {
       });
 
       const response = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-33333333-3333-4333-8333-333333333333",
         userId: "test-user",
       });
 
@@ -2959,6 +3064,11 @@ describe("cloudflare worker routes", () => {
         userId: "test-user",
         workspaceVersion: "7",
       });
+      expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+        runtimeInvocationOrchestrationAttemptId:
+          "web-ingress-33333333-3333-4333-8333-333333333333",
+        triggeredByWebDirect: true,
+      });
       await vi.waitFor(() =>
         expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
           active_attempt_id: null,
@@ -2971,11 +3081,14 @@ describe("cloudflare worker routes", () => {
     it("sends activation diagnostics for an active fence wake", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const activeWakeEnsureProcessing = vi.fn<
+        NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
+      >(async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }));
       const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
-        ensureProcessing: vi.fn(async () => ({
-          action: "woken" as const,
-          kind: "accepted" as const,
-        })),
+        ensureProcessing: activeWakeEnsureProcessing,
       });
       const token = await writeRuntimeControlFenceForTest({
         runner,
@@ -2985,7 +3098,9 @@ describe("cloudflare worker routes", () => {
       });
 
       const response = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-44444444-4444-4444-8444-444444444444",
         userId: "test-user",
       });
 
@@ -3003,6 +3118,14 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            triggeredByWebDirect: true,
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
           processingMode: "default",
@@ -3010,6 +3133,9 @@ describe("cloudflare worker routes", () => {
         },
         userId: "test-user",
       });
+      expect(
+        activeWakeEnsureProcessing.mock.calls[0]?.[0].activeRuntime?.orchestration,
+      ).not.toHaveProperty("runtimeInvocationOrchestrationAttemptId");
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
         active_attempt_id: token.attemptId,
@@ -3051,6 +3177,13 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
           processingMode: "default",

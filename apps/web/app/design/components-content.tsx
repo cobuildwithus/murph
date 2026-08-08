@@ -4,7 +4,7 @@ import {
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
 } from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
-import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
+import { CheckCircle2, CheckIcon, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import {
@@ -129,6 +129,19 @@ import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards"
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
+import {
+  CHECKOUT_CORE_FEATURES,
+  CHECKOUT_PULSE_FEATURES,
+  EDGE_ONLY_FEATURES,
+  JOIN_EDGE_FEATURES,
+  JOIN_FAMILY_FEATURES,
+  JOIN_PULSE_FEATURES,
+  PULSE_TRIAL_FEATURES,
+  SETTINGS_CORE_FEATURES,
+  SETTINGS_EDGE_FEATURES,
+  SETTINGS_FAMILY_FEATURES,
+  SETTINGS_PULSE_FEATURES,
+} from "@/src/lib/hosted-onboarding/plan-features";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
@@ -161,6 +174,9 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
+
+const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
+  "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
 
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
@@ -201,6 +217,32 @@ function Section({
     <div id={id} className="flex flex-col gap-6">
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
+    </div>
+  );
+}
+
+function PlanBulletListStudy({
+  features,
+  title,
+}: {
+  features: readonly string[];
+  title: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card/80 p-4">
+      <p className="mb-2 text-sm font-medium text-foreground">{title}</p>
+      <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
+        {features.map((feature) => (
+          <li key={feature} className="flex items-start gap-2">
+            <CheckIcon
+              className="mt-0.5 size-3.5 shrink-0 text-primary"
+              strokeWidth={2.5}
+              aria-hidden="true"
+            />
+            {feature}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -1533,7 +1575,7 @@ export function ComponentsContent() {
                   <GroupUsageFundingActions
                     monthlyAction={(
                       <GroupSponsorshipDialog
-                        checkoutUrl="/api/design/usage-credit-preview"
+                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
                         inert
                         mode="monthly"
@@ -1545,7 +1587,7 @@ export function ComponentsContent() {
                     )}
                     oneTimeAction={(
                       <GroupSponsorshipDialog
-                        checkoutUrl="/api/design/usage-credit-preview"
+                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
                         inert
                         mode="one_time"
@@ -1566,7 +1608,7 @@ export function ComponentsContent() {
               inert
             >
               <GroupSponsorshipManagementCard
-                endpoint="/api/design/group-sponsorship-management"
+                endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
                 inert
                 management={{
                   authorizationId: "hgsa_design_component",
@@ -2361,6 +2403,39 @@ export function ComponentsContent() {
               <PlanVisual tier="edge" />
               <span className="text-xs text-muted-foreground">Edge</span>
             </div>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Plan selling points">
+          <p className="-mt-3 text-xs text-muted-foreground">
+            Canonical bullet lists from lib/hosted-onboarding/plan-features.ts. The join page,
+            billing settings, and the plan dialogs all render from these lists, so a wording
+            change here is the wording change everywhere. Only Edge may claim the most capable
+            AI models; the top model requires an active paid Edge plan.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <PlanBulletListStudy title="Pulse trial · join page" features={PULSE_TRIAL_FEATURES} />
+            <PlanBulletListStudy title="Pulse · join page" features={JOIN_PULSE_FEATURES} />
+            <PlanBulletListStudy title="Edge · join page" features={JOIN_EDGE_FEATURES} />
+            <PlanBulletListStudy title="Family · join page" features={JOIN_FAMILY_FEATURES} />
+            <PlanBulletListStudy title="Core · settings" features={SETTINGS_CORE_FEATURES} />
+            <PlanBulletListStudy title="Pulse · settings" features={SETTINGS_PULSE_FEATURES} />
+            <PlanBulletListStudy title="Edge · settings" features={SETTINGS_EDGE_FEATURES} />
+            <PlanBulletListStudy title="Family · settings" features={SETTINGS_FAMILY_FEATURES} />
+            <PlanBulletListStudy
+              title="Pulse · start-paid dialog"
+              features={CHECKOUT_PULSE_FEATURES}
+            />
+            <PlanBulletListStudy
+              title="Core · start-paid dialog"
+              features={CHECKOUT_CORE_FEATURES}
+            />
+            <PlanBulletListStudy
+              title="Edge loses · downgrade dialog"
+              features={EDGE_ONLY_FEATURES}
+            />
           </div>
         </Section>
 

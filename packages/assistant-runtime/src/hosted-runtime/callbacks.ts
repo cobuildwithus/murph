@@ -7,6 +7,7 @@ import {
   compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
 } from "@murphai/contracts";
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   emitHostedExecutionStructuredLog,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
@@ -93,8 +94,13 @@ import type {
   HostedRuntimeLinqDeliveryOutcomeRequest,
   HostedRuntimeLinqRecentInboundEngagementResult,
   HostedRuntimeLinqSendResponse,
+  HostedRuntimePlatform,
   HostedRuntimeProviderTargetKind,
 } from "./platform.ts";
+import {
+  toHostedRuntimeLogCode,
+  writeHostedRuntimeLogBestEffort,
+} from "./runtime-logs.ts";
 import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
@@ -1707,6 +1713,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
   latencyTrace?: Omit<HostedAssistantMilestoneTraceContext, "assistantInputIds"> | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
@@ -1744,6 +1751,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
+      platform: input.platform ?? null,
       onProviderAccepted: ({
         acceptedAssistantInputIds,
         acceptedAt,
@@ -1862,6 +1870,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   onBackgroundDeliveryYield?: (input: {
     yieldedEffectCount: number;
   }) => void;
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -1967,6 +1976,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery ?? null,
           linqEnv,
           linqDeliveryContexts,
+          platform: input.platform ?? null,
           preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
           telegramEnv,
           telegramVoiceMemoEnv,
@@ -2806,6 +2816,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   shouldYieldBackgroundDelivery: (() => boolean) | null;
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -3108,6 +3119,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          platform: input.platform,
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
@@ -3584,6 +3596,50 @@ function resolveHostedAssistantLinqDeliveryContexts(input: {
   return wakeContext ? [wakeContext] : [];
 }
 
+// The app-card error-to-text transition happens inside the hosted container,
+// whose stdout/stderr never reaches a queryable sink, so the durable runtime
+// log is the only operator-visible destination for this warning. The entry is
+// projected from an allowlist and never copies error messages: parse-failure
+// messages can embed raw provider response text.
+function createHostedLinqAppCardFallbackErrorObserver(input: {
+  intentId: string | null;
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+}): (fallbackError: {
+  error: unknown;
+  reason: "app_card_rejected" | "capability_check_failed";
+}) => void {
+  return (fallbackError) => {
+    if (!input.platform?.logPort) {
+      return;
+    }
+    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(fallbackError.error);
+    const errorName = diagnostics?.errorName;
+    const errorStatus = diagnostics?.errorStatus;
+    const errorCode = diagnostics?.errorCodeDetail ?? diagnostics?.errorCode;
+    void writeHostedRuntimeLogBestEffort({
+      entry: {
+        component: "outbox",
+        ...(typeof errorCode === "string"
+          ? { errorCode: toHostedRuntimeLogCode(errorCode) }
+          : {}),
+        eventCode: "outbox.linq_app_card_fallback_error",
+        level: "warn",
+        ...(input.intentId ? { outboxIntentRef: input.intentId } : {}),
+        phase: "outbox",
+        redactedJson: {
+          fallbackKind: "text",
+          reason: fallbackError.reason,
+          ...(typeof errorName === "string"
+            ? { errorName: toHostedRuntimeLogCode(errorName) }
+            : {}),
+          ...(typeof errorStatus === "number" ? { errorStatus } : {}),
+        },
+      },
+      platform: input.platform,
+    });
+  };
+}
+
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
@@ -3601,6 +3657,7 @@ function createHostedAssistantLinqSendDependency(input: {
   }) => void;
   onProviderDispatchEntered?: () => void;
   onProviderDispatchSettledWithoutEffect?: () => void;
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
@@ -3608,6 +3665,10 @@ function createHostedAssistantLinqSendDependency(input: {
   threadIsDirect?: boolean | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
+  const onAppCardFallbackError = createHostedLinqAppCardFallbackErrorObserver({
+    intentId: input.intentId ?? null,
+    platform: input.platform ?? null,
+  });
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
     const currentHomeRouteOnly = shouldBypassHostedLinqDeliveryContextForHomeFallback({
@@ -3861,6 +3922,7 @@ function createHostedAssistantLinqSendDependency(input: {
             }),
       }, {
         ...dependencies,
+        onAppCardFallbackError,
         ...(input.publicInternetFetch
           ? { publicFetchImplementation: input.publicInternetFetch }
           : {}),

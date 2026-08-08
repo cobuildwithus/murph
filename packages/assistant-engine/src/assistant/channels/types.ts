@@ -74,6 +74,10 @@ export interface LinqRuntimeDependencies {
     media: AssistantVaultFileResponseMedia,
   ) => Promise<Uint8Array>
   maxSessionMs?: number
+  onAppCardFallbackError?: (input: {
+    error: unknown
+    reason: 'app_card_rejected' | 'capability_check_failed'
+  }) => void
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string
   }) => Promise<void>

@@ -27,6 +27,7 @@ import {
   prepareHostedWebPrismaClientForBuild,
 } from "../scripts/prepare-prisma-client-for-build";
 import {
+  assertHostedGroupFundingRecoveryConfiguration,
   hostedRuntimeLogProductionMigrationCommand,
   hostedWebProductionLinqLineSyncCommand,
   hostedWebProductionMigrationCommand,
@@ -98,6 +99,7 @@ describe("hosted web production migration guard", () => {
     const calls: Array<{ args: readonly string[]; command: string }> = [];
     const environment = {
       HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
       VERCEL: "1",
       VERCEL_ENV: "production",
       VERCEL_GIT_COMMIT_REF: "main",
@@ -141,6 +143,62 @@ describe("hosted web production migration guard", () => {
       /HOSTED_APP_SESSION_HMAC_KEY/u,
     );
     assert.equal(commands, 0);
+  });
+
+  test("preflights a signed funding recovery URL on the configured origin", () => {
+    assert.doesNotThrow(() => assertHostedGroupFundingRecoveryConfiguration({
+      HOSTED_APP_SESSION_HMAC_KEY:
+        "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
+    }));
+  });
+
+  test.each([
+    [
+      "missing",
+      undefined,
+      /hosted public base URL is required/u,
+    ],
+    [
+      "malformed",
+      "https://[invalid",
+      /Invalid URL/u,
+    ],
+    [
+      "pathful",
+      "https://join.example.test/app",
+      /must not include a path/u,
+    ],
+    [
+      "non-HTTPS",
+      "http://localhost:3000",
+      /must use HTTPS/u,
+    ],
+  ])("rejects a %s funding recovery origin before migrations", (
+    _label,
+    publicBaseUrl,
+    expected,
+  ) => {
+    assert.throws(
+      () => assertHostedGroupFundingRecoveryConfiguration({
+        HOSTED_APP_SESSION_HMAC_KEY:
+          "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+        ...(publicBaseUrl
+          ? { HOSTED_ONBOARDING_PUBLIC_BASE_URL: publicBaseUrl }
+          : {}),
+      }),
+      expected,
+    );
+  });
+
+  test("rejects an unusable funding recovery signing authority", () => {
+    assert.throws(
+      () => assertHostedGroupFundingRecoveryConfiguration({
+        HOSTED_APP_SESSION_HMAC_KEY: "not-canonical",
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
+      }),
+      /HOSTED_APP_SESSION_HMAC_KEY/u,
+    );
   });
 
   test("reuses the Prisma client only after the guarded production migration step", async () => {
@@ -554,6 +612,7 @@ describe("hosted web production migration guard", () => {
         runHostedWebProductionMigrationsIfNeeded(
           {
             HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
             VERCEL: "1",
             VERCEL_ENV: "production",
             VERCEL_GIT_COMMIT_REF: "main",

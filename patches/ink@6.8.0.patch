@@ -1,0 +1,12 @@
+diff --git a/build/ink.js b/build/ink.js
+index 30019a073d38ed05dca08f6221af187c429a536b..66ab1d5f2b745a242a7efe7387d6d57df492d76b 100644
+--- a/build/ink.js
++++ b/build/ink.js
+@@ -1,6 +1,6 @@
+ import process from 'node:process';
+ import React from 'react';
+-import { throttle } from 'es-toolkit/compat';
++import throttle from 'es-toolkit/compat/throttle';
+ import ansiEscapes from 'ansi-escapes';
+ import isInCi from 'is-in-ci';
+ import autoBind from 'auto-bind';
