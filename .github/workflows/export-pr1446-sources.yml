@@ -1,4 +1,4 @@
-name: Export PR 1446 sources
+name: Export PR 1446 audited candidate
 
 on:
   push:
@@ -8,43 +8,114 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: export-pr1446-audited-candidate
+  cancel-in-progress: true
+
 jobs:
   export:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
-      - name: Export current main and PR source trees
+      - name: Reconstruct audited patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            scripts/pr1446-final/00 \
+            scripts/pr1446-final/01 \
+            | tr -d '\r\n ' \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/pr1446-final.patch
+          echo '1d92ac0a305f0cef6fcb7bbf5405929fbe2b767e1a2e0dac3b0ac6f1d8cc7a04  /tmp/pr1446-final.patch' \
+            | sha256sum --check
+
+      - name: Materialize current-main candidate
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin main agent/optional-sponsorship-moments
-          git archive --format=tar.gz \
-            --output=/tmp/murph-main.tar.gz \
-            origin/main
-          git archive --format=tar.gz \
-            --output=/tmp/murph-pr1446.tar.gz \
-            origin/agent/optional-sponsorship-moments
-          merge_base="$(git merge-base origin/main origin/agent/optional-sponsorship-moments)"
-          git diff --binary "$merge_base" origin/agent/optional-sponsorship-moments \
-            > /tmp/pr1446-feature.patch
-          sha256sum \
-            /tmp/murph-main.tar.gz \
-            /tmp/murph-pr1446.tar.gz \
-            /tmp/pr1446-feature.patch \
-            > /tmp/SHA256SUMS
+          rm -rf /tmp/pr1446-candidate
+          git worktree add --detach /tmp/pr1446-candidate origin/main
+          cd /tmp/pr1446-candidate
+          git apply --3way --index /tmp/pr1446-final.patch
 
-      - name: Upload source export
+          python - <<'PY'
+          from pathlib import Path
+
+          migration_test = Path(
+              'apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts'
+          )
+          text = migration_test.read_text()
+          migration = '      "20260807210000_add_group_sponsorship_creative_request",\n'
+          if migration not in text:
+              anchor = '      "20260806180000_fix_hosted_usage_plan_transition_bridge",\n'
+              if anchor not in text:
+                  raise SystemExit('migration-list anchor not found')
+              text = text.replace(anchor, anchor + migration, 1)
+              migration_test.write_text(text)
+
+          product_spec = Path('agent-docs/product-specs/hosted-usage-topups.md')
+          text = product_spec.read_text()
+          old = (
+              'Its private monthly maximum never changes public output or creates a '
+              'running bit.'
+          )
+          new = (
+              'Its private monthly maximum never changes the public acknowledgment '
+              'or creates a running bit.'
+          )
+          if old in text:
+              text = text.replace(old, new, 1)
+              product_spec.write_text(text)
+          elif new not in text:
+              raise SystemExit('monthly-maximum contract text not found')
+          PY
+
+          git add -A
+          git diff --cached --check
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git commit -m "Materialize audited PR 1446 candidate"
+
+          git archive --format=tar.gz \
+            --output=/tmp/murph-pr1446-candidate.tar.gz \
+            HEAD
+          git archive --format=tar.gz \
+            --output=/tmp/murph-current-main.tar.gz \
+            origin/main
+          git diff --binary origin/main...HEAD > /tmp/pr1446-candidate.patch
+          git diff --stat origin/main...HEAD > /tmp/pr1446-candidate.stat
+          git diff --name-status origin/main...HEAD > /tmp/pr1446-candidate.files
+          git rev-parse origin/main > /tmp/pr1446-current-main.sha
+          git rev-parse HEAD > /tmp/pr1446-candidate.sha
+          sha256sum \
+            /tmp/murph-pr1446-candidate.tar.gz \
+            /tmp/murph-current-main.tar.gz \
+            /tmp/pr1446-final.patch \
+            /tmp/pr1446-candidate.patch \
+            /tmp/pr1446-candidate.stat \
+            /tmp/pr1446-candidate.files \
+            > /tmp/pr1446-audit-SHA256SUMS
+
+      - name: Upload audited candidate
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: pr1446-sources
+          name: pr1446-audited-candidate
           path: |
-            /tmp/murph-main.tar.gz
-            /tmp/murph-pr1446.tar.gz
-            /tmp/pr1446-feature.patch
-            /tmp/SHA256SUMS
+            /tmp/murph-pr1446-candidate.tar.gz
+            /tmp/murph-current-main.tar.gz
+            /tmp/pr1446-final.patch
+            /tmp/pr1446-candidate.patch
+            /tmp/pr1446-candidate.stat
+            /tmp/pr1446-candidate.files
+            /tmp/pr1446-current-main.sha
+            /tmp/pr1446-candidate.sha
+            /tmp/pr1446-audit-SHA256SUMS
           retention-days: 1
           if-no-files-found: error
