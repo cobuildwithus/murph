@@ -1,0 +1,40 @@
+name: Export PR 1464 audit snapshot
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-export-pr1464-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/non-expiring-starter-usage
+          fetch-depth: 0
+
+      - name: Build exact-head audit artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git bundle create /tmp/pr1464.bundle --all
+          git rev-parse HEAD > /tmp/pr1464-head.txt
+          git rev-parse origin/main > /tmp/pr1464-main.txt
+          tar --exclude=.git -czf /tmp/pr1464-source.tgz .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr1464-audit-snapshot
+          path: |
+            /tmp/pr1464.bundle
+            /tmp/pr1464-head.txt
+            /tmp/pr1464-main.txt
+            /tmp/pr1464-source.tgz
+          retention-days: 1
+          compression-level: 0
