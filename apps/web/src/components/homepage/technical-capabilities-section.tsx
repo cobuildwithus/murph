@@ -37,8 +37,19 @@ const CAPABILITIES = [
   },
 ] as const;
 
-const INFERENCE_DETAIL_WITHOUT_VENICE =
-  "Use managed models, connect your own compatible model endpoint and key, or run an open-source model locally.";
+function inferenceDetail(
+  veniceAvailable: boolean,
+  customInferenceAvailable: boolean,
+): string {
+  const clauses = ["Use managed models"];
+  if (veniceAvailable) {
+    clauses.push("choose Venice when its privacy model fits you better");
+  }
+  if (customInferenceAvailable) {
+    clauses.push("connect your own compatible model endpoint and key");
+  }
+  return `${clauses.join(", ")}, or run an open-source model locally.`;
+}
 
 const RUNTIME_FACTS = [
   ["runtime", "Codex CLI + App Server"],
@@ -67,23 +78,29 @@ const INFERENCE_OPTIONS = [
 ] as const;
 
 export function TechnicalCapabilitiesSection({
+  customInferenceAvailable,
   veniceAvailable,
 }: {
+  customInferenceAvailable: boolean;
   veniceAvailable: boolean;
 }) {
-  // Venice and the provider-choice security anchor render behind the same flag
-  // that gates the FAQ and the /security#model-provider section, so the
-  // homepage never claims a provider path the rest of the site hides.
-  const capabilities = veniceAvailable
-    ? CAPABILITIES
-    : CAPABILITIES.map((capability) =>
-        capability.label === "Inference"
-          ? { ...capability, detail: INFERENCE_DETAIL_WITHOUT_VENICE }
-          : capability,
-      );
-  const inferenceOptions = veniceAvailable
-    ? INFERENCE_OPTIONS
-    : INFERENCE_OPTIONS.filter((option) => option.detail !== "Venice");
+  // Venice and the custom-endpoint path render behind the same flags that gate
+  // the FAQ, the /security#model-provider section, and the Settings inference
+  // surfaces, so the homepage never claims a provider path this deployment
+  // hides.
+  const capabilities = CAPABILITIES.map((capability) =>
+    capability.label === "Inference"
+      ? {
+          ...capability,
+          detail: inferenceDetail(veniceAvailable, customInferenceAvailable),
+        }
+      : capability,
+  );
+  const inferenceOptions = INFERENCE_OPTIONS.filter(
+    (option) =>
+      (veniceAvailable || option.detail !== "Venice")
+      && (customInferenceAvailable || option.label !== "Bring your own"),
+  );
   return (
     <section
       aria-labelledby="technical-capabilities-title"
@@ -109,8 +126,8 @@ export function TechnicalCapabilitiesSection({
             </h2>
             <p className="mt-6 max-w-[46ch] text-pretty text-base leading-[1.75] text-[#f5f0e8]/70 sm:text-[1.0625rem]">
               Murph can use a browser, place phone calls, operate tools, and
-              delegate bounded work. It changes model and reasoning effort to
-              fit the task, while you choose who supplies the inference.
+              delegate bounded work. You choose the model, the reasoning
+              effort, and who supplies the inference.
             </p>
           </div>
 
@@ -184,7 +201,7 @@ function RuntimeDossier() {
         <span aria-hidden="true" className="size-2.5 rounded-full bg-[#d27d6a]" />
         <span aria-hidden="true" className="size-2.5 rounded-full bg-[#d4b87a]" />
         <span aria-hidden="true" className="size-2.5 rounded-full bg-[#7a8c6e]" />
-        <span className="ml-4 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f5f0e8]/35">
+        <span className="ml-4 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f5f0e8]/55">
           murph runtime
         </span>
       </div>

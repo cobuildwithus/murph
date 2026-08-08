@@ -118,19 +118,22 @@ export function SectionsContent() {
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
-          <TechnicalCapabilitiesSection veniceAvailable />
+          <TechnicalCapabilitiesSection customInferenceAvailable veniceAvailable />
         </div>
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Homepage technical runtime · Venice unavailable">
+      <StudySection title="Homepage technical runtime · provider flags off">
         <div
-          data-design-section="homepage-technical-runtime-no-venice"
+          data-design-section="homepage-technical-runtime-minimal"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
-          <TechnicalCapabilitiesSection veniceAvailable={false} />
+          <TechnicalCapabilitiesSection
+            customInferenceAvailable={false}
+            veniceAvailable={false}
+          />
         </div>
       </StudySection>
 

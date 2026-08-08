@@ -6,15 +6,35 @@ import { test } from "vitest";
 
 import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 
-test("TechnicalCapabilitiesSection renders the agent runtime and inference choices", () => {
-  const markup = renderToStaticMarkup(
-    createElement(TechnicalCapabilitiesSection, { veniceAvailable: true }),
+function render(flags: {
+  customInferenceAvailable: boolean;
+  veniceAvailable: boolean;
+}): string {
+  return renderToStaticMarkup(
+    createElement(TechnicalCapabilitiesSection, flags),
   );
+}
+
+test("TechnicalCapabilitiesSection renders the agent runtime and every enabled inference choice", () => {
+  const markup = render({
+    customInferenceAvailable: true,
+    veniceAvailable: true,
+  });
 
   assert.match(markup, /Under the hood/);
+  // The headline glues phrase groups with non-breaking spaces so it stacks as
+  // "Built on Codex, / with a computer / of its own." at every width.
   assert.match(markup, /Built on Codex, with a computer of its own\./);
+  // The member chooses model and reasoning effort; the runtime never claims to
+  // switch configuration on its own.
+  assert.match(
+    markup,
+    /You choose the model, the reasoning effort, and who supplies the inference\./,
+  );
+  assert.doesNotMatch(markup, /changes model and reasoning effort/);
   assert.match(markup, /Codex CLI \+ App Server/);
   assert.match(markup, /be the most capable health agent in the world/);
+  assert.match(markup, /keep the member in control/);
   assert.match(markup, /Its own computer/);
   assert.match(markup, /A real phone number/);
   assert.match(markup, /Bounded subagents/);
@@ -32,16 +52,41 @@ test("TechnicalCapabilitiesSection renders the agent runtime and inference choic
   assert.doesNotMatch(markup, /fully autonomous/i);
 });
 
-test("TechnicalCapabilitiesSection hides Venice and its security anchor when the provider flag is off", () => {
-  const markup = renderToStaticMarkup(
-    createElement(TechnicalCapabilitiesSection, { veniceAvailable: false }),
-  );
+test("TechnicalCapabilitiesSection hides Venice when only the Venice flag is off", () => {
+  const markup = render({
+    customInferenceAvailable: true,
+    veniceAvailable: false,
+  });
 
   assert.doesNotMatch(markup, /Venice/);
   assert.doesNotMatch(markup, /privacy model fits you better/);
-  assert.doesNotMatch(markup, /model-provider/);
-  assert.match(markup, /OpenAI/);
   assert.match(markup, /compatible model endpoint and key/);
   assert.match(markup, /Endpoint \+ key/);
+});
+
+test("TechnicalCapabilitiesSection hides the custom endpoint when only that flag is off", () => {
+  const markup = render({
+    customInferenceAvailable: false,
+    veniceAvailable: true,
+  });
+
+  assert.match(markup, /Venice/);
+  assert.doesNotMatch(markup, /endpoint and key/);
+  assert.doesNotMatch(markup, /Endpoint \+ key/);
+  assert.doesNotMatch(markup, /Bring your own/);
+});
+
+test("TechnicalCapabilitiesSection claims only managed and self-hosted paths when both provider flags are off", () => {
+  const markup = render({
+    customInferenceAvailable: false,
+    veniceAvailable: false,
+  });
+
+  assert.doesNotMatch(markup, /Venice/);
+  assert.doesNotMatch(markup, /endpoint and key/);
+  assert.doesNotMatch(markup, /Endpoint \+ key/);
+  assert.doesNotMatch(markup, /model-provider/);
+  assert.match(markup, /OpenAI/);
   assert.match(markup, /Local OSS/);
+  assert.match(markup, /Use managed models, or run an open-source model locally\./);
 });

@@ -31,6 +31,7 @@ import {
   formatHostedLandingTrialDurationPhrase,
   formatHostedLandingTrialPricingNote,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import { isHostedCustomInferenceEnabled } from "@/src/lib/hosted-inference/feature";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -156,6 +157,7 @@ export default async function HomePage() {
         <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
         <HowItWorksSection />
         <TechnicalCapabilitiesSection
+          customInferenceAvailable={isHostedCustomInferenceEnabled()}
           veniceAvailable={isHostedVeniceAssistantEnabled()}
         />
         <SecurityTeaserSection />
