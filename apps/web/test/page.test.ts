@@ -305,6 +305,9 @@ test("HomePage keeps the technical runtime section in order and honors both prov
       assert.doesNotMatch(markup, /Endpoint \+ key/);
       assert.doesNotMatch(markup, /compatible model endpoint and key/);
     }
+    // The managed and self-hosted paths are never gated.
+    assert.match(markup, /Managed[\s\S]{0,200}OpenAI/);
+    assert.match(markup, /Run it yourself[\s\S]{0,200}Local OSS/);
   }
 });
 
