@@ -26,6 +26,7 @@ import {
 } from "@murphai/device-syncd/types";
 import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
 
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
@@ -490,7 +491,14 @@ export class HostedDeviceSyncPublicIngressService {
 
   async handleWebhook(provider: string, rawBody?: Buffer): Promise<HandleWebhookResult> {
     const resolvedRawBody = rawBody ?? (await this.readWebhookRawBody());
-    return this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody);
+    // One webhook request opens several secure-box fields under the same
+    // domain root (account lookup, then admission work inside the transaction).
+    // Scope the unwrap memo to the request so the KMS round trip happens once,
+    // before the admission transaction opens, instead of per field while a
+    // pooled connection is held. Hosted-onboarding webhooks use the same seam.
+    return runWithHostedDomainRootUnwrapCache(() =>
+      this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody),
+    );
   }
 
   async resolveWebhookPreflight(

@@ -194,13 +194,45 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       httpStatus: 403,
     });
 
-    expect(lockHostedMemberRowMock).toHaveBeenCalledWith(tx, "user-123");
+    expect(lockHostedMemberRowMock).toHaveBeenCalledWith(tx, "user-123", {
+      timeoutMs: 5_000,
+    });
     expect(readHostedHealthDataConsentStateMock).toHaveBeenCalledWith({
       memberId: "user-123",
       prisma: tx,
     });
     expect(executeRaw).not.toHaveBeenCalled();
     expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("bounds the member-row lock wait before taking the admission advisory lock", async () => {
+    const executeRaw = vi.fn(async () => 0);
+    const tx = { $executeRaw: executeRaw };
+    const callback = vi.fn(async () => "admitted");
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $transaction: async <TResult>(
+          transactionCallback: (transaction: typeof tx) => Promise<TResult>,
+        ) => transactionCallback(tx),
+      } as never,
+    });
+
+    await expect(store.withHealthDataAdmissionLock(
+      "user-123",
+      "dsc_123",
+      callback,
+    )).resolves.toBe("admitted");
+
+    // A queued webhook burst must fail fast with a retryable error instead of
+    // burning the transaction budget waiting on the member row. The
+    // transaction-local lock_timeout also bounds the advisory-lock step.
+    expect(lockHostedMemberRowMock).toHaveBeenCalledWith(tx, "user-123", {
+      timeoutMs: 5_000,
+    });
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(callback).toHaveBeenCalledWith(tx);
+    expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]!)
+      .toBeLessThan(executeRaw.mock.invocationCallOrder[0]!);
   });
 
   it("creates new hosted connections without creating a Prisma secret row", async () => {

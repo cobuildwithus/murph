@@ -178,6 +178,105 @@ describe("device sync callback redirect helpers", () => {
     });
   });
 
+  it("maps expired Prisma transaction faults to a retryable 503", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const expiredTransactionError = Object.assign(
+      new Error("A query cannot be executed on an expired transaction."),
+      {
+        code: "P2028",
+        name: "PrismaClientKnownRequestError",
+      },
+    );
+
+    const response = httpModule.jsonError(expiredTransactionError);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "STORE_CONTENTION",
+        message: "The device-sync store timed out under contention. Retry later.",
+        retryable: true,
+      },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledOnce();
+  });
+
+  it("maps transaction-start-timeout faults carried in a cause chain to the retryable 503", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const wrappedStartTimeout = new Error("Webhook admission failed.", {
+      cause: Object.assign(
+        new Error("Unable to start a transaction in the given time."),
+        {
+          code: "P2028",
+          name: "PrismaClientKnownRequestError",
+        },
+      ),
+    });
+
+    const response = httpModule.jsonError(wrappedStartTimeout);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "STORE_CONTENTION",
+        message: "The device-sync store timed out under contention. Retry later.",
+        retryable: true,
+      },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("maps bounded lock-timeout raw-query faults to the retryable 503", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const lockTimeoutError = Object.assign(
+      new Error("canceling statement due to lock timeout"),
+      {
+        code: "P2010",
+        meta: { code: "55P03" },
+        name: "PrismaClientKnownRequestError",
+      },
+    );
+
+    const response = httpModule.jsonError(lockTimeoutError);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "STORE_CONTENTION",
+        message: "The device-sync store timed out under contention. Retry later.",
+        retryable: true,
+      },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps unrelated Prisma errors on the internal 500 path", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const uniqueViolation = Object.assign(
+      new Error("Unique constraint failed."),
+      {
+        code: "P2002",
+        name: "PrismaClientKnownRequestError",
+      },
+    );
+
+    const response = httpModule.jsonError(uniqueViolation);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledOnce();
+  });
+
   it("maps shared malformed request errors to the existing 400 JSON shapes", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const invalidJsonError = new SyntaxError(

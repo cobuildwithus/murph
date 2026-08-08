@@ -94,6 +94,16 @@ export type {
   UpsertHostedDeviceSyncDirtyConnectionResult,
 } from "./prisma-store/types";
 
+/**
+ * Webhook fan-out bursts queue many admissions on one member row. Without a
+ * lock bound, each queued transaction burns its whole 15s budget waiting and
+ * then expires mid-callback; with one, waiters fail fast with a retryable
+ * error the provider redelivers. The bound rides the transaction-local
+ * `lock_timeout` set by `lockHostedMemberRow`, which also covers the
+ * advisory-lock step in the same transaction.
+ */
+const HEALTH_DATA_ADMISSION_LOCK_TIMEOUT_MS = 5_000;
+
 export class PrismaDeviceSyncControlPlaneStore
   implements DeviceSyncPublicIngressStore, HostedBrowserAssertionNonceStore
 {
@@ -493,7 +503,9 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.prisma.$transaction(async (tx) => {
       // Member first is the repository-wide consent serialization order.
       // Connection state is locked only after withdrawal authority is current.
-      await lockHostedMemberRow(tx, userId);
+      await lockHostedMemberRow(tx, userId, {
+        timeoutMs: HEALTH_DATA_ADMISSION_LOCK_TIMEOUT_MS,
+      });
       if (await readHostedHealthDataConsentState({
         memberId: userId,
         prisma: tx,
