@@ -3,11 +3,15 @@ import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-s
 
 const {
   lockHostedMemberRowMock,
+  openHostedUserSecureBoxStringMock,
   randomBytesMock,
   readHostedHealthDataConsentStateMock,
   supersedeDirtyStateMock,
 } = vi.hoisted(() => ({
   lockHostedMemberRowMock: vi.fn(async () => undefined),
+  openHostedUserSecureBoxStringMock: vi.fn(
+    async (_input: { prisma?: unknown; value?: unknown }) => "acct_456",
+  ),
   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
   readHostedHealthDataConsentStateMock: vi.fn(
     async (): Promise<"granted" | "missing" | "revoked"> => "missing",
@@ -26,6 +30,14 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => ({
 vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/legal/consent")>()),
   readHostedHealthDataConsentState: readHostedHealthDataConsentStateMock,
+}));
+
+// Only the secure-box open seam is mocked so the Prisma client the store hands
+// to the decrypt path stays observable. Tests that pass a test codec never
+// reach this seam.
+vi.mock("@/src/lib/hosted-crypto/secure-box", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-crypto/secure-box")>()),
+  openHostedUserSecureBoxString: openHostedUserSecureBoxStringMock,
 }));
 
 vi.mock("node:crypto", async () => {
@@ -1527,6 +1539,75 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       provider: "junction",
       status: "active",
     }));
+  });
+
+  it("decrypts the external account id through the caller's transaction client", async () => {
+    const connection = createConnection({
+      externalAccountIdEncrypted: "sealed:acct_456",
+      id: "dsc_123",
+      provider: "oura",
+      status: "active",
+      userId: "user-123",
+    });
+    // An interactive transaction already holds one pooled connection. A read
+    // that falls back to the root client checks out a second one and can
+    // self-starve the pool under webhook bursts, so touching it fails here.
+    const rootClientUse = vi.fn();
+    const rootPrisma = {
+      deviceConnection: {
+        findFirst: async () => {
+          rootClientUse();
+          throw new Error("root Prisma client must not be used inside a transaction");
+        },
+      },
+    };
+    const tx = {
+      deviceConnection: {
+        findFirst: async () => cloneConnection(connection),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: rootPrisma as never,
+    });
+
+    await expect(
+      store.getConnectionForUser("user-123", "dsc_123", tx as never),
+    ).resolves.toMatchObject({
+      externalAccountId: "acct_456",
+      id: "dsc_123",
+    });
+
+    expect(openHostedUserSecureBoxStringMock).toHaveBeenCalledTimes(1);
+    expect(openHostedUserSecureBoxStringMock.mock.calls[0]?.[0]).toMatchObject({
+      value: "sealed:acct_456",
+    });
+    expect(openHostedUserSecureBoxStringMock.mock.calls[0]?.[0].prisma).toBe(tx);
+    expect(rootClientUse).not.toHaveBeenCalled();
+  });
+
+  it("keeps the root Prisma client as the default external-account reader", async () => {
+    const connection = createConnection({
+      externalAccountIdEncrypted: "sealed:acct_456",
+      id: "dsc_123",
+      provider: "oura",
+      status: "active",
+      userId: "user-123",
+    });
+    const rootPrisma = {
+      deviceConnection: {
+        findFirst: async () => cloneConnection(connection),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: rootPrisma as never,
+    });
+
+    await expect(store.getConnectionForUser("user-123", "dsc_123")).resolves.toMatchObject({
+      externalAccountId: "acct_456",
+    });
+
+    expect(openHostedUserSecureBoxStringMock).toHaveBeenCalledTimes(1);
+    expect(openHostedUserSecureBoxStringMock.mock.calls[0]?.[0].prisma).toBe(rootPrisma);
   });
 
   it("keeps explicit operational connection reads on durable Prisma metadata", async () => {
