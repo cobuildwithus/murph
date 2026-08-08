@@ -420,7 +420,11 @@ function shouldSkipFailedHostedAssistantNotification(
   return (
     !isHostedSignupWelcomeNotification(wake)
     && (
-      wake.notification.notificationPromptProfile === "creative-response"
+      (
+        wake.notification.notificationPromptProfile === "creative-response"
+        || wake.notification.notificationPromptProfile ===
+          "creative-response-text"
+      )
       || wake.notification.firstContact != null
       || wake.notification.responsePolicy?.kind === "allow_send_or_skip"
     )

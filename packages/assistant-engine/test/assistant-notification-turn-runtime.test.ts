@@ -3264,6 +3264,51 @@ test('sendAssistantNotificationLocal preserves a card decision and delivers dete
   )
 })
 
+test.each([
+  {
+    expectedToolProfile: 'provider-turn',
+    profile: 'creative-response' as const,
+  },
+  {
+    expectedToolProfile: 'output-only-turn',
+    profile: 'creative-response-text' as const,
+  },
+])(
+  'sendAssistantNotificationLocal maps $profile to $expectedToolProfile',
+  async ({ expectedToolProfile, profile }) => {
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'send_message',
+        privateSummary: 'Celebrate the group contribution.',
+        text: 'Fiscal leadership has arrived.',
+      }),
+    })
+    const { mocks, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        turnId: `turn-${profile}`,
+      })
+
+    await sendAssistantNotificationLocal({
+      executionContext: { hosted: null },
+      instructions: 'Create one validated creative response.',
+      notificationPromptProfile: profile,
+      responsePolicy: { kind: 'require_send' },
+      vault: `/vaults/${profile}`,
+    })
+
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          promptProfile: 'creative-notification',
+          threadScope: 'isolated-thread',
+          toolProfile: expectedToolProfile,
+        }),
+      }),
+    )
+  },
+)
+
 test('sendAssistantNotificationLocal accepts a sponsor-song response', async () => {
   const providerResult = createProviderResult({
     response: JSON.stringify({

@@ -18,12 +18,10 @@ import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-spo
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
-import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { Button } from "@/src/components/ui/button";
 import type { HostedAiUsageActivitySnapshot } from "@/src/lib/hosted-execution/usage-activity-types";
 import {
   buildMurphSmsHref,
-  buildMurphTelegramTextHref,
   type MurphContactOption,
 } from "@/src/lib/murph-contact-routing";
 
@@ -67,20 +65,6 @@ const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
     }),
     kind: "text",
     label: "Messages",
-  },
-];
-
-const DESIGN_TOP_UP_MULTI_CONTACT_OPTIONS: MurphContactOption[] = [
-  ...DESIGN_TOP_UP_CONTACT_OPTIONS,
-  {
-    href: buildMurphTelegramTextHref({
-      body: "Hey Murph, I just added more usage.",
-      username: "withmurph_bot",
-    }),
-    kind: "telegram",
-    label: "Telegram",
-    rel: "noopener noreferrer",
-    target: "_blank",
   },
 ];
 
@@ -233,13 +217,6 @@ const DESIGN_PERSONAL_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   usedPercent: 35,
 };
 
-const DESIGN_UNAVAILABLE_USAGE_STATUS: HostedPlanUsageStatus = {
-  generatedAt: "2026-07-22T12:00:00.000Z",
-  reason: "group_not_supported",
-  recommendedAction: null,
-  status: "unavailable",
-};
-
 const DESIGN_TRIAL_CONVERSION_USAGE_STATUS: HostedPlanUsageStatus = {
   generatedAt: "2026-07-22T12:00:00.000Z",
   reason: "trial_conversion_pending",
@@ -362,11 +339,10 @@ function GroupUsageFundingStudy() {
           Production components · inert synthetic states
         </p>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          Monthly sponsorship is the primary flow. It starts with one ordinary
-          $5 usage-credit purchase at any capacity and permits later $5 refills
-          only when the group needs capacity, up to the payer&apos;s private
-          monthly maximum. One-time contribution remains a separate secondary
-          action.
+          Monthly sponsorship is the primary flow. One-time contribution
+          remains a separate secondary action and stays quiet in the room by
+          default. An authorized participant can optionally request one message,
+          poem, or 15-second song before checkout.
         </p>
       </div>
 

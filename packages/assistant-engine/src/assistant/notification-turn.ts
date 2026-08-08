@@ -150,6 +150,14 @@ const ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
 }
+const ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'creative-notification',
+  threadScope: 'isolated-thread',
+  toolProfile: 'output-only-turn',
+}
 const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
@@ -174,7 +182,9 @@ export type AssistantNotificationTurnPolicy =
       privateSummary: string
     }
 
-export type AssistantNotificationPromptProfile = 'creative-response'
+export type AssistantNotificationPromptProfile =
+  | 'creative-response'
+  | 'creative-response-text'
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -1579,6 +1589,9 @@ function resolveAssistantNotificationTurnProfile(
   }
   if (input.notificationPromptProfile === 'creative-response') {
     return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
+  }
+  if (input.notificationPromptProfile === 'creative-response-text') {
+    return ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE
   }
   if (isAssistantOnboardingGoalCheckinNotification(input)) {
     return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
