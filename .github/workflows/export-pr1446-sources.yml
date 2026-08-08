@@ -101,6 +101,7 @@ jobs:
 
           python - <<'PY'
           from pathlib import Path
+          import re
 
           migration_test = Path(
               'apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts'
@@ -116,19 +117,25 @@ jobs:
 
           product_spec = Path('agent-docs/product-specs/hosted-usage-topups.md')
           text = product_spec.read_text()
-          old = (
-              'Its private monthly maximum never changes public output or creates a '
-              'running bit.'
-          )
-          new = (
+          desired = (
               'Its private monthly maximum never changes the public acknowledgment '
               'or creates a running bit.'
           )
-          if old in text:
-              text = text.replace(old, new, 1)
+          normalized = ' '.join(text.split())
+          if desired not in normalized:
+              pattern = re.compile(
+                  r'Its private monthly maximum never changes\s+'
+                  r'public output or\s+creates a running bit\.'
+              )
+              text, replacements = pattern.subn(
+                  'Its private monthly maximum never changes the public '\
+                  'acknowledgment or\ncreates a running bit.',
+                  text,
+                  count=1,
+              )
+              if replacements != 1:
+                  raise SystemExit('monthly-maximum contract text not found')
               product_spec.write_text(text)
-          elif new not in text:
-              raise SystemExit('monthly-maximum contract text not found')
           PY
 
           git add -A
