@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2, Link2, UsersRound } from "lucide-react";
 
 import {
-  formatApproximateReferralMessages,
+  formatApproximateReferralUsageDays,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
 
@@ -29,7 +29,7 @@ export function ReferralSection() {
               Murph referrals
             </p>
             <h2 className="mt-4 max-w-[15ch] text-balance font-serif text-[clamp(2rem,4.6vw,3.8rem)] font-semibold leading-[0.98] tracking-[-0.045em] text-[#f5f0e8]">
-              Bring your people. Earn more messages.
+              Bring your people. Earn more Murph time.
             </h2>
             <p className="mt-5 max-w-[58ch] text-[0.9375rem] leading-[1.75] text-[#f5f0e8]/72 sm:text-base">
               Share your personal link or start a qualifying group mission.
@@ -72,7 +72,7 @@ export function ReferralSection() {
                       Earn
                     </p>
                     <p className="text-sm font-semibold text-[#f5f0e8] sm:mt-1">
-                      {formatApproximateReferralMessages(
+                      {formatApproximateReferralUsageDays(
                         reward.approximateMessageCount,
                       )}
                     </p>
@@ -87,7 +87,7 @@ export function ReferralSection() {
               />
               <p>
                 Qualifying rewards appear in your existing AI usage balance.
-                Message counts are approximate.
+                Day estimates are approximate.
               </p>
             </div>
           </div>

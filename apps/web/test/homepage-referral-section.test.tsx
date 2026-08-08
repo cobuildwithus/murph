@@ -10,12 +10,12 @@ test("ReferralSection presents the public referral program on the homepage", () 
   const markup = renderToStaticMarkup(createElement(ReferralSection));
 
   assert.match(markup, /Murph referrals/);
-  assert.match(markup, /Bring your people\. Earn more messages\./);
+  assert.match(markup, /Bring your people\. Earn more Murph time\./);
   assert.match(markup, /Share your personal link or start a qualifying group mission/);
   assert.match(markup, /Invite someone to Murph/);
   assert.match(markup, /Start an active group/);
-  assert.match(markup, /About 100 more messages/);
-  assert.match(markup, /About 140 more messages/);
+  assert.match(markup, /About 10 more days of usage/);
+  assert.match(markup, /About 14 more days of usage/);
   assert.match(markup, /href="\/refer"/);
   assert.match(markup, /See the referral program/);
   assert.match(markup, /Qualifying rewards appear in your existing AI usage balance/);

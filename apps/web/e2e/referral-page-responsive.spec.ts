@@ -73,7 +73,7 @@ test("referral page stays contained and actionable at every marketing breakpoint
       }),
     ).toBeVisible();
     await expect(
-      page.getByText("About 140 more messages", { exact: true }),
+      page.getByText("About 14 more days of usage", { exact: true }),
     ).toBeVisible();
   }
 });

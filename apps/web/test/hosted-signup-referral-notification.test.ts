@@ -94,7 +94,7 @@ describe("hosted signup referral reward notice", () => {
       },
     });
     mocks.buildHostedUsageReferralRewardLabel.mockReturnValue(
-      "about 100 more messages for your Murph",
+      "about 10 more days of usage for your Murph",
     );
   });
 
@@ -103,7 +103,7 @@ describe("hosted signup referral reward notice", () => {
       beneficiaryMemberId: "member_referrer",
       destination: DIRECT_LINQ_DESTINATION,
       notificationKey: "usage-referral-reward:hur_signup",
-      rewardLabel: "about 100 more messages for your Murph",
+      rewardLabel: "about 10 more days of usage for your Murph",
       rewardedAt: REWARDED_AT,
     });
 
@@ -115,7 +115,7 @@ describe("hosted signup referral reward notice", () => {
       "someone completed Murph setup through their referral link",
     );
     expect(wake.notification.instructions).toContain(
-      "already received about 100 more messages for your Murph",
+      "already received about 10 more days of usage for your Murph",
     );
     expect(wake.notification.instructions).toContain(
       "Do not identify, name, or guess who joined",

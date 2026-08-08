@@ -13,7 +13,7 @@ const REFERRAL_METADATA_DESCRIPTION =
   "Share Murph with friends and earn more AI usage when a new member completes setup or a qualifying fresh group becomes active.";
 
 export const metadata: Metadata = createMurphPageMetadata({
-  title: "Murph referrals · Earn more messages with friends",
+  title: "Murph referrals · Earn more Murph time",
   description: REFERRAL_METADATA_DESCRIPTION,
   alternates: {
     canonical: "/refer",

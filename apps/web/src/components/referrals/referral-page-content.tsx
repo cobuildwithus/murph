@@ -12,7 +12,7 @@ import {
 } from "@/src/components/homepage/murph-headshot-avatar";
 import { ReferralShareAction } from "@/src/components/referrals/referral-share-action";
 import {
-  formatApproximateReferralMessages,
+  formatApproximateReferralUsageDays,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
   type HostedPublicReferralRewardId,
 } from "@/src/lib/hosted-growth/referral-program";
@@ -56,13 +56,13 @@ const TRUST_POINTS = [
 const FAQS = [
   {
     answer:
-      "A qualifying signup through your personal link adds about 100 messages. The fresh-group mission with someone new is also about 100 messages, and the active-group mission is about 140. These are approximate because actual usage varies with the model, tools, media, task complexity, and response length.",
-    question: "How many messages do I earn?",
+      "A qualifying signup through your personal link adds about 10 days of typical usage. The fresh-group mission with someone new is also about 10 days, and the active-group mission is about 14. Estimates assume about 10 messages a day, and actual usage varies with the model, tools, media, task complexity, and response length.",
+    question: "How much usage do I earn?",
   },
   {
     answer:
-      "Your personal referral link does not need to be armed first. Group missions do: ask Murph what referral missions are available, choose one, and wait for Murph to confirm it before creating the fresh group.",
-    question: "Do I need to start a mission first?",
+      "Your personal referral link works any time. Group missions need one extra step: tell Murph which mission you want, and wait for the confirmation before creating the fresh group.",
+    question: "Do I need to tell Murph first?",
   },
   {
     answer:
@@ -141,8 +141,9 @@ export function ReferralPageContent({
               <ArrowDown aria-hidden="true" className="size-4" />
             </a>
             <p className="mt-6 max-w-[56ch] text-xs leading-[1.7] text-[#f5f0e8]/55">
-              Rewards are usage, not cash. Message counts are approximate and
-              vary with the model, tools, media, and task complexity.
+              Rewards are usage, not cash. Day estimates assume about 10
+              messages a day and vary with the model, tools, media, and task
+              complexity.
             </p>
           </div>
 
@@ -244,7 +245,7 @@ export function ReferralPageContent({
                       index === 0 ? "text-[#d4b87a]" : "text-[#8a7254]"
                     }`}
                   >
-                    {formatApproximateReferralMessages(
+                    {formatApproximateReferralUsageDays(
                       reward.approximateMessageCount,
                     )}
                   </p>
@@ -275,7 +276,7 @@ export function ReferralPageContent({
               Designed for trust
             </p>
             <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4vw,3.45rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#2d3436]">
-              Your referral should never expose their health.
+              Your referral never exposes their health.
             </h2>
             <p className="mt-5 max-w-[48ch] text-[1rem] leading-[1.75] text-[#4a4036]">
               Murph tracks only the minimum attribution needed to apply the
@@ -344,8 +345,9 @@ export function ReferralPageContent({
         />
         <div className="relative mx-auto flex max-w-[1160px] flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="font-serif text-[clamp(1.9rem,3.6vw,3rem)] font-semibold leading-[1.02] tracking-[-0.04em] text-[#f5f0e8]">
-              Bring someone with you.
+            <h2 className="font-serif text-[clamp(1.9rem,3.6vw,3rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-[#f5f0e8]">
+              <span className="block">Health is hard.</span>
+              <span className="block">Bring someone with you.</span>
             </h2>
             <p className="mt-3 max-w-[46ch] text-[0.9375rem] leading-[1.7] text-[#f5f0e8]/70">
               Murph handles attribution, rewards, and privacy automatically.
@@ -383,8 +385,8 @@ function ReferralHeroArtifact() {
         </div>
 
         <div className="relative mt-7 w-fit max-w-[88%] rounded-2xl rounded-tl-[6px] bg-white px-4 py-3.5 text-[0.9375rem] leading-[1.55] text-[#2d3436] ring-1 ring-[#c4a882]/15">
-          Your referral came through. About 100 messages are already added to
-          your Murph.
+          Your referral came through. About 10 more days of usage are already
+          added to your Murph.
           <span className="absolute -right-2.5 -top-3.5 flex size-7 items-center justify-center rounded-full bg-[#5a6e32] ring-2 ring-[#f5f0e8]">
             <Heart className="size-3.5 fill-current text-[#f5f0e8]" />
           </span>

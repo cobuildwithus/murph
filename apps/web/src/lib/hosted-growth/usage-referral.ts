@@ -1,6 +1,8 @@
 import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
+
+import { computeHostedUsageReferralRewardDays } from "./referral-reward-days";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "@murphai/hosted-execution";
@@ -148,9 +150,10 @@ export function buildHostedUsageReferralRewardLabel(input: {
   const subject = input.destinationKind === "group"
     ? "this room"
     : "your Murph";
-  const approximateMessageCount =
-    POLICIES[input.policyCode].approximateMessageCount;
-  return `about ${approximateMessageCount} more messages for ${subject}`;
+  const approximateRewardDays = computeHostedUsageReferralRewardDays(
+    POLICIES[input.policyCode].approximateMessageCount,
+  );
+  return `about ${approximateRewardDays} more days of usage for ${subject}`;
 }
 
 function outstandingHostedUsageReferralCommitmentWhere(
