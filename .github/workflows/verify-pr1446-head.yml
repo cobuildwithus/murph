@@ -1,0 +1,136 @@
+name: Verify PR 1446 exact head
+
+on:
+  push:
+    branches:
+      - agent/pr1446-recover-finalizer
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr1446-exact-head-verification
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CI: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+      PR_BRANCH: agent/optional-sponsorship-moments
+      EXPECTED_PR_HEAD: 256c2f90be6960a3c8135e81f67b5ec70cb2f210
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: agent/optional-sponsorship-moments
+          fetch-depth: 0
+
+      - name: Confirm exact PR head and fetch main
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_head="$(git rev-parse HEAD)"
+          if [[ "${actual_head}" != "${EXPECTED_PR_HEAD}" ]]; then
+            echo "PR head moved from ${EXPECTED_PR_HEAD} to ${actual_head}; refusing stale verification" >&2
+            exit 1
+          fi
+          git fetch origin main
+          base_ref="$(git rev-parse origin/main)"
+          printf 'BASE_REF=%s\n' "${base_ref}" >> "${GITHUB_ENV}"
+          printf 'VERIFIED_HEAD=%s\n' "${actual_head}" >> "${GITHUB_ENV}"
+          git merge-base --is-ancestor "${base_ref}" HEAD || {
+            echo "PR head no longer contains current main ${base_ref}." >&2
+            exit 1
+          }
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck hosted Web
+        run: pnpm --dir apps/web typecheck
+
+      - name: Lint changed hosted Web TypeScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(
+            git diff --name-only --diff-filter=ACMR "${BASE_REF}...HEAD" \
+              | sed -E -n 's#^apps/web/(.*\.(ts|tsx))$#\1#p'
+          )
+          if [[ "${#files[@]}" -eq 0 ]]; then
+            echo "No changed hosted Web TypeScript files found." >&2
+            exit 1
+          fi
+          pnpm --dir apps/web exec eslint --max-warnings=0 "${files[@]}"
+
+      - name: Run focused hosted Web regressions
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/hosted-group-sponsorship-contract.test.ts
+          apps/web/test/hosted-group-sponsorship-store.test.ts
+          apps/web/test/hosted-group-sponsorship-notification.test.ts
+          apps/web/test/hosted-group-funding-page.test.tsx
+          apps/web/test/hosted-usage-top-up-dialog.test.tsx
+          apps/web/test/hosted-usage-credit-purchase-service.test.ts
+          apps/web/test/hosted-usage-top-up-product-spec.test.ts
+          apps/web/test/hosted-onboarding-stripe-event-reconciliation.test.ts
+          apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts
+
+      - name: Typecheck and test assistant engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm exec vitest run \
+            --config packages/assistant-engine/vitest.config.ts \
+            --no-coverage \
+            packages/assistant-engine/test/assistant-notification-turn-runtime.test.ts \
+            packages/assistant-engine/test/assistant-creative-notification-prompt.test.ts
+
+      - name: Typecheck and test assistant runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir packages/assistant-runtime typecheck
+          pnpm exec vitest run \
+            --config packages/assistant-runtime/vitest.config.ts \
+            --isolate=true \
+            --no-coverage \
+            packages/assistant-runtime/test/hosted-runtime-events.test.ts
+
+      - name: Typecheck and test hosted execution contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir packages/hosted-execution typecheck
+          pnpm exec vitest run \
+            --config packages/hosted-execution/vitest.config.ts \
+            --no-coverage \
+            packages/hosted-execution/test/hosted-execution-sponsorship-contract.test.ts
+
+      - name: Run repository contract guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm hosted-billing:ci-guard
+          pnpm docs:drift
+          pnpm no-js
+
+      - name: Confirm exact head remained clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git diff --cached --exit-code
+          test "$(git rev-parse HEAD)" = "${VERIFIED_HEAD}"
