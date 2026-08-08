@@ -21,9 +21,9 @@ const AVAILABILITY_PRESENTATION: Record<
     label: "Status",
     textClassName: "text-[#736a58]",
   },
-  online: {
+  no_reported_issues: {
     dotClassName: "bg-[#2c7a3f]",
-    label: "Murph is online",
+    label: "No reported issues",
     textClassName: "text-[#2c7a3f]",
   },
   issues: {

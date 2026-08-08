@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { resolveStatusPageAvailability } from "@/src/lib/status-page";
 
 describe("resolveStatusPageAvailability", () => {
-  it("reports online when no incidents or affected components are listed", () => {
+  it("reports no_reported_issues when nothing is publicly listed", () => {
     expect(
       resolveStatusPageAvailability({
         summary: { affected_components: [], ongoing_incidents: [] },
       }),
-    ).toBe("online");
+    ).toBe("no_reported_issues");
   });
 
   it("reports issues while an incident is ongoing", () => {

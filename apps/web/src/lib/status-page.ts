@@ -4,7 +4,10 @@ export const STATUS_PAGE_URL = "https://status.withmurph.ai";
 // slug for a custom-domain page is the domain itself.
 export const STATUS_PAGE_SUMMARY_ENDPOINT = `${STATUS_PAGE_URL}/proxy/status.withmurph.ai`;
 
-export type StatusPageAvailability = "unknown" | "online" | "issues";
+// An empty public summary only proves nothing is publicly listed — incidents
+// can legitimately stay unpublished (docs/incident-response.md) — so the
+// positive state is "no reported issues", never a direct uptime claim.
+export type StatusPageAvailability = "unknown" | "no_reported_issues" | "issues";
 
 export function resolveStatusPageAvailability(
   payload: unknown,
@@ -21,5 +24,7 @@ export function resolveStatusPageAvailability(
   if (!Array.isArray(affected) || !Array.isArray(ongoing)) {
     return "unknown";
   }
-  return affected.length === 0 && ongoing.length === 0 ? "online" : "issues";
+  return affected.length === 0 && ongoing.length === 0
+    ? "no_reported_issues"
+    : "issues";
 }
