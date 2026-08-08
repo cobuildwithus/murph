@@ -13,6 +13,7 @@ import {
   isHostedBillingPlanImmediateUpgrade,
   isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
+  readHostedBillingPlanChangePortalConfigurationId,
   type HostedBillingPlanCode,
 } from "./billing-plans";
 import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
@@ -38,16 +39,6 @@ import {
   logHostedStripeFailure,
   withHostedStripeActionFailureAlert,
 } from "./stripe-error-log";
-
-const HOSTED_BILLING_PLAN_CHANGE_PORTAL_CONFIGURATION_ENV_BY_TARGET = {
-  launch_edge_monthly:
-    "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY",
-  launch_group_monthly: null,
-  launch_max_monthly:
-    "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MAX_MONTHLY",
-  launch_monthly:
-    "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MONTHLY",
-} as const satisfies Record<HostedBillingPlanCode, string | null>;
 
 export type HostedBillingPlanUpgradeResult =
   | {
@@ -482,13 +473,8 @@ function buildHostedBillingPlanChangeReturnUrls(input: {
 function requireHostedBillingPlanChangePortalConfigurationId(
   targetPlanCode: HostedBillingPlanCode,
 ): string {
-  const environmentKey =
-    HOSTED_BILLING_PLAN_CHANGE_PORTAL_CONFIGURATION_ENV_BY_TARGET[
-      targetPlanCode
-    ];
-  const configurationId = normalizeNullableString(
-    environmentKey ? process.env[environmentKey] : undefined,
-  );
+  const configurationId =
+    readHostedBillingPlanChangePortalConfigurationId(targetPlanCode);
   if (configurationId) {
     return configurationId;
   }

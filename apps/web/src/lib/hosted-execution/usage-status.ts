@@ -14,6 +14,7 @@ import {
   canScheduleHostedBillingPlanChange,
   canUpgradeHostedBillingPlan,
   getHostedBillingPlanDefinition,
+  isHostedBillingPlanChangePortalConfigured,
   parseHostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
 import {
@@ -247,10 +248,7 @@ export async function projectHostedPersonalAiUsageStatus(input: {
         accessKind === "trial"
         || (
           accessKind === "paid"
-          && (
-            decision.billingPlanCode === "launch_group_monthly"
-            || decision.billingPlanCode === "launch_edge_monthly"
-          )
+          && decision.billingPlanCode === "launch_group_monthly"
         )
       )
       && actionUrl !== null
@@ -311,14 +309,9 @@ export async function projectHostedPersonalAiUsageStatus(input: {
               action: availableSubscriptionOffer.quote,
               actionUrl,
             })
-          : availableSubscriptionOffer.quote
-            ? buildRecommendedAction({
-                action: availableSubscriptionOffer.quote,
-                actionUrl,
-              })
-            : personalUsageCreditOfferCodes.length > 0
-              ? buildAddUsageRecommendedAction()
-              : null
+          : personalUsageCreditOfferCodes.length > 0
+            ? buildAddUsageRecommendedAction()
+            : null
       : null,
     ...projectSubscriptionActionQuoteExpansion({
       include: includeSubscriptionActionQuote,
@@ -647,11 +640,15 @@ async function resolveAvailableSubscriptionOffer(input: {
         ? "launch_monthly"
         : input.planCode === "launch_monthly"
           ? "launch_edge_monthly"
-          : input.planCode === "launch_edge_monthly"
-            ? "launch_max_monthly"
-            : null
+          : null
     );
   if (!targetPlanCode || targetPlanCode === input.planCode) {
+    return EMPTY_SUBSCRIPTION_OFFER;
+  }
+  if (
+    targetPlanCode === "launch_max_monthly"
+    && !isHostedBillingPlanChangePortalConfigured(targetPlanCode)
+  ) {
     return EMPTY_SUBSCRIPTION_OFFER;
   }
   if (

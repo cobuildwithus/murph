@@ -17,7 +17,7 @@ describe('assistant Max plan guidance', () => {
     const skill = (await readLowUsageSkill()).replace(/\s+/gu, ' ')
 
     expect(skill).toContain(
-      'When an Edge read instead returns a `change_plan` action targeting `launch_max_monthly`, offer Max as the lasting higher-capacity option',
+      'Do not turn an explicit Max quote into an automatic recommendation',
     )
     expect(skill).toContain(
       'Edge, or Max, call `murph.plan_usage` with that exact `targetPlanCode`',
@@ -48,5 +48,6 @@ describe('assistant Max plan guidance', () => {
     expect(skill).toContain(
       'Max keeps access to Murph\'s current premium model and has no higher direct tier to invent',
     )
+    expect(skill).not.toContain('priority access to new frontier models')
   })
 })

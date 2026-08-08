@@ -14,6 +14,8 @@ import {
   canUpgradeHostedBillingPlan,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedBillingPlanDefinition,
+  isHostedBillingPlanChangePortalConfigured,
+  readHostedBillingPlanChangePortalConfigurationId,
   resolveConfiguredHostedBillingPlanCodes,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
@@ -27,6 +29,8 @@ describe("Murph Max billing plan", () => {
       code: "launch_max_monthly",
       displayName: "Max",
       interval: "month",
+      planChangePortalConfigurationIdEnvKey:
+        "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MAX_MONTHLY",
       planCode: "edge",
       priceIdEnvKey:
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MAX_MONTHLY",
@@ -34,6 +38,20 @@ describe("Murph Max billing plan", () => {
     });
     expect(getHostedAiUsageMonthlyAllowanceUsdMicros("launch_max_monthly"))
       .toBe(40_000_000n);
+  });
+
+  it("fails closed until the exact Max plan-change portal is configured", () => {
+    expect(isHostedBillingPlanChangePortalConfigured(
+      "launch_max_monthly",
+      {},
+    )).toBe(false);
+    expect(readHostedBillingPlanChangePortalConfigurationId(
+      "launch_max_monthly",
+      {
+        HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MAX_MONTHLY:
+          "  bpc_max  ",
+      },
+    )).toBe("bpc_max");
   });
 
   it("discovers Max only when its Stripe price is configured", () => {

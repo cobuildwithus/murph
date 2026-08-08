@@ -34,6 +34,7 @@ import {
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlan,
+  isHostedBillingPlanChangePortalConfigured,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
@@ -785,9 +786,11 @@ async function readSettingsPageData(input: {
     && await isHostedBillingPlanSelectionAvailable({
       billingPlanCode: "launch_group_monthly",
     });
-  const maxPlanAvailable = await isHostedBillingPlanSelectionAvailable({
-    billingPlanCode: "launch_max_monthly",
-  });
+  const maxPlanAvailable =
+    isHostedBillingPlanChangePortalConfigured("launch_max_monthly")
+    && await isHostedBillingPlanSelectionAvailable({
+      billingPlanCode: "launch_max_monthly",
+    });
   const usageStatus = await readHostedPersonalAiUsageStatus({
     memberId,
     prisma,

@@ -50,7 +50,9 @@ function buildSubscriptionActionQuote(input: {
     ? 350
     : input.targetPlanCode === "launch_monthly"
       ? 800
-      : 2_000;
+      : input.targetPlanCode === "launch_max_monthly"
+        ? 5_000
+        : 2_000;
   return {
     action: "change_plan",
     expiresAt: "2026-07-10T12:10:00.000Z",
@@ -188,6 +190,70 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Current plan/);
     assert.match(markup, /Choose Edge/);
     assert.match(markup, /Manage billing/);
+  });
+
+  test("renders Max and an exact Edge-to-Max upgrade only when authorized", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const hiddenMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+    }));
+    const availableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      canUpgradeToMax: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      showMaxPlan: true,
+    }));
+
+    assert.doesNotMatch(hiddenMarkup, />Max</);
+    assert.match(availableMarkup, />Max</);
+    assert.match(availableMarkup, /\$50/);
+    assert.match(availableMarkup, /Highest included monthly AI usage/);
+    assert.match(availableMarkup, /Choose Max/);
+  });
+
+  test("uses exact period-end actions for Max downgrades", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      canSwitchToEdge: true,
+      canSwitchToPulse: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_max_monthly",
+      currentPeriodEnd: new Date("2026-09-01T00:00:00.000Z"),
+      showMaxPlan: true,
+    }));
+
+    assert.match(markup, /Max/);
+    assert.match(markup, /Current plan/);
+    assert.match(markup, /Choose Edge/);
+    assert.match(markup, /Choose Pulse/);
+    assert.doesNotMatch(markup, /Choose Max/);
+  });
+
+  test("does not expose Max inside Family billing", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      familyState: "owner",
+      showMaxPlan: true,
+    }));
+
+    assert.doesNotMatch(markup, />Max</);
+    assert.match(markup, /Choose Pulse/);
+    assert.match(markup, /Choose Edge/);
   });
 
   test("suppresses every plan-changing action while webhook projection is pending", async () => {
