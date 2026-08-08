@@ -340,7 +340,7 @@ function hostedUsageCreditPurchaseTargetsMatch(
     return true;
   }
   if (left.kind === "group" && right.kind === "group") {
-    return left.groupJoinCode === right.groupJoinCode;
+    return true;
   }
   return left.kind === "family" && right.kind === "family" &&
     left.familyGroupId === right.familyGroupId;
