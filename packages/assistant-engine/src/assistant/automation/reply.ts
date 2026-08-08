@@ -1475,7 +1475,8 @@ async function evaluateAssistantAutoReplyGroup(input: {
     primaryReplyInput.sourceMetadata.affirmativeReaction === true
   if (
     affirmativeReaction &&
-    outboxContext.replyTargetDelivery === null
+    (outboxContext.replyTargetDelivery === null ||
+      outboxContext.replyTargetDelivery.message === null)
   ) {
     return createAdvancingSkipDecision(
       'affirmative Linq reaction target is not an attested assistant delivery',
@@ -4357,18 +4358,19 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
   }
 
   textCandidates.push(
-    ...matchingDeliveries
-      .filter((delivery) =>
-        delivery.sentAtMs <= causalUpperBoundMs &&
-        (
-          inputProviderMessageId === null ||
-          delivery.providerMessageIds.length === 0
-        ),
+    ...matchingDeliveries.flatMap((delivery) =>
+      delivery.message !== null &&
+      delivery.sentAtMs <= causalUpperBoundMs &&
+      (
+        inputProviderMessageId === null ||
+        delivery.providerMessageIds.length === 0
       )
-      .map((delivery) => ({
-        message: delivery.message,
-        messageTime: delivery.sentAtMs,
-      })),
+        ? [{
+            message: delivery.message,
+            messageTime: delivery.sentAtMs,
+          }]
+        : [],
+    ),
   )
 
   return isAssistantAutoReplyNearestTextEchoMatch({
@@ -4429,12 +4431,15 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     }
   }
 
+  // Every consumer of this resolver quotes delivery text (latest fallback,
+  // reaction context, cross-session context), so media-only records stay out
+  // and its behavior is unchanged by their attestation elsewhere.
   const matchingDeliveries =
-    await listAssistantAutoReplyMatchingOutboxDeliveries({
+    (await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
       historyReader: input.historyReader,
       input: input.input,
-    })
+    })).filter((delivery) => delivery.message !== null)
   const replyToMessageId = input.replyToMessageId
   const replyTargetDelivery = replyToMessageId === null
     ? null
@@ -4582,6 +4587,8 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
   const contextualizedInputs: AssistantAutoReplyPromptInput[] = []
   for (const [index, promptInput] of input.inputs.entries()) {
     const delivery = exactDeliveries[index] ?? null
+    const hasNativeReplyReference =
+      (nativeReplyReferences[index] ?? null) !== null
     const replyToMessageId = replyToMessageIds[index] ?? null
     const participantMessage =
       readAssistantAutoReplyIMessageGroupParticipantMessage(promptInput)
@@ -4598,6 +4605,7 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
             ...promptInput,
             replyContext:
               buildAssistantAutoReplyParticipantReplyContext({
+                hasNativeReplyReference,
                 participantMessage,
                 replyToMessageId,
                 targetMessageRef,
@@ -4605,9 +4613,12 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
           }
         : {
             ...promptInput,
-            replyContext: buildAssistantAutoReplyExplicitReplyContext(
-              delivery.message,
-            ),
+            replyContext:
+              delivery.message !== null
+                ? buildAssistantAutoReplyExplicitReplyContext(
+                    delivery.message,
+                  )
+                : buildAssistantAutoReplyExplicitMediaReplyContext(),
           },
     )
 
@@ -4626,6 +4637,7 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
 }
 
 interface AssistantAutoReplyParticipantMessage {
+  correctionSourceMessageRef: string | null
   messageRef: string
   providerMessageId: string
 }
@@ -4645,8 +4657,12 @@ function readAssistantAutoReplyIMessageGroupParticipantMessage(
     expectedChannel: 'linq',
     input,
   })
+  const correctionSourceMessageRef =
+    input.sourceMetadata?.kind === 'linq'
+      ? normalizeNullableString(input.sourceMetadata.editedSourceInputId)
+      : null
   return messageRef && providerMessageId
-    ? { messageRef, providerMessageId }
+    ? { correctionSourceMessageRef, messageRef, providerMessageId }
     : null
 }
 
@@ -4658,12 +4674,32 @@ function indexAssistantAutoReplyParticipantMessage(
     return
   }
 
+  const hasExistingClaim = messageRefsByProviderId.has(
+    participantMessage.providerMessageId,
+  )
   const existingMessageRef = messageRefsByProviderId.get(
     participantMessage.providerMessageId,
   )
-  if (
-    !messageRefsByProviderId.has(participantMessage.providerMessageId)
-  ) {
+
+  // A trusted correction reuses its source message's provider id. It never
+  // resolves as a target itself: it either agrees with the already-claimed
+  // source ref or marks the provider id unresolvable.
+  if (participantMessage.correctionSourceMessageRef !== null) {
+    if (
+      existingMessageRef ===
+        participantMessage.correctionSourceMessageRef &&
+      hasExistingClaim
+    ) {
+      return
+    }
+    messageRefsByProviderId.set(
+      participantMessage.providerMessageId,
+      null,
+    )
+    return
+  }
+
+  if (!hasExistingClaim) {
     messageRefsByProviderId.set(
       participantMessage.providerMessageId,
       participantMessage.messageRef,
@@ -4679,13 +4715,14 @@ function indexAssistantAutoReplyParticipantMessage(
 }
 
 function buildAssistantAutoReplyParticipantReplyContext(input: {
+  hasNativeReplyReference: boolean
   participantMessage: AssistantAutoReplyParticipantMessage | null
   replyToMessageId: string | null
   targetMessageRef: string | null
 }): string | null {
   if (
     input.participantMessage === null ||
-    input.replyToMessageId === null ||
+    !input.hasNativeReplyReference ||
     input.replyToMessageId === input.participantMessage.providerMessageId
   ) {
     return null
@@ -4744,7 +4781,7 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
   intentId: string
-  message: string
+  message: string | null
   providerMessageIds: string[]
   sentAtMs: number
   sessionId: string
@@ -4791,15 +4828,21 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       return []
     }
 
+    // A sent delivery is attested by its provider message id even when it
+    // carries only response media; media-only records keep a null message so
+    // no consumer can quote text that never existed.
     const message = normalizeNullableString(intent.message)
     const sentAtMs = Date.parse(delivery.sentAt)
-    if (!message || !Number.isFinite(sentAtMs)) {
+    if (
+      (!message && (intent.media?.length ?? 0) === 0) ||
+      !Number.isFinite(sentAtMs)
+    ) {
       return []
     }
 
     return [{
       intentId: intent.intentId,
-      message,
+      message: message ?? null,
       providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
         delivery,
       ),
@@ -4967,6 +5010,13 @@ function buildAssistantAutoReplyExplicitReplyContext(
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
     'Use it only to interpret this message.',
+  ].join('\n')
+}
+
+function buildAssistantAutoReplyExplicitMediaReplyContext(): string {
+  return [
+    'The sender explicitly replied to an exact prior assistant media delivery that has no quotable text.',
+    'Use only that authorship fact to interpret this message; do not infer or describe the unseen media content.',
   ].join('\n')
 }
 
