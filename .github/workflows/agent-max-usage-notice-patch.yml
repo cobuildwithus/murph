@@ -86,13 +86,22 @@ jobs:
               )
 
           source_text = source.decode("utf-8")
-          old_marker = '        "\\nfunction buildHostedTrialExpiredPendingBillingNotice(",'
-          new_marker = '        "\\\\nfunction buildHostedTrialExpiredPendingBillingNotice(",'
-          if source_text.count(old_marker) != 1:
-              raise SystemExit(
-                  "Finalizer escaped usage-notice marker was not uniquely present."
-              )
-          source_text = source_text.replace(old_marker, new_marker, 1)
+          marker_replacements = (
+              (
+                  '        "\\nfunction buildHostedTrialExpiredPendingBillingNotice(",',
+                  '        "\\\\nfunction buildHostedTrialExpiredPendingBillingNotice(",',
+              ),
+              (
+                  '        "\\nfunction renderHostedAiUsageGateLimitNoticeMessage(",',
+                  '        "\\\\nfunction renderHostedAiUsageGateLimitNoticeMessage(",',
+              ),
+          )
+          for old_marker, new_marker in marker_replacements:
+              if source_text.count(old_marker) != 1:
+                  raise SystemExit(
+                      f"Finalizer escaped marker was not uniquely present: {old_marker!r}"
+                  )
+              source_text = source_text.replace(old_marker, new_marker, 1)
 
           exec(
               compile(
