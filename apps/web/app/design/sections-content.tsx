@@ -332,7 +332,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Home partial-load recovery">
+      <StudySection title="Home partial-load and vault-unavailable recovery">
         <HomeLoadStateStudy />
       </StudySection>
 
