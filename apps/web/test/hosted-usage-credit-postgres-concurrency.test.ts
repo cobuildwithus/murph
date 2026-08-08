@@ -2158,7 +2158,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         });
         expect(JSON.stringify(persistedPayload)).not.toMatch(
-          /about \d+ more messages/iu,
+          /about \d+ more days of usage/iu,
         );
         await expect(Promise.all([
           observer.hostedUsageReferral.findUniqueOrThrow({

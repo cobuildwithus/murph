@@ -1,6 +1,8 @@
 import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
+
+import { computeHostedUsageReferralRewardDays } from "./referral-reward-days";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "@murphai/hosted-execution";

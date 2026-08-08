@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatApproximateReferralMessages,
+  formatApproximateReferralUsageDays,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
+import {
+  computeHostedUsageReferralRewardDays,
+} from "@/src/lib/hosted-growth/referral-reward-days";
 import { HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY } from "@/src/lib/hosted-growth/signup-referral-policy";
 import {
   buildHostedUsageReferralRewardLabel,
@@ -39,16 +42,28 @@ describe("public referral program projection", () => {
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
       policyCode: "new_person_activation_v1",
-    })).toContain(String(newPersonGroup.approximateMessageCount));
+    })).toContain(
+      `about ${
+        computeHostedUsageReferralRewardDays(
+          newPersonGroup.approximateMessageCount,
+        )
+      } more days of usage`,
+    );
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
       policyCode: "active_group_v1",
-    })).toContain(String(activeGroup.approximateMessageCount));
+    })).toContain(
+      `about ${
+        computeHostedUsageReferralRewardDays(
+          activeGroup.approximateMessageCount,
+        )
+      } more days of usage`,
+    );
     expect(signup.approximateMessageCount).toBe(
       newPersonGroup.approximateMessageCount,
     );
-    expect(formatApproximateReferralMessages(100)).toBe(
-      "About 100 more messages",
+    expect(formatApproximateReferralUsageDays(100)).toBe(
+      "About 10 more days of usage",
     );
   });
 

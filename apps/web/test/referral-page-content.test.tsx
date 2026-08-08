@@ -44,16 +44,17 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /Real introductions, rewarded automatically\./);
   assert.match(markup, /Opening a link alone is never enough\./);
   assert.match(markup, /Three paths\. One shared reward balance\./);
-  assert.match(markup, /About 100 more messages/);
-  assert.match(markup, /About 140 more messages/);
+  assert.match(markup, /About 10 more days of usage/);
+  assert.match(markup, /About 14 more days of usage/);
   assert.match(markup, /15 human messages/);
   assert.match(markup, /8 from at least 2 other people/);
   assert.match(markup, /at least 10 minutes/);
-  assert.match(markup, /Your referral should never expose their health\./);
+  assert.match(markup, /Your referral never exposes their health\./);
   assert.match(markup, /contains no phone number, email address, health data, or recipient identity/);
   assert.match(markup, /Can I see who used my link\?/);
   assert.match(markup, /does not reveal who it was/);
   assert.match(markup, /Rewards are usage, not cash\./);
+  assert.match(markup, /Health is hard\./);
   assert.match(markup, /Bring someone with you\./);
   assert.equal(
     (markup.match(/data-identity-key="member_referrer"/g) ?? []).length,

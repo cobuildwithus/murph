@@ -192,7 +192,7 @@ export function ReferralLinkActionView(props: {
     >
       <Button
         aria-busy={busy ? "true" : undefined}
-        aria-label={`${label} — your Murph referral link`}
+        aria-label={`${label}, your Murph referral link`}
         className={marketing
           ? "min-h-12 gap-2 rounded-xl border border-white/10 bg-[#f5f0e8] px-5 py-3.5 text-[0.9375rem] font-semibold text-[#2d3436] transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a] aria-busy:cursor-wait"
           : "h-auto px-0 aria-busy:cursor-wait"}
@@ -262,12 +262,12 @@ function readReferralLinkActionLabel(
       : status === "copying"
         ? "Copying..."
         : status === "copied"
-          ? "Link copied"
+          ? "Copied your link"
           : status === "load_error"
             ? "Reload referral link"
             : status === "copy_error"
               ? "Try copy again"
-              : "Copy my referral link";
+              : "Copy referral link";
   }
 
   return status === "loading"

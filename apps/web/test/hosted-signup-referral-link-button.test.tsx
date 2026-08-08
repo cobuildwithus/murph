@@ -140,7 +140,7 @@ describe("HostedSignupReferralLinkButton", () => {
 
     expect(rendered.button.textContent).toBe("Reload link");
     expect(rendered.button.getAttribute("aria-label")).toBe(
-      "Reload link — your Murph referral link",
+      "Reload link, your Murph referral link",
     );
     expect(rendered.container.textContent).toContain(
       "Could not load the referral link.",
@@ -266,7 +266,7 @@ describe("HostedSignupReferralLinkButton", () => {
 
     expect(rendered.button.disabled).toBe(false);
     expect(rendered.button.getAttribute("aria-label")).toBe(
-      "Copying... — your Murph referral link",
+      "Copying..., your Murph referral link",
     );
     expect(rendered.button.getAttribute("aria-busy")).toBe("true");
 

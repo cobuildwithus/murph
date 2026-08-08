@@ -18,10 +18,10 @@ test("ReferralLinkActionView exposes a prominent marketing copy action", () => {
     }),
   );
 
-  assert.match(markup, /Copy my referral link/);
+  assert.match(markup, /Copy referral link/);
   assert.match(
     markup,
-    /aria-label="Copy my referral link — your Murph referral link"/,
+    /aria-label="Copy referral link, your Murph referral link"/,
   );
   assert.match(markup, /bg-\[#f5f0e8\]/);
   assert.doesNotMatch(markup, /Automatic copying was blocked/);

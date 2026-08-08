@@ -9,7 +9,7 @@ import { metadata } from "../app/refer/page";
 test("ReferPage metadata describes the public referral program", () => {
   assert.equal(
     metadata.title,
-    "Murph referrals · Earn more messages with friends",
+    "Murph referrals · Earn more Murph time",
   );
   assert.equal(
     metadata.description,
