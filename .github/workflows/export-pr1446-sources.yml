@@ -1,0 +1,50 @@
+name: Export PR 1446 sources
+
+on:
+  push:
+    branches:
+      - agent/pr1446-recover-finalizer
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Export current main and PR source trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main agent/optional-sponsorship-moments
+          git archive --format=tar.gz \
+            --output=/tmp/murph-main.tar.gz \
+            origin/main
+          git archive --format=tar.gz \
+            --output=/tmp/murph-pr1446.tar.gz \
+            origin/agent/optional-sponsorship-moments
+          merge_base="$(git merge-base origin/main origin/agent/optional-sponsorship-moments)"
+          git diff --binary "$merge_base" origin/agent/optional-sponsorship-moments \
+            > /tmp/pr1446-feature.patch
+          sha256sum \
+            /tmp/murph-main.tar.gz \
+            /tmp/murph-pr1446.tar.gz \
+            /tmp/pr1446-feature.patch \
+            > /tmp/SHA256SUMS
+
+      - name: Upload source export
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pr1446-sources
+          path: |
+            /tmp/murph-main.tar.gz
+            /tmp/murph-pr1446.tar.gz
+            /tmp/pr1446-feature.patch
+            /tmp/SHA256SUMS
+          retention-days: 1
+          if-no-files-found: error
