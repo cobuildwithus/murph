@@ -83,6 +83,12 @@ const EXPECTED_REFERRAL_UNAVAILABLE_ERRORS = new Set([
   "too_many_referrals_in_progress",
   "usage_referral_not_available",
 ]);
+const HOSTED_USAGE_CREDIT_USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  currency: "USD",
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+  style: "currency",
+});
 
 type HostedUsageReferralPolicyDefinition = {
   code: HostedUsageReferralPolicyCode;
@@ -150,13 +156,8 @@ export function buildHostedUsageReferralRewardLabel(input: {
 }
 
 function formatHostedUsageCreditUsd(usdMicros: bigint): string {
-  const cents = Number(usdMicros / 10_000n);
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-    style: "currency",
-  }).format(cents / 100);
+  const cents = (usdMicros + 5_000n) / 10_000n;
+  return HOSTED_USAGE_CREDIT_USD_FORMATTER.format(Number(cents) / 100);
 }
 
 function outstandingHostedUsageReferralCommitmentWhere(
