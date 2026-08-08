@@ -21,10 +21,9 @@ import {
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Murph pitch deck — a full-viewport, snap-scrolling slide deck.
-   Product: a private personal health assistant. Compounding advantage:
-   useful longitudinal context. Social support and experiments remain
-   strong optional primitives. Navigate with arrow keys, scroll, or the
-   dot rail.
+   Wedge: group-chat-native health challenges. Moat: the structured
+   graph of what protocols actually work. Navigate with arrow keys,
+   scroll, or the dot rail.
 
    This file is the shell: navigation, state, and slide order. Each
    slide is its own component in _components/slides.tsx; shared
