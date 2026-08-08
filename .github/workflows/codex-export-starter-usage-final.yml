@@ -1,0 +1,31 @@
+name: Codex export starter usage implementation
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-export-starter-usage-final.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build git bundle
+        shell: bash
+        run: git bundle create murph-starter-usage-main.bundle --all
+
+      - name: Upload git bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: murph-starter-usage-main-bundle
+          path: murph-starter-usage-main.bundle
+          if-no-files-found: error
+          retention-days: 1
