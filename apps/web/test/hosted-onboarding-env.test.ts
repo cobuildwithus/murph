@@ -88,6 +88,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.stripePriceIdsByPlan).toEqual({
       launch_edge_monthly: "price_edge_monthly_123",
       launch_group_monthly: "price_group_monthly_123",
+      launch_max_monthly: null,
       launch_monthly: "price_monthly_123",
     });
     expect(environment.stripeUsageCreditPriceIdsByOffer).toEqual({

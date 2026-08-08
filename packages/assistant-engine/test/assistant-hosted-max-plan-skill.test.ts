@@ -37,7 +37,7 @@ describe('assistant Max plan guidance', () => {
     const skill = (await readLowUsageSkill()).replace(/\s+/gu, ' ')
 
     expect(skill).toContain(
-      'never promise a particular unreleased model or imply that future access is already active',
+      'Never promise a particular unreleased model or imply that future access is already active',
     )
     expect(skill).toContain(
       '**Direct paid Max:** When `recommendedAction` is `add_usage`, say that the member can add usage',

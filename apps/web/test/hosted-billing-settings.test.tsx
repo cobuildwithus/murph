@@ -252,8 +252,8 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.doesNotMatch(markup, />Max</);
-    assert.match(markup, /Choose Pulse/);
-    assert.match(markup, /Choose Edge/);
+    assert.match(markup, /Manage Family billing/);
+    assert.match(markup, /End or change the Family plan first/);
   });
 
   test("suppresses every plan-changing action while webhook projection is pending", async () => {
