@@ -2667,6 +2667,120 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("drains authority-bearing scheduled children after the parent clears its cron reference", async () => {
+    const buildIntent = (input: {
+      authority?: boolean;
+      createdAt: string;
+      intentId: string;
+      status: "pending" | "retryable";
+    }) => ({
+      actorId: `actor_${input.intentId}`,
+      automationAuthority: input.authority
+        ? {
+            automationId: "automation_newsletter",
+            expectedUpdatedAt: "2026-04-08T00:00:00.000Z",
+          }
+        : null,
+      bindingDelivery: null,
+      channel: "linq",
+      createdAt: input.createdAt,
+      dedupeKey: `dedupe_${input.intentId}`,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: true,
+      explicitTarget: "h1_444444444444444444444444",
+      identityId: "identity_1",
+      intentId: input.intentId,
+      lastError: input.status === "retryable"
+        ? { code: "LINQ_API_REQUEST_FAILED", message: "Chat not found" }
+        : null,
+      message: `message ${input.intentId}`,
+      nextAttemptAt: input.createdAt,
+      replyToMessageId: null,
+      sessionId: "session_1",
+      status: input.status,
+      subject: null,
+      threadId: `thread_${input.intentId}`,
+      threadIsDirect: true,
+      turnId: `turn_${input.intentId}`,
+    });
+    const childA = buildIntent({
+      authority: true,
+      createdAt: "2026-04-08T00:01:00.000Z",
+      intentId: "intent_child_a",
+      status: "pending",
+    });
+    const childB = buildIntent({
+      authority: true,
+      createdAt: "2026-04-08T00:01:10.000Z",
+      intentId: "intent_child_b",
+      status: "pending",
+    });
+    const childC = buildIntent({
+      authority: true,
+      createdAt: "2026-04-08T00:01:20.000Z",
+      intentId: "intent_child_c",
+      status: "pending",
+    });
+    const backlogStale = buildIntent({
+      createdAt: "2026-04-08T00:00:00.000Z",
+      intentId: "intent_backlog_stale",
+      status: "retryable",
+    });
+    const backlogFresh = buildIntent({
+      createdAt: "2026-04-08T00:00:30.000Z",
+      intentId: "intent_backlog_fresh",
+      status: "pending",
+    });
+    // The parent manifest already sent, so the cron job no longer references
+    // any delivery intent; the children are scheduled work only through their
+    // copied automation authority.
+    mocks.listAssistantCronPendingDeliveryIntentIds.mockResolvedValue([]);
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      backlogStale,
+      backlogFresh,
+      childA,
+      childB,
+      childC,
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId).sort()).toEqual([
+      "intent_backlog_fresh",
+      "intent_child_a",
+      "intent_child_b",
+      "intent_child_c",
+    ]);
+    for (const effect of sideEffects) {
+      expect(effect.deliveryPhase).toBe("background_retry");
+    }
+
+    // After one child delivers and a foreground yield interrupts the rest,
+    // a later selection still drains every remaining child together.
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      backlogStale,
+      backlogFresh,
+      childB,
+      childC,
+    ]);
+
+    const residualSideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(residualSideEffects.map((effect) => effect.effectId).sort()).toEqual([
+      "intent_backlog_fresh",
+      "intent_child_b",
+      "intent_child_c",
+    ]);
+  });
+
   it("orders background delivery candidates by instant when createdAt offsets differ", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
