@@ -11,6 +11,13 @@ import { resolveHostedWebDistDir } from "../next-artifacts";
 // serverless trace, every non-prerendered render of that route 500s with
 // ENOENT, so a missing trace entry must fail the build
 // (outputFileTracingIncludes in next.config.ts owns the tracing).
+//
+// Today this is a backstop rather than the sole guarantee: the current
+// Turbopack tracer already pulls the whole apps/web tree into each route's
+// closure, so these assets are present even without the explicit includes.
+// That breadth is incidental and could tighten in any release, and a dynamic
+// `readFile` is invisible to static tracing, so the includes state the
+// requirement and this check keeps it honest.
 // Trace entries are recorded relative to each trace file and stay inside
 // apps/web, so the suffixes carry no apps/web prefix.
 const requiredOgAssetSuffixes = [

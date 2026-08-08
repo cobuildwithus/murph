@@ -12,10 +12,12 @@ import {
   ogAssetCandidatePaths,
 } from "../app/font-files";
 
-// These tests intentionally use the real filesystem: the production bug this
-// guards against was OG routes 500ing with ENOENT because the bundled asset
-// paths pointed at the build machine's directory layout. A mocked fs cannot
-// catch that class of failure.
+// These tests intentionally use the real filesystem: the failure they guard
+// against is OG routes 500ing with ENOENT because an asset path does not exist
+// where the code looks for it, and a mocked fs asserts only that some string
+// was passed to readFile. They cover path construction against the real repo
+// layout; `scripts/check-og-emitted-runtime.ts` covers the emitted bundle in
+// the deployed layout, which is the boundary that actually failed.
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(appRoot, "../..");
