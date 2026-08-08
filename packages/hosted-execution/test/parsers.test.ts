@@ -3099,7 +3099,6 @@ describe("parseHostedRuntimeGroupTool", () => {
         usage: {
           fundingNeeded: true,
           fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored" as const,
         },
       },
     };
@@ -3124,7 +3123,6 @@ describe("parseHostedRuntimeGroupTool", () => {
           fundingNeeded: true,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
@@ -3147,7 +3145,6 @@ describe("parseHostedRuntimeGroupTool", () => {
           fundingNeeded: false,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
@@ -3170,7 +3167,6 @@ describe("parseHostedRuntimeGroupTool", () => {
           fundingNeeded: false,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });

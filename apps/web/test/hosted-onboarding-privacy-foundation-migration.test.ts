@@ -250,7 +250,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMailboxPayload",
   "HostedComputerHandoff",
   "HostedComputerRun",
-  "HostedRuntimeLog",
   "HostedWorkspace",
   "HostedUserCryptoAudit",
   "HostedUserCryptoEnvelope",
@@ -1083,6 +1082,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260806120000_hosted_growth_snapshot_active_users",
       "20260806170000_hosted_pulse_trial_start_source",
       "20260806180000_fix_hosted_usage_plan_transition_bridge",
+      "20260807140000_hosted_growth_snapshot_mrr_breakdown",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(

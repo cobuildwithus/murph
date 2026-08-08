@@ -1,23 +1,10 @@
-import { randomUUID } from "node:crypto";
-
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
   HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
-  HOSTED_MAILBOX_LANES,
-  HOSTED_RUNTIME_LOG_COMPONENTS,
-  HOSTED_RUNTIME_LOG_EVENT_CODES,
-  HOSTED_RUNTIME_LOG_LEVELS,
-  HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   isHostedRuntimeMailboxContinuation,
-  isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
-  HostedMailboxLane,
-  HostedRuntimeLogComponent,
-  HostedRuntimeLogEventCode,
-  HostedRuntimeLogLevel,
-  HostedRuntimeLogPhase,
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointReason,
 } from "@murphai/hosted-execution/runtime-control";
@@ -41,18 +28,12 @@ import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
 export {
-  HOSTED_RUNTIME_LOG_COMPONENTS,
-  HOSTED_RUNTIME_LOG_EVENT_CODES,
-  HOSTED_RUNTIME_LOG_LEVELS,
-  HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
 };
 
 const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET =
   new Set<string>(HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS);
 const HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-const HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY =
-  "hosted_runtime_log_user_id_fkey";
 
 export type HostedWorkspaceStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedWorkspaceMutationTx = Prisma.TransactionClient;
@@ -101,68 +82,6 @@ export interface HostedWorkspaceCheckpointResult {
 export interface HostedBrowserVaultReplicaPublishResult {
   status: "published" | "missing" | "conflict";
   workspace: HostedWorkspaceRecord | null;
-}
-
-export interface HostedRuntimeLogRow {
-  id: string;
-  userId: string;
-  at: Date;
-  level: string;
-  component: string;
-  phase: string;
-  eventCode: string;
-  attemptId: string | null;
-  leaseGeneration: bigint | null;
-  workspaceVersion: bigint | null;
-  checkpointVersion: bigint | null;
-  mailboxLane: string | null;
-  mailboxSeqStart: bigint | null;
-  mailboxSeqEnd: bigint | null;
-  outboxIntentRef: string | null;
-  errorCode: string | null;
-  redactedJson: Prisma.JsonValue | null;
-  createdAt: Date;
-}
-
-export interface HostedRuntimeLogRecord {
-  id: string;
-  userId: string;
-  at: string;
-  level: HostedRuntimeLogLevel;
-  component: HostedRuntimeLogComponent;
-  phase: HostedRuntimeLogPhase;
-  eventCode: HostedRuntimeLogEventCode;
-  attemptId: string | null;
-  leaseGeneration: string | null;
-  workspaceVersion: string | null;
-  checkpointVersion: string | null;
-  mailboxLane: HostedMailboxLane | null;
-  mailboxSeqStart: string | null;
-  mailboxSeqEnd: string | null;
-  outboxIntentRef: string | null;
-  errorCode: string | null;
-  redactedJson: Prisma.JsonValue | null;
-  createdAt: string;
-}
-
-/** One runtime log entry as the runtime reports it, before the user is attached. */
-export interface HostedRuntimeLogEntryInput {
-  at?: Date | string | null;
-  attemptId?: string | null;
-  checkpointVersion?: bigint | number | string | null;
-  component: HostedRuntimeLogComponent | string;
-  errorCode?: string | null;
-  eventCode: HostedRuntimeLogEventCode | string;
-  id?: string | null;
-  leaseGeneration?: bigint | number | string | null;
-  level: HostedRuntimeLogLevel | string;
-  mailboxLane?: HostedMailboxLane | string | null;
-  mailboxSeqEnd?: bigint | number | string | null;
-  mailboxSeqStart?: bigint | number | string | null;
-  outboxIntentRef?: string | null;
-  phase: HostedRuntimeLogPhase | string;
-  redacted?: HostedRuntimeRedactedJson | null;
-  workspaceVersion?: bigint | number | string | null;
 }
 
 export async function ensureHostedWorkspace(input: {
@@ -838,170 +757,6 @@ export function readHostedWorkspaceBrowserVaultSourceStateHash(
 }
 
 /**
- * Normalizes one runtime log entry into the legacy primary row shape.
- */
-function buildHostedRuntimeLogCreateData(
-  input: HostedRuntimeLogEntryInput & { userId: string },
-) {
-  return {
-      at: input.at === undefined || input.at === null
-        ? new Date()
-        : requireDate(input.at, "Hosted runtime log at"),
-      attemptId: normalizeNullableHostedRuntimeLogString(
-        input.attemptId,
-        "Hosted runtime log attemptId",
-      ),
-      checkpointVersion: normalizeNullableBigInt(
-        input.checkpointVersion,
-        "Hosted runtime log checkpointVersion",
-      ),
-      component: requireAllowedString(
-        input.component,
-        HOSTED_RUNTIME_LOG_COMPONENTS,
-        "Hosted runtime log component",
-      ),
-      errorCode: normalizeNullableHostedRuntimeLogString(
-        input.errorCode,
-        "Hosted runtime log errorCode",
-      ),
-      eventCode: requireAllowedString(
-        input.eventCode,
-        HOSTED_RUNTIME_LOG_EVENT_CODES,
-        "Hosted runtime log eventCode",
-      ),
-      id: normalizeNullableString(input.id) ?? randomUUID(),
-      leaseGeneration: normalizeNullableBigInt(
-        input.leaseGeneration,
-        "Hosted runtime log leaseGeneration",
-      ),
-      level: requireAllowedString(
-        input.level,
-        HOSTED_RUNTIME_LOG_LEVELS,
-        "Hosted runtime log level",
-      ),
-      mailboxLane: normalizeNullableHostedMailboxLane(input.mailboxLane),
-      mailboxSeqEnd: normalizeNullableBigInt(
-        input.mailboxSeqEnd,
-        "Hosted runtime log mailboxSeqEnd",
-      ),
-      mailboxSeqStart: normalizeNullableBigInt(
-        input.mailboxSeqStart,
-        "Hosted runtime log mailboxSeqStart",
-      ),
-      outboxIntentRef: normalizeNullableHostedRuntimeLogString(
-        input.outboxIntentRef,
-        "Hosted runtime log outboxIntentRef",
-      ),
-      phase: requireAllowedString(
-        input.phase,
-        HOSTED_RUNTIME_LOG_PHASES,
-        "Hosted runtime log phase",
-      ),
-      redactedJson: toNullablePrismaJson(sanitizeHostedRuntimeRedactedJson(
-        input.redacted,
-        "Hosted runtime log redactedJson",
-      )),
-      userId: requireNonEmptyString(input.userId, "Hosted runtime log userId"),
-      workspaceVersion: normalizeNullableBigInt(
-        input.workspaceVersion,
-        "Hosted runtime log workspaceVersion",
-      ),
-  };
-}
-
-/**
- * Writes a batch of runtime log entries as one statement. The runtime log
- * callback accepts up to 50 entries, and one Prisma call per entry would put a
- * single request's fanout above the whole pool's capacity, making the pool
- * itself the request's concurrency limiter. `createMany` keeps one callback to
- * one statement. Every entry is normalized before the insert runs, so a
- * malformed entry rejects the batch instead of persisting part of it.
- */
-export async function recordHostedRuntimeLogs(input: {
-  entries: readonly HostedRuntimeLogEntryInput[];
-  prisma?: HostedWorkspaceStoreClient;
-  userId: string;
-}): Promise<number> {
-  const prisma = input.prisma ?? getPrisma();
-  const rows = input.entries.map((entry) => buildHostedRuntimeLogCreateData({
-    ...entry,
-    userId: input.userId,
-  }));
-
-  if (rows.length === 0) {
-    return 0;
-  }
-
-  try {
-    const result = await prisma.hostedRuntimeLog.createMany({
-      data: rows,
-    });
-
-    return result.count;
-  } catch (error) {
-    // A runtime can finish draining a best-effort diagnostic batch after
-    // account deletion committed. The member row is authoritative; diagnostics
-    // must neither recreate it nor turn this expected race into a retrying 500.
-    if (isMissingHostedRuntimeLogMember(error)) {
-      return 0;
-    }
-    throw error;
-  }
-}
-
-function isMissingHostedRuntimeLogMember(error: unknown): boolean {
-  if (
-    !(error instanceof Prisma.PrismaClientKnownRequestError)
-    || error.code !== "P2003"
-  ) {
-    return false;
-  }
-
-  const directConstraint = error.meta?.constraint;
-  if (directConstraint === HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY) {
-    return true;
-  }
-
-  const driverAdapterError = error.meta?.driverAdapterError;
-  if (!isUnknownRecord(driverAdapterError)) {
-    return false;
-  }
-  const cause = driverAdapterError.cause;
-  if (!isUnknownRecord(cause)) {
-    return false;
-  }
-  const constraint = cause.constraint;
-  return (
-    isUnknownRecord(constraint)
-    && constraint.index === HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY
-  );
-}
-
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-export async function listHostedRuntimeLogs(input: {
-  limit?: number;
-  prisma?: HostedWorkspaceStoreClient;
-  userId: string;
-}): Promise<HostedRuntimeLogRecord[]> {
-  const prisma = input.prisma ?? getPrisma();
-  const userId = requireNonEmptyString(input.userId, "Hosted runtime log userId");
-  const rows = await prisma.hostedRuntimeLog.findMany({
-    orderBy: {
-      at: "desc",
-    },
-    take: normalizeHostedRuntimeLogLimit(input.limit ?? 20),
-    where: {
-      userId,
-    },
-  });
-
-  return rows.map((row) => projectHostedRuntimeLog(row));
-}
-
-/**
  * Claims the per-member cooldown that decides which accepted-attempt failure
  * triggers a runtime recheck. The claim lives in workspace control state, so
  * recovery never depends on a best-effort diagnostic row being written or read
@@ -1051,62 +806,6 @@ export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorksp
   };
 }
 
-export function projectHostedRuntimeLog(record: HostedRuntimeLogRow): HostedRuntimeLogRecord {
-  return {
-    at: record.at.toISOString(),
-    attemptId: normalizeNullableHostedRuntimeLogString(
-      record.attemptId,
-      "Hosted runtime log attemptId",
-    ),
-    checkpointVersion: record.checkpointVersion?.toString() ?? null,
-    component: requireAllowedString(
-      record.component,
-      HOSTED_RUNTIME_LOG_COMPONENTS,
-      "Hosted runtime log component",
-    ),
-    createdAt: record.createdAt.toISOString(),
-    errorCode: normalizeNullableHostedRuntimeLogString(
-      record.errorCode,
-      "Hosted runtime log errorCode",
-    ),
-    eventCode: requireAllowedString(
-      record.eventCode,
-      HOSTED_RUNTIME_LOG_EVENT_CODES,
-      "Hosted runtime log eventCode",
-    ),
-    id: record.id,
-    leaseGeneration: record.leaseGeneration?.toString() ?? null,
-    level: requireAllowedString(
-      record.level,
-      HOSTED_RUNTIME_LOG_LEVELS,
-      "Hosted runtime log level",
-    ),
-    mailboxLane: normalizeNullableHostedMailboxLane(record.mailboxLane),
-    mailboxSeqEnd: record.mailboxSeqEnd?.toString() ?? null,
-    mailboxSeqStart: record.mailboxSeqStart?.toString() ?? null,
-    outboxIntentRef: normalizeNullableHostedRuntimeLogString(
-      record.outboxIntentRef,
-      "Hosted runtime log outboxIntentRef",
-    ),
-    phase: requireAllowedString(
-      record.phase,
-      HOSTED_RUNTIME_LOG_PHASES,
-      "Hosted runtime log phase",
-    ),
-    redactedJson: record.redactedJson,
-    userId: record.userId,
-    workspaceVersion: record.workspaceVersion?.toString() ?? null,
-  };
-}
-
-function normalizeHostedRuntimeLogLimit(value: number): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError("Hosted runtime log limit must be a positive integer.");
-  }
-
-  return Math.min(value, 50);
-}
-
 function sanitizeHostedRuntimeRedactedJson(
   value: Record<string, unknown> | null | undefined,
   label: string,
@@ -1114,25 +813,6 @@ function sanitizeHostedRuntimeRedactedJson(
 ): HostedRuntimeRedactedJson | null {
   const parsed = parseHostedRuntimeRedactedJson(value, label, reservedKeys);
   return parsed && Object.keys(parsed).length > 0 ? parsed : null;
-}
-
-function normalizeNullableHostedRuntimeLogString(
-  value: string | null | undefined,
-  label: string,
-): string | null {
-  const normalized = normalizeNullableString(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  parseHostedRuntimeRedactedJson({ value: normalized }, label);
-
-  if (normalized.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(normalized)) {
-    throw new TypeError(`${label} must be a bounded opaque identifier or code.`);
-  }
-
-  return normalized;
 }
 
 function toNullablePrismaJson(
@@ -1160,24 +840,6 @@ function normalizeNullableBigInt(
   }
 
   return normalizeBigInt(value, label);
-}
-
-function normalizeNullableHostedMailboxLane(
-  value: string | null | undefined,
-): HostedMailboxLane | null {
-  const normalized = normalizeNullableString(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  if (isHostedMailboxLane(normalized)) {
-    return normalized;
-  }
-
-  throw new TypeError(
-    `Hosted runtime log mailboxLane must be one of ${HOSTED_MAILBOX_LANES.join(", ")}.`,
-  );
 }
 
 function normalizeBigInt(

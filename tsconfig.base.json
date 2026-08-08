@@ -165,6 +165,9 @@
       "#hosted-web-testing": [
         "./apps/web/test/support/hosted-web-testkit.ts"
       ],
+      "@/src/lib/hosted-runtime-log/subject-key": [
+        "./apps/web/src/lib/hosted-runtime-log/subject-key.ts"
+      ],
       "@murphai/messaging-ingress/linq-webhook": [
         "./packages/messaging-ingress/src/linq-webhook.ts"
       ],

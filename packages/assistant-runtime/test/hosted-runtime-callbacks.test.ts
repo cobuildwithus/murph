@@ -33,6 +33,7 @@ import {
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
+import type { HostedRuntimeLogPort } from "../src/hosted-runtime/platform.ts";
 
 const mocks = vi.hoisted(() => ({
   applyAssistantVaultFileSendApprovalResult: vi.fn(),
@@ -45,6 +46,7 @@ const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   findAssistantAutoReplyDeliveryIntentIds: vi.fn(),
   hasAssistantAutoReplyChannel: vi.fn(),
+  listAssistantCronPendingDeliveryIntentIds: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
@@ -96,6 +98,8 @@ vi.mock("@murphai/assistant-engine", async () => {
     findAssistantAutoReplyDeliveryIntentIds:
       mocks.findAssistantAutoReplyDeliveryIntentIds,
     hasAssistantAutoReplyChannel: mocks.hasAssistantAutoReplyChannel,
+    listAssistantCronPendingDeliveryIntentIds:
+      mocks.listAssistantCronPendingDeliveryIntentIds,
     listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
     markAssistantOutboxIntentMirrorTerminalById:
       mocks.markAssistantOutboxIntentMirrorTerminalById,
@@ -466,6 +470,7 @@ beforeEach(() => {
     }),
   );
   mocks.readAssistantOutboxIntent.mockResolvedValue(null);
+  mocks.listAssistantCronPendingDeliveryIntentIds.mockResolvedValue([]);
   mocks.listAssistantOutboxIntents.mockResolvedValue([]);
   mocks.readAssistantVaultFileMedia.mockReturnValue(null);
   mocks.readVerifiedAssistantVaultFileBytes.mockResolvedValue(
@@ -2553,6 +2558,228 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects[0]?.effectId).toBe("intent_fresh");
     expect(sideEffects[0]?.deliveryPhase).toBe("background_retry");
     expect(sideEffects[0]?.payload.message).toBe("fresh reply");
+  });
+
+  it("drains the durable scheduled-delivery cohort across passes while unrelated backlog stays capped", async () => {
+    const buildIntent = (input: {
+      createdAt: string;
+      intentId: string;
+      status: "pending" | "retryable";
+    }) => ({
+      actorId: `actor_${input.intentId}`,
+      bindingDelivery: null,
+      channel: "linq",
+      createdAt: input.createdAt,
+      dedupeKey: `dedupe_${input.intentId}`,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: true,
+      explicitTarget: "h1_333333333333333333333333",
+      identityId: "identity_1",
+      intentId: input.intentId,
+      lastError: input.status === "retryable"
+        ? { code: "LINQ_API_REQUEST_FAILED", message: "Chat not found" }
+        : null,
+      message: `message ${input.intentId}`,
+      nextAttemptAt: input.createdAt,
+      replyToMessageId: null,
+      sessionId: "session_1",
+      status: input.status,
+      subject: null,
+      threadId: `thread_${input.intentId}`,
+      threadIsDirect: true,
+      turnId: `turn_${input.intentId}`,
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      buildIntent({
+        createdAt: "2026-04-08T00:00:00.000Z",
+        intentId: "intent_backlog_stale",
+        status: "retryable",
+      }),
+      buildIntent({
+        createdAt: "2026-04-08T00:00:30.000Z",
+        intentId: "intent_backlog_fresh",
+        status: "pending",
+      }),
+      buildIntent({
+        createdAt: "2026-04-08T00:01:00.000Z",
+        intentId: "intent_cron_a",
+        status: "pending",
+      }),
+      buildIntent({
+        createdAt: "2026-04-08T00:02:00.000Z",
+        intentId: "intent_cron_b",
+        status: "pending",
+      }),
+    ]);
+    mocks.listAssistantCronPendingDeliveryIntentIds.mockResolvedValue([
+      "intent_cron_a",
+      "intent_cron_b",
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId).sort()).toEqual([
+      "intent_backlog_fresh",
+      "intent_cron_a",
+      "intent_cron_b",
+    ]);
+    for (const effect of sideEffects) {
+      expect(effect.deliveryPhase).toBe("background_retry");
+    }
+
+    // A later pass (for example after a foreground yield interrupted the
+    // drain) re-derives the remaining cohort from durable cron owner state:
+    // once the first reminder's job is reconciled sent, only the residual
+    // cohort member is exempt from the backlog cap.
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      buildIntent({
+        createdAt: "2026-04-08T00:00:00.000Z",
+        intentId: "intent_backlog_stale",
+        status: "retryable",
+      }),
+      buildIntent({
+        createdAt: "2026-04-08T00:00:30.000Z",
+        intentId: "intent_backlog_fresh",
+        status: "pending",
+      }),
+      buildIntent({
+        createdAt: "2026-04-08T00:02:00.000Z",
+        intentId: "intent_cron_b",
+        status: "pending",
+      }),
+    ]);
+    mocks.listAssistantCronPendingDeliveryIntentIds.mockResolvedValue([
+      "intent_cron_b",
+    ]);
+
+    const residualSideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(residualSideEffects.map((effect) => effect.effectId).sort()).toEqual([
+      "intent_backlog_fresh",
+      "intent_cron_b",
+    ]);
+  });
+
+  it("drains authority-bearing scheduled children after the parent clears its cron reference", async () => {
+    const buildIntent = (input: {
+      authority?: boolean;
+      createdAt: string;
+      intentId: string;
+      status: "pending" | "retryable";
+    }) => ({
+      actorId: `actor_${input.intentId}`,
+      automationAuthority: input.authority
+        ? {
+            automationId: "automation_newsletter",
+            expectedUpdatedAt: "2026-04-08T00:00:00.000Z",
+          }
+        : null,
+      bindingDelivery: null,
+      channel: "linq",
+      createdAt: input.createdAt,
+      dedupeKey: `dedupe_${input.intentId}`,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: true,
+      explicitTarget: "h1_444444444444444444444444",
+      identityId: "identity_1",
+      intentId: input.intentId,
+      lastError: input.status === "retryable"
+        ? { code: "LINQ_API_REQUEST_FAILED", message: "Chat not found" }
+        : null,
+      message: `message ${input.intentId}`,
+      nextAttemptAt: input.createdAt,
+      replyToMessageId: null,
+      sessionId: "session_1",
+      status: input.status,
+      subject: null,
+      threadId: `thread_${input.intentId}`,
+      threadIsDirect: true,
+      turnId: `turn_${input.intentId}`,
+    });
+    const childA = buildIntent({
+      authority: true,
+      createdAt: "2026-04-08T00:01:00.000Z",
+      intentId: "intent_child_a",
+      status: "pending",
+    });
+    const childB = buildIntent({
+      authority: true,
+      createdAt: "2026-04-08T00:01:10.000Z",
+      intentId: "intent_child_b",
+      status: "pending",
+    });
+    const childC = buildIntent({
+      authority: true,
+      createdAt: "2026-04-08T00:01:20.000Z",
+      intentId: "intent_child_c",
+      status: "pending",
+    });
+    const backlogStale = buildIntent({
+      createdAt: "2026-04-08T00:00:00.000Z",
+      intentId: "intent_backlog_stale",
+      status: "retryable",
+    });
+    const backlogFresh = buildIntent({
+      createdAt: "2026-04-08T00:00:30.000Z",
+      intentId: "intent_backlog_fresh",
+      status: "pending",
+    });
+    // The parent manifest already sent, so the cron job no longer references
+    // any delivery intent; the children are scheduled work only through their
+    // copied automation authority.
+    mocks.listAssistantCronPendingDeliveryIntentIds.mockResolvedValue([]);
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      backlogStale,
+      backlogFresh,
+      childA,
+      childB,
+      childC,
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId).sort()).toEqual([
+      "intent_backlog_fresh",
+      "intent_child_a",
+      "intent_child_b",
+      "intent_child_c",
+    ]);
+    for (const effect of sideEffects) {
+      expect(effect.deliveryPhase).toBe("background_retry");
+    }
+
+    // After one child delivers and a foreground yield interrupts the rest,
+    // a later selection still drains every remaining child together.
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      backlogStale,
+      backlogFresh,
+      childB,
+      childC,
+    ]);
+
+    const residualSideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(residualSideEffects.map((effect) => effect.effectId).sort()).toEqual([
+      "intent_backlog_fresh",
+      "intent_child_b",
+      "intent_child_c",
+    ]);
   });
 
   it("orders background delivery candidates by instant when createdAt offsets differ", async () => {
@@ -9222,6 +9449,288 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("writes one bounded runtime log entry when a capability error selects text recovery", async () => {
+    const idempotencyKey = "assistant-outbox:card-capability-error-log";
+    const logWrite = vi.fn<HostedRuntimeLogPort["write"]>(async () => ({ loggedCount: 1 }));
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(String(request));
+      if (url.pathname.endsWith("/capability/check_imessage")) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const body = JSON.parse(String(init?.body)) as {
+        message?: { parts?: Array<{ type?: string }> };
+      };
+      expect(body.message?.parts?.some((part) => part.type === "imessage_app"))
+        .toBe(false);
+      return new Response(JSON.stringify({ message: { id: "linq_text_1" } }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+          buildClaimedLinqEngagementResult(request)
+        ),
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      platform: { logPort: { write: logWrite } },
+      providerFetch,
+    });
+    assert.ok(dependencies.sendLinq);
+
+    await expect(dependencies.sendLinq({
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550002",
+      idempotencyKey,
+      message: "Nutrition summary",
+      persistAppCardTextFallback: vi.fn(async () => undefined),
+      target: "linq_chat_123",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      providerMessageId: "linq_text_1",
+    });
+
+    expect(logWrite).toHaveBeenCalledTimes(1);
+    const entries = logWrite.mock.calls[0]?.[0]?.entries ?? [];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      component: "outbox",
+      errorCode: "LINQ_API_REQUEST_FAILED",
+      eventCode: "outbox.linq_app_card_fallback_error",
+      level: "warn",
+      phase: "outbox",
+      redactedJson: {
+        errorStatus: 403,
+        fallbackKind: "text",
+        reason: "capability_check_failed",
+      },
+    });
+    const serializedEntry = JSON.stringify(entries[0]);
+    expect(serializedEntry).not.toContain("+15550001");
+    expect(serializedEntry).not.toContain("+15550002");
+    expect(serializedEntry).not.toContain("linq_chat_123");
+    expect(serializedEntry).not.toContain(idempotencyKey);
+    expect(serializedEntry).not.toContain("linq-actual-runtime-token");
+    expect(serializedEntry).not.toContain("Forbidden");
+  });
+
+  it("keeps text recovery ahead of a failing runtime log write after an app-card rejection", async () => {
+    const idempotencyKey = "assistant-outbox:card-rejected-log-failure";
+    const events: string[] = [];
+    const logWrite = vi.fn<HostedRuntimeLogPort["write"]>(async () => {
+      throw new Error("log endpoint unavailable");
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(String(request));
+      if (url.pathname.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({
+          address: "+15550001",
+          available: true,
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as {
+        message?: { idempotency_key?: string; parts?: Array<{ type?: string }> };
+      };
+      if (body.message?.parts?.some((part) => part.type === "imessage_app")) {
+        events.push("provider:app-card");
+        return new Response(JSON.stringify({ error: "unsupported app card" }), {
+          headers: { "content-type": "application/json" },
+          status: 400,
+        });
+      }
+      events.push(`provider:text:${body.message?.idempotency_key ?? "none"}`);
+      return new Response(JSON.stringify({ message: { id: "linq_text_1" } }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const persistAppCardTextFallback = vi.fn(async (fallback: {
+      idempotencyKey: string;
+    }) => {
+      events.push(`persist:${fallback.idempotencyKey}`);
+    });
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+          buildClaimedLinqEngagementResult(request)
+        ),
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      platform: { logPort: { write: logWrite } },
+      providerFetch,
+    });
+    assert.ok(dependencies.sendLinq);
+
+    await expect(dependencies.sendLinq({
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550002",
+      idempotencyKey,
+      message: "Nutrition summary",
+      persistAppCardTextFallback,
+      target: "linq_chat_123",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      providerMessageId: "linq_text_1",
+    });
+
+    expect(events).toEqual([
+      "provider:app-card",
+      `persist:${idempotencyKey}:fallback`,
+      `provider:text:${idempotencyKey}:fallback`,
+    ]);
+    expect(logWrite).toHaveBeenCalledTimes(1);
+    const entries = logWrite.mock.calls[0]?.[0]?.entries ?? [];
+    expect(entries[0]).toMatchObject({
+      component: "outbox",
+      errorCode: "LINQ_API_REQUEST_FAILED",
+      eventCode: "outbox.linq_app_card_fallback_error",
+      level: "warn",
+      phase: "outbox",
+      redactedJson: {
+        errorStatus: 400,
+        fallbackKind: "text",
+        reason: "app_card_rejected",
+      },
+    });
+    const serializedEntry = JSON.stringify(entries[0]);
+    expect(serializedEntry).not.toContain("unsupported app card");
+    expect(serializedEntry).not.toContain(idempotencyKey);
+  });
+
+  it("bounds a malformed capability response to a classification-only log entry", async () => {
+    const idempotencyKey = "assistant-outbox:card-capability-malformed-json";
+    const logWrite = vi.fn<HostedRuntimeLogPort["write"]>(async () => ({ loggedCount: 1 }));
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(String(request));
+      if (url.pathname.endsWith("/capability/check_imessage")) {
+        return new Response("LEAKMARKER private provider prose", {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as {
+        message?: { parts?: Array<{ type?: string }> };
+      };
+      expect(body.message?.parts?.some((part) => part.type === "imessage_app"))
+        .toBe(false);
+      return new Response(JSON.stringify({ message: { id: "linq_text_1" } }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+          buildClaimedLinqEngagementResult(request)
+        ),
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      platform: { logPort: { write: logWrite } },
+      providerFetch,
+    });
+    assert.ok(dependencies.sendLinq);
+
+    await expect(dependencies.sendLinq({
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550002",
+      idempotencyKey,
+      message: "Nutrition summary",
+      persistAppCardTextFallback: vi.fn(async () => undefined),
+      target: "linq_chat_123",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      providerMessageId: "linq_text_1",
+    });
+
+    expect(logWrite).toHaveBeenCalledTimes(1);
+    const entries = logWrite.mock.calls[0]?.[0]?.entries ?? [];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      component: "outbox",
+      errorCode: "syntax_error",
+      eventCode: "outbox.linq_app_card_fallback_error",
+      level: "warn",
+      phase: "outbox",
+      redactedJson: {
+        errorName: "SyntaxError",
+        fallbackKind: "text",
+        reason: "capability_check_failed",
+      },
+    });
+    const serializedEntry = JSON.stringify(entries[0]);
+    expect(serializedEntry).not.toContain("LEAKMARKER");
+    expect(serializedEntry).not.toContain("+15550001");
+    expect(serializedEntry).not.toContain(idempotencyKey);
+  });
+
+  it("writes no runtime log entry for an expected unavailable capability result", async () => {
+    const idempotencyKey = "assistant-outbox:card-capability-unavailable-silent";
+    const logWrite = vi.fn<HostedRuntimeLogPort["write"]>(async () => ({ loggedCount: 1 }));
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(String(request));
+      if (url.pathname.endsWith("/capability/check_imessage")) {
+        return new Response(JSON.stringify({
+          address: "+15550001",
+          available: false,
+        }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as {
+        message?: { parts?: Array<{ type?: string }> };
+      };
+      expect(body.message?.parts?.some((part) => part.type === "imessage_app"))
+        .toBe(false);
+      return new Response(JSON.stringify({ message: { id: "linq_text_1" } }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+          buildClaimedLinqEngagementResult(request)
+        ),
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      platform: { logPort: { write: logWrite } },
+      providerFetch,
+    });
+    assert.ok(dependencies.sendLinq);
+
+    await expect(dependencies.sendLinq({
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550002",
+      idempotencyKey,
+      message: "Nutrition summary",
+      persistAppCardTextFallback: vi.fn(async () => undefined),
+      target: "linq_chat_123",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).resolves.toMatchObject({
+      providerMessageId: "linq_text_1",
+    });
+
+    expect(logWrite).not.toHaveBeenCalled();
+  });
+
   it("uses the persisted text fallback immediately after the first capability rate limit", async () => {
     vi.useFakeTimers();
     try {
@@ -12541,6 +13050,7 @@ describe("hosted runtime callbacks", () => {
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
+      onAppCardFallbackError: expect.any(Function),
       signal: undefined,
     });
     const linqFetch = mocks.sendLinqMessage.mock.calls[0]?.[1]?.fetchImplementation;
@@ -14133,6 +14643,7 @@ describe("hosted runtime callbacks", () => {
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
+      onAppCardFallbackError: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -14236,6 +14747,7 @@ describe("hosted runtime callbacks", () => {
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
+      onAppCardFallbackError: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -14340,6 +14852,7 @@ describe("hosted runtime callbacks", () => {
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
+      onAppCardFallbackError: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -14348,6 +14861,122 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
       }),
     ]);
+  });
+
+  it("stamps the prepared-outbox intent onto the app-card fallback log entry", async () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_fallback_log_intent",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the current wake",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      transportIdempotent: true,
+    });
+    const logWrite = vi.fn<HostedRuntimeLogPort["write"]>(async () => ({ loggedCount: 1 }));
+    mocks.sendLinqMessage.mockImplementationOnce(async (
+      _request: unknown,
+      dependencies: {
+        onAppCardFallbackError?: (input: {
+          error: unknown;
+          reason: "app_card_rejected" | "capability_check_failed";
+        }) => void;
+      },
+    ) => {
+      dependencies.onAppCardFallbackError?.({
+        error: new VaultCliError(
+          "LINQ_API_REQUEST_FAILED",
+          "Linq request POST /chats/[chat]/messages failed with HTTP 400.",
+          { status: 400 },
+        ),
+        reason: "app_card_rejected",
+      });
+      return {
+        providerMessageId: "linq_message_sent",
+        providerThreadId: "linq_chat_current",
+        target: "linq_chat_current",
+        targetKind: "thread" as const,
+      };
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15550002",
+        idempotencyKey: `assistant-outbox:${effect.effectId}`,
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+          buildClaimedLinqEngagementResult(request)
+        ),
+      }),
+      platform: { logPort: { write: logWrite } },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+      }),
+    ]);
+    expect(logWrite).toHaveBeenCalledTimes(1);
+    const entries = logWrite.mock.calls[0]?.[0]?.entries ?? [];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      component: "outbox",
+      errorCode: "LINQ_API_REQUEST_FAILED",
+      eventCode: "outbox.linq_app_card_fallback_error",
+      level: "warn",
+      outboxIntentRef: effect.effectId,
+      phase: "outbox",
+      redactedJson: {
+        errorStatus: 400,
+        fallbackKind: "text",
+        reason: "app_card_rejected",
+      },
+    });
+    const serializedEntry = JSON.stringify(entries[0]);
+    expect(serializedEntry).not.toContain("+15550001");
+    expect(serializedEntry).not.toContain("+15550002");
+    expect(serializedEntry).not.toContain("linq_chat_current");
   });
 
   it("checks egress authority for route-scoped Linq timer retries without prepared authority", async () => {
