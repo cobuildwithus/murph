@@ -1,0 +1,172 @@
+name: Agent Shorten Vital Connection Copy
+
+on:
+  push:
+    branches:
+      - agent/explain-vital-garmin-handoff
+    paths:
+      - .github/workflows/agent-shorten-vital-copy.yml
+
+concurrency:
+  group: agent-shorten-vital-copy
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Tighten the disclosure and remove temporary workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str, label: str) -> None:
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"Expected exactly one {label} match in {path}, found {count}"
+                  )
+              path.write_text(text.replace(old, new, 1))
+
+          def replace_required(path: Path, replacements: list[tuple[str, str]]) -> None:
+              text = path.read_text()
+              for old, new in replacements:
+                  if old not in text:
+                      raise SystemExit(f"Expected test copy not found in {path}: {old}")
+                  text = text.replace(old, new)
+              path.write_text(text)
+
+          dialog_path = Path(
+              "apps/web/app/(dashboard)/connect/connect-page-dialogs.tsx"
+          )
+          replace_once(
+              dialog_path,
+              "            Vital connects {sourceName} for Murph",
+              "            Vital connects {sourceName} to Murph",
+              "dialog title",
+          )
+          replace_once(
+              dialog_path,
+              '''          <DialogDescription className="leading-6">
+            The next authorization screen may name Vital instead of Murph. That
+            is expected.
+          </DialogDescription>''',
+              '''          <DialogDescription className="leading-6">
+            The next screen may say Vital. That is expected.
+          </DialogDescription>''',
+              "dialog description",
+          )
+          replace_once(
+              dialog_path,
+              '''        <div className="space-y-3 text-sm leading-6 text-muted-foreground">
+          <p>
+            Vital acts as Murph&apos;s health-sync provider. It processes the
+            data you approve to operate this connection and send it to Murph; it
+            is not the health assistant using the data.
+          </p>
+          <p>
+            Murph does not authorize Vital to sell this data, use it for
+            advertising, train models on it, or use it for unrelated purposes.
+            You can disconnect
+            {` ${sourceName}`} at any time.
+          </p>
+        </div>''',
+              '''        <p className="text-sm leading-6 text-muted-foreground">
+          Vital processes the data you approve only to sync it to Murph. Murph
+          does not allow Vital to sell it, use it for ads or model training, or
+          use it for anything unrelated. Disconnect anytime.
+        </p>''',
+              "dialog body",
+          )
+
+          replace_required(
+              Path("apps/web/test/vital-connection-dialog.test.tsx"),
+              [
+                  ("Vital connects Fitbit for Murph", "Vital connects Fitbit to Murph"),
+                  ("Vital connects Garmin for Murph", "Vital connects Garmin to Murph"),
+                  ("may name Vital instead of Murph", "may say Vital"),
+                  ("health-sync provider", "processes the data you approve"),
+                  (
+                      "does not authorize Vital to sell this data",
+                      "does not allow Vital to sell it",
+                  ),
+                  ("train models on it", "model training"),
+                  ("disconnect Fitbit at any time", "Disconnect anytime"),
+              ],
+          )
+          replace_required(
+              Path("apps/web/test/connect-page.test.ts"),
+              [
+                  ("Vital connects Dexcom for Murph", "Vital connects Dexcom to Murph"),
+                  ("Vital connects Fitbit for Murph", "Vital connects Fitbit to Murph"),
+                  ("health-sync provider", "processes the data you approve"),
+                  (
+                      "does not authorize Vital to sell",
+                      "does not allow Vital to sell it",
+                  ),
+                  ("train models on it", "model training"),
+              ],
+          )
+
+          for workflow in [
+              ".github/workflows/agent-vital-matcher-diagnostic.yml",
+              ".github/workflows/agent-vital-semantic-rebuild-v2.yml",
+              ".github/workflows/agent-vital-semantic-rebuild.yml",
+              ".github/workflows/agent-vital-targeted-rebuild.yml",
+              ".github/workflows/agent-shorten-vital-copy.yml",
+          ]:
+              path = Path(workflow)
+              if path.exists():
+                  path.unlink()
+          PY
+          git diff --check
+          git diff --stat
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate required artifacts
+        run: |
+          pnpm health-commons:generate
+          pnpm --dir apps/web prisma:generate
+
+      - name: Run focused Web tests
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/connect-page.test.ts
+          apps/web/test/vital-connection-dialog.test.tsx
+
+      - name: Typecheck hosted Web
+        run: pnpm --dir apps/web typecheck:prepared
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Shorten Vital connection disclosure"
+          git push origin HEAD:agent/explain-vital-garmin-handoff
