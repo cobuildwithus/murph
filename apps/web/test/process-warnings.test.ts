@@ -1,3 +1,5 @@
+import util from "node:util";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalEmitWarning = process.emitWarning;
@@ -98,6 +100,43 @@ describe("hosted web warning filters", () => {
       ["Some other deprecation", "DeprecationWarning"],
       [PG_CONCURRENT_QUERY_DEPRECATION_MESSAGE, "ExperimentalWarning"],
       ["Plain runtime warning", "Warning"],
+    ]);
+  });
+
+  it("suppresses util.deprecate wrappers created before the filter installs", async () => {
+    const forwardedWarnings: unknown[][] = [];
+
+    process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+      forwardedWarnings.push([warning, ...args]);
+    }) as typeof process.emitWarning;
+
+    // pg creates its deprecation wrappers at module evaluation, before
+    // prisma.ts reaches installHostedWebWarningFilters(), so wrapper creation
+    // must not bind the pre-filter emitter. util.deprecate resolves
+    // process.emitWarning at call time; this test fails if that ever changes
+    // (the pg message would reach the stub above, bypassing the filter).
+    const pgDeprecated = util.deprecate(
+      () => {},
+      PG_CONCURRENT_QUERY_DEPRECATION_MESSAGE,
+    );
+    const otherDeprecated = util.deprecate(
+      () => {},
+      "Some other library deprecation.",
+    );
+
+    const { installHostedWebWarningFilters } = await import("@/src/lib/process-warnings");
+
+    installHostedWebWarningFilters();
+
+    pgDeprecated();
+    otherDeprecated();
+
+    expect(forwardedWarnings).toEqual([
+      [
+        "Some other library deprecation.",
+        "DeprecationWarning",
+        expect.any(Function),
+      ],
     ]);
   });
 
