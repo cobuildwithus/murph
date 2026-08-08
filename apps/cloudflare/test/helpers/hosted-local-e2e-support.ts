@@ -235,6 +235,7 @@ export function expectAdvertisedMurphDynamicTools(
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
     newsletterAvailable?: boolean;
+    pendingVaultFilesAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
@@ -310,6 +311,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.responseCardAvailable !== true
         && name === "murph.attach_response_card"
+      ) {
+        return false;
+      }
+
+      if (
+        options.pendingVaultFilesAvailable !== true
+        && name === "murph.pending_vault_files"
       ) {
         return false;
       }

@@ -221,6 +221,8 @@ describe("hosted group funding page", () => {
   });
 
   it("restores the payer's exact frozen sponsor details with a matching active purchase", async () => {
+    const signedFundingLocator =
+      "gf1.member_group_runtime.signed_exhaustion_locator";
     const frozenSponsorship = {
       publicAlias: "The Group Historian",
       runningBitRequest: "Treat me like Murph’s exhausted CFO.",
@@ -237,14 +239,33 @@ describe("hosted group funding page", () => {
         kind: "group",
       },
     });
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce({
+      displayName: "Sunday sleep crew",
+      joinCode: signedFundingLocator,
+      kind: "friends",
+      runtimeMemberId: "member_group_runtime",
+    });
     mocks.readHostedGroupSponsorshipDraftForCreator.mockResolvedValueOnce(
       frozenSponsorship,
     );
 
     renderToStaticMarkup(await GroupFundingPage({
-      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+      params: Promise.resolve({ joinCode: signedFundingLocator }),
     }));
 
+    expect(mocks.readHostedGroupUsageFundingTargetByJoinCode).toHaveBeenCalledWith({
+      joinCode: signedFundingLocator,
+      prisma: { label: "test-prisma" },
+    });
+    expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
+      serverApprovedPayableTargets: [{
+        beneficiaryMemberId: "member_group_runtime",
+        groupJoinCode: signedFundingLocator,
+        kind: "group",
+      }],
+      payerMemberId: "member_payer",
+      prisma: { label: "test-prisma" },
+    });
     expect(mocks.readHostedGroupSponsorshipDraftForCreator).toHaveBeenCalledWith({
       creatorMemberId: "member_payer",
       prisma: { label: "test-prisma" },
@@ -261,6 +282,16 @@ describe("hosted group funding page", () => {
       }),
       undefined,
     );
+    const renderedActivePurchase = mocks.HostedUsageTopUpDialog.mock.calls[0]?.[0]
+      ?.activePurchase;
+    expect(renderedActivePurchase).not.toHaveProperty("targetConflict");
+    expect(renderedActivePurchase).not.toHaveProperty("target");
+    for (const [props] of mocks.HostedUsageTopUpDialog.mock.calls) {
+      expect(props.checkoutUrl).toBe(
+        `/api/groups/fund/${encodeURIComponent(signedFundingLocator)}/usage-credit/checkout`,
+      );
+      expect(JSON.stringify(props)).not.toContain("group_join_code_1234");
+    }
   });
 
   it("does not offer payment recovery when the frozen sponsor draft cannot be read", async () => {
@@ -341,9 +372,18 @@ describe("hosted group funding page", () => {
   });
 
   it("shows only the authenticated payer their private sponsorship management projection", async () => {
+    const signedFundingLocator =
+      "gf1.member_group_runtime.signed_exhaustion_locator";
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce({
+      displayName: "Sunday sleep crew",
+      joinCode: signedFundingLocator,
+      kind: "friends",
+      runtimeMemberId: "member_group_runtime",
+    });
     mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
       fundingNeeded: false,
-      fundingUrl: null,
+      fundingUrl:
+        `https://www.withmurph.ai/groups/fund/${encodeURIComponent(signedFundingLocator)}`,
       sponsorshipStatus: "sponsored",
     });
     mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValueOnce({
@@ -357,13 +397,15 @@ describe("hosted group funding page", () => {
     });
 
     const markup = renderToStaticMarkup(await GroupFundingPage({
-      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+      params: Promise.resolve({ joinCode: signedFundingLocator }),
     }));
 
     assert.match(markup, /management:active:500:500:1000/u);
     assert.doesNotMatch(markup, /remaining|messages|percentage/iu);
     expect(mocks.GroupSponsorshipManagementCard).toHaveBeenCalledWith(
       expect.objectContaining({
+        endpoint:
+          `/api/groups/fund/${encodeURIComponent(signedFundingLocator)}/sponsorship`,
         management: expect.objectContaining({
           chargedThisPeriodMinor: 500,
           monthlyCapMinor: 1_000,
@@ -373,6 +415,14 @@ describe("hosted group funding page", () => {
       }),
       undefined,
     );
+    for (const [props] of mocks.HostedUsageTopUpDialog.mock.calls) {
+      expect(props.checkoutUrl).toBe(
+        `/api/groups/fund/${encodeURIComponent(signedFundingLocator)}/usage-credit/checkout`,
+      );
+      expect(JSON.stringify(props)).not.toContain("group_join_code_1234");
+    }
+    expect(JSON.stringify(mocks.GroupSponsorshipManagementCard.mock.calls))
+      .not.toContain("group_join_code_1234");
   });
 
   it("shows sponsored status with a secondary one-time contribution to a non-sponsor", async () => {

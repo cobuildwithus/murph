@@ -227,6 +227,9 @@ import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
 
+const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
+  "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
+
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
   flow: "fill-gaps",
@@ -1707,7 +1710,7 @@ export function ComponentsContent() {
                   <GroupUsageFundingActions
                     monthlyAction={
                       <GroupSponsorshipDialog
-                        checkoutUrl="/api/design/usage-credit-preview"
+                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
                         inert
                         mode="monthly"
@@ -1719,7 +1722,7 @@ export function ComponentsContent() {
                     }
                     oneTimeAction={
                       <GroupSponsorshipDialog
-                        checkoutUrl="/api/design/usage-credit-preview"
+                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
                         inert
                         mode="one_time"
@@ -1740,7 +1743,7 @@ export function ComponentsContent() {
               inert
             >
               <GroupSponsorshipManagementCard
-                endpoint="/api/design/group-sponsorship-management"
+                endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
                 inert
                 management={{
                   authorizationId: "hgsa_design_component",

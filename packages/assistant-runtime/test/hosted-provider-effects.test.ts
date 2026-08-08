@@ -413,6 +413,7 @@ describe("hosted provider effects", () => {
   });
 
   it("persists hosted app-card text fallback before its provider send", async () => {
+    const onAppCardFallbackError = vi.fn();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
@@ -449,6 +450,7 @@ describe("hosted provider effects", () => {
     }, {
       env: { LINQ_API_TOKEN: "linq-token" },
       fetchImplementation: fetchMock,
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toMatchObject({
       idempotencyKey: "hosted-card-fallback",
@@ -461,9 +463,11 @@ describe("hosted provider effects", () => {
     expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
       fetchMock.mock.invocationCallOrder[1]!,
     );
+    expect(onAppCardFallbackError).not.toHaveBeenCalled();
   });
 
   it("returns the promoted identity after a direct app-card text fallback", async () => {
+    const onAppCardFallbackError = vi.fn();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
@@ -511,6 +515,7 @@ describe("hosted provider effects", () => {
     }, {
       env: { LINQ_API_TOKEN: "linq-token" },
       fetchImplementation: fetchMock,
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toEqual({
       idempotencyKey: "hosted-card-rejected:fallback",
@@ -521,6 +526,114 @@ describe("hosted provider effects", () => {
 
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: "hosted-card-rejected:fallback",
+    });
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce();
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "LINQ_API_REQUEST_FAILED",
+      }),
+      reason: "app_card_rejected",
+    });
+  });
+
+  it("observes a hosted capability error before selecting text recovery", async () => {
+    const onAppCardFallbackError = vi.fn();
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/capability/check_imessage")) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-08-05",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-capability-error",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      onAppCardFallbackError,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: "fallback-message",
+    });
+
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce();
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "LINQ_API_REQUEST_FAILED",
+      }),
+      reason: "capability_check_failed",
+    });
+  });
+
+  it("observes a malformed capability response error before selecting text recovery", async () => {
+    const onAppCardFallbackError = vi.fn();
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/capability/check_imessage")) {
+        return new Response("LEAKMARKER private provider prose", {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-08-05",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-malformed-json",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      onAppCardFallbackError,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: "fallback-message",
+    });
+
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce();
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: expect.any(SyntaxError),
+      reason: "capability_check_failed",
     });
   });
 

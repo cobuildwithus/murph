@@ -189,7 +189,10 @@ count, or automatic refill events. The exact payer privately sees the current
 period's fulfilled and pending amounts, maximum, period end, status, and
 management controls. A near-cap notice is private and revalidated against the
 current authorization. The room is notified only when the existing usage gate
-actually pauses work, using neutral language without a funding prompt.
+actually pauses work. Every exhausted room receives the ordinary pause copy and
+the current first-party funding link. The message does not branch on or expose
+the current funding setup; the funding page separately preserves any active
+automatic sponsor and the single-sponsor billing invariant.
 
 ## Group Sponsorship Moment
 
@@ -466,13 +469,37 @@ missions. A broad request for every option or a way to earn usage reads both
 current funding and referral state. If the room already has an automatic
 sponsor, the page preserves that single-sponsor invariant and offers the
 additional payer only a one-time contribution. Murph does not imply the room
-needs funding or disclose private sponsor facts.
+needs funding when `fundingNeeded` is false or disclose private sponsor facts.
+For low capacity, Web sets that boolean only when no automatic refill is
+available or pending. An unresolved current-period refill payment remains
+pending recovery even if its authorization has since paused, entered recovery,
+or been canceled; terminal purchases do not suppress the warning. The
+assistant receives no sponsorship-status field, does not infer why a false
+signal was returned, and uses the same warning and follow-up contract for every
+room. Referral eligibility uses the ordinary runtime access gate and does not
+invoke this funding projection.
 
-Immediately before both the exhaustion crossing send and a later denied-gate
-retry, delivery re-reads the current personal usage-status projection. It
-appends the canonical first-party **Add usage** action only when the recommended
-action is currently `add_usage`; a failed projection or any ineligible state
-sends the neutral copy unchanged.
+For a group exhaustion notice, the existing claim rechecks current group usage
+and delivery always sends a first-party signed funding-only link with one
+deterministic neutral pause message. The message identifies private options and
+waiting for reset without pressuring a payer or promising instant recovery.
+The mandatory URL is derived only from the runtime member and server
+configuration; funding-page sponsor state, group display data, and join-code
+preference are not delivery dependencies. Missing or invalid mandatory action
+data fails before claim/provider work and never becomes terminal linkless copy.
+The production predeploy guard constructs and parses this exact signed URL from
+the configured HTTPS hosted origin and signing authority before serving
+traffic, and runtime validates against the same origin. A completed crossing
+has no separate replay owner, so the pre-serve invariant—not the denied-gate
+path—prevents configuration from stranding the one-shot notice. This is one
+branchless message contract; it exposes no payment setup, payer, cap, amount,
+balance, purchase, or refill facts.
+
+Immediately before a personal exhaustion crossing send and a later personal
+denied-gate retry, delivery re-reads the current personal usage-status
+projection. It appends the canonical first-party **Add usage** action only when
+the recommended action is currently `add_usage`; a failed projection or any
+ineligible state sends the neutral copy unchanged.
 
 A fulfilled grant invalidates a queued stale exhaustion notice. If credit is
 later exhausted again, at most one new reply-anchored notice is eligible for
@@ -1060,6 +1087,15 @@ row, membership, join code, vault-share projection, or profile-name/email
 grant is created. Owner-created join codes keep funding exactly as before,
 and enrollment stays behind the owner-minted join link.
 
+An exhaustion notice may also use the signed locator for an owner-created
+group so notice construction stays database-free. After authenticating that
+locator, the funding page keeps the signed capability in its funding path,
+client endpoints, and persisted return URL; it never reveals the durable join
+code. The already-resolved synthetic runtime member is the exact group purchase
+identity, so a purchase begun through either valid funding locator resumes
+through the other. Payer, purchase kind, offer, request key, and Family group
+identity checks remain exact.
+
 The Stripe Customer belongs to the payer, never to the group owner or synthetic
 container. Fulfilled credit belongs to the beneficiary. Payer departure and
 beneficiary deletion therefore follow the separate lifecycle rules above.
@@ -1255,9 +1291,11 @@ Current focused unit and component coverage exercises:
 - Family owner/member authorization, exact target freezing, former-member
   status/cancel-only recovery, all ordered target-conflict payment suppression,
   and payer-wide single-active purchase presentation;
-- group usage reads with only binary sponsorship/funding state, trusted
-  low-capacity next-turn context, the route-authorized unsponsored funding
-  link, and neutral sponsored pause copy with no payer or depletion detail; and
+- group usage reads with only funding urgency and the first-party URL,
+  automatic-refill suppression while low, ordinary low-capacity next-turn
+  context once automatic recovery is unavailable, and one route-authorized
+  exhaustion message with the funding link and no payer or accounting detail;
+  and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 
 These suites do not prove a real Stripe test-mode webhook or deployed browser

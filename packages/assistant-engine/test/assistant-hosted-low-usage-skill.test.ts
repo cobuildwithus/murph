@@ -202,7 +202,13 @@ describe('assistant hosted low-usage skill', () => {
       "Never infer the responder from the whole grouped turn",
     )
     expect(normalizedSkill).toContain(
-      'Keep this first mention link-free and route-neutral',
+      'Keep this first mention link-free and option-neutral',
+    )
+    expect(normalizedSkill).toContain(
+      '`fundingNeeded` is the sole server-owned urgency signal',
+    )
+    expect(normalizedSkill).toContain(
+      'When it is false, skip the heads-up entirely and do not infer or explain why',
     )
     expect(normalizedSkill).toContain(
       'do not name or count earned, sponsored, paid, funding, or referral paths',
@@ -214,7 +220,7 @@ describe('assistant hosted low-usage skill', () => {
       'present all of them before any link',
     )
     expect(normalizedSkill).toContain(
-      'place any funding URL after the sponsored path rather than opening with it',
+      'place any funding URL after the group-funding path rather than opening with it',
     )
     expect(normalizedSkill).toContain(
       'Never send it in the first assistant-initiated heads-up',
@@ -234,13 +240,11 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain("Match the room's energy")
     expect(normalizedSkill).toContain('without naming or singling out a nonpayer')
     expect(normalizedSkill).toContain('guilt-trip, call out nonpayers')
-    expect(skill).toContain('skip the heads-up entirely')
+    expect(normalizedSkill).toContain('skip the heads-up entirely')
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
     expect(normalizedSkill).toContain('If no funding URL is returned')
-    expect(normalizedSkill).toContain(
-      'share only the binary sponsored status unless the current request matches the direct or broad intent split above',
-    )
+    expect(normalizedSkill).not.toContain('sponsorshipStatus')
     expect(skill).toContain(
       'returned percentages and forecast as overall available AI usage',
     )
@@ -265,10 +269,16 @@ describe('assistant hosted low-usage skill', () => {
       '`fundingNeeded` controls urgency, not whether a returned funding URL may be shared after an explicit request',
     )
     expect(normalizedSkill).toContain(
-      'a returned first-party funding URL is the private path for an additional one-time contribution',
+      'describe a returned first-party funding URL as the private path to sponsor more Murph time for the room',
     )
     expect(normalizedSkill).toContain(
       'does not make explicit funding unavailable',
+    )
+    expect(normalizedSkill).toContain(
+      'the room needs more Murph time to avoid or recover from a pause',
+    )
+    expect(normalizedSkill).toContain(
+      'The deterministic Web-owned exhaustion notice may include its own current first-party recovery link',
     )
     expect(normalizedSkill).not.toContain(
       'Share a returned first-party funding URL only when `fundingNeeded` is true',
@@ -296,7 +306,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(directPlanGuidance).toContain('**Direct paid Core:**')
     expect(directPlanGuidance).not.toMatch(/\bGroup\b/u)
     expect(hostedGroupGuidance).toContain(hostedGroupHeading)
-    expect(hostedGroupGuidance).toContain('sponsorshipStatus')
+    expect(hostedGroupGuidance).not.toContain('sponsorshipStatus')
   })
 
   it('preserves explicit billing confirmation and payment truth', async () => {
@@ -388,9 +398,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('Never choose an amount, start')
     expect(skill).toContain('Checkout, or claim usage was added')
     expect(skill).toContain(
-      'never reveal who paid, amounts, caps, purchase status, or refill',
+      'never reveal whether or how the room is currently funded, who paid',
     )
-    expect(skill).toContain('never claim the room is sponsored when the read says it is not')
+    expect(skill).not.toContain('claim the room is sponsored')
     expect(skill).toContain('standing objective')
     expect(skill).toContain('deferral rules below still outrank this objective')
   })
