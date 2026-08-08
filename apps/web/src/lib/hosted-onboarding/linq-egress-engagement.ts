@@ -196,9 +196,20 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     threadId: input.target,
   });
   if (targetThreadRoute) {
+    if (targetThreadRoute.containerMemberId !== input.memberId) {
+      throwHostedLinqRouteAuthorityMismatch();
+    }
+    // A current-home-only assertion keeps a member's proactive direct send out
+    // of a durable group thread by pinning it to that member's home Linq route.
+    // A thread container owns no member Linq route, so the container thread it
+    // is asserting against is the only route it can ever reach; holding it to a
+    // home route it cannot have would reject every proactive send it makes.
     if (
       isHostedLinqCurrentHomeOnlyAssertion(input)
-      || targetThreadRoute.containerMemberId !== input.memberId
+      && await hasHostedMemberLinqHomeRoute({
+        memberId: input.memberId,
+        prisma: input.prisma,
+      })
     ) {
       throwHostedLinqRouteAuthorityMismatch();
     }
@@ -232,6 +243,31 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     homeRouteFallbackAllowed:
       input.homeRouteFallbackAllowed === true && input.authorityCheckOnly === true,
   });
+}
+
+async function hasHostedMemberLinqHomeRoute(input: {
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+}): Promise<boolean> {
+  const routing = await input.prisma.hostedMemberRouting.findUnique({
+    where: { memberId: input.memberId },
+    select: {
+      linqChatIdEncrypted: true,
+      linqChatLookupKey: true,
+      pendingLinqChatIdEncrypted: true,
+      pendingLinqChatLookupKey: true,
+    },
+  });
+  if (!routing) {
+    return false;
+  }
+
+  return Boolean(
+    routing.linqChatIdEncrypted
+    ?? routing.linqChatLookupKey
+    ?? routing.pendingLinqChatIdEncrypted
+    ?? routing.pendingLinqChatLookupKey,
+  );
 }
 
 function isHostedLinqCurrentHomeOnlyAssertion(input: {
