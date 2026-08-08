@@ -196,21 +196,12 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     threadId: input.target,
   });
   if (targetThreadRoute) {
+    // The route's container member is the canonical owner of this durable
+    // thread, and thread containers are synthetic members that no personal
+    // runtime can ever authenticate as. Exact ownership is therefore the whole
+    // authority: a personal proactive send still cannot reach a group thread,
+    // and the owning container is not held to a home route it cannot have.
     if (targetThreadRoute.containerMemberId !== input.memberId) {
-      throwHostedLinqRouteAuthorityMismatch();
-    }
-    // A current-home-only assertion keeps a member's proactive direct send out
-    // of a durable group thread by pinning it to that member's home Linq route.
-    // A thread container owns no member Linq route, so the container thread it
-    // is asserting against is the only route it can ever reach; holding it to a
-    // home route it cannot have would reject every proactive send it makes.
-    if (
-      isHostedLinqCurrentHomeOnlyAssertion(input)
-      && await hasHostedMemberLinqHomeRoute({
-        memberId: input.memberId,
-        prisma: input.prisma,
-      })
-    ) {
       throwHostedLinqRouteAuthorityMismatch();
     }
 
@@ -243,41 +234,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     homeRouteFallbackAllowed:
       input.homeRouteFallbackAllowed === true && input.authorityCheckOnly === true,
   });
-}
-
-async function hasHostedMemberLinqHomeRoute(input: {
-  memberId: string;
-  prisma: HostedLinqEngagementClient;
-}): Promise<boolean> {
-  const routing = await input.prisma.hostedMemberRouting.findUnique({
-    where: { memberId: input.memberId },
-    select: {
-      linqChatIdEncrypted: true,
-      linqChatLookupKey: true,
-      pendingLinqChatIdEncrypted: true,
-      pendingLinqChatLookupKey: true,
-    },
-  });
-  if (!routing) {
-    return false;
-  }
-
-  return Boolean(
-    routing.linqChatIdEncrypted
-    ?? routing.linqChatLookupKey
-    ?? routing.pendingLinqChatIdEncrypted
-    ?? routing.pendingLinqChatLookupKey,
-  );
-}
-
-function isHostedLinqCurrentHomeOnlyAssertion(input: {
-  answeredMailboxItemIds?: readonly string[] | null;
-  homeRouteFallbackAllowed?: boolean | null;
-  replyToMessageId?: string | null;
-}): boolean {
-  return input.homeRouteFallbackAllowed === true
-    && normalizeNullable(input.replyToMessageId) === null
-    && (input.answeredMailboxItemIds?.length ?? 0) === 0;
 }
 
 async function matchesPersistedHostedLinqDirectInbound(input: {

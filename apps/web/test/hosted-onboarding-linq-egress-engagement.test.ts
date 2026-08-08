@@ -216,15 +216,14 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
-  it("uses a same-member durable route for replies but not current-home sends", async () => {
+  it("uses a container's durable route for replies and current-home-fallback preflights", async () => {
     const prisma = createPrismaStub({
-      homeChatId: "chat-home",
-      threadRouteContainerMemberId: "member-1",
+      threadRouteContainerMemberId: "container-1",
     });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
-      memberId: "member-1",
+      memberId: "container-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-authorized",
       targetKind: "thread",
@@ -234,20 +233,22 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
 
+    // A scheduled occurrence whose route never recorded threadIsDirect asks for
+    // the home-route fallback. The container owns no home route, so its own
+    // durable thread stays the answer instead of a mismatch.
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: true,
       homeRouteFallbackAllowed: true,
-      memberId: "member-1",
+      memberId: "container-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-authorized",
       targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
+    })).resolves.toEqual({ targetOverride: null, threadIsDirect: false });
+
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
 
     const foreignRoutePrisma = createPrismaStub({
-      threadRouteContainerMemberId: "member-2",
+      threadRouteContainerMemberId: "container-2",
     });
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
@@ -260,51 +261,23 @@ describe("hosted Linq egress authority", () => {
       httpStatus: 403,
     });
     expect(foreignRoutePrisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
-  });
 
-  it("authorizes a container runtime's current-home-only send to its own durable thread", async () => {
-    const prisma = createPrismaStub({
-      memberRoutingMissing: true,
-      threadRouteContainerMemberId: "container-1",
+    const memberHomeRoutePrisma = createPrismaStub({
+      homeChatId: "chat-home",
+      threadRouteContainerMemberId: "container-2",
     });
-
-    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      authorityCheckOnly: true,
-      homeRouteFallbackAllowed: true,
-      memberId: "container-1",
-      prisma: asRuntimeEngagementPrisma(prisma),
-      target: "chat-authorized",
-      targetKind: "thread",
-    })).resolves.toMatchObject({ targetOverride: null, threadIsDirect: false });
-
-    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
-      select: {
-        linqChatIdEncrypted: true,
-        linqChatLookupKey: true,
-        pendingLinqChatIdEncrypted: true,
-        pendingLinqChatLookupKey: true,
-      },
-      where: { memberId: "container-1" },
-    });
-  });
-
-  it("rejects a current-home-only send to a durable thread when the runtime holds a pending home route", async () => {
-    const prisma = createPrismaStub({
-      pendingChatId: "chat-pending",
-      threadRouteContainerMemberId: "member-1",
-    });
-
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: true,
       homeRouteFallbackAllowed: true,
       memberId: "member-1",
-      prisma: asRuntimeEngagementPrisma(prisma),
+      prisma: asRuntimeEngagementPrisma(memberHomeRoutePrisma),
       target: "chat-authorized",
       targetKind: "thread",
     })).rejects.toMatchObject({
       code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
       httpStatus: 403,
     });
+    expect(memberHomeRoutePrisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
   });
 
   it("rejects non-participant sends before route resolution when member access is inactive", async () => {
@@ -1626,9 +1599,6 @@ function createPrismaStub(input: {
   homeParticipantContactKind?: "email" | "phone" | null;
   homeParticipantContactLookupKey?: string | null;
   identityPhone?: string;
-  // Thread containers own a durable group thread and never carry member
-  // routing, so their runtime reads no routing row at all.
-  memberRoutingMissing?: boolean;
   pendingChatId?: string;
   threadRouteContainerMemberId?: string;
 }) {
@@ -1650,7 +1620,7 @@ function createPrismaStub(input: {
       }),
     },
     hostedMemberRouting: {
-      findUnique: vi.fn().mockResolvedValue(input.memberRoutingMissing ? null : {
+      findUnique: vi.fn().mockResolvedValue({
         linqChatIdEncrypted: input.homeChatId ? "encrypted-home-chat" : null,
         linqChatLookupKey: createRequiredLinqChatLookupKey(input.homeChatId),
         linqParticipantContactKind:
