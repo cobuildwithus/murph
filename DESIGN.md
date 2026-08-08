@@ -135,7 +135,7 @@ A single-accent system. Sage green carries every affirmative signal; the rest of
 
 **The No Gray Rule.** All structural neutrals are tinted warm. Borders use `rgba(196, 168, 130, 0.25)`, not `#e0e0e0`. Cards sit on cream, not on gray. If a surface looks cold, it's wrong. Literal gray may appear inside a bounded identifying illustration, such as the Luna artwork, but does not become a page surface or general neutral token.
 
-**The Chalkboard Rule.** Data is presented on paper, as if written by hand. Stat numbers are serif (Fraunces), not the sans-serif dashboard default. Charts use dashed baseline + solid active lines, not filled areas.
+**The Chalkboard Rule.** Data is presented on paper, as if written by hand. Stat numbers are serif (Fraunces), not the sans-serif dashboard default. Charts use dashed reference rules and solid data lines. Restrained flat semantic range bands are allowed when they clarify a reference interval; decorative filled series areas and gradients are not.
 
 ## 3. Typography
 
@@ -285,22 +285,24 @@ qualitative, and incompatible-unit context stays explicit near the chart or in
 the ledger. When the latest comparable result has a normalized lab range, place
 one quiet `Latest lab range` legend above dashed boundary rules for its
 two-sided band or one-sided limit. Preserve exact `<`, `<=`, `>`, and `>=`
-source boundaries in the legend. Extend the data-focused scale just enough to
-keep a one-sided limit visible; keep two-sided overlays clipped rather than
-flattening the historical trend to fit a wide interval. Label source context as
-latest so it does not imply that older labs shared the same range. If the latest
-comparable result has no usable numeric source range, an exact-unit authored
-Health Commons range may appear instead as `Published adult comparator`; it
-never changes the source status and appears only when the result's normalized
-specimen kind is explicitly eligible. State in the legend that the published
-comparator is not the reporting lab's range. Missing, mismatched, and
-context-dependent specimens omit it. Keep the authored source label in the chart
-legend. Qualified source ranges remain ledger-only and block a comparator from
-superseding more specific source context. Do not add a visible chart title or
-single-result trend instruction above or below this graph. Simplifying the
-hierarchy must not imply that excluded values were plotted. The loading skeleton
-mirrors the same latest-result, chart, and ledger structure rather than
-substituting a generic card grid.
+source boundaries in the legend. Fit the vertical scale to the union of the
+comparable results and the available range bounds. Shade the source range with
+very light sage and the visible below/above regions with very light sienna; keep
+the legend and dashed rules as non-color cues. Label source context as latest so
+it does not imply that older labs shared the same range. If the latest comparable
+result has no usable numeric source range, an exact-unit authored Health Commons
+range may appear instead as `Published adult comparator`; it never changes the
+source status and appears only when the result's normalized specimen kind is
+explicitly eligible. State in the legend that the published comparator is not
+the reporting lab's range, and render it with neutral dashed boundaries only,
+without sage/sienna bands. Missing, mismatched, and context-dependent specimens
+omit it. Keep the authored source label in the chart legend. Qualified source
+ranges remain ledger-only and block a comparator from superseding more specific
+source context. Do not add a visible chart title or single-result trend
+instruction above or below this graph. Simplifying the hierarchy must not imply
+that excluded values were plotted. The loading skeleton mirrors the same
+latest-result, chart, and ledger structure rather than substituting a generic
+card grid.
 
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature

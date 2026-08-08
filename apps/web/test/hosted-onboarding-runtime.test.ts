@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type Stripe from "stripe";
 
 import type { HostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
 import {
@@ -15,6 +16,10 @@ const globalForHostedOnboarding = globalThis as typeof globalThis & {
   __murphHostedOnboardingStripe?: unknown;
 };
 const originalVercelEnvironment = process.env.VERCEL_ENV;
+
+type StripePriceRetrieveMock = (
+  ...args: Parameters<Stripe["prices"]["retrieve"]>
+) => Promise<Record<string, unknown>>;
 
 function createHostedOnboardingEnvironment(
   overrides: Partial<HostedOnboardingEnvironment> = {},
@@ -93,7 +98,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
   });
 
   it("accepts a distinct active monthly Group Price with the catalog amount", async () => {
-    const retrieve = vi.fn().mockResolvedValue(
+    const retrieve = vi.fn<StripePriceRetrieveMock>().mockResolvedValue(
       buildRecurringStripePrice(),
     );
     globalForHostedOnboarding.__murphHostedOnboardingEnv =
@@ -156,16 +161,16 @@ describe("requireHostedStripeCheckoutConfig", () => {
 
   it("bounds display-only Group Price validation and fails closed", async () => {
     vi.useFakeTimers();
-    const retrieve = vi.fn(
+    const retrieve = vi.fn<StripePriceRetrieveMock>(
       (
         _priceId: string,
-        _params: unknown,
-        requestOptions: { timeout?: number },
+        _params?: Stripe.PriceRetrieveParams,
+        requestOptions?: Stripe.RequestOptions,
       ) =>
         new Promise((_, reject) => {
           setTimeout(
             () => reject(new Error("Stripe display read timed out.")),
-            requestOptions.timeout,
+            requestOptions?.timeout ?? 0,
           );
         }),
     );
@@ -268,7 +273,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
       createHostedOnboardingEnvironment();
     globalForHostedOnboarding.__murphHostedOnboardingStripe = {
       prices: {
-        retrieve: vi.fn().mockResolvedValue(
+        retrieve: vi.fn<StripePriceRetrieveMock>().mockResolvedValue(
           buildRecurringStripePrice(override),
         ),
       },

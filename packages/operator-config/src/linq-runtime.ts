@@ -1395,13 +1395,11 @@ export async function createLinqWebhookSubscription(
     : null
   const subscribedEvents = normalizeLinqWebhookEventTypeList(input.subscribedEvents)
   const body: WebhookSubscriptionCreateParams = {
-    ...(phoneNumbers
-      ? {
-          phone_numbers: phoneNumbers,
-        }
-      : {}),
     subscribed_events: subscribedEvents,
     target_url: normalizeRequiredString(input.targetUrl, 'target url'),
+  }
+  if (phoneNumbers) {
+    body.phone_numbers = phoneNumbers
   }
   const response = await requestLinqJson<WebhookSubscriptionCreateResponse>({
     details: {
@@ -2293,26 +2291,19 @@ function buildLinqRichLinkMessageBody(input: {
 }): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const replyToMessageId = normalizeNullableString(input.replyToMessageId)
-  return {
-    message: {
-      parts: [{
-        type: 'link',
-        value: normalizeRequiredString(input.linkUrl, 'rich link url'),
-      }],
-      ...(idempotencyKey
-        ? {
-            idempotency_key: idempotencyKey,
-          }
-        : {}),
-      ...(replyToMessageId
-        ? {
-            reply_to: {
-              message_id: replyToMessageId,
-            },
-          }
-        : {}),
-    },
+  const message: MessageSendParams['message'] = {
+    parts: [{
+      type: 'link',
+      value: normalizeRequiredString(input.linkUrl, 'rich link url'),
+    }],
   }
+  if (idempotencyKey) {
+    message.idempotency_key = idempotencyKey
+  }
+  if (replyToMessageId) {
+    message.reply_to = { message_id: replyToMessageId }
+  }
+  return { message }
 }
 
 function buildLinqRichLinkIdempotencyKey(value: string | null | undefined): string | null {
@@ -2344,13 +2335,11 @@ function buildLinqMessageBody(input: {
   if (normalizedMessage !== null) {
     const renderedText = renderMarkdownMessageText(normalizedMessage)
     textPart = {
-      ...(renderedText.decorations.length > 0
-        ? {
-            text_decorations: renderedText.decorations,
-          }
-        : {}),
       type: 'text',
       value: renderedText.text,
+    }
+    if (renderedText.decorations.length > 0) {
+      textPart.text_decorations = renderedText.decorations
     }
   }
   const parts: MessageContent['parts'] = textPart ? [textPart, ...media] : media
@@ -2364,23 +2353,16 @@ function buildLinqMessageBody(input: {
     throw new VaultCliError('LINQ_INVALID_INPUT', `Linq message must contain at most ${LINQ_MAX_MESSAGE_PARTS} parts.`)
   }
 
-  return {
-    message: {
-      parts,
-      ...(idempotencyKey
-        ? {
-            idempotency_key: idempotencyKey,
-          }
-        : {}),
-      ...(replyToMessageId
-        ? {
-            reply_to: {
-              message_id: replyToMessageId,
-            },
-          }
-        : {}),
-    },
+  const message: MessageSendParams['message'] = {
+    parts,
   }
+  if (idempotencyKey) {
+    message.idempotency_key = idempotencyKey
+  }
+  if (replyToMessageId) {
+    message.reply_to = { message_id: replyToMessageId }
+  }
+  return { message }
 }
 
 function normalizeLinqMediaList(
