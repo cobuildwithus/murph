@@ -1,0 +1,32 @@
+name: PR 1381 final audit export
+
+on:
+  push:
+    branches:
+      - agent/codex-1381-final-audit-export
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch exact audit refs
+        run: |
+          git fetch origin main agent/codex-exact-app-server-protocol --force
+          git show-ref > /tmp/murph-pr1381-refs.txt
+          git bundle create /tmp/murph-pr1381.bundle \
+            refs/remotes/origin/main \
+            refs/remotes/origin/agent/codex-exact-app-server-protocol
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murph-pr1381-final-audit
+          path: |
+            /tmp/murph-pr1381.bundle
+            /tmp/murph-pr1381-refs.txt
+          if-no-files-found: error
+          retention-days: 1
