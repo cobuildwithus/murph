@@ -38,6 +38,9 @@ import type {
   AssistantHostedPrivateImageUrlPublisher,
 } from "../src/assistant/execution-context.ts";
 import {
+  normalizeAssistantExecutionContext,
+} from "../src/assistant/execution-context.ts";
+import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from "../src/assistant/group-shared-read-limits.ts";
 import type {
@@ -3832,6 +3835,77 @@ describe("murph.group dynamic tool", () => {
       expect(groupRequest).not.toHaveBeenCalled();
     },
   );
+
+  it("keeps the route probe across execution-context normalization", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>();
+    const fetchImpl = vi.fn();
+    const privateImageUrlPublish = vi.fn();
+    const persistGeneratedImageCapture = vi.fn();
+    const status = {
+      status: "unavailable" as const,
+      unavailableReason: "sms_attachments_unsupported",
+    };
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "share_contact_card",
+      avatarPrompt: "A friendly square portrait of Murph",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    // The engine rebuilds the hosted group tool before any tool runs. A probe
+    // that does not survive that rebuild reads as admission downstream, so the
+    // tool the executor sees must come through the real normalization.
+    const normalized = normalizeAssistantExecutionContext({
+      hosted: {
+        groupTool: {
+          directAttachmentRouteStatus: () => status,
+          request: groupRequest,
+        },
+        memberId: "member_direct",
+        userEnvKeys: [],
+      },
+    } as never);
+    const normalizedGroupTool = normalized.hosted?.groupTool;
+    expect(normalizedGroupTool?.directAttachmentRouteStatus).toEqual(
+      expect.any(Function),
+    );
+    expect(normalizedGroupTool?.directAttachmentRouteStatus?.()).toEqual(status);
+
+    const result = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: "openai-test-key" },
+      fetchImpl: fetchImpl as typeof fetch,
+      hostedToolContext: {
+        ...createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_direct",
+            conversationScope: "direct",
+            inboundMailboxItemIds: ["mailbox_direct"],
+            originSessionId: "session_direct",
+            recipientKey: "recipient_direct",
+          }),
+          groupRequest,
+          persistGeneratedImageCapture,
+          privateImageUrlPublish,
+        }),
+        groupTool: normalizedGroupTool ?? null,
+      },
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "share_contact_card",
+      result: status,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(persistGeneratedImageCapture).not.toHaveBeenCalled();
+    expect(privateImageUrlPublish).not.toHaveBeenCalled();
+    expect(groupRequest).not.toHaveBeenCalled();
+  });
 
   it("rejects generated contact cards without fresh accepted direct input", async () => {
     const groupRequest = vi.fn<GroupToolRequest>();

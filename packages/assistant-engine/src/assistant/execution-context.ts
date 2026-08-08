@@ -911,8 +911,15 @@ function normalizeAssistantGroupTool(
     return undefined
   }
 
+  // Keep the optional route probe bound alongside `request`. Dropping it here
+  // silently downgrades a pre-generation refusal into a post-generation one,
+  // because callers treat an absent probe as admission.
+  const directAttachmentRouteStatus = input.directAttachmentRouteStatus
   return {
     request: input.request.bind(input),
+    ...(typeof directAttachmentRouteStatus === 'function'
+      ? { directAttachmentRouteStatus: directAttachmentRouteStatus.bind(input) }
+      : {}),
   }
 }
 
