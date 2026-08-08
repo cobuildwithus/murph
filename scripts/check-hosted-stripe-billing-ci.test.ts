@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
-  classifyHostedStripeBillingLiveEligibility,
   inspectHostedStripeBillingProviderBoundary,
   inspectHostedStripeBillingWorkflow,
   type HostedStripeBillingProviderBoundarySources,
@@ -39,44 +38,6 @@ function providerIssueCodes(
 }
 
 describe("hosted Stripe billing workflow guard", () => {
-  it.each([
-    {
-      actor: "maintainer",
-      expected: true,
-      headRepository: "example/murph",
-      label: "same-repository human pull request",
-      pullRequestAuthor: "contributor",
-    },
-    {
-      actor: "contributor",
-      expected: false,
-      headRepository: "example/fork",
-      label: "fork pull request",
-      pullRequestAuthor: "contributor",
-    },
-    {
-      actor: "dependabot[bot]",
-      expected: false,
-      headRepository: "example/murph",
-      label: "dependency-bot pull request triggered by the bot",
-      pullRequestAuthor: "dependabot[bot]",
-    },
-    {
-      actor: "maintainer",
-      expected: false,
-      headRepository: "example/murph",
-      label: "dependency-bot pull request retriggered by a maintainer",
-      pullRequestAuthor: "dependabot[bot]",
-    },
-  ])("classifies $label without crossing the live trust boundary", (input) => {
-    expect(classifyHostedStripeBillingLiveEligibility({
-      actor: input.actor,
-      headRepository: input.headRepository,
-      pullRequestAuthor: input.pullRequestAuthor,
-      repository: "example/murph",
-    })).toBe(input.expected);
-  });
-
   it("accepts the checked-in fork-safe workflow", async () => {
     expect(issueCodes(await readWorkflow())).toEqual([]);
   });
@@ -97,34 +58,34 @@ describe("hosted Stripe billing workflow guard", () => {
     expect(issueCodes(source)).toContain("unsafe-workflow-dispatch");
   });
 
-  it("rejects removing the same-repository trust check", async () => {
+  it("rejects removing the main-push live trigger", async () => {
     const source = (await readWorkflow()).replace(
-      'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$PR_AUTHOR" != "dependabot[bot]" && "$ACTOR" != "dependabot[bot]" ]]; then',
-      'if [[ "$HEAD_REPOSITORY" != "" ]]; then',
-    );
-    expect(issueCodes(source)).toContain("missing-trusted-head-check");
-  });
-
-  it("rejects classifying dependency-bot authors only from the triggering actor", async () => {
-    const source = (await readWorkflow()).replace(
-      'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$PR_AUTHOR" != "dependabot[bot]" && "$ACTOR" != "dependabot[bot]" ]]; then',
-      'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$ACTOR" != "dependabot[bot]" ]]; then',
-    );
-    expect(issueCodes(source)).toContain("missing-trusted-head-check");
-  });
-
-  it("rejects dropping the pull request author identity from eligibility", async () => {
-    const source = (await readWorkflow()).replace(
-      "          PR_AUTHOR: ${{ github.event.pull_request.user.login }}\n",
+      "  push:\n    branches:\n      - main\n",
       "",
     );
-    expect(issueCodes(source)).toContain("missing-pr-author-check");
+    expect(issueCodes(source)).toContain("missing-main-push-trigger");
   });
 
-  it("rejects restoring a marker that silently skips trusted live proof", async () => {
+  it("rejects letting the live job start from pull request events", async () => {
     const source = (await readWorkflow()).replace(
-      "          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}\n",
-      "          CONFIGURED: ${{ vars.HOSTED_STRIPE_BILLING_LIVE_CONFIGURED }}\n          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}\n",
+      "if: ${{ github.event_name == 'push' }}",
+      "if: ${{ always() }}",
+    );
+    expect(issueCodes(source)).toContain("missing-live-if");
+  });
+
+  it("rejects dropping the pull-request live exclusion from the boundary", async () => {
+    const source = (await readWorkflow()).replace(
+      'pull_request)\n              if [[ "$LIVE_RESULT" != "skipped" ]]',
+      "pull_request)\n              if false",
+    );
+    expect(issueCodes(source)).toContain("missing-pr-live-exclusion");
+  });
+
+  it("rejects restoring a marker that silently skips live proof", async () => {
+    const source = (await readWorkflow()).replace(
+      "          HERMETIC_RESULT: ${{ needs.billing-hermetic.result }}\n",
+      "          CONFIGURED: ${{ vars.HOSTED_STRIPE_BILLING_LIVE_CONFIGURED }}\n          HERMETIC_RESULT: ${{ needs.billing-hermetic.result }}\n",
     );
     expect(issueCodes(source)).toContain("silent-live-config-skip");
   });
@@ -142,8 +103,8 @@ describe("hosted Stripe billing workflow guard", () => {
 
   it("rejects workflow-level cancellation that can interrupt cleanup", async () => {
     const source = (await readWorkflow()).replace(
-      "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}\n  cancel-in-progress: false",
-      "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}\n  cancel-in-progress: true",
+      "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'main-push' }}\n  cancel-in-progress: false",
+      "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'main-push' }}\n  cancel-in-progress: true",
     );
     expect(issueCodes(source)).toContain("unsafe-workflow-cancellation");
   });
