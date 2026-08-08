@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]]"
+          git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           set +e
@@ -84,8 +84,22 @@ jobs:
               raise SystemExit(
                   f"Finalizer source hash mismatch: {actual_source_hash}"
               )
+
+          source_text = source.decode("utf-8")
+          old_marker = '        "\\nfunction buildHostedTrialExpiredPendingBillingNotice(",'
+          new_marker = '        "\\\\nfunction buildHostedTrialExpiredPendingBillingNotice(",'
+          if source_text.count(old_marker) != 1:
+              raise SystemExit(
+                  "Finalizer escaped usage-notice marker was not uniquely present."
+              )
+          source_text = source_text.replace(old_marker, new_marker, 1)
+
           exec(
-              compile(source, "scripts/agent-max-finalize.py", "exec"),
+              compile(
+                  source_text,
+                  "scripts/agent-max-finalize.py",
+                  "exec",
+              ),
               {"__name__": "__main__"},
           )
           PY
