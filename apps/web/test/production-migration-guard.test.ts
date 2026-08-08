@@ -1371,7 +1371,10 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       releaseMigrationScript,
-      "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
+      // The migration entrypoint imports @murphai/hosted-execution/env at
+      // module load, and on Vercel migrations run before `pnpm build`, so the
+      // package's dist output must be built first or the deploy fails.
+      "pnpm --dir ../../packages/hosted-execution build && pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
     );
     assert.equal(
       deploymentProtectionScript,
