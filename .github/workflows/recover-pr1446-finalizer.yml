@@ -1,0 +1,38 @@
+name: Recover PR 1446 audit script
+
+on:
+  push:
+    branches:
+      - agent/pr1446-recover-finalizer
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Decode the prior audit script
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/pr1446-finalizer/00 \
+              scripts/pr1446-finalizer/01 \
+              scripts/pr1446-finalizer/02 \
+            | tr -d '\r\n ' \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/finalize-pr-1446.py
+          echo 'ed3d729f7ebce7616f4d3135b15aa1698daf915499c78b4a6371831ab9dbd18c  /tmp/finalize-pr-1446.py' \
+            | sha256sum --check
+
+      - name: Upload decoded script
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pr1446-finalizer
+          path: /tmp/finalize-pr-1446.py
+          retention-days: 1
+          if-no-files-found: error
