@@ -2859,9 +2859,12 @@ describe("hosted runtime internal web routes", () => {
       ));
 
       expect(untracedResponse.status).toBe(200);
-      // The wire contract is unchanged so the runner's existing retry, which
-      // covers a staged callback still in flight, keeps working.
-      expect(parseHostedRuntimeLatencyTraceResponse(await untracedResponse.json())).toEqual({
+      // Assert the raw body, not the parsed projection: the parser drops
+      // unknown keys, so reparsing here would still pass if the route leaked
+      // untracedCount to the runner. The wire contract must stay exactly these
+      // three fields so the runner's existing retry, which covers a staged
+      // callback still in flight, keeps working.
+      expect(await untracedResponse.json()).toEqual({
         matchedCount: 0,
         recorded: false,
         unmatchedCount: 1,
