@@ -80,17 +80,102 @@ jobs:
           set -e
 
           if [[ "$apply_status" -ne 0 ]]; then
-            {
-              echo "git apply exit: $apply_status"
-              echo
-              echo "Unmerged paths:"
-              git diff --name-only --diff-filter=U || true
-              echo
-              echo "Status:"
-              git status --short || true
-            } > /tmp/publish-result.txt
-            git diff --cc > /tmp/conflicts.patch || true
-            exit "$apply_status"
+            mapfile -t actual_conflicts < <(git diff --name-only --diff-filter=U | sort)
+            expected_conflicts=(
+              "agent-docs/index.md"
+              "agent-docs/operations/verification-and-runtime.md"
+              "agent-docs/references/testing-ci-map.md"
+              "apps/web/test/hosted-ops-growth.test.ts"
+              "apps/web/test/hosted-orchestration-reconciliation-facts.test.ts"
+              "apps/web/test/user-facing-messages.test.ts"
+            )
+            mapfile -t expected_conflicts < <(printf '%s\n' "${expected_conflicts[@]}" | sort)
+            if [[ "${actual_conflicts[*]}" != "${expected_conflicts[*]}" ]]; then
+              {
+                echo "git apply exit: $apply_status"
+                echo "Unexpected conflicts:"
+                printf '%s\n' "${actual_conflicts[@]}"
+              } > /tmp/publish-result.txt
+              git diff --cc > /tmp/conflicts.patch || true
+              exit "$apply_status"
+            fi
+
+            python3 <<'PY'
+          from pathlib import Path
+
+          choose_theirs = {
+              "agent-docs/index.md",
+              "agent-docs/operations/verification-and-runtime.md",
+              "agent-docs/references/testing-ci-map.md",
+              "apps/web/test/hosted-ops-growth.test.ts",
+              "apps/web/test/hosted-orchestration-reconciliation-facts.test.ts",
+              "apps/web/test/user-facing-messages.test.ts",
+          }
+
+          def resolve_theirs(text: str) -> str:
+              lines = text.splitlines(keepends=True)
+              out: list[str] = []
+              index = 0
+              while index < len(lines):
+                  if not lines[index].startswith("<<<<<<< ours"):
+                      out.append(lines[index])
+                      index += 1
+                      continue
+                  index += 1
+                  while index < len(lines) and not lines[index].startswith("======="):
+                      index += 1
+                  if index >= len(lines):
+                      raise RuntimeError("missing conflict separator")
+                  index += 1
+                  theirs: list[str] = []
+                  while index < len(lines) and not lines[index].startswith(">>>>>>> theirs"):
+                      theirs.append(lines[index])
+                      index += 1
+                  if index >= len(lines):
+                      raise RuntimeError("missing conflict terminator")
+                  out.extend(theirs)
+                  index += 1
+              return "".join(out)
+
+          for path_text in sorted(choose_theirs):
+              path = Path(path_text)
+              resolved = resolve_theirs(path.read_text())
+              if any(marker in resolved for marker in ("<<<<<<<", "=======", ">>>>>>>")):
+                  raise RuntimeError(f"unresolved marker in {path}")
+              path.write_text(resolved)
+
+          growth_path = Path("apps/web/test/hosted-ops-growth.test.ts")
+          growth = growth_path.read_text()
+          entry_mock = (
+              "  hostedUsageCreditEntry: {\n"
+              "    count: vi.fn(),\n"
+              "    findMany: vi.fn(),\n"
+              "  },\n"
+          )
+          purchase_mock = (
+              "  hostedUsageCreditPurchase: {\n"
+              "    findMany: vi.fn(),\n"
+              "  },\n"
+          )
+          if purchase_mock not in growth:
+              if entry_mock not in growth:
+                  raise RuntimeError("starter credit-entry mock anchor missing")
+              growth = growth.replace(entry_mock, entry_mock + purchase_mock, 1)
+          entry_client = "  hostedUsageCreditEntry: mocks.hostedUsageCreditEntry,\n"
+          purchase_client = "  hostedUsageCreditPurchase: mocks.hostedUsageCreditPurchase,\n"
+          if purchase_client not in growth:
+              if entry_client not in growth:
+                  raise RuntimeError("starter credit-entry client anchor missing")
+              growth = growth.replace(entry_client, entry_client + purchase_client, 1)
+          growth_path.write_text(growth)
+          PY
+
+            git add "${expected_conflicts[@]}"
+          fi
+
+          if git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- . ':!pnpm-lock.yaml'; then
+            echo "Unresolved conflict marker found." >&2
+            exit 1
           fi
 
           git diff --cached --check
