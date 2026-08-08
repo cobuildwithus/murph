@@ -2885,6 +2885,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.retryable_payload_missing",
   "outbox.ambiguous",
   "outbox.delivery_finished",
+  "outbox.linq_app_card_fallback_error",
   "outbox.receipt_checkpointed",
   "runner.accepted_attempt_failed",
   "runner.error",
