@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 const CAPABILITIES = [
   {
     detail:
@@ -107,7 +105,7 @@ export function TechnicalCapabilitiesSection({
               className="mt-6 max-w-[16ch] text-balance font-serif text-[clamp(2rem,4.5vw,3.5rem)] font-semibold leading-[1.05] tracking-[-0.03em]"
               id="technical-capabilities-title"
             >
-              You send a text. A whole computer goes to work.
+              There&rsquo;s a computer on the other end.
             </h2>
             <p className="mt-6 max-w-[46ch] text-pretty text-base leading-[1.75] text-[#f5f0e8]/70 sm:text-[1.0625rem]">
               Murph can use a browser, place phone calls, operate tools, and
@@ -155,15 +153,6 @@ export function TechnicalCapabilitiesSection({
               <h3 className="mt-5 max-w-[22ch] text-balance font-serif text-[clamp(1.625rem,3vw,2.25rem)] font-semibold leading-[1.1] tracking-[-0.02em]">
                 The agent stays. The inference path is yours.
               </h3>
-              {veniceAvailable ? (
-                <Link
-                  className="-my-2 mt-4 inline-flex items-center gap-2 py-2 text-sm font-medium text-[#f5f0e8] underline decoration-[#d4b87a]/45 underline-offset-4 transition-colors hover:text-[#d4b87a] hover:decoration-[#d4b87a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:[outline-color:#d4b87a]"
-                  href="/security#model-provider"
-                >
-                  See how provider choice works
-                  <span aria-hidden="true">→</span>
-                </Link>
-              ) : null}
             </div>
 
             <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#c4a882]/20 bg-[#c4a882]/20">

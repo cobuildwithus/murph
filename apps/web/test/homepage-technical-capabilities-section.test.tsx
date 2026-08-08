@@ -12,7 +12,7 @@ test("TechnicalCapabilitiesSection renders the agent runtime and inference choic
   );
 
   assert.match(markup, /Under the hood/);
-  assert.match(markup, /You send a text\. A whole computer goes to work\./);
+  assert.match(markup, /There’s a computer on the other end\./);
   assert.match(markup, /Codex CLI \+ App Server/);
   assert.match(markup, /Its own computer/);
   assert.match(markup, /A real phone number/);
@@ -24,7 +24,9 @@ test("TechnicalCapabilitiesSection renders the agent runtime and inference choic
   assert.match(markup, /compatible model endpoint and key/);
   assert.match(markup, /Endpoint \+ key/);
   assert.match(markup, /Local OSS/);
-  assert.match(markup, /href="\/security#model-provider"/);
+  // The provider-choice security anchor only renders behind the Venice flag,
+  // which is off in production, so the section links nowhere.
+  assert.doesNotMatch(markup, /model-provider/);
   assert.doesNotMatch(markup, /unlimited/i);
   assert.doesNotMatch(markup, /fully autonomous/i);
 });
