@@ -229,32 +229,6 @@ describe("device sync callback redirect helpers", () => {
     expect(warnSpy).toHaveBeenCalledOnce();
   });
 
-  it("maps transaction-start-timeout faults carried in a cause chain to the retryable 503", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const wrappedStartTimeout = new Error("Webhook admission failed.", {
-      cause: Object.assign(
-        new Error("Unable to start a transaction in the given time."),
-        {
-          code: "P2028",
-          name: "PrismaClientKnownRequestError",
-        },
-      ),
-    });
-
-    const response = httpModule.jsonError(wrappedStartTimeout);
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "STORE_CONTENTION",
-        message: "The device-sync store timed out under contention. Retry later.",
-        retryable: true,
-      },
-    });
-    expect(errorSpy).not.toHaveBeenCalled();
-  });
-
   it.each(["originalCode", "code"] as const)(
     "maps adapter-pg P2010 lock timeouts from the nested cause %s to the retryable 503",
     async (codeField) => {

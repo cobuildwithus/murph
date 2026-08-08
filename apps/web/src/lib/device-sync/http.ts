@@ -111,7 +111,6 @@ const PRISMA_RAW_QUERY_FAULT_CODE = "P2010";
 // Postgres raises 55P03 when a bounded `lock_timeout` wait gives up, which is
 // how the webhook admission member-row lock fails fast under fan-out bursts.
 const POSTGRES_LOCK_TIMEOUT_CODE = "55P03";
-const DATABASE_CONTENTION_CAUSE_CHAIN_LIMIT = 5;
 
 const DEVICE_SYNC_STORE_CONTENTION_ERROR_CODE = "STORE_CONTENTION";
 
@@ -139,35 +138,19 @@ function matchDatabaseContentionError(error: unknown): JsonErrorMapping | null {
   };
 }
 
+/**
+ * Both contention shapes arrive directly: the Prisma wrapper, the webhook
+ * trace-release catch, and the shared JSON route helper all rethrow the
+ * original error, so the classifier decodes exactly what the store emits.
+ */
 function isDatabaseContentionError(error: unknown): boolean {
-  let current: unknown = error;
-  const seen = new Set<unknown>();
-
-  for (
-    let depth = 0;
-    current !== null && typeof current === "object" && depth < DATABASE_CONTENTION_CAUSE_CHAIN_LIMIT;
-    depth += 1
-  ) {
-    if (seen.has(current)) {
-      return false;
-    }
-    seen.add(current);
-
-    const record = current as { cause?: unknown; code?: unknown; meta?: unknown };
-    if (record.code === PRISMA_TRANSACTION_FAULT_CODE || record.code === POSTGRES_LOCK_TIMEOUT_CODE) {
-      return true;
-    }
-    if (
-      record.code === PRISMA_RAW_QUERY_FAULT_CODE
-      && isAdapterPgLockTimeoutMeta(record.meta)
-    ) {
-      return true;
-    }
-
-    current = record.cause;
+  if (error === null || typeof error !== "object") {
+    return false;
   }
 
-  return false;
+  const record = error as { code?: unknown; meta?: unknown };
+  return record.code === PRISMA_TRANSACTION_FAULT_CODE
+    || (record.code === PRISMA_RAW_QUERY_FAULT_CODE && isAdapterPgLockTimeoutMeta(record.meta));
 }
 
 /**
