@@ -12,6 +12,7 @@ import {
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import {
   HostedBillingStatus,
+  HostedUsageCreditPurchaseStatus,
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -46,11 +47,19 @@ import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessagePoint,
 } from "@/src/lib/hosted-ops/growth-message-series";
+import {
+  MONTHLY_REVENUE_MONTHS,
+  buildHostedGrowthMonthlyRevenueSeries,
+  startOfUtcMonthsAgo,
+  type HostedGrowthMonthlyRevenuePoint,
+} from "@/src/lib/hosted-ops/growth-monthly-revenue-series";
 import { HOSTED_MESSAGE_VOLUME_BASE } from "@/src/lib/message-volume";
 import { getPrisma } from "@/src/lib/prisma";
 
 export { buildHostedGrowthMessageSeries } from "@/src/lib/hosted-ops/growth-message-series";
 export type { HostedGrowthMessagePoint } from "@/src/lib/hosted-ops/growth-message-series";
+export { buildHostedGrowthMonthlyRevenueSeries } from "@/src/lib/hosted-ops/growth-monthly-revenue-series";
+export type { HostedGrowthMonthlyRevenuePoint } from "@/src/lib/hosted-ops/growth-monthly-revenue-series";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
@@ -180,7 +189,9 @@ export interface HostedGrowthSnapshotRow {
   activeUsersTrailing7Days: number | null;
   capturedAt: Date;
   coveredMembers: number;
+  familyMrrUsdCents: number | null;
   inboundMessagesPriorDay: number | null;
+  individualMrrUsdCents: number | null;
   mrrUsdCents: number;
   outboundMessagesPriorDay: number | null;
   payingCustomers: number;
@@ -275,6 +286,7 @@ export interface HostedGrowthDashboard {
   current: HostedGrowthCurrentMetrics;
   dailySeries: HostedGrowthDailyPoint[];
   messageSeries: HostedGrowthMessagePoint[];
+  monthlyRevenueSeries: HostedGrowthMonthlyRevenuePoint[];
   mrrWowPercent: number | null;
   newMembers: {
     today: number;
@@ -1176,6 +1188,10 @@ export async function readHostedGrowthDashboard(
   const activeUsersCurrentStart = addUtcDays(now, -7);
   const activeUsersPreviousStart = addUtcDays(now, -14);
   const activeUsersMonthlyStart = addUtcDays(now, -30);
+  const monthlyRevenueStart = startOfUtcMonthsAgo(
+    todayStart,
+    MONTHLY_REVENUE_MONTHS - 1,
+  );
 
   const [
     current,
@@ -1191,6 +1207,7 @@ export async function readHostedGrowthDashboard(
     activeUsersTrailing30DayDirectRows,
     activeUsersGroupRows,
     activeUsersTodayDirectRows,
+    monthlyRevenuePurchases,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
@@ -1236,6 +1253,10 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
+    // One snapshot read serves both the 30-day chart series and the
+    // six-month revenue projection; the message-history aggregate below
+    // still ends at dailyStart, so widening this window double-counts
+    // nothing.
     prisma.hostedGrowthDailySnapshot.findMany({
       orderBy: {
         snapshotDate: "asc",
@@ -1243,7 +1264,7 @@ export async function readHostedGrowthDashboard(
       select: growthSnapshotSelect,
       where: {
         snapshotDate: {
-          gte: dailyStart,
+          gte: monthlyRevenueStart,
           lte: todayStart,
         },
       },
@@ -1364,6 +1385,26 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
+    prisma.hostedUsageCreditPurchase.findMany({
+      select: {
+        cashAmountMinor: true,
+        groupSponsorshipAuthorizationId: true,
+        groupSponsorshipMoment: {
+          select: {
+            purchaseId: true,
+          },
+        },
+        paidAt: true,
+      },
+      where: {
+        paidAt: {
+          gte: monthlyRevenueStart,
+          lte: now,
+        },
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+        stripeLiveMode: true,
+      },
+    }),
   ]);
   const activeUsers = await calculateHostedGrowthActiveUsers({
     currentDirectRows: activeUsersTrailing7DayDirectRows,
@@ -1478,6 +1519,20 @@ export async function readHostedGrowthDashboard(
         && messagesBeforeSeries._count.outboundMessagesPriorDay > 0,
       windowEnd: now,
     }),
+    monthlyRevenueSeries: buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: MONTHLY_REVENUE_MONTHS,
+      purchases: monthlyRevenuePurchases.flatMap((purchase) =>
+        purchase.paidAt === null ? [] : [{
+          cashAmountMinor: purchase.cashAmountMinor,
+          isGroupSponsorship:
+            purchase.groupSponsorshipAuthorizationId !== null
+            || purchase.groupSponsorshipMoment !== null,
+          paidAt: purchase.paidAt,
+        }]
+      ),
+      snapshots,
+      windowEnd: now,
+    }),
     mrrWowPercent: comparableSnapshot === null
       ? null
       : calculatePercentChange(current.mrrUsdCents, comparableSnapshot.mrrUsdCents),
@@ -1492,7 +1547,9 @@ export async function readHostedGrowthDashboard(
           current.payingCustomers,
           comparableSnapshot.payingCustomers,
         ),
-    snapshotSeries: snapshots.map(serializeSnapshotPoint),
+    snapshotSeries: snapshots
+      .filter((row) => row.snapshotDate.getTime() >= dailyStart.getTime())
+      .map(serializeSnapshotPoint),
     trialCohorts: buildTrialCohortRows({
       rowCount: WEEKLY_ROWS,
       trialStartRows,
@@ -1654,7 +1711,10 @@ export async function captureHostedGrowthDailySnapshot(
       activeUsersTrailing7Days: activityCreateCounts.activeUsersTrailing7Days,
       capturedAt: now,
       coveredMembers: current.coveredMembers,
+      familyMrrUsdCents: current.familyMrrUsdCents,
       inboundMessagesPriorDay,
+      individualMrrUsdCents:
+        current.pulseMrrUsdCents + current.edgeMrrUsdCents,
       mrrUsdCents: current.mrrUsdCents,
       outboundMessagesPriorDay,
       payingCustomers: current.payingCustomers,
@@ -1675,7 +1735,10 @@ export async function captureHostedGrowthDailySnapshot(
         : {}),
       capturedAt: now,
       coveredMembers: current.coveredMembers,
+      familyMrrUsdCents: current.familyMrrUsdCents,
       inboundMessagesPriorDay,
+      individualMrrUsdCents:
+        current.pulseMrrUsdCents + current.edgeMrrUsdCents,
       mrrUsdCents: current.mrrUsdCents,
       outboundMessagesPriorDay,
       payingCustomers: current.payingCustomers,
@@ -1925,7 +1988,9 @@ const growthSnapshotSelect = {
   activeUsersTrailing7Days: true,
   capturedAt: true,
   coveredMembers: true,
+  familyMrrUsdCents: true,
   inboundMessagesPriorDay: true,
+  individualMrrUsdCents: true,
   mrrUsdCents: true,
   outboundMessagesPriorDay: true,
   payingCustomers: true,
