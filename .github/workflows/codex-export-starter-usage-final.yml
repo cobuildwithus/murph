@@ -46,7 +46,10 @@ jobs:
           with output_path.open("wb") as output:
               for path in sorted(paths):
                   try:
-                      data = subprocess.check_output(["git", "show", f"{base}:{path}"])
+                      data = subprocess.check_output(
+                          ["git", "show", f"{base}:{path}"],
+                          stderr=subprocess.DEVNULL,
+                      )
                   except subprocess.CalledProcessError:
                       continue
                   output.write(f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n".encode())
@@ -65,7 +68,7 @@ jobs:
           zstd --decompress \
             --patch-from=/tmp/starter-diff-reference.bin \
             /tmp/starter.patch.zst \
-            --output=/tmp/starter.patch
+            -o /tmp/starter.patch
           echo "35c4efbb2c540edec5ed5b9231956dc00465f820662765c3586862e1b163534a  /tmp/starter.patch" | sha256sum --check
 
           git fetch origin main
