@@ -100,6 +100,12 @@ export interface AssistantAutomationScanResult {
 }
 
 export interface AssistantAutomationPassResult {
+  /**
+   * Outbox delivery-intent IDs queued by cron jobs executed in this pass.
+   * Distinct from currentTurnDeliveryIntentIds so callers can honor the
+   * current-pass cron cohort without reclassifying it as a foreground turn.
+   */
+  cronPendingDeliveryIntentIds?: string[]
   cronProcessed: number
   currentTurnDeliveryIntentIds: string[]
   nextWakeAt: string | null

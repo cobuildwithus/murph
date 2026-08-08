@@ -1079,6 +1079,7 @@ export async function runAssistantAutomationPass(
   passTiming.postScanTailElapsedMs = Date.now() - postScanTailStartedAt
 
   return {
+    cronPendingDeliveryIntentIds: cronResult.pendingDeliveryIntentIds ?? [],
     cronProcessed: cronResult.processed,
     currentTurnDeliveryIntentIds:
       scanResult.currentTurnDeliveryIntentIds,

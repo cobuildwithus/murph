@@ -2294,6 +2294,8 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
+    let cronPendingDeliveryIntentIds =
+      assistantMetrics.assistantAutomationCronPendingDeliveryIntentIds ?? [];
     let foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
       assistantMetrics,
       currentTurnDeliveryIntentIds,
@@ -2355,6 +2357,8 @@ export async function runHostedWorkspaceAssistantPhase(
       });
       currentTurnDeliveryIntentIds =
         assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
+      cronPendingDeliveryIntentIds =
+        assistantMetrics.assistantAutomationCronPendingDeliveryIntentIds ?? [];
       foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
         assistantMetrics,
         currentTurnDeliveryIntentIds,
@@ -2497,6 +2501,7 @@ export async function runHostedWorkspaceAssistantPhase(
       : providerCleanupPlan.stateQueued;
     const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
       actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+      currentPassCronIntentIds: cronPendingDeliveryIntentIds,
       includeBackgroundDueIntents:
         input.shouldYieldBackgroundMaintenance?.() !== true,
       preferredIntentIds: currentTurnDeliveryIntentIds,

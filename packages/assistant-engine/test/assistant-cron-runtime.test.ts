@@ -4908,6 +4908,7 @@ describe('assistant cron runtime orchestration', () => {
 
       expect(summary).toEqual({
         failed: 0,
+        pendingDeliveryIntentIds: [queuedIntentId],
         processed: 1,
         succeeded: 0,
       })
@@ -7739,6 +7740,86 @@ describe('assistant cron runtime orchestration', () => {
     const updatedCanonical = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
     expect(updatedCanonical.state.lastSucceededAt).not.toBeNull()
     expect(updatedCanonical.state.runningAt).toBeNull()
+  })
+
+  it('reports queued delivery-intent ids for every job processed in one pass', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-queued-intent-ids-',
+    )
+    const firstJob = await createCanonicalJob(vaultRoot, 'queued-first')
+    const secondJob = await createCanonicalJob(vaultRoot, 'queued-second')
+    await updateCanonicalRuntimeState(vaultRoot, firstJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-04-08T07:58:00.000Z',
+      },
+    }))
+    await updateCanonicalRuntimeState(vaultRoot, secondJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-04-08T07:59:00.000Z',
+      },
+    }))
+
+    const queuedIntentIds = ['outbox_queued_first', 'outbox_queued_second']
+    let sendCall = 0
+    cronMocks.sendAssistantMessageLocal.mockImplementation(async (input: {
+      onProviderRequestStarted?: () => Promise<void> | void
+    }) => {
+      await input.onProviderRequestStarted?.()
+      const intentId = queuedIntentIds[sendCall] ?? 'outbox_queued_overflow'
+      sendCall += 1
+      await saveAssistantOutboxIntent(
+        vaultRoot,
+        buildTestLinqOutboxIntent({
+          createdAt: '2026-04-08T08:10:00.000Z',
+          intentId,
+        }),
+      )
+      return {
+        decision: {
+          kind: 'send_message' as const,
+          privateSummary: 'Queued scheduled reminder.',
+          text: `Reminder ${intentId}.`,
+        },
+        deliveryOutcome: {
+          kind: 'queued' as const,
+          error: null,
+          intentId,
+          session: {
+            sessionId: 'session-default',
+          },
+        },
+        response: `Reminder ${intentId}.`,
+        session: {
+          sessionId: 'session-default',
+        },
+      }
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      limit: 5,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      pendingDeliveryIntentIds: queuedIntentIds,
+      processed: 2,
+      succeeded: 0,
+    })
+
+    const updatedFirst = await getAssistantCronJob(vaultRoot, firstJob.jobId)
+    expect(updatedFirst.state.pendingDeliveryIntentId).toBe(queuedIntentIds[0])
+    expect(updatedFirst.state.nextRunAt).toBeNull()
+    const updatedSecond = await getAssistantCronJob(vaultRoot, secondJob.jobId)
+    expect(updatedSecond.state.pendingDeliveryIntentId).toBe(queuedIntentIds[1])
+    expect(updatedSecond.state.nextRunAt).toBeNull()
   })
 
   it('reclaims stale canonical running jobs while preserving fresh running claims', async () => {
@@ -10622,6 +10703,7 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(summary).toEqual({
       failed: 0,
+      pendingDeliveryIntentIds: [queuedIntentId],
       processed: 1,
       succeeded: 0,
     })
@@ -10901,6 +10983,7 @@ describe('assistant cron runtime orchestration', () => {
       }),
     ).resolves.toEqual({
       failed: 0,
+      pendingDeliveryIntentIds: [queuedIntentId],
       processed: 1,
       succeeded: 0,
     })
@@ -11009,7 +11092,12 @@ describe('assistant cron runtime orchestration', () => {
     await expect(processDueAssistantCronJobsLocal({
       deliveryDispatchMode: 'queue-only',
       vault: vaultRoot,
-    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    })).resolves.toEqual({
+      failed: 0,
+      pendingDeliveryIntentIds: [firstIntentId],
+      processed: 1,
+      succeeded: 0,
+    })
 
     await expect(reconcileAssistantCronDeliveryIntent({
       intent: {
@@ -11071,7 +11159,12 @@ describe('assistant cron runtime orchestration', () => {
     await expect(processDueAssistantCronJobsLocal({
       deliveryDispatchMode: 'queue-only',
       vault: vaultRoot,
-    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    })).resolves.toEqual({
+      failed: 0,
+      pendingDeliveryIntentIds: [secondIntentId],
+      processed: 1,
+      succeeded: 0,
+    })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenLastCalledWith(
       expect.objectContaining({
         instructions: expect.stringContaining(
@@ -11174,7 +11267,12 @@ describe('assistant cron runtime orchestration', () => {
       deliveryDispatchMode: 'queue-only',
       limit: 1,
       vault: vaultRoot,
-    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    })).resolves.toEqual({
+      failed: 0,
+      pendingDeliveryIntentIds: [queuedIntentId],
+      processed: 1,
+      succeeded: 0,
+    })
 
     await expect(reconcileAssistantCronDeliveryIntent({
       intent: {
@@ -11758,6 +11856,7 @@ describe('assistant cron runtime orchestration', () => {
       }),
     ).resolves.toEqual({
       failed: 0,
+      pendingDeliveryIntentIds: [queuedIntentId],
       processed: 1,
       succeeded: 0,
     })
@@ -12671,7 +12770,12 @@ async function createRequiredLinqAttachmentDeliveryFixture(input: {
     deliveryDispatchMode: 'queue-only',
     limit: 1,
     vault: vaultRoot,
-  })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+  })).resolves.toEqual({
+    failed: 0,
+    pendingDeliveryIntentIds: [intent.intentId],
+    processed: 1,
+    succeeded: 0,
+  })
 
   const actualChannelAdapters = await vi.importActual<
     typeof import('../src/assistant/channel-adapters.ts')

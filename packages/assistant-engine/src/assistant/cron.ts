@@ -134,6 +134,12 @@ export interface AssistantCronTargetMutationResult {
 
 export interface AssistantCronProcessDueResult {
   failed: number
+  /**
+   * Outbox delivery-intent IDs queued by this pass's executed jobs, in
+   * execution order and bounded by the pass limit. Present only when at
+   * least one job left a queued delivery behind.
+   */
+  pendingDeliveryIntentIds?: string[]
   processed: number
   succeeded: number
 }
@@ -665,6 +671,14 @@ export async function processDueAssistantCronJobsLocal(
       summary.succeeded += 1
     } else if (result.run.outcome === 'failed') {
       summary.failed += 1
+    }
+    if (
+      result.run.outcome === 'delivery_pending'
+      && result.pendingDeliveryIntentId !== null
+    ) {
+      ;(summary.pendingDeliveryIntentIds ??= []).push(
+        result.pendingDeliveryIntentId,
+      )
     }
     emitAssistantCronJobCompletedEvent({
       errorCode: result.runErrorCode,

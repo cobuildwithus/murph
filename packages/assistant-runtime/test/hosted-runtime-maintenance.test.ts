@@ -4367,6 +4367,9 @@ describe("runHostedAssistantAutomationLane", () => {
       processedAutomationIds.push(...dueAutomationIds.slice(0, limit));
       expect(input.shouldDeferCron?.()).toBe(false);
       return {
+        cronPendingDeliveryIntentIds: processedAutomationIds.map(
+          (automationId) => `outbox_${automationId}`,
+        ),
         cronProcessed: processedAutomationIds.length,
         nextWakeAt: processedAutomationIds.length === dueAutomationIds.length
           ? null
@@ -4400,6 +4403,10 @@ describe("runHostedAssistantAutomationLane", () => {
     );
     expect(processedAutomationIds).toEqual(dueAutomationIds);
     expect(result.assistantAutomationCronProcessed).toBe(2);
+    expect(result.assistantAutomationCronPendingDeliveryIntentIds).toEqual([
+      "outbox_older-due-automation",
+      "outbox_later-exact-time-reminder",
+    ]);
     expect(result.nextWakeAt).toBeNull();
   });
 

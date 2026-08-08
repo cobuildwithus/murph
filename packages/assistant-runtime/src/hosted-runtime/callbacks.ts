@@ -150,6 +150,13 @@ interface HostedAssistantDeliveryBoundaryFields {
 
 export interface CollectHostedAssistantDeliverySideEffectsInput {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  /**
+   * Intents queued by cron jobs executed in the current automation pass.
+   * They stay classified as background work but are all selected for the
+   * same post-checkpoint drain instead of competing with historical backlog
+   * for the single background slot.
+   */
+  currentPassCronIntentIds?: readonly string[];
   includeBackgroundDueIntents: boolean;
   preferredEffectIds?: readonly string[];
   preferredIntentIds?: readonly string[];
@@ -160,6 +167,7 @@ export async function collectHostedAssistantDeliverySideEffects(
   input: CollectHostedAssistantDeliverySideEffectsInput,
 ): Promise<HostedAssistantDeliveryEffect[]> {
   const request = {
+    currentPassCronIntentIds: input.currentPassCronIntentIds ?? [],
     includeBackgroundDueIntents: input.includeBackgroundDueIntents,
     preferredEffectIds: input.preferredEffectIds ?? [],
     preferredIntentIds: input.preferredIntentIds ?? [],
@@ -308,13 +316,30 @@ export async function collectHostedAssistantDeliverySideEffects(
       intents,
       vaultRoot: request.vaultRoot,
     });
-  const cappedBackgroundCandidates = filteredBackgroundCandidates.slice(
-    0,
-    Math.max(
-      0,
-      HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS - foregroundCandidates.length,
+  const currentPassCronOrder = new Map(
+    request.currentPassCronIntentIds.map(
+      (intentId, index) => [intentId, index] as const,
     ),
   );
+  const currentPassCronCandidates = filteredBackgroundCandidates
+    .filter((intent) => currentPassCronOrder.has(intent.intentId))
+    .sort((left, right) =>
+      (currentPassCronOrder.get(left.intentId) ?? 0)
+      - (currentPassCronOrder.get(right.intentId) ?? 0)
+    );
+  const backlogBackgroundCandidates = filteredBackgroundCandidates.filter(
+    (intent) => !currentPassCronOrder.has(intent.intentId),
+  );
+  const cappedBackgroundCandidates = [
+    ...currentPassCronCandidates,
+    ...backlogBackgroundCandidates.slice(
+      0,
+      Math.max(
+        0,
+        HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS - foregroundCandidates.length,
+      ),
+    ),
+  ];
   const effects = [
     ...foregroundCandidates.map((intent) =>
       buildHostedAssistantDeliveryEffectFromIntent(intent, "foreground_current_turn")

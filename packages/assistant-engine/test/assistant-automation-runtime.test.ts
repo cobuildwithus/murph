@@ -6831,6 +6831,60 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
+  it('widens the cron limit to a bare maxPerScan without a separate input override', async () => {
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+    const inputSource: AssistantInputSource = {
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      }),
+    }
+    runLoopMocks.processDueAssistantCronJobs.mockResolvedValueOnce({
+      failed: 0,
+      pendingDeliveryIntentIds: [
+        'outbox_cron_first',
+        'outbox_cron_second',
+      ],
+      processed: 2,
+      succeeded: 0,
+    })
+
+    const result = await runLoop.runAssistantAutomationPass({
+      inputSource,
+      maxPerScan: 50,
+      requestId: 'request-inputless-cron-capacity',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxPerScan: 50,
+      }),
+    )
+    expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limit: 50,
+      }),
+    )
+    expect(result.cronProcessed).toBe(2)
+    expect(result.cronPendingDeliveryIntentIds).toEqual([
+      'outbox_cron_first',
+      'outbox_cron_second',
+    ])
+  })
+
   it('skips dynamic context builder when the canonical refresh ingests input', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
