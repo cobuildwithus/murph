@@ -19,7 +19,7 @@ env:
 jobs:
   verify-and-push:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -34,10 +34,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - name: Reconstruct and apply the audited patch to current main
+      - name: Reconstruct reviewed patches
         shell: bash
         run: |
           set -euo pipefail
+
           cat \
             scripts/pr1446-final/00 \
             scripts/pr1446-final/01 \
@@ -48,12 +49,128 @@ jobs:
           echo '1d92ac0a305f0cef6fcb7bbf5405929fbe2b767e1a2e0dac3b0ac6f1d8cc7a04  /tmp/pr1446-final.patch' \
             | sha256sum --check
 
+          cat scripts/pr1446-followup/00 \
+            | tr -d '\r\n ' \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/pr1446-followup.patch
+          echo 'e71fc74ff14f0dc00b11564fd916bc71de55739df782ff90f5f712dcc2b42697  /tmp/pr1446-followup.patch' \
+            | sha256sum --check
+
+      - name: Materialize exact current-main candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+
           git fetch origin main agent/optional-sponsorship-moments
           source_ref="$(git rev-parse origin/agent/optional-sponsorship-moments)"
-          git reset --hard origin/main
-          git apply --3way --index /tmp/pr1446-final.patch
-          git diff --cached --check
+          base_ref="$(git rev-parse origin/main)"
           printf 'SOURCE_REF=%s\n' "$source_ref" >> "$GITHUB_ENV"
+          printf 'BASE_REF=%s\n' "$base_ref" >> "$GITHUB_ENV"
+
+          git reset --hard origin/main
+
+          set +e
+          git apply --3way --index /tmp/pr1446-final.patch
+          apply_status=$?
+          set -e
+
+          mapfile -t unmerged < <(git diff --name-only --diff-filter=U)
+          if [[ "$apply_status" -ne 0 ]]; then
+            if [[ "${#unmerged[@]}" -ne 1 || "${unmerged[0]}" != "agent-docs/index.md" ]]; then
+              printf 'Unexpected audited-patch conflicts:\n' >&2
+              printf '  %s\n' "${unmerged[@]}" >&2
+              exit "$apply_status"
+            fi
+
+            # This file is an inventory. Preserve every newer mainline row and
+            # update only the product-spec entry owned by this change.
+            git show HEAD:agent-docs/index.md > agent-docs/index.md
+            python - <<'PY'
+          from pathlib import Path
+
+          index = Path("agent-docs/index.md")
+          lines = index.read_text().splitlines(keepends=True)
+          offsets = [
+              offset
+              for offset, line in enumerate(lines)
+              if "`agent-docs/product-specs/hosted-usage-topups.md`" in line
+          ]
+          if len(offsets) != 1:
+              raise SystemExit(
+                  f"expected one hosted-usage-topups index row, found {len(offsets)}"
+              )
+
+          offset = offsets[0]
+          old = (
+              "and a single room-specific roughly 15-second song on activation "
+              "with later refills silent."
+          )
+          new = (
+              "and an optional participant-authorized message, poem, or "
+              "15-second song on activation with later refills silent."
+          )
+          row = lines[offset]
+          if new not in row:
+              if old not in row:
+                  raise SystemExit("hosted-usage-topups index row shape changed")
+              lines[offset] = row.replace(old, new, 1)
+              index.write_text("".join(lines))
+          PY
+            git add agent-docs/index.md
+          elif [[ "${#unmerged[@]}" -ne 0 ]]; then
+            printf 'Audited patch reported success with unresolved conflicts:\n' >&2
+            printf '  %s\n' "${unmerged[@]}" >&2
+            exit 1
+          fi
+
+          # Keep baseline-contract tests and prose aligned with the additive
+          # migration and the exact privacy wording established by this PR.
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          migration_test = Path(
+              "apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts"
+          )
+          text = migration_test.read_text()
+          migration = '      "20260807210000_add_group_sponsorship_creative_request",\n'
+          if migration not in text:
+              anchor = '      "20260806180000_fix_hosted_usage_plan_transition_bridge",\n'
+              if anchor not in text:
+                  raise SystemExit("migration-list anchor not found")
+              migration_test.write_text(text.replace(anchor, anchor + migration, 1))
+
+          product_spec = Path("agent-docs/product-specs/hosted-usage-topups.md")
+          text = product_spec.read_text()
+          desired = (
+              "Its private monthly maximum never changes the public acknowledgment "
+              "or creates a running bit."
+          )
+          if desired not in " ".join(text.split()):
+              pattern = re.compile(
+                  r"Its private monthly maximum never changes\s+"
+                  r"public output or\s+creates a running bit\."
+              )
+              text, replacements = pattern.subn(
+                  "Its private monthly maximum never changes the public "
+                  "acknowledgment or\ncreates a running bit.",
+                  text,
+                  count=1,
+              )
+              if replacements != 1:
+                  raise SystemExit("monthly-maximum contract text not found")
+              product_spec.write_text(text)
+          PY
+          git add -A
+
+          git apply --3way --index /tmp/pr1446-followup.patch
+
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
+          git diff --cached --check
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -61,18 +178,19 @@ jobs:
       - name: Typecheck hosted Web
         run: pnpm --dir apps/web typecheck
 
-      - name: Lint changed hosted Web files
-        run: >-
-          pnpm --dir apps/web exec eslint
-          app/design/group-usage-funding-study.tsx
-          app/design/sections-content.tsx
-          src/components/hosted-groups/group-sponsorship-dialog.tsx
-          src/lib/hosted-groups/group-sponsorship-contract.ts
-          src/lib/hosted-groups/group-sponsorship-notification.ts
-          src/lib/hosted-groups/group-sponsorship-store.ts
-          test/hosted-group-sponsorship-contract.test.ts
-          test/hosted-group-sponsorship-notification.test.ts
-          test/hosted-group-sponsorship-store.test.ts
+      - name: Lint every changed hosted Web source and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t web_lint_files < <(
+            git diff --cached --name-only --diff-filter=ACMR \
+              | sed -E -n 's#^apps/web/(.*\.(ts|tsx))$#\1#p'
+          )
+          if [[ "${#web_lint_files[@]}" -eq 0 ]]; then
+            echo "No changed hosted Web TypeScript files found." >&2
+            exit 1
+          fi
+          pnpm --dir apps/web exec eslint --max-warnings=0 "${web_lint_files[@]}"
 
       - name: Run focused hosted Web regressions
         run: >-
@@ -83,6 +201,7 @@ jobs:
           apps/web/test/hosted-group-sponsorship-store.test.ts
           apps/web/test/hosted-group-sponsorship-notification.test.ts
           apps/web/test/hosted-group-funding-page.test.tsx
+          apps/web/test/hosted-usage-top-up-dialog.test.tsx
           apps/web/test/hosted-usage-credit-purchase-service.test.ts
           apps/web/test/hosted-usage-top-up-product-spec.test.ts
           apps/web/test/hosted-onboarding-stripe-event-reconciliation.test.ts
@@ -188,7 +307,9 @@ jobs:
               await surface.getByRole("radio", { name: /^Song\b/ }).check();
               await surface
                 .getByLabel("What should it be about?")
-                .fill("Make this the group’s theme song and use our latest running joke.");
+                .fill(
+                  "Make this the group’s theme song and use our latest running joke.",
+                );
               await surface
                 .getByLabel("Genre or style reference")
                 .fill("Warm ensemble-sitcom theme with a bright acoustic intro");
@@ -249,7 +370,8 @@ jobs:
             >/tmp/pr1446-design-server.log 2>&1 &
           server_pid=$!
           for attempt in $(seq 1 180); do
-            if curl --fail --silent http://127.0.0.1:3000/api/internal/health >/dev/null; then
+            if curl --fail --silent \
+              http://127.0.0.1:3000/api/internal/health >/dev/null; then
               break
             fi
             if ! kill -0 "$server_pid" 2>/dev/null; then
@@ -258,18 +380,25 @@ jobs:
             fi
             sleep 1
           done
-          curl --fail --silent http://127.0.0.1:3000/api/internal/health >/dev/null
+          curl --fail --silent \
+            http://127.0.0.1:3000/api/internal/health >/dev/null
           pnpm --dir apps/web exec node .tmp-pr1446-design-proof.mjs
           test -s /tmp/pr1446-desktop.png
           test -s /tmp/pr1446-mobile.png
 
-      - name: Upload hosted design proof
+      - name: Upload hosted design proof when credentials are available
         shell: bash
         env:
           CLOUDFLARE_IMAGES_ACCOUNT_ID: ${{ vars.CLOUDFLARE_IMAGES_ACCOUNT_ID || secrets.CLOUDFLARE_IMAGES_ACCOUNT_ID }}
           CLOUDFLARE_IMAGES_API_KEY: ${{ secrets.CLOUDFLARE_IMAGES_API_KEY }}
         run: |
           set -euo pipefail
+          if [[ -z "${CLOUDFLARE_IMAGES_ACCOUNT_ID:-}" \
+            || -z "${CLOUDFLARE_IMAGES_API_KEY:-}" ]]; then
+            echo "Cloudflare image credentials are unavailable; retaining the GitHub artifact proof."
+            exit 0
+          fi
+
           pnpm exec tsx --tsconfig tsconfig.base.json \
             scripts/upload-design-proof-image.ts \
             /tmp/pr1446-desktop.png \
@@ -292,6 +421,45 @@ jobs:
             echo "Mobile: ${urls[1]}"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Mark the execution plan complete after proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          plan = Path(
+              "agent-docs/exec-plans/completed/"
+              "2026-08-07-optional-group-sponsorship-moments.md"
+          )
+          text = plan.read_text()
+          old = (
+              "Status: verification in progress\n"
+              "Updated: 2026-08-08\n"
+              "Completed: pending final verification\n"
+          )
+          new = (
+              "Verification completed on the exact current-main candidate: "
+              "focused Web, assistant-engine, hosted-execution, and "
+              "assistant-runtime typechecks and regressions passed; billing, "
+              "documentation, no-JavaScript, frontend-design-proof, and PR "
+              "architecture guards passed; desktop and mobile browser proof "
+              "confirmed the optional personalization flow and no horizontal "
+              "overflow.\n\n"
+              "Status: completed\n"
+              "Updated: 2026-08-08\n"
+              "Completed: 2026-08-08\n"
+          )
+          if old not in text:
+              raise SystemExit("execution-plan verification marker changed")
+          plan.write_text(text.replace(old, new, 1))
+          PY
+          git add \
+            agent-docs/exec-plans/completed/2026-08-07-optional-group-sponsorship-moments.md
+          pnpm docs:drift
+          git diff --cached --check
+          git diff --exit-code
+
       - name: Upload verification proof artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -305,10 +473,16 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: Commit and push the verified result
+      - name: Commit and push the fully verified result
         shell: bash
         run: |
           set -euo pipefail
+          git fetch origin main
+          current_main="$(git rev-parse origin/main)"
+          if [[ "$current_main" != "$BASE_REF" ]]; then
+            echo "main advanced during verification: $BASE_REF -> $current_main" >&2
+            exit 1
+          fi
           git diff --cached --check
           git diff --exit-code
           git config user.name "OpenAI"
@@ -318,4 +492,7 @@ jobs:
           git push \
             --force-with-lease=refs/heads/agent/optional-sponsorship-moments:${SOURCE_REF} \
             origin HEAD:agent/optional-sponsorship-moments
-          echo "Pushed ${final_commit}" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "Base: ${BASE_REF}"
+            echo "Pushed: ${final_commit}"
+          } >> "$GITHUB_STEP_SUMMARY"
