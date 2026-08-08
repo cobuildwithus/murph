@@ -1,0 +1,86 @@
+name: PR 1381 final audit candidate
+
+on:
+  push:
+    branches:
+      - agent/codex-1381-final-audit-candidate
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-1381-final-audit-candidate
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply audited PR patch
+        run: |
+          cat .audit/pr1381.patch.gz.b64.* | base64 -d | gzip -d > /tmp/pr1381.patch
+          git apply --check /tmp/pr1381.patch
+          git apply /tmp/pr1381.patch
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck assistant engine
+        run: pnpm --dir packages/assistant-engine typecheck
+      - name: Run focused Codex protocol and runtime coverage
+        run: >-
+          pnpm --dir packages/assistant-engine exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/app-server-protocol.test.ts
+          test/assistant-codex-dynamic-tool-request.test.ts
+          test/assistant-codex-failures.test.ts
+          test/assistant-codex-runtime.test.ts
+          test/codex-runtime-helpers.test.ts
+          test/assistant-codex-subagent-usage.test.ts
+
+  full-assistant-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply audited PR patch
+        run: |
+          cat .audit/pr1381.patch.gz.b64.* | base64 -d | gzip -d > /tmp/pr1381.patch
+          git apply --check /tmp/pr1381.patch
+          git apply /tmp/pr1381.patch
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run complete assistant-engine suite
+        run: pnpm --dir packages/assistant-engine test
+
+  downstream:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply audited PR patch
+        run: |
+          cat .audit/pr1381.patch.gz.b64.* | base64 -d | gzip -d > /tmp/pr1381.patch
+          git apply --check /tmp/pr1381.patch
+          git apply /tmp/pr1381.patch
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run assistant-runtime integration coverage
+        run: >-
+          pnpm --dir packages/assistant-runtime exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/hosted-runtime-workspace-entrypoint.test.ts
+      - name: Run CLI Codex coverage
+        run: >-
+          pnpm --dir packages/cli exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/assistant-codex.test.ts
