@@ -1,6 +1,6 @@
 # Unified group funding contract
 
-Status: active
+Status: completed
 Created: 2026-08-07
 Updated: 2026-08-07
 
@@ -80,5 +80,9 @@ Updated: 2026-08-07
 
 ## Verification
 
-- Commands to run: focused Web tests; focused Assistant Engine prompt tests; Web and Assistant Engine typechecks; focused lint; required documentation checks; ReviewGPT specialist and final gates; exact-head GitHub Actions.
-- Expected outcomes: all focused checks and required PR gates pass with no sponsored-specific assistant branch remaining.
+- Focused Web proof passed: 554 tests covering refill availability, public/private projection, assistant serialization, deterministic linked exhaustion delivery, both provider routes, and funding-locator purchase recovery.
+- Focused Assistant Engine proof passed: 13 static prompt-contract tests. Web and Assistant Engine typechecks and focused lint passed.
+- The existing design-catalog funding surface passed desktop and mobile visual proof with a synthetic signed funding endpoint.
+- Final ReviewGPT round 6 passed the behavior head with no remaining qualifying finding. The later exact-head catalog-only proof delta did not change production behavior.
+- Exact-head GitHub Actions passed, including release build/typecheck, app verification, package coverage, frontend design proof, and the production-shaped hosted-local Stripe browser matrix.
+Completed: 2026-08-07
