@@ -278,27 +278,32 @@ describe("hosted preference handoff sweeper", () => {
             workflowId: "hosted-user-runtime:synthetic",
           });
     });
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(0);
 
-    await expect(runHostedPreferenceHandoffSweeper({
-      handoffTimeoutMs: 1,
-      hasActiveAccess: vi.fn(async () => true),
-      logger: buildLogger(),
-      requestHandoff,
-      store,
-    })).resolves.toMatchObject({
-      handoffAccepted: 0,
-      handoffFailed: 1,
-    });
-    await expect(runHostedPreferenceHandoffSweeper({
-      handoffTimeoutMs: 1,
-      hasActiveAccess: vi.fn(async () => true),
-      logger: buildLogger(),
-      requestHandoff,
-      store,
-    })).resolves.toMatchObject({
-      handoffAccepted: 1,
-      handoffFailed: 0,
-    });
+    try {
+      await expect(runHostedPreferenceHandoffSweeper({
+        handoffTimeoutMs: 1,
+        hasActiveAccess: vi.fn(async () => true),
+        logger: buildLogger(),
+        requestHandoff,
+        store,
+      })).resolves.toMatchObject({
+        handoffAccepted: 0,
+        handoffFailed: 1,
+      });
+      await expect(runHostedPreferenceHandoffSweeper({
+        handoffTimeoutMs: 1,
+        hasActiveAccess: vi.fn(async () => true),
+        logger: buildLogger(),
+        requestHandoff,
+        store,
+      })).resolves.toMatchObject({
+        handoffAccepted: 1,
+        handoffFailed: 0,
+      });
+    } finally {
+      dateNow.mockRestore();
+    }
 
     expect(requestHandoff).toHaveBeenCalledTimes(2);
     expect(requestHandoff).toHaveBeenNthCalledWith(1, {

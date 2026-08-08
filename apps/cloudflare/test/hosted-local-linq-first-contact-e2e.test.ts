@@ -1099,6 +1099,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       messageTargetingAvailable: true,
+      pendingVaultFilesAvailable: true,
       phoneCallsAvailable: true,
       progressUpdatesAvailable: true,
       vaultFileSendAvailable: true,
