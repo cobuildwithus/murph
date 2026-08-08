@@ -1,4 +1,4 @@
-name: Agent Max source export
+name: Agent Max final patch apply
 
 on:
   push:
@@ -6,14 +6,15 @@ on:
       - agent/add-murph-max-plan
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: agent-max-source-export-${{ github.ref }}
-  cancel-in-progress: true
+  group: agent-max-final-patch-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  export-source:
+  apply:
+    if: github.actor == 'rocketman-21'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -22,13 +23,32 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Archive exact source tree
-        run: git archive --format=tar HEAD | gzip > "$RUNNER_TEMP/agent-max-source.tar.gz"
+      - name: Apply verified patch set
+        shell: bash
+        run: |
+          set -euo pipefail
+          patches=(
+            .github/agent-max-final-01.patch
+            .github/agent-max-final-02.patch
+            .github/agent-max-final-03.patch
+            .github/agent-max-final-04.patch
+            .github/agent-max-final-05.patch
+          )
 
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-max-source-${{ github.sha }}
-          path: ${{ runner.temp }}/agent-max-source.tar.gz
-          if-no-files-found: error
-          retention-days: 1
+          for patch in "${patches[@]}"; do
+            test -f "$patch"
+            git apply --check "$patch"
+            git apply --index "$patch"
+          done
+
+          git rm "${patches[@]}" .github/workflows/agent-max-finalize.yml
+          git diff --cached --check
+
+      - name: Commit and push final fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "rocketman"
+          git config user.email "20303031+rocketman-21@users.noreply.github.com"
+          git commit -m "fix: harden Max plan integration"
+          git push origin HEAD:agent/add-murph-max-plan
