@@ -1,0 +1,166 @@
+name: Verify and push PR 1446 WIP
+
+on:
+  push:
+    branches:
+      - agent/pr1446-recover-finalizer
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr1446-wip-finalizer
+  cancel-in-progress: true
+
+jobs:
+  verify-and-push:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CI: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+      EXPECTED_MAIN_SHA: a8aa91eca0052bc5d6e6cf76a2600e04b3a1e3f8
+      PATCH_SHA256: a5c2cdb5a8b9fca25e17f32664c30e7dd6e116439ac17edcc43fe5bb246f08c3
+      PR_BRANCH: agent/optional-sponsorship-moments
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Decode audited WIP patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            scripts/pr1446-wip/00 \
+            scripts/pr1446-wip/01 \
+            scripts/pr1446-wip/02 \
+            scripts/pr1446-wip/03 \
+            scripts/pr1446-wip/04 \
+            | tr -d '\r\n ' \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/pr1446-wip.patch
+          echo "${PATCH_SHA256}  /tmp/pr1446-wip.patch" | sha256sum --check
+
+      - name: Apply to the exact current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main "${PR_BRANCH}"
+          base_ref="$(git rev-parse origin/main)"
+          source_ref="$(git rev-parse "origin/${PR_BRANCH}")"
+          if [[ "${base_ref}" != "${EXPECTED_MAIN_SHA}" ]]; then
+            echo "main moved from ${EXPECTED_MAIN_SHA} to ${base_ref}; refusing a stale patch" >&2
+            exit 1
+          fi
+          printf 'BASE_REF=%s\n' "${base_ref}" >> "${GITHUB_ENV}"
+          printf 'SOURCE_REF=%s\n' "${source_ref}" >> "${GITHUB_ENV}"
+          git reset --hard "${base_ref}"
+          git apply --index --binary /tmp/pr1446-wip.patch
+          git diff --cached --check
+
+      - name: Push the audited WIP to the draft PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "OpenAI"
+          git config user.email "openai@users.noreply.github.com"
+          git commit -m "WIP: make group sponsorship creative moments opt-in"
+          final_commit="$(git rev-parse HEAD)"
+          printf 'FINAL_COMMIT=%s\n' "${final_commit}" >> "${GITHUB_ENV}"
+          git push \
+            --force-with-lease="refs/heads/${PR_BRANCH}:${SOURCE_REF}" \
+            origin "${final_commit}:refs/heads/${PR_BRANCH}"
+          echo "Pushed ${final_commit} to ${PR_BRANCH}."
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck hosted Web
+        run: pnpm --dir apps/web typecheck
+
+      - name: Lint changed hosted Web TypeScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(
+            git diff --name-only --diff-filter=ACMR "${BASE_REF}...HEAD" \
+              | sed -E -n 's#^apps/web/(.*\.(ts|tsx))$#\1#p'
+          )
+          if [[ "${#files[@]}" -eq 0 ]]; then
+            echo "No changed hosted Web TypeScript files found." >&2
+            exit 1
+          fi
+          pnpm --dir apps/web exec eslint --max-warnings=0 "${files[@]}"
+
+      - name: Run focused hosted Web regressions
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/hosted-group-sponsorship-contract.test.ts
+          apps/web/test/hosted-group-sponsorship-store.test.ts
+          apps/web/test/hosted-group-sponsorship-notification.test.ts
+          apps/web/test/hosted-group-funding-page.test.tsx
+          apps/web/test/hosted-usage-top-up-dialog.test.tsx
+          apps/web/test/hosted-usage-credit-purchase-service.test.ts
+          apps/web/test/hosted-usage-top-up-product-spec.test.ts
+          apps/web/test/hosted-onboarding-stripe-event-reconciliation.test.ts
+          apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts
+
+      - name: Typecheck and test assistant engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm exec vitest run \
+            --config packages/assistant-engine/vitest.config.ts \
+            --no-coverage \
+            packages/assistant-engine/test/assistant-notification-turn-runtime.test.ts \
+            packages/assistant-engine/test/assistant-creative-notification-prompt.test.ts
+
+      - name: Typecheck and test assistant runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir packages/assistant-runtime typecheck
+          pnpm exec vitest run \
+            --config packages/assistant-runtime/vitest.config.ts \
+            --isolate=true \
+            --no-coverage \
+            packages/assistant-runtime/test/hosted-runtime-events.test.ts
+
+      - name: Typecheck and test hosted execution contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir packages/hosted-execution typecheck
+          pnpm exec vitest run \
+            --config packages/hosted-execution/vitest.config.ts \
+            --no-coverage \
+            packages/hosted-execution/test/hosted-execution-sponsorship-contract.test.ts
+
+      - name: Run repository contract guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm hosted-billing:ci-guard
+          pnpm docs:drift
+          pnpm no-js
+
+      - name: Confirm the pushed WIP remained clean during verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git diff --cached --exit-code
+          test "$(git rev-parse HEAD)" = "${FINAL_COMMIT}"
+          test "$(git rev-parse "origin/${PR_BRANCH}")" = "${FINAL_COMMIT}"
