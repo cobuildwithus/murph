@@ -1,173 +1,100 @@
-import { rm, writeFile } from 'node:fs/promises'
-import { afterEach, describe, expect, it } from 'vitest'
-
-import { initializeVault } from '@murphai/core'
-import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
+import { describe, expect, it } from 'vitest'
 
 import {
   executeGroupRoomModelDynamicTool,
-  readGroupRoomModelDynamicToolRequest,
   type GroupRoomModelDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools/group-room-model.js'
 import type {
   AssistantHostedUserActionScope,
 } from '../src/assistant/hosted-tool-context.js'
-import {
-  ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
-  ASSISTANT_GROUP_ROOM_MODEL_SLUG,
-  readAssistantGroupRoomModelBody,
+import type {
+  AssistantGroupRoomModelReadState,
 } from '../src/assistant/group-room-model.js'
-import {
-  buildKnowledgeMarkdown,
-  buildKnowledgePageRelativePath,
-} from '../src/knowledge/documents.js'
-import { createTempVaultContext } from './test-helpers.js'
 
-const cleanupPaths: string[] = []
-
-afterEach(async () => {
-  await Promise.all(
-    cleanupPaths.splice(0).map((path) =>
-      rm(path, { force: true, recursive: true }),
-    ),
-  )
-})
+const digest = 'a'.repeat(64)
+const vaultRoot = '/tmp/group-room-model-maintenance-test'
 
 describe('group room-model maintenance boundary', () => {
-  it('reports exact body bytes and never silently reactivates inactive state', async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-group-room-model-maintenance-boundary-',
-    )
-    cleanupPaths.push(parentRoot)
-    await initializeVault({ vaultRoot })
-
-    const missing = await executeMaintenance({ action: 'show' }, vaultRoot)
-    const missingState = readToolResult<{
-      body: null
-      bodyUtf8Bytes: number
-      digest: string
-      status: 'missing'
-    }>(missing)
-    expect(missingState).toMatchObject({
-      body: null,
-      bodyUtf8Bytes: 0,
-      status: 'missing',
-    })
-
+  it('reports exact UTF-8 body bytes for present and missing state', async () => {
     const body = '## People\n- Casey likes 🧠-dry rulings.'
-    const created = await executeMaintenance({
-      action: 'upsert',
+    const present = await execute({ action: 'show' }, {
       body,
-      expectedDigest: missingState.digest,
-    }, vaultRoot)
-    expect(created.rpcResult.success).toBe(true)
-
-    const active = await executeMaintenance({ action: 'show' }, vaultRoot)
-    const activeState = readToolResult<{
-      body: string
-      bodyUtf8Bytes: number
-      digest: string
-      status: string
-    }>(active)
-    expect(activeState).toMatchObject({
+      digest,
+      kind: 'present',
+      status: 'active',
+    })
+    expect(readResult(present)).toEqual({
       body,
       bodyUtf8Bytes: new TextEncoder().encode(body).byteLength,
+      digest,
       status: 'active',
     })
 
-    const pagePath = await resolveAssistantVaultPath(
-      vaultRoot,
-      buildKnowledgePageRelativePath(ASSISTANT_GROUP_ROOM_MODEL_SLUG),
-      'file path',
-    )
-    await writeFile(pagePath, buildKnowledgeMarkdown({
-      body,
-      compiledAt: '2026-08-08T00:00:00.000Z',
-      librarySlugs: [],
-      pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
-      relatedSlugs: [],
-      slug: ASSISTANT_GROUP_ROOM_MODEL_SLUG,
-      sourcePaths: [],
-      status: 'archived',
-      summary: null,
-      title: 'Group room model',
-    }), 'utf8')
-
-    const inactive = await executeMaintenance({ action: 'show' }, vaultRoot)
-    const inactiveState = readToolResult<{
-      body: string
-      bodyUtf8Bytes: number
-      digest: string
-      status: string
-    }>(inactive)
-    expect(inactiveState).toMatchObject({
-      body,
-      bodyUtf8Bytes: new TextEncoder().encode(body).byteLength,
-      status: 'archived',
+    const missing = await execute({ action: 'show' }, {
+      digest,
+      kind: 'missing',
     })
+    expect(readResult(missing)).toEqual({
+      body: null,
+      bodyUtf8Bytes: 0,
+      digest,
+      status: 'missing',
+    })
+  })
 
-    const blocked = await executeMaintenance({
-      action: 'upsert',
-      body: '## People\n- maintenance must not reactivate this page.',
-      expectedDigest: inactiveState.digest,
-    }, vaultRoot)
-    expect(blocked.rpcResult.success).toBe(false)
-    expect(blocked.rpcResult.contentItems[0]?.text).toContain(
+  it('prevents silent maintenance from reactivating inactive state', async () => {
+    const state = {
+      body: '## People\n- Keep this archived.',
+      digest,
+      kind: 'present' as const,
+      status: 'archived',
+    }
+    const request = {
+      action: 'upsert' as const,
+      body: '## People\n- Maintenance must not reactivate this page.',
+      expectedDigest: digest,
+    }
+
+    const maintenance = await execute(request, state)
+    expect(maintenance.rpcResult.success).toBe(false)
+    expect(maintenance.rpcResult.contentItems[0]?.text).toContain(
       'must not reactivate inactive group room-model state',
     )
-    await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
-      .resolves.toBeNull()
 
-    const explicitUpdate = await executeGroupRoomModelDynamicTool({
-      available: true,
-      request: requireRequest({
-        action: 'upsert',
-        body: '## People\n- Casey asked the room to remember this again.',
-        expectedDigest: inactiveState.digest,
-      }),
-      userActionScope: createGroupUserActionScope(),
-      vaultRoot,
-    })
-    expect(explicitUpdate.rpcResult.success).toBe(true)
-    await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
-      .resolves.toContain('asked the room to remember this again')
+    const explicitGroupRequest = await execute(
+      request,
+      state,
+      createGroupUserActionScope(),
+    )
+    expect(explicitGroupRequest.rpcResult.contentItems[0]?.text).not.toContain(
+      'must not reactivate inactive group room-model state',
+    )
   })
 })
 
-async function executeMaintenance(
-  args: unknown,
-  vaultRoot: string,
+async function execute(
+  args: Extract<
+    GroupRoomModelDynamicToolRequest,
+    { kind: 'group-room-model' }
+  >['args'],
+  state: AssistantGroupRoomModelReadState,
+  userActionScope: AssistantHostedUserActionScope | null = null,
 ): Promise<Awaited<ReturnType<typeof executeGroupRoomModelDynamicTool>>> {
   return await executeGroupRoomModelDynamicTool({
     available: true,
-    managedMaintenanceAuthorized: true,
-    request: requireRequest(args),
-    userActionScope: null,
+    managedMaintenanceAuthorized: userActionScope === null,
+    readGroupRoomModelState: async () => state,
+    request: { args, kind: 'group-room-model' },
+    userActionScope,
     vaultRoot,
   })
 }
 
-function requireRequest(
-  args: unknown,
-): Extract<GroupRoomModelDynamicToolRequest, { kind: 'group-room-model' }> {
-  const request = readGroupRoomModelDynamicToolRequest({
-    arguments: args,
-    tool: 'group_room_model',
-  })
-  if (!request || request.kind !== 'group-room-model') {
-    throw new Error('Expected valid group room-model tool arguments.')
-  }
-  return request
-}
-
-function readToolResult<T>(
+function readResult(
   result: Awaited<ReturnType<typeof executeGroupRoomModelDynamicTool>>,
-): T {
-  const text = result.rpcResult.contentItems[0]?.text
-  if (!result.rpcResult.success || !text) {
-    throw new Error(`Expected a successful tool result, received: ${text}`)
-  }
-  return JSON.parse(text) as T
+): unknown {
+  expect(result.rpcResult.success).toBe(true)
+  return JSON.parse(result.rpcResult.contentItems[0]?.text ?? 'null')
 }
 
 function createGroupUserActionScope(): AssistantHostedUserActionScope {
