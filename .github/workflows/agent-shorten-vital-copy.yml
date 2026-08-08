@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 jobs:
-  update:
+  update-copy:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -38,17 +38,16 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+          import re
 
-          def replace_once(path: Path, old: str, new: str, label: str) -> None:
+          def replace_once(path, old, new, label):
               text = path.read_text()
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(
-                      f"Expected exactly one {label} match in {path}, found {count}"
-                  )
+                  raise SystemExit(f"Expected one {label} match in {path}, found {count}")
               path.write_text(text.replace(old, new, 1))
 
-          def replace_required(path: Path, replacements: list[tuple[str, str]]) -> None:
+          def replace_required(path, replacements):
               text = path.read_text()
               for old, new in replacements:
                   if old not in text:
@@ -56,48 +55,49 @@ jobs:
                   text = text.replace(old, new)
               path.write_text(text)
 
-          dialog_path = Path(
-              "apps/web/app/(dashboard)/connect/connect-page-dialogs.tsx"
-          )
+          dialog_path = Path("apps/web/app/(dashboard)/connect/connect-page-dialogs.tsx")
           replace_once(
               dialog_path,
-              "            Vital connects {sourceName} for Murph",
-              "            Vital connects {sourceName} to Murph",
+              "Vital connects {sourceName} for Murph",
+              "Vital connects {sourceName} to Murph",
               "dialog title",
           )
-          replace_once(
-              dialog_path,
-              '''          <DialogDescription className="leading-6">
-            The next authorization screen may name Vital instead of Murph. That
-            is expected.
-          </DialogDescription>''',
-              '''          <DialogDescription className="leading-6">
-            The next screen may say Vital. That is expected.
-          </DialogDescription>''',
-              "dialog description",
+
+          dialog = dialog_path.read_text()
+          description_pattern = re.compile(
+              r'          <DialogDescription className="leading-6">\n'
+              r'            The next authorization screen may name Vital instead of Murph\. That\n'
+              r'            is expected\.\n'
+              r'          </DialogDescription>'
           )
-          replace_once(
-              dialog_path,
-              '''        <div className="space-y-3 text-sm leading-6 text-muted-foreground">
-          <p>
-            Vital acts as Murph&apos;s health-sync provider. It processes the
-            data you approve to operate this connection and send it to Murph; it
-            is not the health assistant using the data.
-          </p>
-          <p>
-            Murph does not authorize Vital to sell this data, use it for
-            advertising, train models on it, or use it for unrelated purposes.
-            You can disconnect
-            {` ${sourceName}`} at any time.
-          </p>
-        </div>''',
-              '''        <p className="text-sm leading-6 text-muted-foreground">
-          Vital processes the data you approve only to sync it to Murph. Murph
-          does not allow Vital to sell it, use it for ads or model training, or
-          use it for anything unrelated. Disconnect anytime.
-        </p>''',
-              "dialog body",
+          dialog, description_count = description_pattern.subn(
+              '          <DialogDescription className="leading-6">\n'
+              '            The next screen may say Vital. That is expected.\n'
+              '          </DialogDescription>',
+              dialog,
+              count=1,
           )
+          if description_count != 1:
+              raise SystemExit(f"Expected one dialog description match, found {description_count}")
+
+          body_pattern = re.compile(
+              r'        <div className="space-y-3 text-sm leading-6 text-muted-foreground">\n'
+              r'.*?'
+              r'        </div>',
+              re.S,
+          )
+          dialog, body_count = body_pattern.subn(
+              '        <p className="text-sm leading-6 text-muted-foreground">\n'
+              '          Vital processes the data you approve only to sync it to Murph. Murph\n'
+              '          does not allow Vital to sell it, use it for ads or model training, or\n'
+              '          use it for anything unrelated. Disconnect anytime.\n'
+              '        </p>',
+              dialog,
+              count=1,
+          )
+          if body_count != 1:
+              raise SystemExit(f"Expected one dialog body match, found {body_count}")
+          dialog_path.write_text(dialog)
 
           replace_required(
               Path("apps/web/test/vital-connection-dialog.test.tsx"),
@@ -106,10 +106,7 @@ jobs:
                   ("Vital connects Garmin for Murph", "Vital connects Garmin to Murph"),
                   ("may name Vital instead of Murph", "may say Vital"),
                   ("health-sync provider", "processes the data you approve"),
-                  (
-                      "does not authorize Vital to sell this data",
-                      "does not allow Vital to sell it",
-                  ),
+                  ("does not authorize Vital to sell this data", "does not allow Vital to sell it"),
                   ("train models on it", "model training"),
                   ("disconnect Fitbit at any time", "Disconnect anytime"),
               ],
@@ -120,10 +117,7 @@ jobs:
                   ("Vital connects Dexcom for Murph", "Vital connects Dexcom to Murph"),
                   ("Vital connects Fitbit for Murph", "Vital connects Fitbit to Murph"),
                   ("health-sync provider", "processes the data you approve"),
-                  (
-                      "does not authorize Vital to sell",
-                      "does not allow Vital to sell it",
-                  ),
+                  ("does not authorize Vital to sell", "does not allow Vital to sell it"),
                   ("train models on it", "model training"),
               ],
           )
