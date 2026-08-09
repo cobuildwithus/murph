@@ -80,7 +80,7 @@ describe('assistant tracked workout table skill', () => {
       'Do not reconstruct and replace the complete nested exercise/set array',
     )
     expect(skill).toContain('pass `--workout-id`')
-    expect(skill).toContain('pass `--set-order`')
+    expect(skill).toContain('one explicit exercise selector, and `--set-order`')
     expect(skill).toContain('correct the same set rather than append a duplicate')
     expect(skill).toContain('Saved target values remain in the workout format')
     expect(skill).toContain('Finish only when the member explicitly says they are done')
@@ -108,7 +108,9 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(skill).toContain('ask one narrow disambiguating question')
     expect(skill).toContain('final 2 reps spotted')
-    expect(skill).toContain('Never leave meaningful notation only in conversation text')
+    expect(skill).toContain(
+      'Never leave meaningful notation only in conversation text',
+    )
   })
 
   it('accepts a synthetic four-set tracked card', () => {
