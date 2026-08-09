@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildHostedUsageReferralOutstandingWhere,
   buildHostedUsageReferralRewardLabel,
+  HOSTED_USAGE_REFERRAL_POLICY_VERSION,
   HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS,
   HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
   bindArmedHostedUsageReferralToNewContainerTx,
@@ -40,7 +41,7 @@ describe("hosted usage referral policy", () => {
         },
       },
       notificationKey: "usage-referral-reward:referral_1",
-      rewardLabel: "$3.50 of cost-weighted usage credit for this room",
+      rewardLabel: "about 14 more days of Murph usage for this room",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
       styleBand: {
         humor: 8,
@@ -61,26 +62,38 @@ describe("hosted usage referral policy", () => {
       "Keep any edge aimed at Murph",
     );
     expect(wake.notification.instructions).toContain(
-      "$3.50 of cost-weighted usage credit for this room",
+      "about 14 more days of Murph usage for this room",
     );
     expect(wake.notification.instructions).toContain(
-      'Final message: include "$3.50 of cost-weighted usage credit for this room" exactly',
+      'Final message: include "about 14 more days of Murph usage for this room" exactly',
     );
   });
 
-  it("labels each fixed mission reward as cost-weighted usage credit", () => {
+  it("labels persisted mission rewards as days of Murph usage", () => {
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "group",
+      policyCode: "new_person_activation_v1",
+      policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
       rewardUsdMicros: 2_000_000n,
-    })).toBe("$2.00 of cost-weighted usage credit for this room");
+    })).toBe("about 10 more days of Murph usage for this room");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
+      policyCode: "active_group_v1",
+      policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
       rewardUsdMicros: 3_500_000n,
-    })).toBe("$3.50 of cost-weighted usage credit for your Murph");
+    })).toBe("about 14 more days of Murph usage for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
+      policyCode: "new_person_activation_v1",
+      policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
       rewardUsdMicros: 2_750_000n,
-    })).toBe("$2.75 of cost-weighted usage credit for your Murph");
+    })).toBe("about 14 more days of Murph usage for your Murph");
+    expect(buildHostedUsageReferralRewardLabel({
+      destinationKind: "group",
+      policyCode: "active_group_v1",
+      policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+      rewardUsdMicros: 2_750_000n,
+    })).toBe("about 11 more days of Murph usage for this room");
   });
 
   it("shares display copy and outstanding semantics with read-only projections", () => {
@@ -177,7 +190,7 @@ describe("hosted usage referral policy", () => {
       beneficiaryMemberId: "member_personal",
       destination,
       notificationKey: "usage-referral-reward:referral_personal",
-      rewardLabel: "$2.00 of cost-weighted usage credit for your Murph",
+      rewardLabel: "about 10 more days of Murph usage for your Murph",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
       styleBand: {
         humor: 3,
@@ -236,7 +249,7 @@ describe("hosted usage referral policy", () => {
       beneficiaryMemberId: "member_personal",
       destination: linqDestination,
       notificationKey: "usage-referral-reward:referral_personal_linq",
-      rewardLabel: "$2.00 of cost-weighted usage credit for your Murph",
+      rewardLabel: "about 10 more days of Murph usage for your Murph",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
       styleBand: {
         humor: 3,

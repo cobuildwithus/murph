@@ -86,7 +86,7 @@ export function ReferralSection({
                     </p>
                     <p className="text-sm font-semibold text-[#f5f0e8] sm:mt-1">
                       {formatHostedPublicReferralRewardValue(
-                        reward.rewardUsdMicros,
+                        reward,
                       )}
                     </p>
                   </div>
@@ -100,8 +100,8 @@ export function ReferralSection({
               />
               <p>
                 Qualifying rewards are applied automatically to the Murph they
-                were earned for. Dollar labels state exact cost-weighted usage
-                credit; actual message capacity varies.
+                were earned for. Day estimates reflect typical Murph use;
+                actual capacity varies.
               </p>
             </div>
           </div>

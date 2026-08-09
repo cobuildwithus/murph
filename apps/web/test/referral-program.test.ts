@@ -76,12 +76,16 @@ describe("public referral program projection", () => {
 
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
+      policyCode: newPersonGroup.policyCode,
+      policyVersion: newPersonGroup.policyVersion,
       rewardUsdMicros: newPersonGroup.rewardUsdMicros,
-    })).toBe("$2.00 of cost-weighted usage credit for your Murph");
+    })).toBe("about 10 more days of Murph usage for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
+      policyCode: activeGroup.policyCode,
+      policyVersion: activeGroup.policyVersion,
       rewardUsdMicros: activeGroup.rewardUsdMicros,
-    })).toBe("$3.50 of cost-weighted usage credit for your Murph");
+    })).toBe("about 14 more days of Murph usage for your Murph");
     expect(signup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
@@ -100,10 +104,8 @@ describe("public referral program projection", () => {
     expect(activeGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
     );
-    expect(formatHostedPublicReferralRewardValue(
-      HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
-    )).toBe(
-      "$2.00 of cost-weighted usage credit",
+    expect(formatHostedPublicReferralRewardValue(signup)).toBe(
+      "About 10 more days of Murph usage",
     );
   });
 
