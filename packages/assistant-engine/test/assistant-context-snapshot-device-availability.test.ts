@@ -6,17 +6,18 @@ import {
   addMeasurement,
   initializeVault,
 } from '@murphai/core'
+import { writeAssistantStateVersionedJson } from '@murphai/runtime-state/node'
 import { describe, expect, it } from 'vitest'
 
 import {
+  ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA,
+  ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION,
   isAssistantContextSnapshotRefreshPending,
   markAssistantContextSnapshotDirty,
   readAssistantContextSnapshotPrompt,
   refreshAssistantContextSnapshot,
+  resolveAssistantContextSnapshotPath,
 } from '../src/assistant-context-snapshot.js'
-import {
-  refreshAssistantContextSnapshot as refreshCoreAssistantContextSnapshot,
-} from '../src/assistant/context-snapshot.js'
 
 async function createDeviceMeasurementVault(): Promise<{
   parentRoot: string
@@ -77,20 +78,17 @@ describe('assistant context snapshot device availability', () => {
       })
 
       const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
-      expect(prompt).toContain(
-        'Canonical health-measurement availability for navigation only:',
-      )
-      expect(prompt).toContain('Body/scale measurement history is available')
+      expect(prompt).toContain('Body/scale measurement history is present')
       expect(prompt).toContain(
         'vault-cli wearables body list --limit 30 --format json',
       )
-      expect(prompt).toContain('Blood-pressure measurement history is available')
+      expect(prompt).toContain('Blood-pressure measurement history is present')
       expect(prompt).toContain(
         'vault-cli measurement list --from 2026-08-08 --limit 100 --format json',
       )
       expect(prompt).toContain('systolic-blood-pressure')
       expect(prompt).toContain('diastolic-blood-pressure')
-      expect(prompt).toContain('latest canonical reading 2026-08-08')
+      expect(prompt).toContain('latest 2026-08-08')
       expect(prompt).toContain(
         'Never substitute raw Junction artifacts for canonical history',
       )
@@ -108,13 +106,31 @@ describe('assistant context snapshot device availability', () => {
     }
   })
 
-  it('migrates completed snapshots that predate device-availability caching', async () => {
+  it('rebuilds snapshots written with the previous schema version', async () => {
     const { parentRoot, vaultRoot } = await createDeviceMeasurementVault()
 
     try {
-      await refreshCoreAssistantContextSnapshot({
-        now: () => '2026-08-08T12:05:00.000Z',
-        vaultRoot,
+      await writeAssistantStateVersionedJson({
+        filePath: resolveAssistantContextSnapshotPath(vaultRoot),
+        schema: ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA,
+        schemaVersion: ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION - 1,
+        value: {
+          dirtySequence: 0,
+          lastCompleted: {
+            generatedAt: '2026-08-08T12:01:00.000Z',
+            includedDomains: [],
+            promptBlock: 'Legacy context snapshot.',
+            sectionPresence: {
+              activeExperiments: false,
+              bloodTests: false,
+              habitat: false,
+              healthContext: false,
+            },
+            sourceDirtySequence: 0,
+          },
+          lastRefreshAttempt: null,
+          pendingDirtyDomains: [],
+        },
       })
       await expect(
         isAssistantContextSnapshotRefreshPending({ vaultRoot }),
@@ -129,7 +145,7 @@ describe('assistant context snapshot device availability', () => {
         skipped: false,
       })
       await expect(readAssistantContextSnapshotPrompt({ vaultRoot }))
-        .resolves.toContain('Body/scale measurement history is available')
+        .resolves.toContain('Body/scale measurement history is present')
       await expect(
         isAssistantContextSnapshotRefreshPending({ vaultRoot }),
       ).resolves.toBe(false)
