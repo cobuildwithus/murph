@@ -39,6 +39,7 @@ jobs:
           cat .github/agent-scripts/apply_message_current_sender.py.gz.b64.* \
             | base64 --decode \
             | gzip -dc > /tmp/apply_message_current_sender.py
+          python .github/agent-scripts/fix_message_current_sender.py
           python /tmp/apply_message_current_sender.py
 
       - name: Check patch formatting
@@ -69,6 +70,7 @@ jobs:
         run: |
           git rm \
             .github/workflows/agent-apply-message-current-sender.yml \
+            .github/agent-scripts/fix_message_current_sender.py \
             .github/agent-scripts/apply_message_current_sender.py.gz.b64.*
           git add -A
           git diff --cached --check
