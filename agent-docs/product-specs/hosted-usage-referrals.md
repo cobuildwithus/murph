@@ -112,8 +112,10 @@ retryable.
 
 A public `GET /r/<token>` only validates the token and renders a small landing
 page. Link previews, crawlers, and scanners therefore cannot allocate onboarding
-state. The route is `noindex`, `nofollow`, and `no-referrer` so stable tokens do
-not enter search indexes or downstream referrer headers.
+state. The route is `noindex`, `nofollow`, and `strict-origin`: referrer headers
+carry only the first-party origin, never the stable-token path, while the native
+same-origin claim form retains the canonical `Origin` required by its mutation
+guard.
 
 The available landing has one action: `Join Murph`, above a single closing line
 stating that Murph credits whoever shared the link and that the referrer cannot

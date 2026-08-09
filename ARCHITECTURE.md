@@ -1058,7 +1058,37 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   branch-local PgBouncer and Postgres connection conditions, and page two
   preconfigured direct operator Linq chats. Its SQLite contains only counts,
   ratios, bounded state maps, error-counter baselines, failure codes, and alert
-  admission state. First-incident and non-replayable direct-error alert
+  admission state. Metric families normalize independently: an unavailable
+  family stays null and its canonical allowlisted name is retained, while
+  available families continue to drive their own conditions. Missing data is
+  never treated as zero. A telemetry-only notification opens after two
+  consecutive incomplete or failed collections. The first two-check threshold
+  window counts incomplete versus unavailable observations, unions only
+  canonical missing families observed on partial checks, and uses the threshold
+  time as the window end; one bounded evidence value on each existing sample
+  preserves that provenance across restart. One bounded obligation in the
+  existing incident row survives a busy pending slot, restart, and recovery
+  until a telemetry-bearing page is acknowledged. Recovery and another metric
+  gap before that acknowledgment coalesce into the same unresolved operator
+  notification instead of creating a backlog; the first threshold window remains
+  authoritative. An owed telemetry page
+  alone does not occupy a closed provider fence. Before an incident admits its
+  first page, concrete evidence—including a direct-error delta—that appears on
+  the threshold or a later sample persists in one combined immutable body, so
+  the exact pressure and truthful
+  telemetry facts share the next eligible attempt and one acknowledgment cycle.
+  An acknowledged-incident recurrence waits for the eligible sample, which
+  includes any still-current unsafe evidence and labels
+  historical telemetry by its own observation time. A later complete collection rearms
+  telemetry only after the obligation is acknowledged. Its additive alert-state
+  and sample-evidence columns
+  preserve the existing schema
+  version; current code also recognizes a telemetry pending body cleared by the
+  prior Worker, preventing a duplicate after rollback and re-upgrade. Concrete
+  unsafe conditions retain paced recurrence, but acknowledged monitoring
+  evidence cannot enter their later pages without a currently owed obligation.
+  First-incident
+  and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring
   replayable evidence, and acknowledged replayable recurrence is admitted only
@@ -2507,7 +2537,8 @@ canonical UTC snapshot instant. That reference remains in semantic transcript
 history so a later turn can reopen the workout without a second table store;
 the native presentation projection omits it before encoding the card URL.
 Linq requires an HTTPS app-card URL, so V3 compact-table envelopes use a
-bounded Base64URL fragment on the fixed `https://murph.ai/` origin. The
+bounded Base64URL fragment on the fixed canonical
+`https://www.withmurph.ai/` origin. The
 fragment stays inside the immutable message URL, is not sent to the Web origin
 by an HTTPS request, and is decoded locally by the Messages extension. This is
 a narrow presentation exception to the fixed-URL rule: the fragment may contain
