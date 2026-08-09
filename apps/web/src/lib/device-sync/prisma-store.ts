@@ -489,11 +489,29 @@ export class PrismaDeviceSyncControlPlaneStore
     userId: string,
     connectionId: string,
     callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+    options: {
+      /**
+       * Bounds the member-row lock wait via a transaction-local
+       * `lock_timeout`, which also covers the advisory-lock step in the same
+       * transaction. Only callers whose failure is absorbed by an external
+       * redelivery loop (webhook acceptance) should pass this: a bounded
+       * waiter fails fast with a retryable error and the provider redelivers.
+       * Journeys without redelivery (connection establishment, companion
+       * ingestion, scheduled wakes) keep the full transaction budget.
+       */
+      memberRowLockTimeoutMs?: number;
+    } = {},
   ): Promise<TResult> {
     return this.prisma.$transaction(async (tx) => {
       // Member first is the repository-wide consent serialization order.
       // Connection state is locked only after withdrawal authority is current.
-      await lockHostedMemberRow(tx, userId);
+      await lockHostedMemberRow(
+        tx,
+        userId,
+        options.memberRowLockTimeoutMs !== undefined
+          ? { timeoutMs: options.memberRowLockTimeoutMs }
+          : {},
+      );
       if (await readHostedHealthDataConsentState({
         memberId: userId,
         prisma: tx,
