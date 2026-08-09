@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Refreshed after the Murph Max merge advanced main.
+          # Refreshed after the referral-display merge advanced main.
           git fetch origin main agent/non-expiring-starter-usage
           git branch --force export-main origin/main
           git branch --force export-pr origin/agent/non-expiring-starter-usage
