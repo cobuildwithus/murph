@@ -91,6 +91,9 @@ describe('assistant context snapshot device availability', () => {
       expect(prompt).toContain('systolic-blood-pressure')
       expect(prompt).toContain('diastolic-blood-pressure')
       expect(prompt).toContain('latest canonical reading 2026-08-08')
+      expect(prompt).toContain(
+        'Never substitute raw Junction artifacts for canonical history',
+      )
       expect(prompt).not.toContain('82.5')
       expect(prompt).not.toContain('121')
       expect(prompt).not.toContain('79')
