@@ -3,7 +3,10 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
+import {
+  ASSISTANT_SKILLS,
+  resolveAssistantSkillsRoot,
+} from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 const FUNCTION_DOCUMENTS_URL = 'https://my.functionhealth.com/documents'
@@ -47,7 +50,17 @@ describe('assistant manual provider export guidance', () => {
         'utf8',
       ),
     ])
+    const connectedAppsSkill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'connected-apps',
+    )
 
+    expect(connectedAppsSkill).toBeTruthy()
+    expect(connectedAppsSkill?.triggerHint).toContain(
+      'verified manual export or one-time import fallback',
+    )
+    expect(connectedAppsSkill?.triggerHint).toContain(
+      'without a proven direct Murph connection',
+    )
     expect(buildDirectPrompt()).toContain(
       'Read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.',
     )
