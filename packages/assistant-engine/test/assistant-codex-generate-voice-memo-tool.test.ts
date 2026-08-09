@@ -22,8 +22,12 @@ function createTelegramRuntime(input?: {
     elevenLabs: {
       apiKeyAvailable: input?.apiKeyAvailable ?? true,
       defaultVoiceId: input?.defaultVoiceId ?? null,
-      modelId: input?.modelId ?? 'eleven_multilingual_v2',
-      voiceId: input?.voiceId ?? 'voice_default',
+      modelId: input?.modelId === undefined
+        ? 'eleven_multilingual_v2'
+        : input.modelId,
+      voiceId: input?.voiceId === undefined
+        ? 'voice_default'
+        : input.voiceId,
     },
     kind: 'telegram',
   }
