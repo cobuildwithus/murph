@@ -18,15 +18,15 @@ jobs:
           fetch-depth: 0
       - name: Rebuild exact PR on audited main
         run: |
+          cp .github/pr1381-audit-fixes.patch.gz.b64 /tmp/pr1381-audit-fixes.patch.gz.b64
           git config user.name "PR 1381 final audit"
           git config user.email "pr1381-audit@users.noreply.github.com"
-          git fetch --no-tags origin +refs/heads/agent/codex-exact-app-server-protocol:refs/remotes/origin/agent/codex-exact-app-server-protocol
-          git cherry-pick \
-            28395092b56325e0a8955408e7aaee6df752dbbe \
-            956b123d4cf07820269a4f6153b21e591ef5bcc8 \
-            9383777dd24b747e55dbb3f871bbfc3e51305094 \
-            48af94011e4d90e86eb9caa90a3b376dfaade018
-          base64 --decode .github/pr1381-audit-fixes.patch.gz.b64 | gunzip > /tmp/pr1381-audit-fixes.patch
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/agent/codex-exact-app-server-protocol:refs/remotes/origin/agent/codex-exact-app-server-protocol
+          git checkout --detach refs/remotes/origin/agent/codex-exact-app-server-protocol
+          git merge --no-commit --no-ff e0a40645663e4479e3a58dcbe21f790d3c737c87
+          base64 --decode /tmp/pr1381-audit-fixes.patch.gz.b64 | gunzip > /tmp/pr1381-audit-fixes.patch
           git apply --check /tmp/pr1381-audit-fixes.patch
           git apply /tmp/pr1381-audit-fixes.patch
           git diff --check
