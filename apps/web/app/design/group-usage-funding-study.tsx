@@ -319,7 +319,16 @@ function GroupUsageFundingStudy() {
         }}
         checkoutUrl="/api/design/usage-credit-preview"
         customizationAllowed
-        frozenSponsorship={null}
+        frozenSponsorship={{
+          creativeRequest: {
+            format: "song",
+            prompt: "Turn the group’s finish-line energy into a tiny theme.",
+            styleRequest: "Warm acoustic ensemble with a bright tempo.",
+          },
+          publicAlias: "Sunday sleep crew",
+          runningBitRequest: "Keep the finish-line jokes going.",
+          sponsorMessage: null,
+        }}
         inert
         mode="one_time"
         offers={[]}
