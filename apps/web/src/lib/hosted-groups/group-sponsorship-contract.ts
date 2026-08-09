@@ -33,23 +33,27 @@ export interface HostedGroupSponsorshipDraftInput {
 export function buildHostedGroupSponsorshipDraftInput(
   input: HostedGroupSponsorshipDraftInput,
 ): HostedGroupSponsorshipDraft {
+  const creativeRequest = input.creativeEnabled
+    ? {
+        format: input.creativeFormat,
+        prompt: normalizeOptionalDraftText(input.creativePrompt),
+        styleRequest:
+          input.creativeFormat === "song"
+            ? normalizeOptionalDraftText(input.creativeStyleRequest)
+            : null,
+      }
+    : null;
+  const runningBitRequest = input.runningBitAvailable
+    ? normalizeOptionalDraftText(input.runningBitRequest)
+    : null;
+
   return {
-    ...(input.creativeEnabled
-      ? {
-          creativeRequest: {
-            format: input.creativeFormat,
-            prompt: normalizeOptionalDraftText(input.creativePrompt),
-            styleRequest:
-              input.creativeFormat === "song"
-                ? normalizeOptionalDraftText(input.creativeStyleRequest)
-                : null,
-          },
-        }
-      : {}),
-    publicAlias: normalizeOptionalDraftText(input.publicAlias),
-    runningBitRequest: input.runningBitAvailable
-      ? normalizeOptionalDraftText(input.runningBitRequest)
-      : null,
+    ...(creativeRequest ? { creativeRequest } : {}),
+    publicAlias:
+      creativeRequest || runningBitRequest
+        ? normalizeOptionalDraftText(input.publicAlias)
+        : null,
+    runningBitRequest,
     sponsorMessage: null,
   };
 }
