@@ -1,6 +1,6 @@
 # non-expiring-starter-usage
 
-Status: active — rebased draft PR candidate verified locally; exact-head CI pending
+Status: active — current-main merge published; exact-head CI pending
 Created: 2026-08-07
 Updated: 2026-08-09
 
@@ -109,9 +109,8 @@ Updated: 2026-08-09
 
 ## Verification
 
-- Rebased cleanly onto `f7359e41ad63bdd430b3d67d34e77161323091b0`,
-  including the Max paid-plan work, while keeping Starter as the sole free
-  entitlement model.
+- Merged current `main` through `41dfbf7a3f6cf3af1cf78c91f0fe32354e32a5b5`
+  after the final audit fixes, with GitHub reporting the PR mergeable.
 - `git diff --check`: passed for the complete candidate and final audit fixes.
 - Changed TypeScript-family syntax parse: passed for 143 changed files with
   zero parser diagnostics.
@@ -121,8 +120,9 @@ Updated: 2026-08-09
   legacy-event retirement.
 - Focused regression coverage now includes exact once-only Starter enrollment,
   canonical full-grant-plus-consumption migration, redeemed-timestamp fallback
-  for incomplete legacy projections, delayed-event replay, and untouched
-  Starter account retirement during phone transfer.
+  for incomplete legacy projections, delayed-event replay, untouched Starter
+  account retirement during phone transfer, and idempotent cutover replay after
+  later Starter usage lowers the grant projection.
 - Full pnpm-backed tests, generated Prisma checks, browser design proof,
   ReviewGPT, and exact-head CI must pass on the published PR head before this
   plan is marked complete.
