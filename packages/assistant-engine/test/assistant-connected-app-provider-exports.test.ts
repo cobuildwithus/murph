@@ -10,6 +10,8 @@ const FUNCTION_DOCUMENTS_URL = 'https://my.functionhealth.com/documents'
 const LIVONGO_SIGN_IN_URL = 'https://my.livongo.com'
 const TELADOC_EXPORT_URL =
   'https://library.teladochealth.com/hc/en-us/articles/360044659034-How-to-Export-Your-Personal-Data-from-the-Secure-Livongo-Website'
+const TELADOC_MIGRATION_URL =
+  'https://www.teladochealth.com/start/new-experience-faq'
 const STRONG_EXPORT_URL =
   'https://help.strongapp.io/article/235-export-workout-data'
 const HEVY_EXPORT_URL =
@@ -89,6 +91,7 @@ describe('assistant manual provider export guidance', () => {
     expect(reference).toContain(FUNCTION_DOCUMENTS_URL)
     expect(reference).toContain(LIVONGO_SIGN_IN_URL)
     expect(reference).toContain(TELADOC_EXPORT_URL)
+    expect(reference).toContain(TELADOC_MIGRATION_URL)
     expect(reference).toContain(STRONG_EXPORT_URL)
     expect(reference).toContain(HEVY_EXPORT_URL)
 
@@ -107,10 +110,21 @@ describe('assistant manual provider export guidance', () => {
       "download contains all of the member's data but does not state the file format",
     )
     expect(normalizedReference).toContain(
-      'does not document an equivalent export menu',
+      'choose `Condition Management`, then choose `Go to programs`',
+    )
+    expect(normalizedReference).not.toContain(
+      'under `Programs` → `Condition Management`',
     )
     expect(normalizedReference).toContain(
-      'Give the official export article below as the fallback action link',
+      'does not document an equivalent export control',
+    )
+    expect(normalizedReference).toContain(
+      'give the migration FAQ below as the fallback action link',
+    )
+    expect(normalizedReference).toContain('membersupport@livongo.com')
+    expect(normalizedReference).toContain('800-945-4355')
+    expect(normalizedReference).toContain(
+      'Send exactly one action link',
     )
     expect(normalizedReference).toContain(
       'one-time snapshot, not continuous Teladoc sync',
