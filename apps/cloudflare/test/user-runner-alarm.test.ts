@@ -3439,21 +3439,10 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("replaces a recent prior-version fence after its exact container reports no active child", async () => {
+  it("preserves a recent prior-version fence during startup grace after no active child", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     const activeWakeStartedAtEpochMs = Date.parse(FIXED_NOW);
-    const originalClearWriteFenceForReplacement =
-      RunnerStateStore.prototype.clearWriteFenceForReplacement;
-    const clearWriteFenceForReplacement = vi.spyOn(
-      RunnerStateStore.prototype,
-      "clearWriteFenceForReplacement",
-    ).mockImplementation(async function (this: RunnerStateStore, input) {
-      const result = await originalClearWriteFenceForReplacement.call(this, input);
-      vi.setSystemTime(new Date(activeWakeStartedAtEpochMs + 125));
-      return result;
-    });
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => {
         vi.setSystemTime(new Date(activeWakeStartedAtEpochMs + 50));
@@ -3468,10 +3457,8 @@ describe("HostedUserRunner execution coordination", () => {
       CF_VERSION_METADATA: { id: "current" },
     };
     const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
-    const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
     const { invoke, runner, runnerContainerNames, sql } = createRunnerHarness({
       ensureProcessing,
-      invocationResults: [invocationResult.promise],
       runnerRuntimeEnvSource,
       workspace: createWorkspaceState({ version: "7" }),
     });
@@ -3482,7 +3469,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceVersion: "7",
     });
 
-    const response = await runner.ensureRuntimeProcessingForUser({
+    await expect(runner.ensureRuntimeProcessingForUser({
       orchestration: {
         activeFenceTargetWasPriorVersion: false,
         activeWakeAccepted: true,
@@ -3495,57 +3482,33 @@ describe("HostedUserRunner execution coordination", () => {
         replacementFenceClearedAtEpochMs: 999_995,
         replacementFenceClearStartedAtEpochMs: 999_996,
       },
-      orchestrationAttemptId: "test-orchestration-attempt-replace-prior-version",
+      orchestrationAttemptId: "test-orchestration-attempt-preserve-prior-version",
       userId: TEST_USER_ID,
-    }).finally(() => {
-      clearWriteFenceForReplacement.mockRestore();
-    });
-    expect(response).toMatchObject({
-      action: "replaced",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:34.125Z",
-      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
-    });
+    })).resolves.toMatchObject({ kind: "retry_later" });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(runnerContainerNames[0]).toBe(priorRunnerContainerName);
-    expect(runnerContainerNames).toContain(currentRunnerContainerName);
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
-      activeFenceTargetWasPriorVersion: true,
-      activeWakeAccepted: false,
-      activeWakeElapsedMs: 50,
-      activeWakeFinishedAtEpochMs: activeWakeStartedAtEpochMs + 50,
-      activeWakeFoundNoActiveChild: true,
-      activeWakeStartedAtEpochMs,
-      replacementFenceClearElapsedMs: 75,
-      replacementFenceClearedAtEpochMs: activeWakeStartedAtEpochMs + 125,
-      replacementFenceClearStartedAtEpochMs: activeWakeStartedAtEpochMs + 50,
-      replacedStaleFence: true,
-      runtimeInvocationPreparationElapsedMs: expect.any(Number),
-      runtimeStoreEnsureElapsedMs: expect.any(Number),
-      workspaceReadElapsedMs: expect.any(Number),
-    });
+    expect(ensureProcessing.mock.calls[0]?.[0].activeRuntime?.orchestration)
+      .toMatchObject({
+        activeFenceTargetWasPriorVersion: true,
+      });
+    expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: expect.not.stringMatching(token.attemptId),
+      active_attempt_id: token.attemptId,
       active_expires_at: null,
       backoff_until: null,
       wake_at: null,
     });
-
-    invocationResult.resolve({
-      nextWakeAt: null,
-      status: "idle",
-    });
-    await vi.waitFor(() =>
-      expect(readRunnerMeta(sql)).toMatchObject({
-        active_attempt_id: null,
-        last_invocation_at: expect.any(String),
-      })
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "starting_fence_preserved",
+        }),
+      }),
     );
   });
 
-  it("replaces a recent legacy-container fence when the versioned target reports no active child", async () => {
+  it("preserves a recent legacy-container fence during startup grace after no active child", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -3554,7 +3517,6 @@ describe("HostedUserRunner execution coordination", () => {
         reason: "no-active-child" as const,
       }),
     );
-    const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
     const { invoke, runner, runnerContainerNames, sql } = createRunnerHarness({
       ensureProcessing,
       runnerRuntimeEnvSource: {
@@ -3571,21 +3533,18 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-replace-legacy-container",
+      orchestrationAttemptId: "test-orchestration-attempt-preserve-legacy-container",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "replaced",
-      kind: "runtime_processing_accepted",
-      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
-    });
+    })).resolves.toMatchObject({ kind: "retry_later" });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(runnerContainerNames[0]).toBe(TEST_USER_ID);
-    expect(runnerContainerNames).toContain(currentRunnerContainerName);
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
-      activeFenceTargetWasPriorVersion: true,
-      replacedStaleFence: true,
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      backoff_until: null,
+      wake_at: null,
     });
   });
 
@@ -3640,7 +3599,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("replaces a non-wakeable write fence after startup grace elapses", async () => {
+  it("replaces a non-wakeable prior-version fence after startup grace elapses", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
@@ -3653,10 +3612,15 @@ describe("HostedUserRunner execution coordination", () => {
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
       invocationResults: [invocationResult.promise],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
       workspaceVersion: "7",
     });
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
@@ -3674,6 +3638,8 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(ensureProcessing.mock.calls[0]?.[0].activeRuntime?.orchestration)
+      .toMatchObject({ activeFenceTargetWasPriorVersion: true });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
       runtimeInvocationOrchestrationAttemptId:
