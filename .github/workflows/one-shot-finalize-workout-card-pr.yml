@@ -1,0 +1,545 @@
+name: One-shot finalize workout card PR
+
+on:
+  push:
+    branches:
+      - agent/imessage-workout-session-card
+    paths:
+      - .github/workflows/one-shot-finalize-workout-card-pr.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: contains(github.event.head_commit.message, '[finalize-workout-card-pr]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: agent/imessage-workout-session-card
+
+      - name: Apply exact remediation
+        shell: bash
+        run: |
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(
+                      f"{path}: expected {expected} matches for {old!r}, found {count}"
+                  )
+              target.write_text(text.replace(old, new))
+
+          compact = "packages/contracts/src/compact-table-card.ts"
+          replace_exact(
+              compact,
+              "COMPACT_TABLE_APP_CARD_URL_PREFIX",
+              "IMESSAGE_APP_CARD_URL_PREFIX",
+          )
+          replace_exact(
+              compact,
+              "COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH",
+              "IMESSAGE_APP_CARD_URL_MAX_LENGTH",
+          )
+
+          operator = "packages/operator-config/src/assistant-response-cards.ts"
+          replace_exact(
+              operator,
+              "import * as z from '@murphai/contracts/zod-runtime'\n",
+              "",
+          )
+          replace_exact(
+              operator,
+              """  const parsed = assistantResponseCardSchema.parse(card)
+            if (parsed.kind !== 'compact_table' || parsed.workout === undefined) {
+          """,
+              """  const parsed = compactTableResponseCardV1Schema.parse(card)
+            if (parsed.workout === undefined) {
+          """,
+          )
+
+          statuses = [
+              "far_under_target",
+              "under_target",
+              "on_target",
+              "over_target",
+              "far_over_target",
+              "unavailable",
+          ]
+
+          def text(maximum: int) -> dict:
+              return {"type": "string", "maxLength": maximum}
+
+          def nullable_text(maximum: int) -> dict:
+              return {"anyOf": [text(maximum), {"type": "null"}]}
+
+          required_metric = {
+              "type": "object",
+              "properties": {
+                  "total": {"type": "number"},
+                  "mealCount": {"type": "number"},
+              },
+              "required": ["total", "mealCount"],
+          }
+          optional_metric = {
+              "anyOf": [
+                  {
+                      "type": "object",
+                      "properties": {
+                          "total": {"type": "number"},
+                          "mealCount": {"type": "number"},
+                      },
+                      "required": ["total", "mealCount"],
+                  },
+                  {
+                      "type": "object",
+                      "properties": {
+                          "mealCount": {"const": 0},
+                          "total": {"type": "null"},
+                      },
+                      "required": ["total", "mealCount"],
+                  },
+              ],
+          }
+          goal = {
+              "anyOf": [
+                  {
+                      "type": "object",
+                      "properties": {
+                          "status": {"enum": statuses},
+                          "target": {"type": "number"},
+                      },
+                      "required": ["target", "status"],
+                  },
+                  {"type": "null"},
+              ],
+          }
+          nutrition = {
+              "type": "object",
+              "additionalProperties": False,
+              "properties": {
+                  "kind": {"const": "daily_nutrition"},
+                  "version": {"const": 2},
+                  "localDate": {"type": "string"},
+                  "mealCount": {"type": "number"},
+                  "totals": {
+                      "type": "object",
+                      "properties": {
+                          "calories": required_metric,
+                          "proteinGrams": optional_metric,
+                          "carbsGrams": optional_metric,
+                          "fatGrams": optional_metric,
+                          "fiberGrams": optional_metric,
+                      },
+                      "required": [
+                          "calories",
+                          "proteinGrams",
+                          "carbsGrams",
+                          "fatGrams",
+                          "fiberGrams",
+                      ],
+                  },
+                  "goals": {
+                      "type": "object",
+                      "properties": {
+                          "calories": goal,
+                          "proteinGrams": goal,
+                          "carbsGrams": goal,
+                          "fatGrams": goal,
+                          "fiberGrams": goal,
+                      },
+                      "required": [
+                          "calories",
+                          "proteinGrams",
+                          "carbsGrams",
+                          "fatGrams",
+                          "fiberGrams",
+                      ],
+                  },
+              },
+              "required": [
+                  "kind",
+                  "version",
+                  "localDate",
+                  "mealCount",
+                  "totals",
+                  "goals",
+              ],
+          }
+          workout_set = {
+              "type": "object",
+              "additionalProperties": False,
+              "properties": {
+                  "status": {"enum": ["pending", "completed", "skipped"]},
+                  "target": nullable_text(40),
+                  "actual": nullable_text(40),
+              },
+              "required": ["status", "target", "actual"],
+          }
+          workout_exercise = {
+              "type": "object",
+              "additionalProperties": False,
+              "properties": {
+                  "name": text(60),
+                  "sets": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 8,
+                      "items": workout_set,
+                  },
+              },
+              "required": ["name", "sets"],
+          }
+          workout = {
+              "type": "object",
+              "additionalProperties": False,
+              "properties": {
+                  "version": {"const": 1},
+                  "state": {"enum": ["active", "completed"]},
+                  "exercises": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 8,
+                      "items": workout_exercise,
+                  },
+              },
+              "required": ["version", "state", "exercises"],
+          }
+          row = {
+              "type": "object",
+              "additionalProperties": False,
+              "properties": {
+                  "label": text(60),
+                  "values": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 4,
+                      "items": text(32),
+                  },
+              },
+              "required": ["label", "values"],
+          }
+          tracking = {
+              "anyOf": [
+                  {
+                      "type": "object",
+                      "additionalProperties": False,
+                      "properties": {
+                          "kind": {"const": "workout"},
+                          "entityId": {"type": "string"},
+                          "snapshotAt": {"type": "string"},
+                      },
+                      "required": ["kind", "entityId", "snapshotAt"],
+                  },
+                  {"type": "null"},
+              ],
+          }
+          compact_table = {
+              "type": "object",
+              "additionalProperties": False,
+              "properties": {
+                  "kind": {"const": "compact_table"},
+                  "version": {"const": 1},
+                  "title": text(60),
+                  "subtitle": nullable_text(120),
+                  "rowHeader": text(24),
+                  "columns": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 4,
+                      "items": text(24),
+                  },
+                  "rows": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 8,
+                      "items": row,
+                  },
+                  "footer": nullable_text(120),
+                  "tracking": tracking,
+                  "workout": workout,
+              },
+              "required": [
+                  "kind",
+                  "version",
+                  "title",
+                  "subtitle",
+                  "rowHeader",
+                  "columns",
+                  "rows",
+                  "footer",
+                  "tracking",
+              ],
+          }
+          schema = {
+              "description": (
+                  "Current card authoring contract: daily_nutrition V2 or "
+                  "compact_table V1, optionally with workout detail."
+              ),
+              "anyOf": [nutrition, compact_table],
+          }
+          serialized_size = len(
+              json.dumps(schema, separators=(",", ":"), ensure_ascii=False)
+          )
+          if serialized_size > 5_000:
+              raise SystemExit(
+                  f"model-facing response-card schema is {serialized_size} bytes"
+              )
+
+          operator_path = Path(operator)
+          source = operator_path.read_text()
+          marker = "function createAssistantResponseCardJsonSchema() {"
+          start = source.find(marker)
+          if start < 0 or source.count(marker) != 1:
+              raise SystemExit("response-card schema function marker is not singular")
+          schema_source = json.dumps(schema, indent=2, ensure_ascii=False)
+          operator_path.write_text(
+              source[:start]
+              + "function createAssistantResponseCardJsonSchema() {\n"
+              + "  return "
+              + schema_source.replace("\n", "\n  ")
+              + "\n}\n"
+          )
+
+          response_test = (
+              "packages/operator-config/test/"
+              "workout-session-response-card.test.ts"
+          )
+          replace_exact(
+              response_test,
+              """import {
+            assistantResponseCardSchema,
+          """,
+              """import {
+            LINQ_IMESSAGE_APP_CARD_ORIGIN,
+            assistantResponseCardJsonSchema,
+            assistantResponseCardSchema,
+          """,
+          )
+          replace_exact(
+              response_test,
+              "const APP_CARD_URL_PREFIX = 'https://murph.ai/#murph-card='",
+              "const APP_CARD_URL_PREFIX = `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`",
+          )
+          test_path = Path(response_test)
+          test_source = test_path.read_text()
+          insertion = r'''
+
+            it('keeps the model-facing schema bounded and exposes workout detail', () => {
+              expect(JSON.stringify(assistantResponseCardJsonSchema).length)
+                .toBeLessThanOrEqual(5_000)
+              expect(assistantResponseCardJsonSchema).toMatchObject({
+                anyOf: [
+                  {},
+                  {
+                    properties: {
+                      workout: {
+                        properties: {
+                          state: { enum: ['active', 'completed'] },
+                          exercises: {
+                            items: {
+                              properties: {
+                                sets: {
+                                  items: {
+                                    properties: {
+                                      status: {
+                                        enum: ['pending', 'completed', 'skipped'],
+                                      },
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+              })
+            })
+
+            it('renders a completed workout and both skipped-set variants', () => {
+              const completedCard = {
+                ...ACTIVE_WORKOUT_CARD,
+                subtitle: null,
+                footer: null,
+                rows: [
+                  { label: 'Bench press', values: ['2/3'] },
+                  { label: 'Incline dumbbell press', values: ['1/3'] },
+                ],
+                workout: {
+                  version: 1,
+                  state: 'completed',
+                  exercises: [
+                    {
+                      name: 'Bench press',
+                      sets: [
+                        {
+                          status: 'completed',
+                          target: '185 lb × 8',
+                          actual: '185 lb × 8',
+                        },
+                        {
+                          status: 'completed',
+                          target: '185 lb × 8',
+                          actual: '185 lb × 7',
+                        },
+                        {
+                          status: 'skipped',
+                          target: '185 lb × 6–8',
+                          actual: null,
+                        },
+                      ],
+                    },
+                    {
+                      name: 'Incline dumbbell press',
+                      sets: [
+                        {
+                          status: 'completed',
+                          target: '55 lb × 10',
+                          actual: '55 lb × 10',
+                        },
+                        {
+                          status: 'skipped',
+                          target: '55 lb × 8–10',
+                          actual: null,
+                        },
+                        {
+                          status: 'skipped',
+                          target: null,
+                          actual: null,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              } satisfies AssistantResponseCard
+
+              const visible = renderAssistantResponseCardText(completedCard)
+              expect(visible).toContain(
+                'Push day\nCompleted workout · 3/6 sets complete',
+              )
+              expect(visible).toContain(
+                'set 3: skipped (target 185 lb × 6–8)',
+              )
+              expect(visible).toContain(
+                'Incline dumbbell press: set 1: 55 lb × 10 · set 2: skipped (target 55 lb × 8–10) · set 3: skipped',
+              )
+              expect(buildLinqIMessageAppLayout(completedCard)).toEqual({
+                caption: 'Push day',
+                subcaption: '3/6 sets · COMPLETE',
+                trailing_caption: 'OPEN',
+              })
+              expect(decodeAppCardUrl(
+                encodeWorkoutSessionAppCardUrl(completedCard),
+              )).toMatchObject({
+                schemaVersion: 4,
+                card: { s: 'c', u: null, f: null },
+              })
+            })
+          '''
+          ending = "\n})\n"
+          close = test_source.rfind(ending)
+          if close < 0:
+              raise SystemExit("workout-session test describe close not found")
+          test_path.write_text(
+              test_source[:close] + insertion + test_source[close:]
+          )
+
+          replace_exact(
+              "packages/operator-config/test/"
+              "workout-session-cross-platform-fixture.test.ts",
+              "https://murph.ai/#murph-card=",
+              "https://www.withmurph.ai/#murph-card=",
+          )
+
+          product_index = "agent-docs/product-specs/index.md"
+          replace_exact(
+              product_index,
+              "Last verified: 2026-08-08",
+              "Last verified: 2026-08-09",
+          )
+          replace_exact(
+              product_index,
+              """| `agent-docs/product-specs/measured-biomarker-index.md` | Curated device-first Biomarkers index over preserved private lab history, with explicit identity admission, no catch-all Other section, and closed health-area notebook disclosures. | Implemented |
+          """,
+              """| `agent-docs/product-specs/measured-biomarker-index.md` | Curated device-first Biomarkers index over preserved private lab history, with explicit identity admission, no catch-all Other section, and closed health-area notebook disclosures. | Implemented |
+          | `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards with plan-versus-actual ownership, set-level text commands, immutable native snapshots, and reader-first rollout. | Specified |
+          """,
+          )
+
+          docs_index = "agent-docs/index.md"
+          replace_exact(
+              docs_index,
+              "reply-thread binding, and bounded offline V3 compact-table fragments are\n",
+              "reply-thread binding, and bounded offline V3 compact-table plus V4 workout-session\nfragments are\n",
+          )
+          replace_exact(
+              docs_index,
+              """`agent-docs/operations/imessage-deliverability.md`.
+          """,
+              """`agent-docs/operations/imessage-deliverability.md`, and
+          `agent-docs/product-specs/imessage-workout-tracking.md`.
+          """,
+          )
+          replace_exact(
+              docs_index,
+              """| `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
+          """,
+              """| `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
+          | `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards, set-level text commands, immutable native snapshots, privacy boundaries, and reader-first rollout. | iMessage workout product spec | High | 2026-08-09 |
+          """,
+          )
+
+          deliverability = "agent-docs/operations/imessage-deliverability.md"
+          replace_exact(
+              deliverability,
+              "Last verified: 2026-08-07",
+              "Last verified: 2026-08-09",
+          )
+          replace_exact(
+              deliverability,
+              """New V1, V2, and V3 cards use the same bounded HTTPS Base64URL fragment family for the immutable presentation values visible in the private-direct message; the extension also retains legacy data-URL reads for already-sent nutrition cards. Encoding is not encryption. Every fragment must omit member identity, canonical record references, credentials, and other authority; V3 additionally strips its tracking reference before encoding.""",
+              """New V1, V2, V3, and V4 cards use the same bounded HTTPS Base64URL fragment family for the immutable presentation values visible in the private-direct message; the extension also retains legacy data-URL reads for already-sent nutrition cards. Encoding is not encryption. Every fragment must omit member identity, canonical record references, credentials, and other authority; V3 strips its tracking reference before encoding, while V4 carries only the bounded workout presentation snapshot and likewise omits canonical workout authority.""",
+          )
+
+          for obsolete in [
+              ".github/workout-card-remediation-report.txt",
+              ".github/workflows/one-shot-finalize-workout-card-pr.yml",
+          ]:
+              Path(obsolete).unlink(missing_ok=True)
+
+          remaining = []
+          for path in [
+              compact,
+              operator,
+              response_test,
+              "packages/operator-config/test/"
+              "workout-session-cross-platform-fixture.test.ts",
+          ]:
+              if "https://murph.ai/#murph-card=" in Path(path).read_text():
+                  remaining.append(path)
+          if remaining:
+              raise SystemExit(
+                  "legacy authoring origin remains in: " + ", ".join(remaining)
+              )
+
+          print(f"model-facing response-card schema bytes: {serialized_size}")
+          PY
+
+          git diff --check
+          git status --short
+          git add -A
+          git commit -m "fix(workouts): reconcile native card contracts"
+          git push origin HEAD:agent/imessage-workout-session-card
