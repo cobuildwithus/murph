@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Purpose
 
@@ -12,6 +12,12 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
+
+Independent partial PlanetScale metric normalization, explicit unknown-family
+evidence, continued evaluation of available database signals, and one-shot
+telemetry-only operator paging are jointly specified by `ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`, `agent-docs/references/testing-ci-map.md`, and
+`apps/cloudflare/README.md`.
 
 Automatic meal-photo schema-v2 enrollment ordering, including the one-row
 per-installation revision fence, credential-free revocation tombstone,

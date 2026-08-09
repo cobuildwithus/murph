@@ -197,11 +197,20 @@ application traffic is required to use transaction-mode PgBouncer on 6432 and
 the direct endpoint is migration-only. Adding another direct production client
 requires splitting that signal first.
 
-Unsafe samples open one incident. Two consecutive collection failures open the
-fallback monitoring incident. The object writes Linq provider-attempt admission
-before egress, never attempts more than once per 30 minutes across all incidents,
-and reuses the exact body plus idempotency key after an ambiguous send. The
-message reports actual collection time rather than the scheduled Cron slot.
+Each metric family is normalized independently. When a documented family is
+absent, the sample keeps that family unknown instead of substituting zero, still
+evaluates every available signal, and records the canonical missing metric names
+without retaining labels or raw scrape data. Unsafe available signals therefore
+still open an incident immediately. Two consecutive incomplete or failed
+collections open the fallback monitoring incident. An acknowledged
+telemetry-only page is one-shot for that uninterrupted outage; a complete sample
+closes it and allows a later outage to page again. Concrete unsafe conditions
+retain their 30-minute recurrence. The object writes Linq provider-attempt
+admission before egress, never attempts more than once per 30 minutes across all
+incidents, and reuses the exact body plus idempotency key after an ambiguous
+send. The message reports actual collection time rather than the scheduled Cron
+slot and describes partial or unavailable telemetry without claiming database
+pressure.
 Before each message POST it requires the configured direct
 [Linq chat health](https://docs.linqapp.com/guides/chats/chat-health/) and its
 current [line reputation](https://docs.linqapp.com/guides/phone-numbers/phone-reputation/)

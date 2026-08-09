@@ -4,6 +4,7 @@ import type {
 } from "../user-runner/types.js";
 import type {
   DatabaseHealthCondition,
+  DatabaseMetricObservationSnapshot,
   DatabaseMetricSnapshot,
 } from "./metrics.js";
 
@@ -203,7 +204,7 @@ export class DatabaseHealthStore {
     const row = this.sql.exec<DatabaseHealthCounterRow>(
       `SELECT direct_connection_error_counters_json
        FROM database_health_samples
-       WHERE scrape_status = 'ok'
+       WHERE direct_connection_error_counters_json <> '{}'
        ORDER BY observed_at_ms DESC
        LIMIT 1`,
     ).toArray()[0];
@@ -270,38 +271,61 @@ export class DatabaseHealthStore {
 
   recordFailedSample(input: {
     conditions: readonly DatabaseHealthCondition[];
+    directConnectionErrorDelta: number | null;
     failureCode: string;
     observedAtMs: number;
+    snapshot: DatabaseMetricObservationSnapshot | null;
   }): void {
+    const snapshot = input.snapshot;
     this.sql.exec(
       `INSERT INTO database_health_samples (
          observed_at_ms,
          scrape_status,
          failure_code,
+         client_wait_seconds,
+         client_waiting_connections,
+         server_connections,
+         server_pool_capacity,
+         server_pool_saturation_ratio,
          server_pool_states_json,
+         postgres_connections,
+         postgres_max_connections,
          postgres_connection_states_json,
+         direct_connection_error_delta,
          direct_connection_error_counters_json,
          conditions_json
-       ) VALUES (?, 'failed', ?, '{}', '{}', '{}', ?)
+       ) VALUES (?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(observed_at_ms) DO UPDATE SET
          scrape_status = excluded.scrape_status,
          failure_code = excluded.failure_code,
-         client_wait_seconds = NULL,
-         client_waiting_connections = NULL,
-         server_connections = NULL,
-         server_pool_capacity = NULL,
-         server_pool_saturation_ratio = NULL,
+         client_wait_seconds = excluded.client_wait_seconds,
+         client_waiting_connections = excluded.client_waiting_connections,
+         server_connections = excluded.server_connections,
+         server_pool_capacity = excluded.server_pool_capacity,
+         server_pool_saturation_ratio = excluded.server_pool_saturation_ratio,
          server_pool_states_json = excluded.server_pool_states_json,
-         postgres_connections = NULL,
-         postgres_max_connections = NULL,
+         postgres_connections = excluded.postgres_connections,
+         postgres_max_connections = excluded.postgres_max_connections,
          postgres_connection_states_json =
            excluded.postgres_connection_states_json,
-         direct_connection_error_delta = NULL,
+         direct_connection_error_delta =
+           excluded.direct_connection_error_delta,
          direct_connection_error_counters_json =
            excluded.direct_connection_error_counters_json,
          conditions_json = excluded.conditions_json`,
       input.observedAtMs,
       input.failureCode,
+      snapshot?.clientWaitSeconds ?? null,
+      snapshot?.clientWaitingConnections ?? null,
+      snapshot?.serverConnections ?? null,
+      snapshot?.serverPoolCapacity ?? null,
+      snapshot?.serverPoolSaturationRatio ?? null,
+      JSON.stringify(snapshot?.serverPoolStates ?? {}),
+      snapshot?.postgresConnections ?? null,
+      snapshot?.postgresMaxConnections ?? null,
+      JSON.stringify(snapshot?.postgresConnectionStates ?? {}),
+      input.directConnectionErrorDelta,
+      JSON.stringify(snapshot?.directConnectionErrorCounters ?? {}),
       JSON.stringify(input.conditions),
     );
   }

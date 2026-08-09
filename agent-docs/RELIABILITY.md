@@ -184,8 +184,12 @@ Last verified: 2026-08-07
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample
   or classified failure in Durable Object SQLite and prunes history after 30
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
-  Concrete unhealthy gauges page immediately; discovery, scrape, parse, or
-  required-metric absence must recur on two consecutive runs before paging.
+  Concrete unhealthy gauges page immediately. Metric families are normalized
+  independently: an absent or structurally unusable family remains unknown,
+  its canonical allowlisted name is retained with the failed sample and warning,
+  and every available signal is still evaluated. No unknown value becomes zero.
+  Discovery, scrape, parse, or incomplete required metrics must recur on two
+  consecutive runs before paging the monitoring condition.
   A newly opened incident or one-shot direct migration admission failure admits
   its exact body and idempotency key in the same synchronous SQLite transaction
   that persists the sample and advances any direct-error counter baseline.
@@ -206,10 +210,13 @@ Last verified: 2026-08-07
   behind an older page but cannot be consumed by the counter baseline. This
   explicit prioritization keeps admitted bodies immutable without another
   message queue or delivery lifecycle.
-  An acknowledged incident's replayable gauge or monitoring recurrence does
-  not admit stale evidence while the attempt fence is closed; once the fence
-  opens, a still-unsafe current sample admits the recurrence, while recovery
-  closes the incident without another page. An already pending page is
+  An acknowledged incident's replayable gauge does not admit stale evidence
+  while the attempt fence is closed; once the fence opens, a still-unsafe
+  current gauge admits the recurrence. An acknowledged telemetry-only incident
+  is one-shot while collection remains continuously incomplete or unavailable;
+  its current samples remain queryable, but they do not admit repeated pages.
+  A complete healthy sample closes that incident and rearms a future telemetry
+  outage. An already pending page is
   processed or deferred before a later clean sample can close the incident,
   and only an acknowledged provider response clears it. Provider entry is
   globally fenced by the persisted last-attempt
@@ -239,8 +246,10 @@ Last verified: 2026-08-07
   destination keys for the next eligible cycle; only acknowledged entry to both
   distinct recipients clears the pending alert. An idempotent replay of a
   destination that already succeeded cannot produce another recipient-visible
-  message. Acknowledged recurrences advance the alert
+  message. Acknowledged concrete-condition recurrences advance the alert
   sequence and choose another fixed opening from current metric evidence.
+  Telemetry-only copy instead states that monitoring is incomplete or
+  unavailable and cannot claim that the database itself is under pressure.
   Message variation must remain contextual and deterministic, never random
   padding. Database pages intentionally have no quiet hours.
 - Linq edit delivery is at-least-once and remains owned by the existing hosted

@@ -829,12 +829,16 @@ describe("database health monitor", () => {
       .toBe(pendingAlert.pendingAlertMessage);
   });
 
-  it("pages only after two consecutive scrape failures and clears after recovery", async () => {
+  it("pages once per uninterrupted telemetry outage and identifies missing metrics", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const healthyMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
+    const missingMetricsBody = healthyMetricsBody.replace(
+      /^planetscale_postgres_settings_max_connections.*$/mu,
+      "",
+    );
+    let metricsBody = missingMetricsBody;
     const harness = createMonitorHarness({
-      serviceDiscoveryResponses: [
-        () => new Response(null, { status: 503 }),
-        () => new Response(null, { status: 503 }),
-      ],
+      readMetricsBody: () => metricsBody,
     });
 
     await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
@@ -849,13 +853,60 @@ describe("database health monitor", () => {
         {
           failures: 2,
           kind: "monitoring_unavailable",
+          missingMetrics: [
+            "planetscale_postgres_settings_max_connections",
+          ],
         },
       ],
       outcome: "alert_sent",
       sampleStatus: "failed",
     });
     await expect(
-      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({
+      outcome: "alert_deferred",
+      sampleStatus: "failed",
+    });
+    expect(harness.primaryLinqRequests).toHaveLength(1);
+
+    const firstAlert = await readLinqRequestBody(
+      harness.primaryLinqRequests[0],
+    );
+    expect(firstAlert.message.parts[0]?.value).toBe(
+      "Database monitor telemetry is incomplete for 2 checks "
+      + "(missing PlanetScale metric: Postgres max connections). "
+      + "Checked 00:10 UTC.",
+    );
+    expect(firstAlert.message.parts[0]?.value).not.toContain(
+      "database is under pressure",
+    );
+    expect(warning).toHaveBeenCalledWith(
+      "Database health metrics collection failed.",
+      {
+        failureCode: "required_metrics_missing",
+        failures: 1,
+        missingMetrics: [
+          "planetscale_postgres_settings_max_connections",
+        ],
+      },
+    );
+
+    const failedSample = harness.monitor.readRecentSamples().find(
+      (sample) => sample.observedAtMs === FIVE_MINUTES_MS * 2,
+    );
+    expect(failedSample?.conditions).toEqual([
+      {
+        failures: 2,
+        kind: "monitoring_unavailable",
+        missingMetrics: [
+          "planetscale_postgres_settings_max_connections",
+        ],
+      },
+    ]);
+
+    metricsBody = healthyMetricsBody;
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3 + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({
       outcome: "healthy",
       sampleStatus: "ok",
@@ -865,7 +916,200 @@ describe("database health monitor", () => {
       consecutiveScrapeFailures: 0,
       incidentOpen: false,
     });
+
+    metricsBody = missingMetricsBody;
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 4 + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "failed",
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 5 + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({
+      outcome: "alert_sent",
+      sampleStatus: "failed",
+    });
+    expect(harness.primaryLinqRequests).toHaveLength(2);
+    const secondAlert = await readLinqRequestBody(
+      harness.primaryLinqRequests[1],
+    );
+    expect(secondAlert.message.idempotency_key)
+      .not.toBe(firstAlert.message.idempotency_key);
+  });
+
+  it("still pages an available unsafe signal when another metric is missing", async () => {
+    const partialMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+    }).replace(
+      /^planetscale_postgres_settings_max_connections.*$/mu,
+      "",
+    );
+    const harness = createMonitorHarness({ metricsBody: partialMetricsBody });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({
+        conditions: [
+          {
+            kind: "client_wait",
+            seconds: 8,
+            waitingConnections: 3,
+          },
+        ],
+        outcome: "alert_sent",
+        sampleStatus: "failed",
+      });
+
     expect(harness.primaryLinqRequests).toHaveLength(1);
+    const alert = await readLinqRequestBody(harness.primaryLinqRequests[0]);
+    expect(alert.message.parts[0]?.value).toContain("PgBouncer wait 8s");
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      clientWaitSeconds: 8,
+      failureCode: "required_metrics_missing",
+      postgresMaxConnections: null,
+      scrapeStatus: "failed",
+    });
+  });
+
+  it("retains the first telemetry page behind an existing incident fence", async () => {
+    const unsafeMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+    });
+    const partialHealthyMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+    }).replace(
+      /^planetscale_postgres_settings_max_connections.*$/mu,
+      "",
+    );
+    let metricsBody = unsafeMetricsBody;
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent", sampleStatus: "ok" });
+    metricsBody = partialHealthyMetricsBody;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 2)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 3)).resolves
+      .toMatchObject({ outcome: "alert_deferred", sampleStatus: "failed" });
+
+    const pendingAlert = harness.monitor.readAlertState();
+    expect(pendingAlert.pendingAlertMessage).toContain(
+      "Database monitor telemetry is incomplete for 2 checks",
+    );
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({
+      outcome: "alert_sent",
+      sampleStatus: "failed",
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      outcome: "alert_deferred",
+      sampleStatus: "failed",
+    });
+
+    expect(harness.primaryLinqRequests).toHaveLength(2);
+  });
+
+  it("advances an available direct-error baseline across partial samples", async () => {
+    let directErrors = 5;
+    let omitMaxConnections = false;
+    const harness = createMonitorHarness({
+      readMetricsBody: () => {
+        const body = buildMetricsBody({
+          branchId: BRANCH_ID,
+          directErrors,
+        });
+        return omitMaxConnections
+          ? body.replace(
+            /^planetscale_postgres_settings_max_connections.*$/mu,
+            "",
+          )
+          : body;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
+    directErrors = 7;
+    omitMaxConnections = true;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 2)).resolves
+      .toMatchObject({
+        conditions: [
+          {
+            count: 2,
+            kind: "direct_migration_admission_failures",
+          },
+        ],
+        outcome: "alert_sent",
+        sampleStatus: "failed",
+      });
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 3)).resolves
+      .toMatchObject({
+        conditions: [
+          {
+            failures: 2,
+            kind: "monitoring_unavailable",
+          },
+        ],
+        outcome: "alert_deferred",
+        sampleStatus: "failed",
+      });
+
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      directConnectionErrorDelta: 0,
+      failureCode: "required_metrics_missing",
+    });
+  });
+
+  it("retries an unacknowledged telemetry page with its exact identity", async () => {
+    const missingMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+    }).replace(
+      /^planetscale_postgres_settings_max_connections.*$/mu,
+      "",
+    );
+    const harness = createMonitorHarness({
+      linqResponses: [
+        () => {
+          throw new Error("ambiguous send");
+        },
+      ],
+      metricsBody: missingMetricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 2)).resolves
+      .toMatchObject({ outcome: "alert_failed", sampleStatus: "failed" });
+    const pendingAlert = harness.monitor.readAlertState();
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 3)).resolves
+      .toMatchObject({ outcome: "alert_deferred", sampleStatus: "failed" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({
+      outcome: "alert_sent",
+      sampleStatus: "failed",
+    });
+
+    expect(harness.primaryLinqRequests).toHaveLength(2);
+    const firstAttempt = await readLinqRequestBody(
+      harness.primaryLinqRequests[0],
+    );
+    const retryAttempt = await readLinqRequestBody(
+      harness.primaryLinqRequests[1],
+    );
+    expect(retryAttempt).toEqual(firstAttempt);
+    expect(retryAttempt.message.idempotency_key)
+      .toBe(pendingAlert.pendingAlertIdempotencyKey);
+    expect(retryAttempt.message.parts[0]?.value)
+      .toBe(pendingAlert.pendingAlertMessage);
   });
 
   it("retains an admitted page across failed and healthy samples until delivery", async () => {

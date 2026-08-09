@@ -529,10 +529,13 @@ supported provider credential.
   hours, while a fully stale trace is deleted.
 - `apps/cloudflare/test/database-health-{metrics,monitor,worker}.test.ts`
   covers the independent PlanetScale/Linq database-health plane. The tests
-  prove strict metric normalization and required-series failure, positive
-  direct-port counter deltas with reset/new-series suppression, SQLite sample
-  persistence and 30-day pruning, concrete connection thresholds, two-failure
-  collection hysteresis, failed-scrape incident preservation, recovery reset,
+  prove strict per-family metric normalization, explicit unknowns for missing
+  required series, continued evaluation of available signals, positive
+  direct-port counter deltas with reset/new-series suppression across complete
+  and partial samples, SQLite sample persistence and 30-day pruning, concrete
+  connection thresholds, two-failure collection hysteresis, one acknowledged
+  page per uninterrupted telemetry-only outage, failed-scrape incident
+  preservation, recovery reset and rearming,
   global 30-minute wall-time provider-attempt pacing across incident recovery,
   current actual-check-time and rotated evidence-bearing recurrence copy,
   no stale fenced gauge page after recovery, exact body/idempotency reuse after

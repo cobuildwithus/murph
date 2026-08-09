@@ -1049,7 +1049,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   branch-local PgBouncer and Postgres connection conditions, and page two
   preconfigured direct operator Linq chats. Its SQLite contains only counts,
   ratios, bounded state maps, error-counter baselines, failure codes, and alert
-  admission state. First-incident and non-replayable direct-error alert
+  admission state. Metric families normalize independently: an unavailable
+  family stays null and its canonical allowlisted name is retained, while
+  available families continue to drive their own conditions. Missing data is
+  never treated as zero. A telemetry-only incident pages once after two
+  consecutive incomplete or failed collections and rearms only after a complete
+  sample; concrete unsafe conditions retain paced recurrence. First-incident
+  and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring
   replayable evidence, and acknowledged replayable recurrence is admitted only
