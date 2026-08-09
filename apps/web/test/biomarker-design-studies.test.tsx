@@ -134,6 +134,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain(
     'data-design-section="signup-referral-flow"',
   );
+  expect(sectionsMarkup).toContain(
+    'data-design-contract="origin-only-referral-claim"',
+  );
   expect(sectionsMarkup).toContain("Settings · Messaging");
   expect(sectionsMarkup).toContain("Recipient landing states");
   expect(sectionsMarkup).toContain("Meet Murph");
