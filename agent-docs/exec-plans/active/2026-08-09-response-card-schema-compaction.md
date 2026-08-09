@@ -70,6 +70,9 @@ Updated: 2026-08-09
 - Keep the model schema inline. The deployed App Server drops local definitions
   during large-schema compaction, so reference reuse cannot preserve nested
   authoring shapes.
+- Retain one deterministic pinned-App-Server regression in the existing
+  scripted-runtime suite. It proves the provider-visible nested shapes and both
+  runtime tool calls without introducing another harness.
 
 ## Verification
 
@@ -79,3 +82,18 @@ Updated: 2026-08-09
 - Expected outcomes: all checks pass; both probes produce canonical arguments
   without a tool-schema rejection; the complete tool input remains below 5,000
   Codex-normalized bytes.
+- Completed outcomes: the focused card suites pass (16 tests), the expanded
+  pinned-App-Server and card-tool suites pass (40 tests), both affected package
+  typechecks pass, and the live Sol probes accepted nutrition V2 and compact
+  table cards.
+
+## Review dispositions
+
+- Accepted the preliminary coverage finding. The temporary live proof is now
+  backed by a committed test at the existing real App Server/local Responses
+  boundary; no coverage patch artifact was supplied.
+- Accepted the final Purpose Drift disclosure finding. A changed tool contract
+  intentionally rotates eligible native threads once so thread-start can adopt
+  the new schema; the PR contract documents bounded transcript continuity,
+  conditional hot-path work, rollback behavior, and the two-turn deployment
+  smoke. No compatibility mechanism is warranted.
