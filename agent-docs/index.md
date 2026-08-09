@@ -14,7 +14,8 @@ per-user health-data consent barrier through exact stop-target reservation and
 container registration. Web admits it only for an extant, non-suspended member
 whose grant is not revoked, preserving missing-grant compatibility only for
 legacy members that still exist. Foreground readiness and exact-target
-destruction retain priority over the platform wait. This contract is jointly specified by
+destruction retain priority over the platform wait. Rollout puts Web first,
+then drains older containers immediately. This contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 

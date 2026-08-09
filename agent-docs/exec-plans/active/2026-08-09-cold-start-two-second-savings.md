@@ -109,9 +109,12 @@ Updated: 2026-08-09
   destroys and clears that exact target before binding the current-version
   fence. This adds no new persisted field, state owner, queue, generation,
   scheduler, or reconciliation loop.
-- Deployment must use immediate container rollout because an older deployed
-  Worker can still have created unrecorded shell hints. The new Worker becomes
-  the rollback floor after it writes the first reserved stop target.
+- Deployment must put Web first, then use immediate container rollout for the
+  Worker because an older deployed Worker can still have created unrecorded
+  shell hints. Old Workers fail closed on Web's new absent/suspended-member
+  denial; the reverse order would leave the account-deletion race open until
+  Web deploys. The new Worker becomes the rollback floor after it writes the
+  first reserved stop target.
 - Final ReviewGPT round 3 proved that sharing the mutation barrier was not
   sufficient for account deletion: a hint already queued behind successful
   cleanup could read the deleted consent grant as legacy `missing`, recreate
