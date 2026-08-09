@@ -1,6 +1,6 @@
 # Referral reward usage-day labels
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -65,3 +65,4 @@ Updated: 2026-08-09
   typecheck, frontend design proof, ReviewGPT gates, and required PR CI.
 - Expected outcomes: no dollar-denominated referral labels remain on scoped
   user-facing surfaces; all checks pass on the pushed PR head.
+Completed: 2026-08-09
