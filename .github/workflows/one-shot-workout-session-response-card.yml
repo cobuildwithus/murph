@@ -28,6 +28,8 @@ jobs:
         run: |
           cat .github/patches/workout-session-response-card/part-*.b64 > /tmp/murph-workout-pr1.b64
           base64 --decode /tmp/murph-workout-pr1.b64 > /tmp/murph-workout-pr1.zip
+          wc -c /tmp/murph-workout-pr1.zip
+          sha256sum /tmp/murph-workout-pr1.zip
           echo "88f2cdd53ad6860e22a42a10c773034c6944b5c94648483922e8a8616d822fb6  /tmp/murph-workout-pr1.zip" | sha256sum -c -
           python -c "import zipfile; zipfile.ZipFile('/tmp/murph-workout-pr1.zip').extractall('/tmp')"
           python /tmp/pr1-current/apply.py .
