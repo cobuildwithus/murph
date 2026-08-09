@@ -53,8 +53,9 @@ Updated: 2026-08-09
    target through the canonical Linq route/member owner; never accept a runtime
    id from provider payload text.
 2. Risk: repeated typing events cause launch amplification.
-   Mitigation: call the existing idempotent/coalesced prewarm owner and add
-   focused repeated-event proof instead of introducing durable dedupe state.
+   Mitigation: drop optional hints while the consent-mutation lock is occupied,
+   then rely on the existing idempotent/coalesced lifecycle for the one admitted
+   hint; add focused repeated-event proof instead of durable dedupe state.
 3. Risk: waiting for prewarm makes webhook delivery less reliable.
    Mitigation: use the existing bounded best-effort latency-hint pattern and
    prove failures do not change webhook acknowledgement or message handling.
@@ -70,9 +71,9 @@ Updated: 2026-08-09
 3. [completed] Implement focused code and tests.
 4. [completed] Run focused verification, direct scenario proof, and candidate
    diff review.
-5. [in progress] Commit, push, open the PR, then run preliminary specialist and
+5. [completed] Commit, push, open the PR, then run preliminary specialist and
    final ReviewGPT concurrently with exact-head CI.
-6. [pending] Resolve findings, close this plan with `scripts/finish-task`, and
+6. [in progress] Resolve findings, close this plan with `scripts/finish-task`, and
    push the final head.
 
 ## Decisions
@@ -87,8 +88,20 @@ Updated: 2026-08-09
   schedules lookup plus shell prewarm after acknowledgement. The established
   Cloudflare prewarm owner repeats live admission, consent serialization,
   exact stop-target binding, and lifecycle coalescing.
-- Duplicate typing events need no new receipt or dedupe state: they carry no
-  durable work and converge through the existing shell/container lifecycle.
+- Duplicate typing events need no new receipt or dedupe state. The optional
+  Cloudflare owner returns before its FIFO whenever the consent-mutation lock
+  is occupied, so repeated hints and hints during authoritative ensure,
+  withdrawal, or deletion cannot queue ahead of user-critical work. The single
+  admitted hint converges through the existing shell/container lifecycle.
+- The preliminary specialist finding was accepted: focused mocks did not prove
+  the complete signed typing-to-prewarm-to-later-reply journey. A hosted-local
+  scenario now crosses the real Web and Worker boundaries and asserts typing
+  creates no mailbox, provider, or outbound effect before the ordinary message.
+- The final round-one finding was accepted after a pre-fix regression proved
+  four repeated hints queued behind the first consent admission. The optional
+  owner now checks the existing lock before joining it; the corrected regression
+  proves duplicates settle immediately and at most one hint can precede an
+  authoritative ensure.
 
 ## Verification
 
@@ -101,4 +114,23 @@ Updated: 2026-08-09
   tests skipped.
 - `pnpm --filter @murphai/hosted-web typecheck:prepared` — passed after the
   generated client/catalog preparation completed.
-- Exact-head CI and ReviewGPT — pending.
+- Pre-fix focused UserRunner regression — failed as intended: none of four
+  duplicate hints settled while the first admission was held, proving FIFO
+  amplification before the correction.
+- Corrected focused UserRunner concurrency and deletion tests — passed.
+- Full `apps/cloudflare/test/user-runner-alarm.test.ts` — passed, 126 tests.
+- `pnpm --filter @murphai/cloudflare typecheck` — passed.
+- Hosted-local Linq scenario collection succeeded, but local execution was
+  blocked before assertions: the normal lane hit the unchanged runner-bundle
+  byte ratchet; the supported no-bundle lane then reached stack startup but the
+  local Docker installation lacked `docker buildx`.
+- One Crabbox Testbox `test:diff` run exercised affected package tests. Changed
+  messaging-ingress tests passed; the run stopped on two hosted-local-harness
+  failures specific to the Testbox Docker-bridge profile (MinIO readiness and a
+  localhost/host.docker.internal expectation). No second remote run was used.
+- Preliminary ReviewGPT — findings resolved; no rerun is required by policy.
+- Final ReviewGPT round one — finding reproduced and resolved; full-snapshot
+  round two is pending on the remediated exact head.
+- Exact-head CI — the initial head's unrelated assistant coverage failure is
+  fixed on current `main`; the remediated branch will incorporate that base and
+  rerun the required checks.

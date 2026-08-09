@@ -1185,7 +1185,10 @@ checks active access and complete crypto roots before calling the existing
 best-effort Cloudflare shell-prewarm route. Missing, ambiguous, inactive, or
 ineligible routes stop there. The Cloudflare runner independently repeats live
 admission under the consent-mutation barrier before starting its coalesced
-container lifecycle. Typing must not plan onboarding, bind routes, append
+container lifecycle. The optional owner drops repeated hints, or any hint that
+arrives while authoritative ensure, withdrawal, or deletion owns the barrier,
+before they can queue on its FIFO; at most one admitted hint can precede later
+authoritative processing. Typing must not plan onboarding, bind routes, append
 mailbox rows, signal Temporal, start runtime processing, send read receipts, or
 add reconciliation work; it is optional latency data and never durable wake
 authority.

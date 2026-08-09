@@ -2001,7 +2001,10 @@ plans onboarding, binds a route, appends mailbox work, starts processing,
 signals Temporal, sends a receipt, or adds reconciliation work. Cloudflare
 still rechecks live Web-owned admission under the per-user consent-mutation
 barrier before it starts a container, so Web's lookup grants no runtime
-authority. Repeated signals rely on the existing container lifecycle's
+authority. The optional Cloudflare owner admits a hint only when its existing
+consent-mutation lock is idle; repeated hints and hints arriving during
+authoritative ensure, withdrawal, or deletion are dropped before the FIFO.
+The single admitted hint then relies on the existing container lifecycle's
 coalescing instead of a second dedupe or warm-state owner. The Temporal mailbox
 signal remains the only durable wake authority for hosted runtime work. For a
 committed known-checkpoint Linq message, Web first verifies the checkpoint owner

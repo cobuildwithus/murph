@@ -289,6 +289,9 @@ export class HostedUserRunner {
   }
 
   async prewarmRuntimeShellForUser(userId: string): Promise<void> {
+    if (this.runtimeConsentMutationLock) {
+      return;
+    }
     await this.withRuntimeConsentMutationLock(async () => {
       let admission: HostedRuntimeHealthDataAdmissionResponse;
       try {

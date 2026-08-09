@@ -22,7 +22,10 @@ Last verified: 2026-08-09
   read. The typing producer resolves only the private home-chat blind index and
   performs an advisory active-access/root check after acknowledging the webhook;
   it receives no member id from Linq and grants no runtime authority. The shared
-  HTTP route obtains the named runner stub without binding durable state. The
+  HTTP route obtains the named runner stub without binding durable state.
+  Because this hint is optional, it is admitted only when the barrier is idle;
+  repeated hints and hints arriving during authoritative ensure, withdrawal, or
+  deletion return without joining the FIFO. The
   optional read abandons after a fixed 250 ms
   deadline so it cannot hold authoritative processing, withdrawal, or deletion
   behind the ordinary Web-control timeout; only allowed admission reserves and
