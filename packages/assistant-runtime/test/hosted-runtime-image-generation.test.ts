@@ -112,7 +112,7 @@ describe("hosted image generation", () => {
     assert.equal(controller.launcher.readStatus?.("session_unbound"), null);
     assert.equal(controller.hasWork(), false);
     assert.equal(controller.hasCompleted(), false);
-    assert.equal(await controller.stageCompleted(), 0);
+    assert.deepEqual(await controller.stageCompleted(), []);
 
     assert.equal(controller.launcher.launch({
       continuationSessionId: "asst_origin_1",
@@ -292,10 +292,12 @@ describe("hosted image generation", () => {
     });
     assert.equal(controller.hasCompleted(), true);
     assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
-    assert.equal(await controller.stageCompleted(), 1);
+    const stagedCompletionInputIds = await controller.stageCompleted();
+    assert.equal(stagedCompletionInputIds.length, 1);
     assert.equal(enqueueAttempt, 2);
     assert.equal(controller.hasCompleted(), false);
     const completionInputId = await findCompletionInputId(vaultRoot);
+    assert.deepEqual(stagedCompletionInputIds, [completionInputId]);
     assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
     assert.equal(controller.launcher.launch({
       continuationSessionId: "asst_origin_1",
@@ -375,7 +377,7 @@ describe("hosted image generation", () => {
       savedImageRef: privateMedia.ref,
       status: "ready",
     });
-    assert.equal(await controller.stageCompleted(), 0);
+    assert.deepEqual(await controller.stageCompleted(), []);
 
     assert.equal(controller.launcher.launch({
       continuationSessionId: "asst_origin_1",
@@ -404,7 +406,8 @@ describe("hosted image generation", () => {
     await vi.waitFor(() => {
       assert.equal(controller.hasCompleted(), true);
     });
-    assert.equal(await controller.stageCompleted(), 1);
+    const stagedFailureInputIds = await controller.stageCompleted();
+    assert.equal(stagedFailureInputIds.length, 1);
     assert.equal(recordRuntimeIssue.mock.calls.length, 1);
     assert.equal(
       recordRuntimeIssue.mock.calls[0]?.[0]?.errorCode,
@@ -417,6 +420,7 @@ describe("hosted image generation", () => {
       (inputId) => inputId !== completionInputId,
     );
     assert.ok(failureInputId);
+    assert.deepEqual(stagedFailureInputIds, [failureInputId]);
     const failureCompletion = await readAssistantInputEvent({
       inputId: failureInputId,
       vault: vaultRoot,
@@ -491,8 +495,10 @@ describe("hosted image generation", () => {
 
     shutdown.abort();
     assert.equal(controller.hasCompleted(), true);
-    assert.equal(await controller.stageCompleted(), 1);
+    const stagedCompletionInputIds = await controller.stageCompleted();
+    assert.equal(stagedCompletionInputIds.length, 1);
     const completionInputId = await findCompletionInputId(vaultRoot);
+    assert.deepEqual(stagedCompletionInputIds, [completionInputId]);
     const completion = await readAssistantInputEvent({
       inputId: completionInputId,
       vault: vaultRoot,
@@ -513,7 +519,7 @@ describe("hosted image generation", () => {
     await vi.waitFor(() => {
       assert.equal(controller.hasWork(), false);
     });
-    assert.equal(await controller.stageCompleted(), 0);
+    assert.deepEqual(await controller.stageCompleted(), []);
     assert.deepEqual(
       await readHostedPendingAssistantInputIds({ vaultRoot }),
       [completionInputId],
