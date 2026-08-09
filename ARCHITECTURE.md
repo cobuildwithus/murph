@@ -1059,11 +1059,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   gap before that acknowledgment coalesce into the same unresolved operator
   notification instead of creating a backlog; the first threshold's bounded
   evidence and observation time remain authoritative. An owed telemetry page
-  alone does not occupy a closed provider fence. A newly opened incident with
-  concrete evidence persists one combined immutable body, so the exact pressure
-  and truthful telemetry facts share the next eligible attempt and one
-  acknowledgment cycle. An acknowledged-incident recurrence waits for the
-  eligible sample, which includes any still-current unsafe evidence and labels
+  alone does not occupy a closed provider fence. Before an incident admits its
+  first page, concrete evidence that appears on the threshold or a later sample
+  persists in one combined immutable body, so the exact pressure and truthful
+  telemetry facts share the next eligible attempt and one acknowledgment cycle.
+  An acknowledged-incident recurrence waits for the eligible sample, which
+  includes any still-current unsafe evidence and labels
   historical telemetry by its own observation time. A later complete collection rearms
   telemetry only after the obligation is acknowledged. Its additive columns
   preserve the existing schema

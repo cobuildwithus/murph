@@ -1419,6 +1419,122 @@ describe("database health monitor", () => {
     expect(harness.allLinqRequests).toHaveLength(4);
   });
 
+  it("retains pressure that begins after an unadmitted telemetry threshold", async () => {
+    let clientWaitSeconds = 8;
+    let omitMaxConnections = false;
+    const harness = createMonitorHarness({
+      readMetricsBody: () => {
+        const body = buildMetricsBody({
+          branchId: BRANCH_ID,
+          clientWaitSeconds,
+        });
+        return omitMaxConnections
+          ? body.replace(
+            /^planetscale_postgres_settings_max_connections.*$/mu,
+            "",
+          )
+          : body;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent", sampleStatus: "ok" });
+    clientWaitSeconds = 0;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 2)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
+
+    omitMaxConnections = true;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 3)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 4)).resolves
+      .toMatchObject({
+        conditions: [{ failures: 2, kind: "monitoring_unavailable" }],
+        outcome: "alert_deferred",
+        sampleStatus: "failed",
+      });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      alertSequence: 0,
+      incidentOpen: true,
+      monitoringAlertObligation: {
+        checkedAtMs: FIVE_MINUTES_MS * 4,
+        failures: 2,
+      },
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+
+    clientWaitSeconds = 8;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 5)).resolves
+      .toMatchObject({
+        conditions: [
+          { kind: "client_wait", seconds: 8 },
+          { failures: 3, kind: "monitoring_unavailable" },
+        ],
+        outcome: "alert_deferred",
+        sampleStatus: "failed",
+      });
+    const mixedPending = harness.monitor.readAlertState();
+    expect(mixedPending).toMatchObject({
+      alertSequence: 1,
+      monitoringAlertObligation: {
+        checkedAtMs: FIVE_MINUTES_MS * 4,
+        failures: 2,
+      },
+      pendingAlertIncludesMonitoring: true,
+    });
+    expect(mixedPending.pendingAlertMessage).toBe(
+      "Database health is outside the safe range. PgBouncer wait 8s; "
+      + "Database monitor telemetry was incomplete for 2 checks "
+      + "(observed 00:20 UTC; missing PlanetScale metric: "
+      + "Postgres max connections). Checked 00:25 UTC.",
+    );
+    expect(mixedPending.pendingAlertIdempotencyKey).not.toBeNull();
+
+    clientWaitSeconds = 0;
+    omitMaxConnections = false;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 6)).resolves
+      .toMatchObject({ outcome: "alert_deferred", sampleStatus: "ok" });
+    harness.restartMonitor();
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      monitoringAlertObligation: expect.objectContaining({ failures: 2 }),
+      pendingAlertIdempotencyKey: mixedPending.pendingAlertIdempotencyKey,
+      pendingAlertMessage: mixedPending.pendingAlertMessage,
+    });
+
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent", sampleStatus: "ok" });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      incidentOpen: false,
+      monitoringAlertObligation: null,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
+
+    const allBodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    const mixedAttempts = allBodies.filter(
+      (body) =>
+        body.message.parts[0]?.value === mixedPending.pendingAlertMessage,
+    );
+    expect(mixedAttempts.map((body) => body.to[0]).sort()).toEqual([
+      "+12025550123",
+      "+12025550124",
+    ]);
+    expect(mixedAttempts.map(
+      (body) => body.message.idempotency_key,
+    ).sort()).toEqual([
+      mixedPending.pendingAlertIdempotencyKey,
+      `${mixedPending.pendingAlertIdempotencyKey}-recipient-2`,
+    ]);
+    expect(harness.primaryLinqRequests).toHaveLength(2);
+    expect(harness.allLinqRequests).toHaveLength(4);
+  });
+
   it("keeps a stale pressure retry from clearing rearmed telemetry", async () => {
     let clientWaitSeconds = 0;
     let missingFamily: "max_connections" | "server_pools" | null =

@@ -413,7 +413,7 @@ export class DatabaseHealthMonitor {
         && !attemptFenceOpen
         && !hasDirectConnectionError
         && (
-          !isNewIncident
+          alertState.alertSequence > 0
           || currentReplayableConditions.length === 0
         );
       const admittedCheckedAtMs =

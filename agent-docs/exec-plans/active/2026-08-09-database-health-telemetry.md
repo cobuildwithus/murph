@@ -128,4 +128,10 @@ Updated: 2026-08-09
   restart, clears the obligation after both recipients acknowledge it, and
   produces no second provider attempt. The focused close/reopen, mixed-threshold,
   recovery, restart, and both-recipient regression covers the correction. Final
-  ReviewGPT round 6 remains pending.
+  ReviewGPT round 6 found that `incidentOpen` still misclassified an unadmitted
+  telemetry incident as an acknowledged recurrence when pressure began on the
+  following sample. The accepted correction derives admission from the existing
+  zero alert sequence instead: pressure appearing before the first page creates
+  the same combined immutable body. A focused delayed-pressure, recovery,
+  restart, both-recipient, acknowledgment, and no-second-attempt regression
+  covers the path. Final ReviewGPT round 7 remains pending.
