@@ -156,8 +156,8 @@ export class HostedUserRunner {
       env,
       invocationService: runtimeInvocation,
       runnerContainerNamespace,
-      readCheckpointHandoffStartedAt: async (input) =>
-        await this.workspaceSnapshotSessions.readCurrentOwnerStartedAt(input),
+      readCheckpointHandoff: async (input) =>
+        await this.workspaceSnapshotSessions.readCurrentOwnerHandoff(input),
       runnerRuntimeEnvSource,
       runtimeRetryAnalytics,
       stateStore: this.stateStore,
@@ -478,6 +478,24 @@ export class HostedUserRunner {
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession | null> {
     return await this.workspaceSnapshotSessions.create(input);
+  }
+
+  async heartbeatHostedWorkspaceSnapshotUploadSession(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.heartbeatCurrentOwner(input);
+  }
+
+  async completeHostedWorkspaceSnapshotUploadSession(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.completeCurrentOwner(input);
   }
 
   async rememberHostedWorkspaceSnapshotReplacedRef(input: {

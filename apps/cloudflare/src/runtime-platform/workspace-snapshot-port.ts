@@ -50,6 +50,9 @@ import {
   readRequiredHostedRuntimeString,
 } from "./hosted-http.ts";
 
+const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS = 2_000;
+const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS = 2_000;
+
 export function createCloudflareWorkspaceSnapshotPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -58,6 +61,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
   const sessionWriteFenceHeaders = new Map<string, Headers>();
+  const sessionHeartbeatStops = new Map<string, () => void>();
   const readSessionWriteFenceHeaders = async (
     snapshotId: string,
     description: string,
@@ -70,6 +74,62 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       input.workspaceCheckpointBridge,
       description,
     );
+  };
+  const stopSessionHeartbeat = (snapshotId: string): void => {
+    sessionHeartbeatStops.get(snapshotId)?.();
+    sessionHeartbeatStops.delete(snapshotId);
+  };
+  const startSessionHeartbeat = (snapshotId: string, headers: Headers): void => {
+    stopSessionHeartbeat(snapshotId);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let failureLogged = false;
+    const schedule = () => {
+      if (stopped) {
+        return;
+      }
+      timer = setTimeout(() => {
+        void heartbeat();
+      }, WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS);
+    };
+    const heartbeat = async () => {
+      try {
+        await fetchHostedJson({
+          body: { snapshotId },
+          description: "Hosted workspace snapshot handoff heartbeat",
+          exposeResponseBodyInError: false,
+          fetchImpl: input.fetchImpl,
+          headers: new Headers(headers),
+          method: "POST",
+          redactedLogPath: "/workspace-snapshots/REDACTED/heartbeat",
+          timeoutMs: Math.min(
+            input.timeoutMs,
+            WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS,
+          ),
+          url: new URL(
+            `/workspace-snapshots/${encodeURIComponent(snapshotId)}/heartbeat`,
+            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+          ),
+        });
+        failureLogged = false;
+      } catch (error) {
+        if (!failureLogged) {
+          failureLogged = true;
+          console.warn("Hosted workspace snapshot handoff heartbeat failed.", {
+            errorName: error instanceof Error ? error.name : typeof error,
+          });
+        }
+      } finally {
+        schedule();
+      }
+    };
+    schedule();
+    sessionHeartbeatStops.set(snapshotId, () => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    });
   };
   const port: NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> = {
     async abortSnapshotSession(request) {
@@ -96,6 +156,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           ),
         });
       } finally {
+        stopSessionHeartbeat(request.snapshotId);
         sessionWriteFenceHeaders.delete(request.snapshotId);
       }
     },
@@ -127,6 +188,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           ),
         });
       } finally {
+        stopSessionHeartbeat(request.ref.snapshotId);
         sessionWriteFenceHeaders.delete(request.ref.snapshotId);
       }
       const completed = parseHostedWorkspaceSnapshotCompletePayload(payload);
@@ -412,6 +474,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       assertHostedWorkspaceSnapshotOperationLive(signal);
       const started = parseHostedWorkspaceSnapshotStartPayload(payload, input.boundUserId);
       sessionWriteFenceHeaders.set(started.snapshotId, new Headers(headers));
+      startSessionHeartbeat(started.snapshotId, headers);
       return started;
     },
   };

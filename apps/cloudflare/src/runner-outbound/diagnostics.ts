@@ -90,6 +90,9 @@ export function readHostedRunnerInternalOperation(input: {
     if (/^\/workspace-snapshots\/[^/]+\/complete$/u.test(input.pathname)) {
       return "workspace_snapshot_complete";
     }
+    if (/^\/workspace-snapshots\/[^/]+\/heartbeat$/u.test(input.pathname)) {
+      return "workspace_snapshot_heartbeat";
+    }
     if (/^\/workspace-snapshots\/[^/]+\/data-key\/unwrap$/u.test(input.pathname)) {
       return "workspace_snapshot_data_key_unwrap";
     }

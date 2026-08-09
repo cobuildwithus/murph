@@ -1185,7 +1185,90 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(abortRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
   });
 
+  it("heartbeats an active snapshot handoff and stops after abort", async () => {
+    vi.useFakeTimers();
+    const snapshotId = "snapshot_runner_platform_heartbeat";
+    const objectKey =
+      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot heartbeat fetch");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return new Response(JSON.stringify({
+          encryption: {
+            aad: buildHostedWorkspaceSnapshotV2Aad({
+              objectKey,
+              snapshotId,
+              userId: "member_123",
+            }),
+            dataKeyBase64,
+            ivBase64: "AQIDBAUGBwgJCgsM",
+            rootKeyId: "root_key_test",
+            scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+            wrappedDataKey: "wrapped_data_key_test",
+          },
+          limits: {
+            maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+            warnEncryptedBytes: 128 * 1024 * 1024,
+          },
+          objectKey,
+          snapshotId,
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}`)) {
+        return new Response(JSON.stringify({ aborted: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const heartbeatRequest = requireFetchRequest(
+      fetchMock.mock.calls[1],
+      "workspace snapshot heartbeat",
+    );
+    expect(heartbeatRequest.method).toBe("POST");
+    expect(heartbeatRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(heartbeatRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+
+    await platform.workspaceSnapshotPort!.abortSnapshotSession({ objectKey, snapshotId });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("reuses the snapshot session write fence when completing after the runtime lease changes", async () => {
+    vi.useFakeTimers();
     const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
       Uint8Array.from({ length: 32 }, (_, index) => index + 1),
@@ -1273,6 +1356,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("returns foreground-pending snapshot completion checkpoints to the runtime", async () => {

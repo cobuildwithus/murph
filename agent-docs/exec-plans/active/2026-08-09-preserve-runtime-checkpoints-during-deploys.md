@@ -15,8 +15,12 @@ Updated: 2026-08-09
 
 - Replacement preserves a fence only when the durable current snapshot-upload
   session belongs to the exact fenced attempt and lease generation.
-- A matching session causes one-second retries for no more than 15 seconds from
-  session creation; absent, mismatched, and stale sessions add no wait.
+- A matching session causes one-second retries only while its runtime-owned
+  heartbeat is less than 10 seconds old and completion is absent; live
+  checkpoints have no artificial deadline.
+- Absent, mismatched, completed, and stale sessions add no wait; a dead runtime
+  can defer replacement for the 10-second liveness window plus at most one
+  additional retry interval (one second) after its final heartbeat.
 - Existing production rollout defaults and the independent state-isolation
   preflight remain unchanged.
 - Focused coordination tests, Cloudflare typecheck, exact-head review, and PR CI
@@ -31,11 +35,12 @@ Updated: 2026-08-09
 
 ## Constraints
 
-- Reuse the existing durable snapshot-upload session as the only handoff fact.
+- Reuse the existing durable snapshot-upload session as the only handoff state
+  owner, with server-owned heartbeat and completion metadata.
 - Do not add a blanket fence grace period or delay ordinary starts.
 - Do not change rollout configuration or weaken independent deploy guards.
-- Bound stale-session impact while covering the measured p99, and keep retries
-  fast enough for the normal publication path.
+- Derive liveness from the publishing runtime rather than snapshot age, and
+  keep both heartbeat failure recovery and replacement retries short.
 
 ## Tasks
 
@@ -43,7 +48,7 @@ Updated: 2026-08-09
 2. [x] Disprove concurrent execution and identify the interrupted checkpoint.
 3. [x] Revert the unrelated startup-fence behavior and false incident record.
 4. [x] Restore the existing rollout defaults and state-isolation preflight.
-5. [ ] Preserve only the exact fresh checkpoint handoff during replacement.
+5. [x] Preserve only the exact live checkpoint handoff during replacement.
 6. [ ] Run focused verification, exact-head ReviewGPT, and PR CI.
 7. [ ] Update the PR, close this plan, and hand off deployment checks.
 
@@ -55,6 +60,7 @@ Updated: 2026-08-09
   replacement was accepted; it never published that snapshot.
 - Fleet snapshot completion distribution over 14 days: p50 3.253 seconds, p95
   7.781 seconds, p99 12.061 seconds, maximum 28.969 seconds.
-- Focused runtime-coordination test: 128 passed.
-- Retry-response tests: 2 passed.
+- Focused Cloudflare tests: 490 passed, including a 29-second live handoff,
+  stale-heartbeat replacement, completion-marker replacement, heartbeat route,
+  heartbeat timer shutdown, and retry timing.
 - Cloudflare package typecheck passed.

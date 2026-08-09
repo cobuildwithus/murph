@@ -38,6 +38,8 @@ export interface WorkspaceSnapshotR2BucketLike {
 
 export interface HostedWorkspaceSnapshotUploadSession {
   attemptId: string;
+  checkpointHandoffCompletedAt?: string;
+  checkpointHandoffHeartbeatAt?: string;
   createdAt: string;
   encryption: {
     aad: HostedWorkspaceSnapshotV2Aad;
@@ -113,6 +115,18 @@ export function parseHostedWorkspaceSnapshotUploadSession(
   const r2PutDrainUntil = record.r2PutDrainUntil === undefined
     ? null
     : requireIsoString(record.r2PutDrainUntil, `${label}.r2PutDrainUntil`);
+  const checkpointHandoffCompletedAt = record.checkpointHandoffCompletedAt === undefined
+    ? null
+    : requireIsoString(
+        record.checkpointHandoffCompletedAt,
+        `${label}.checkpointHandoffCompletedAt`,
+      );
+  const checkpointHandoffHeartbeatAt = record.checkpointHandoffHeartbeatAt === undefined
+    ? null
+    : requireIsoString(
+        record.checkpointHandoffHeartbeatAt,
+        `${label}.checkpointHandoffHeartbeatAt`,
+      );
   if ((r2PutExpiresAt === null) !== (r2PutDrainUntil === null)) {
     throw new TypeError(
       `${label}.r2PutExpiresAt and ${label}.r2PutDrainUntil must be recorded together.`,
@@ -128,6 +142,12 @@ export function parseHostedWorkspaceSnapshotUploadSession(
 
   return {
     attemptId: requireString(record.attemptId, `${label}.attemptId`),
+    ...(checkpointHandoffCompletedAt === null
+      ? {}
+      : { checkpointHandoffCompletedAt }),
+    ...(checkpointHandoffHeartbeatAt === null
+      ? {}
+      : { checkpointHandoffHeartbeatAt }),
     createdAt: requireIsoString(record.createdAt, `${label}.createdAt`),
     encryption: {
       aad: parseHostedWorkspaceSnapshotAad(encryption.aad, `${label}.encryption.aad`),
