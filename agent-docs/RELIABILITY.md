@@ -193,7 +193,8 @@ Last verified: 2026-08-07
   threshold persists one bounded telemetry-page obligation in the existing
   incident row. It survives an occupied pending-message slot, restart, recovery,
   and direct-error-only prioritization; only acknowledgment of a pending body
-  that includes the monitoring condition clears it.
+  that includes the monitoring condition clears it. The additive columns retain
+  the existing schema version so a rollback Worker can safely ignore them.
   A newly opened incident or one-shot direct migration admission failure admits
   its exact body and idempotency key in the same synchronous SQLite transaction
   that persists the sample and advances any direct-error counter baseline.

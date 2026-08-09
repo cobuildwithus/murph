@@ -91,3 +91,6 @@ Updated: 2026-08-09
 - Final ReviewGPT round 1 independently found the same owed-page loss. No
   additional finding was reported. Round 2 remains pending on the corrected
   pushed head.
+- Parent rollout review replaced the schema-version bump with idempotent
+  additive columns at the existing version, preserving compatibility with the
+  previously deployed Worker during overlap or rollback.

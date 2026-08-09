@@ -10,7 +10,7 @@ import {
   type DatabaseMetricSnapshot,
 } from "./metrics.js";
 
-const DATABASE_HEALTH_SCHEMA_VERSION = 2;
+const DATABASE_HEALTH_SCHEMA_VERSION = 1;
 
 export interface DatabaseHealthMonitoringAlertObligation {
   checkedAtMs: number;
@@ -509,20 +509,18 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
       "Database health Durable Object schema is newer than this Worker.",
     );
   }
-  if (version < 2) {
-    ensureDatabaseHealthTableColumn(
-      sql,
-      "database_health_meta",
-      "monitoring_alert_owed_json",
-      "TEXT",
-    );
-    ensureDatabaseHealthTableColumn(
-      sql,
-      "database_health_meta",
-      "pending_alert_includes_monitoring",
-      "INTEGER NOT NULL DEFAULT 0 CHECK (pending_alert_includes_monitoring IN (0, 1))",
-    );
-  }
+  ensureDatabaseHealthTableColumn(
+    sql,
+    "database_health_meta",
+    "monitoring_alert_owed_json",
+    "TEXT",
+  );
+  ensureDatabaseHealthTableColumn(
+    sql,
+    "database_health_meta",
+    "pending_alert_includes_monitoring",
+    "INTEGER NOT NULL DEFAULT 0 CHECK (pending_alert_includes_monitoring IN (0, 1))",
+  );
   sql.exec(
     `INSERT INTO database_health_schema_meta (key, value)
      VALUES ('schema_version', ?)

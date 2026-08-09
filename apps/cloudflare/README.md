@@ -211,7 +211,9 @@ closes and rearms the incident after any owed page is delivered. Concrete unsafe
 conditions retain their 30-minute recurrence. The object writes Linq provider-attempt
 admission before egress, never attempts more than once per 30 minutes across all
 incidents, and reuses the exact body plus idempotency key after an ambiguous
-send. The message reports actual collection time rather than the scheduled Cron
+send. The obligation columns are added idempotently without advancing the
+schema version, so the previously deployed Worker can ignore them during a
+rollback. The message reports actual collection time rather than the scheduled Cron
 slot and describes partial or unavailable telemetry without claiming database
 pressure.
 Before each message POST it requires the configured direct

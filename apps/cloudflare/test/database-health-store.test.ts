@@ -61,6 +61,6 @@ describe("database health store", () => {
       `SELECT value
        FROM database_health_schema_meta
        WHERE key = 'schema_version'`,
-    ).one().value).toBe(2);
+    ).one().value).toBe(1);
   });
 });
