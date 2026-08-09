@@ -851,6 +851,15 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   the app-local Vercel OIDC adapter remains for browser/session/status/deletion
   calls into Cloudflare.
 
+  The shared public footer may read incident.io's fixed, public, bodyless,
+  queryless status summary directly from the browser. The response is display
+  evidence only and creates no product, incident, or availability authority.
+  Hosted Web keeps the global referrer policy at `strict-origin` and limits CSP
+  connectivity to the exact status-page origin, so the request carries no page
+  path, query, fragment, account data, prompt, health content, or message
+  content. Ordinary browser technical metadata still reaches incident.io and
+  is disclosed in the public subprocessor register.
+
   Nullable hosted-member model and reasoning preferences are web-owned,
   billing-gated control facts. Active personal members may select Luna or
   Terra; only an active paid Edge personal member may select Sol. The common
