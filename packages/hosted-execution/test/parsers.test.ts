@@ -3365,6 +3365,13 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolResponse({
       action: "share_contact_card",
+      result: { status: "unconfirmed" },
+    })).toEqual({
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "share_contact_card",
       result: { status: "unavailable", unavailableReason: "send_failed" },
     })).toEqual({
       action: "share_contact_card",

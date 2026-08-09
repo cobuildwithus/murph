@@ -530,6 +530,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('share_contact_card'),
+      avatarPrompt: z.string().trim().min(1).max(4000).optional(),
     })
     .strict(),
   z
@@ -990,6 +991,13 @@ type MurphGroupToolRequest =
             alt: string | null
             imageRef: string
           }
+    }
+  | {
+      action: 'share_contact_card'
+      avatar: {
+        source: 'generate'
+        args: GenerateImageToolArgs
+      }
     }
 
 export type MurphDynamicToolRequest =
@@ -1702,13 +1710,13 @@ function currentHostedMailboxItemId(
 
 function buildGeneratedImageCaptureIdempotencyKey(
   input: {
-    scope: 'generate-image' | 'group-avatar'
-    toolCallId: string | null
+    requestId: string | null
+    scope: 'contact-card-avatar' | 'generate-image' | 'group-avatar'
   },
 ): string | null {
-  const toolCallId = normalizeNullableString(input.toolCallId)
-  return toolCallId
-    ? `murph.dynamic-tool.${input.scope}:${toolCallId}`
+  const requestId = normalizeNullableString(input.requestId)
+  return requestId
+    ? `murph.dynamic-tool.${input.scope}:${requestId}`
     : null
 }
 
@@ -2545,7 +2553,7 @@ export async function executeMurphDynamicToolRequest(input: {
       }
 
       const captureIdempotencyKey = buildGeneratedImageCaptureIdempotencyKey({
-        toolCallId: readGeneratedImageToolCallId(input.request),
+        requestId: readGeneratedImageToolCallId(input.request),
         scope: 'generate-image',
       })
       const imageGenerationLauncher =
@@ -3698,6 +3706,77 @@ async function executeGroupTool(input: {
     | null = null
   if (input.request.action === 'offer_access') {
     request = buildGroupAccessOfferHostRequest(input.request)
+  } else if (isPreparedContactCardRequest(input.request)) {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (
+      userActionScope?.conversationScope !== 'direct'
+      || userActionScope.acceptedInputIds.length === 0
+    ) {
+      return toolTextResult(
+        false,
+        'personalized contact cards require a fresh user request in a personal direct conversation',
+      )
+    }
+    // Refuse a route that can never carry the attachment before paying for
+    // generation, capture, and publication. The post-generation binding below
+    // still owns the authoritative thread.
+    const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null
+    if (routeStatus && routeStatus.status !== 'ok') {
+      return toolTextResult(true, safeToolPayloadText({
+        action: 'share_contact_card',
+        result: routeStatus,
+      }))
+    }
+    const contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null
+    if (!contactCardShareKey) {
+      return toolTextResult(
+        false,
+        'personalized contact cards require fresh user-sourced input for this turn',
+      )
+    }
+    const prepared = await prepareGroupAvatarRuntimeRequest({
+      abortSignal: input.abortSignal,
+      // The accepted request, not the tool call: a replay must reuse this
+      // capture rather than pay for a second stochastic generation.
+      captureRequestId: contactCardShareKey,
+      captureScope: 'contact-card-avatar',
+      env: input.env,
+      fetchImpl: input.fetchImpl,
+      hostedToolContext: input.hostedToolContext,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      nextUsageOrdinal: input.nextUsageOrdinal,
+      request: {
+        action: 'set_chat_avatar',
+        avatar: input.request.avatar,
+      },
+      vaultRoot: input.vaultRoot,
+    })
+    if (!prepared.rpcSuccess) {
+      return {
+        rpcResult: {
+          contentItems: [{ text: prepared.rpcText, type: 'inputText' }],
+          success: false,
+        },
+        usageDraft: prepared.usageDraft ?? null,
+      }
+    }
+    request = {
+      action: 'share_contact_card',
+      contactCardImageUrl: prepared.request.groupChatIconUrl,
+      // Trusted-host request identity, so a retried or replayed turn collapses
+      // to one card while a genuinely new accepted request has its own send
+      // identity. Deliberately not the tool call id: a retry re-emits the
+      // call with a new id but keeps the same accepted input.
+      contactCardShareKey,
+    }
+    usageDraft = prepared.usageDraft ?? null
+    generatedAvatarCapture = prepared.savedImageRef
+      ? {
+          savedCaptureId: prepared.savedCaptureId ?? null,
+          savedImageRef: prepared.savedImageRef,
+        }
+      : null
   } else if (isPreparedGroupAvatarRequest(input.request)) {
     let preflight: Extract<
       HostedRuntimeGroupToolResponse,
@@ -3728,13 +3807,14 @@ async function executeGroupTool(input: {
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
+      captureRequestId: input.toolCallId,
+      captureScope: 'group-avatar',
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedToolContext: input.hostedToolContext,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       nextUsageOrdinal: input.nextUsageOrdinal,
       request: input.request,
-      toolCallId: input.toolCallId,
       vaultRoot: input.vaultRoot,
     })
     if (!prepared.rpcSuccess) {
@@ -4128,6 +4208,17 @@ async function executeGroupPermissionOffer(input: {
   }
 }
 
+const MURPH_CONTACT_CARD_IMAGE_OUTPUT_COMPRESSION = 40
+
+function isPreparedContactCardRequest(
+  request: MurphGroupToolRequest,
+): request is Extract<
+  MurphGroupToolRequest,
+  { action: 'share_contact_card'; avatar: unknown }
+> {
+  return request.action === 'share_contact_card' && 'avatar' in request
+}
+
 function isPreparedGroupAvatarRequest(
   request: MurphGroupToolRequest,
 ): request is Extract<
@@ -4139,6 +4230,13 @@ function isPreparedGroupAvatarRequest(
 
 async function prepareGroupAvatarRuntimeRequest(input: {
   abortSignal: AbortSignal | null
+  /**
+   * Identity that owns the generated capture. A replayed turn re-emits the
+   * tool call with a new id, so a caller whose effect must survive a replay
+   * passes its accepted-request id here instead.
+   */
+  captureRequestId: string | null
+  captureScope: 'contact-card-avatar' | 'group-avatar'
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
@@ -4148,7 +4246,6 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     MurphGroupToolRequest,
     { action: 'set_chat_avatar'; avatar: unknown }
   >
-  toolCallId: string | null
   vaultRoot: string | null
 }): Promise<
   | {
@@ -4171,10 +4268,15 @@ async function prepareGroupAvatarRuntimeRequest(input: {
   if (avatar.source === 'generate') {
     const generated = await executeGenerateImageTool({
       abortSignal: input.abortSignal,
-      args: avatar.args,
+      args: input.captureScope === 'contact-card-avatar'
+        ? {
+            ...avatar.args,
+            outputCompression: MURPH_CONTACT_CARD_IMAGE_OUTPUT_COMPRESSION,
+          }
+        : avatar.args,
       captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
-        scope: 'group-avatar',
-        toolCallId: input.toolCallId,
+        requestId: input.captureRequestId,
+        scope: input.captureScope,
       }),
       env: input.env,
       fetchImpl: input.fetchImpl,
@@ -5531,6 +5633,31 @@ function parseGroupArguments(
       },
     }
   }
+  if (parsed.data.action === 'share_contact_card') {
+    if (!parsed.data.avatarPrompt) {
+      return { ok: true, request: { action: 'share_contact_card' } }
+    }
+    return {
+      ok: true,
+      request: {
+        action: 'share_contact_card',
+        avatar: {
+          source: 'generate',
+          // One fixed configuration. The card has no recipient-visible alt
+          // channel, and photo quality is not a member-visible choice, so the
+          // schema asks the model only for the picture description.
+          args: {
+            alt: null,
+            outputFormat: 'jpeg',
+            prompt: parsed.data.avatarPrompt,
+            quality: 'medium',
+            referenceImageRefs: [],
+            size: '1024x1024',
+          },
+        },
+      },
+    }
+  }
   if (parsed.data.action === 'set_chat_avatar') {
     if (parsed.data.avatarSource === 'generate') {
       if (!parsed.data.prompt) {
@@ -5617,7 +5744,6 @@ function parseGroupArguments(
     || parsed.data.action === 'read_chat_name'
     || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_chat_participants'
-    || parsed.data.action === 'share_contact_card'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
   }
