@@ -404,18 +404,14 @@ describe("hosted runtime latency dashboard store", () => {
       timingLogTruncated: false,
       unknownColdStateCount: 2,
     });
-    expect(prisma.hostedRuntimeLog.findMany).toHaveBeenCalledWith(
+    expect(runtimeLogMocks.listHostedRuntimeTurnTimingLogs).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
-          attemptId: {
-            in: [
-              "attempt_cold",
-              "attempt_warm",
-              "attempt_unknown",
-              "attempt_staged",
-            ],
-          },
-        }),
+        attemptIds: [
+          "attempt_cold",
+          "attempt_warm",
+          "attempt_unknown",
+          "attempt_staged",
+        ],
       }),
     );
   });
@@ -697,36 +693,12 @@ describe("hosted runtime latency dashboard store", () => {
       windowHours: 1,
     });
 
-    expect(prisma.hostedRuntimeLog.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      orderBy: [{ at: "desc" }, { id: "desc" }],
-      where: expect.objectContaining({
-        AND: [
-          {
-            redactedJson: {
-              equals: "murph.assistant-turn-timing.v1",
-              path: ["schema"],
-            },
-          },
-          {
-            redactedJson: {
-              equals: "assistant.turn.timing",
-              path: ["type"],
-            },
-          },
-          {
-            redactedJson: {
-              equals: "reply-dispatched",
-              path: ["turnTimingStage"],
-            },
-          },
-        ],
-        at: {
-          gte: instant("2026-05-27T11:00:00.000Z"),
-          lte: instant("2026-05-27T12:10:00.000Z"),
-        },
-        eventCode: "assistant.automation_detail",
-      }),
-    }));
+    expect(runtimeLogMocks.listHostedRuntimeTurnTimingLogs).toHaveBeenCalledWith({
+      attemptIds: ["attempt_truncated"],
+      from: instant("2026-05-27T11:00:00.000Z"),
+      limit: 100_001,
+      to: instant("2026-05-27T12:10:00.000Z"),
+    });
     expect(dashboard.replyTraceQuality.timingLogTruncated).toBe(true);
     expect(dashboard.replyLatencyMs.providerRequest.count).toBe(0);
     expect(dashboard.replyLatencyMs.providerResultToReplyIntent.count).toBe(0);
@@ -779,12 +751,6 @@ describe("hosted runtime latency dashboard store", () => {
       providerStartAt: "2026-05-27T12:00:01.000Z",
       runtimeAttemptId: "attempt_unavailable",
     });
-    const legacyTiming = createTurnTimingLogRows({
-      deliveryIntentId: "intent_unavailable",
-      providerRequestElapsedMs: 2_000,
-      runtimeAttemptId: "attempt_unavailable",
-      sinceProviderResultMs: 1_000,
-    });
     runtimeLogMocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
     runtimeLogMocks.listHostedRuntimeTurnTimingLogs.mockRejectedValueOnce(
       new Error("isolated database unavailable"),
@@ -793,7 +759,7 @@ describe("hosted runtime latency dashboard store", () => {
     const dashboard = await readHostedIngressLatencyDashboard({
       inFlightGraceMs: 0,
       now: instant("2026-05-27T12:05:00.000Z"),
-      prisma: createLatencyDashboardPrisma([row], legacyTiming),
+      prisma: createLatencyDashboardPrisma([row]),
       source: "linq",
       windowHours: 1,
     });
@@ -1161,6 +1127,74 @@ describe("hosted runtime latency dashboard store", () => {
     expect(trace?.runtimeAttemptId).toBe("attempt_staged_1");
     expect(trace?.providerStartAt).toBeNull();
     expect(trace?.providerRequestOrdinal).toBeNull();
+  });
+
+  it("separates untraced assistant inputs from rejected provider start rows", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:11:20.000Z")),
+    });
+
+    await expect(recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_untraced_1"],
+      at: instant("2026-06-02T19:11:21.000Z"),
+      authenticatedUserId: "member_latency_1",
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_untraced_1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+      untracedCount: 1,
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_traced_1",
+      at: instant("2026-06-02T19:11:22.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_untraced_1",
+      source: "linq",
+    });
+
+    await expect(recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_traced_1", "input_untraced_1"],
+      at: instant("2026-06-02T19:11:23.000Z"),
+      authenticatedUserId: "member_latency_1",
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_untraced_1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 1,
+      untracedCount: 1,
+    });
+  });
+
+  it("reports assistant milestones for untraced assistant inputs as untraced", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:11:40.000Z")),
+    });
+
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_untraced_2"],
+      at: instant("2026-06-02T19:11:41.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "first_codex_output_observed",
+      prisma,
+      runtimeAttemptId: "attempt_untraced_2",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+      untracedCount: 1,
+    });
   });
 
   it("transfers terminal refresh ownership to the recovery attempt", async () => {
@@ -2228,14 +2262,27 @@ function createLatencyDashboardPrisma(
     redactedJson: unknown;
   }[] = [],
 ): LatencyDashboardPrisma {
+  if (timingLogRows.length > 0) {
+    runtimeLogMocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
+    runtimeLogMocks.listHostedRuntimeTurnTimingLogs.mockResolvedValue(
+      [...timingLogRows],
+    );
+  }
+
+  const normalizedRows = rows.map((row) => ({
+    linqDelivery: null,
+    linqDeliveryId: null,
+    phaseBreakdownJson: null,
+    providerRequestOrdinal: null,
+    replyRuntimeAttemptId: null,
+    runtimeAttemptId: null,
+    ...row,
+  }));
   return {
     hostedIngressLatencyTrace: {
-      findMany: vi.fn(async () => rows),
+      findMany: vi.fn(async () => normalizedRows),
     },
-    hostedRuntimeLog: {
-      findMany: vi.fn(async () => timingLogRows),
-    },
-  } as unknown as LatencyDashboardPrisma;
+  };
 }
 
 function createLinkedDashboardRow(input: {
@@ -2478,9 +2525,6 @@ function createLatencyWritePrisma(input: {
       update: typeof update;
       updateMany: typeof updateMany;
     };
-    hostedRuntimeLog: {
-      findMany: ReturnType<typeof vi.fn>;
-    };
     readMailboxQuerySql: () => string;
     readMailboxQueryValues: () => readonly (readonly unknown[])[];
     readTrace: () => MutableLatencyTrace | null;
@@ -2497,9 +2541,6 @@ function createLatencyWritePrisma(input: {
       findMany,
       updateMany,
       update,
-    },
-    hostedRuntimeLog: {
-      findMany: vi.fn(async () => []),
     },
     readDeliveryLinkSql: () => deliveryLinkSql,
     readMailboxQuerySql: () => {

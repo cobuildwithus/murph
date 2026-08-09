@@ -771,13 +771,21 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
-  it("retries the current capacity-epoch Linq usage-limit notice from the denied gate", async () => {
-    const deniedDecision = buildUsageLimitExceededGateDecision();
-    mocks.projectHostedAiUsageLimitNoticeForDelivery.mockImplementation(
-      async (input: { message: string }) =>
-        `${input.message}\n\nAdd usage: ` +
-        "https://www.withmurph.ai/settings?addUsage=true#subscription",
-    );
+  it("retries the same group capacity epoch after mandatory link projection recovers", async () => {
+    const deniedDecision = {
+      ...buildUsageLimitExceededGateDecision(),
+      allowanceSource: "thread_container" as const,
+      userNotice: {
+        code: "thread_usage_limit_reached" as const,
+        message: "Murph is paused for this chat.",
+      },
+    };
+    const linkedNotice =
+      "Murph is paused in this chat right now. Private options are here:\n" +
+      "https://www.withmurph.ai/groups/fund/group_join_code_1234";
+    mocks.projectHostedAiUsageLimitNoticeForDelivery
+      .mockRejectedValueOnce(new Error("mandatory recovery URL unavailable"))
+      .mockResolvedValueOnce(linkedNotice);
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
         conversationImportedSeq: "2",
@@ -804,9 +812,9 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake({
       routeAuthority,
     }));
-    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat
-      .mockRejectedValueOnce(new Error("provider unavailable"))
-      .mockResolvedValueOnce({ status: "sent" });
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue({
+      status: "sent",
+    });
 
     const firstResponse = await reconciliationRoute.GET(
       requestForFacts(),
@@ -829,27 +837,27 @@ describe("hosted orchestration reconciliation facts", () => {
       mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock
         .invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
-    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledTimes(2);
-    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenLastCalledWith({
-      chatId: "chat_runtime_denied",
-      claimToken: {
-        periodStart: deniedDecision.periodStart.toISOString(),
-        planResetAt: null,
-        sentAt: FIXED_NOW,
-        usageCreditLedgerVersion: "3",
-      },
-      memberId: MEMBER_ID,
-      message:
-        `${deniedDecision.userNotice.message}\n\nAdd usage: ` +
-        "https://www.withmurph.ai/settings?addUsage=true#subscription",
-      noticeCode: deniedDecision.userNotice.code,
-      occurredAt: FIXED_NOW,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      replyToMessageId: "msg_runtime_denied",
-      routeAuthority,
-      sourceEventId: "linq_event_runtime_denied",
-    });
-    expect(mocks.projectHostedAiUsageLimitNoticeForDelivery).toHaveBeenCalledWith({
+    expect(mocks.projectHostedAiUsageLimitNoticeForDelivery).toHaveBeenCalledTimes(2);
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledExactlyOnceWith({
+        chatId: "chat_runtime_denied",
+        claimToken: {
+          periodStart: deniedDecision.periodStart.toISOString(),
+          planResetAt: null,
+          sentAt: FIXED_NOW,
+          usageCreditLedgerVersion: "3",
+        },
+        memberId: MEMBER_ID,
+        message: linkedNotice,
+        noticeCode: deniedDecision.userNotice.code,
+        occurredAt: FIXED_NOW,
+        prisma: expect.objectContaining({ kind: "prisma" }),
+        replyToMessageId: "msg_runtime_denied",
+        routeAuthority,
+        sourceEventId: "linq_event_runtime_denied",
+      });
+    expect(mocks.projectHostedAiUsageLimitNoticeForDelivery)
+      .toHaveBeenLastCalledWith({
       memberId: MEMBER_ID,
       message: deniedDecision.userNotice.message,
       noticeCode: deniedDecision.userNotice.code,

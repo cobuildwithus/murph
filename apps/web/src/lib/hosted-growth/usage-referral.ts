@@ -18,10 +18,10 @@ import {
 } from "@murphai/contracts";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import { readHostedGroupUsageStatus } from "../hosted-groups/group-usage-funding";
 import {
   lookupHostedGroupParticipantMemberByHandle,
 } from "../hosted-groups/participant-member";
+import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   appendHostedUsageCreditGrantTx,
 } from "../hosted-execution/usage-credit-grant";
@@ -1561,11 +1561,9 @@ async function hasHostedUsageReferralSourceAccess(input: {
   prisma: PrismaClient;
 }): Promise<boolean> {
   if (input.actor.beneficiaryMemberId !== input.actor.referrerMemberId) {
-    const status = await readHostedGroupUsageStatus({
+    return hasHostedRuntimeActiveAccess(input.actor.beneficiaryMemberId, {
       prisma: input.prisma,
-      runtimeMemberId: input.actor.beneficiaryMemberId,
     });
-    return status !== null;
   }
 
   const status = await readHostedPersonalAiUsageStatus({

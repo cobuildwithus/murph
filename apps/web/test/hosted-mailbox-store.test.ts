@@ -830,7 +830,6 @@ describe("appendHostedMailboxItemTx", () => {
       }),
     });
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
-    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalled();
   });
 
   it("ignores caller-supplied payload metadata when selecting storage and inserting metadata", async () => {
@@ -1044,7 +1043,6 @@ describe("appendHostedMailboxItemTx", () => {
     );
     expect(executeRawMock.mock.calls[0]?.[2]).toBe("dedupe_existing_1");
     expect(tx.$queryRaw).not.toHaveBeenCalled();
-    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalled();
     expect(consoleWarn).toHaveBeenCalledWith("Hosted mailbox dedupe conflict.", {
       component: "mailbox",
       eventCode: "mailbox.dedupe_conflict",
@@ -1163,11 +1161,6 @@ describe("appendHostedMailboxItemTx", () => {
       },
     });
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
-    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        eventCode: "mailbox.dedupe_conflict",
-      }),
-    });
   });
 });
 
@@ -2890,28 +2883,6 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue(null),
       },
-      hostedRuntimeLog: {
-        create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
-          at: args.data.at as Date,
-          attemptId: args.data.attemptId as string | null,
-          checkpointVersion: args.data.checkpointVersion as bigint | null,
-          component: String(args.data.component),
-          createdAt: FIXED_NOW,
-          errorCode: args.data.errorCode as string | null,
-          eventCode: String(args.data.eventCode),
-          id: String(args.data.id),
-          leaseGeneration: args.data.leaseGeneration as bigint | null,
-          level: String(args.data.level),
-          mailboxLane: args.data.mailboxLane as string | null,
-          mailboxSeqEnd: args.data.mailboxSeqEnd as bigint | null,
-          mailboxSeqStart: args.data.mailboxSeqStart as bigint | null,
-          outboxIntentRef: args.data.outboxIntentRef as string | null,
-          phase: String(args.data.phase),
-          redactedJson: args.data.redactedJson,
-          userId: String(args.data.userId),
-          workspaceVersion: args.data.workspaceVersion as bigint | null,
-        })),
-      },
       hostedThreadRoute: {
         findFirst: vi.fn().mockResolvedValue({
           containerMemberId: containerUserId,
@@ -3235,28 +3206,6 @@ function createHostedMailboxTx(input: {
     hostedMailboxPayload: input.hostedMailboxPayload,
     hostedGroup: input.hostedGroup ?? {
       findUnique: vi.fn(async () => null),
-    },
-    hostedRuntimeLog: {
-      create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
-        at: args.data.at as Date,
-        attemptId: args.data.attemptId as string | null,
-        checkpointVersion: args.data.checkpointVersion as bigint | null,
-        component: String(args.data.component),
-        createdAt: FIXED_NOW,
-        errorCode: args.data.errorCode as string | null,
-        eventCode: String(args.data.eventCode),
-        id: String(args.data.id),
-        leaseGeneration: args.data.leaseGeneration as bigint | null,
-        level: String(args.data.level),
-        mailboxLane: args.data.mailboxLane as string | null,
-        mailboxSeqEnd: args.data.mailboxSeqEnd as bigint | null,
-        mailboxSeqStart: args.data.mailboxSeqStart as bigint | null,
-        outboxIntentRef: args.data.outboxIntentRef as string | null,
-        phase: String(args.data.phase),
-        redactedJson: args.data.redactedJson,
-        userId: String(args.data.userId),
-        workspaceVersion: args.data.workspaceVersion as bigint | null,
-      })),
     },
     hostedThreadContainer: input.hostedThreadContainer ?? {
       findUnique: vi.fn(async () => null),

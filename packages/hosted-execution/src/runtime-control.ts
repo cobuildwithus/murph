@@ -1012,7 +1012,6 @@ export interface HostedRuntimeGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
-  sponsorshipStatus: "not_sponsored" | "sponsored";
 }
 
 export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [

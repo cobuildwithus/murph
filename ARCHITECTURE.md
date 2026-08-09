@@ -932,16 +932,21 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   entitlement, and separate daily Linq anti-abuse gates, remain enforceable.
 
   The group-tool privacy projection has one bounded rolling-deploy reader seam.
-  A compatible runtime accepts both the current exact
-  `{fundingNeeded,fundingUrl,sponsorshipStatus}` response and the immediately
-  preceding exact `{capacityState,fundingUrl,periodEnd,remainingPercent?}`
-  response. It maps the preceding shape to `not_sponsored`, derives only the
-  funding boolean, and discards period and percentage fields before they reach
-  assistant policy. In the current shape, `fundingNeeded` expresses urgency
-  while `fundingUrl` remains the capability for an explicit contribution at
-  any valid group-capacity state. Assistant policy uses the boolean only for
-  proactive depletion messaging and may share the returned URL after an
-  explicit funding request even when the boolean is false. Deploy that reader
+  A compatible runtime accepts the current exact `{fundingNeeded,fundingUrl}`
+  response, strips the immediately preceding optional `sponsorshipStatus`
+  field, and also accepts the older exact
+  `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response. It derives
+  only the funding boolean from that oldest shape and discards period,
+  percentage, and funding-setup fields before they reach assistant policy. In
+  the current shape, `fundingNeeded` is false for healthy capacity and for low
+  capacity with an available or pending automatic refill; it is true for low
+  capacity without automatic recovery and for every exhausted room.
+  `fundingUrl` remains the capability for an explicit contribution at any valid
+  group-capacity state. Assistant policy has one contract regardless of payment
+  setup: it uses the boolean only for proactive depletion messaging and may
+  share the returned URL after an explicit funding request even when the
+  boolean is false. A Web-owned exhaustion projection always appends that
+  current URL to the ordinary group pause copy. Deploy that reader
   throughout Cloudflare/runner before Web begins emitting the current shape.
   Because the preceding producer cannot represent an active monthly
   sponsorship, the Web switch becomes a forward-only tandem cutover once
