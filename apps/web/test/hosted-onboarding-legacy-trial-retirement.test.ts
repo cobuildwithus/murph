@@ -239,7 +239,7 @@ function buildStripe(status: Stripe.Subscription.Status) {
       trialUsageLimitUsdMicros: "4500000",
     },
     status,
-  } as Stripe.Subscription;
+  } as unknown as Stripe.Subscription;
   return {
     subscriptions: {
       cancel: vi.fn(async () => subscription),

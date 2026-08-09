@@ -2855,7 +2855,7 @@ function makeExactLegacyPulseTrialSubscription(input?: {
     status: input?.status ?? "trialing",
     trial_end: 1_745_020_800,
     trial_start: 1_744_416_000,
-  } as Stripe.Subscription;
+  } as unknown as Stripe.Subscription;
 }
 
 function makeStripeSubscription(
