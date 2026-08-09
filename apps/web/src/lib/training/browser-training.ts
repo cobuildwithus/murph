@@ -1,9 +1,10 @@
+import { BROWSER_VAULT_TRAINING_SESSION_SCHEMA } from "@murphai/contracts/browser-vault";
 import type {
   BrowserVaultEntity,
   BrowserVaultQueryClient,
 } from "@murphai/query/browser-replica-client";
 
-const RECENT_SESSION_LIMIT = 12;
+const RECENT_SESSION_LIMIT = 24;
 const EXERCISE_PROGRESS_LIMIT = 8;
 const SUMMARY_LOOKBACK_DAYS = 30;
 const PROGRESS_LOOKBACK_DAYS = 183;
@@ -14,7 +15,6 @@ export interface TrainingSetView {
   assistanceKg: number | null;
   bodyweightKg: number | null;
   completed: boolean;
-  completedAt: string | null;
   distanceMeters: number | null;
   durationSeconds: number | null;
   id: string;
@@ -22,14 +22,12 @@ export interface TrainingSetView {
   order: number;
   reps: number | null;
   rpe: number | null;
-  type: string | null;
   weight: number | null;
   weightUnit: string | null;
 }
 
 export interface TrainingExerciseView {
   id: string;
-  mode: string | null;
   name: string;
   note: string | null;
   order: number;
@@ -47,9 +45,7 @@ export interface TrainingSessionView {
   exercises: TrainingExerciseView[];
   id: string;
   note: string | null;
-  routineId: string | null;
   setCount: number;
-  source: string | null;
   startedAt: string;
   state: "completed" | "in_progress";
   title: string;
@@ -58,7 +54,7 @@ export interface TrainingSessionView {
 export interface TrainingExerciseProgress {
   bestSet: TrainingSetView | null;
   id: string;
-  lastPerformedAt: string;
+  lastPerformedDate: string;
   lastSet: TrainingSetView | null;
   name: string;
   sessionCount: number;
@@ -94,80 +90,79 @@ export function selectBrowserVaultTraining(
   const sessions = client.entities
     .list({ families: ["event"], kinds: ["activity_session"] })
     .flatMap(parseTrainingSession)
-    .filter(isStrengthTrainingSession)
     .sort(compareSessionsLatestFirst);
-  const activeSession = sessions.find((session) => session.state === "in_progress") ?? null;
-  const completedSessions = sessions.filter((session) => session.state === "completed");
-  const recentSessions = completedSessions.slice(0, RECENT_SESSION_LIMIT);
+  const currentDate = resolveTrainingCurrentDate(sessions, generatedAt);
+  const activeSession =
+    sessions.find((session) => session.state === "in_progress") ?? null;
+  const completedSessions = sessions.filter(
+    (session) => session.state === "completed",
+  );
   const summarySessions = sessions.filter((session) =>
-    isWithinLookback(session.startedAt, generatedAt, SUMMARY_LOOKBACK_DAYS)
+    isIsoDateWithinLookback(
+      session.date,
+      currentDate,
+      SUMMARY_LOOKBACK_DAYS,
+    )
   );
   const progressSessions = sessions.filter((session) =>
-    isWithinLookback(session.startedAt, generatedAt, PROGRESS_LOOKBACK_DAYS)
+    isIsoDateWithinLookback(
+      session.date,
+      currentDate,
+      PROGRESS_LOOKBACK_DAYS,
+    )
   );
 
   return {
     activeSession,
     exerciseProgress: buildExerciseProgress(progressSessions),
     generatedAt,
-    recentSessions,
+    recentSessions: completedSessions.slice(0, RECENT_SESSION_LIMIT),
     summary: buildTrainingSummary(summarySessions),
-    weeks: buildTrainingWeeks(sessions, generatedAt),
+    weeks: buildTrainingWeeks(sessions, currentDate),
   };
 }
 
 function parseTrainingSession(entity: BrowserVaultEntity): TrainingSessionView[] {
-  const attributes = entity.attributes;
-  const workout = readRecord(attributes.workout);
-  const explicitState = readSessionState(
-    workout?.state
-      ?? workout?.status
-      ?? attributes.state
-      ?? attributes.status
-      ?? attributes.sessionStatus,
-  );
-  const inferredLiveState = readString(workout?.sourceApp) === "murph-live"
-    && readString(workout?.startedAt) !== null
-    && readString(workout?.endedAt) === null
-      ? "in_progress"
-      : null;
-  const state = explicitState ?? inferredLiveState ?? "completed";
-  const exercises = parseWorkoutExercises({
-    active: state === "in_progress",
-    sessionId: entity.id,
-    value: workout?.exercises,
-  });
-  const legacyExercises = exercises.length > 0
-    ? exercises
-    : parseLegacyStrengthExercises({
-        sessionId: entity.id,
-        value: attributes.strengthExercises,
-      });
-  const startedAt = readString(workout?.startedAt)
-    ?? readString(attributes.startedAt)
+  const training = readRecord(entity.attributes.training);
+  if (
+    !training
+    || readString(training.schema) !== BROWSER_VAULT_TRAINING_SESSION_SCHEMA
+  ) {
+    return [];
+  }
+
+  const startedAt = readString(training.startedAt)
     ?? entity.occurredAt
     ?? (entity.date ? `${entity.date}T12:00:00.000Z` : null);
-
   if (!startedAt) {
     return [];
   }
 
-  const endedAt = readString(workout?.endedAt)
-    ?? readString(attributes.endedAt)
-    ?? readString(attributes.completedAt);
-  const durationMinutes = readNumber(attributes.durationMinutes)
+  const endedAt = readString(training.endedAt);
+  const state = readString(training.state) === "in_progress"
+    ? "in_progress"
+    : "completed";
+  const exercises = parseWorkoutExercises({
+    sessionId: entity.id,
+    value: training.exercises,
+  });
+  const normalizedExercises = exercises.length > 0
+    ? exercises
+    : parseLegacyStrengthExercises({
+        sessionId: entity.id,
+        value: training.strengthExercises,
+      });
+  const durationMinutes = readNumber(training.durationMinutes)
     ?? deriveDurationMinutes(startedAt, endedAt);
-  const title = readString(attributes.title)
-    ?? readString(workout?.routineName)
-    ?? entity.title
-    ?? defaultTrainingTitle(
-      readString(attributes.activityType) ?? readString(attributes.activityKind),
-    );
-  const note = readString(workout?.sessionNote) ?? readString(attributes.note);
-  const activityType = readString(attributes.activityKind)
-    ?? readString(attributes.activityType)
-    ?? (legacyExercises.length > 0 ? "strength-training" : "activity");
-  const sets = legacyExercises.flatMap((exercise) => exercise.sets);
+  const activityType = readString(training.activityType)
+    ?? readString(entity.attributes.activityKind)
+    ?? (normalizedExercises.length > 0 ? "strength-training" : "activity");
+  const title = readString(training.title)
+    ?? readString(training.routineName)
+    ?? defaultTrainingTitle(activityType);
+  const note = readString(training.sessionNote)
+    ?? readString(training.note);
+  const sets = normalizedExercises.flatMap((exercise) => exercise.sets);
 
   return [{
     activityType,
@@ -175,13 +170,11 @@ function parseTrainingSession(entity: BrowserVaultEntity): TrainingSessionView[]
     date: entity.date ?? startedAt.slice(0, 10),
     durationMinutes,
     endedAt,
-    exerciseCount: legacyExercises.length,
-    exercises: legacyExercises,
+    exerciseCount: normalizedExercises.length,
+    exercises: normalizedExercises,
     id: entity.id,
     note,
-    routineId: readString(workout?.routineId) ?? readString(attributes.routineId),
     setCount: sets.length,
-    source: readString(attributes.source),
     startedAt,
     state,
     title,
@@ -189,7 +182,6 @@ function parseTrainingSession(entity: BrowserVaultEntity): TrainingSessionView[]
 }
 
 function parseWorkoutExercises(input: {
-  active: boolean;
   sessionId: string;
   value: unknown;
 }): TrainingExerciseView[] {
@@ -207,7 +199,8 @@ function parseWorkoutExercises(input: {
 
       const order = readPositiveInteger(exercise.order) ?? index + 1;
       const sourceExerciseId = readString(exercise.sourceExerciseId);
-      const exerciseId = sourceExerciseId ?? `${normalizeExerciseName(name)}:${order}`;
+      const exerciseKey = sourceExerciseId ?? normalizeExerciseName(name);
+      const exerciseId = `${exerciseKey}:${order}:${index}`;
       const unitOverride = readString(exercise.unitOverride);
       const sets = Array.isArray(exercise.sets)
         ? exercise.sets.flatMap((setValue, setIndex) => {
@@ -221,8 +214,7 @@ function parseWorkoutExercises(input: {
               addedWeightKg: readNumber(set.addedWeightKg),
               assistanceKg: readNumber(set.assistanceKg),
               bodyweightKg: readNumber(set.bodyweightKg),
-              completed: readSetCompleted(set, input.active),
-              completedAt: readString(set.completedAt),
+              completed: hasLoggedTrainingSet(set),
               distanceMeters: readNumber(set.distanceMeters),
               durationSeconds: readNumber(set.durationSeconds),
               id: `${input.sessionId}:${exerciseId}:${setOrder}:${setIndex}`,
@@ -230,7 +222,6 @@ function parseWorkoutExercises(input: {
               order: setOrder,
               reps: readNonNegativeInteger(set.reps),
               rpe: readNumber(set.rpe),
-              type: readString(set.type),
               weight: readNumber(set.weight),
               weightUnit: readString(set.weightUnit) ?? unitOverride,
             } satisfies TrainingSetView];
@@ -239,7 +230,6 @@ function parseWorkoutExercises(input: {
 
       return [{
         id: exerciseId,
-        mode: readString(exercise.mode),
         name,
         note: readString(exercise.note),
         order,
@@ -265,7 +255,10 @@ function parseLegacyStrengthExercises(input: {
       return [];
     }
 
-    const setCount = Math.min(readPositiveInteger(exercise.setCount) ?? 0, 150);
+    const setCount = Math.min(
+      readPositiveInteger(exercise.setCount) ?? 0,
+      150,
+    );
     const reps = readNonNegativeInteger(exercise.repsPerSet);
     const weight = readNumber(exercise.load);
     const weightUnit = readString(exercise.loadUnit);
@@ -275,7 +268,6 @@ function parseLegacyStrengthExercises(input: {
       assistanceKg: null,
       bodyweightKg: null,
       completed: true,
-      completedAt: null,
       distanceMeters: null,
       durationSeconds: null,
       id: `${input.sessionId}:${exerciseId}:${setIndex + 1}`,
@@ -283,14 +275,12 @@ function parseLegacyStrengthExercises(input: {
       order: setIndex + 1,
       reps,
       rpe: null,
-      type: null,
       weight,
       weightUnit,
     } satisfies TrainingSetView));
 
     return [{
       id: exerciseId,
-      mode: weight !== null ? "weight_reps" : null,
       name,
       note: readString(exercise.loadDescription),
       order: index + 1,
@@ -298,26 +288,6 @@ function parseLegacyStrengthExercises(input: {
       sourceExerciseId: null,
     } satisfies TrainingExerciseView];
   });
-}
-
-function readSetCompleted(
-  set: Record<string, unknown>,
-  activeSession: boolean,
-): boolean {
-  const status = readString(set.status);
-  if (status === "skipped" || status === "planned" || set.completed === false) {
-    return false;
-  }
-  if (
-    set.completed === true
-    || readString(set.completedAt)
-    || status === "completed"
-    || status === "done"
-  ) {
-    return true;
-  }
-
-  return activeSession ? hasLoggedTrainingSet(set) : true;
 }
 
 function hasLoggedTrainingSet(set: Record<string, unknown>): boolean {
@@ -332,33 +302,18 @@ function hasLoggedTrainingSet(set: Record<string, unknown>): boolean {
     || readNumber(set.addedWeightKg) !== null;
 }
 
-function readSessionState(value: unknown): TrainingSessionView["state"] | null {
-  const state = readString(value)?.toLowerCase();
-  if (!state) {
-    return null;
-  }
-  if (["active", "in_progress", "in-progress", "started"].includes(state)) {
-    return "in_progress";
-  }
-  if (["completed", "complete", "done", "finished"].includes(state)) {
-    return "completed";
-  }
-  return null;
-}
-
-function isStrengthTrainingSession(session: TrainingSessionView): boolean {
-  return session.exercises.length > 0
-    || session.activityType === "strength-training"
-    || session.activityType === "strength_training"
-    || session.activityType === "strength";
-}
-
-function buildTrainingSummary(sessions: readonly TrainingSessionView[]): TrainingSummary {
+function buildTrainingSummary(
+  sessions: readonly TrainingSessionView[],
+): TrainingSummary {
   const completedSets = sessions.flatMap((session) =>
-    session.exercises.flatMap((exercise) => exercise.sets.filter((set) => set.completed))
+    session.exercises.flatMap((exercise) =>
+      exercise.sets.filter((set) => set.completed)
+    )
   );
   const exerciseIds = new Set(
-    sessions.flatMap((session) => session.exercises.map(progressExerciseKey)),
+    sessions.flatMap((session) =>
+      session.exercises.map(progressExerciseKey)
+    ),
   );
 
   return {
@@ -376,6 +331,7 @@ function buildExerciseProgress(
     bestSet: TrainingSetView | null;
     id: string;
     lastPerformedAt: string;
+    lastPerformedDate: string;
     lastSet: TrainingSetView | null;
     name: string;
     sessionIds: Set<string>;
@@ -395,6 +351,7 @@ function buildExerciseProgress(
         bestSet: null,
         id,
         lastPerformedAt: session.startedAt,
+        lastPerformedDate: session.date,
         lastSet: null,
         name: exercise.name,
         sessionIds: new Set<string>(),
@@ -402,7 +359,8 @@ function buildExerciseProgress(
       };
       const latestSet = completedSets.at(-1) ?? null;
       const representativeSet = completedSets.reduce<TrainingSetView | null>(
-        (best, set) => best === null || compareTrainingSets(set, best) > 0 ? set : best,
+        (best, set) =>
+          best === null || compareTrainingSets(set, best) > 0 ? set : best,
         null,
       );
 
@@ -410,6 +368,7 @@ function buildExerciseProgress(
       current.setCount += completedSets.length;
       if (session.startedAt >= current.lastPerformedAt) {
         current.lastPerformedAt = session.startedAt;
+        current.lastPerformedDate = session.date;
         current.lastSet = latestSet;
         current.name = exercise.name;
       }
@@ -436,7 +395,7 @@ function buildExerciseProgress(
     .map((entry) => ({
       bestSet: entry.bestSet,
       id: entry.id,
-      lastPerformedAt: entry.lastPerformedAt,
+      lastPerformedDate: entry.lastPerformedDate,
       lastSet: entry.lastSet,
       name: entry.name,
       sessionCount: entry.sessionIds.size,
@@ -446,20 +405,20 @@ function buildExerciseProgress(
 
 function buildTrainingWeeks(
   sessions: readonly TrainingSessionView[],
-  generatedAt: string,
+  currentDateValue: string,
 ): TrainingWeek[] {
-  const now = parseDate(generatedAt);
-  if (!now) {
+  const currentDate = parseIsoDate(currentDateValue);
+  if (!currentDate) {
     return [];
   }
 
-  const currentWeekStart = startOfUtcWeek(now);
+  const currentWeekStart = startOfUtcWeek(currentDate);
   return Array.from({ length: WEEK_COUNT }, (_, index) => {
     const weekOffset = index - (WEEK_COUNT - 1);
     const start = addUtcDays(currentWeekStart, weekOffset * 7);
     const end = addUtcDays(start, 7);
     const count = sessions.filter((session) => {
-      const date = parseDate(session.startedAt);
+      const date = parseIsoDate(session.date);
       return date !== null && date >= start && date < end;
     }).length;
 
@@ -479,6 +438,11 @@ function compareTrainingSets(
   left: TrainingSetView,
   right: TrainingSetView,
 ): number {
+  const assistanceDifference = compareAssistance(left, right);
+  if (assistanceDifference !== 0) {
+    return assistanceDifference;
+  }
+
   const leftLoad = normalizedLoadKg(left);
   const rightLoad = normalizedLoadKg(right);
   if (leftLoad !== rightLoad) {
@@ -488,6 +452,22 @@ function compareTrainingSets(
   return (left.reps ?? 0) - (right.reps ?? 0)
     || (left.durationSeconds ?? 0) - (right.durationSeconds ?? 0)
     || (left.distanceMeters ?? 0) - (right.distanceMeters ?? 0);
+}
+
+function compareAssistance(
+  left: TrainingSetView,
+  right: TrainingSetView,
+): number {
+  if (left.assistanceKg === null && right.assistanceKg === null) {
+    return 0;
+  }
+  if (left.assistanceKg === null) {
+    return 1;
+  }
+  if (right.assistanceKg === null) {
+    return -1;
+  }
+  return right.assistanceKg - left.assistanceKg;
 }
 
 function normalizedLoadKg(set: TrainingSetView): number {
@@ -519,23 +499,47 @@ function compareSessionsLatestFirst(
   left: TrainingSessionView,
   right: TrainingSessionView,
 ): number {
-  return right.startedAt.localeCompare(left.startedAt) || right.id.localeCompare(left.id);
+  return right.startedAt.localeCompare(left.startedAt)
+    || right.id.localeCompare(left.id);
 }
 
-function isWithinLookback(
+function isIsoDateWithinLookback(
   value: string,
-  generatedAt: string,
+  currentDateValue: string,
   days: number,
 ): boolean {
-  const date = parseDate(value);
-  const now = parseDate(generatedAt);
-  if (!date || !now) {
+  const date = parseIsoDate(value);
+  const currentDate = parseIsoDate(currentDateValue);
+  if (!date || !currentDate) {
     return false;
   }
 
-  const cutoff = addUtcDays(now, -(days - 1));
-  cutoff.setUTCHours(0, 0, 0, 0);
-  return date >= cutoff && date <= now;
+  const cutoff = addUtcDays(currentDate, -(days - 1));
+  return date >= cutoff && date <= currentDate;
+}
+
+function resolveTrainingCurrentDate(
+  sessions: readonly TrainingSessionView[],
+  generatedAt: string,
+): string {
+  const generatedDate = generatedAt.slice(0, 10);
+  const parsedGeneratedDate = parseIsoDate(generatedDate);
+  if (!parsedGeneratedDate) {
+    return generatedDate;
+  }
+
+  const latestAllowedDate = addUtcDays(parsedGeneratedDate, 1)
+    .toISOString()
+    .slice(0, 10);
+  const latestSessionDate = sessions
+    .map((session) => session.date)
+    .filter((date) => parseIsoDate(date) !== null && date <= latestAllowedDate)
+    .sort()
+    .at(-1);
+
+  return latestSessionDate && latestSessionDate > generatedDate
+    ? latestSessionDate
+    : generatedDate;
 }
 
 function deriveDurationMinutes(
@@ -546,13 +550,16 @@ function deriveDurationMinutes(
     return null;
   }
 
-  const started = parseDate(startedAt);
-  const ended = parseDate(endedAt);
+  const started = parseDateTime(startedAt);
+  const ended = parseDateTime(endedAt);
   if (!started || !ended || ended < started) {
     return null;
   }
 
-  return Math.max(1, Math.round((ended.getTime() - started.getTime()) / 60_000));
+  return Math.max(
+    1,
+    Math.round((ended.getTime() - started.getTime()) / 60_000),
+  );
 }
 
 function defaultTrainingTitle(activityType: string | null): string {
@@ -580,7 +587,15 @@ function addUtcDays(value: Date, days: number): Date {
   return result;
 }
 
-function parseDate(value: string): Date | null {
+function parseIsoDate(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return null;
+  }
+  const parsed = new Date(`${value}T12:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseDateTime(value: string): Date | null {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
@@ -592,7 +607,9 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function readString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 function readNumber(value: unknown): number | null {
@@ -600,9 +617,17 @@ function readNumber(value: unknown): number | null {
 }
 
 function readPositiveInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+  return typeof value === "number"
+      && Number.isInteger(value)
+      && value > 0
+    ? value
+    : null;
 }
 
 function readNonNegativeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+  return typeof value === "number"
+      && Number.isInteger(value)
+      && value >= 0
+    ? value
+    : null;
 }

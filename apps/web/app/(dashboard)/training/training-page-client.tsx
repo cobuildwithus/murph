@@ -37,18 +37,27 @@ const MESSAGE_EXAMPLES = [
 
 export default function TrainingPageClient({
   authenticated,
-  contactOptions,
+  continueContactOptions,
+  startContactOptions,
 }: {
   authenticated: boolean;
-  contactOptions: readonly MurphContactOption[];
+  continueContactOptions: readonly MurphContactOption[];
+  startContactOptions: readonly MurphContactOption[];
 }) {
   const { error, refresh, refreshPending, status } = useBrowserVault();
   const training = useBrowserVaultSelector(selectBrowserVaultTraining);
-  const contactOption = contactOptions[0] ?? null;
-  const preparing = status === "loading" || (status === "empty" && refreshPending);
+  const activeSession = training?.activeSession ?? null;
+  const primaryContactOption = activeSession
+    ? continueContactOptions[0] ?? null
+    : startContactOptions[0] ?? null;
+  const primaryActionLabel = activeSession
+    ? "Continue workout"
+    : "Start workout";
+  const preparing =
+    status === "loading" || (status === "empty" && refreshPending);
   const hasTraining = Boolean(
     training
-    && (training.activeSession || training.recentSessions.length > 0),
+      && (training.activeSession || training.recentSessions.length > 0),
   );
 
   return (
@@ -62,7 +71,8 @@ export default function TrainingPageClient({
         <ContactAction
           authenticated={authenticated}
           className="w-full sm:w-auto"
-          option={contactOption}
+          label={primaryActionLabel}
+          option={primaryContactOption}
         />
       </div>
 
@@ -73,9 +83,16 @@ export default function TrainingPageClient({
           <AlertTitle>Could not refresh your training log</AlertTitle>
           <AlertDescription>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <span>{error ?? "Your saved workouts are not available right now."}</span>
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
-                <RefreshCw />
+              <span>
+                {error ?? "Your saved workouts are not available right now."}
+              </span>
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => void refresh()}
+              >
+                <RefreshCw aria-hidden="true" />
                 Retry
               </Button>
             </div>
@@ -90,7 +107,7 @@ export default function TrainingPageClient({
       {!preparing && status !== "error" && !hasTraining ? (
         <EmptyTraining
           authenticated={authenticated}
-          contactOption={contactOption}
+          contactOption={startContactOptions[0] ?? null}
         />
       ) : null}
 
@@ -102,7 +119,9 @@ export default function TrainingPageClient({
 function TrainingDashboard({ training }: { training: BrowserTrainingView }) {
   return (
     <div className="flex flex-col gap-8">
-      {training.activeSession ? <ActiveWorkout session={training.activeSession} /> : null}
+      {training.activeSession ? (
+        <ActiveWorkout session={training.activeSession} />
+      ) : null}
       <Summary training={training} />
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.65fr)]">
         <RecentWorkouts sessions={training.recentSessions} />
@@ -114,7 +133,8 @@ function TrainingDashboard({ training }: { training: BrowserTrainingView }) {
 }
 
 function ActiveWorkout({ session }: { session: TrainingSessionView }) {
-  const progress = session.setCount > 0
+  const hasSets = session.setCount > 0;
+  const progress = hasSets
     ? Math.round((session.completedSetCount / session.setCount) * 100)
     : 0;
 
@@ -129,37 +149,64 @@ function ActiveWorkout({ session }: { session: TrainingSessionView }) {
       <div className="grid gap-7 px-5 py-6 md:px-8 md:py-8 lg:grid-cols-[1fr_13rem] lg:items-end">
         <div>
           <p className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-white/55">
-            <span className="size-2 rounded-full bg-[#a6b88a]" />
+            <span
+              aria-hidden="true"
+              className="size-2 rounded-full bg-[#a6b88a]"
+            />
             In progress
           </p>
-          <h2 className="mt-4 font-serif text-3xl font-semibold" id="active-workout-heading">
+          <h2
+            className="mt-4 font-serif text-3xl font-semibold"
+            id="active-workout-heading"
+          >
             {session.title}
           </h2>
           <p className="mt-2 text-sm text-white/60">
-            {session.exerciseCount} {pluralize(session.exerciseCount, "exercise")}
-            {session.setCount > 0
+            {session.exerciseCount}{" "}
+            {pluralize(session.exerciseCount, "exercise")}
+            {hasSets
               ? ` · ${session.completedSetCount} of ${session.setCount} sets logged`
               : ""}
           </p>
-          <div className="mt-6 grid gap-2 sm:grid-cols-2">
-            {session.exercises.map((exercise) => (
-              <ActiveExercise exercise={exercise} key={exercise.id} />
-            ))}
-          </div>
+          {session.exercises.length > 0 ? (
+            <div className="mt-6 grid gap-2 sm:grid-cols-2">
+              {session.exercises.map((exercise) => (
+                <ActiveExercise exercise={exercise} key={exercise.id} />
+              ))}
+            </div>
+          ) : (
+            <p className="mt-6 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-4 text-sm leading-relaxed text-white/65">
+              Tell Murph your first exercise and it will appear here.
+            </p>
+          )}
         </div>
         <div>
           <div className="flex items-end justify-between gap-3">
-            <span className="font-serif text-5xl font-semibold tabular-nums">{progress}%</span>
-            <span className="pb-1 text-xs text-white/50">complete</span>
+            <span className="font-serif text-5xl font-semibold tabular-nums">
+              {hasSets ? `${progress}%` : "Ready"}
+            </span>
+            <span className="pb-1 text-xs text-white/50">
+              {hasSets ? "complete" : "to log"}
+            </span>
           </div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+          {hasSets ? (
             <div
-              className="h-full rounded-full bg-[#a6b88a]"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+              aria-label={`${progress}% of workout sets logged`}
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={progress}
+              className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"
+              role="progressbar"
+            >
+              <div
+                className="h-full rounded-full bg-[#a6b88a]"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          ) : null}
           <p className="mt-4 text-xs leading-relaxed text-white/55">
-            Keep messaging Murph as you go. This view reads the same private workout record.
+            Keep messaging Murph as you go. One message updates this same private
+            workout record.
           </p>
         </div>
       </div>
@@ -169,19 +216,35 @@ function ActiveWorkout({ session }: { session: TrainingSessionView }) {
 
 function ActiveExercise({ exercise }: { exercise: TrainingExerciseView }) {
   const completed = exercise.sets.filter((set) => set.completed).length;
-  const done = exercise.sets.length > 0 && completed === exercise.sets.length;
+  const done =
+    exercise.sets.length > 0 && completed === exercise.sets.length;
 
   return (
     <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3">
-      <span className={cn(
-        "flex size-7 items-center justify-center rounded-full border",
-        done ? "border-[#a6b88a]/40 bg-[#a6b88a]/15" : "border-white/15",
-      )}>
-        {done ? <Check className="size-3.5 text-[#d7e1c7]" /> : exercise.order}
+      <span
+        className={cn(
+          "flex size-7 items-center justify-center rounded-full border",
+          done
+            ? "border-[#a6b88a]/40 bg-[#a6b88a]/15"
+            : "border-white/15",
+        )}
+      >
+        {done ? (
+          <Check aria-hidden="true" className="size-3.5 text-[#d7e1c7]" />
+        ) : (
+          exercise.order
+        )}
       </span>
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-white/90">{exercise.name}</p>
-        <p className="text-xs text-white/45">{completed}/{exercise.sets.length} sets</p>
+        <p className="truncate text-sm font-medium text-white/90">
+          {exercise.name}
+        </p>
+        {exercise.note ? (
+          <p className="truncate text-xs text-white/45">{exercise.note}</p>
+        ) : null}
+        <p className="text-xs text-white/45">
+          {completed}/{exercise.sets.length} sets
+        </p>
       </div>
     </div>
   );
@@ -203,9 +266,18 @@ function Summary({ training }: { training: BrowserTrainingView }) {
         title="Last 30 days"
       />
       <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70">
-        <div className="grid grid-cols-2 divide-x divide-y divide-border/70 lg:grid-cols-4 lg:divide-y-0">
-          {stats.map(([label, value]) => (
-            <div className="px-5 py-5 md:px-6" key={label}>
+        <div className="grid grid-cols-2 lg:grid-cols-4">
+          {stats.map(([label, value], index) => (
+            <div
+              className={cn(
+                "px-5 py-5 md:px-6",
+                index % 2 === 1 && "border-l border-border/70",
+                index >= 2 && "border-t border-border/70",
+                index > 0 && "lg:border-l lg:border-border/70",
+                "lg:border-t-0",
+              )}
+              key={label}
+            >
               <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
                 {label}
               </p>
@@ -232,12 +304,18 @@ function Consistency({ weeks }: { weeks: BrowserTrainingView["weeks"] }) {
       </div>
       <div className="mt-5 grid h-24 grid-cols-8 items-end gap-2 sm:gap-3">
         {weeks.map((week) => (
-          <div className="flex h-full flex-col items-center justify-end gap-2" key={week.startDate}>
+          <div
+            className="flex h-full flex-col items-center justify-end gap-2"
+            key={week.startDate}
+          >
             <span className="text-[10px] tabular-nums text-muted-foreground">
               {week.count || ""}
             </span>
             <div
-              aria-label={`${week.label}: ${week.count} ${pluralize(week.count, "workout")}`}
+              aria-label={`${week.label}: ${week.count} ${pluralize(
+                week.count,
+                "workout",
+              )}`}
               className={cn(
                 "w-full max-w-12 rounded-t-md",
                 week.count ? "bg-primary/75" : "bg-muted",
@@ -259,7 +337,11 @@ function Consistency({ weeks }: { weeks: BrowserTrainingView["weeks"] }) {
   );
 }
 
-function RecentWorkouts({ sessions }: { sessions: readonly TrainingSessionView[] }) {
+function RecentWorkouts({
+  sessions,
+}: {
+  sessions: readonly TrainingSessionView[];
+}) {
   return (
     <section aria-labelledby="recent-workouts-heading">
       <SectionHeading
@@ -270,7 +352,11 @@ function RecentWorkouts({ sessions }: { sessions: readonly TrainingSessionView[]
       {sessions.length > 0 ? (
         <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70">
           {sessions.map((session, index) => (
-            <WorkoutDetails key={session.id} open={index === 0} session={session} />
+            <WorkoutDetails
+              key={session.id}
+              open={index === 0}
+              session={session}
+            />
           ))}
         </div>
       ) : (
@@ -288,27 +374,51 @@ function WorkoutDetails({
   session: TrainingSessionView;
 }) {
   return (
-    <details className="group border-b border-border/70 last:border-0" open={open}>
-      <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-5 hover:bg-muted/30 sm:px-5">
+    <details
+      className="group border-b border-border/70 last:border-0"
+      open={open}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-5 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5">
         <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Dumbbell className="size-5" />
+          <Dumbbell aria-hidden="true" className="size-5" />
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="truncate font-semibold">{session.title}</h3>
           <p className="mt-1 text-xs text-muted-foreground">
             {formatIsoDate(session.date)}
-            {session.durationMinutes ? ` · ${session.durationMinutes} min` : ""}
-            {session.exerciseCount ? ` · ${session.exerciseCount} exercises` : ""}
-            {session.completedSetCount ? ` · ${session.completedSetCount} sets` : ""}
+            {session.durationMinutes
+              ? ` · ${session.durationMinutes} min`
+              : ""}
+            {session.exerciseCount
+              ? ` · ${session.exerciseCount} ${pluralize(
+                  session.exerciseCount,
+                  "exercise",
+                )}`
+              : ""}
+            {session.completedSetCount
+              ? ` · ${session.completedSetCount} ${pluralize(
+                  session.completedSetCount,
+                  "set",
+                )}`
+              : ""}
           </p>
         </div>
-        <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+        <ChevronDown
+          aria-hidden="true"
+          className="size-4 text-muted-foreground transition-transform group-open:rotate-180"
+        />
       </summary>
       <div className="border-t border-border/60 bg-muted/[0.16] px-4 py-5 sm:px-5">
         <div className="flex flex-col gap-5">
-          {session.exercises.map((exercise) => (
-            <ExerciseSets exercise={exercise} key={exercise.id} />
-          ))}
+          {session.exercises.length > 0 ? (
+            session.exercises.map((exercise) => (
+              <ExerciseSets exercise={exercise} key={exercise.id} />
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No exercise details were recorded for this workout.
+            </p>
+          )}
         </div>
         {session.note ? (
           <p className="mt-5 border-l-2 border-primary/30 pl-3 text-sm text-muted-foreground">
@@ -326,23 +436,52 @@ function ExerciseSets({ exercise }: { exercise: TrainingExerciseView }) {
   return (
     <div>
       <div className="flex justify-between gap-3">
-        <h4 className="font-medium">{exercise.name}</h4>
-        <span className="text-xs text-muted-foreground">{sets.length} sets</span>
+        <div className="min-w-0">
+          <h4 className="truncate font-medium">{exercise.name}</h4>
+          {exercise.note ? (
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {exercise.note}
+            </p>
+          ) : null}
+        </div>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {sets.length} {pluralize(sets.length, "set")}
+        </span>
       </div>
       <div className="mt-3 overflow-hidden rounded-xl border border-border/70 bg-background/70">
-        {sets.length > 0 ? sets.map((set) => (
-          <div
-            className="grid grid-cols-[2rem_1fr_auto] gap-3 border-b border-border/60 px-3 py-2.5 last:border-0"
-            key={set.id}
-          >
-            <span className="font-mono text-[10px] text-muted-foreground">{set.order}</span>
-            <span className="text-sm font-medium tabular-nums">{formatTrainingSet(set)}</span>
-            {set.rpe !== null ? (
-              <span className="text-xs text-muted-foreground">RPE {compact(set.rpe)}</span>
-            ) : null}
-          </div>
-        )) : (
-          <p className="px-3 py-3 text-sm text-muted-foreground">No completed sets recorded.</p>
+        {sets.length > 0 ? (
+          sets.map((set) => {
+            const value = formatTrainingSet(set);
+            return (
+              <div
+                className="grid grid-cols-[2rem_minmax(0,1fr)_auto] gap-3 border-b border-border/60 px-3 py-2.5 last:border-0"
+                key={set.id}
+              >
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {set.order}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium tabular-nums">
+                    {value}
+                  </span>
+                  {set.note && value !== set.note ? (
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                      {set.note}
+                    </span>
+                  ) : null}
+                </span>
+                {set.rpe !== null ? (
+                  <span className="text-xs text-muted-foreground">
+                    RPE {compact(set.rpe)}
+                  </span>
+                ) : null}
+              </div>
+            );
+          })
+        ) : (
+          <p className="px-3 py-3 text-sm text-muted-foreground">
+            No completed sets recorded.
+          </p>
         )}
       </div>
     </div>
@@ -364,16 +503,24 @@ function ExerciseProgress({
       {entries.length > 0 ? (
         <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70">
           {entries.map((entry) => (
-            <div className="border-b border-border/70 px-4 py-4 last:border-0" key={entry.id}>
+            <div
+              className="border-b border-border/70 px-4 py-4 last:border-0"
+              key={entry.id}
+            >
               <div className="flex justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="truncate font-medium">{entry.name}</h3>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {entry.sessionCount} workouts · {entry.setCount} sets
+                    {entry.sessionCount}{" "}
+                    {pluralize(entry.sessionCount, "workout")} ·{" "}
+                    {entry.setCount} {pluralize(entry.setCount, "set")}
                   </p>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  {formatIsoDate(entry.lastPerformedAt, { month: "short", day: "numeric" })}
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {formatIsoDate(entry.lastPerformedDate, {
+                    month: "short",
+                    day: "numeric",
+                  })}
                 </span>
               </div>
               <div className="mt-4 grid grid-cols-2 gap-2">
@@ -390,14 +537,25 @@ function ExerciseProgress({
   );
 }
 
-function ProgressValue({ label, set }: { label: string; set: TrainingSetView | null }) {
+function ProgressValue({
+  label,
+  set,
+}: {
+  label: string;
+  set: TrainingSetView | null;
+}) {
+  const value = set ? formatTrainingSet(set) : "—";
+
   return (
     <div className="rounded-xl bg-muted/55 px-3 py-3">
       <p className="font-mono text-[8px] uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </p>
-      <p className="mt-1 truncate text-sm font-semibold tabular-nums">
-        {set ? formatTrainingSet(set) : "—"}
+      <p
+        className="mt-1 truncate text-sm font-semibold tabular-nums"
+        title={value}
+      >
+        {value}
       </p>
     </div>
   );
@@ -413,21 +571,26 @@ function EmptyTraining({
   return (
     <section className="rounded-2xl border border-border/70 bg-card/70 px-6 py-10 md:px-10 md:py-12">
       <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-        <Dumbbell className="size-6" />
+        <Dumbbell aria-hidden="true" className="size-6" />
       </span>
       <h2 className="mt-6 max-w-lg font-serif text-3xl font-semibold">
         Your workout log starts with one message.
       </h2>
       <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        Tell Murph what you are doing at the gym. Sets, reps, weight and corrections become one private history you can review here over time.
+        Tell Murph what you are doing at the gym. Sets, reps, weight and
+        corrections become one private history you can review here over time.
       </p>
       <ContactAction
         authenticated={authenticated}
         className="mt-6 w-full sm:w-fit"
+        label="Start workout"
         option={contactOption}
       />
-      <div className="mt-8">
-        <MessageGuide />
+      <div className="mt-9 border-t border-border/70 pt-7">
+        <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+          Try saying
+        </p>
+        <MessageExamples className="mt-3" />
       </div>
     </section>
   );
@@ -438,50 +601,81 @@ function MessageGuide() {
     <section className="rounded-2xl border border-border/70 bg-card/70 px-5 py-6">
       <div className="flex items-start gap-3">
         <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <MessageCircle className="size-4" />
+          <MessageCircle aria-hidden="true" className="size-4" />
         </span>
         <div>
-          <h2 className="font-serif text-xl font-semibold">Just tell Murph what happened.</h2>
+          <h2 className="font-serif text-xl font-semibold">
+            Just tell Murph what happened.
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Start, log, correct or ask what you did last time without opening another app.
+            Start, log, correct or ask what you did last time without opening
+            another app.
           </p>
         </div>
       </div>
-      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {MESSAGE_EXAMPLES.map((message) => (
-          <p className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm" key={message}>
-            “{message}”
-          </p>
-        ))}
-      </div>
+      <MessageExamples className="mt-5" />
     </section>
+  );
+}
+
+function MessageExamples({ className }: { className?: string }) {
+  return (
+    <ul className={cn("grid gap-2 sm:grid-cols-2 lg:grid-cols-4", className)}>
+      {MESSAGE_EXAMPLES.map((message) => (
+        <li
+          className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm"
+          key={message}
+        >
+          “{message}”
+        </li>
+      ))}
+    </ul>
   );
 }
 
 function ContactAction({
   authenticated,
   className,
+  label,
   option,
 }: {
   authenticated: boolean;
   className?: string;
+  label: string;
   option: MurphContactOption | null;
 }) {
   if (!authenticated) {
-    return <AuthButton className={className} size="lg">Log in to start training</AuthButton>;
+    return (
+      <AuthButton className={className} size="lg">
+        Log in to start training
+      </AuthButton>
+    );
   }
   if (!option) {
-    return null;
+    return (
+      <a
+        aria-label="Set up messaging to use training"
+        className={cn(
+          buttonVariants({ size: "lg", variant: "outline" }),
+          className,
+        )}
+        href="/settings"
+      >
+        <MessageCircle aria-hidden="true" />
+        Set up messaging
+      </a>
+    );
   }
   return (
     <a
+      aria-label={`${label} with ${option.label}`}
       className={cn(buttonVariants({ size: "lg" }), className)}
       href={option.href}
       rel={option.rel}
       target={option.target}
     >
-      <MessageCircle />
-      {option.label}
+      <MessageCircle aria-hidden="true" />
+      {label}
     </a>
   );
 }
@@ -497,7 +691,12 @@ function SectionHeading({
 }) {
   return (
     <div className="mb-4">
-      <h2 className="font-serif text-2xl font-semibold tracking-tight" id={id}>{title}</h2>
+      <h2
+        className="font-serif text-2xl font-semibold tracking-tight"
+        id={id}
+      >
+        {title}
+      </h2>
       <p className="mt-1 text-sm text-muted-foreground">{description}</p>
     </div>
   );
@@ -513,7 +712,11 @@ function SmallEmpty({ text }: { text: string }) {
 
 function TrainingSkeleton() {
   return (
-    <div aria-label="Loading training log" className="flex flex-col gap-6" role="status">
+    <div
+      aria-label="Loading training log"
+      className="flex flex-col gap-6"
+      role="status"
+    >
       <div className="h-52 animate-pulse rounded-2xl bg-muted" />
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border lg:grid-cols-4">
         {Array.from({ length: 4 }, (_, index) => (
@@ -539,20 +742,26 @@ function formatTrainingSet(set: TrainingSetView): string {
   if (load && set.reps !== null) return `${load} × ${set.reps}`;
   if (load) return load;
   if (set.reps !== null) return `${set.reps} ${pluralize(set.reps, "rep")}`;
-  if (set.durationSeconds !== null) return formatDuration(set.durationSeconds);
+  if (set.durationSeconds !== null) {
+    return formatDuration(set.durationSeconds);
+  }
   if (set.distanceMeters !== null) return formatDistance(set.distanceMeters);
+  if (set.note) return set.note;
   return "Completed";
 }
 
 function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${compact(seconds)} sec`;
-  const minutes = Math.floor(seconds / 60);
-  const remainder = Math.round(seconds % 60);
+  const roundedSeconds = Math.max(0, Math.round(seconds));
+  if (roundedSeconds < 60) return `${roundedSeconds} sec`;
+  const minutes = Math.floor(roundedSeconds / 60);
+  const remainder = roundedSeconds % 60;
   return remainder ? `${minutes}m ${remainder}s` : `${minutes} min`;
 }
 
 function formatDistance(meters: number): string {
-  return meters >= 1_000 ? `${compact(meters / 1_000)} km` : `${compact(meters)} m`;
+  return meters >= 1_000
+    ? `${compact(meters / 1_000)} km`
+    : `${compact(meters)} m`;
 }
 
 function compact(value: number): string {

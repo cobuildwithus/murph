@@ -50,6 +50,7 @@ import {
   type BrowserVaultRequestedMetric,
 } from "./metric-points.ts";
 import { toBrowserVaultLabResultRows } from "./lab-results.ts";
+import { projectBrowserTrainingSession } from "./training.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -61,7 +62,7 @@ export async function createBrowserVaultReplica(
   const defaultProjectedVault = createDefaultProjectedVault(input.vault);
   const entities = defaultProjectedVault.entities
     .filter((entity) => isBrowserVaultIncludedFamily(entity.family))
-    .map(projectEntity);
+    .map((entity) => projectEntity(entity, generatedAt));
   const timelineRows = buildTimeline(defaultProjectedVault, { limit: TIMELINE_LIMIT })
     .map(projectTimelineRow);
   const weeklySampleSummaries = projectWeeklySampleSummaries(defaultProjectedVault, generatedAt);
@@ -340,9 +341,12 @@ function readStringArray(value: unknown): string[] {
 }
 
 
-function projectEntity(entity: CanonicalEntity): BrowserVaultEntity {
+function projectEntity(
+  entity: CanonicalEntity,
+  generatedAt: string,
+): BrowserVaultEntity {
   return {
-    attributes: projectEntityAttributes(entity),
+    attributes: projectEntityAttributes(entity, generatedAt),
     bodyPreview: projectEntityBodyPreview(entity),
     date: entity.date,
     experimentSlug: entity.experimentSlug,
@@ -400,9 +404,12 @@ function projectEntityBodyPreview(entity: CanonicalEntity): string | null {
   return previewText(entity.body, BODY_PREVIEW_CHARS);
 }
 
-function projectEntityAttributes(entity: CanonicalEntity): Record<string, unknown> {
+function projectEntityAttributes(
+  entity: CanonicalEntity,
+  generatedAt: string,
+): Record<string, unknown> {
   if (entity.family === "event") {
-    return projectSafeEventAttributes(entity);
+    return projectSafeEventAttributes(entity, generatedAt);
   }
   if (entity.family === "habitat") {
     return projectSafeAttributeKeys(entity, [
@@ -454,36 +461,31 @@ function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown>
   return allowed;
 }
 
-function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unknown> {
+function projectSafeEventAttributes(
+  entity: CanonicalEntity,
+  generatedAt: string,
+): Record<string, unknown> {
   if (entity.family !== "event") {
     return {};
   }
 
   switch (entity.kind) {
     case "activity_session": {
-      // Workout sessions remain canonical event records. The browser replica
-      // exposes only the fields needed to render the private training log; it
-      // does not introduce a second workout model or mutation owner.
-      const attributes = projectSafeAttributeKeys(entity, [
-        "activityType",
-        "completedAt",
-        "distanceKm",
-        "durationMinutes",
-        "endedAt",
-        "note",
-        "routineId",
-        "sessionStatus",
-        "source",
-        "startedAt",
-        "state",
-        "status",
-        "strengthExercises",
-        "title",
-        "workout",
-      ]);
-      const activityKind = resolveAdherenceObservationActivityKind({ attributes: entity.attributes });
+      const attributes = projectSafeAttributeKeys(entity, ["source"]);
+      const activityKind = resolveAdherenceObservationActivityKind({
+        attributes: entity.attributes,
+      });
       if (activityKind) {
         attributes.activityKind = activityKind;
+      }
+
+      const training = projectBrowserTrainingSession({
+        activityKind,
+        entity,
+        generatedAt,
+      });
+      if (training) {
+        attributes.training = training;
       }
       return attributes;
     }
