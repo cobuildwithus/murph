@@ -1,0 +1,83 @@
+name: Inspect PR 1464 host support status
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-inspect-pr1464-host-support.yml
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_RUN_ID: "31335260291"
+      TARGET_HEAD_SHA: "47019397f5c26ecffceded0f40281242848c4223"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/starter-usage-export-final
+          fetch-depth: 0
+
+      - name: Collect GitHub Actions diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="agent-docs/debug/pr1464-host-support"
+          mkdir -p "$out"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_RUN_ID}" > "$out/run.json"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_RUN_ID}/jobs?per_page=100" > "$out/jobs-pages.json"
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${TARGET_HEAD_SHA}/check-runs?per_page=100" > "$out/check-runs.json"
+          gh run view "$TARGET_RUN_ID" --repo "$GITHUB_REPOSITORY" --json status,conclusion,name,workflowName,url,event,headBranch,headSha,jobs > "$out/run-view.json"
+          gh run view "$TARGET_RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed > "$out/log-failed.txt" 2>&1 || true
+
+          python3 <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("agent-docs/debug/pr1464-host-support")
+          run = json.loads((root / "run.json").read_text())
+          view = json.loads((root / "run-view.json").read_text())
+          lines = [
+              f"run={run.get('id')}",
+              f"status={run.get('status')}",
+              f"conclusion={run.get('conclusion')}",
+              f"head_sha={run.get('head_sha')}",
+              f"url={run.get('html_url')}",
+              "",
+              "jobs:",
+          ]
+          for job in view.get("jobs", []):
+              lines.append(
+                  f"- {job.get('databaseId')} {job.get('name')}: "
+                  f"{job.get('status')}/{job.get('conclusion')}"
+              )
+              for step in job.get("steps", []):
+                  conclusion = step.get("conclusion")
+                  if conclusion not in (None, "success", "skipped"):
+                      lines.append(
+                          f"  - step {step.get('number')} {step.get('name')}: "
+                          f"{step.get('status')}/{conclusion}"
+                      )
+          failed_log = (root / "log-failed.txt").read_text(errors="replace")
+          lines.extend(["", "failed log:", failed_log[-30000:]])
+          (root / "summary.txt").write_text("\n".join(lines))
+          PY
+
+      - name: Publish diagnostics on helper branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add agent-docs/debug/pr1464-host-support
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: record PR 1464 host-support diagnostics"
+            git push origin HEAD:refs/heads/codex/starter-usage-export-final
+          fi
