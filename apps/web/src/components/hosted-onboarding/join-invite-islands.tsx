@@ -165,6 +165,12 @@ export function JoinInvitePhoneVerificationIsland({
       <HostedAuthPanel
         inviteCode={inviteCode}
         methods={HOSTED_PRIVY_AUTH_METHODS}
+        onCompleted={() => {
+          router.refresh();
+        }}
+        onSignOut={() => {
+          router.refresh();
+        }}
         requireLaunchConsentOnCompletion
         size="compact"
       />
