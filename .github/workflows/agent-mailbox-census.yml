@@ -17,8 +17,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - name: Print production mailbox transaction call sites
+      - name: Archive source worktree
         shell: bash
         run: |
           set -euo pipefail
-          git grep -n -C 18 -E 'appendHosted(MailboxEnvelope|MailboxEnvelopeWithSourceMessage|MailboxEnvelopeWithIdentity|MealPhotoMailboxEnvelope|EnvironmentVoiceMailboxEnvelope|MailboxItem)Tx' -- apps/web/src apps/web/app || true
+          tar --exclude=.git --exclude=murph-source.tar.gz -czf murph-source.tar.gz .
+      - name: Upload source worktree
+        uses: actions/upload-artifact@v4
+        with:
+          name: murph-source
+          path: murph-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
