@@ -1,6 +1,6 @@
 # Prevent concurrent hosted runtime startup across deploy versions
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -51,14 +51,16 @@ Updated: 2026-08-09
 
 ## Tasks
 
-1. Capture private production proof without persisting member identifiers.
-2. Convert the dangerous prior-version behavior test into the desired bounded
-   startup-grace regression and demonstrate it fails before the implementation
+1. Completed: captured private production proof without persisting member
+   identifiers.
+2. Completed: converted the dangerous prior-version behavior test into the desired bounded
+   startup-grace regression and demonstrated it fails before the implementation
    change.
-3. Remove the deploy-version-specific grace bypass and update owner docs.
-4. Run focused tests, typecheck, and direct diff/code-path proof.
-5. Commit and push a review candidate, open a PR, run CI plus preliminary and
-   final ReviewGPT concurrently, resolve findings, and close the plan.
+3. Completed: removed the deploy-version-specific grace bypass and updated
+   owner docs.
+4. Completed: ran focused tests, typecheck, and direct diff/code-path proof.
+5. Completed: committed and pushed a review candidate, opened a PR, ran CI plus preliminary and
+   final ReviewGPT concurrently, resolved findings, and closed the plan.
 
 ## Decisions
 
@@ -75,12 +77,18 @@ Updated: 2026-08-09
 
 ## Verification
 
-- Commands to run:
-  - focused Vitest for the startup-fence cases in
-    `apps/cloudflare/test/user-runner-alarm.test.ts`
-  - `pnpm --dir apps/cloudflare typecheck`
-  - `git diff --check`
-  - exact-head GitHub Actions and required ReviewGPT gates
-- Expected outcomes: fresh deploy-skewed fences return `retry_later` and remain
-  authoritative, fences older than startup grace are replaced, and all checks
-  pass without a persisted-state or deploy-contract change.
+- Pre-fix regression: the two new recent-fence cases failed because the prior
+  code returned replacement acceptance instead of `retry_later`.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts
+  apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage`: 115 passed.
+- `pnpm --dir apps/cloudflare typecheck`: passed.
+- `git diff --check`: passed.
+- Direct production scenario evidence: two foreground runtime lease generations
+  overlapped for one member; the bounded three-day trace query found no second
+  affected member.
+- Preliminary ReviewGPT: `SPECIALIST_OUTCOME: PASS`; product-experience and
+  coverage evidence sufficient, no findings, no patch artifact.
+- Final ReviewGPT round 1: `ROUND_OUTCOME: PASS`; no findings.
+- Exact-head GitHub Actions on the reviewed candidate: all required checks
+  passed. The final plan-archive-only head receives the normal CI rerun.
+Completed: 2026-08-09
