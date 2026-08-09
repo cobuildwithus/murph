@@ -85,7 +85,6 @@ export function SignupReferralFlowStudy() {
   return (
     <div
       className="flex flex-col gap-10"
-      data-design-auth-methods="phone email telegram"
       data-design-section="signup-referral-flow"
       id="signup-referral-flow"
     >
