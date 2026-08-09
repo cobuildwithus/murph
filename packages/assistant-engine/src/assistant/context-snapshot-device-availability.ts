@@ -53,7 +53,7 @@ export async function isAssistantDeviceAvailabilitySnapshotRefreshPending(input:
   vaultRoot: string
 }): Promise<boolean> {
   const state = await readAssistantContextSnapshotState(input.vaultRoot)
-  if (state?.lastCompleted === null || !state?.lastCompleted) {
+  if (!state?.lastCompleted) {
     return false
   }
   if (state.pendingDirtyDomains.length > 0) {
@@ -139,17 +139,14 @@ async function buildAssistantDeviceAvailabilityPrompt(
     DEVICE_AVAILABILITY_METRIC_FILTERS,
   )
   const bodyDate = latestEffectiveDate(
-    points.filter((point) =>
-      BODY_METRIC_KEYS.has(point.metricKey)
-      && point.source.kind === 'wearable-summary',
-    ),
+    points.filter((point) => BODY_METRIC_KEYS.has(point.metricKey)),
   )
   const bloodPressureDate = latestEffectiveDate(
     points.filter((point) => BLOOD_PRESSURE_METRIC_KEYS.has(point.metricKey)),
   )
   const lines = [
     bodyDate
-      ? `- Body/scale measurement history is available (latest canonical reading ${bodyDate}). Read canonical body summaries with \`vault-cli wearables body list --limit 30 --format json\`.`
+      ? `- Body/scale measurement history is available (latest canonical reading ${bodyDate}). Start with \`vault-cli wearables body list --limit 30 --format json\`; if the reading was saved as a canonical measurement event, use \`vault-cli measurement list --from ${bodyDate} --limit 100 --format json\` and widen the date range when needed.`
       : null,
     bloodPressureDate
       ? `- Blood-pressure measurement history is available (latest canonical reading ${bloodPressureDate}). Read canonical events with \`vault-cli measurement list --from ${bloodPressureDate} --limit 100 --format json\`; inspect \`systolic-blood-pressure\` and \`diastolic-blood-pressure\` entries, treating values as paired only when they come from the same event, and widen the date range when needed.`
