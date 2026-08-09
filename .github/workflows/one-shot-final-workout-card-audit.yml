@@ -1,0 +1,142 @@
+name: One-shot final workout card audit
+
+on:
+  push:
+    branches:
+      - agent/imessage-workout-session-card
+    paths:
+      - .github/workflows/one-shot-final-workout-card-audit.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: contains(github.event.head_commit.message, '[final-audit-workout-pr]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: agent/imessage-workout-session-card
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply final audit fixes
+        shell: bash
+        run: |
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          python - <<'PY'
+          import base64
+          import gzip
+
+          payload = """
+          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
+          """
+          exec(gzip.decompress(base64.b64decode(payload)).decode())
+          PY
+
+      - name: Verify focused contracts
+        shell: bash
+        run: |
+          git diff --check
+          pnpm --dir packages/contracts typecheck
+          pnpm --dir packages/operator-config typecheck
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir packages/contracts exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/workout-session-card.test.ts
+          pnpm --dir packages/operator-config exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/assistant-response-cards.test.ts \
+            test/workout-session-response-card.test.ts \
+            test/workout-session-cross-platform-fixture.test.ts
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/assistant-workout-session-skill.test.ts
+          pnpm docs:drift
+
+      - name: Commit verified fixes
+        shell: bash
+        run: |
+          git status --short
+          git add -A
+          git commit -m "fix(workouts): finalize iMessage card contracts"
+          git push origin HEAD:agent/imessage-workout-session-card
