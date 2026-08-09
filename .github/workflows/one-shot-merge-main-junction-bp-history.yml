@@ -1,0 +1,34 @@
+name: One-shot reconcile latest main for BP history
+
+on:
+  push:
+    branches:
+      - codex/junction-blood-pressure-history-backfill
+    paths:
+      - .github/workflows/one-shot-merge-main-junction-bp-history.yml
+
+permissions:
+  contents: write
+
+jobs:
+  merge:
+    if: contains(github.event.head_commit.message, '[merge-main-junction-bp-history]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/junction-blood-pressure-history-backfill
+
+      - name: Merge latest main and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          rm .github/workflows/one-shot-merge-main-junction-bp-history.yml
+          git add -A
+          git commit -m "chore: remove one-shot merge helper"
+          git push origin HEAD:codex/junction-blood-pressure-history-backfill
