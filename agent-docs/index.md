@@ -32,6 +32,13 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
+Private current-sender Assistant Ask completion expiry, exact reviewed-text
+binding, personal direct-route revalidation at every provider attempt, and
+terminal no-fallback failure are jointly specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
+`agent-docs/operations/verification-and-runtime.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 Independent partial PlanetScale metric normalization, explicit unknown-family
 evidence, continued evaluation of available database signals, and one-shot
 telemetry-only operator paging with unresolved-window coalescing, current-pressure

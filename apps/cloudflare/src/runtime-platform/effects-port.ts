@@ -222,6 +222,42 @@ export function createCloudflareEffectsPort(input: {
     },
     ...(webControlTransport
       ? {
+          async assertAssistantAskPrivateCompletionAuthority(request, context) {
+            const description =
+              "Hosted Assistant Ask private completion authority assertion";
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: {
+                authority: request.route,
+                privateAssistantAskCompletion: {
+                  answeredMailboxItemIds: request.answeredMailboxItemIds,
+                  expiresAt: request.assistantAskCompletionExpiresAt,
+                  idempotencyKey: request.idempotencyKey,
+                  responseTextDigest: request.responseTextDigest,
+                },
+              },
+              boundUserId: input.boundUserId,
+              description,
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description,
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            if (
+              !payload
+              || typeof payload !== "object"
+              || Array.isArray(payload)
+              || (payload as { authorized?: unknown }).authorized !== true
+            ) {
+              throw new TypeError(
+                "Hosted Assistant Ask private completion authority response is invalid.",
+              );
+            }
+          },
           async assertExternalThreadRouteAuthority(authority, context) {
             const payload = await fetchHostedWebControlPlaneJson({
               body: context?.assistantAskCompletion

@@ -131,6 +131,14 @@ describe("hosted private current-sender Assistant Ask completion", () => {
         notification: {
           deliveryDispatchMode: "queue-only",
           externalThreadRouteAuthority: null,
+          privateAssistantAskCompletion: {
+            expiresAt: AUTHORITY.expiresAt,
+            requestId:
+              createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
+                groupRuntimeMemberId: AUTHORITY.groupRuntimeMemberId,
+                originAssistantInputId: INPUT_ID,
+              }),
+          },
           responsePolicy: {
             kind: "require_send_exact_text",
             text: "Here's the private workout based on your recent training.",

@@ -913,11 +913,16 @@ Last verified: 2026-08-09
   `assistant.notification.requested` for the same personal member: queue-only,
   exact-text, idempotent, same source channel, current `direct-member` route
   only, and no external group-route authority. The personal runtime's existing
-  notification consumer creates the delivery intent. Exact replay reopens and
-  revalidates the stored group input; changed identity, question, permission,
-  target, route, or expiry becomes unavailable, and route drift cannot redirect
-  existing work. Neither path adds a scheduler, callback wait, status or grant
-  row, retry owner, delivery ledger, or second generation.
+  notification consumer creates the delivery intent while retaining the
+  original completion expiry and proof anchor. Each provider-entry attempt asks
+  Web to revalidate that expiry, the exact reviewed-text digest, the same
+  personal member, and the current same-channel `direct-member` route. Expired,
+  revoked, text-mismatched, or route-drifted proof is terminal with no group or
+  alternate-route fallback. Exact replay reopens and revalidates the stored
+  group input; changed identity, question, permission, target, route, or expiry
+  becomes unavailable, and route drift cannot redirect existing work. Neither
+  path adds a scheduler, callback wait, status or grant row, retry owner,
+  delivery ledger, or second generation.
 - The same dirty-runtime prefix admits only two server-identified,
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and

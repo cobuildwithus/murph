@@ -538,6 +538,13 @@ function cloneAssistantNotificationPayload(
     ...(value.firstContact === undefined
       ? {}
       : { firstContact: value.firstContact ? { ...value.firstContact } : null }),
+    ...(value.privateAssistantAskCompletion === undefined
+      ? {}
+      : {
+          privateAssistantAskCompletion: {
+            ...value.privateAssistantAskCompletion,
+          },
+        }),
     ...(value.responsePolicy === undefined
       ? {}
       : { responsePolicy: value.responsePolicy ? { ...value.responsePolicy } : null }),

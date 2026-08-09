@@ -380,9 +380,14 @@ never returns to the group. Web appends one deterministic, queue-only
 `assistant.notification.requested` for the same member's current same-channel
 `direct-member` route, with `threadIsDirect: true`, no external group-thread
 authority, and the exact reviewed text. The personal runtime consumes that
-notification through the existing delivery primitive. Replay cannot redirect
-the completion after member or route drift. This adds no second model turn,
-group wake, group outbox intent, route selector, queue, or table.
+notification through the existing delivery primitive while retaining the
+original completion expiry and proof anchor. Immediately before provider entry,
+Web reopens that proof and revalidates the unexpired private Assistant Ask, the
+exact reviewed-text digest, the same personal member, and the current
+same-channel `direct-member` route. Expired, revoked, text-mismatched, or
+route-drifted proof fails terminally with no group fallback. Replay cannot
+redirect the completion after member or route drift. This adds no second model
+turn, group wake, group outbox intent, route selector, queue, or table.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most

@@ -2840,7 +2840,7 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("update_display_name or set_chat_avatar ok means provider acceptance");
+      .toContain("update_display_name/set_chat_avatar ok means provider acceptance");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)

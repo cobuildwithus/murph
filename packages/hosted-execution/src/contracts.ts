@@ -242,6 +242,11 @@ export interface HostedExecutionAssistantNotificationFirstContactPolicy {
   markSeenOnDeliveryAccepted: boolean;
 }
 
+export interface HostedExecutionPrivateAssistantAskCompletionNotification {
+  expiresAt: string;
+  requestId: string;
+}
+
 export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
@@ -250,7 +255,16 @@ export interface HostedExecutionAssistantNotificationRequestedPayload {
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
   instructions: string;
   notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
+  privateAssistantAskCompletion?: HostedExecutionPrivateAssistantAskCompletionNotification;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
+  route: HostedExecutionAssistantNotificationRoute;
+}
+
+export interface HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority {
+  answeredMailboxItemIds: readonly string[];
+  assistantAskCompletionExpiresAt: string;
+  idempotencyKey: string;
+  responseTextDigest: string;
   route: HostedExecutionAssistantNotificationRoute;
 }
 

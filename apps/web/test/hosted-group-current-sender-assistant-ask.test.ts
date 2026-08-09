@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createHash } from "node:crypto";
+
 import {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
@@ -103,6 +106,7 @@ import {
 import {
   HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
   HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+  assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx,
   createHostedGroupCurrentSenderAssistantAskRequestId,
   createHostedGroupCurrentSenderPrivateAssistantAskRequestId,
   requestHostedGroupCurrentSenderAssistantAsk,
@@ -617,6 +621,60 @@ describe("hosted current-sender Assistant Ask authority", () => {
             ? completionWake
             : null,
     );
+
+    const privateDeliveryAuthority = {
+      answeredMailboxItemIds: [completionId],
+      assistantAskCompletionExpiresAt: requestWake.ask.expiresAt,
+      boundRuntimeMemberId: SENDER_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+          completionId,
+        ),
+      now: NOW,
+      responseTextDigest: createHash("sha256").update(answer).digest("hex"),
+      route: DIRECT_ROUTE,
+      tx: fakeTx as never,
+    };
+    await expect(
+      assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx(
+        privateDeliveryAuthority,
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+        ...privateDeliveryAuthority,
+        responseTextDigest: "0".repeat(64),
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+    });
+    await expect(
+      assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+        ...privateDeliveryAuthority,
+        now: new Date(requestWake.ask.expiresAt),
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+    });
+    await expect(
+      assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+        ...privateDeliveryAuthority,
+        route: {
+          ...DIRECT_ROUTE,
+          threadId: `hid_${"3".repeat(32)}`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+    });
+    await expect(
+      assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+        ...privateDeliveryAuthority,
+        boundRuntimeMemberId: "member_other",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+    });
 
     await expect(handleHostedRuntimeAssistantAskControl({
       boundRuntimeMemberId: SENDER_MEMBER_ID,

@@ -6,6 +6,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
@@ -19,6 +20,7 @@ import {
   type HostedExecutionAssistantNotificationRoute,
   type HostedExecutionConversationMessageWake,
   type HostedExecutionExternalThreadRouteAuthority,
+  type HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedRuntimeGroupCurrentSenderMessageResult,
@@ -34,7 +36,10 @@ import {
 import {
   requireHostedRuntimeActiveAccessForUpdateTx,
 } from "../hosted-mailbox/runtime-access";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import {
   resolveHostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
@@ -50,8 +55,6 @@ const HOSTED_GROUP_CURRENT_SENDER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-current-sender-assistant-ask.request.v1";
 const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-current-sender-private-assistant-ask.request.v1";
-const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_DELIVERY_KEY_PREFIX =
-  "assistant-ask-private:";
 const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_NOTIFICATION_INSTRUCTIONS =
   "Private current-sender Assistant Ask completion; exact reviewed text is in responsePolicy.";
 const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_UNAVAILABLE_TEXT =
@@ -655,9 +658,15 @@ export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx
   const notification = wake?.kind === "assistant.notification.requested"
     ? wake.notification
     : null;
+  const privateCompletion = notification?.privateAssistantAskCompletion;
   const deliveryKey = createHostedGroupCurrentSenderPrivateDeliveryKey(
     input.completionId,
   );
+  const requestId =
+    createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
+      groupRuntimeMemberId: input.authority.groupRuntimeMemberId,
+      originAssistantInputId: input.authority.origin.assistantInputId,
+    });
   if (
     !wake
     || wake.kind !== "assistant.notification.requested"
@@ -672,6 +681,9 @@ export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx
     || notification.instructions
       !== HOSTED_GROUP_CURRENT_SENDER_PRIVATE_NOTIFICATION_INSTRUCTIONS
     || (notification.notificationPromptProfile ?? null) !== null
+    || !privateCompletion
+    || privateCompletion.expiresAt !== input.authority.expiresAt
+    || privateCompletion.requestId !== requestId
     || responsePolicy?.kind !== "require_send_exact_text"
     || responseText.length === 0
     || [...responseText].length
@@ -709,6 +721,11 @@ export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
   const deliveryKey = createHostedGroupCurrentSenderPrivateDeliveryKey(
     input.completionId,
   );
+  const requestId =
+    createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
+      groupRuntimeMemberId: input.authority.groupRuntimeMemberId,
+      originAssistantInputId: input.authority.origin.assistantInputId,
+    });
   const responseText = buildHostedGroupCurrentSenderPrivateResponseText(
     input.result,
   );
@@ -722,6 +739,10 @@ export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
       externalThreadRouteAuthority: null,
       instructions:
         HOSTED_GROUP_CURRENT_SENDER_PRIVATE_NOTIFICATION_INSTRUCTIONS,
+      privateAssistantAskCompletion: {
+        expiresAt: input.authority.expiresAt,
+        requestId,
+      },
       responsePolicy: {
         kind: "require_send_exact_text",
         text: responseText,
@@ -743,6 +764,172 @@ export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
     expectedUserId: input.authority.targetMemberId,
     mailboxItemId: input.completionId,
   };
+}
+
+export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx(
+  input: HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority & {
+    boundRuntimeMemberId: string;
+    now?: Date;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  const completionId = input.answeredMailboxItemIds[0] ?? null;
+  let expectedDeliveryKey: string;
+  try {
+    expectedDeliveryKey = completionId
+      ? createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+          completionId,
+        )
+      : "";
+  } catch {
+    throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+  }
+  const now = input.now ?? new Date();
+  const expiresAtMs = Date.parse(input.assistantAskCompletionExpiresAt);
+  if (
+    !completionId
+    || input.answeredMailboxItemIds.length !== 1
+    || completionId.trim() !== completionId
+    || input.idempotencyKey !== expectedDeliveryKey
+    || !Number.isFinite(expiresAtMs)
+    || new Date(expiresAtMs).toISOString()
+      !== input.assistantAskCompletionExpiresAt
+    || expiresAtMs <= now.getTime()
+    || !/^[0-9a-f]{64}$/u.test(input.responseTextDigest)
+  ) {
+    throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+  }
+
+  const completionItem = await readHostedMailboxItemById({
+    mailboxItemId: completionId,
+    prisma: input.tx,
+  });
+  if (
+    !completionItem
+    || completionItem.dedupeKey !== completionId
+    || completionItem.expiresAt !== input.assistantAskCompletionExpiresAt
+    || completionItem.kind !== "assistant.notification.requested"
+    || completionItem.userId !== input.boundRuntimeMemberId
+  ) {
+    throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+  }
+
+  const completionWake = await readHostedMailboxWakeByItemId({
+    availableAt: now,
+    mailboxItemId: completionId,
+    prisma: input.tx,
+  });
+  const notification = completionWake?.kind
+      === "assistant.notification.requested"
+    ? completionWake.notification
+    : null;
+  const responsePolicy = notification?.responsePolicy;
+  const responseText = responsePolicy?.kind === "require_send_exact_text"
+    ? responsePolicy.text
+    : null;
+  const privateCompletion = notification?.privateAssistantAskCompletion;
+  if (
+    !completionWake
+    || completionWake.kind !== "assistant.notification.requested"
+    || completionWake.eventId !== completionId
+    || completionWake.userId !== input.boundRuntimeMemberId
+    || !notification
+    || notification.deliveryDedupeToken !== expectedDeliveryKey
+    || notification.deliveryDispatchMode !== "queue-only"
+    || notification.deliveryIdempotencyKey !== expectedDeliveryKey
+    || (notification.externalThreadRouteAuthority ?? null) !== null
+    || (notification.firstContact ?? null) !== null
+    || notification.instructions
+      !== HOSTED_GROUP_CURRENT_SENDER_PRIVATE_NOTIFICATION_INSTRUCTIONS
+    || (notification.notificationPromptProfile ?? null) !== null
+    || !privateCompletion
+    || privateCompletion.expiresAt
+      !== input.assistantAskCompletionExpiresAt
+    || responsePolicy?.kind !== "require_send_exact_text"
+    || responseText === null
+    || responseText.trim().length === 0
+    || [...responseText].length
+      > HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS
+    || createHash("sha256").update(responseText).digest("hex")
+      !== input.responseTextDigest
+    || !hostedGroupCurrentSenderPrivateRoutesEqual(
+      notification.route,
+      input.route,
+    )
+  ) {
+    throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+  }
+
+  const requestItem = await readHostedMailboxItemById({
+    mailboxItemId: privateCompletion.requestId,
+    prisma: input.tx,
+  });
+  const requestWake = requestItem
+    ? await readHostedMailboxWakeByItemId({
+        availableAt: now,
+        mailboxItemId: privateCompletion.requestId,
+        prisma: input.tx,
+      })
+    : null;
+  if (
+    !requestItem
+    || requestItem.dedupeKey !== privateCompletion.requestId
+    || requestItem.expiresAt !== input.assistantAskCompletionExpiresAt
+    || requestItem.kind !== "assistant.ask.requested"
+    || requestItem.userId !== input.boundRuntimeMemberId
+    || !requestWake
+    || !isHostedExecutionAssistantAskRequestedWake(requestWake)
+    || requestWake.eventId !== privateCompletion.requestId
+    || requestWake.userId !== input.boundRuntimeMemberId
+    || requestWake.ask.expiresAt !== input.assistantAskCompletionExpiresAt
+    || !("origin" in requestWake.ask)
+    || requestWake.ask.origin.kind !== "accepted_input"
+    || requestWake.ask.target.kind !== "group_sender_private"
+  ) {
+    throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+  }
+
+  const expectedRequestId =
+    createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
+      groupRuntimeMemberId: requestWake.ask.target.groupRuntimeMemberId,
+      originAssistantInputId: requestWake.ask.origin.assistantInputId,
+    });
+  if (expectedRequestId !== privateCompletion.requestId) {
+    throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+  }
+  const authority =
+    await readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx({
+      expectedGroupRuntimeMemberId:
+        requestWake.ask.target.groupRuntimeMemberId,
+      expectedTargetMemberId: input.boundRuntimeMemberId,
+      now,
+      origin: requestWake.ask.origin,
+      tx: input.tx,
+    });
+  if (
+    !authority
+    || authority.permissionDigest !== requestWake.ask.target.permissionDigest
+    || authority.question !== requestWake.ask.question
+  ) {
+    throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+  }
+  const destination = await resolveHostedGroupCurrentSenderPrivateDestination({
+    authority,
+    tx: input.tx,
+  });
+  if (
+    !destination
+    || !hostedGroupCurrentSenderPrivateRoutesEqual(
+      destination.route,
+      notification.route,
+    )
+    || !hostedGroupCurrentSenderPrivateRoutesEqual(
+      destination.route,
+      input.route,
+    )
+  ) {
+    throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+  }
 }
 
 export function buildHostedGroupCurrentSenderPrivateResponseText(
@@ -791,11 +978,12 @@ async function resolveHostedGroupCurrentSenderPrivateDestination(input: {
 function createHostedGroupCurrentSenderPrivateDeliveryKey(
   completionId: string,
 ): string {
-  const normalized = normalizeHostedCurrentSenderOpaqueId(
-    completionId,
-    "Hosted current-sender private completion ID",
+  return createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+    normalizeHostedCurrentSenderOpaqueId(
+      completionId,
+      "Hosted current-sender private completion ID",
+    ),
   );
-  return `${HOSTED_GROUP_CURRENT_SENDER_PRIVATE_DELIVERY_KEY_PREFIX}${normalized}`;
 }
 
 function hostedGroupCurrentSenderPrivateRoutesEqual(
@@ -813,6 +1001,15 @@ function hostedGroupCurrentSenderPrivateRoutesEqual(
     && actual.identityId === expected.identityId
     && actual.threadId === expected.threadId
     && actual.threadIsDirect === expected.threadIsDirect;
+}
+
+function throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+    httpStatus: 403,
+    message: "Hosted Assistant Ask delivery authority is no longer valid.",
+    retryable: false,
+  });
 }
 
 function readHostedCurrentSenderSource(

@@ -75,7 +75,11 @@ additionally proves exact accepted group-message attribution to the canonical
 author's active personal runtime, rejection of thread-container and
 non-accepted-input contexts, conversion to one same-channel `direct-member`
 queue-only exact-text notification with no group-route authority, and rejection
-of route-changing replay. Exact-head CI owns the broad app and package suites.
+of route-changing replay. Provider-entry proof must revalidate the original
+private Assistant Ask expiry, exact reviewed-text digest, same personal member,
+and current same-channel `direct-member` route, with expiry, revocation, text
+mismatch, and route drift all terminal and unable to fall back to the group.
+Exact-head CI owns the broad app and package suites.
 
 ## Hosted Stripe Billing Verification
 

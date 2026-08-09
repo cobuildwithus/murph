@@ -4,8 +4,10 @@ export * from "./assistant-usage.ts";
 export * from "./assistant-personalization.ts";
 export * from "./pending-group-setup.ts";
 export {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+  HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
 } from "./assistant-identifiers.ts";
 export * from "./builders.ts";

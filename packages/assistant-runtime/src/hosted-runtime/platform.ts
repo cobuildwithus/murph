@@ -70,6 +70,9 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
+} from "@murphai/hosted-execution";
+import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
   HostedVaultShareProjectionScope,
@@ -336,6 +339,9 @@ export interface HostedRuntimeAssistantAskCompletionAuthority {
   idempotencyKey: string;
 }
 
+export type HostedRuntimeAssistantAskPrivateCompletionAuthority =
+  HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority;
+
 export interface HostedRuntimeExternalThreadRouteAuthorityResult {
   assistantAskFallbackRequired?: boolean | null;
 }
@@ -405,6 +411,10 @@ type HostedRuntimeEffectsPortBase = {
       signal?: AbortSignal | null;
     },
   ): Promise<HostedRuntimeExternalThreadRouteAuthorityResult | void>;
+  assertAssistantAskPrivateCompletionAuthority?(
+    authority: HostedRuntimeAssistantAskPrivateCompletionAuthority,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
   resolveCurrentVerifiedEmailRecipient?(
     context?: { signal?: AbortSignal | null },
   ): Promise<string | null>;

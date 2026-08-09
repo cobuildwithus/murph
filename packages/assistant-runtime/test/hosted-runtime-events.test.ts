@@ -1893,6 +1893,79 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
+  it("maps private Assistant Ask completion proof into exact notification delivery authority", async () => {
+    const completionId = `aask_done_${"b".repeat(64)}`;
+    const requestId = `aask_req_${"a".repeat(64)}`;
+    const expiresAt = "2099-08-09T05:10:00.000Z";
+    const deliveryKey = `assistant-ask-private:${completionId}`;
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: completionId,
+      memberId: "member_123",
+      notification: {
+        deliveryDedupeToken: deliveryKey,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: deliveryKey,
+        externalThreadRouteAuthority: null,
+        instructions: "Queue the exact reviewed private answer.",
+        privateAssistantAskCompletion: {
+          expiresAt,
+          requestId,
+        },
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Reviewed private answer.",
+        },
+        route: {
+          actorId: "hid_linq_actor_private",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-direct-chat",
+          },
+          identityId: "hid_linq_identity_private",
+          threadId: "hid_linq_thread_private",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-08-09T05:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_private_completion",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
+    const notificationInput =
+      mocks.sendAssistantNotification.mock.calls[0]?.[0];
+    expect(notificationInput).toMatchObject({
+      answeredMailboxItemIds: [completionId],
+      deliveryDedupeToken: deliveryKey,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: deliveryKey,
+      firstContactPolicy: null,
+      hostedDeliveryIdempotency: {
+        inboundMailboxItemIds: ["hmi_private_completion"],
+      },
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: "Reviewed private answer.",
+      },
+      reviewedAssistantAskCompletionExpiresAt: expiresAt,
+      threadIsDirect: true,
+    });
+    expect(notificationInput).not.toHaveProperty(
+      "outboxExternalThreadRouteAuthority",
+    );
+    expect(notificationInput).not.toHaveProperty("notificationPromptProfile");
+    expect(notificationInput).not.toHaveProperty("privateAssistantAskCompletion");
+    expect(notificationInput).not.toHaveProperty("requestId");
+  });
+
   it("propagates detached group route authority into the assistant outbox", async () => {
     const externalThreadRouteAuthority = {
       accountLookupKey: "linq-account-key",

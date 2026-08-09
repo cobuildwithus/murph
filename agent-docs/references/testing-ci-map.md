@@ -705,7 +705,10 @@ keep the one-second presentation-only deadline and late-result rejection.
   coverage. The private path proves exact accepted-message attribution,
   personal-runtime targeting, same-channel `direct-member` routing, queue-only
   exact-text notification, absence of group-route authority, and retry
-  non-redirection. The production-like Linux
+  non-redirection. Provider-entry coverage binds the original private Assistant
+  Ask expiry, exact reviewed-text digest, same personal member, and current
+  same-channel direct route, then proves expiry, revocation, text mismatch, or
+  route drift fails terminally without group fallback. The production-like Linux
   proof must show committed group reads succeed while writes, `.runtime/**`,
   `.codex/**`, environment files, other roots, inherited shell secrets, and tool network are
   denied, and it must show child failure or cancellation cannot interrupt the
