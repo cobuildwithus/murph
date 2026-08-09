@@ -345,6 +345,34 @@ describe("hosted Starter usage grant owner", () => {
     expect(mocks.appendHostedUsageCreditGrantTx).not.toHaveBeenCalled();
   });
 
+  it("accepts a reconciled legacy grant after later Starter usage reduced its remaining balance", async () => {
+    const entry = {
+      ...validLegacyMigrationEntry(),
+      grant: { remainingUsdMicros: 2_250_000n },
+    };
+    const tx = txWithEntry(
+      entry,
+      null,
+      validLegacyConsumptionDebit(),
+    );
+
+    await expect(ensureHostedStarterUsageGrantTx({
+      effectiveAt: new Date("2026-08-09T20:00:00.000Z"),
+      initialConsumedUsdMicros: 1_500_000n,
+      memberId: "member_123",
+      source: "legacy_trial_migration",
+      tx: tx as never,
+    })).resolves.toEqual({
+      balanceUsdMicros: 2_000_000n,
+      effectiveAt: EFFECTIVE_AT,
+      entryId: "huce_starter",
+      granted: false,
+      ledgerVersion: 7n,
+    });
+
+    expect(mocks.appendHostedUsageCreditGrantTx).not.toHaveBeenCalled();
+  });
+
   it("fails closed when late legacy consumption finds a non-migration Starter grant", async () => {
     const tx = txWithEntry(validEntry());
 

@@ -266,9 +266,11 @@ async function assertHostedStarterUsageLegacyConsumptionReplayTx(input: {
   });
   const expectedRemainingUsdMicros =
     HOSTED_STARTER_USAGE_GRANT_USD_MICROS - input.initialConsumedUsdMicros;
+  const actualRemainingUsdMicros =
+    input.existingGrant.grant?.remainingUsdMicros ?? -1n;
   if (
-    input.existingGrant.grant?.remainingUsdMicros
-      !== expectedRemainingUsdMicros
+    actualRemainingUsdMicros < 0n
+    || actualRemainingUsdMicros > expectedRemainingUsdMicros
     || !debit
     || debit.amountUsdMicros !== -input.initialConsumedUsdMicros
     || debit.beneficiaryMemberId !== input.memberId
