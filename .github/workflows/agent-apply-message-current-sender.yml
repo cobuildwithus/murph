@@ -1,0 +1,77 @@
+name: Apply group private continuation
+
+on:
+  push:
+    branches:
+      - agent/message-current-sender
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-message-current-sender
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply implementation
+        run: |
+          gzip -dc .github/agent-scripts/apply_message_current_sender.py.gz > /tmp/apply_message_current_sender.py
+          python /tmp/apply_message_current_sender.py
+
+      - name: Check patch formatting
+        run: git diff --check
+
+      - name: Run focused tests
+        run: |
+          pnpm exec vitest run \
+            packages/hosted-execution/test/assistant-ask-private-message.test.ts \
+            packages/hosted-execution/test/assistant-ask-current-sender.test.ts \
+            packages/assistant-engine/test/assistant-codex-group-private-message.test.ts \
+            packages/assistant-engine/test/assistant-codex-group-current-sender.test.ts \
+            packages/assistant-runtime/test/hosted-runtime-current-sender-private-message.test.ts \
+            packages/assistant-runtime/test/hosted-runtime-current-sender-assistant-ask.test.ts \
+            apps/cloudflare/test/group-tool-private-message-replay.test.ts \
+            apps/cloudflare/test/group-tool-port-replay.test.ts \
+            apps/web/test/hosted-group-current-sender-private-message.test.ts \
+            apps/web/test/hosted-group-current-sender-assistant-ask.test.ts \
+            apps/web/test/hosted-group-tool.test.ts
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Validate agent docs
+        run: pnpm docs:drift
+
+      - name: Commit implementation
+        run: |
+          git rm \
+            .github/workflows/agent-apply-message-current-sender.yml \
+            .github/agent-scripts/apply_message_current_sender.py.gz
+          git add -A
+          git diff --cached --check
+          git config user.name "OpenAI Codex"
+          git config user.email "codex@openai.com"
+          git commit -m "Add private group continuations"
+          git push origin HEAD:agent/message-current-sender
