@@ -17,11 +17,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - name: Archive source worktree
+      - name: Archive tracked source worktree
         shell: bash
         run: |
           set -euo pipefail
-          tar --exclude=.git --exclude=murph-source.tar.gz -czf murph-source.tar.gz .
+          git archive --format=tar.gz --output=murph-source.tar.gz HEAD
       - name: Upload source worktree
         uses: actions/upload-artifact@v4
         with:
