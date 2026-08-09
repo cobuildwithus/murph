@@ -6,9 +6,10 @@ import { HOSTED_PULSE_TRIAL_DAYS } from "./billing-plans";
 // plans a member can switch between — but every list lives here so a wording
 // change lands on all surfaces at once.
 //
-// Copy rule: only Edge may claim the most capable AI models. The top model
-// requires an active paid Edge plan (ASSISTANT_MODEL_SOL_REQUIRES_EDGE), so
-// that claim on Pulse or Core would promise something the product blocks.
+// Copy rule: only Edge and Max may claim the most capable AI models. The top
+// model requires their shared premium runtime entitlement
+// (ASSISTANT_MODEL_SOL_REQUIRES_EDGE), so that claim on Pulse or Core would
+// promise something the product blocks.
 
 export const PULSE_TRIAL_FEATURES = [
   `Full Pulse access for ${HOSTED_PULSE_TRIAL_DAYS} days`,
@@ -46,6 +47,13 @@ export const EDGE_ONLY_FEATURES = [
 export const SETTINGS_EDGE_FEATURES = [
   "Everything in Pulse",
   ...EDGE_ONLY_FEATURES,
+] as const;
+
+export const SETTINGS_MAX_FEATURES = [
+  "Everything in Edge",
+  "Highest included monthly AI usage",
+  "More room for frequent deep research and analysis",
+  "Built for heavier, ongoing Murph use",
 ] as const;
 
 export const JOIN_EDGE_FEATURES = [

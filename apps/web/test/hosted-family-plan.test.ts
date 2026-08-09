@@ -285,7 +285,11 @@ describe("hosted Family plan", () => {
     }));
     runtimeMocks.requireHostedStripeBillingPlanConfig.mockImplementation(({ billingPlanCode }) => ({
       billingPlanCode,
-      priceId: billingPlanCode === "launch_edge_monthly" ? "price_edge" : "price_pulse",
+      priceId: billingPlanCode === "launch_edge_monthly"
+        ? "price_edge"
+        : billingPlanCode === "launch_max_monthly"
+          ? "price_max"
+          : "price_pulse",
       stripe: runtimeMocks.requireHostedStripeApi(),
     }));
     runtimeMocks.requireHostedStripeFamilyPlanConfig.mockImplementation(({ planCode }) => ({
@@ -5061,7 +5065,21 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
-  it("converts an active direct paid owner subscription into Family billing without creating a second checkout", async () => {
+  it.each([
+    {
+      currentPlanCode: "launch_monthly" as const,
+      currentPriceId: "price_pulse",
+      label: "Pulse",
+    },
+    {
+      currentPlanCode: "launch_max_monthly" as const,
+      currentPriceId: "price_max",
+      label: "Max",
+    },
+  ])("converts an active direct-paid $label owner subscription into Family billing without creating a second checkout", async ({
+    currentPlanCode,
+    currentPriceId,
+  }) => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,
       id: "hbag_family",
@@ -5077,7 +5095,9 @@ describe("hosted Family plan", () => {
       billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
     });
-    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(createMemberBillingRefMock());
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(createMemberBillingRefMock({
+      currentBillingPlanCode: currentPlanCode,
+    }));
 
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
@@ -5088,11 +5108,11 @@ describe("hosted Family plan", () => {
       customerId: "cus_direct",
       itemQuantity: 1,
       metadata: {
-        billingPlanCode: "launch_monthly",
+        billingPlanCode: currentPlanCode,
         checkoutOffer: "standard",
         memberId: "member_owner",
       },
-      priceId: "price_pulse",
+      priceId: currentPriceId,
       subscriptionId: "sub_direct",
     });
     const updatedSubscription = makeFamilyStripeSubscription({
@@ -5150,7 +5170,7 @@ describe("hosted Family plan", () => {
       payment_behavior: "pending_if_incomplete",
       proration_behavior: "always_invoice",
     }), {
-      idempotencyKey: "hosted-family-direct-paid-upgrade:hbag_family:sub_direct:launch_monthly:price_pulse:price_family:seats-2",
+      idempotencyKey: `hosted-family-direct-paid-upgrade:hbag_family:sub_direct:${currentPlanCode}:${currentPriceId}:price_family:seats-2`,
     });
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
     expect(tx.hostedMember.update).not.toHaveBeenCalled();

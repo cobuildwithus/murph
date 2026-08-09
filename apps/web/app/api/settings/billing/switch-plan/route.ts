@@ -25,12 +25,13 @@ export const POST = withJsonError(async (request: Request) => {
   if (
     targetPlanCode !== "launch_group_monthly"
     && targetPlanCode !== "launch_monthly"
+    && targetPlanCode !== "launch_edge_monthly"
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_PLAN_SWITCH_TARGET_INVALID",
       httpStatus: 400,
       message:
-        "targetPlanCode must be launch_group_monthly or launch_monthly.",
+        "targetPlanCode must be launch_group_monthly, launch_monthly, or launch_edge_monthly.",
     });
   }
 

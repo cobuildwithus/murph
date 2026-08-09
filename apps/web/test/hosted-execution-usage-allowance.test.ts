@@ -44,6 +44,7 @@ import { buildHostedRetellPhoneCallUsageRecord } from "@/src/lib/hosted-executio
 
 const DIRECT_PULSE_ALLOWANCE_USD_MICROS = 6_400_000n;
 const DIRECT_EDGE_ALLOWANCE_USD_MICROS = 16_000_000n;
+const DIRECT_MAX_ALLOWANCE_USD_MICROS = 40_000_000n;
 const FAMILY_PULSE_ALLOWANCE_USD_MICROS = 5_600_000n;
 const FAMILY_EDGE_ALLOWANCE_USD_MICROS = 15_200_000n;
 
@@ -2476,6 +2477,35 @@ describe("resolveHostedAiUsageGate", () => {
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     });
+  });
+
+  it("identifies Max when an active Max member exhausts the combined allowance", async () => {
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_max_monthly",
+      limitUsdMicros: DIRECT_MAX_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: DIRECT_MAX_ALLOWANCE_USD_MICROS,
+    });
+
+    const decision = await resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    });
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      billingPlanCode: "launch_max_monthly",
+      reason: "ai_usage_limit_exceeded",
+      userNotice: {
+        code: "max_usage_limit_reached",
+        message: expect.any(String),
+      },
+    });
+    if (decision.allowed || !decision.userNotice) {
+      throw new Error("Expected exhausted Max usage to return a user notice");
+    }
+    expect(decision.userNotice.message).toMatch(/Max/iu);
+    expect(decision.userNotice.message).not.toMatch(/Pulse|Edge/iu);
   });
 
   it("gives an exhausted group gate the deterministic refill admission seam before denial", async () => {
