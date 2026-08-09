@@ -76,6 +76,9 @@ import {
   resolveHostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import {
+  assertHostedLinqRecentInboundEngagementForRuntime,
+} from "../hosted-onboarding/linq-egress-engagement";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
 import { issueHostedSignupReferralLink } from "../hosted-growth/signup-referral";
@@ -350,6 +353,7 @@ export async function handleHostedRuntimeGroupTool(input: {
     return handleHostedRuntimeGroupShareContactCard({
       contactCardImageUrl: input.request.contactCardImageUrl ?? null,
       contactCardShareKey: input.request.contactCardShareKey ?? null,
+      directLinqChatId: input.request.directLinqChatId ?? null,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -1742,6 +1746,33 @@ type HostedRuntimeGroupLinqThreadAuthorization =
   | { chatId: string }
   | { unavailableReason: string };
 
+/**
+ * Authorize a personalized contact card against the direct/home Linq owner.
+ * `hostedMemberRouting` is the sole owner of a direct chat, and the same chat
+ * is forbidden from existing in the group thread-route store, so the group
+ * assertion can never admit one. This reuses the existing runtime egress
+ * assertion rather than introducing a second direct-route owner.
+ */
+async function authorizeHostedRuntimeDirectLinqChat(input: {
+  chatId: string;
+  memberId: string;
+}): Promise<HostedRuntimeGroupLinqThreadAuthorization> {
+  try {
+    const assertion = await assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true,
+      memberId: input.memberId,
+      prisma: getPrisma(),
+      target: input.chatId,
+    });
+    if (assertion.threadIsDirect !== true) {
+      return { unavailableReason: "linq_thread_unauthorized" };
+    }
+  } catch {
+    return { unavailableReason: "linq_thread_unauthorized" };
+  }
+  return { chatId: input.chatId };
+}
+
 async function authorizeHostedRuntimeGroupLinqThread(input: {
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
@@ -2222,6 +2253,7 @@ function logHostedThreadContainerParticipantReconcileCapped(input: {
 async function handleHostedRuntimeGroupShareContactCard(input: {
   contactCardImageUrl: string | null;
   contactCardShareKey: string | null;
+  directLinqChatId: string | null;
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
@@ -2230,7 +2262,15 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
     result: { status: "unavailable", unavailableReason },
   });
 
-  const authorized = await authorizeHostedRuntimeGroupLinqThread(input);
+  // A direct conversation is owned by the member's own routing record, so it
+  // is revalidated through the direct egress owner rather than the group
+  // thread-route store, which structurally cannot hold this chat.
+  const authorized = input.directLinqChatId
+    ? await authorizeHostedRuntimeDirectLinqChat({
+      chatId: input.directLinqChatId,
+      memberId: input.memberId,
+    })
+    : await authorizeHostedRuntimeGroupLinqThread(input);
   if ("unavailableReason" in authorized) {
     return unavailable(authorized.unavailableReason);
   }

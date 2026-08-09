@@ -536,11 +536,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
-  it("binds personalized contact cards to the exact direct iMessage route", async () => {
-    const directAuthority = {
-      ...ROUTE_AUTHORITY,
-      threadId: "chat_direct_1",
-    };
+  it("binds personalized contact cards to the exact direct iMessage chat", async () => {
     const contactCardImageUrl =
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
     const request = vi.fn().mockResolvedValue({
@@ -551,9 +547,10 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
+        // A direct home conversation carries no thread-route authority.
         buildLinqDeliveryContext({
           directRecipientPhoneNumber: "+15550000001",
-          routeAuthority: directAuthority,
+          routeAuthority: null,
           target: "chat_direct_1",
           threadIsDirect: true,
         }),
@@ -565,13 +562,11 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       contactCardImageUrl,
     });
 
+    // The chat id, never a fabricated group thread authority.
     expect(request).toHaveBeenCalledExactlyOnceWith({
       action: "share_contact_card",
       contactCardImageUrl,
-      linqThread: {
-        authority: directAuthority,
-        chatId: "chat_direct_1",
-      },
+      directLinqChatId: "chat_direct_1",
     });
   });
 

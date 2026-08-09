@@ -4691,7 +4691,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           : "chat_group_contact_card",
       },
       sourceMetadata: {
-        externalThreadRouteAuthorityPresent: true,
+        // An ordinary direct wake carries no external thread-route authority:
+        // its route lives in the member's own routing record. A group wake
+        // does. This is the exact shape the production webhook persists.
+        externalThreadRouteAuthorityPresent: !input.threadIsDirect,
         kind: "linq" as const,
         partCount: 0,
         reactionEligible: false,
@@ -4783,15 +4786,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
       ]);
       expect(contactCardRequests).toEqual([
+        // The trusted host's exact direct chat, carried without any group
+        // thread-route authority, which a direct home chat cannot have.
         {
           action: "share_contact_card",
           contactCardImageUrl,
           contactCardShareKey: directInput.inputId,
-          linqThread: expect.objectContaining({
-            chatId: "chat_direct_contact_card",
-          }),
+          directLinqChatId: "chat_direct_contact_card",
         },
-        // No direct route, so nothing binds a thread and Web fails closed.
+        // No direct route, so nothing binds a chat and Web fails closed.
         {
           action: "share_contact_card",
           contactCardImageUrl,

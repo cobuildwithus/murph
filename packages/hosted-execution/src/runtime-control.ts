@@ -1450,6 +1450,13 @@ export type HostedRuntimeGroupToolRequest =
       action: "share_contact_card";
       contactCardImageUrl?: string;
       contactCardShareKey?: string;
+      /**
+       * Trusted-host chat id for a personalized card in a direct conversation.
+       * Direct routes are owned by the member's own routing record rather than
+       * the group thread-route store, so they carry no thread authority here
+       * and Web revalidates the chat against that owner before sending.
+       */
+      directLinqChatId?: string;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
   | {

@@ -488,7 +488,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         if (linqRoute?.service === "imessage") {
           return await forwardRequest({
             ...request,
-            linqThread: linqRoute.thread,
+            directLinqChatId: linqRoute.chatId,
           });
         }
         return linqRoute?.service === "sms"
@@ -783,40 +783,59 @@ type HostedGroupToolLinqRouteContext = {
   thread: HostedRuntimeGroupToolLinqThreadContext;
 };
 
-function resolveHostedGroupToolLinqRouteContext(
-  contexts: readonly HostedAssistantLinqDeliveryContext[],
-): HostedGroupToolLinqRouteContext | null {
-  return resolveHostedToolLinqRouteContext({
-    contexts,
-    threadIsDirect: false,
-  });
-}
+/**
+ * Direct home conversations are owned by `hostedMemberRouting`, not by the
+ * group thread-route store, and one chat may never live in both. So a direct
+ * route carries only the trusted host's exact chat id and service; Web
+ * revalidates it against the direct owner at the send boundary. Fabricating a
+ * thread-route authority here would assert an owner that cannot exist.
+ */
+type HostedDirectToolLinqRouteContext = {
+  chatId: string;
+  service: HostedGroupToolLinqService;
+};
 
 function resolveHostedDirectToolLinqRouteContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
-): HostedGroupToolLinqRouteContext | null {
-  return resolveHostedToolLinqRouteContext({
-    contexts,
-    threadIsDirect: true,
-  });
+): HostedDirectToolLinqRouteContext | null {
+  const eligible = new Map<string, HostedDirectToolLinqRouteContext>();
+  let hasInvalidCandidate = false;
+  for (const context of contexts) {
+    if (context.threadIsDirect !== true) {
+      if (context.threadIsDirect !== false) {
+        hasInvalidCandidate = true;
+      }
+      continue;
+    }
+    const service = normalizeHostedGroupToolLinqService(context.service);
+    const chatId = normalizeAssistantRouteString(context.target);
+    if (!service || !chatId) {
+      hasInvalidCandidate = true;
+      continue;
+    }
+    const routeKey = JSON.stringify([chatId, service]);
+    if (!eligible.has(routeKey)) {
+      eligible.set(routeKey, { chatId, service });
+    }
+  }
+  if (hasInvalidCandidate || eligible.size !== 1) {
+    return null;
+  }
+  return [...eligible.values()][0] ?? null;
 }
 
-function resolveHostedToolLinqRouteContext(input: {
-  contexts: readonly HostedAssistantLinqDeliveryContext[];
-  threadIsDirect: boolean;
-}): HostedGroupToolLinqRouteContext | null {
+function resolveHostedGroupToolLinqRouteContext(
+  contexts: readonly HostedAssistantLinqDeliveryContext[],
+): HostedGroupToolLinqRouteContext | null {
   const eligible = new Map<string, HostedGroupToolLinqRouteContext>();
   let hasInvalidAuthoritativeCandidate = false;
-  for (const context of input.contexts) {
+  for (const context of contexts) {
     const authority = context.routeAuthority;
-    if (!authority || context.threadIsDirect !== input.threadIsDirect) {
-      if (
-        authority
-        && context.threadIsDirect !== true
-        && context.threadIsDirect !== false
-      ) {
-        hasInvalidAuthoritativeCandidate = true;
-      }
+    if (!authority || context.threadIsDirect === true) {
+      continue;
+    }
+    if (context.threadIsDirect !== false) {
+      hasInvalidAuthoritativeCandidate = true;
       continue;
     }
     const service = normalizeHostedGroupToolLinqService(context.service);
@@ -1087,19 +1106,27 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
   const event = input.event;
   const sourceMetadata = event?.sourceMetadata;
   const replyTarget = event?.replyTarget;
-  // Admit authoritative Linq events from either thread shape and carry the
-  // event's real value through. Group consumers select `false` and the direct
-  // consumer selects `true`, so neither can read the other's route.
+  // Admit Linq events from either thread shape and carry the event's real
+  // value through. Group consumers select `false` and require the external
+  // thread-route authority these events carry. A direct home conversation
+  // structurally cannot have that authority — its route lives in
+  // `hostedMemberRouting` — so it is admitted on the trusted reply target
+  // alone and revalidated against its own owner at the Web send boundary.
   if (
     !event
     || sourceMetadata?.kind !== "linq"
-    || sourceMetadata.externalThreadRouteAuthorityPresent !== true
     || typeof event.conversation?.threadIsDirect !== "boolean"
     || replyTarget?.channel !== "linq"
   ) {
     return null;
   }
   const threadIsDirect = event.conversation.threadIsDirect;
+  if (
+    !threadIsDirect
+    && sourceMetadata.externalThreadRouteAuthorityPresent !== true
+  ) {
+    return null;
+  }
   const threadId = normalizeAssistantRouteString(replyTarget.threadId);
   if (!threadId) {
     return null;
@@ -1109,11 +1136,16 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
       normalizeAssistantRouteString(sourceMetadata.senderHandle),
     fromPhoneNumber: null,
     replyToMessageId: normalizeAssistantRouteString(replyTarget.messageId),
-    routeAuthority: {
-      channel: "linq",
-      containerMemberId: input.memberId,
-      threadId,
-    },
+    // Only a group thread carries external thread-route authority. Leaving it
+    // null for a direct conversation keeps the group resolvers structurally
+    // unable to select it.
+    routeAuthority: threadIsDirect
+      ? null
+      : {
+        channel: "linq",
+        containerMemberId: input.memberId,
+        threadId,
+      },
     service: normalizeAssistantRouteString(sourceMetadata.service),
     target: threadId,
     threadIsDirect,

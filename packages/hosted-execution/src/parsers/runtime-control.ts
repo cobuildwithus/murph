@@ -1516,6 +1516,7 @@ export function parseHostedRuntimeGroupToolRequest(
         "action",
         "contactCardImageUrl",
         "contactCardShareKey",
+        "directLinqChatId",
         "linqThread",
       ]),
       label,
@@ -1541,6 +1542,17 @@ export function parseHostedRuntimeGroupToolRequest(
               maxCodePoints:
                 HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
               value: record.contactCardShareKey,
+            }),
+          }),
+      ...(record.directLinqChatId === undefined
+        || record.directLinqChatId === null
+        ? {}
+        : {
+            directLinqChatId: parseHostedRuntimeGroupAskBoundedText({
+              label: `${label} directLinqChatId`,
+              maxCodePoints:
+                HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+              value: record.directLinqChatId,
             }),
           }),
       ...(record.linqThread === undefined || record.linqThread === null

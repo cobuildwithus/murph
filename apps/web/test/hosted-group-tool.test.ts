@@ -4,6 +4,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
+  assertHostedLinqRecentInboundEngagementForRuntime: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   canonicalizeHostedGroupDisclosurePermissionText: vi.fn(),
@@ -159,6 +160,11 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-egress-engagement", () => ({
+  assertHostedLinqRecentInboundEngagementForRuntime:
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
@@ -4640,28 +4646,41 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
   });
 
-  it("shares a generated contact card in a direct-authorized chat without requiring group ownership", async () => {
+  it("authorizes a generated contact card through the direct route owner, not the group thread store", async () => {
     const contactCardImageUrl =
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
         action: "share_contact_card",
         contactCardImageUrl,
-        linqThread: LINQ_THREAD,
+        directLinqChatId: "chat_direct_1",
       },
     })).resolves.toEqual({
       action: "share_contact_card",
       result: { status: "sent" },
     });
 
+    // A direct home chat can never exist in the group thread-route store, so
+    // that assertion must not be the one gating this send.
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(mocks.assertHostedLinqRecentInboundEngagementForRuntime)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        authorityCheckOnly: true,
+        memberId: "member_container",
+        target: "chat_direct_1",
+      }));
     expect(mocks.hostedThreadContainerFindUnique).not.toHaveBeenCalled();
     expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
     expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith(
       expect.objectContaining({
-        chatId: "chat_group_1",
+        chatId: "chat_direct_1",
         idempotencyKeyPrefix: "personalized-contact-card",
         imageUrl: contactCardImageUrl,
         memberId: "member_container",
@@ -4669,13 +4688,56 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
   });
 
+  it.each([
+    {
+      label: "the direct owner rejects the chat",
+      setup: () => {
+        mocks.assertHostedLinqRecentInboundEngagementForRuntime
+          .mockRejectedValue(new Error("route authority mismatch"));
+      },
+    },
+    {
+      label: "the resolved route is not direct",
+      setup: () => {
+        mocks.assertHostedLinqRecentInboundEngagementForRuntime
+          .mockResolvedValue({ targetOverride: null, threadIsDirect: false });
+      },
+    },
+  ])("refuses a generated contact card when $label", async ({ setup }) => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    setup();
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        directLinqChatId: "chat_direct_1",
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unauthorized",
+      },
+    });
+
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  });
+
   it("rejects an untrusted generated contact-card image URL before fetching it", async () => {
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
         action: "share_contact_card",
         contactCardImageUrl: "https://example.invalid/avatar.png",
-        linqThread: LINQ_THREAD,
+        directLinqChatId: "chat_direct_1",
       },
     })).resolves.toEqual({
       action: "share_contact_card",

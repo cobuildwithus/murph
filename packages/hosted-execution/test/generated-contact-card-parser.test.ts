@@ -56,6 +56,28 @@ describe("generated contact-card runtime request", () => {
     })).toThrow(/contactCardShareKey/u);
   });
 
+  it("carries a bounded direct chat id and rejects an oversized one", () => {
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "share_contact_card",
+      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+      directLinqChatId: "chat_direct_1",
+    }, {
+      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
+    })).toEqual({
+      action: "share_contact_card",
+      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+      directLinqChatId: "chat_direct_1",
+    });
+
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "share_contact_card",
+      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+      directLinqChatId: "c".repeat(201),
+    }, {
+      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
+    })).toThrow(/directLinqChatId/u);
+  });
+
   it("rejects untrusted image origins and model-supplied extra fields", () => {
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "share_contact_card",
