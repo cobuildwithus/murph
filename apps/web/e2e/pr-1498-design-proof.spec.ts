@@ -79,7 +79,12 @@ async function captureStudy({
 
 test("capture signed-in invite recovery design proof", async ({ browser }) => {
   test.setTimeout(300_000);
+  // Capture-only: Playwright's testDir picks this up in every e2e job, but a
+  // job that did not ask for a capture has nowhere to put one. Skipping there
+  // keeps this runnable on demand without failing the suites it shares a
+  // directory with.
   const outputDir = process.env.DESIGN_PROOF_OUTPUT_DIR;
+  test.skip(!outputDir, "DESIGN_PROOF_OUTPUT_DIR is not set for this run.");
   expect(outputDir, "DESIGN_PROOF_OUTPUT_DIR is required").toBeTruthy();
   await mkdir(outputDir!, { recursive: true });
 
