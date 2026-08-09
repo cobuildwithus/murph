@@ -82,6 +82,12 @@ Planning is not activation. Do not silently create a protocol, reminder, check-i
 
 Treat physique photos, body measurements, pain and symptom notes, training logs, and competition health data as private by default. Sharing requires explicit user intent.
 
+### Repeated-set logs and cumulative totals
+
+For several small sets spread across a day, read `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` when an experiment owns the schedule or records. Treat each completion reply to one reminder as one occurrence, not as confirmation of an entire day.
+
+An actual cumulative repetition total must come from explicit canonical per-session or per-set quantities. Never derive it from elapsed days, the planned rotation, assumed adherence, expected occurrences, or the current per-set standard. Keep the recorded total, theoretical full-compliance total, and any unknown historical quantity visibly separate. When old logs contain completed sets but not repetitions, give the exact known set count and an honest known subtotal or lower bound instead of fabricating precision.
+
 ## Build the smallest complete answer
 
 1. **Set the decision criterion.** Translate the request into the outcome that should guide tradeoffs. Use neutral language for appearance goals; do not promise spot reduction, rank bodies, or turn appearance into a health verdict.
