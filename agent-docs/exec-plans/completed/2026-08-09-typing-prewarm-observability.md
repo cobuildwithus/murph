@@ -56,7 +56,7 @@ Updated: 2026-08-09
 3. [done] Attach consumed prewarm observations to the next fresh-start latency
    trace with no new I/O.
 4. [done] Add focused behavior, privacy, and no-extra-wait verification.
-5. [in progress] Commit, push, open a PR, and complete the required specialist,
+5. [done] Commit, push, open a PR, and complete the required specialist,
    ReviewGPT, CI, and parent-review gates.
 
 ## Decisions
