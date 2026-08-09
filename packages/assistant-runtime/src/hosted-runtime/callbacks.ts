@@ -5600,6 +5600,18 @@ function normalizeHostedAssistantDeliveryMedia(
   media: AssistantOutboxIntent["media"],
 ): HostedAssistantDeliveryMedia[] {
   return (media ?? []).map((item) => {
+    if (item.kind === "vault_file") {
+      return {
+        approvalGeneration: item.approvalGeneration,
+        approvalId: item.approvalId,
+        contentType: item.contentType,
+        filename: item.filename,
+        kind: item.kind,
+        ref: item.ref,
+        sha256: item.sha256,
+        sizeBytes: item.sizeBytes,
+      };
+    }
     if (item.kind !== "voice_memo") {
       return item;
     }
