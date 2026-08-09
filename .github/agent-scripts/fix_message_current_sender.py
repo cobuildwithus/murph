@@ -136,7 +136,7 @@ if route_anchor not in s:
 s = s.replace(route_anchor, route_replacement, 1)
 
 end = 'print("Applied message_current_sender implementation and focused tests.")\n'
-additional = r'''replace_once(
+additional = r"""replace_once(
     "packages/assistant-engine/src/assistant-codex/dynamic-tools.ts",
     dedent('''\
       if (parsed.data.action === 'ask_current_sender') {
@@ -167,7 +167,7 @@ additional = r'''replace_once(
     '''),
 )
 
-'''
+"""
 replacement = additional + """if FAILURES:
     print("Patch preflight failed with the following source-anchor mismatches:")
     for failure in FAILURES:
