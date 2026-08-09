@@ -243,6 +243,21 @@ is reconciled; later known daily bars may still render. State that the daily
 message total combines inbound messages across supported channels with tracked
 Linq replies. Give each keyboard-enabled chart one visible focus surface named
 by its heading. Keep acquisition and revenue snapshots after the message charts.
+End the grid with **Monthly revenue**: restrained sage bars where each bar
+estimates one UTC month from the month's latest snapshot MRR plus fulfilled
+live-mode top-up and group-sponsorship cash. The card copy must say it is an
+estimate rather than invoices, that refunds are not subtracted, and that
+account deletion can remove past purchase cash or leave an old one-time group
+gift counted as a regular top-up, and it must name hover, tap, and focus as the
+breakdown affordances. The bar carries only the total; the keyboard-reachable
+tooltip lists personal subscriptions, family subscriptions, group sponsorship,
+and usage top-ups with a summed total row, and labels the window-end month
+"month to date". Months whose snapshots predate the subscription split columns
+show one combined subscription line rather than an invented split; a recorded
+split is trusted only when it sums to the snapshot's MRR total. A month with no
+snapshot withholds its total ("Unavailable") and leaves a bar gap while still
+listing its known one-time cash. Months before the first revenue evidence are
+trimmed.
 
 Below the chart grid, show trial-start provenance in one flat bordered surface:
 30-day UTC totals for Direct iMessage, Website, Companion, and Unknown followed

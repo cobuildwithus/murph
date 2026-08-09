@@ -8,6 +8,7 @@ import {
   readAssistantGroupRoomModelState,
   replaceAssistantGroupRoomModel,
 } from '../../assistant/group-room-model.js'
+import { assistantConversationHistoryUtf8Bytes } from '../../assistant/shared.js'
 import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
@@ -140,15 +141,31 @@ export async function executeGroupRoomModelDynamicTool(input: {
           state.kind === 'present'
             ? {
                 body: state.body,
+                bodyUtf8Bytes: assistantConversationHistoryUtf8Bytes(
+                  state.body,
+                ),
                 digest: state.digest,
                 status: state.status,
               }
             : {
                 body: null,
+                bodyUtf8Bytes: 0,
                 digest: state.digest,
                 status: 'missing',
               },
         ),
+      )
+    }
+
+    if (
+      input.request.args.action === 'upsert' &&
+      input.managedMaintenanceAuthorized === true &&
+      state.kind === 'present' &&
+      state.status !== 'active'
+    ) {
+      return groupRoomModelTextResult(
+        false,
+        'silent maintenance must not reactivate inactive group room-model state; no update was made',
       )
     }
 

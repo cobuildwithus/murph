@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  hasHostedRuntimeActiveAccess: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
+  readHostedGroupFundingRecoveryStatus: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
   resolveHostedMemberRoutingByTelegramUserId: vi.fn(),
@@ -17,7 +19,13 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   readHostedAiUsageGate: mocks.readHostedAiUsageGate,
 }));
 
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+  hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
+}));
+
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  readHostedGroupFundingRecoveryStatus:
+    mocks.readHostedGroupFundingRecoveryStatus,
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
@@ -100,6 +108,7 @@ describe("hosted usage referral tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.useRealUsageStatus = false;
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedAiUsageGate.mockResolvedValue({
       allowed: true,
@@ -114,7 +123,6 @@ describe("hosted usage referral tool", () => {
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     });
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({ status: "active" });
     mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
       lookup: {
         core: { id: "member_referrer" },
@@ -294,6 +302,12 @@ describe("hosted usage referral tool", () => {
         status: "ok",
       },
     });
+    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
+      "member_group",
+      { prisma },
+    );
+    expect(mocks.readHostedGroupFundingRecoveryStatus).not.toHaveBeenCalled();
+    expect(mocks.readHostedGroupUsageStatus).not.toHaveBeenCalled();
   });
 
   it("offers only the provider-neutral mission from Telegram", async () => {

@@ -196,10 +196,12 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     threadId: input.target,
   });
   if (targetThreadRoute) {
-    if (
-      isHostedLinqCurrentHomeOnlyAssertion(input)
-      || targetThreadRoute.containerMemberId !== input.memberId
-    ) {
+    // The route's container member is the canonical owner of this durable
+    // thread, and thread containers are synthetic members that no personal
+    // runtime can ever authenticate as. Exact ownership is therefore the whole
+    // authority: a personal proactive send still cannot reach a group thread,
+    // and the owning container is not held to a home route it cannot have.
+    if (targetThreadRoute.containerMemberId !== input.memberId) {
       throwHostedLinqRouteAuthorityMismatch();
     }
 
@@ -232,16 +234,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     homeRouteFallbackAllowed:
       input.homeRouteFallbackAllowed === true && input.authorityCheckOnly === true,
   });
-}
-
-function isHostedLinqCurrentHomeOnlyAssertion(input: {
-  answeredMailboxItemIds?: readonly string[] | null;
-  homeRouteFallbackAllowed?: boolean | null;
-  replyToMessageId?: string | null;
-}): boolean {
-  return input.homeRouteFallbackAllowed === true
-    && normalizeNullable(input.replyToMessageId) === null
-    && (input.answeredMailboxItemIds?.length ?? 0) === 0;
 }
 
 async function matchesPersistedHostedLinqDirectInbound(input: {

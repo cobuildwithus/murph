@@ -13,17 +13,6 @@ export interface HostedStripeBillingProviderBoundarySources {
   sandbox: string;
 }
 
-export function classifyHostedStripeBillingLiveEligibility(input: {
-  actor: string;
-  headRepository: string;
-  pullRequestAuthor: string;
-  repository: string;
-}): boolean {
-  return input.headRepository === input.repository
-    && input.pullRequestAuthor !== "dependabot[bot]"
-    && input.actor !== "dependabot[bot]";
-}
-
 const REQUIRED_MATRIX_MARKERS = [
   "proveNewMemberPulseTrialCheckout",
   "proveTrialStartsPaidPulseAfterInvoiceReconciliation",
@@ -47,6 +36,11 @@ export function inspectHostedStripeBillingWorkflow(
   };
 
   requireText("missing-pull-request", "  pull_request:\n", "Workflow must run on pull_request.");
+  requireText(
+    "missing-main-push-trigger",
+    "  push:\n    branches:\n      - main\n",
+    "Workflow must run the live lane on pushes to main.",
+  );
   if (source.includes("pull_request_target")) {
     issues.push({
       code: "unsafe-pull-request-target",
@@ -84,26 +78,16 @@ export function inspectHostedStripeBillingWorkflow(
     "pnpm --dir apps/web prisma:generate",
     "Hermetic web billing proof must generate Prisma Client in a fresh checkout.",
   );
-  requireText(
-    "missing-pr-author-check",
-    "PR_AUTHOR: ${{ github.event.pull_request.user.login }}",
-    "Live eligibility must classify the pull request author independently of the event actor.",
-  );
-  requireText(
-    "missing-trusted-head-check",
-    'if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$PR_AUTHOR" != "dependabot[bot]" && "$ACTOR" != "dependabot[bot]" ]]; then\n            echo "run_live=true" >> "$GITHUB_OUTPUT"',
-    "Every trusted same-repository PR head must enter the live lane, while dependency-bot code remains excluded.",
-  );
   if (source.includes("HOSTED_STRIPE_BILLING_LIVE_CONFIGURED")) {
     issues.push({
       code: "silent-live-config-skip",
-      message: "Trusted heads must fail preflight when sandbox configuration is absent, not skip behind a marker.",
+      message: "Main merges must fail preflight when sandbox configuration is absent, not skip behind a marker.",
     });
   }
   requireText(
     "missing-live-if",
-    "if: ${{ needs.live-eligibility.outputs.run_live == 'true' }}",
-    "Live job must be gated by the non-secret eligibility result.",
+    "if: ${{ github.event_name == 'push' }}",
+    "The secret-bearing live job must run only on trusted push events, never on pull request code.",
   );
   requireText(
     "missing-dedicated-environment",
@@ -157,7 +141,7 @@ export function inspectHostedStripeBillingWorkflow(
   );
   requireText(
     "missing-required-boundary-always",
-    "  billing-required:\n    name: Required hosted Stripe billing boundary\n    needs:\n      - billing-hermetic\n      - live-eligibility\n      - live-stripe-browser\n    if: ${{ always() }}",
+    "  billing-required:\n    name: Required hosted Stripe billing boundary\n    needs:\n      - billing-hermetic\n      - live-stripe-browser\n    if: ${{ always() }}",
     "The required billing boundary must always inspect hermetic and live results.",
   );
   requireText(
@@ -167,8 +151,13 @@ export function inspectHostedStripeBillingWorkflow(
   );
   requireText(
     "missing-fail-closed-live-gate",
-    'case "$LIVE_ELIGIBLE" in\n            true)\n              if [[ "$LIVE_RESULT" != "success" ]]',
-    "Trusted heads must fail when the live lane is missing, skipped, or unsuccessful.",
+    'case "$EVENT_NAME" in\n            push)\n              if [[ "$LIVE_RESULT" != "success" ]]',
+    "Main merges must fail when the live lane is missing, skipped, or unsuccessful.",
+  );
+  requireText(
+    "missing-pr-live-exclusion",
+    'pull_request)\n              if [[ "$LIVE_RESULT" != "skipped" ]]',
+    "Pull requests must fail closed if the secret-bearing live job ever starts.",
   );
   const workflowConcurrency = source.match(
     /^concurrency:\n  group: .+\n  cancel-in-progress: (true|false)$/mu,

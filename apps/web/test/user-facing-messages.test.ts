@@ -18,10 +18,6 @@ const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
 const THREAD_PAUSE_STATED =
   /paused|out\b|quiet|gone|nothing left|done|no more|zero|dark|silence|tapped|unsupervised|ran? out|time's up/iu;
 
-/** Every group funding ask must point at the room, never at one named payer. */
-const GROUP_FUNDING_ANYONE_PHRASE =
-  /anyone|anybody|any one|any of you|one of you|someone|somebody|whoever|whichever|which of you|one person/iu;
-
 const TEST_TEMPLATE_KEYS = [
   "assistant.signup_welcome",
   "assistant.family_welcome",
@@ -35,7 +31,6 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.group_upgrade_pulse",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
-  "linq.ai_usage.thread_limit_funding",
 ] as const satisfies readonly UserFacingMessageTemplateKey[];
 
 const TEST_CONTEXT_BY_KEY = {
@@ -72,9 +67,6 @@ const TEST_CONTEXT_BY_KEY = {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.thread_limit_reached": {},
-  "linq.ai_usage.thread_limit_funding": {
-    fundingUrl: "https://www.withmurph.ai/groups/fund/test-code",
-  },
 } satisfies {
   [K in UserFacingMessageTemplateKey]: UserFacingMessageContextByKey[K];
 };
@@ -135,10 +127,6 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.ai_usage.trial_conversion_pending", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.trial_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
-    expectEveryVariantContains(
-      "linq.ai_usage.thread_limit_funding",
-      "https://www.withmurph.ai/groups/fund/test-code",
-    );
   });
 
   it("tells the member to resend every unprocessed wrong-line message", () => {
@@ -168,14 +156,6 @@ describe("user-facing message variants", () => {
       expect(text).not.toMatch(/\bMurph (?:time|usage)\b/iu);
       expect(text).toMatch(/everyone|everybody|all of you|whole room|whole group/iu);
       expect(text).not.toMatch(/included|allowance|usage period|monthly amount/iu);
-    }
-  });
-
-  it("asks the room to fund the group only from the delivery-time action copy", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_funding")) {
-      expect(text).toMatch(GROUP_FUNDING_ANYONE_PHRASE);
-      expect(text).toMatch(/https:\/\/www\.withmurph\.ai\/groups\/fund\/test-code$/u);
-      expect(text).not.toMatch(/trial|upgrade|Edge|Pulse|\$|paid|owner|admin/iu);
     }
   });
 

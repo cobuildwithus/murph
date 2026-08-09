@@ -27,6 +27,7 @@ import {
   admitHostedGroupSponsorshipRefillTx,
   cancelHostedGroupSponsorshipsForPayerAccountDeletionTx,
   createHostedGroupSponsorshipAuthorizationTx,
+  hasHostedGroupAutomaticRefillAvailable,
   isHostedGroupSponsorshipNearCapNotificationCurrentTx,
   manageHostedGroupSponsorshipAuthorization,
   markHostedGroupSponsorshipRecoveryRequiredForPurchase,
@@ -47,6 +48,60 @@ const NOW = new Date("2026-08-01T12:00:00.000Z");
 beforeEach(() => {
   sharedMocks.lockHostedMemberRow.mockClear();
 });
+
+function createAutomaticRefillReadHarness(input: {
+  authorization?: ReturnType<typeof buildAuthorization> | null;
+  purchases?: Array<{
+    cashAmountMinor: number;
+    groupSponsorshipChargeOrdinal: number;
+    groupSponsorshipPeriodStartedAt?: Date | null;
+    status: HostedUsageCreditPurchaseStatus;
+  }>;
+  activation?: ReturnType<typeof buildActivationPurchase> | null;
+}) {
+  const purchases = input.purchases ?? [];
+  const authorizationFindMany = vi.fn(async () => {
+    if (!input.authorization) {
+      return [];
+    }
+    return [{
+      ...input.authorization,
+      purchases: purchases
+        .filter((purchase) =>
+          purchase.groupSponsorshipChargeOrdinal > 0
+          && (purchase.status === HostedUsageCreditPurchaseStatus.created
+            || purchase.status === HostedUsageCreditPurchaseStatus.checkout_open
+            || purchase.status ===
+              HostedUsageCreditPurchaseStatus.payment_pending)
+        )
+        .map((purchase) => ({
+          groupSponsorshipChargeOrdinal:
+            purchase.groupSponsorshipChargeOrdinal,
+          groupSponsorshipPeriodStartedAt:
+            purchase.groupSponsorshipPeriodStartedAt ?? PERIOD_START,
+          status: purchase.status,
+        })),
+    }];
+  });
+  const purchaseFindMany = vi.fn(async () => purchases);
+  const findFirstPurchase = vi.fn(async () =>
+    input.activation === undefined ? buildActivationPurchase() : input.activation
+  );
+  return {
+    authorizationFindMany,
+    findFirstPurchase,
+    purchaseFindMany,
+    prisma: {
+      hostedGroupSponsorshipAuthorization: {
+        findMany: authorizationFindMany,
+      },
+      hostedUsageCreditPurchase: {
+        findFirst: findFirstPurchase,
+        findMany: purchaseFindMany,
+      },
+    },
+  };
+}
 
 function buildAuthorization(overrides: Record<string, unknown> = {}) {
   return {
@@ -84,6 +139,186 @@ function buildActivationPurchase() {
     stripePriceLookupKey: "price_lookup",
   };
 }
+
+describe("automatic group sponsorship refill availability", () => {
+  it("reports current cap headroom without exposing sponsorship details", async () => {
+    const harness = createAutomaticRefillReadHarness({
+      authorization: buildAuthorization(),
+      purchases: [{
+        cashAmountMinor: 500,
+        groupSponsorshipChargeOrdinal: 0,
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+      }],
+    });
+
+    await expect(hasHostedGroupAutomaticRefillAvailable({
+      beneficiaryMemberId: "member_group_runtime",
+      now: NOW,
+      prisma: harness.prisma as never,
+    })).resolves.toBe(true);
+  });
+
+  it.each([
+    [
+      HostedUsageCreditPurchaseStatus.created,
+      HostedGroupSponsorshipAuthorizationStatus.active,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.checkout_open,
+      HostedGroupSponsorshipAuthorizationStatus.active,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.payment_pending,
+      HostedGroupSponsorshipAuthorizationStatus.active,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.payment_pending,
+      HostedGroupSponsorshipAuthorizationStatus.paused,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.payment_pending,
+      HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+    ],
+    [
+      HostedUsageCreditPurchaseStatus.payment_pending,
+      HostedGroupSponsorshipAuthorizationStatus.canceled,
+    ],
+  ])(
+    "treats a current-period %s refill as available for a %s authorization",
+    async (purchaseStatus, status) => {
+      const harness = createAutomaticRefillReadHarness({
+        activation: {
+          ...buildActivationPurchase(),
+          stripeCustomerIdEncrypted: "",
+        },
+        authorization: buildAuthorization({ status }),
+        purchases: [{
+          cashAmountMinor: 500,
+          groupSponsorshipChargeOrdinal: 1,
+          status: purchaseStatus,
+        }],
+      });
+
+      await expect(hasHostedGroupAutomaticRefillAvailable({
+        beneficiaryMemberId: "member_group_runtime",
+        now: NOW,
+        prisma: harness.prisma as never,
+      })).resolves.toBe(true);
+      expect(harness.findFirstPurchase).not.toHaveBeenCalled();
+      expect(harness.purchaseFindMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    HostedGroupSponsorshipAuthorizationStatus.active,
+    HostedGroupSponsorshipAuthorizationStatus.paused,
+    HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+    HostedGroupSponsorshipAuthorizationStatus.canceled,
+  ])(
+    "does not treat a terminal refill as available for a %s authorization",
+    async (status) => {
+      const harness = createAutomaticRefillReadHarness({
+        activation: {
+          ...buildActivationPurchase(),
+          stripeCustomerIdEncrypted: "",
+        },
+        authorization: buildAuthorization({ status }),
+        purchases: [{
+          cashAmountMinor: 500,
+          groupSponsorshipChargeOrdinal: 1,
+          status: HostedUsageCreditPurchaseStatus.fulfilled,
+        }],
+      });
+
+      await expect(hasHostedGroupAutomaticRefillAvailable({
+        beneficiaryMemberId: "member_group_runtime",
+        now: NOW,
+        prisma: harness.prisma as never,
+      })).resolves.toBe(false);
+    },
+  );
+
+  it("reports no automatic recovery after the current cap is fulfilled", async () => {
+    const harness = createAutomaticRefillReadHarness({
+      authorization: buildAuthorization(),
+      purchases: [
+        {
+          cashAmountMinor: 500,
+          groupSponsorshipChargeOrdinal: 0,
+          status: HostedUsageCreditPurchaseStatus.fulfilled,
+        },
+        {
+          cashAmountMinor: 500,
+          groupSponsorshipChargeOrdinal: 1,
+          status: HostedUsageCreditPurchaseStatus.fulfilled,
+        },
+      ],
+    });
+
+    await expect(hasHostedGroupAutomaticRefillAvailable({
+      beneficiaryMemberId: "member_group_runtime",
+      now: NOW,
+      prisma: harness.prisma as never,
+    })).resolves.toBe(false);
+  });
+
+  it("fails closed when no active automatic sponsor exists", async () => {
+    const harness = createAutomaticRefillReadHarness({ authorization: null });
+
+    await expect(hasHostedGroupAutomaticRefillAvailable({
+      beneficiaryMemberId: "member_group_runtime",
+      now: NOW,
+      prisma: harness.prisma as never,
+    })).resolves.toBe(false);
+    expect(harness.findFirstPurchase).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the activation has no reusable payment authority", async () => {
+    const harness = createAutomaticRefillReadHarness({
+      activation: {
+        ...buildActivationPurchase(),
+        stripeCustomerIdEncrypted: "",
+      },
+      authorization: buildAuthorization(),
+      purchases: [{
+        cashAmountMinor: 500,
+        groupSponsorshipChargeOrdinal: 0,
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+      }],
+    });
+
+    await expect(hasHostedGroupAutomaticRefillAvailable({
+      beneficiaryMemberId: "member_group_runtime",
+      now: NOW,
+      prisma: harness.prisma as never,
+    })).resolves.toBe(false);
+    expect(harness.purchaseFindMany).not.toHaveBeenCalled();
+  });
+
+  it("uses the next period and its pending cap after a lazy rollover", async () => {
+    const expiredPeriodEnd = new Date("2026-07-31T12:00:00.000Z");
+    const harness = createAutomaticRefillReadHarness({
+      authorization: buildAuthorization({
+        monthlyCapMinor: 1_000,
+        pendingMonthlyCapMinor: 500,
+        periodEndsAt: expiredPeriodEnd,
+        periodStartedAt: new Date("2026-06-30T12:00:00.000Z"),
+      }),
+      purchases: [],
+    });
+
+    await expect(hasHostedGroupAutomaticRefillAvailable({
+      beneficiaryMemberId: "member_group_runtime",
+      now: NOW,
+      prisma: harness.prisma as never,
+    })).resolves.toBe(true);
+    expect(harness.purchaseFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        groupSponsorshipPeriodStartedAt: expiredPeriodEnd,
+      }),
+    }));
+  });
+});
 
 function createRefillHarness(input: {
   authorization?: ReturnType<typeof buildAuthorization>;

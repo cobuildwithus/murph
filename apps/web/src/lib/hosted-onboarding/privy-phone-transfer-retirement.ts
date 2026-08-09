@@ -528,7 +528,6 @@ async function readHostedPrivyPhoneTransferSourceShapeTx(input: {
           hostedMailboxItems: true,
           hostedMailboxLaneCounters: true,
           hostedMailboxPayloads: true,
-          hostedRuntimeLogs: true,
           linqContactCardShares: true,
           linqDailyStates: true,
           mealPhotoCaptureEnrollments: true,
@@ -607,7 +606,6 @@ const HOSTED_PRIVY_PHONE_TRANSFER_RUNTIME_OWNED_RELATIONS: ReadonlySet<string> =
     "hostedMailboxItems",
     "hostedMailboxLaneCounters",
     "hostedMailboxPayloads",
-    "hostedRuntimeLogs",
     "linqDailyStates",
   ]);
 

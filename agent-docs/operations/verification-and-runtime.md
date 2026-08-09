@@ -94,15 +94,14 @@ pnpm hosted-local e2e stripe-billing-browser-matrix
 pnpm hosted-billing:live:cleanup
 ```
 
-Never run PR-controlled fork code with writable Stripe authority and never use
-`pull_request_target` to work around GitHub's secret boundary. The Actions
-classifier admits only same-repository heads (excluding dependency-bot heads)
-whose pull-request author and triggering actor are both non-Dependabot. Every
-eligible trusted head enters the live lane; absent or malformed sandbox
-configuration fails closed. Fork and dependency-bot
-pull requests run only the credential-free hermetic lane. The always-present
-`Required hosted Stripe billing boundary` job checks the applicable result so
-branch protection has one stable required context. The live job exposes the
+Never run PR-controlled code with writable Stripe authority and never use
+`pull_request_target` to work around GitHub's secret boundary. The live lane
+runs only on pushes to `main` (`github.event_name == 'push'`), so no pull
+request event of any origin can start the secret-bearing job; absent or
+malformed sandbox configuration fails closed on those `main` runs. All pull
+requests run only the credential-free hermetic lane. The always-present
+`Required hosted Stripe billing boundary` job checks the event-applicable
+result so branch protection has one stable required context. The live job exposes the
 existing pinned `@openai/codex` workspace binary for
 hosted-local model-catalog preparation without adding another CLI dependency.
 Keep the key on preflight/matrix/cleanup steps only; within the scenario it
