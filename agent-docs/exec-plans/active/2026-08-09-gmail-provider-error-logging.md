@@ -6,20 +6,22 @@ Updated: 2026-08-09
 
 ## Goal
 
-- Make failed Composio connected-app executions log the provider-authored error
-  message through the existing hosted onboarding route logger.
+- Make failed Composio connected-app executions log the provider's documented
+  structured error code/category through the existing hosted onboarding route
+  logger without retaining free-form provider prose that may echo private input.
 - Preserve current send, retry, ambiguity, and user-visible behavior.
 
 ## Success criteria
 
-- HTTP error responses and successful HTTP envelopes with
-  `successful: false` retain a bounded provider error message.
-- Production route logs include that message after the existing shared log
-  sanitizer removes secrets, URLs, contact details, and paths.
+- HTTP error responses retain bounded documented numeric error codes and strict
+  category slugs; successful HTTP envelopes with `successful: false` retain only
+  the existing generic diagnostic because their error field is free-form text.
+- Production route logs include the structured diagnostic while the runner
+  response remains generic.
 - Invalid, oversized, or differently shaped provider bodies preserve the
   current status/type behavior without adding another logging system.
-- Focused tests prove useful wording survives and recognizable private values
-  do not.
+- Focused tests prove useful structured diagnostics survive and arbitrary
+  provider wording does not.
 
 ## Scope
 
@@ -55,3 +57,17 @@ Updated: 2026-08-09
 - `pnpm --dir apps/web typecheck`: passed after the same command identified and
   prompted an explicit `HostedOnboardingError` control-flow check in the test.
 - `pnpm --dir apps/web typecheck:prepared`: passed on the final candidate.
+- Final ReviewGPT round 1 on `72b7f530caa5` returned two accepted findings:
+  free-form provider prose can echo private input, and the fixed-write wrapper
+  must retain its ambiguity classification. The existing service test reproduced
+  the latter failure.
+- Preliminary specialist ReviewGPT returned one accepted coverage finding for
+  the same service boundary plus route and unusable-body proof gaps. Its optional
+  test-only patch was inspected but not applied because its service expectation
+  preserved the unsafe free-form-message behavior and removed the required
+  ambiguity classification; the applicable coverage is being added manually.
+- Remediated focused proof on the four affected boundaries passed: 62 tests in
+  `connected-apps-composio`, `connected-apps-email-send`,
+  `connected-apps-service`, and `connected-apps-internal-route`.
+- Remediated `pnpm --dir apps/web typecheck:prepared`, `pnpm logs:guard`,
+  `pnpm docs:drift`, and `git diff --check`: passed.
