@@ -13,25 +13,25 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default async function TrainingPage() {
-  const [auth, contactOptions] = await Promise.all([
+  const [auth, startContactOptions, continueContactOptions] = await Promise.all([
     getHostedDashboardPageAuthSnapshot(),
-    resolveTrainingContactOptions(),
+    resolveTrainingContactOptions("Start a workout with me."),
+    resolveTrainingContactOptions("Continue my active workout."),
   ]);
 
   return (
     <TrainingPageClient
       authenticated={auth.authenticated}
-      contactOptions={contactOptions}
+      continueContactOptions={continueContactOptions}
+      startContactOptions={startContactOptions}
     />
   );
 }
 
-async function resolveTrainingContactOptions() {
+async function resolveTrainingContactOptions(body: string) {
   try {
     return await resolveHostedMurphContactOptions({
-      message: {
-        body: "Start a workout with me.",
-      },
+      message: { body },
       preferredKind: "text",
     });
   } catch {

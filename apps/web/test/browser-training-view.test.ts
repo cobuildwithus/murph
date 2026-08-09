@@ -10,17 +10,20 @@ import {
 
 import { selectBrowserVaultTraining } from "../src/lib/training/browser-training";
 
-type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
+type CanonicalEntity = Parameters<
+  typeof createVaultReadModel
+>[0]["entities"][number];
 
 function createWorkoutEntity(
   entityId: string,
   attributes: Record<string, unknown>,
   occurredAt: string,
+  date = occurredAt.slice(0, 10),
 ): CanonicalEntity {
   return {
     attributes,
     body: null,
-    date: occurredAt.slice(0, 10),
+    date,
     entityId,
     experimentSlug: null,
     family: "event",
@@ -61,15 +64,32 @@ test("Training derives the live workout, recent history and exercise progress fr
                   name: "Bench press",
                   order: 1,
                   sets: [
-                    { order: 1, reps: 10, weight: 135, weightUnit: "lb" },
-                    { order: 2, reps: 8, weight: 145, weightUnit: "lb" },
+                    {
+                      order: 1,
+                      reps: 10,
+                      weight: 135,
+                      weightUnit: "lb",
+                    },
+                    {
+                      order: 2,
+                      reps: 8,
+                      weight: 145,
+                      weightUnit: "lb",
+                    },
                   ],
                   sourceExerciseId: "EX001",
                 },
                 {
                   name: "Lateral raise",
                   order: 2,
-                  sets: [{ order: 1, reps: 12, weight: 20, weightUnit: "lb" }],
+                  sets: [
+                    {
+                      order: 1,
+                      reps: 12,
+                      weight: 20,
+                      weightUnit: "lb",
+                    },
+                  ],
                   sourceExerciseId: "EX002",
                 },
               ],
@@ -115,12 +135,17 @@ test("Training derives the live workout, recent history and exercise progress fr
       vaultRoot: "browser://vault",
     }),
   });
-  const view = selectBrowserVaultTraining(createBrowserVaultQueryClient(replica));
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+  );
 
   assert.equal(view.activeSession?.id, "workout_active");
   assert.equal(view.activeSession?.completedSetCount, 1);
   assert.equal(view.activeSession?.setCount, 2);
-  assert.deepEqual(view.recentSessions.map((session) => session.id), ["workout_completed"]);
+  assert.deepEqual(
+    view.recentSessions.map((session) => session.id),
+    ["workout_completed"],
+  );
   assert.deepEqual(view.summary, {
     exerciseCount: 2,
     setCount: 4,
@@ -132,12 +157,16 @@ test("Training derives the live workout, recent history and exercise progress fr
   assert.ok(bench);
   assert.equal(bench.sessionCount, 2);
   assert.equal(bench.setCount, 3);
+  assert.equal(bench.lastPerformedDate, "2026-08-09");
   assert.equal(bench.lastSet?.weight, 155);
   assert.equal(bench.bestSet?.weight, 155);
-  assert.equal(view.weeks.reduce((sum, week) => sum + week.count, 0), 2);
+  assert.equal(
+    view.weeks.reduce((sum, week) => sum + week.count, 0),
+    2,
+  );
 });
 
-test("Training treats any live set result field as logged while placeholders stay planned", async () => {
+test("Training treats result-bearing sets as logged and keeps placeholders planned before and after finish", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-08-09T18:00:00.000Z",
     metricPoints: [],
@@ -166,17 +195,50 @@ test("Training treats any live set result field as logged while placeholders sta
           },
           "2026-08-09T17:00:00.000Z",
         ),
+        createWorkoutEntity(
+          "workout_finished_placeholders",
+          {
+            activityType: "strength-training",
+            workout: {
+              endedAt: "2026-08-08T18:00:00.000Z",
+              exercises: [
+                {
+                  name: "Squat",
+                  order: 1,
+                  sets: [
+                    { order: 1, reps: 5, type: "normal", weight: 185 },
+                    { order: 2, type: "normal" },
+                  ],
+                },
+              ],
+              sourceApp: "murph-live",
+              startedAt: "2026-08-08T17:00:00.000Z",
+            },
+          },
+          "2026-08-08T17:00:00.000Z",
+        ),
       ],
       metadata: null,
       vaultRoot: "browser://vault",
     }),
   });
-  const view = selectBrowserVaultTraining(createBrowserVaultQueryClient(replica));
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+  );
 
   assert.equal(view.activeSession?.completedSetCount, 2);
   assert.deepEqual(
     view.activeSession?.exercises[0]?.sets.map((set) => set.completed),
     [true, true, false],
+  );
+  const finished = view.recentSessions.find(
+    (session) => session.id === "workout_finished_placeholders",
+  );
+  assert.ok(finished);
+  assert.equal(finished.completedSetCount, 1);
+  assert.deepEqual(
+    finished.exercises[0]?.sets.map((set) => set.completed),
+    [true, false],
   );
 });
 
@@ -209,9 +271,138 @@ test("Training keeps legacy strength summaries visible while old records migrate
       vaultRoot: "browser://vault",
     }),
   });
-  const view = selectBrowserVaultTraining(createBrowserVaultQueryClient(replica));
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+  );
 
-  assert.equal(view.recentSessions[0]?.exercises[0]?.name, "Goblet squat");
+  assert.equal(
+    view.recentSessions[0]?.exercises[0]?.name,
+    "Goblet squat",
+  );
   assert.equal(view.recentSessions[0]?.completedSetCount, 3);
   assert.equal(view.exerciseProgress[0]?.bestSet?.weight, 50);
+});
+
+test("Training uses the canonical local date for week buckets and progress labels", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-10T12:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "training-local-date",
+    vault: createVaultReadModel({
+      entities: [
+        createWorkoutEntity(
+          "sunday_local_workout",
+          {
+            activityType: "strength-training",
+            workout: {
+              endedAt: "2026-08-10T02:00:00.000Z",
+              exercises: [
+                {
+                  name: "Deadlift",
+                  order: 1,
+                  sets: [{ order: 1, reps: 5, weight: 225 }],
+                },
+              ],
+              startedAt: "2026-08-10T01:00:00.000Z",
+            },
+          },
+          "2026-08-10T01:00:00.000Z",
+          "2026-08-09",
+        ),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+  );
+
+  assert.equal(view.weeks.at(-1)?.count, 0);
+  assert.equal(view.weeks.at(-2)?.count, 1);
+  assert.equal(view.exerciseProgress[0]?.lastPerformedDate, "2026-08-09");
+});
+
+
+test("Training treats less assistance as stronger progress", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T18:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "assisted-progress",
+    vault: createVaultReadModel({
+      entities: [
+        createWorkoutEntity(
+          "assisted_pullups",
+          {
+            activityType: "strength-training",
+            workout: {
+              endedAt: "2026-08-09T17:30:00.000Z",
+              exercises: [
+                {
+                  name: "Assisted pull-up",
+                  order: 1,
+                  sets: [
+                    { assistanceKg: 25, order: 1, reps: 8 },
+                    { assistanceKg: 15, order: 2, reps: 8 },
+                  ],
+                  sourceExerciseId: "EX_ASSISTED_PULLUP",
+                },
+              ],
+              startedAt: "2026-08-09T17:00:00.000Z",
+            },
+          },
+          "2026-08-09T17:00:00.000Z",
+        ),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+  );
+
+  assert.equal(view.exerciseProgress[0]?.bestSet?.assistanceKg, 15);
+});
+
+
+test("Training includes a next-local-day workout before UTC midnight", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T23:30:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "training-positive-time-zone",
+    vault: createVaultReadModel({
+      entities: [
+        createWorkoutEntity(
+          "tokyo_monday_workout",
+          {
+            activityType: "strength-training",
+            workout: {
+              exercises: [
+                {
+                  name: "Bench press",
+                  order: 1,
+                  sets: [{ order: 1, reps: 8, weight: 60 }],
+                },
+              ],
+              sourceApp: "murph-live",
+              startedAt: "2026-08-09T23:00:00.000Z",
+            },
+          },
+          "2026-08-09T23:00:00.000Z",
+          "2026-08-10",
+        ),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+  );
+
+  assert.equal(view.summary.workoutCount, 1);
+  assert.equal(view.summary.trainingDayCount, 1);
+  assert.equal(view.weeks.at(-1)?.count, 1);
+  assert.equal(view.exerciseProgress[0]?.lastPerformedDate, "2026-08-10");
 });

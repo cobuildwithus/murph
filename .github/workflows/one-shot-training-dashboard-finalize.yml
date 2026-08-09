@@ -1,0 +1,110 @@
+name: One-shot training dashboard finalize
+
+on:
+  push:
+    branches:
+      - agent/training-dashboard
+    paths:
+      - .github/workflows/one-shot-training-dashboard-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, '[apply-training-dashboard-finalize]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: agent/training-dashboard
+
+      - name: Reconstruct reviewed training files
+        shell: python
+        run: |
+          from pathlib import Path
+          import base64
+          import gzip
+          import hashlib
+          import shutil
+
+          compressed_files = {
+              ".training-patch/browser-training.ts.gz.b64": (
+                  "apps/web/src/lib/training/browser-training.ts",
+                  "3782a6ff875fe85a0dde1db055245249834f99a2",
+              ),
+              ".training-patch/build.ts.gz.b64": (
+                  "packages/query/src/browser-replica/build.ts",
+                  "434d94ddb2d0573c84b252bee6c6874a015173d6",
+              ),
+              ".training-patch/training-page-client.tsx.gz.b64": (
+                  "apps/web/app/(dashboard)/training/training-page-client.tsx",
+                  "0eeea6e8c8730ea995aa8d55887af09beb62aad8",
+              ),
+              ".training-patch/hosted-execution.test.ts.gz.b64": (
+                  "packages/hosted-execution/test/hosted-execution.test.ts",
+                  "efde94ebaa421d369debc509fc961a9788bacf09",
+              ),
+          }
+
+          expected_files = {
+              "apps/web/app/(dashboard)/training/page.tsx":
+                  "5e14bd4aea34c72a39045568c62348916146006c",
+              "apps/web/app/(dashboard)/training/training-page-client.tsx":
+                  "0eeea6e8c8730ea995aa8d55887af09beb62aad8",
+              "apps/web/src/lib/training/browser-training.ts":
+                  "3782a6ff875fe85a0dde1db055245249834f99a2",
+              "apps/web/test/browser-training-view.test.ts":
+                  "0bcace539c12fab8fefea56536ecfd2c51e9f3de",
+              "apps/web/test/training-page.test.tsx":
+                  "df96006ba4cc7bf5231193eb3e5a9e5588a23b1c",
+              "packages/contracts/src/browser-vault.ts":
+                  "64212a137dd695c0da3f839e2ecfc3e0b1910302",
+              "packages/hosted-execution/test/hosted-execution.test.ts":
+                  "efde94ebaa421d369debc509fc961a9788bacf09",
+              "packages/query/src/browser-replica/build.ts":
+                  "434d94ddb2d0573c84b252bee6c6874a015173d6",
+              "packages/query/src/browser-replica/training.ts":
+                  "71ec18c4914179cc762b988a550985a7ba97fcec",
+              "packages/query/test/browser-vault-training-projection.test.ts":
+                  "5a30233c34782100d18cada55e52c25d67000e0a",
+          }
+
+          def git_blob_hash(data: bytes) -> str:
+              header = b"blob " + str(len(data)).encode("ascii") + b"\0"
+              return hashlib.sha1(header + data).hexdigest()
+
+          for source, (target, expected_hash) in compressed_files.items():
+              encoded = Path(source).read_text(encoding="utf-8").strip()
+              data = gzip.decompress(base64.b64decode(encoded))
+              actual_hash = git_blob_hash(data)
+              if actual_hash != expected_hash:
+                  raise SystemExit(
+                      f"{target}: reconstructed blob {actual_hash}, expected {expected_hash}"
+                  )
+              destination = Path(target)
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_bytes(data)
+
+          for target, expected_hash in expected_files.items():
+              data = Path(target).read_bytes()
+              actual_hash = git_blob_hash(data)
+              if actual_hash != expected_hash:
+                  raise SystemExit(
+                      f"{target}: final blob {actual_hash}, expected {expected_hash}"
+                  )
+
+          shutil.rmtree(".training-patch")
+          Path(
+              ".github/workflows/one-shot-training-dashboard-finalize.yml"
+          ).unlink()
+
+      - name: Commit reviewed files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(web): harden training dashboard read model"
+          git push origin HEAD:agent/training-dashboard

@@ -34,7 +34,6 @@ const trainingFixture: BrowserTrainingView = {
     exercises: [
       {
         id: "EX001",
-        mode: "weight_reps",
         name: "Bench press",
         note: null,
         order: 1,
@@ -44,7 +43,6 @@ const trainingFixture: BrowserTrainingView = {
             assistanceKg: null,
             bodyweightKg: null,
             completed: true,
-            completedAt: "2026-08-09T17:10:00.000Z",
             distanceMeters: null,
             durationSeconds: null,
             id: "active-set-1",
@@ -52,7 +50,6 @@ const trainingFixture: BrowserTrainingView = {
             order: 1,
             reps: 8,
             rpe: 8,
-            type: null,
             weight: 155,
             weightUnit: "lb",
           },
@@ -61,17 +58,15 @@ const trainingFixture: BrowserTrainingView = {
             assistanceKg: null,
             bodyweightKg: null,
             completed: false,
-            completedAt: null,
             distanceMeters: null,
             durationSeconds: null,
             id: "active-set-2",
             note: null,
             order: 2,
-            reps: 8,
+            reps: null,
             rpe: null,
-            type: null,
-            weight: 155,
-            weightUnit: "lb",
+            weight: null,
+            weightUnit: null,
           },
         ],
         sourceExerciseId: "EX001",
@@ -79,9 +74,7 @@ const trainingFixture: BrowserTrainingView = {
     ],
     id: "active-workout",
     note: null,
-    routineId: null,
     setCount: 2,
-    source: "manual",
     startedAt: "2026-08-09T17:00:00.000Z",
     state: "in_progress",
     title: "Push day",
@@ -93,7 +86,6 @@ const trainingFixture: BrowserTrainingView = {
         assistanceKg: null,
         bodyweightKg: null,
         completed: true,
-        completedAt: null,
         distanceMeters: null,
         durationSeconds: null,
         id: "best-set",
@@ -101,18 +93,16 @@ const trainingFixture: BrowserTrainingView = {
         order: 2,
         reps: 8,
         rpe: 8,
-        type: null,
         weight: 155,
         weightUnit: "lb",
       },
       id: "EX001",
-      lastPerformedAt: "2026-08-09T17:00:00.000Z",
+      lastPerformedDate: "2026-08-09",
       lastSet: {
         addedWeightKg: null,
         assistanceKg: null,
         bodyweightKg: null,
         completed: true,
-        completedAt: null,
         distanceMeters: null,
         durationSeconds: null,
         id: "last-set",
@@ -120,7 +110,6 @@ const trainingFixture: BrowserTrainingView = {
         order: 1,
         reps: 8,
         rpe: 8,
-        type: null,
         weight: 155,
         weightUnit: "lb",
       },
@@ -141,9 +130,8 @@ const trainingFixture: BrowserTrainingView = {
       exercises: [
         {
           id: "EX001",
-          mode: "weight_reps",
           name: "Bench press",
-          note: null,
+          note: "Pause at the chest",
           order: 1,
           sets: [
             {
@@ -151,15 +139,13 @@ const trainingFixture: BrowserTrainingView = {
               assistanceKg: null,
               bodyweightKg: null,
               completed: true,
-              completedAt: null,
               distanceMeters: null,
               durationSeconds: null,
               id: "completed-set-1",
-              note: null,
+              note: "Smooth tempo",
               order: 1,
               reps: 10,
               rpe: null,
-              type: null,
               weight: 135,
               weightUnit: "lb",
             },
@@ -168,7 +154,6 @@ const trainingFixture: BrowserTrainingView = {
               assistanceKg: null,
               bodyweightKg: null,
               completed: true,
-              completedAt: null,
               distanceMeters: null,
               durationSeconds: null,
               id: "completed-set-2",
@@ -176,7 +161,6 @@ const trainingFixture: BrowserTrainingView = {
               order: 2,
               reps: 8,
               rpe: 8,
-              type: null,
               weight: 145,
               weightUnit: "lb",
             },
@@ -186,9 +170,7 @@ const trainingFixture: BrowserTrainingView = {
       ],
       id: "completed-workout",
       note: null,
-      routineId: null,
       setCount: 2,
-      source: "manual",
       startedAt: "2026-08-07T17:00:00.000Z",
       state: "completed",
       title: "Push day",
@@ -207,6 +189,22 @@ const trainingFixture: BrowserTrainingView = {
   })),
 };
 
+const startContactOptions = [
+  {
+    href: "sms:+15555550100?body=Start%20a%20workout%20with%20me.",
+    kind: "text" as const,
+    label: "Text Murph",
+  },
+];
+
+const continueContactOptions = [
+  {
+    href: "sms:+15555550100?body=Continue%20my%20active%20workout.",
+    kind: "text" as const,
+    label: "Text Murph",
+  },
+];
+
 beforeEach(() => {
   mocks.useBrowserVault.mockReturnValue({
     error: null,
@@ -217,29 +215,36 @@ beforeEach(() => {
   mocks.useBrowserVaultSelector.mockReturnValue(trainingFixture);
 });
 
-test("Training renders live progress, workout history and longitudinal exercise context", () => {
+test("Training renders live progress, history and a continuation action for the active workout", () => {
   const markup = renderToStaticMarkup(
     createElement(TrainingPageClient, {
       authenticated: true,
-      contactOptions: [
-        {
-          href: "sms:+15555550100?body=Start%20a%20workout%20with%20me.",
-          kind: "text",
-          label: "Text Murph",
-        },
-      ],
+      continueContactOptions,
+      startContactOptions,
     }),
   );
 
   assert.match(markup, /Your private log/);
   assert.match(markup, /In progress/);
   assert.match(markup, /1 of 2 sets logged/);
+  assert.match(markup, /role="progressbar"/);
+  assert.match(markup, /aria-valuenow="50"/);
   assert.match(markup, /Last 30 days/);
   assert.match(markup, /Recent workouts/);
   assert.match(markup, /Exercise progress/);
   assert.match(markup, /135 lb × 10/);
+  assert.match(markup, /Pause at the chest/);
+  assert.match(markup, /Smooth tempo/);
   assert.match(markup, /155 lb × 8/);
-  assert.match(markup, /href="sms:\+15555550100\?body=/);
+  assert.match(markup, /Continue workout/);
+  assert.match(
+    markup,
+    /href="sms:\+15555550100\?body=Continue%20my%20active%20workout\."/,
+  );
+  assert.doesNotMatch(
+    markup,
+    /href="sms:\+15555550100\?body=Start%20a%20workout%20with%20me\."/,
+  );
   assert.match(markup, /Same weight, 8 reps/);
 });
 
@@ -260,18 +265,59 @@ test("Training gives a zero-data member one clear conversational start", () => {
   const markup = renderToStaticMarkup(
     createElement(TrainingPageClient, {
       authenticated: true,
-      contactOptions: [
-        {
-          href: "sms:+15555550100?body=Start%20a%20workout%20with%20me.",
-          kind: "text",
-          label: "Text Murph",
-        },
-      ],
+      continueContactOptions,
+      startContactOptions,
     }),
   );
 
   assert.match(markup, /Your workout log starts with one message/);
   assert.match(markup, /Bench 135 lb × 10/);
-  assert.match(markup, /Text Murph/);
+  assert.match(markup, /Start workout/);
+  assert.match(
+    markup,
+    /href="sms:\+15555550100\?body=Start%20a%20workout%20with%20me\."/,
+  );
   assert.doesNotMatch(markup, /Last 30 days/);
+  assert.equal((markup.match(/Just tell Murph what happened/g) ?? []).length, 0);
+});
+
+test("Training handles an empty active workout without presenting false zero-percent failure", () => {
+  mocks.useBrowserVaultSelector.mockReturnValue({
+    ...trainingFixture,
+    activeSession: {
+      ...trainingFixture.activeSession!,
+      completedSetCount: 0,
+      exerciseCount: 0,
+      exercises: [],
+      setCount: 0,
+      title: "Workout",
+    },
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(TrainingPageClient, {
+      authenticated: true,
+      continueContactOptions,
+      startContactOptions,
+    }),
+  );
+
+  assert.match(markup, />Ready</);
+  assert.match(markup, /Tell Murph your first exercise/);
+  assert.doesNotMatch(markup, /0%/);
+  assert.doesNotMatch(markup, /role="progressbar"/);
+});
+
+
+test("Training offers a clear setup path when no messaging channel is available", () => {
+  const markup = renderToStaticMarkup(
+    createElement(TrainingPageClient, {
+      authenticated: true,
+      continueContactOptions: [],
+      startContactOptions: [],
+    }),
+  );
+
+  assert.match(markup, /Set up messaging/);
+  assert.match(markup, /href="\/settings"/);
 });
