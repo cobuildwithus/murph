@@ -19,7 +19,7 @@ export type HostedDirectRuntimeWakeSource =
  * all of those steps.
  */
 export function startHostedRuntimeShellPrewarmBestEffort(input: {
-  source: "linq-instant-start";
+  source: "linq-established" | "linq-instant-start";
   userId: string;
 }): Promise<void> {
   const wakeSource = input.source;

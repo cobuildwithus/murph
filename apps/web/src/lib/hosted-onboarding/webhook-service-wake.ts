@@ -7,7 +7,10 @@ import type {
   CloudflareHostedControlRuntimeEnsureProcessingTiming,
 } from "@murphai/cloudflare-hosted-control/client";
 
-import { startHostedDirectRuntimeWakeBestEffort } from "../hosted-execution/direct-runtime-wake";
+import {
+  startHostedDirectRuntimeWakeBestEffort,
+  startHostedRuntimeShellPrewarmBestEffort,
+} from "../hosted-execution/direct-runtime-wake";
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -100,6 +103,19 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
         expectedUserId: userId,
         ...(knownCheckpoint ? { knownCheckpoint } : {}),
         mailboxItemId,
+        ...(directEnsureEligible ? {
+          onActiveAccessConfirmed: (activeUserId: string) => {
+            const prewarm = startHostedRuntimeShellPrewarmBestEffort({
+              source: "linq-established",
+              userId: activeUserId,
+            });
+            if (input.scheduleAfterResponse) {
+              input.scheduleAfterResponse(() => prewarm);
+            } else {
+              void prewarm;
+            }
+          },
+        } : {}),
       }),
       signal: input.signal,
     });

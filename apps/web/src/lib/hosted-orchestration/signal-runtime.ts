@@ -81,6 +81,10 @@ export interface SignalHostedMailboxAppendInput {
     userId: string;
   };
   mailboxItemId: string;
+  // Synchronous latency hints may start here, after current access has been
+  // proved but before the Temporal network hop. The callback must not perform
+  // authoritative work or wait for completion.
+  onActiveAccessConfirmed?: (userId: string) => void;
   prisma?: PrismaClient;
 }
 
@@ -151,6 +155,7 @@ export async function signalHostedMailboxAppendRuntime(
       message: "Hosted runtime user is not active.",
       prisma: input.prisma ?? getPrisma(),
     });
+    input.onActiveAccessConfirmed?.(mailboxItem.userId);
   }
 
   return signalHostedUserRuntimeWorkflow({

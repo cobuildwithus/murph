@@ -89,23 +89,49 @@ const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const execFileAsync = promisify(execFile);
 
 interface ColdStartSample {
+  acceptedToDirectEnsureRequestMs?: number;
   acceptedToProviderMs?: number;
   acceptedToRunnerAcceptedMs?: number;
   assistantAutoReplyBootstrapMs?: number;
+  assistantServicePreLockMs?: number;
   automationBootstrapMs?: number;
+  automationLaneToAssistantServiceMs?: number;
   archiveExtractMs?: number;
   cleanupMs?: number;
+  cloudflareRouteToFreshStartRequestedMs?: number;
+  codexAppServerInitializeMs?: number;
+  codexAppServerPreProviderMs?: number;
+  codexAppServerSpawnReadyMs?: number;
+  codexAppServerThreadResumeMs?: number;
+  codexAppServerThreadStartMs?: number;
+  codexAppServerWarmReuseMs?: number;
+  codexProcessPreparationMs?: number;
   dataKeyUnwrapMs?: number;
   decryptMs?: number;
+  directEnsureRequestToCloudflareRouteMs?: number;
+  directEnsureRequestToProviderMs?: number;
+  directEnsureRequestToRunnerAcceptedMs?: number;
   durableRootReplaceMs?: number;
   encryptedBytes?: number;
   executionTargetHydrateMs?: number;
   extractMs?: number;
+  freshStartRequestedToContainerReadyMs?: number;
+  freshStartRequestedToInvocationPreparedMs?: number;
+  mailboxImportDoneToAssistantPhaseMs?: number;
+  memberPreferencesPrePlanningMs?: number;
   nodeStartupMs?: number;
   objectFetchMs?: number;
+  outboxScanElapsedMs?: number;
   preparedRestore?: boolean;
   presignGetMs?: number;
+  providerAdmissionMs?: number;
+  providerPlanAndGateMs?: number;
   providerPreProviderSetupMs?: number;
+  providerPromptBuildMs?: number;
+  providerSessionResolveMs?: number;
+  providerTurnLockWaitMs?: number;
+  receiptScanElapsedMs?: number;
+  receiptScanLockWaitMs?: number;
   runnerAcceptedToRestoreDoneMs?: number;
   runtimeInvocationPreparationMs?: number;
   sizeGuardMs?: number;
@@ -454,10 +480,39 @@ async function runColdStartTrial(
   const phaseBreakdown = requirePhaseBreakdown(trace.phaseBreakdown);
   const restore = requireRestoreBreakdown(phaseBreakdown);
   const importBreakdown = phaseBreakdown.import;
+  const orchestration = phaseBreakdown.orchestration;
   const preProviderBreakdown = phaseBreakdown.preProvider;
+  const acceptedAtEpochMs = requireIsoEpochMs(trace.acceptedAt, "acceptedAt");
+  const providerStartAtEpochMs = requireIsoEpochMs(
+    trace.providerStartAt,
+    "providerStartAt",
+  );
+  const runnerJobAcceptedAtEpochMs = requireIsoEpochMs(
+    trace.runnerJobAcceptedAt,
+    "runnerJobAcceptedAt",
+  );
+  const directEnsureRequestStartedAtEpochMs = requireTiming(
+    orchestration?.directEnsureRequestStartedAtEpochMs,
+    "directEnsureRequestStartedAtEpochMs",
+  );
+  const cloudflareRouteReceivedAtEpochMs = requireTiming(
+    orchestration?.cloudflareRouteReceivedAtEpochMs,
+    "cloudflareRouteReceivedAtEpochMs",
+  );
+  const freshStartRequestedAtEpochMs = requireTiming(
+    orchestration?.freshStartRequestedAtEpochMs,
+    "freshStartRequestedAtEpochMs",
+  );
 
   return {
     ...baseSample,
+    // These local-benchmark spans expose the control-plane window now available
+    // to the command-only container start and the authoritative work remaining
+    // after UserRunner reaches the fresh-start boundary.
+    acceptedToDirectEnsureRequestMs: elapsedEpochMs(
+      acceptedAtEpochMs,
+      directEnsureRequestStartedAtEpochMs,
+    ),
     acceptedToProviderMs: elapsedIso(trace.acceptedAt, requireIso(trace.providerStartAt)),
     acceptedToRunnerAcceptedMs: elapsedIso(
       trace.acceptedAt,
@@ -470,14 +525,66 @@ async function runColdStartTrial(
         "autoReplyPreparedAtEpochMs",
       ),
     ),
+    assistantServicePreLockMs: readOptionalTiming(
+      phaseBreakdown.provider?.assistantServicePreLockMs,
+      "assistantServicePreLockMs",
+    ),
     automationBootstrapMs: requireTiming(
       preProviderBreakdown?.automationBootstrapMs,
       "automationBootstrapMs",
     ),
+    automationLaneToAssistantServiceMs: readOptionalTiming(
+      preProviderBreakdown?.automationLaneToAssistantServiceMs,
+      "automationLaneToAssistantServiceMs",
+    ),
     archiveExtractMs: requireTiming(restore.archiveExtractMs, "archiveExtractMs"),
     cleanupMs: requireTiming(restore.cleanupMs, "cleanupMs"),
+    cloudflareRouteToFreshStartRequestedMs: elapsedEpochMs(
+      cloudflareRouteReceivedAtEpochMs,
+      freshStartRequestedAtEpochMs,
+    ),
+    codexAppServerInitializeMs: readOptionalTiming(
+      phaseBreakdown.provider?.codexAppServerInitializeMs,
+      "codexAppServerInitializeMs",
+    ),
+    codexAppServerPreProviderMs: readOptionalTiming(
+      phaseBreakdown.provider?.codexAppServerPreProviderMs,
+      "codexAppServerPreProviderMs",
+    ),
+    codexAppServerSpawnReadyMs: readOptionalTiming(
+      phaseBreakdown.provider?.codexAppServerSpawnReadyMs,
+      "codexAppServerSpawnReadyMs",
+    ),
+    codexAppServerThreadResumeMs: readOptionalTiming(
+      phaseBreakdown.provider?.codexAppServerThreadResumeMs,
+      "codexAppServerThreadResumeMs",
+    ),
+    codexAppServerThreadStartMs: readOptionalTiming(
+      phaseBreakdown.provider?.codexAppServerThreadStartMs,
+      "codexAppServerThreadStartMs",
+    ),
+    codexAppServerWarmReuseMs: readOptionalTiming(
+      phaseBreakdown.provider?.codexAppServerWarmReuseMs,
+      "codexAppServerWarmReuseMs",
+    ),
+    codexProcessPreparationMs: readOptionalTiming(
+      phaseBreakdown.provider?.codexProcessPreparationMs,
+      "codexProcessPreparationMs",
+    ),
     dataKeyUnwrapMs: requireTiming(restore.dataKeyUnwrapMs, "dataKeyUnwrapMs"),
     decryptMs: requireTiming(restore.decryptMs, "decryptMs"),
+    directEnsureRequestToCloudflareRouteMs: elapsedEpochMs(
+      directEnsureRequestStartedAtEpochMs,
+      cloudflareRouteReceivedAtEpochMs,
+    ),
+    directEnsureRequestToProviderMs: elapsedEpochMs(
+      directEnsureRequestStartedAtEpochMs,
+      providerStartAtEpochMs,
+    ),
+    directEnsureRequestToRunnerAcceptedMs: elapsedEpochMs(
+      directEnsureRequestStartedAtEpochMs,
+      runnerJobAcceptedAtEpochMs,
+    ),
     durableRootReplaceMs: requireTiming(
       restore.durableRootReplaceMs,
       "durableRootReplaceMs",
@@ -488,13 +595,67 @@ async function runColdStartTrial(
       "executionTargetHydrateMs",
     ),
     extractMs: requireTiming(restore.extractMs, "extractMs"),
+    freshStartRequestedToContainerReadyMs: elapsedEpochMs(
+      freshStartRequestedAtEpochMs,
+      requireTiming(
+        orchestration?.freshStartContainerReadyAtEpochMs,
+        "freshStartContainerReadyAtEpochMs",
+      ),
+    ),
+    freshStartRequestedToInvocationPreparedMs: elapsedEpochMs(
+      freshStartRequestedAtEpochMs,
+      requireTiming(
+        orchestration?.freshStartInvocationPreparedAtEpochMs,
+        "freshStartInvocationPreparedAtEpochMs",
+      ),
+    ),
+    mailboxImportDoneToAssistantPhaseMs: readOptionalTiming(
+      preProviderBreakdown?.mailboxImportDoneToAssistantPhaseMs,
+      "mailboxImportDoneToAssistantPhaseMs",
+    ),
+    memberPreferencesPrePlanningMs: readOptionalTiming(
+      preProviderBreakdown?.memberPreferencesPrePlanningMs,
+      "memberPreferencesPrePlanningMs",
+    ),
     nodeStartupMs: requireTiming(phaseBreakdown.boot?.nodeStartupMs, "nodeStartupMs"),
     objectFetchMs: requireTiming(restore.objectFetchMs, "objectFetchMs"),
+    outboxScanElapsedMs: readOptionalTiming(
+      preProviderBreakdown?.outboxScanElapsedMs,
+      "outboxScanElapsedMs",
+    ),
     preparedRestore: preparation.preparedSnapshotRestorePresent,
     presignGetMs: requireTiming(restore.presignGetMs, "presignGetMs"),
+    providerAdmissionMs: readOptionalTiming(
+      phaseBreakdown.provider?.admissionMs,
+      "admissionMs",
+    ),
+    providerPlanAndGateMs: readOptionalTiming(
+      phaseBreakdown.provider?.providerPlanAndGateMs,
+      "providerPlanAndGateMs",
+    ),
     providerPreProviderSetupMs: requireTiming(
       phaseBreakdown.provider?.preProviderSetupMs,
       "preProviderSetupMs",
+    ),
+    providerPromptBuildMs: readOptionalTiming(
+      phaseBreakdown.provider?.promptBuildMs,
+      "promptBuildMs",
+    ),
+    providerSessionResolveMs: readOptionalTiming(
+      phaseBreakdown.provider?.sessionResolveMs,
+      "sessionResolveMs",
+    ),
+    providerTurnLockWaitMs: readOptionalTiming(
+      phaseBreakdown.provider?.turnLockWaitMs,
+      "turnLockWaitMs",
+    ),
+    receiptScanElapsedMs: readOptionalTiming(
+      preProviderBreakdown?.receiptScanElapsedMs,
+      "receiptScanElapsedMs",
+    ),
+    receiptScanLockWaitMs: readOptionalTiming(
+      preProviderBreakdown?.receiptScanLockWaitMs,
+      "receiptScanLockWaitMs",
     ),
     runnerAcceptedToRestoreDoneMs: elapsedIso(
       requireIso(trace.runnerJobAcceptedAt),
@@ -735,12 +896,18 @@ async function waitForMeasuredLatencyTrace(input: {
         mailboxItemId: input.mailboxItemId,
         userId: input.userId,
       });
+      const orchestration = trace.phaseBreakdown?.orchestration;
       if (
         trace.providerStartAt
         && trace.runnerJobAcceptedAt
         && trace.runtimeAttemptId
         && trace.workspaceRestoreDoneAt
         && trace.phaseBreakdown
+        && typeof orchestration?.directEnsureRequestStartedAtEpochMs === "number"
+        && typeof orchestration?.cloudflareRouteReceivedAtEpochMs === "number"
+        && typeof orchestration?.freshStartRequestedAtEpochMs === "number"
+        && typeof orchestration?.freshStartContainerReadyAtEpochMs === "number"
+        && typeof orchestration?.freshStartInvocationPreparedAtEpochMs === "number"
       ) {
         return trace;
       }
@@ -943,21 +1110,47 @@ function buildSamplePercentileRecord(
   samples: readonly ColdStartSample[],
 ): Record<string, number> {
   const fields = [
+    "acceptedToDirectEnsureRequestMs",
     "acceptedToProviderMs",
     "acceptedToRunnerAcceptedMs",
     "assistantAutoReplyBootstrapMs",
+    "assistantServicePreLockMs",
     "automationBootstrapMs",
+    "automationLaneToAssistantServiceMs",
     "archiveExtractMs",
     "cleanupMs",
+    "cloudflareRouteToFreshStartRequestedMs",
+    "codexAppServerInitializeMs",
+    "codexAppServerPreProviderMs",
+    "codexAppServerSpawnReadyMs",
+    "codexAppServerThreadResumeMs",
+    "codexAppServerThreadStartMs",
+    "codexAppServerWarmReuseMs",
+    "codexProcessPreparationMs",
     "dataKeyUnwrapMs",
     "decryptMs",
+    "directEnsureRequestToCloudflareRouteMs",
+    "directEnsureRequestToProviderMs",
+    "directEnsureRequestToRunnerAcceptedMs",
     "durableRootReplaceMs",
     "executionTargetHydrateMs",
     "extractMs",
+    "freshStartRequestedToContainerReadyMs",
+    "freshStartRequestedToInvocationPreparedMs",
+    "mailboxImportDoneToAssistantPhaseMs",
+    "memberPreferencesPrePlanningMs",
     "nodeStartupMs",
     "objectFetchMs",
+    "outboxScanElapsedMs",
     "presignGetMs",
+    "providerAdmissionMs",
+    "providerPlanAndGateMs",
     "providerPreProviderSetupMs",
+    "providerPromptBuildMs",
+    "providerSessionResolveMs",
+    "providerTurnLockWaitMs",
+    "receiptScanElapsedMs",
+    "receiptScanLockWaitMs",
     "runnerAcceptedToRestoreDoneMs",
     "runtimeInvocationPreparationMs",
     "sizeGuardMs",
@@ -1014,11 +1207,23 @@ function requireTiming(value: unknown, field: string): number {
   return value;
 }
 
+function readOptionalTiming(value: unknown, field: string): number | undefined {
+  return value === undefined ? undefined : requireTiming(value, field);
+}
+
 function requireIso(value: string | null): string {
   if (!value) {
     throw new Error("Expected a measured latency milestone timestamp.");
   }
   return value;
+}
+
+function requireIsoEpochMs(value: string | null, field: string): number {
+  const epochMs = Date.parse(requireIso(value));
+  if (!Number.isSafeInteger(epochMs) || epochMs < 0) {
+    throw new Error(`Expected valid ISO timing ${field}.`);
+  }
+  return epochMs;
 }
 
 function elapsedIso(start: string, end: string): number {

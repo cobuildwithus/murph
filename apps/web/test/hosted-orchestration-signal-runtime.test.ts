@@ -199,6 +199,31 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
+  it("exposes an access-validated latency seam before the Temporal network hop", async () => {
+    const callOrder: string[] = [];
+    const onActiveAccessConfirmed = vi.fn(() => {
+      callOrder.push("access-confirmed");
+    });
+    mocks.signalWithStart.mockImplementationOnce(async () => {
+      callOrder.push("temporal");
+    });
+
+    await signalHostedMailboxAppendRuntime({
+      client: buildClient(),
+      expectedUserId: "member_123",
+      knownCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+        userId: "member_123",
+      },
+      mailboxItemId: "mailbox_123",
+      onActiveAccessConfirmed,
+    });
+
+    expect(onActiveAccessConfirmed).toHaveBeenCalledWith("member_123");
+    expect(callOrder).toEqual(["access-confirmed", "temporal"]);
+  });
+
   it("signals planner lane facts for participant-authorized thread containers", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "canceled",
@@ -256,6 +281,7 @@ describe("hosted runtime Temporal signaling", () => {
       },
     }));
 
+    const onActiveAccessConfirmed = vi.fn();
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
       expectedUserId: "member_123",
@@ -265,10 +291,12 @@ describe("hosted runtime Temporal signaling", () => {
         userId: "member_123",
       },
       mailboxItemId: "mailbox_123",
+      onActiveAccessConfirmed,
     })).rejects.toThrow("Hosted runtime user is not active.");
 
     expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
     expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledTimes(1);
+    expect(onActiveAccessConfirmed).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 

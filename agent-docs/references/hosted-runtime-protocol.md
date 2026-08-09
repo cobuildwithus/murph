@@ -963,10 +963,14 @@ handlers may additionally fire one best-effort direct
 `ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
 message payload). Linq first proves the committed known-checkpoint owner and
 canonical live active access; Assistant Ask first completes its normal
-server-bound append checks. Web always awaits the applicable Temporal
-`signalWithStart`; only after Temporal accepts that durable signal does Web
-start the direct ensure. An access failure or Temporal acceptance failure starts
-no direct wake. Linq instant start follows the same rule: enrollment returns the
+server-bound append checks. Immediately after that Linq access proof, Web may
+start the existing owner-neutral `runtime/shell-prewarm` request while it awaits
+the Temporal `signalWithStart`. The shell hint issues only the deterministic
+platform start command; it does not read runtime state, create a fence, wait for
+readiness, or invoke work. An access failure starts no shell hint or direct wake;
+a Temporal failure may leave an idle shell but cannot start runtime work. Only
+after Temporal accepts the durable signal does Web start the direct ensure.
+Linq instant start follows the same authority split: enrollment returns the
 newly committed activation as an explicit per-request wake continuation instead
 of signaling it first. Once the instant-start planner has committed the member
 row, Web may fire one best-effort `runtime/shell-prewarm` request while trial

@@ -100,7 +100,14 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       signalAccepted: true;
       workflowId: string;
     }) => void;
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(() => {
+    mocks.prewarmRuntimeShell.mockImplementationOnce(async () => {
+      wakeOrder.push("prewarm");
+      return { accepted: true };
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce((input: {
+      onActiveAccessConfirmed?: (userId: string) => void;
+    }) => {
+      input.onActiveAccessConfirmed?.("member_123");
       wakeOrder.push("temporal");
       return new Promise((resolve) => {
         resolveTemporalSignal = resolve;
@@ -143,9 +150,10 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     await vi.waitFor(() => {
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     });
-    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).toHaveBeenCalledTimes(1);
+    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith("member_123");
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
-    expect(afterResponseTasks).toHaveLength(0);
+    expect(afterResponseTasks).toHaveLength(1);
     expect(handoffSettled).toBe(false);
 
     resolveTemporalSignal({
@@ -160,7 +168,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
 
     expect(handoffSettled).toBe(true);
-    expect(wakeOrder).toEqual(["temporal", "direct"]);
+    expect(wakeOrder).toEqual(["prewarm", "temporal", "direct"]);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledWith({
       onTiming: expect.any(Function),
@@ -176,6 +184,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         userId: "member_123",
       },
       mailboxItemId: "mailbox_123",
+      onActiveAccessConfirmed: expect.any(Function),
     });
     await Promise.all(afterResponseTasks.map((task) => task()));
     expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
@@ -325,6 +334,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       signalAccepted: true,
     });
 
+    expect(mocks.prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   });
@@ -340,6 +350,23 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
 
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves only the access-validated shell hint when Temporal later fails", async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce((input: {
+      onActiveAccessConfirmed?: (userId: string) => void;
+    }) => {
+      input.onActiveAccessConfirmed?.("member_123");
+      return Promise.reject(new Error("temporal down after access"));
+    });
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      response,
+      wakeHandoff: buildWakeHandoff(),
+    })).rejects.toThrow("temporal down after access");
+
+    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith("member_123");
+    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 
   it("starts no direct wake when participant-aware signaling denies access", async () => {
