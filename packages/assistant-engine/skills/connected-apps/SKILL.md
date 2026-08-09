@@ -48,9 +48,10 @@ Management, Strong, and Hevy. Do not use `murph.connected_apps_search` to hunt
 for an arbitrary health integration, and do not claim support because a provider
 appears in the reference.
 
-Give the provider's official export link and the smallest useful steps, ask for
-the original downloaded file, and describe the result as a manual export or
-one-time import rather than a live sync. The member performs the export by
+Give the provider's verified action link—an account or export page when one is
+documented, otherwise the official instructions—plus the smallest useful steps.
+Ask for the original downloaded file and describe the result as a manual export
+or one-time import rather than a live sync. The member performs the export by
 default. Use `computer-use` only when they explicitly ask Murph to operate the
 portal and that skill permits the action. Once a file arrives, the global
 health-record ingestion invariant owns preservation and canonical extraction.
