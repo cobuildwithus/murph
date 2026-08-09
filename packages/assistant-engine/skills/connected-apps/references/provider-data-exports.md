@@ -84,25 +84,34 @@ help article first when the documented account flow is available.
 
 https://my.livongo.com
 
-Teladoc's article says the download contains all of the member's data but does
-not state the file format, schema, timestamp semantics, or how migrated accounts
-are represented. Never call it a CSV or promise reading-level fields before
-inspecting the actual export.
+The official legacy export article says the download contains all of the
+member's data but does not state the file format, schema, timestamp semantics,
+or how migrated accounts are represented. Never call it a CSV or promise
+reading-level fields before inspecting the actual export. Use this article when
+the member asks for the official instructions or source; it is not the normal
+sign-in action link.
 
-Some members now see existing Livongo information in the Teladoc Health app or
-website under `Programs` → `Condition Management`. Teladoc's public migration
-FAQ documents that viewing path but does not document an equivalent export menu
-for the newer experience. If the legacy `Reports and Data` path is unavailable,
-do not invent another menu. Give the official export article below as the
-fallback action link and tell the member to use any first-party export their
-account shows or contact Teladoc support.
+https://library.teladochealth.com/hc/en-us/articles/360044659034-How-to-Export-Your-Personal-Data-from-the-Secure-Livongo-Website
+
+Some members now access existing Livongo programs through the Teladoc Health app
+or website. The official migration FAQ tells members to sign in, choose
+`Condition Management`, then choose `Go to programs`; it does not document an
+equivalent export control for the newer experience. If the legacy `Reports and
+Data` path is unavailable, do not invent another menu. Explain that no verified
+new export path is documented, give the migration FAQ below as the fallback
+action link, and tell the member to use any first-party export their account
+shows or contact Livongo Member Support at `membersupport@livongo.com` or
+`800-945-4355`.
+
+Send exactly one action link: the Livongo sign-in page for the normal legacy
+flow, or the migration FAQ only when the legacy path is unavailable.
+
+https://www.teladochealth.com/start/new-experience-faq
 
 This is a one-time snapshot, not continuous Teladoc sync. The member must export
 again to refresh later readings. When the file arrives, inspect its real format
 and use the narrowest existing measurement or health-record ingestion path; do
 not infer blood pressure, weight, or glucose rows from an unsupported summary.
-
-https://library.teladochealth.com/hc/en-us/articles/360044659034-How-to-Export-Your-Personal-Data-from-the-Secure-Livongo-Website
 
 ## Strong
 
