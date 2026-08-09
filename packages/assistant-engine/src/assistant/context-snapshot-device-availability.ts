@@ -89,6 +89,8 @@ export async function refreshAssistantDeviceAvailabilitySnapshot(
   }
 
   let wroteSnapshot = false
+  let pendingDirtyDomainsAfterRace:
+    AssistantContextSnapshotState['pendingDirtyDomains'] = []
   await withAssistantRuntimeWriteLock(input.vaultRoot, async () => {
     const latestState = await readAssistantContextSnapshotState(input.vaultRoot)
     if (
@@ -96,6 +98,7 @@ export async function refreshAssistantDeviceAvailabilitySnapshot(
       || latestState.pendingDirtyDomains.length > 0
       || latestState.dirtySequence !== startedState.dirtySequence
     ) {
+      pendingDirtyDomainsAfterRace = latestState?.pendingDirtyDomains ?? []
       return
     }
 
@@ -122,13 +125,21 @@ export async function refreshAssistantDeviceAvailabilitySnapshot(
     wroteSnapshot = true
   })
 
-  return wroteSnapshot
-    ? {
-        pendingDirtyDomains: [],
-        refreshed: true,
-        skipped: false,
-      }
-    : coreResult
+  if (wroteSnapshot) {
+    return {
+      pendingDirtyDomains: [],
+      refreshed: true,
+      skipped: false,
+    }
+  }
+  if (pendingDirtyDomainsAfterRace.length > 0) {
+    return {
+      pendingDirtyDomains: pendingDirtyDomainsAfterRace,
+      refreshed: coreResult.refreshed,
+      skipped: false,
+    }
+  }
+  return coreResult
 }
 
 async function buildAssistantDeviceAvailabilityPrompt(
