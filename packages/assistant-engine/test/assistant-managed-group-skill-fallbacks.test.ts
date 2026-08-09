@@ -12,7 +12,6 @@ const MANAGED_GROUP_SKILL_SLUGS = [
   "group-chat",
   "group-challenge",
   "group-challenge-scorecards",
-  "group-newsletter",
   "groupchat-comedy",
 ] as const;
 
@@ -70,12 +69,24 @@ describe("managed hosted group skill boundary", () => {
     );
   });
 
+  it("keeps newsletter behavior as a public ordinary-automation recipe", async () => {
+    const raw = await readFile(
+      path.join(resolveAssistantSkillsRoot(), "group-newsletter", "SKILL.md"),
+      "utf8",
+    );
+
+    expect(raw).toContain("name: group-newsletter");
+    expect(raw).toContain('`murph.automation action="save"`');
+    expect(raw).toContain('delivery="group_email"');
+    expect(raw).toContain('`murph.group action="read_shared"` once');
+    expect(raw).not.toContain(PUBLIC_FALLBACK_MARKER);
+  });
+
   it("keeps the exact managed group fallback set registered at stable slugs", () => {
     expect([...MANAGED_GROUP_SKILL_SLUGS].sort()).toEqual([
       "group-challenge",
       "group-challenge-scorecards",
       "group-chat",
-      "group-newsletter",
       "groupchat-comedy",
     ]);
 
@@ -85,6 +96,7 @@ describe("managed hosted group skill boundary", () => {
     for (const slug of MANAGED_GROUP_SKILL_SLUGS) {
       expect(registeredSlugs.has(slug), slug).toBe(true);
     }
+    expect(registeredSlugs.has("group-newsletter")).toBe(true);
   });
 
   it("keeps public routing metadata for the private-owned challenge skills", () => {
