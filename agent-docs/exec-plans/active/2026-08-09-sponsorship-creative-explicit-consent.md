@@ -56,6 +56,11 @@ Updated: 2026-08-09
 3. Risk: prompt/tool widening lets text-only requests invoke music generation.
    Mitigation: retain separate text/song notification profiles and executable
    tests proving the tool is exposed only for validated song requests.
+4. Risk: a selected song silently degrades into an ordinary text response when
+   generation fails.
+   Mitigation: require exactly one generated voice-memo attachment before any
+   receipt, transcript persistence, or delivery; otherwise use the existing
+   optional-creative failure settlement without changing the granted credit.
 
 ## Tasks
 
@@ -85,6 +90,10 @@ Updated: 2026-08-09
 - Web, hosted execution, assistant runtime, and assistant-engine typechecks pass.
 - Hosted Stripe billing guard, docs drift/gardening, changed-Web ESLint,
   design-proof checker tests, and `git diff --check` pass.
+- Final ReviewGPT round 1 identified the song-to-text fallback. The accepted
+  finding is corrected at the notification-turn delivery boundary; focused
+  prompt and notification-runtime proof passes 55 tests and assistant-engine
+  typecheck passes.
 - The real design-catalog flow was rendered through the repository Playwright
   fallback at desktop and mobile viewports. Quiet-default and explicit creative
   states were inspected locally and after hosted proof upload.

@@ -21,6 +21,9 @@ describe('assistant creative notification prompt', () => {
     )
     expect(prompt).toContain('`durationSeconds` to exactly 15')
     expect(prompt).toContain('at most four short lyric lines')
+    expect(prompt).toContain(
+      'never substitute text when generation fails',
+    )
   })
 
   it('translates named song references into broad traits instead of imitation', () => {

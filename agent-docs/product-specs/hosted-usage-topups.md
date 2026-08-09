@@ -259,11 +259,13 @@ facts or referring to sensitive history.
 
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
 response gentle and non-comedic. A creative provider failure terminally settles
-this optional notification instead of asking the model to try another song.
-Once a delivery intent commits, the ordinary outbox retains its retry and
-deduplication behavior. There is no reservation, attempt counter, post-hoc
-media-attempt accounting, or media-specific retry state. The reconciler wakes
-newly paid usage work before attempting this optional social effect, and
+this optional notification instead of asking the model to try another song. A
+selected song without exactly one generated voice-memo attachment fails before
+receipt, transcript persistence, or delivery and is never replaced by a
+text-only response. Once a delivery intent commits, the ordinary outbox retains
+its retry and deduplication behavior. There is no reservation, attempt counter,
+post-hoc media-attempt accounting, or media-specific retry state. The reconciler
+wakes newly paid usage work before attempting this optional social effect, and
 notification failure never rolls back an already committed credit grant.
 
 The running bit remains a Web-owned expiring product fact, not durable group

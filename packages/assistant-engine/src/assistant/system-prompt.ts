@@ -253,7 +253,7 @@ export function buildAssistantCreativeNotificationPromptWithCacheMetadata(
     "Do not run commands, write files, use the network, contact anyone separately, schedule anything, mutate group state, or expose private health, account, payment, or routing details. Never infer the contributor or payer identity; use a public alias only when the task explicitly supplies one.",
     "For a song style request that names a song, show, soundtrack, artist, or genre, translate the reference into high-level traits such as mood, tempo, instrumentation, and structure. Never copy or closely imitate a recognizable melody, lyric, catchphrase, vocal identity, or signature arrangement.",
     "Never imitate or name a real artist, band, song, or lyrics.",
-    "Return exactly one JSON response object after any required tool call. If song generation fails, return a brief text fallback.",
+    "Return exactly one JSON response object after any required tool call. A song response is valid only after successful song generation; never substitute text when generation fails.",
     buildAssistantCreativeNotificationDecisionContractText(input.channel),
   );
   const layers: AssistantSystemPromptLayers = {
@@ -1492,7 +1492,7 @@ function buildAssistantCreativeNotificationDecisionContractText(
 - Return only:
   {"kind":"send_message","text":"...","privateSummary":"..."}
 - For message or poem, \`text\` is the complete creative response.
-- For song, \`text\` is one plain sentence accompanying the generated song, or a fallback only if song generation fails. Do not use music-note emoji or canned anthem/jingle hype.
+- For song, \`text\` is one plain sentence accompanying the successfully generated song. Never substitute a text-only response when song generation fails. Do not use music-note emoji or canned anthem/jingle hype.
 - \`privateSummary\` is an internal run note.
 - Do not return any other kind or field.`,
   );

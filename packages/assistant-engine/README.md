@@ -63,8 +63,10 @@ browsing capabilities. The ordinary response-media and outbox owners remain
 unchanged. Named style references are reduced to broad musical traits rather
 than copied melody, lyrics, catchphrases, vocal identity, or signature
 arrangement. A creative provider failure settles the optional notification
-instead of starting another song attempt; a committed delivery intent retains
-the ordinary outbox retry and deduplication behavior.
+instead of starting another song attempt. A selected song without exactly one
+generated voice-memo attachment fails before receipt, transcript persistence,
+or delivery and is never replaced by a text-only response. A committed delivery
+intent retains the ordinary outbox retry and deduplication behavior.
 
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain
