@@ -177,9 +177,27 @@ describe('assistant nutrition strategy skill', () => {
     expect(compactGoals).toContain(
       'Reuse at most one Goal with slug `murph-daily-nutrition-starting-targets`.',
     )
+    expect(compactGoals).toContain(
+      'Use this only after an explicit interactive request to set nutrition targets or to receive a numeric daily nutrition card',
+    )
+    expect(compactGoals).toContain(
+      'A scheduled closeout may use an already accepted active bundle, but it must not use this workflow to ask for inputs, derive or save targets, or surface a proposal.',
+    )
     expect(compactGoals).toContain('status `paused`')
     expect(compactGoals).toContain('vault-cli goal import-json --input -')
     expect(compactGoals).toContain('kind: "metric"')
+    expect(compactGoals).toContain(
+      "Supplying `metricTargets` replaces that Goal's stored array",
+    )
+    expect(compactGoals).toContain(
+      'every edit or overlap removal must therefore send the complete intended post-update array for the managed Goal.',
+    )
+    expect(compactGoals).toContain(
+      'Preserve every unchanged target and stable target id, and omit only a metric deliberately removed because an explicit owner now exists.',
+    )
+    expect(compactGoals).toContain(
+      'Read the Goal back and verify the complete retained set',
+    )
     expect(compactGoals).toContain(
       'A turn that creates or changes the paused proposal must be ordinary text, never a card.',
     )
@@ -199,7 +217,7 @@ describe('assistant nutrition strategy skill', () => {
       'A member- or clinician-chosen active target always wins for its metric.',
     )
     expect(compactGoals).toContain(
-      'remove only that overlapping metric from the managed Goal; never edit the explicit Goal.',
+      "send the managed Goal's complete retained array without that overlapping metric; never edit the explicit Goal.",
     )
     expect(compactGoals).toContain(
       'If the member declines, update the same Goal to `abandoned`.',

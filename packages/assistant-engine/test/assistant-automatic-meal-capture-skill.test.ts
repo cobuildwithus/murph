@@ -127,16 +127,19 @@ describe('assistant automatic meal capture skill', () => {
     )
     const compactSkill = compact(skill)
     expect(compactSkill).toContain(
-      'nutrition-strategy/references/daily-nutrition-card-goals.md',
+      'resolve all five targets from active canonical Goals.',
     )
     expect(compactSkill).toContain(
-      'Resolve all five targets from active canonical Goals.',
+      'This scheduled closeout does not provide target-setting intent',
     )
     expect(compactSkill).toContain(
-      'If the workflow creates or changes its paused proposal, return only the required ordinary-text explanation and stop; do not attach a card.',
+      'do not ask for profile inputs, call `goal import-json`, create or change a paused proposal, or surface a numeric target proposal.',
     )
     expect(compactSkill).toContain(
-      'If the proposal already exists but remains paused, retain the ordinary compact closeout without repeating the automatic proposal every night.',
+      'If the active target bundle is incomplete or ambiguous, retain the ordinary compact closeout and do not attach a card.',
+    )
+    expect(compactSkill).not.toContain(
+      'follow it exactly. Resolve all five targets from active canonical Goals.',
     )
     expect(compactSkill).toContain(
       "Never infer a target from this day's meal total or one wearable day.",
