@@ -32,6 +32,7 @@ import {
 } from './redaction.js'
 
 const ASSISTANT_TURN_RECEIPT_SCHEMA = 'murph.assistant-turn-receipt.v1'
+const ASSISTANT_TURN_RECEIPT_READ_CONCURRENCY = 4
 const PROVIDER_MODEL_PREVIEW_LIMIT = 240
 const TURN_TEXT_PREVIEW_HASH_LENGTH = 12
 
@@ -300,24 +301,43 @@ async function listRecentAssistantTurnReceiptsInternal(
     let filesRead = 0
     const receipts: AssistantTurnReceipt[] = []
 
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) {
-        continue
-      }
-
-      const receipt = await readAssistantTurnReceiptAtPath(
-        paths,
-        path.join(paths.turnsDirectory, entry.name),
-        (bytes) => {
-          filesRead += 1
-          bytesRead += bytes
-        },
+    const receiptEntries = entries.filter(
+      (entry) => entry.isFile() && entry.name.endsWith('.json'),
+    )
+    for (
+      let index = 0;
+      index < receiptEntries.length;
+      index += ASSISTANT_TURN_RECEIPT_READ_CONCURRENCY
+    ) {
+      const batch = receiptEntries.slice(
+        index,
+        index + ASSISTANT_TURN_RECEIPT_READ_CONCURRENCY,
       )
-      if (!receipt || (sessionFilter && receipt.sessionId !== sessionFilter)) {
-        continue
-      }
+      const rawReceipts = await Promise.all(
+        batch.map((entry) =>
+          readAssistantTurnReceiptRawAtPath(
+            path.join(paths.turnsDirectory, entry.name),
+          ),
+        ),
+      )
 
-      insertRecentAssistantTurnReceipt(receipts, receipt, normalizedLimit)
+      // Parse and quarantine in directory order so parallel reads do not turn
+      // quarantine writes or timestamp ties into concurrent side effects.
+      for (const rawReceipt of rawReceipts) {
+        const receipt = await parseAssistantTurnReceiptRawAtPath(
+          paths,
+          rawReceipt,
+          (bytes) => {
+            filesRead += 1
+            bytesRead += bytes
+          },
+        )
+        if (!receipt || (sessionFilter && receipt.sessionId !== sessionFilter)) {
+          continue
+        }
+
+        insertRecentAssistantTurnReceipt(receipts, receipt, normalizedLimit)
+      }
     }
 
     return {
@@ -375,25 +395,86 @@ async function readAssistantTurnReceiptAtPath(
   receiptPath: string,
   onBytesRead?: (bytes: number) => void,
 ): Promise<AssistantTurnReceipt | null> {
-  let raw: string | null = null
-  try {
-    raw = await readFile(receiptPath, 'utf8')
-    onBytesRead?.(Buffer.byteLength(raw, 'utf8'))
-    return assistantTurnReceiptSchema.parse(JSON.parse(raw))
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null
+  return await parseAssistantTurnReceiptRawAtPath(
+    paths,
+    await readAssistantTurnReceiptRawAtPath(receiptPath),
+    onBytesRead,
+  )
+}
+
+type AssistantTurnReceiptRawRead =
+  | {
+      kind: 'error'
+      error: unknown
+      receiptPath: string
+    }
+  | {
+      kind: 'missing'
+      receiptPath: string
+    }
+  | {
+      kind: 'read'
+      raw: string
+      receiptPath: string
     }
 
-    await quarantineAssistantStateFile({
-      artifactKind: 'turn-receipt',
+async function readAssistantTurnReceiptRawAtPath(
+  receiptPath: string,
+): Promise<AssistantTurnReceiptRawRead> {
+  try {
+    return {
+      kind: 'read',
+      raw: await readFile(receiptPath, 'utf8'),
+      receiptPath,
+    }
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return {
+        kind: 'missing',
+        receiptPath,
+      }
+    }
+
+    return {
       error,
-      ...(raw === null ? {} : { expectedContent: raw }),
-      filePath: receiptPath,
-      paths,
-    }).catch(() => undefined)
+      kind: 'error',
+      receiptPath,
+    }
+  }
+}
+
+async function parseAssistantTurnReceiptRawAtPath(
+  paths: AssistantStatePaths,
+  input: AssistantTurnReceiptRawRead,
+  onBytesRead?: (bytes: number) => void,
+): Promise<AssistantTurnReceipt | null> {
+  if (input.kind === 'missing') {
     return null
   }
+
+  if (input.kind === 'read') {
+    try {
+      onBytesRead?.(Buffer.byteLength(input.raw, 'utf8'))
+      return assistantTurnReceiptSchema.parse(JSON.parse(input.raw))
+    } catch (error) {
+      await quarantineAssistantStateFile({
+        artifactKind: 'turn-receipt',
+        error,
+        expectedContent: input.raw,
+        filePath: input.receiptPath,
+        paths,
+      }).catch(() => undefined)
+      return null
+    }
+  }
+
+  await quarantineAssistantStateFile({
+    artifactKind: 'turn-receipt',
+    error: input.error,
+    filePath: input.receiptPath,
+    paths,
+  }).catch(() => undefined)
+  return null
 }
 
 async function writeAssistantTurnReceiptAtPath(

@@ -1611,6 +1611,16 @@ describe("hosted runtime control contracts", () => {
         mailboxImportDoneToAssistantPhaseMs: 29,
         workspaceAssistantPreAutomationMs: 11,
         automationLaneToAssistantServiceMs: 7,
+        automationReadinessMs: 1,
+        automationInputSelectionMs: 1,
+        automationPassSetupMs: 1,
+        automationCandidateScanMs: 1,
+        automationGroupAndOperationScopeMs: 1,
+        automationTerminalEvidenceMs: 1,
+        automationSessionPreflightMs: 1,
+        automationCrossSessionContextMs: 0,
+        automationPromptPreparationMs: 0,
+        automationServiceHandoffMs: 0,
         executionTargetHydrateMs: 2,
         systemMailboxMaintenanceMs: 3,
         memberPreferencesPrePlanningMs: 4,
@@ -1719,6 +1729,24 @@ describe("hosted runtime control contracts", () => {
       { outboxScanBytesRead: -1 }, // counts must be non-negative
       { receiptScanBytesRead: -1 }, // counts must be non-negative
       { outboxScanElapsedMs: "23" }, // durations must stay numeric
+      { automationSessionPreflightMs: "2" }, // nested durations must stay numeric
+      {
+        automationLaneToAssistantServiceMs: 7,
+        automationReadinessMs: 7,
+      }, // a partial subdivision is ambiguous and must be dropped
+      {
+        automationLaneToAssistantServiceMs: 7,
+        automationReadinessMs: 2,
+        automationInputSelectionMs: 1,
+        automationPassSetupMs: 1,
+        automationCandidateScanMs: 1,
+        automationGroupAndOperationScopeMs: 1,
+        automationTerminalEvidenceMs: 1,
+        automationSessionPreflightMs: 1,
+        automationCrossSessionContextMs: 0,
+        automationPromptPreparationMs: 0,
+        automationServiceHandoffMs: 0,
+      }, // all leaves are required to sum exactly to their parent
       { mailboxImportDoneToAssistantPhaseMs: -1 }, // durations must be non-negative
       { receiptScanFilesRead: 12, receiptScanPath: 1 }, // arbitrary metadata is forbidden
     ]) {
