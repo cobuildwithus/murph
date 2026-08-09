@@ -129,7 +129,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
     "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
   );
   expect(sectionsMarkup).toContain(
-    "Reusable signup referral link and recipient claim states",
+    "Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states",
   );
   expect(sectionsMarkup).toMatch(
     /<[^>]*(?=[^>]*\bdata-design-contract="origin-only-referral-claim")(?=[^>]*\bdata-design-section="signup-referral-flow")[^>]*>/,
