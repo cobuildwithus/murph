@@ -10,27 +10,22 @@ import {
 } from "@murphai/hosted-execution/auth";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => {
-  const nonceTransaction = {
+const mocks = vi.hoisted(() => ({
+  prisma: {
+    $transaction: vi.fn(),
     hostedWebInternalRequestNonce: {
       create: vi.fn(async () => undefined),
       deleteMany: vi.fn(async () => ({ count: 0 })),
     },
-  };
-
-  return {
-    prisma: {
-      $transaction: vi.fn(async (
-        callback: (transaction: typeof nonceTransaction) => Promise<unknown>,
-      ) => await callback(nonceTransaction)),
-    },
-    readHostedPersonalAiUsageStatus: vi.fn(),
-    withJsonError: vi.fn((handler: (...args: never[]) => Promise<Response>) => handler),
-    jsonOk: vi.fn((payload: unknown, status?: number) =>
-      Response.json(payload, { status }),
-    ),
-  };
-});
+  },
+  readHostedPersonalAiUsageStatus: vi.fn(),
+  withJsonError: vi.fn(
+    (handler: (...args: never[]) => Promise<Response>) => handler,
+  ),
+  jsonOk: vi.fn((payload: unknown, status?: number) =>
+    Response.json(payload, { status }),
+  ),
+}));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => mocks.prisma,
@@ -116,8 +111,12 @@ describe("hosted plan usage tool route", () => {
       memberId: "member_bound",
     });
     expect(
-      mocks.prisma.$transaction.mock.calls[0]?.[0],
-    ).toEqual(expect.any(Function));
+      mocks.prisma.hostedWebInternalRequestNonce.create,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.prisma.hostedWebInternalRequestNonce.deleteMany,
+    ).not.toHaveBeenCalled();
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("opts the hosted assistant into current subscription action terms", async () => {
