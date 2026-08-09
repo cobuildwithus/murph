@@ -1,6 +1,6 @@
 # Investigate hosted cold-start savings without losing existing overlap
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -164,3 +164,4 @@ Updated: 2026-08-09
 - Confirm the final diff contains no established-member prewarm callback or
   timing requirement, retains optional historical latency parsing, and keeps
   the first-contact call site plus both consent-withdrawal orderings.
+Completed: 2026-08-09
