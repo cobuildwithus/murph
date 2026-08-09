@@ -1,6 +1,6 @@
 # Junction scale and blood-pressure vault awareness
 
-Status: implementation complete; exact-head verification is recorded in the pull request
+Status: implementation complete; final exact-head CI pending on the reconciled pull-request head
 Date: 2026-08-09
 
 ## Outcome
@@ -65,10 +65,12 @@ Blood-test availability was already part of the assistant context snapshot. It i
 - `packages/assistant-engine/test/assistant-context-snapshot-device-availability.test.ts`
   - asserts Murph receives canonical read instructions and dates without numeric readings;
   - asserts a snapshot written with the previous schema version is detected and rebuilt once.
+- `packages/assistant-engine/test/assistant-context-snapshot.test.ts`
+  - retains the existing legacy-cache migration proof and now expects the current version-6 snapshot envelope.
 
 ## Verification
 
-Run:
+Focused commands:
 
 ```bash
 pnpm --filter @murphai/vault-usecases test -- junction-scale-blood-pressure-canonicalization
@@ -77,4 +79,8 @@ pnpm --filter @murphai/vault-usecases typecheck
 pnpm --filter @murphai/assistant-engine typecheck
 ```
 
-Record exact-head CI and any required review-gate evidence in the pull request before merge.
+Verification history:
+
+- The first PR-head package-coverage run identified one owned stale assertion that still expected context-snapshot schema version 5; it was updated to version 6.
+- The branch was reconciled with `main` at `e1b4c0ed15ff1a05c915df0747b756d1cff8370b` before the final exact-head run.
+- Final exact-head CI and any required review-gate evidence remain pending and must be recorded in the pull request before merge.
