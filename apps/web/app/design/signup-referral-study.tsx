@@ -4,11 +4,13 @@ import {
   HostedSignupReferralLanding,
   type HostedSignupReferralLandingState,
 } from "@/src/components/hosted-onboarding/hosted-signup-referral-landing";
+import { JoinInviteSignedInMismatchView } from "@/src/components/hosted-onboarding/join-invite-signed-in-mismatch-view";
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import {
   HostedSignupReferralLinkButtonView,
   type HostedSignupReferralLinkButtonState,
 } from "@/src/components/settings/hosted-signup-referral-link-button";
+import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 
 const DESIGN_REFERRAL_URL = "https://example.com/r/design-referral";
@@ -128,6 +130,27 @@ export function SignupReferralFlowStudy() {
               />
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Signed-in invite recovery
+        </p>
+        <div
+          className="overflow-hidden rounded-3xl border border-border bg-background"
+          data-design-section="signup-referral-signed-in-recovery"
+          data-design-state="signed-in-account-mismatch"
+          id="signup-referral-signed-in-recovery"
+          inert
+        >
+          <JoinInviteSignedInMismatchView
+            signOutAction={
+              <Button size="lg" type="button" variant="outline">
+                Sign out and use invite
+              </Button>
+            }
+          />
         </div>
       </section>
     </div>
