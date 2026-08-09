@@ -63,21 +63,24 @@ describe("hosted usage referral policy", () => {
     expect(wake.notification.instructions).toContain(
       "$3.50 of cost-weighted usage credit for this room",
     );
+    expect(wake.notification.instructions).toContain(
+      'Final message: include "$3.50 of cost-weighted usage credit for this room" exactly',
+    );
   });
 
   it("labels each fixed mission reward as cost-weighted usage credit", () => {
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "group",
-      policyCode: "new_person_activation_v1",
+      rewardUsdMicros: 2_000_000n,
     })).toBe("$2.00 of cost-weighted usage credit for this room");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
-      policyCode: "active_group_v1",
+      rewardUsdMicros: 3_500_000n,
     })).toBe("$3.50 of cost-weighted usage credit for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
-      policyCode: "new_person_activation_v1",
-    })).toBe("$2.00 of cost-weighted usage credit for your Murph");
+      rewardUsdMicros: 2_750_000n,
+    })).toBe("$2.75 of cost-weighted usage credit for your Murph");
   });
 
   it("shares display copy and outstanding semantics with read-only projections", () => {

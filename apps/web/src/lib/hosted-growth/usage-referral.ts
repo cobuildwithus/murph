@@ -146,13 +146,12 @@ interface HostedUsageReferralCelebrationStyleBand {
 
 export function buildHostedUsageReferralRewardLabel(input: {
   destinationKind: "group" | "personal";
-  policyCode: HostedUsageReferralPolicyCode;
+  rewardUsdMicros: bigint;
 }): string {
   const subject = input.destinationKind === "group"
     ? "this room"
     : "your Murph";
-  const rewardUsdMicros = POLICIES[input.policyCode].rewardUsdMicros;
-  return `${formatHostedUsageCreditUsd(rewardUsdMicros)} of cost-weighted usage credit for ${subject}`;
+  return `${formatHostedUsageCreditUsd(input.rewardUsdMicros)} of cost-weighted usage credit for ${subject}`;
 }
 
 function formatHostedUsageCreditUsd(usdMicros: bigint): string {
@@ -1075,8 +1074,8 @@ async function appendHostedUsageReferralCelebration(input: {
     select: {
       beneficiaryMemberId: true,
       celebrationQueuedAt: true,
-      policyCode: true,
       referrerMemberId: true,
+      rewardUsdMicros: true,
       rewardedAt: true,
       sourceConversationJson: true,
       status: true,
@@ -1135,7 +1134,6 @@ async function appendHostedUsageReferralCelebration(input: {
     memberId: input.beneficiaryMemberId,
     prisma: input.prisma,
   });
-  const policy = POLICIES[referral.policyCode];
   const effectiveStyle = resolveAssistantEffectiveStyle({
     ...(preferences.persona ? { persona: preferences.persona } : {}),
     personality: {
@@ -1167,7 +1165,7 @@ async function appendHostedUsageReferralCelebration(input: {
         notificationKey,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind,
-          policyCode: policy.code,
+          rewardUsdMicros: referral.rewardUsdMicros,
         }),
         rewardedAt,
         styleBand: {
@@ -1261,6 +1259,7 @@ export function buildHostedUsageReferralCelebrationWake(input: {
       instructions: [
         "Continue the source conversation by celebrating its completed usage challenge.",
         `The person who accepted it has already earned ${input.rewardLabel} for this conversation.`,
+        `Final message: include "${input.rewardLabel}" exactly and say it was already earned.`,
         "Make this feel like a funny shared achievement, not a billing receipt.",
         `Server-supplied destination style band: tone=${input.styleBand.tone}; Humor=${input.styleBand.humor}/10; Unhinged=${input.styleBand.unhinged}/10.`,
         "Match that band naturally without mentioning settings.",
@@ -1726,7 +1725,7 @@ async function readHostedUsageReferralSnapshot(input: {
             policyCode: mission.policyCode,
             rewardLabel: buildHostedUsageReferralRewardLabel({
               destinationKind,
-              policyCode: mission.policyCode,
+              rewardUsdMicros: POLICIES[mission.policyCode].rewardUsdMicros,
             }),
             state: mission.status === "armed" ? "armed" : "target_bound",
           }]
@@ -1745,7 +1744,7 @@ async function readHostedUsageReferralSnapshot(input: {
         requirementsLabel: POLICIES[code].requirementsLabel,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind,
-          policyCode: code,
+          rewardUsdMicros: POLICIES[code].rewardUsdMicros,
         }),
       })),
     trialCreditNotice:

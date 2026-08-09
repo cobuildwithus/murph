@@ -43,15 +43,14 @@ return.
 
 | Path | Qualification | Public reward label |
 | --- | --- | --- |
-| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member. | About 100 more messages |
-| `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | About 100 more messages |
-| `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | About 140 more messages |
+| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member. | $2.00 of cost-weighted usage credit |
+| `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | $2.00 of cost-weighted usage credit |
+| `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 of cost-weighted usage credit |
 
-The message labels describe the approximate value of each fixed offer. The
-ledger continues to store exact cost-weighted usage value in USD micros. Actual
-message capacity varies by model, tools, media, task complexity, and response
-length, so these labels must never be reused to estimate a member's current
-messages remaining.
+Each dollar label states the exact cost-weighted usage value of its fixed offer.
+The ledger stores that value in USD micros. Actual message capacity varies by
+model, tools, media, task complexity, and response length, so Murph does not
+translate the credit into a message estimate.
 
 Trial rewards add usage capacity but never extend the trial end date.
 
@@ -313,10 +312,11 @@ conversation.
 After a qualifying signup-link reward commits, Murph sends one concise personal
 confirmation through the member's current authorized Linq or Telegram route. It
 states that someone completed setup through the referral link and that the
-approximate-message reward is already applied. It does not identify or guess who
-joined, mention dollars or internal qualification logic, or ask the member to do
-another step. A missing route delays only this notice; it never delays, reverses,
-or duplicates the reward. Settings history remains the durable visible receipt.
+receipt's persisted dollar-denominated cost-weighted usage credit is already
+applied. It does not identify or guess who joined, mention internal qualification
+logic, or ask the member to do another step. A missing route delays only this
+notice; it never delays, reverses, or duplicates the reward. Settings history
+remains the durable visible receipt.
 
 Once a notification mailbox item is durable, failed signaling leaves that same
 item eligible for the next bounded pass regardless of its lane. A notification
@@ -338,13 +338,14 @@ Referral access and history remain read-only projections:
   supported Murph conversation exists;
 - the empty referral explanation says qualifying rewards are added
   automatically;
-- current mission rows show title, status, deadline, approximate message reward,
-  and reward owner;
+- current mission rows show title, status, deadline, dollar-denominated
+  cost-weighted usage reward, and reward owner;
 - reward columns stack below descriptions on narrow screens instead of forcing
   horizontal compression;
 - qualification requirements and selection date stay in one native details
   disclosure;
-- completed mission and signup-link rewards appear in History;
+- completed mission and signup-link rewards appear in History with the exact
+  persisted receipt amount;
 - signup-link rows use their persisted policy version to display `Invite someone
   to Murph` rather than masquerading as the fresh-group mission;
 - purchase-grant history follows referral history as a flat ledger;

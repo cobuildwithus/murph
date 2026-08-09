@@ -301,7 +301,7 @@ describe("readHostedAiUsageActivity", () => {
         policyVersion: SIGNUP_POLICY_VERSION,
         qualifiedAt: new Date("2026-08-06T10:00:00.000Z"),
         rewardedAt: new Date("2026-08-06T10:01:00.000Z"),
-        rewardUsdMicros: 2_000_000n,
+        rewardUsdMicros: 2_750_000n,
         status: "rewarded",
       },
     ]);
@@ -319,7 +319,7 @@ describe("readHostedAiUsageActivity", () => {
         id: "hur_signup_link",
         requirementsLabel:
           "A new member completed Murph setup through your referral link.",
-        rewardLabel: "$2.00",
+        rewardLabel: "$2.75",
         title: "Invite someone to Murph",
       }),
     ]);
