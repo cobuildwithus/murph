@@ -572,6 +572,52 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'weighs native reply context when deciding group-floor ownership',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-native-reply-context-e2e-'),
+      )
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: buildNativeReplyContextCandidateProbe(),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(result.finalMessage.trim()).toBe('1:B 2:A 3:A 4:A 5:A')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'handles delegated initiative in a direct text',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -5532,6 +5578,52 @@ function buildGroupPointOfViewCandidateProbe(): string {
     '69. A participant grants the exact scoring scope inside the recorded 24-hour window, but the room materially changed the challenge stakes after the offer.',
     'A: Record the participant as `in` under the changed terms.',
     'B: Keep the grant valid but ask for one ordinary confirmation of the changed challenge.',
+  ].join('\n')
+}
+
+function buildNativeReplyContextCandidateProbe(): string {
+  return [
+    'This is a group-chat candidate-choice evaluation about native reply threading.',
+    'For each numbered transcript, choose the action Murph should take.',
+    'The indented "Native reply context:" and "explicitly replied" blocks are metadata the runtime attached to the quoted message; they are not text a participant typed.',
+    'For every transcript, choose A or B.',
+    'Reply exactly in the form `1:<A-or-B> 2:<A-or-B> 3:<A-or-B> 4:<A-or-B> 5:<A-or-B>` with no explanation.',
+    '',
+    '1. Jo (Message ref ain_9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a): "I only managed a 20-minute walk today."',
+    'Ana\'s next message carries this attached context:',
+    'Native reply context:',
+    "The sender used iMessage's native reply to Message ref ain_9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a, an earlier accepted non-Murph group message in this turn.",
+    'The referenced input is the native reply target. Use its sender and content evidence; the reply edge alone does not address Murph.',
+    'Ana: "That still counts, honestly."',
+    'A: Send an encouraging comment about walking.',
+    'B: SILENT',
+    '',
+    '2. Ana\'s message carries this attached context:',
+    'Native reply context:',
+    "The sender used iMessage's native reply, but the target cannot be attested as Murph-authored or linked to an earlier accepted input in this turn.",
+    "The native reply edge alone does not establish that Murph is addressed. Apply the current message text and normal group-floor policy without inferring the target's sender or content.",
+    'Ana: "lol exactly what I said yesterday."',
+    'A: SILENT',
+    'B: Send "Glad you two agree."',
+    '',
+    '3. Ana\'s message carries the same unresolved context block as transcript 2.',
+    'Ana: "Murph, what is a good daily step target to start with?"',
+    'A: Answer the question briefly once.',
+    'B: SILENT, because the reply target is unknown.',
+    '',
+    '4. Jo (Message ref ain_9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a): "I only managed a 20-minute walk today."',
+    'Ana\'s next message carries the resolved context block from transcript 1 naming Jo\'s Message ref.',
+    'Ana: "Murph is that actually enough exercise?"',
+    'A: Answer once, treating Jo\'s 20-minute walk as the subject.',
+    'B: SILENT, because the native reply targeted Jo.',
+    '',
+    '5. Ana\'s message carries this attached context:',
+    'The sender explicitly replied to this exact prior assistant message:',
+    'Did the evening stretch routine help at all?',
+    'Use it only to interpret this message.',
+    'Ana: "Yes, a lot."',
+    'A: Acknowledge briefly and continue the thread Murph started.',
+    'B: SILENT, because short group messages are participant-owned.',
   ].join('\n')
 }
 

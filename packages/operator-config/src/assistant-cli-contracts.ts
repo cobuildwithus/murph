@@ -747,6 +747,13 @@ const assistantChannelCleanupMessageSchema = z
   })
   .strict()
 
+export const assistantProviderMessageEffectSchema = z
+  .object({
+    providerMessageId: z.string().min(1),
+    message: z.string().min(1).nullable(),
+  })
+  .strict()
+
 const assistantMessageChannelDeliverySchema = z.object({
   kind: z.literal('message').optional(),
   channel: z.string().min(1),
@@ -757,6 +764,10 @@ const assistantMessageChannelDeliverySchema = z.object({
   messageLength: z.number().int().nonnegative(),
   providerMessageId: z.string().min(1).nullable().default(null),
   providerMessageIds: z.array(z.string().min(1)).min(1).optional(),
+  providerMessageEffects: z
+    .array(assistantProviderMessageEffectSchema)
+    .min(1)
+    .optional(),
   cleanupMessages: z.array(assistantChannelCleanupMessageSchema).min(1).optional(),
   cleanupTargetAliases: z.array(z.string().min(1)).min(1).optional(),
   providerThreadId: z.string().min(1).nullable().default(null),
@@ -1777,6 +1788,9 @@ export type AssistantTranscriptEntry = z.infer<
 >
 export type AssistantChannelDelivery = z.infer<
   typeof assistantChannelDeliverySchema
+>
+export type AssistantProviderMessageEffect = z.infer<
+  typeof assistantProviderMessageEffectSchema
 >
 export type AssistantDeliveryError = z.infer<
   typeof assistantDeliveryErrorSchema
