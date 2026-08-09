@@ -1,6 +1,6 @@
 # Preserve response-card schema through Codex
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -85,7 +85,8 @@ Updated: 2026-08-09
 - Completed outcomes: the focused card suites pass (16 tests), the expanded
   pinned-App-Server and card-tool suites pass (40 tests), both affected package
   typechecks pass, and the live Sol probes accepted nutrition V2 and compact
-  table cards.
+  table cards. Required exact-head CI is green, preliminary specialist findings
+  are resolved, and final ReviewGPT round 2 passed with no qualifying findings.
 
 ## Review dispositions
 
@@ -97,3 +98,4 @@ Updated: 2026-08-09
   the new schema; the PR contract documents bounded transcript continuity,
   conditional hot-path work, rollback behavior, and the two-turn deployment
   smoke. No compatibility mechanism is warranted.
+Completed: 2026-08-09
