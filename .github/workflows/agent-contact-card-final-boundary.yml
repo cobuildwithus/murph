@@ -1,0 +1,147 @@
+name: Final generated contact-card boundary audit
+
+on:
+  push:
+    branches:
+      - agent/generated-murph-contact-card
+
+permissions:
+  contents: write
+
+concurrency:
+  group: final-generated-contact-card-boundary-audit
+  cancel-in-progress: true
+
+jobs:
+  verify-and-finalize:
+    runs-on: ubuntu-latest
+    env:
+      ORIGINAL_PRODUCT_HEAD: dd5ea281e7b88285957dabafbb8d49d78ed5c8b4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Apply fail-closed request-shape corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$ORIGINAL_PRODUCT_HEAD" HEAD
+          python3 -m py_compile .agent-patch/final-contact-card-boundary-v3.py
+          python3 .agent-patch/final-contact-card-boundary-v3.py
+          git diff --check
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate Web Prisma client
+        run: pnpm --dir apps/web prisma:generate
+      - name: Verify corrected behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run --no-coverage \
+            packages/hosted-execution/test/generated-contact-card-parser.test.ts \
+            packages/hosted-execution/test/hosted-runtime-control.test.ts \
+            packages/assistant-engine/test/assistant-codex-group-tool.test.ts \
+            packages/assistant-runtime/test/hosted-runtime-group-tool-linq-context.test.ts \
+            packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts
+          pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
+            apps/web/test/hosted-group-tool.test.ts \
+            apps/web/test/hosted-onboarding-linq-attachment-idempotency.test.ts \
+            apps/web/test/hosted-onboarding-linq-contact-card-share.test.ts \
+            apps/web/test/hosted-onboarding-linq-contact-card.test.ts
+          pnpm typecheck:packages
+          pnpm --dir apps/web typecheck:prepared
+      - name: Commit only the audited product changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git reset "$ORIGINAL_PRODUCT_HEAD"
+          rm -rf .agent-patch
+          rm -f .github/workflows/agent-contact-card-final-boundary.yml
+
+          git add \
+            agent-docs/exec-plans/completed/2026-08-08-generated-murph-contact-card.md \
+            apps/web/src/lib/hosted-groups/group-tool.ts \
+            apps/web/src/lib/hosted-onboarding/linq-client.ts \
+            apps/web/src/lib/hosted-onboarding/linq-contact-card-share.ts \
+            apps/web/test/hosted-group-tool.test.ts \
+            apps/web/test/hosted-onboarding-linq-attachment-idempotency.test.ts \
+            apps/web/test/hosted-onboarding-linq-contact-card-share.test.ts \
+            packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts \
+            packages/assistant-runtime/test/hosted-runtime-group-tool-linq-context.test.ts \
+            packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts \
+            packages/hosted-execution/src/parsers/runtime-control.ts \
+            packages/hosted-execution/src/runtime-control.ts \
+            packages/hosted-execution/test/generated-contact-card-parser.test.ts
+
+          python3 - <<'PY'
+          import subprocess
+
+          expected = {
+              "agent-docs/exec-plans/completed/2026-08-08-generated-murph-contact-card.md",
+              "apps/web/src/lib/hosted-groups/group-tool.ts",
+              "apps/web/src/lib/hosted-onboarding/linq-client.ts",
+              "apps/web/src/lib/hosted-onboarding/linq-contact-card-share.ts",
+              "apps/web/test/hosted-group-tool.test.ts",
+              "apps/web/test/hosted-onboarding-linq-attachment-idempotency.test.ts",
+              "apps/web/test/hosted-onboarding-linq-contact-card-share.test.ts",
+              "packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts",
+              "packages/assistant-runtime/test/hosted-runtime-group-tool-linq-context.test.ts",
+              "packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts",
+              "packages/hosted-execution/src/parsers/runtime-control.ts",
+              "packages/hosted-execution/src/runtime-control.ts",
+              "packages/hosted-execution/test/generated-contact-card-parser.test.ts",
+          }
+          actual = set(filter(None, subprocess.check_output(
+              ["git", "diff", "--cached", "--name-only"],
+              text=True,
+          ).splitlines()))
+          if actual != expected:
+              raise RuntimeError(
+                  f"staged path mismatch: missing={sorted(expected - actual)} "
+                  f"unexpected={sorted(actual - expected)}"
+              )
+          unstaged = subprocess.check_output(
+              ["git", "diff", "--name-only"],
+              text=True,
+          ).strip()
+          if unstaged:
+              raise RuntimeError(f"unexpected unstaged files: {unstaged}")
+          PY
+
+          git diff --cached --check
+          git commit -m "fix(contact-card): enforce personalized request boundaries"
+
+      - name: Re-verify the exact clean commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD^
+          pnpm exec vitest run --no-coverage \
+            packages/hosted-execution/test/generated-contact-card-parser.test.ts \
+            packages/hosted-execution/test/hosted-runtime-control.test.ts \
+            packages/assistant-engine/test/assistant-codex-group-tool.test.ts \
+            packages/assistant-runtime/test/hosted-runtime-group-tool-linq-context.test.ts \
+            packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts
+          pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
+            apps/web/test/hosted-group-tool.test.ts \
+            apps/web/test/hosted-onboarding-linq-attachment-idempotency.test.ts \
+            apps/web/test/hosted-onboarding-linq-contact-card-share.test.ts \
+            apps/web/test/hosted-onboarding-linq-contact-card.test.ts
+          pnpm typecheck:packages
+          pnpm --dir apps/web typecheck:prepared
+          test -z "$(git status --porcelain)"
+      - name: Push the audited head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push \
+            --force-with-lease=refs/heads/agent/generated-murph-contact-card:${GITHUB_SHA} \
+            origin HEAD:refs/heads/agent/generated-murph-contact-card
