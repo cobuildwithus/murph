@@ -264,7 +264,10 @@ kinds, webhook-version category, outcome, and an event-id suffix. Non-array
 `parts` values and unsupported part types still fail closed with the same
 redacted warning. Inbound `imessage_app` parts contribute only their documented
 fallback text (or a fixed placeholder); app identity, layout, and URL metadata
-do not enter the durable mailbox payload or logs.
+do not enter the durable mailbox payload or logs. First-contact admission and
+blocked-content screening use that same fallback text before any signup or
+group routing; an app card without fallback text remains contentless for
+admission rather than receiving the active-member placeholder.
 
 ## Legal and health-permission publication surfaces
 

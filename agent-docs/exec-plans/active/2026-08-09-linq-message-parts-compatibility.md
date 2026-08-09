@@ -21,6 +21,8 @@ Updated: 2026-08-09
 - Current documented `imessage_app` parts preserve bounded fallback text for
   assistant processing while omitting card URLs and provider-owned app/layout
   metadata from canonical payloads and logs.
+- Unknown-sender direct and group admission screens the same fallback text with
+  the existing first-contact rules; a card without fallback stays contentless.
 - Existing text, link, media, voice memo, retry, dedupe, and webhook signature
   behavior remains unchanged.
 - The two existing Linq SDK consumers use the current public-registry release
@@ -70,11 +72,17 @@ Updated: 2026-08-09
   compatibility payload and keep other non-array values invalid.
 - Support the SDK's documented `imessage_app` part explicitly rather than
   treating all unknown provider part kinds as acceptable.
+- Use one fallback-text interpretation across active-member mailbox delivery
+  and unknown-sender admission. Keep the fixed contentless placeholder confined
+  to accepted active-member canonicalization.
 
 ## Verification
 
 - Focused Messaging Ingress (49), Inboxd (19), hosted Web (184), and
   operator-config (65) tests pass.
+- After both first-round review gates identified the same first-contact gap, the
+  hosted dispatch regression suite passes 176 tests covering direct, group,
+  contentless, URL, and opt-out app-card fallback cases.
 - Affected Messaging Ingress, Inboxd, operator-config, and hosted Web
   typechecks pass. The SDK upgrade required one outbound read to tolerate the
   newly optional SDK `message.parts` property; request construction is
@@ -84,4 +92,10 @@ Updated: 2026-08-09
 - `pnpm deps:audit` remains blocked by repository-pre-existing transitive
   advisories. None of its reported paths includes `@linqapp/sdk`, and the
   lockfile diff adds no new SDK transitive dependency.
+- The production-shaped signed-webhook hosted-local regression is authored but
+  its isolated lane is blocked before Vitest starts: runner bundle preparation
+  twice timed out in the unchanged `vault-cli --llms-full --format json`
+  manifest step. A standalone assistant-engine build succeeded once; subsequent
+  standalone generation reproduced the same timeout. Focused dispatch coverage
+  and exact-head CI remain the executable proof for this change.
 - Exact-head ReviewGPT gates and PR CI remain pending.

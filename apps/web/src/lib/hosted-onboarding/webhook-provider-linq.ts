@@ -3237,8 +3237,14 @@ function buildHostedLinqFirstContactAdmissionText(
   parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
 ): string | null {
   const text = parts
-    .filter((part) => part.type === "text" || part.type === "link")
-    .map((part) => normalizeHostedLinqPartText(part.value) ?? "")
+    .filter((part) =>
+      part.type === "text"
+      || part.type === "link"
+      || part.type === "imessage_app"
+    )
+    .map((part) => part.type === "imessage_app"
+      ? normalizeHostedLinqPartText(part.fallback_text) ?? ""
+      : normalizeHostedLinqPartText(part.value) ?? "")
     .filter(Boolean)
     .join("\n")
     .slice(0, 2_000)

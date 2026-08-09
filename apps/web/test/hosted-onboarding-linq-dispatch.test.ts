@@ -7145,7 +7145,39 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("sends the signup link on the first inbound SMS phone message", async () => {
+  it.each([
+    {
+      eventId: "evt_sms_first_contact",
+      expectedPartTypes: ["text"],
+      expectedService: "sms",
+      expectedText: "Murph can you help me start?",
+      label: "first inbound SMS phone message",
+      parts: [{
+        type: "text",
+        value: "Murph can you help me start?",
+      }],
+      service: undefined,
+    },
+    {
+      eventId: "evt_imessage_app_first_contact",
+      expectedPartTypes: ["imessage_app"],
+      expectedService: "imessage",
+      expectedText: "Completed the check-in",
+      label: "first inbound iMessage app card with fallback text",
+      parts: [{
+        fallback_text: "Completed the check-in",
+        type: "imessage_app",
+      }],
+      service: "iMessage",
+    },
+  ])("sends the signup link on the $label", async ({
+    eventId,
+    expectedPartTypes,
+    expectedService,
+    expectedText,
+    parts,
+    service,
+  }) => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     const firstContactAdmissionOrder: string[] = [];
     mocks.classifyHostedLinqFirstContactAdmission.mockImplementationOnce(async () => {
@@ -7207,14 +7239,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         data: {
-          parts: [
-            {
-              type: "text",
-              value: "Murph can you help me start?",
-            },
-          ],
+          parts,
         },
-        eventId: "evt_sms_first_contact",
+        eventId,
+        service,
       }),
       signature: null,
       timestamp: null,
@@ -7227,13 +7255,21 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
-    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledWith({
+      request: expect.objectContaining({
+        eventId,
+        partTypes: expectedPartTypes,
+        service: expectedService,
+        text: expectedText,
+      }),
+      signal: undefined,
+    });
     expect(firstContactAdmissionOrder).toEqual(["claim", "classify"]);
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).toHaveBeenCalledWith({
       data: {
         confidence: 1,
         decision: "allow",
-        eventId: "evt_sms_first_contact",
+        eventId,
         source: "deterministic",
       },
       skipDuplicates: true,
@@ -7549,7 +7585,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("deterministically blocks media-only unknown Linq first contacts without claiming a classifier-budget attempt", async () => {
+  it.each([
+    {
+      eventId: "evt_media_only_first_contact",
+      label: "media-only unknown Linq first contacts",
+      parts: [{
+        type: "media",
+        value: "https://example.test/cat.jpg",
+      }],
+    },
+    {
+      eventId: "evt_app_without_fallback_first_contact",
+      label: "iMessage app first contacts without fallback text",
+      parts: [{ type: "imessage_app" }],
+    },
+  ])("deterministically blocks $label without claiming a classifier-budget attempt", async ({
+    eventId,
+    parts,
+  }) => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
 
     const prismaMocks = {
@@ -7584,7 +7637,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           .mockResolvedValue({
             confidence: 1,
             decision: "block",
-            eventId: "evt_media_only_first_contact",
+            eventId,
             source: "deterministic",
           }),
       },
@@ -7600,14 +7653,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         data: {
-          parts: [
-            {
-              type: "media",
-              value: "https://example.test/cat.jpg",
-            },
-          ],
+          parts,
         },
-        eventId: "evt_media_only_first_contact",
+        eventId,
         service: "iMessage",
       }),
       signature: null,
@@ -7627,7 +7675,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       data: {
         confidence: 1,
         decision: "block",
-        eventId: "evt_media_only_first_contact",
+        eventId,
         source: "deterministic",
       },
       skipDuplicates: true,
@@ -7821,6 +7869,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               id: "handle_group_stranger",
               service: "iMessage",
             },
+            parts: [{
+              fallback_text: "Can you help this group get started?",
+              type: "imessage_app",
+            }],
             sent_at: createdAt,
           },
           eventId,
@@ -7840,6 +7892,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledWith({
       request: expect.objectContaining({
         eventId: "evt_group_offer_day1_first",
+        partTypes: ["imessage_app"],
+        text: "Can you help this group get started?",
       }),
       signal: undefined,
     });
@@ -8974,6 +9028,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ],
     },
     {
+      label: "URL in iMessage app fallback text",
+      parts: [{
+        fallback_text: "Check this out https://spam.example.test",
+        type: "imessage_app",
+      }],
+      service: "iMessage",
+    },
+    {
       label: "bare domain URL text",
       parts: [
         {
@@ -9071,6 +9133,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           value: "Reply STOP to unsubscribe",
         },
       ],
+    },
+    {
+      label: "STOP opt-out boilerplate in iMessage app fallback text",
+      parts: [{
+        fallback_text: "Reply STOP to unsubscribe",
+        type: "imessage_app",
+      }],
+      service: "iMessage",
     },
     {
       label: "hyphenated STOP opt-out boilerplate",

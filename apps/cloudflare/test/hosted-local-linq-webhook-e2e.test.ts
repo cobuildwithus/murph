@@ -31,6 +31,7 @@ const hostedLinqCometRiderAssistantReplyText =
   "Got it - I'll call you Comet Rider.\n\nWhat are your health goals right now?";
 const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
+const hostedLinqAppCardAssistantReplyText = "Handled the app card.";
 const hostedLinqTypingPrewarmAssistantReplyText =
   "The typing prewarm kept the normal reply path intact.";
 const hostedLinqParticipantAdditionGroupContext =
@@ -146,6 +147,65 @@ describe("hosted local Linq webhook e2e", () => {
       assistantProviderBody.includes("U can call me Rocket Man"),
       summarizeProviderTextRequestShape(assistantProviderBody),
     ).toBe(true);
+  }, 300_000);
+
+  it("reduces an inbound iMessage app card to fallback text and replies in the same chat", async () => {
+    const { chatId, replyChatPath, userId } =
+      await createActiveLinqWebhookMember("app-card");
+    const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyChatPath);
+    const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
+    const fallbackText = "Completed the check-in from the app card.";
+    const privateCardSentinel = "private-card-metadata-sentinel";
+
+    requireScenario().queueAssistantResponses([hostedLinqAppCardAssistantReplyText], {
+      matchInputContains: fallbackText,
+    });
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      chatId,
+      {
+        eventId: `evt_app_card_${userId}`,
+        messageId: `msg_app_card_${userId}`,
+        parts: [{
+          app: {
+            bundle_id: `com.example.${privateCardSentinel}`,
+            name: privateCardSentinel,
+            team_id: "TESTTEAM01",
+          },
+          fallbackText,
+          layout: {
+            caption: privateCardSentinel,
+          },
+          type: "imessage_app",
+          url: `https://example.test/${privateCardSentinel}`,
+        }],
+        service: "iMessage",
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(userId);
+    await requireScenario().waitForHostedCompletion(userId);
+
+    const replySend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: replyChatPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
+      hostedLinqAppCardAssistantReplyText,
+    );
+    const assistantProviderBody = requireSingleAssistantProviderRequestBody(
+      requireScenario().assistantProviderRequests.slice(assistantProviderCountBeforeReply),
+      "iMessage app-card provider request",
+    );
+    expect(assistantProviderBody).toContain(fallbackText);
+    expect(assistantProviderBody).not.toContain(privateCardSentinel);
   }, 300_000);
 
   it("prewarms from signed typing before the later durable message and reply", async () => {

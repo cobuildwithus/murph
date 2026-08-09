@@ -85,12 +85,19 @@ export function hostedLinqFirstContactContainsBlockedContent(input: {
       return true;
     }
 
-    if (part.type === "text") {
-      return containsUrlLikeText(part.value)
-        || containsSmsOptOutBoilerplate(part.value)
+    if (part.type === "text" || part.type === "imessage_app") {
+      const value = part.type === "imessage_app"
+        ? part.fallback_text?.trim()
+        : part.value;
+      if (!value) {
+        return false;
+      }
+
+      return containsUrlLikeText(value)
+        || containsSmsOptOutBoilerplate(value)
         || (
           blocksStandaloneSmsOptOutCommand
-          && containsStandaloneSmsOptOutCommand(part.value)
+          && containsStandaloneSmsOptOutCommand(value)
         );
     }
 
