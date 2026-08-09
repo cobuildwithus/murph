@@ -65,6 +65,15 @@ describe('assistant manual provider export guidance', () => {
     expect(normalizedSkill).toContain(
       'verified fallback routes for Function Health, Livongo/Teladoc Condition Management, Strong, and Hevy',
     )
+    expect(normalizedSkill).toContain(
+      "Give the provider's verified action link",
+    )
+    expect(normalizedSkill).toContain(
+      'an account or export page when one is documented, otherwise the official instructions',
+    )
+    expect(normalizedSkill).not.toContain(
+      "Give the provider's official export link",
+    )
     expect(normalizedSkill).not.toContain('Teladoc Health/Livongo')
     expect(normalizedReference).toContain(
       'manual export or one-time import, not a live sync',
