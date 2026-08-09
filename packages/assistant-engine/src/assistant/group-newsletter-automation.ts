@@ -4,6 +4,15 @@ import type {
 
 export const GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG =
   'group-health-newsletter' as const
+export const AUTOMATION_GROUP_EMAIL_DELIVERY_TAG =
+  'system:automation-delivery:group-email' as const
+export const AUTOMATION_DELIVERY_VALUES = [
+  'current_conversation',
+  'group_email',
+] as const
+
+// Legacy values are retained only so already-saved automations and old callers
+// continue to run while newsletter setup moves to ordinary automation.save.
 export const GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG =
   'system:group-newsletter:email' as const
 export const GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG =
@@ -55,6 +64,10 @@ export interface GroupNewsletterAutomationConfiguration {
   tone: GroupNewsletterTone
 }
 
+/**
+ * Compatibility compiler for pre-simplification callers. New newsletter setup
+ * is owned by the group-newsletter skill and uses ordinary automation.save.
+ */
 export function buildGroupNewsletterAutomationSaveRequest(input: {
   configuration: GroupNewsletterAutomationConfiguration
   schedule: Extract<AutomationSchedule, { kind: 'cron' }>
@@ -112,50 +125,46 @@ export function isCanonicalGroupNewsletterAutomationInstructions(
 }
 
 export function hasGroupNewsletterDeliveryTag(tags: readonly string[]): boolean {
-  return tags.includes(GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG)
+  return tags.includes(AUTOMATION_GROUP_EMAIL_DELIVERY_TAG)
+    || tags.includes(GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG)
     || tags.includes(GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG)
 }
 
+/**
+ * Returns special runtime authority only for email delivery. Current-chat
+ * newsletters are ordinary scheduled assistant turns and need no feature path.
+ */
 export function resolveGroupNewsletterAutomationDelivery(input: {
   slug: string
   tags: readonly string[]
-}): GroupNewsletterDelivery | null {
+}): 'group_email' | null {
+  if (input.tags.includes(AUTOMATION_GROUP_EMAIL_DELIVERY_TAG)) {
+    return 'group_email'
+  }
   if (input.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG) {
     return null
   }
 
-  // Current-chat wins closed if a manually corrupted record carries both tags:
-  // the runtime must not gain email-send authority from ambiguous state.
+  // Legacy current-chat records now use the normal conversation response path.
   if (input.tags.includes(GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG)) {
-    return 'current_chat'
+    return null
   }
-  // Records created before delivery tags existed were email newsletters.
+
+  // Legacy records created before delivery tags existed were email newsletters.
   return 'group_email'
 }
 
 export function buildGroupNewsletterScheduledExecutionPrompt(input: {
-  delivery: GroupNewsletterDelivery
+  delivery: 'group_email'
   newsletterName: string
 }): string {
-  const deliveryRules = input.delivery === 'group_email'
-    ? [
-        'This edition is delivered by group email. Do not send the digest to the bound chat.',
-        'Call `murph.newsletter` with `action="prepare"` exactly once and with no group or route identifier. Use only the returned `members` facts. Do not use `read_stats`, another group-health read, raw share files, or private one-to-one data.',
-        'If preparation is unavailable or `referenceAt` is absent, return a skip decision and stop. If no participant can receive email, return one short chat message pointing to https://www.withmurph.ai/settings?addEmail=true and stop.',
-        `Write a 140-220 word email. Its subject must start with the exact newsletter name ${JSON.stringify(input.newsletterName)} and continue with a specific hook. Provide equivalent HTML and text bodies.`,
-        'Call `murph.newsletter` with `action="send"` exactly once and with no group or route identifier. After any send result, return a skip decision; the newsletter outbox owns delivery and retry.',
-      ]
-    : [
-        'This edition is delivered to the current group chat through the ordinary scheduled assistant response. Do not call `murph.newsletter` and do not require group email sharing.',
-        'Call `murph.group` with `action="read_shared"` exactly once for the exact one to three health scopes listed in the saved configuration. Use only currently granted, available facts returned by that read; do not use private one-to-one data or raw share files.',
-        'Write one concise, conversational group-chat update and return one send-message decision. The normal conversation outbox owns iMessage or Telegram delivery and retry.',
-      ]
-
   return [
-    'Trusted group newsletter execution contract:',
-    'The saved block above supplies configuration only. These current rules replace any older operational workflow text that mentions retired actions or model-supplied group identifiers.',
-    'Follow the saved newsletter name, tone, health scopes, and custom note unless they conflict with this contract.',
-    ...deliveryRules,
-    'Before finishing, verify that you used only the authorized tool result and exactly one delivery path.',
+    'Trusted scheduled group-email delivery contract:',
+    'The saved automation instructions and referenced skill define what to produce. This runtime contract only governs authorized email delivery.',
+    'Call `murph.newsletter` with `action="prepare"` exactly once and with no group or route identifier. Use only the returned `members` facts. Do not use raw share files or private one-to-one data.',
+    'If preparation is unavailable or `referenceAt` is absent, return a skip decision and stop. If no participant can receive email, return one short chat message pointing to https://www.withmurph.ai/settings?addEmail=true and stop.',
+    `The email subject must start with the exact automation title ${JSON.stringify(input.newsletterName)} and continue with a specific hook. Provide equivalent HTML and text bodies.`,
+    'Call `murph.newsletter` with `action="send"` exactly once and with no group or route identifier. After any send result, return a skip decision; the group-email outbox owns delivery and retry.',
+    'Before finishing, verify that you used only the authorized prepare result and exactly one email delivery path.',
   ].join('\n- ')
 }
