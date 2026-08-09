@@ -127,7 +127,7 @@ function buildFaqs(input: {
   if (input.signupAvailable) {
     faqs.push({
       answer:
-        "No. Settings history shows that someone completed setup through your link without revealing who. When an authorized Murph chat is available, Murph also sends the same identity-safe confirmation.",
+        "No. Settings history records qualifying rewards without identifying who joined. When an authorized Murph chat is available, Murph also confirms an applied reward.",
       question: "Can I see who used my link?",
     });
   }

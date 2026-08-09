@@ -329,6 +329,31 @@ describe("readHostedAiUsageActivity", () => {
     expect(mocks.policyDisplay).not.toHaveBeenCalled();
   });
 
+  it("omits cap-disqualified signup activations from Settings history", async () => {
+    const now = new Date("2026-08-06T12:00:00.000Z");
+    mocks.creditFindMany.mockResolvedValue([]);
+    mocks.missionFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    const { readHostedAiUsageActivity } = await import(
+      "@/src/lib/hosted-execution/usage-activity"
+    );
+    const activity = await readHostedAiUsageActivity({
+      memberId: "member_123",
+      now,
+    });
+
+    expect(mocks.missionFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: {
+          referrerMemberId: "member_123",
+          status: "rewarded",
+        },
+      }),
+    );
+    expect(activity.missions).toEqual([]);
+  });
+
   it("switches an unqualified bound mission to final checking at its exact cutoff", async () => {
     const now = new Date("2026-07-29T12:00:00.000Z");
     const row = (input: { expiresAt: Date; id: string }) => ({
