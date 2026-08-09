@@ -478,16 +478,16 @@ async function buildAssistantSnapshotCoverage(input: {
   supplementCount: number
 }> {
   const [
-  bloodTestCoverage,
-  deviceMeasurementCoverage,
-  goalRead,
-  conditionRead,
-  allergyRead,
-  regimenRead,
-  habitatRead,
-] = await Promise.all([
-  collectAssistantSnapshotBloodTestCoverage(input),
-  collectAssistantSnapshotDeviceMeasurementCoverage(input),
+    bloodTestCoverage,
+    deviceMeasurementCoverage,
+    goalRead,
+    conditionRead,
+    allergyRead,
+    regimenRead,
+    habitatRead,
+  ] = await Promise.all([
+    collectAssistantSnapshotBloodTestCoverage(input),
+    collectAssistantSnapshotDeviceMeasurementCoverage(input),
       listAssistantSnapshotFrontmatterRecords(
         input,
         VAULT_LAYOUT.goalsDirectory,
