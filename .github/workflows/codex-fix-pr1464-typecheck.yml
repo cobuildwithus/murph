@@ -1,0 +1,37 @@
+name: Fix PR 1464 exact-head typecheck
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-fix-pr1464-typecheck.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/non-expiring-starter-usage
+          fetch-depth: 0
+
+      - name: Apply exact-head fixture typing fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin agent/non-expiring-starter-usage
+          expected_head="ad015abc7b7474f6fb6686117873b7929cf73745"
+          actual_head="$(git rev-parse origin/agent/non-expiring-starter-usage)"
+          test "$actual_head" = "$expected_head"
+          git checkout -B agent/non-expiring-starter-usage "$actual_head"
+          printf '%s' 'LS0tIGEvYXBwcy93ZWIvdGVzdC9ob3N0ZWQtZXhlY3V0aW9uLXVzYWdlLWFsbG93YW5jZS50ZXN0LnRzCisrKyBiL2FwcHMvd2ViL3Rlc3QvaG9zdGVkLWV4ZWN1dGlvbi11c2FnZS1hbGxvd2FuY2UudGVzdC50cwpAQCAtNDIwNSw2ICs0MjA1LDcgQEAKICAgICAgICAgY3VycmVudENoZWNrb3V0T2ZmZXI6IG51bGwsCiAgICAgICAgIGN1cnJlbnRQZXJpb2RFbmQ6IG5ldyBEYXRlKCIyMDI2LTA0LTAxVDAwOjAwOjAwLjAwMFoiKSwKICAgICAgICAgY3VycmVudFBlcmlvZFN0YXJ0OiBuZXcgRGF0ZSgiMjAyNi0wMy0wMVQwMDowMDowMC4wMDBaIiksCisgICAgICAgIHN0cmlwZVN1YnNjcmlwdGlvbkxvb2t1cEtleTogbnVsbCwKICAgICAgICAgY3VycmVudFRyaWFsRW5kc0F0OiBudWxsLAogICAgICAgICBjdXJyZW50VHJpYWxTdGFydGVkQXQ6IG51bGwsCiAgICAgICAgIHB1bHNlVHJpYWxQb2xpY3lWZXJzaW9uOiBudWxsLApAQCAtNDI2Myw2ICs0MjY0LDcgQEAKICAgICAgICAgY3VycmVudENoZWNrb3V0T2ZmZXI6IG51bGwsCiAgICAgICAgIGN1cnJlbnRQZXJpb2RFbmQ6IG5ldyBEYXRlKCIyMDI2LTA0LTAxVDAwOjAwOjAwLjAwMFoiKSwKICAgICAgICAgY3VycmVudFBlcmlvZFN0YXJ0OiBuZXcgRGF0ZSgiMjAyNi0wMy0wMVQwMDowMDowMC4wMDBaIiksCisgICAgICAgIHN0cmlwZVN1YnNjcmlwdGlvbkxvb2t1cEtleTogbnVsbCwKICAgICAgICAgY3VycmVudFRyaWFsRW5kc0F0OiBudWxsLAogICAgICAgICBjdXJyZW50VHJpYWxTdGFydGVkQXQ6IG51bGwsCiAgICAgICAgIHB1bHNlVHJpYWxQb2xpY3lWZXJzaW9uOiBudWxsLAotLS0gYS9hcHBzL3dlYi90ZXN0L2hvc3RlZC1vbmJvYXJkaW5nLWxlZ2FjeS10cmlhbC1yZXRpcmVtZW50LnRlc3QudHMKKysrIGIvYXBwcy93ZWIvdGVzdC9ob3N0ZWQtb25ib2FyZGluZy1sZWdhY3ktdHJpYWwtcmV0aXJlbWVudC50ZXN0LnRzCkBAIC0yMzksNyArMjM5LDcgQEAKICAgICAgIHRyaWFsVXNhZ2VMaW1pdFVzZE1pY3JvczogIjQ1MDAwMDAiLAogICAgIH0sCiAgICAgc3RhdHVzLAotICB9IGFzIFN0cmlwZS5TdWJzY3JpcHRpb247CisgIH0gYXMgdW5rbm93biBhcyBTdHJpcGUuU3Vic2NyaXB0aW9uOwogICByZXR1cm4gewogICAgIHN1YnNjcmlwdGlvbnM6IHsKICAgICAgIGNhbmNlbDogdmkuZm4oYXN5bmMgKCkgPT4gc3Vic2NyaXB0aW9uKSwKLS0tIGEvYXBwcy93ZWIvdGVzdC9ob3N0ZWQtb25ib2FyZGluZy1zdHJpcGUtYmlsbGluZy1ldmVudHMudGVzdC50cworKysgYi9hcHBzL3dlYi90ZXN0L2hvc3RlZC1vbmJvYXJkaW5nLXN0cmlwZS1iaWxsaW5nLWV2ZW50cy50ZXN0LnRzCkBAIC0yODU1LDcgKzI4NTUsNyBAQAogICAgIHN0YXR1czogaW5wdXQ/LnN0YXR1cyA/PyAidHJpYWxpbmciLAogICAgIHRyaWFsX2VuZDogMV83NDVfMDIwXzgwMCwKICAgICB0cmlhbF9zdGFydDogMV83NDRfNDE2XzAwMCwKLSAgfSBhcyBTdHJpcGUuU3Vic2NyaXB0aW9uOworICB9IGFzIHVua25vd24gYXMgU3RyaXBlLlN1YnNjcmlwdGlvbjsKIH0KIAogZnVuY3Rpb24gbWFrZVN0cmlwZVN1YnNjcmlwdGlvbigK' | base64 --decode > /tmp/pr1464-typefix.patch
+          git apply --index /tmp/pr1464-typefix.patch
+          git diff --cached --check
+          git commit -m "Fix Starter usage test fixture types"
+          git push origin HEAD:refs/heads/agent/non-expiring-starter-usage
