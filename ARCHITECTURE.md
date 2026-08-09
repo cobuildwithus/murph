@@ -1058,15 +1058,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   until a telemetry-bearing page is acknowledged. Recovery and another metric
   gap before that acknowledgment coalesce into the same unresolved operator
   notification instead of creating a backlog; the first threshold's bounded
-  evidence and observation time remain authoritative. An owed telemetry page does not
-  occupy a closed provider fence: the next eligible sample includes any current
-  unsafe database evidence, with historical telemetry labeled by its own
-  observation time. A later complete collection rearms telemetry only after the
-  obligation is acknowledged. Its additive columns preserve the existing schema
+  evidence and observation time remain authoritative. An owed telemetry page
+  alone does not occupy a closed provider fence. A newly opened incident still
+  persists its current concrete evidence without the telemetry marker, so the
+  exact pressure event owns the next eligible attempt while telemetry remains
+  owed behind it. An acknowledged-incident recurrence waits for the eligible
+  sample, which includes any still-current unsafe evidence and labels historical
+  telemetry by its own observation time. A later complete collection rearms
+  telemetry only after the obligation is acknowledged. Its additive columns
+  preserve the existing schema
   version; current code also recognizes a telemetry pending body cleared by the
   prior Worker, preventing a duplicate after rollback and re-upgrade. Concrete
-  unsafe conditions retain paced recurrence, but acknowledged monitoring evidence
-  cannot enter their later pages without a currently owed obligation. First-incident
+  unsafe conditions retain paced recurrence, but acknowledged monitoring
+  evidence cannot enter their later pages without a currently owed obligation.
+  First-incident
   and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring

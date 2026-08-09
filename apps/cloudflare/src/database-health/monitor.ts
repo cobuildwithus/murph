@@ -369,12 +369,13 @@ export class DatabaseHealthMonitor {
           missingMetrics: monitoringAlertObligation.missingMetrics,
         }
         : null;
+      const currentReplayableConditions = sample.conditions.filter(
+        (condition) =>
+          condition.kind !== "direct_migration_admission_failures"
+          && condition.kind !== "monitoring_unavailable",
+      );
       const conditionsWithDeferredDirectErrors = [
-        ...sample.conditions.filter(
-          (condition) =>
-            condition.kind !== "direct_migration_admission_failures"
-            && condition.kind !== "monitoring_unavailable",
-        ),
+        ...currentReplayableConditions,
         ...(monitoringConditionForAdmission
           ? [monitoringConditionForAdmission]
           : []),
@@ -393,6 +394,12 @@ export class DatabaseHealthMonitor {
           input.checkedAtMs - alertState.lastAlertAttemptedAtMs
           >= DATABASE_HEALTH_ALERT_INTERVAL_MS
         );
+      const isRetainingNewIncidentPressure =
+        isNewIncident
+        && monitoringAlertObligation !== null
+        && !attemptFenceOpen
+        && !hasDirectConnectionError
+        && currentReplayableConditions.length > 0;
       const admittedConditions =
         (
           isPromotingDeferredDirectError
@@ -406,11 +413,14 @@ export class DatabaseHealthMonitor {
             (condition) =>
               condition.kind === "direct_migration_admission_failures",
           )
-          : conditionsWithDeferredDirectErrors;
+          : isRetainingNewIncidentPressure
+            ? currentReplayableConditions
+            : conditionsWithDeferredDirectErrors;
       const shouldHoldMonitoringForFence =
         monitoringAlertObligation !== null
         && !attemptFenceOpen
-        && !hasDirectConnectionError;
+        && !hasDirectConnectionError
+        && !isRetainingNewIncidentPressure;
       const admittedCheckedAtMs =
         admittedConditions.length === 1
         && admittedConditions[0]?.kind

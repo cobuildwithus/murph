@@ -78,7 +78,7 @@ Updated: 2026-08-09
 
 ## Verification log
 
-- Focused Node Vitest after review remediation: 4 files and 66 tests passed.
+- Focused Node Vitest after review remediation: 4 files and 67 tests passed.
 - Focused Workers-runtime Vitest: 1 file and 1 test passed.
 - Cloudflare package typecheck passed.
 - Raw health/model/vault log guard passed.
@@ -116,5 +116,12 @@ Updated: 2026-08-09
   create an empty body. A focused two-window regression proves the first page to
   both recipients, a pressure-only ambiguous recurrence, recovery, a distinct
   rearmed missing-family obligation across restart, exact old-body retry without
-  clearing it, and delivery of the second page to both recipients. Final
-  ReviewGPT round 4 remains pending.
+  clearing it, and delivery of the second page to both recipients.
+- Final ReviewGPT round 4 found that the closed-fence hold also suppressed a newly
+  opened incident's current concrete pressure. The narrowed admission persists
+  that new-incident pressure alone with exact identity and check time, leaves the
+  telemetry obligation owed behind it, and keeps telemetry-only plus
+  acknowledged-incident recurrence on the fresh eligible-sample path. A focused
+  close/reopen, mixed-threshold, recovery, restart, both-recipient pressure, and
+  later telemetry regression covers the correction. Final ReviewGPT round 5
+  remains pending.

@@ -208,14 +208,17 @@ Crossing the two-failure threshold records one bounded alert obligation in the
 existing incident row, so an older pending page or direct-error priority cannot
 lose it; recovery and another gap before acknowledgment coalesce into that same
 notification while the first threshold's bounded evidence and observation time
-remain authoritative. The obligation does not occupy a closed provider fence. At the
-next eligible sample, current unsafe database evidence shares the page while
-historical telemetry keeps its own observation time. Only acknowledgment of a
+remain authoritative. The obligation does not occupy a closed provider fence.
+At the same time, a newly opened incident persists its current concrete evidence alone,
+so that exact pressure event owns the next eligible attempt and telemetry stays
+owed behind it. For acknowledged-incident recurrence, the next eligible sample
+supplies any still-current unsafe evidence while historical telemetry keeps its
+own observation time. Only acknowledgment of a
 telemetry-bearing page clears the obligation; a later complete sample then
 closes and rearms the incident. After acknowledgment, incomplete samples remain
 queryable but cannot repeat telemetry copy inside concrete-pressure pages unless
-a later rearmed threshold creates a new obligation. Concrete unsafe conditions retain their
-30-minute recurrence. The object writes Linq provider-attempt
+a later rearmed threshold creates a new obligation. Concrete unsafe conditions
+retain their 30-minute recurrence. The object writes Linq provider-attempt
 admission before egress, never attempts more than once per 30 minutes across all
 incidents, and reuses the exact body plus idempotency key after an ambiguous
 send. The obligation columns are added idempotently without advancing the
