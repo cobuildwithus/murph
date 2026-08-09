@@ -129,6 +129,12 @@ if old_block not in s:
     raise SystemExit('known anchor block not found')
 s = s.replace(old_block, new_block, 1)
 
+route_anchor = "    '                    route: currentSenderAuthority.directRoute,\\n',"
+route_replacement = "    'route: currentSenderAuthority.directRoute,\\n',"
+if route_anchor not in s:
+    raise SystemExit('private route anchor missing')
+s = s.replace(route_anchor, route_replacement, 1)
+
 end = 'print("Applied message_current_sender implementation and focused tests.")\n'
 replacement = """if FAILURES:
     print("Patch preflight failed with the following source-anchor mismatches:")
