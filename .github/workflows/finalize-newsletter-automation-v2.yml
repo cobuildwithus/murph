@@ -93,13 +93,78 @@ jobs:
               )
 
           '''
-          script, count = helper_pattern.subn(robust_helper, script, count=1)
+          script, count = helper_pattern.subn(
+              lambda _match: robust_helper,
+              script,
+              count=1,
+          )
           if count != 1:
               raise SystemExit(f'failed to replace patch helper: {count}')
 
           patch_script = Path('/tmp/finalize-newsletter-automation.py')
           patch_script.write_text(script)
           runpy.run_path(str(patch_script), run_name='__main__')
+
+          policy_path = Path(
+              'packages/assistant-runtime/src/hosted-runtime/automation-tool-policy.ts'
+          )
+          policy = policy_path.read_text()
+          active_gate = "    status !== 'archived'\n"
+          if policy.count(active_gate) != 2:
+              raise SystemExit(
+                  f'expected two hosted delivery status gates, found {policy.count(active_gate)}'
+              )
+          policy_path.write_text(policy.replace(active_gate, "    status === 'active'\n"))
+
+          cron_path = Path(
+              'packages/assistant-engine/src/assistant/cron/execution.ts'
+          )
+          cron = cron_path.read_text()
+          old_import = "import {\n  resolveAutomationGroupEmailDelivery,\n} from '../group-newsletter-automation.js'\n"
+          new_import = "import {\n  resolveAutomationGroupEmailConfigurationIssue,\n} from '../automation-delivery.js'\nimport {\n  resolveAutomationGroupEmailDelivery,\n} from '../group-newsletter-automation.js'\n"
+          if cron.count(old_import) != 1:
+              raise SystemExit(
+                  f'expected one group-email resolver import, found {cron.count(old_import)}'
+              )
+          cron = cron.replace(old_import, new_import, 1)
+          old_authority = "    input.job.source.schedule.kind !== 'cron' ||\n    resolveAutomationGroupEmailDelivery(input.job.source) !== 'group_email'\n"
+          new_authority = "    resolveAutomationGroupEmailDelivery(input.job.source) !== 'group_email' ||\n    resolveAutomationGroupEmailConfigurationIssue({\n      continuityPolicy: input.job.source.continuityPolicy,\n      delivery: 'group_email',\n      route: input.job.source.route,\n      schedule: input.job.source.schedule,\n    }) !== null\n"
+          if cron.count(old_authority) != 1:
+              raise SystemExit(
+                  f'expected one scheduled email authority gate, found {cron.count(old_authority)}'
+              )
+          cron_path.write_text(cron.replace(old_authority, new_authority, 1))
+
+          policy_test_path = Path(
+              'packages/assistant-runtime/test/automation-tool-policy.test.ts'
+          )
+          policy_test = policy_test_path.read_text()
+          insertion = '''
+            it('allows pausing a malformed existing email record without reauthorizing it', () => {
+              expect(resolveHostedAutomationPatchPolicy({
+                existing: existing({
+                  continuityPolicy: 'preserve',
+                  schedule: { kind: 'dailyLocal', localTime: '09:00' },
+                  tags: [AUTOMATION_GROUP_EMAIL_DELIVERY_TAG],
+                }),
+                request: patch({ status: 'paused' }),
+                route: DIRECT_ROUTE,
+              })).toEqual({
+                status: 'paused',
+                tags: undefined,
+              })
+            })
+
+          '''
+          marker = "  it('allows archival cleanup of a malformed existing generic email record', () => {\n"
+          if policy_test.count(marker) != 1:
+              raise SystemExit(
+                  f'expected one malformed-record archival test, found {policy_test.count(marker)}'
+              )
+          policy_test_path.write_text(
+              policy_test.replace(marker, insertion + marker, 1)
+          )
+
           Path('.github/workflows/finalize-newsletter-automation-v2.yml').unlink()
 
       - name: Install workspace dependencies
@@ -138,6 +203,7 @@ jobs:
           test -e agent-docs/exec-plans/completed/2026-08-09-newsletter-as-automation.md
           grep -q 'system:automation-delivery:group-email' packages/assistant-engine/src/assistant/automation-delivery.ts
           grep -q 'resolveHostedAutomationSavePolicy' packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts
+          grep -q 'resolveAutomationGroupEmailConfigurationIssue' packages/assistant-engine/src/assistant/cron/execution.ts
 
       - name: Commit and push reviewed fixes
         run: |
