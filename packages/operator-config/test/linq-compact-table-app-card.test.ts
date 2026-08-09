@@ -12,17 +12,18 @@ import {
 const CARD: CompactTableResponseCardV1 = {
   kind: 'compact_table',
   version: 1,
-  title: 'Live workout',
-  subtitle: null,
+  title: 'Eight-exercise workout',
+  subtitle: 'Verified canonical workout snapshot for today',
   rowHeader: 'Exercise',
   columns: ['Set 1', 'Set 2', 'Set 3', 'Set 4'],
-  rows: [
-    {
-      label: 'Exercise A',
-      values: ['12', '10', '9', '8'],
-    },
-  ],
-  footer: null,
+  rows: Array.from({ length: 8 }, (_, rowIndex) => ({
+    label: `Exercise ${rowIndex + 1} movement pattern`,
+    values: Array.from({ length: 4 }, (_, columnIndex) => {
+      const cellLength = rowIndex === 7 && columnIndex === 3 ? 24 : 22
+      return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, 'x')
+    }),
+  })),
+  footer: 'Assists and spotted reps remain on the exact set note.',
   tracking: {
     kind: 'workout',
     entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
@@ -31,7 +32,7 @@ const CARD: CompactTableResponseCardV1 = {
 }
 
 describe('Linq compact-table app cards', () => {
-  it('uses the installed extension with a truthful static fallback layout', async () => {
+  it('sends the largest admitted card once with a truthful static fallback', async () => {
     const requests: Array<{ body: unknown; url: string }> = []
     const fetchImplementation: LinqFetch = async (url, init) => {
       requests.push({
@@ -58,6 +59,7 @@ describe('Linq compact-table app cards', () => {
       fetchImplementation,
     })
 
+    expect(encodeCompactTableAppCardUrl(CARD)).toHaveLength(2_047)
     expect(requests).toHaveLength(1)
     expect(requests[0]?.url).toContain('/chats/chat_1/messages')
     expect(requests[0]?.body).toMatchObject({

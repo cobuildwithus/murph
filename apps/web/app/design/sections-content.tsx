@@ -460,10 +460,8 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Reusable signup referral link and recipient claim states">
-        <div data-design-section="signup-referral-flow">
-          <SignupReferralFlowStudy />
-        </div>
+      <StudySection title="Reusable signup referral link, recipient claim, and signed-in recovery states">
+        <SignupReferralFlowStudy />
       </StudySection>
 
       <Separator />
