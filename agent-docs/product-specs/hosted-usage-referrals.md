@@ -323,14 +323,14 @@ conversation. Group notifications carry live external-thread authority. Personal
 notifications require the frozen direct thread and never move to a newer home
 conversation.
 
-After a qualifying signup-link reward commits, Murph sends one concise personal
-confirmation through the member's current authorized Linq or Telegram route. It
-states that someone completed setup through the referral link and that the
-receipt's persisted dollar-denominated cost-weighted usage credit is already
-applied. It does not identify or guess who joined, mention internal qualification
-logic, or ask the member to do another step. A missing route delays only this
-notice; it never delays, reverses, or duplicates the reward. Settings history
-remains the durable visible receipt.
+After a qualifying signup-link reward commits, Settings history is the durable
+visible receipt. When the member has a current authorized Linq or Telegram
+route, Murph also sends one concise personal confirmation. It states that
+someone completed setup through the referral link and that the receipt's
+persisted dollar-denominated cost-weighted usage credit is already applied. It
+does not identify or guess who joined, mention internal qualification logic, or
+ask the member to do another step. A missing route delays only this notice; it
+never delays, reverses, or duplicates the reward.
 
 Once a notification mailbox item is durable, failed signaling leaves that same
 item eligible for the next bounded pass regardless of its lane. A notification

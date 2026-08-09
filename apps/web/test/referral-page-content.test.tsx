@@ -65,7 +65,13 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /Messages someone chooses to post in a shared group remain visible to that group/);
   assert.doesNotMatch(markup, /Their conversations are never visible to you/);
   assert.match(markup, /Can I see who used my link\?/);
-  assert.match(markup, /does not reveal who it was/);
+  assert.match(markup, /Settings history shows that someone completed setup/);
+  assert.match(markup, /When an authorized Murph chat is available/);
+  assert.match(markup, /example · chat available/);
+  assert.doesNotMatch(markup, /anything they share with Murph/);
+  assert.doesNotMatch(markup, /You cannot see their conversations/);
+  assert.doesNotMatch(markup, /sends you a short confirmation/);
+  assert.doesNotMatch(markup, /Murph tells you that/);
   assert.match(markup, /Rewards are usage, not cash\./);
   assert.match(markup, /Health is hard\./);
   assert.match(markup, /Bring someone with you\./);
@@ -88,6 +94,13 @@ test("ReferralPageContent advertises only signup rewards when group missions are
   assert.match(markup, /Invite someone to Murph/);
   assert.match(markup, /Their private conversations and health data are never visible to you/);
   assert.match(markup, /what they share privately with Murph stays private/);
+  assert.match(markup, /Settings history shows that someone completed setup/);
+  assert.match(markup, /When an authorized Murph chat is available/);
+  assert.match(markup, /example · chat available/);
+  assert.doesNotMatch(markup, /anything they share with Murph/);
+  assert.doesNotMatch(markup, /You cannot see their conversations/);
+  assert.doesNotMatch(markup, /sends you a short confirmation/);
+  assert.doesNotMatch(markup, /Murph tells you that/);
   assert.doesNotMatch(markup, /Shared-group messages remain visible/);
   assert.doesNotMatch(markup, /Start an active group/);
   assert.doesNotMatch(markup, /Bring someone new to Murph/);
@@ -113,7 +126,11 @@ test("ReferralPageContent advertises only group missions when signup rewards are
   assert.match(markup, /Private chats and health data stay private/);
   assert.match(markup, /Messages someone chooses to post in a shared group remain visible to that group/);
   assert.match(markup, /Shared-group messages remain visible to that group/);
+  assert.match(markup, /The durable receipt appears in Settings history/);
+  assert.match(markup, /When an authorized Murph chat is available/);
+  assert.match(markup, /example · chat available/);
   assert.doesNotMatch(markup, /Their conversations are never visible to you/);
+  assert.doesNotMatch(markup, /sends you a short confirmation/);
 });
 
 test("ReferralPageContent shows one unavailability state when every reward path is disabled", () => {

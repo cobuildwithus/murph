@@ -26,8 +26,8 @@ const LINK_PRIVACY_TRUST_POINT = {
 
 const REWARD_PRIVACY_TRUST_POINT = {
   description:
-    "When a referral qualifies you get a short confirmation, never anyone’s identity or anything they told Murph.",
-  title: "Rewards never name anyone.",
+    "Murph applies rewards automatically, and Settings history keeps the durable receipt. When an authorized Murph chat is available, Murph also sends a short confirmation without repeating anything shared privately.",
+  title: "The receipt stays with you.",
 } as const;
 
 const SIGNUP_PRIVACY_TRUST_POINT = {
@@ -74,7 +74,7 @@ function buildHowItWorks(input: {
     },
     {
       description:
-        "Murph applies the usage reward automatically and sends you a short confirmation. There is no claim form or payout setup.",
+        "Murph applies the usage reward automatically. The durable receipt appears in Settings history. When an authorized Murph chat is available, Murph also sends a short confirmation.",
       title: "Usage is added",
     },
   ];
@@ -127,7 +127,7 @@ function buildFaqs(input: {
   if (input.signupAvailable) {
     faqs.push({
       answer:
-        "No. Murph tells you that someone completed setup through your link, but does not reveal who it was. You cannot see their conversations, health information, or anything they share with Murph.",
+        "No. Settings history shows that someone completed setup through your link without revealing who. When an authorized Murph chat is available, Murph also sends the same identity-safe confirmation.",
       question: "Can I see who used my link?",
     });
   }
@@ -539,7 +539,7 @@ function ReferralHeroArtifact({
           <div>
             <p className="text-sm font-semibold text-[#2d3436]">Murph</p>
             <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-              just now
+              example · chat available
             </p>
           </div>
         </div>
