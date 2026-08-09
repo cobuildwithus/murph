@@ -5393,10 +5393,14 @@ test("resolveConfiguredConnectSources marks only Vital-backed actions", async ()
 });
 
 test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", async () => {
-  const fetch = vi.fn(async () =>
-    Response.json({
-      authorizationUrl: "https://junction.example.test/link/fitbit",
-    }),
+  const fetch = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return Response.json({
+        authorizationUrl: "https://junction.example.test/link/fitbit",
+      });
+    },
   );
   vi.stubGlobal("fetch", fetch);
 
