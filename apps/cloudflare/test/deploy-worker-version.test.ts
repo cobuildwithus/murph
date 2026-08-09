@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  listHostedDeployEnvironmentInvariantErrors,
   listHostedDeployEnvironmentInvariantErrorsAsync,
 } from "../scripts/deploy-preflight.js";
 import {
@@ -371,6 +372,116 @@ describe("runHostedWorkerDeployment", () => {
         HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
       }),
     });
+    expect(dependencies.validatePreparedArtifacts).not.toHaveBeenCalled();
+    expect(dependencies.deployDirect).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "malformed authority JSON",
+      { HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: '{"standby"' },
+    ],
+    [
+      "an invalid authority status",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "authority-v2": {
+            publicKeyPem: "standby-public-key",
+            status: "verify-only",
+          },
+        }),
+      },
+    ],
+    [
+      "an additional active authority",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "authority-v2": {
+            publicKeyPem: "standby-public-key",
+            status: "active",
+          },
+        }),
+      },
+    ],
+    [
+      "a private JWK without d",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v2": {
+              privateJwk: {
+                crv: "P-256",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "decrypt_only",
+            },
+          }),
+      },
+    ],
+    [
+      "a non-Cloudflare private recipient",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v2": {
+              privateJwk: {
+                crv: "P-256",
+                d: "standby-private-coordinate",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "recovery-offline",
+              status: "decrypt_only",
+            },
+          }),
+      },
+    ],
+  ] as const)("rejects %s before prepared artifacts or Wrangler", async (
+    _name,
+    overrides,
+  ) => {
+    const dependencies = createDependencies({
+      validateDeployEnvironment: async ({ source }) => {
+        const errors = listHostedDeployEnvironmentInvariantErrors(
+          source,
+          { deployWorker: true },
+        );
+        if (errors.length > 0) {
+          throw new Error(
+            `Invalid GitHub environment variables for deploy workflow: ${errors.join(" ")}`,
+          );
+        }
+      },
+    });
+
+    await expect(runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: createPreviewDeploymentEnv({
+        HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "authority-v1",
+        HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
+          "-----BEGIN PUBLIC KEY-----\\nactive\\n-----END PUBLIC KEY-----",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+          "cloudflare-automation:v1",
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify({
+          crv: "P-256",
+          d: "active-private-coordinate",
+          kty: "EC",
+          x: "active-public-x",
+          y: "active-public-y",
+        }),
+        ...overrides,
+      }),
+      resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-runner-staging",
+    })).rejects.toThrow(/HOSTED_CRYPTO_/u);
+
     expect(dependencies.validatePreparedArtifacts).not.toHaveBeenCalled();
     expect(dependencies.deployDirect).not.toHaveBeenCalled();
   });

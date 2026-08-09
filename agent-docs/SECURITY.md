@@ -454,6 +454,45 @@ Last verified: 2026-08-07
   redirects, or client-safe connection projections. Runtime requests require a
   callback signature bound to the member plus Cloudflare's active attempt,
   lease-generation, and workspace-version fence.
+- Hosted domain-root key rotation must be reader-first. Keep the required
+  single-key authority and Cloudflare automation variables as the active
+  generation while optional keyrings add only `verify_only`, `decrypt_only`,
+  or `disabled` compatibility entries. Authority private signing material must
+  remain non-exportable in GCP KMS; an exportable Cloudflare private JWK may
+  exist only in approved secret stores and secret provider inputs. The sole
+  plaintext-file exception is the ignored
+  `apps/cloudflare/.deploy/worker-secrets.json` payload rendered for Wrangler:
+  its parent must be mode `0700`, the file mode `0600`, and the file may be
+  consumed only through Wrangler's `--secrets-file`. Protected production
+  deploys run on an ephemeral worker whose disposal owns cleanup; any direct or
+  local deploy must remove that exact generated file after success or failure.
+  The file is never a source of truth. Private JWK values must never enter CLI
+  argument values, logs, tracked or review artifacts, or any other plaintext
+  file. Web build and Worker deploy preflight must share one runtime-state
+  acceptance contract for optional standby rings. Before provider mutation,
+  complete-preload validation must require all three authority/public/private
+  payloads, reject required-active-ID collisions, require the intended
+  `verify_only` / `disabled` / `decrypt_only` statuses under explicit proposed
+  IDs, reject duplicate normalized IDs, and match the Cloudflare public/private
+  P-256 coordinates by key id. Web public entries and public JWKs must use
+  closed raw schemas so sibling private material or another ignored field cannot
+  enter Vercel. All three ring strings must reject duplicate JSON object members
+  before the first ordinary parse, so discarded earlier members cannot remain
+  in provider-bound text. Before provider mutation, the complete-only command
+  must import the exact proposed authority PEM as a P-256 ECDSA verification
+  key and prove the exact Cloudflare public/private JWKs by wrapping and
+  unwrapping an ephemeral challenge;
+  errors may name fields but must never reproduce values. Proposed IDs are
+  non-secret one-shot operator validation metadata, not provider runtime
+  configuration. Record the current
+  ready Web deployment, deploy Web first, and prove the unchanged active Web
+  crypto context before changing the Worker; a build success is not runtime
+  proof. A standby preload must not mutate envelope key references. Activation,
+  re-signing, rewrapping, and retirement require an explicit production
+  mutation owner, a reader-complete compatibility window that retains the
+  current Cloudflare private key, and aggregate proof of zero old active or
+  `decrypt_only` references before old
+  material is disabled or removed.
 - Clinical provider egress is allowlist-derived, never caller-URL-derived. The
   committed directory and SMART discovery pin HTTPS origins; FHIR continuation
   URLs must retain the exact origin and resource-family path, redirects are

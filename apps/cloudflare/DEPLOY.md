@@ -678,6 +678,13 @@ Set these in the selected GitHub environment as secrets:
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
+The protected GitHub Environment may also hold the optional
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` secret. Deploy
+automation forwards it to the Worker secret store without exposing it to the
+runner. Its entries are compatibility material only; the required
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK` remains the active private
+key.
+
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
 The optional read-only Labs port uses that existing signed callback and adds no
 Cloudflare secret or provider credential. `JUNCTION_API_KEY` for Labs remains in
@@ -796,8 +803,89 @@ Hosted crypto authority metadata:
 
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION`
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
+- `HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON` for additional `verify_only` or
+  `disabled` public verification keys
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
 - `HOSTED_CRYPTO_ENV`
+
+### Hosted crypto standby-key preload
+
+Treat a hosted authority or Cloudflare automation key change as a reader-first
+compatibility rollout. The protected GitHub Environment is the Cloudflare
+deploy source of truth: store
+`HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON` as an environment variable and
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` as an environment
+secret. Vercel Production must receive the same authority verify keyring plus
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON`. Updating Vercel
+configuration is incomplete until the Web app is redeployed; updating the
+GitHub Environment is incomplete until the protected Cloudflare workflow
+renders, syncs, deploys, and proves the live Worker bindings.
+
+For a non-active preload, create a new non-exportable version on the existing
+GCP KMS asymmetric signing key and add its public key as `verify_only` on both
+Web and Worker. Generate the P-256 Cloudflare recipient keypair with an
+operating-system cryptographic random source, retain the private JWK only in an
+approved local secret store during transfer, add its public entry to Web as
+`disabled`, and add its private entry to Cloudflare as `decrypt_only`. Keep all
+required single-key variables unchanged, deploy Web first, then deploy
+Cloudflare, and confirm production envelope key-reference aggregates are
+unchanged. Provider inspection and logs must show names, scopes, statuses, and
+counts only—not keyring JSON, PEM bodies, JWKs, or production rows.
+
+Web build and Worker deploy preflight must use the same runtime-state standby
+acceptance contract before either provider can promote code. It rejects
+malformed or active optional entries, rejects private material in Web's public
+ring or a private keyring in Web runtime, and permits Cloudflare entries only
+for `cloudflare-automation-secret`. Both provider gates also reject an optional
+entry that collides with the required active authority or Cloudflare key ID,
+because runtime overlay would otherwise replace it. Before either provider
+gate accepts a ring, identifiers must also remain unique after the same trimming
+used by runtime constructors. Web public entries and their JWKs use closed raw
+schemas, and a duplicate-aware scan runs before the first `JSON.parse` for all
+three rings. Duplicate raw members, sibling private material, and undeclared
+fields fail before Vercel.
+Before any provider mutation, load all three proposed payloads from approved
+secret stores into the process environment together with the current active
+IDs and the operator-only
+`HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION` and
+`HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID`. Run the Web
+`hosted-crypto:env-check` script with `--require-complete-preload`; complete
+mode requires the intended `verify_only` / `disabled` / `decrypt_only` entries
+to survive under distinct proposed IDs, imports the exact proposed authority
+PEM as a P-256 ECDSA verification key, and wraps then unwraps an ephemeral
+challenge through the exact proposed Cloudflare public/private JWKs. The two
+proposed ID inputs are non-secret one-shot validation metadata; do not add them
+to a provider runtime.
+Validation errors identify only the configuration field. Do not put values in
+arguments or bypass either gate.
+
+Record the current ready Vercel production deployment before preload. Deploy
+Web first, then prove the unchanged active Web crypto-context path against
+current envelopes before changing the Worker. A successful build alone is not
+proof; restore the recorded Web deployment if that live check fails. After the
+protected Cloudflare deploy, require Worker preflight, managed-container smoke,
+and unchanged privacy-safe envelope-reference aggregates. The current active
+Vercel deployment and unchanged active single-key bindings remain the rollback
+floor throughout standby preload.
+
+The Cloudflare private keyring's canonical deploy hop renders the ignored
+`apps/cloudflare/.deploy/worker-secrets.json` payload under a mode-`0700`
+directory with mode `0600`, then supplies that file only as Wrangler's
+`--secrets-file`. The protected production workflow runs on an ephemeral
+worker, so worker disposal removes the payload. A direct or local deploy must
+remove that exact generated file after both success and failure. It is an
+ephemeral transport, not a source of truth; the approved local secret store and
+protected GitHub Environment secret remain the owners. Never place private JWK
+values in CLI argument values, logs, tracked or review artifacts, or any other
+plaintext file.
+
+Standby preload is not authority activation or envelope rotation. Do not change
+an active key id/version, re-sign or rewrap domain-root envelopes, disable a
+current key, or remove compatibility entries until a separately reviewed
+production mutation owner exists. That later operation must deploy all readers
+first, preserve the current Cloudflare private key for the entire compatibility
+window, migrate in bounded batches, prove healthy reads, and prove zero active
+or `decrypt_only` envelope references before retirement.
 
 Hosted assistant config:
 
