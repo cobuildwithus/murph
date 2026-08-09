@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   ChevronsUpDown,
+  Dumbbell,
   FlaskConical,
   Home,
   Leaf,
@@ -65,6 +66,12 @@ const navItems: {
   icon?: ElementType;
 }[] = [
   { label: "Home", href: "/home", icon: Home },
+  {
+    label: "Training",
+    href: "/training",
+    matchPrefix: "/training",
+    icon: Dumbbell,
+  },
   {
     label: "Environment",
     href: "/environment",

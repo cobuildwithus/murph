@@ -1,0 +1,566 @@
+"use client";
+
+import {
+  Check,
+  ChevronDown,
+  Dumbbell,
+  MessageCircle,
+  RefreshCw,
+} from "lucide-react";
+
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { AuthButton } from "@/src/components/ui/auth-button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
+import { PageHeader } from "@/src/components/ui/page-header";
+import {
+  useBrowserVault,
+  useBrowserVaultSelector,
+} from "@/src/lib/browser-vault/context";
+import { formatIsoDate, formatNumber } from "@/src/lib/browser-vault/display";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
+import {
+  selectBrowserVaultTraining,
+  type BrowserTrainingView,
+  type TrainingExerciseProgress,
+  type TrainingExerciseView,
+  type TrainingSessionView,
+  type TrainingSetView,
+} from "@/src/lib/training/browser-training";
+import { cn } from "@/src/lib/utils";
+
+const MESSAGE_EXAMPLES = [
+  "Start my push workout",
+  "Bench 135 lb × 10",
+  "Same weight, 8 reps",
+  "Actually set two was 9",
+] as const;
+
+export default function TrainingPageClient({
+  authenticated,
+  contactOptions,
+}: {
+  authenticated: boolean;
+  contactOptions: readonly MurphContactOption[];
+}) {
+  const { error, refresh, refreshPending, status } = useBrowserVault();
+  const training = useBrowserVaultSelector(selectBrowserVaultTraining);
+  const contactOption = contactOptions[0] ?? null;
+  const preparing = status === "loading" || (status === "empty" && refreshPending);
+  const hasTraining = Boolean(
+    training
+    && (training.activeSession || training.recentSessions.length > 0),
+  );
+
+  return (
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <PageHeader
+          eyebrow="Your private log"
+          title="Training"
+          description="Log sets by messaging Murph. Review every workout and see what is improving here."
+        />
+        <ContactAction
+          authenticated={authenticated}
+          className="w-full sm:w-auto"
+          option={contactOption}
+        />
+      </div>
+
+      {preparing ? <TrainingSkeleton /> : null}
+
+      {status === "error" ? (
+        <Alert variant="destructive">
+          <AlertTitle>Could not refresh your training log</AlertTitle>
+          <AlertDescription>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span>{error ?? "Your saved workouts are not available right now."}</span>
+              <Button size="sm" variant="outline" onClick={() => void refresh()}>
+                <RefreshCw />
+                Retry
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {!preparing && hasTraining && training ? (
+        <TrainingDashboard training={training} />
+      ) : null}
+
+      {!preparing && status !== "error" && !hasTraining ? (
+        <EmptyTraining
+          authenticated={authenticated}
+          contactOption={contactOption}
+        />
+      ) : null}
+
+      {status === "error" && !hasTraining ? <MessageGuide /> : null}
+    </div>
+  );
+}
+
+function TrainingDashboard({ training }: { training: BrowserTrainingView }) {
+  return (
+    <div className="flex flex-col gap-8">
+      {training.activeSession ? <ActiveWorkout session={training.activeSession} /> : null}
+      <Summary training={training} />
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.65fr)]">
+        <RecentWorkouts sessions={training.recentSessions} />
+        <ExerciseProgress entries={training.exerciseProgress} />
+      </div>
+      <MessageGuide />
+    </div>
+  );
+}
+
+function ActiveWorkout({ session }: { session: TrainingSessionView }) {
+  const progress = session.setCount > 0
+    ? Math.round((session.completedSetCount / session.setCount) * 100)
+    : 0;
+
+  return (
+    <section
+      aria-labelledby="active-workout-heading"
+      className={cn(
+        "overflow-hidden rounded-2xl bg-linear-to-br text-white shadow-sm",
+        "from-[#2d3436] via-[#3a2e24] to-[#2a1f16]",
+      )}
+    >
+      <div className="grid gap-7 px-5 py-6 md:px-8 md:py-8 lg:grid-cols-[1fr_13rem] lg:items-end">
+        <div>
+          <p className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-white/55">
+            <span className="size-2 rounded-full bg-[#a6b88a]" />
+            In progress
+          </p>
+          <h2 className="mt-4 font-serif text-3xl font-semibold" id="active-workout-heading">
+            {session.title}
+          </h2>
+          <p className="mt-2 text-sm text-white/60">
+            {session.exerciseCount} {pluralize(session.exerciseCount, "exercise")}
+            {session.setCount > 0
+              ? ` · ${session.completedSetCount} of ${session.setCount} sets logged`
+              : ""}
+          </p>
+          <div className="mt-6 grid gap-2 sm:grid-cols-2">
+            {session.exercises.map((exercise) => (
+              <ActiveExercise exercise={exercise} key={exercise.id} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="flex items-end justify-between gap-3">
+            <span className="font-serif text-5xl font-semibold tabular-nums">{progress}%</span>
+            <span className="pb-1 text-xs text-white/50">complete</span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-[#a6b88a]"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <p className="mt-4 text-xs leading-relaxed text-white/55">
+            Keep messaging Murph as you go. This view reads the same private workout record.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ActiveExercise({ exercise }: { exercise: TrainingExerciseView }) {
+  const completed = exercise.sets.filter((set) => set.completed).length;
+  const done = exercise.sets.length > 0 && completed === exercise.sets.length;
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3">
+      <span className={cn(
+        "flex size-7 items-center justify-center rounded-full border",
+        done ? "border-[#a6b88a]/40 bg-[#a6b88a]/15" : "border-white/15",
+      )}>
+        {done ? <Check className="size-3.5 text-[#d7e1c7]" /> : exercise.order}
+      </span>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-white/90">{exercise.name}</p>
+        <p className="text-xs text-white/45">{completed}/{exercise.sets.length} sets</p>
+      </div>
+    </div>
+  );
+}
+
+function Summary({ training }: { training: BrowserTrainingView }) {
+  const stats = [
+    ["Workouts", training.summary.workoutCount],
+    ["Training days", training.summary.trainingDayCount],
+    ["Sets logged", training.summary.setCount],
+    ["Exercises", training.summary.exerciseCount],
+  ] as const;
+
+  return (
+    <section aria-labelledby="training-summary-heading">
+      <SectionHeading
+        description="A simple view of consistency and volume."
+        id="training-summary-heading"
+        title="Last 30 days"
+      />
+      <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70">
+        <div className="grid grid-cols-2 divide-x divide-y divide-border/70 lg:grid-cols-4 lg:divide-y-0">
+          {stats.map(([label, value]) => (
+            <div className="px-5 py-5 md:px-6" key={label}>
+              <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+                {label}
+              </p>
+              <p className="mt-2 font-serif text-3xl font-semibold tabular-nums">
+                {formatNumber(value, { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+          ))}
+        </div>
+        <Consistency weeks={training.weeks} />
+      </div>
+    </section>
+  );
+}
+
+function Consistency({ weeks }: { weeks: BrowserTrainingView["weeks"] }) {
+  const max = Math.max(1, ...weeks.map((week) => week.count));
+
+  return (
+    <div className="border-t border-border/70 px-5 py-5 md:px-6">
+      <div className="flex justify-between gap-4 text-sm">
+        <p className="font-medium">Eight-week consistency</p>
+        <p className="text-muted-foreground">Workouts per week</p>
+      </div>
+      <div className="mt-5 grid h-24 grid-cols-8 items-end gap-2 sm:gap-3">
+        {weeks.map((week) => (
+          <div className="flex h-full flex-col items-center justify-end gap-2" key={week.startDate}>
+            <span className="text-[10px] tabular-nums text-muted-foreground">
+              {week.count || ""}
+            </span>
+            <div
+              aria-label={`${week.label}: ${week.count} ${pluralize(week.count, "workout")}`}
+              className={cn(
+                "w-full max-w-12 rounded-t-md",
+                week.count ? "bg-primary/75" : "bg-muted",
+              )}
+              role="img"
+              style={{
+                height: week.count
+                  ? Math.max(18, Math.round((week.count / max) * 72))
+                  : 6,
+              }}
+            />
+            <span className="hidden truncate font-mono text-[8px] uppercase text-muted-foreground sm:block">
+              {week.label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RecentWorkouts({ sessions }: { sessions: readonly TrainingSessionView[] }) {
+  return (
+    <section aria-labelledby="recent-workouts-heading">
+      <SectionHeading
+        description="Open a session to review every recorded set."
+        id="recent-workouts-heading"
+        title="Recent workouts"
+      />
+      {sessions.length > 0 ? (
+        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70">
+          {sessions.map((session, index) => (
+            <WorkoutDetails key={session.id} open={index === 0} session={session} />
+          ))}
+        </div>
+      ) : (
+        <SmallEmpty text="Finished workouts will appear here." />
+      )}
+    </section>
+  );
+}
+
+function WorkoutDetails({
+  open,
+  session,
+}: {
+  open: boolean;
+  session: TrainingSessionView;
+}) {
+  return (
+    <details className="group border-b border-border/70 last:border-0" open={open}>
+      <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-5 hover:bg-muted/30 sm:px-5">
+        <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Dumbbell className="size-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate font-semibold">{session.title}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {formatIsoDate(session.date)}
+            {session.durationMinutes ? ` · ${session.durationMinutes} min` : ""}
+            {session.exerciseCount ? ` · ${session.exerciseCount} exercises` : ""}
+            {session.completedSetCount ? ` · ${session.completedSetCount} sets` : ""}
+          </p>
+        </div>
+        <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-border/60 bg-muted/[0.16] px-4 py-5 sm:px-5">
+        <div className="flex flex-col gap-5">
+          {session.exercises.map((exercise) => (
+            <ExerciseSets exercise={exercise} key={exercise.id} />
+          ))}
+        </div>
+        {session.note ? (
+          <p className="mt-5 border-l-2 border-primary/30 pl-3 text-sm text-muted-foreground">
+            {session.note}
+          </p>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function ExerciseSets({ exercise }: { exercise: TrainingExerciseView }) {
+  const sets = exercise.sets.filter((set) => set.completed);
+
+  return (
+    <div>
+      <div className="flex justify-between gap-3">
+        <h4 className="font-medium">{exercise.name}</h4>
+        <span className="text-xs text-muted-foreground">{sets.length} sets</span>
+      </div>
+      <div className="mt-3 overflow-hidden rounded-xl border border-border/70 bg-background/70">
+        {sets.length > 0 ? sets.map((set) => (
+          <div
+            className="grid grid-cols-[2rem_1fr_auto] gap-3 border-b border-border/60 px-3 py-2.5 last:border-0"
+            key={set.id}
+          >
+            <span className="font-mono text-[10px] text-muted-foreground">{set.order}</span>
+            <span className="text-sm font-medium tabular-nums">{formatTrainingSet(set)}</span>
+            {set.rpe !== null ? (
+              <span className="text-xs text-muted-foreground">RPE {compact(set.rpe)}</span>
+            ) : null}
+          </div>
+        )) : (
+          <p className="px-3 py-3 text-sm text-muted-foreground">No completed sets recorded.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ExerciseProgress({
+  entries,
+}: {
+  entries: readonly TrainingExerciseProgress[];
+}) {
+  return (
+    <section aria-labelledby="exercise-progress-heading">
+      <SectionHeading
+        description="Latest and strongest sets from the last six months."
+        id="exercise-progress-heading"
+        title="Exercise progress"
+      />
+      {entries.length > 0 ? (
+        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70">
+          {entries.map((entry) => (
+            <div className="border-b border-border/70 px-4 py-4 last:border-0" key={entry.id}>
+              <div className="flex justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="truncate font-medium">{entry.name}</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {entry.sessionCount} workouts · {entry.setCount} sets
+                  </p>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {formatIsoDate(entry.lastPerformedAt, { month: "short", day: "numeric" })}
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <ProgressValue label="Last" set={entry.lastSet} />
+                <ProgressValue label="Best" set={entry.bestSet} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <SmallEmpty text="Progress appears after Murph has a few completed sets." />
+      )}
+    </section>
+  );
+}
+
+function ProgressValue({ label, set }: { label: string; set: TrainingSetView | null }) {
+  return (
+    <div className="rounded-xl bg-muted/55 px-3 py-3">
+      <p className="font-mono text-[8px] uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-sm font-semibold tabular-nums">
+        {set ? formatTrainingSet(set) : "—"}
+      </p>
+    </div>
+  );
+}
+
+function EmptyTraining({
+  authenticated,
+  contactOption,
+}: {
+  authenticated: boolean;
+  contactOption: MurphContactOption | null;
+}) {
+  return (
+    <section className="rounded-2xl border border-border/70 bg-card/70 px-6 py-10 md:px-10 md:py-12">
+      <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+        <Dumbbell className="size-6" />
+      </span>
+      <h2 className="mt-6 max-w-lg font-serif text-3xl font-semibold">
+        Your workout log starts with one message.
+      </h2>
+      <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+        Tell Murph what you are doing at the gym. Sets, reps, weight and corrections become one private history you can review here over time.
+      </p>
+      <ContactAction
+        authenticated={authenticated}
+        className="mt-6 w-full sm:w-fit"
+        option={contactOption}
+      />
+      <div className="mt-8">
+        <MessageGuide />
+      </div>
+    </section>
+  );
+}
+
+function MessageGuide() {
+  return (
+    <section className="rounded-2xl border border-border/70 bg-card/70 px-5 py-6">
+      <div className="flex items-start gap-3">
+        <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <MessageCircle className="size-4" />
+        </span>
+        <div>
+          <h2 className="font-serif text-xl font-semibold">Just tell Murph what happened.</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Start, log, correct or ask what you did last time without opening another app.
+          </p>
+        </div>
+      </div>
+      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {MESSAGE_EXAMPLES.map((message) => (
+          <p className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 text-sm" key={message}>
+            “{message}”
+          </p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ContactAction({
+  authenticated,
+  className,
+  option,
+}: {
+  authenticated: boolean;
+  className?: string;
+  option: MurphContactOption | null;
+}) {
+  if (!authenticated) {
+    return <AuthButton className={className} size="lg">Log in to start training</AuthButton>;
+  }
+  if (!option) {
+    return null;
+  }
+  return (
+    <a
+      className={cn(buttonVariants({ size: "lg" }), className)}
+      href={option.href}
+      rel={option.rel}
+      target={option.target}
+    >
+      <MessageCircle />
+      {option.label}
+    </a>
+  );
+}
+
+function SectionHeading({
+  description,
+  id,
+  title,
+}: {
+  description: string;
+  id: string;
+  title: string;
+}) {
+  return (
+    <div className="mb-4">
+      <h2 className="font-serif text-2xl font-semibold tracking-tight" id={id}>{title}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+function SmallEmpty({ text }: { text: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-border bg-muted/20 px-5 py-10 text-center text-sm text-muted-foreground">
+      {text}
+    </div>
+  );
+}
+
+function TrainingSkeleton() {
+  return (
+    <div aria-label="Loading training log" className="flex flex-col gap-6" role="status">
+      <div className="h-52 animate-pulse rounded-2xl bg-muted" />
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border lg:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div className="h-28 animate-pulse bg-muted" key={index} />
+        ))}
+      </div>
+      <span className="sr-only">Loading your training log.</span>
+    </div>
+  );
+}
+
+function formatTrainingSet(set: TrainingSetView): string {
+  const load = set.weight !== null
+    ? `${compact(set.weight)}${set.weightUnit ? ` ${set.weightUnit}` : ""}`
+    : set.addedWeightKg !== null
+      ? `+${compact(set.addedWeightKg)} kg`
+      : set.assistanceKg !== null
+        ? `${compact(set.assistanceKg)} kg assist`
+        : set.bodyweightKg !== null
+          ? "Bodyweight"
+          : null;
+
+  if (load && set.reps !== null) return `${load} × ${set.reps}`;
+  if (load) return load;
+  if (set.reps !== null) return `${set.reps} ${pluralize(set.reps, "rep")}`;
+  if (set.durationSeconds !== null) return formatDuration(set.durationSeconds);
+  if (set.distanceMeters !== null) return formatDistance(set.distanceMeters);
+  return "Completed";
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${compact(seconds)} sec`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes} min`;
+}
+
+function formatDistance(meters: number): string {
+  return meters >= 1_000 ? `${compact(meters / 1_000)} km` : `${compact(meters)} m`;
+}
+
+function compact(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: Number.isInteger(value) ? 0 : 1,
+  }).format(value);
+}
+
+function pluralize(value: number, singular: string): string {
+  return value === 1 ? singular : `${singular}s`;
+}

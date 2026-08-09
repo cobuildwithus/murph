@@ -461,7 +461,26 @@ function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unk
 
   switch (entity.kind) {
     case "activity_session": {
-      const attributes = projectSafeAttributeKeys(entity, ["source"]);
+      // Workout sessions remain canonical event records. The browser replica
+      // exposes only the fields needed to render the private training log; it
+      // does not introduce a second workout model or mutation owner.
+      const attributes = projectSafeAttributeKeys(entity, [
+        "activityType",
+        "completedAt",
+        "distanceKm",
+        "durationMinutes",
+        "endedAt",
+        "note",
+        "routineId",
+        "sessionStatus",
+        "source",
+        "startedAt",
+        "state",
+        "status",
+        "strengthExercises",
+        "title",
+        "workout",
+      ]);
       const activityKind = resolveAdherenceObservationActivityKind({ attributes: entity.attributes });
       if (activityKind) {
         attributes.activityKind = activityKind;
