@@ -3103,6 +3103,18 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const readerFirstResponse = {
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          includedUsageUsedPercent: 64,
+        },
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(readerFirstResponse))
+      .toEqual(response);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_usage",
       result: {
@@ -3194,6 +3206,26 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       },
     })).toThrow(/remainingPercent must be at most 100/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          includedUsageUsedPercent: 101,
+        },
+      },
+    })).toThrow(/includedUsageUsedPercent must be at most 100/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          includedUsageUsedPercent: 20.5,
+        },
+      },
+    })).toThrow(/includedUsageUsedPercent/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       ...response,
       result: {

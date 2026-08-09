@@ -2955,6 +2955,7 @@ export function parseHostedRuntimeGroupToolResponse(
         new Set([
           "fundingNeeded",
           "fundingUrl",
+          "includedUsageUsedPercent",
           "sponsorshipStatus",
         ]),
         "Hosted runtime group tool read_usage usage",
@@ -2976,6 +2977,21 @@ export function parseHostedRuntimeGroupToolResponse(
       if (typeof usage.fundingNeeded !== "boolean") {
         throw new TypeError(
           "Hosted runtime group tool read_usage fundingNeeded must be boolean.",
+        );
+      }
+      const includedUsageUsedPercent =
+        usage.includedUsageUsedPercent === undefined
+          ? undefined
+          : requireNonNegativeInteger(
+              usage.includedUsageUsedPercent,
+              "Hosted runtime group tool read_usage includedUsageUsedPercent",
+            );
+      if (
+        includedUsageUsedPercent !== undefined
+        && includedUsageUsedPercent > 100
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage includedUsageUsedPercent must be at most 100.",
         );
       }
       return {

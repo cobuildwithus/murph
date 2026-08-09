@@ -428,14 +428,18 @@ fallback when an older supported runner omits it.
 
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 
-The group-tool `read_usage` parser temporarily accepts the exact current
-privacy-safe response and the immediately preceding exact response. This
-read-side tolerance is only the first deployment step.
+The group-tool `read_usage` parser accepts the exact current privacy-safe
+response, the immediately preceding exact response, and a prospective optional
+`includedUsageUsedPercent` field. The first reader phase validates and strips
+that field, preserving the current product projection while making a later
+producer-first skew non-failing. Read-side tolerance is the first deployment
+step.
 
 1. Deploy the Cloudflare Worker and runner bundle first with
    `container_rollout=immediate`. Require managed-container smoke to report the
    new bundle fingerprint and drain older warm runners. The compatible runtime
-   accepts the current `{fundingNeeded,fundingUrl}` response, strips the
+   accepts the current `{fundingNeeded,fundingUrl}` response, validates and
+   strips an additive optional `includedUsageUsedPercent`, strips the
    immediately preceding optional `sponsorshipStatus` field, and still accepts
    the older `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response.
    It derives only whether funding is needed from that oldest shape and
@@ -444,9 +448,15 @@ read-side tolerance is only the first deployment step.
    Web release. Confirm both the migration and new Web have converged before
    enabling monthly authorization creation or automatic refill admission. Web
    now emits only `{fundingNeeded,fundingUrl}`.
-3. Smoke group reads with and without an active automatic sponsor. The runtime
-   and assistant may learn only funding urgency and the first-party capability;
-   funding setup and quantitative fields must not reappear.
+3. Any change that exposes `includedUsageUsedPercent` to assistant policy must
+   update the canonical product/privacy contracts and land separately after
+   that reader fingerprint converges. The first-phase reader will safely strip
+   the field if Web promotes first; deploy the preserving reader immediately to
+   close that bounded product-availability window.
+4. Until that separate product change completes, smoke group reads with and
+   without an active automatic sponsor and confirm the runtime learns only
+   funding urgency and the first-party capability. Funding setup and
+   quantitative fields must not reappear.
 
 The first monthly authorization is the old-Web rollback floor. The preceding
 Web reconciliation code cannot activate that authorization, so after the first
@@ -456,12 +466,14 @@ that schema and compatible Web/runtime bundle. Before the first authorization,
 Web may be rolled back only while monthly creation and refill admission remain
 disabled and the additive schema is retained.
 
-The legacy reader exists only for the bounded cutover window. Remove it after
+The legacy-shape reader branches exist only for their bounded cutover windows.
+Remove them after
 old Web is neither routable nor rollback-eligible, all pre-reader warm runners
 have drained, and production evidence shows no preceding-shape responses. This
 is a narrow read-side seam, not a permanent rollout framework, and it must never
 restore group percentages, period boundaries, or other quantitative accounting
-to runtime or assistant policy.
+to runtime or assistant policy without an explicit product/privacy contract
+change.
 
 The current projection separates urgency from capability: `fundingNeeded`
 controls assistant-initiated depletion messaging, while a non-null `fundingUrl`

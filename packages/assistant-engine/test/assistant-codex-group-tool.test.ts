@@ -2292,6 +2292,188 @@ describe("murph.group dynamic tool", () => {
   });
 
   it.each([
+    {
+      errorFields: {
+        code: "HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID",
+        name: "HostedGroupToolResponseSchemaError",
+      },
+      expectedIssue: {
+        component: "assistant.group-tool",
+        details: {
+          action: "read_usage",
+          failureCategory: "response_schema_invalid",
+        },
+        errorCode: "HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID",
+        issueKind: "schema_rejection",
+        operation: "read_usage",
+        phase: "tool_result_parse",
+        severity: "warning",
+        summary: "Hosted group tool request failed.",
+      },
+    },
+    {
+      errorFields: {
+        code: "PRIVATE_WEB_ERROR",
+        retryable: true,
+        statusCode: 503,
+      },
+      expectedIssue: {
+        component: "assistant.group-tool",
+        details: {
+          action: "read_usage",
+          failureCategory: "http_5xx",
+          retryable: true,
+          statusClass: "5xx",
+        },
+        errorCode: "HOSTED_GROUP_TOOL_HTTP_5XX",
+        issueKind: "tool_error",
+        operation: "read_usage",
+        phase: "tool_call",
+        severity: "warning",
+        summary: "Hosted group tool request failed.",
+      },
+    },
+    {
+      errorFields: {
+        code: "PRIVATE_RATE_LIMIT_DETAIL",
+        retryable: false,
+        status: 429,
+      },
+      expectedIssue: {
+        component: "assistant.group-tool",
+        details: {
+          action: "read_usage",
+          failureCategory: "http_4xx",
+          retryable: false,
+          statusClass: "4xx",
+        },
+        errorCode: "HOSTED_GROUP_TOOL_HTTP_4XX",
+        issueKind: "tool_error",
+        operation: "read_usage",
+        phase: "tool_call",
+        severity: "warning",
+        summary: "Hosted group tool request failed.",
+      },
+    },
+    {
+      errorFields: {
+        code: "PRIVATE_TIMEOUT_DETAIL",
+        hostedRuntimeFetchCauseKind: "timeout",
+      },
+      expectedIssue: {
+        component: "assistant.group-tool",
+        details: {
+          action: "read_usage",
+          failureCategory: "timeout",
+        },
+        errorCode: "HOSTED_GROUP_TOOL_TIMEOUT",
+        issueKind: "timeout",
+        operation: "read_usage",
+        phase: "tool_call",
+        severity: "warning",
+        summary: "Hosted group tool request failed.",
+      },
+    },
+    {
+      errorFields: {
+        code: "PRIVATE_NETWORK_DETAIL",
+        hostedRuntimeFetchCauseKind: "network",
+      },
+      expectedIssue: {
+        component: "assistant.group-tool",
+        details: {
+          action: "read_usage",
+          failureCategory: "transport",
+        },
+        errorCode: "HOSTED_GROUP_TOOL_TRANSPORT_FAILED",
+        issueKind: "tool_error",
+        operation: "read_usage",
+        phase: "tool_call",
+        severity: "warning",
+        summary: "Hosted group tool request failed.",
+      },
+    },
+    {
+      errorFields: {
+        code: "PRIVATE_UNKNOWN_DETAIL",
+      },
+      expectedIssue: {
+        component: "assistant.group-tool",
+        details: {
+          action: "read_usage",
+          failureCategory: "unknown",
+        },
+        errorCode: "HOSTED_GROUP_TOOL_FAILED",
+        issueKind: "tool_error",
+        operation: "read_usage",
+        phase: "tool_call",
+        severity: "warning",
+        summary: "Hosted group tool request failed.",
+      },
+    },
+  ])("records bounded group-tool failure metadata %#", async ({
+    errorFields,
+    expectedIssue,
+  }) => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_usage",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const privateDetail = "private upstream group-tool response";
+    const groupRequest = vi.fn<GroupToolRequest>(async () => {
+      throw Object.assign(new Error(privateDetail), errorFields);
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult).toEqual({
+      contentItems: [{ type: "inputText", text: "group tool request failed" }],
+      success: false,
+    });
+    expect(result.runtimeIssueInputs).toEqual([expectedIssue]);
+    expect(JSON.stringify(result)).not.toContain(privateDetail);
+    expect(JSON.stringify(result)).not.toContain("PRIVATE_");
+  });
+
+  it("does not report caller-owned group-tool cancellation as a runtime failure", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_usage",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>(async () => {
+      throw Object.assign(new Error("caller cancelled"), {
+        hostedRuntimeFetchCallerSignalAborted: true,
+        hostedRuntimeFetchCauseKind: "abort",
+      });
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.runtimeIssueInputs).toBeUndefined();
+  });
+
+  it.each([
     ["INTERNAL_ERROR", 500, null],
     [
       "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",

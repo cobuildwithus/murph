@@ -1,9 +1,86 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-import { createHostedRuntimeGroupToolPort } from "../src/runtime-platform/group-tool-port.ts";
+import {
+  createHostedRuntimeGroupToolPort,
+  HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID,
+} from "../src/runtime-platform/group-tool-port.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+it("categorizes a malformed group usage response without retaining its payload", async () => {
+  const privatePayloadKey = "privateAccountingDetail";
+  const privatePayloadValue = "private-accounting-value";
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+    action: "read_usage",
+    result: {
+      status: "ok",
+      usage: {
+        fundingNeeded: false,
+        fundingUrl: null,
+        [privatePayloadKey]: privatePayloadValue,
+      },
+    },
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  }));
+  const groupToolPort = createHostedRuntimeGroupToolPort({
+    boundUserId: "member_group_usage_schema",
+    fetchImpl: fetchImpl as typeof fetch,
+    timeoutMs: 45_000,
+    transport: { mode: "proxy" },
+  });
+
+  const error = await groupToolPort.request({ action: "read_usage" })
+    .then(() => null, (caught: unknown) => caught);
+
+  expect(error).toMatchObject({
+    code: HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID,
+    name: "HostedGroupToolResponseSchemaError",
+  });
+  expect(error).not.toHaveProperty("cause");
+  expect(JSON.stringify(error)).not.toContain(privatePayloadKey);
+  expect(JSON.stringify(error)).not.toContain(privatePayloadValue);
+  expect(String(error)).not.toContain(privatePayloadKey);
+  expect(String(error)).not.toContain(privatePayloadValue);
+});
+
+it("accepts and strips the reader-first group usage progress field", async () => {
+  const currentResponse = {
+    action: "read_usage" as const,
+    result: {
+      status: "ok" as const,
+      usage: {
+        fundingNeeded: false,
+        fundingUrl: null,
+      },
+    },
+  };
+  const readerFirstResponse = {
+    ...currentResponse,
+    result: {
+      ...currentResponse.result,
+      usage: {
+        ...currentResponse.result.usage,
+        includedUsageUsedPercent: 64,
+      },
+    },
+  };
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify(readerFirstResponse), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  }));
+  const groupToolPort = createHostedRuntimeGroupToolPort({
+    boundUserId: "member_group_usage_progress",
+    fetchImpl: fetchImpl as typeof fetch,
+    timeoutMs: 45_000,
+    transport: { mode: "proxy" },
+  });
+
+  await expect(groupToolPort.request({ action: "read_usage" }))
+    .resolves.toEqual(currentResponse);
 });
 
 it("aborts participant display-name reads at the short soft deadline and ignores late responses", async () => {
