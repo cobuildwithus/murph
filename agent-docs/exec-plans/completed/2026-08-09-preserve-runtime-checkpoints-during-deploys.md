@@ -1,6 +1,6 @@
 # Preserve shutdown checkpoints during runtime replacement
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -28,8 +28,8 @@ Updated: 2026-08-09
   start-to-start cadence.
 - Existing production rollout defaults and the independent state-isolation
   preflight remain unchanged.
-- Focused coordination tests, Cloudflare typecheck, exact-head review, and PR CI
-  pass.
+- Focused coordination tests, Cloudflare typecheck, and exact-head review pass;
+  any unrelated base-branch CI blocker is proved and documented.
 
 ## Scope
 
@@ -54,8 +54,8 @@ Updated: 2026-08-09
 3. [x] Revert the unrelated startup-fence behavior and false incident record.
 4. [x] Restore the existing rollout defaults and state-isolation preflight.
 5. [x] Preserve only the exact live checkpoint handoff during replacement.
-6. [ ] Run focused verification, exact-head ReviewGPT, and PR CI.
-7. [ ] Update the PR, close this plan, and hand off deployment checks.
+6. [x] Run focused verification, exact-head ReviewGPT, and classify PR CI.
+7. [x] Update the PR, close this plan, and hand off deployment checks.
 
 ## Verification log
 
@@ -73,3 +73,12 @@ Updated: 2026-08-09
 - Cloudflare package typecheck passed.
 - ReviewGPT round four found the foreground-preemption priority inversion and
   the start/heartbeat timing inequality; both were reproduced and remediated.
+- ReviewGPT round five audited the complete exact-head patch and passed with no
+  qualifying findings; model verification confirmed GPT-5.6 Pro.
+- Exact-head Cloudflare-adjacent release build/typecheck and assistant, CLI,
+  and platform coverage jobs passed. Two `apps/web` jobs are blocked by
+  unrelated current-base regressions: the viewport workflow runs a design-proof
+  spec without its required output variable (the same workflow fails on
+  `main`), and app verification has an outdated biomarker design-study copy
+  assertion. This PR has no `apps/web` diff.
+Completed: 2026-08-09
