@@ -1,6 +1,5 @@
 import { PrismaClient } from "@prisma/client";
 
-import { HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS } from "../auth";
 import { isUniqueViolation } from "./prisma-errors";
 
 export class PrismaHostedBrowserAssertionNonceStore {
@@ -18,38 +17,24 @@ export class PrismaHostedBrowserAssertionNonceStore {
     now: string;
     expiresAt: string;
   }): Promise<boolean> {
-    return this.prisma.$transaction(async (tx) => {
-      const cleanupCutoff = new Date(
-        new Date(input.now).getTime() - HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS * 1000,
-      );
-
-      await tx.deviceBrowserAssertionNonce.deleteMany({
-        where: {
-          expiresAt: {
-            lte: cleanupCutoff,
-          },
+    try {
+      await this.prisma.deviceBrowserAssertionNonce.create({
+        data: {
+          nonceHash: input.nonceHash,
+          userId: input.userId,
+          method: input.method,
+          path: input.path,
+          createdAt: new Date(input.now),
+          expiresAt: new Date(input.expiresAt),
         },
       });
-
-      try {
-        await tx.deviceBrowserAssertionNonce.create({
-          data: {
-            nonceHash: input.nonceHash,
-            userId: input.userId,
-            method: input.method,
-            path: input.path,
-            createdAt: new Date(input.now),
-            expiresAt: new Date(input.expiresAt),
-          },
-        });
-        return true;
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          return false;
-        }
-
-        throw error;
+      return true;
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return false;
       }
-    });
+
+      throw error;
+    }
   }
 }

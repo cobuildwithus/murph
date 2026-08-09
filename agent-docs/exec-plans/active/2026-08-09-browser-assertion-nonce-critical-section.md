@@ -1,0 +1,86 @@
+# Bound browser assertion nonce database critical sections
+
+Status: active
+Created: 2026-08-09
+Updated: 2026-08-09
+
+## Goal
+
+Keep hosted browser assertion replay admission to one atomic nonce insert and move
+expired nonce reclamation into the existing bounded hourly retention owner, so
+browser actions never hold a pooled database connection while sweeping shared
+nonce state.
+
+## Success criteria
+
+- Browser assertion admission performs one direct insert and treats only the
+  nonce primary-key conflict as a replay.
+- The hourly primary-database cleanup deletes expired browser assertion nonces
+  in bounded, ordered, skip-locked batches without delaying unrelated inserts.
+- Mixed-version cleanup preserves legacy raw-expiry rows through the verifier's
+  former acceptance horizon.
+- Focused unit and real-PostgreSQL concurrency coverage proves replay
+  convergence, conservative cleanup, bounded work, and lock avoidance.
+- Focused verification, exact-head CI, the preliminary specialist pass, and the
+  final ReviewGPT gate complete without unresolved accepted findings.
+
+## Scope
+
+- In scope:
+  - The hosted browser assertion nonce store.
+  - The existing hourly hosted-retention invocation and focused cleanup owner.
+  - Direct unit, retention, route, and PostgreSQL contention coverage.
+- Out of scope:
+  - The verifier and persisted first-invalid boundary owned by PR #1486.
+  - Other database locks, schema changes, pool-size changes, or a new scheduler.
+
+## Constraints
+
+- Preserve fail-closed browser assertion authentication.
+- Use the nonce primary key as the only replay-convergence owner.
+- Preserve legacy rows until `now - 61 seconds` reaches their stored raw expiry;
+  new rows may remain conservatively over-retained for the same allowance.
+- Keep cleanup serial and bounded to four batches of at most 5,000 rows.
+- Reuse the existing hourly retention route; add no queue, advisory lock, schema
+  migration, or independent lifecycle owner.
+
+## Tasks
+
+1. [x] Replace request-path sweep-plus-insert transactions with one direct
+   insert.
+2. [x] Add bounded skip-locked browser nonce cleanup to the hourly retention
+   invocation.
+3. [x] Add focused unit, retention, route, and PostgreSQL contention coverage.
+4. [x] Run focused checks and inspect the exact candidate diff.
+5. [x] Commit and push the candidate and open draft PR #1500.
+6. [ ] Complete exact-head CI, the preliminary specialist pass, and the final
+   ReviewGPT gate, then archive this plan.
+
+## Verification
+
+- Focused Vitest suites cover direct nonce admission, retention SQL and batch
+  limits, the hourly route result, and runtime-log cleanup ordering.
+- An opt-in two-client PostgreSQL test proves one winner for duplicate nonce
+  admission and proves that a locked expired row cannot block a fresh insert.
+- Web typecheck and focused ESLint, root source hygiene, documentation
+  drift/gardening, and diff whitespace checks cover the affected surfaces.
+
+## Decisions
+
+- Keep replay convergence in the existing nonce primary key instead of adding an
+  advisory lock or a second read.
+- Keep mixed-version cleanup conservative instead of adding a migration or
+  weakening the first-invalid verifier boundary.
+- Reuse the existing hourly retention invocation and shared batch ceilings
+  instead of adding another scheduler or increasing pool capacity.
+
+## Final review
+
+- Rechecked the request path, replay conflict handling, mixed-version cutoff,
+  bounded `SKIP LOCKED` cleanup, hourly orchestration, and independent-pool
+  PostgreSQL proof. No runtime defect remained after the final static pass.
+- Corrected four durable documents that still described the deleted foreground
+  cleanup transaction and added the new real-PostgreSQL proof to the canonical
+  testing map.
+- Kept the focused retention helper local rather than broadening the shared
+  cleanup API or introducing another scheduler, queue, lock, or lifecycle owner.
