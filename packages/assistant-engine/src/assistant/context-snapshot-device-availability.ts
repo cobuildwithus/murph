@@ -171,7 +171,7 @@ async function buildAssistantDeviceAvailabilityPrompt(
   return [
     ASSISTANT_DEVICE_AVAILABILITY_PROMPT_HEADER,
     ...lines,
-    '- Availability is not evidence of a current value. Query the canonical vault before quoting, comparing, or interpreting readings; do not use raw Junction artifacts unless canonical data is unexpectedly absent.',
+    '- Availability is not evidence of a current value. Query the canonical vault before quoting, comparing, or interpreting readings. Never substitute raw Junction artifacts for canonical history; if canonical data is unexpectedly absent, treat it as an ingestion problem.',
   ].join('\n')
 }
 
