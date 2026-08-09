@@ -56,7 +56,7 @@ const CHALLENGE_CARD: AssistantResponseCard = {
     label: 'Maya',
     points: 120,
     coverage: 'complete',
-    detail: 'Run selfie + 10k steps',
+    detail: null,
   }],
   footer: null,
 }
@@ -188,6 +188,22 @@ describe('murph.attach_response_card', () => {
     )
     expect(groupTool!.description).toContain(
       'an all-unscored collective keeps collectivePoints null',
+    )
+    expect(groupTool!.description).toContain(
+      'entire canonical ranked result contains at most eight entries',
+    )
+    expect(groupTool!.description).toContain('never truncate the ranking')
+    expect(groupTool!.description).toContain('never shorten labels to fit the card')
+    expect(groupTool!.description).toContain(
+      'Subtitle and footer may only copy exact canonical room-facing challenge text',
+    )
+    expect(groupTool!.description).toContain(
+      'never author score, rank, coverage, missing-data, count, or arithmetic claims there',
+    )
+    expect(groupTool!.description).toContain('nonempty omittedParticipantIds')
+    expect(groupTool!.description).toContain('Collective cards have no row cap')
+    expect(groupTool!.description).toContain(
+      'Copy scoreboard.coverage exactly into collective coverageCounts',
     )
   })
 

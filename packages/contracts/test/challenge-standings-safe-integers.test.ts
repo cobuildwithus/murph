@@ -36,6 +36,27 @@ describe('challenge standings safe integers', () => {
       },
       collectivePoints: 0,
       coverage: 'complete',
+      coverageCounts: {
+        completeParticipants: 1,
+        partialParticipants: 0,
+        totalParticipants: 1,
+        unscoredParticipants: 0,
+      },
+      entries: undefined,
+    }).success).toBe(false)
+
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...CARD,
+      format: 'collective',
+      objective: { kind: 'target', targetPoints: 1 },
+      collectivePoints: 0,
+      coverage: 'complete',
+      coverageCounts: {
+        completeParticipants: Number.MAX_SAFE_INTEGER + 1,
+        partialParticipants: 0,
+        totalParticipants: 1,
+        unscoredParticipants: 0,
+      },
       entries: undefined,
     }).success).toBe(false)
   })

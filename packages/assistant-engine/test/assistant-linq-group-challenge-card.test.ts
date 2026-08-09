@@ -16,7 +16,7 @@ const CHALLENGE_CARD = {
     label: 'Maya',
     points: 120,
     coverage: 'complete',
-    detail: 'Run selfie + 10k steps',
+    detail: null,
   }],
   footer: null,
 } satisfies AssistantResponseCard

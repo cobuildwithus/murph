@@ -87,6 +87,7 @@ export {
   assistantResponseCardSchema,
   assistantResponseCardV1Bounds,
   challengeStandingsCardV1Bounds,
+  challengeStandingsCoverageCountsV1Schema,
   challengeStandingsCoverageValues,
   challengeStandingsEntryV1Schema,
   challengeStandingsObjectiveV1Schema,
@@ -105,6 +106,7 @@ export {
   rankedChallengeStandingsResponseCardV1Schema,
   type AssistantResponseCard,
   type ChallengeStandingsCoverage,
+  type ChallengeStandingsCoverageCountsV1,
   type ChallengeStandingsEntryV1,
   type ChallengeStandingsObjectiveV1,
   type ChallengeStandingsResponseCardV1,
@@ -337,16 +339,29 @@ function renderChallengeStandingsResponseCardText(
     const coverage = card.coverage === 'partial'
       ? ['Verified lower-bound progress.']
       : []
+    const coverageCounts = card.coverageCounts
+    const coverageLine = `Coverage: ${coverageCounts.completeParticipants} complete, ${
+      coverageCounts.partialParticipants
+    } partial, ${coverageCounts.unscoredParticipants} unscored (${
+      coverageCounts.totalParticipants
+    } total).`
     const footer = card.footer === null ? [] : ['', card.footer]
-    return [heading, '', scoreLine, status, ...coverage, ...footer].join('\n')
+    return [
+      heading,
+      '',
+      scoreLine,
+      status,
+      coverageLine,
+      ...coverage,
+      ...footer,
+    ].join('\n')
   }
 
   const rows = card.entries.map((entry, index) => {
     const rank = challengeRank(card.entries, index)
     const prefix = rank === null ? '—' : `${rank}.`
     const score = renderChallengeEntryScore(entry, card.objective)
-    const detail = entry.detail === null ? '' : ` — ${entry.detail}`
-    return `${prefix} ${entry.label}: ${score}${detail}`
+    return `${prefix} ${entry.label}: ${score}`
   })
   const partial = card.entries.some((entry) => entry.coverage === 'partial')
     ? ['', 'Scores marked + are verified lower bounds.']

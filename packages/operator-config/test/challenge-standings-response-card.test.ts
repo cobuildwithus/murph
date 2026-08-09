@@ -3,6 +3,11 @@ import { Buffer } from 'node:buffer'
 import { describe, expect, it } from 'vitest'
 
 import {
+  challengeStandingsCardV1Bounds,
+  IMESSAGE_APP_CARD_URL_PREFIX,
+} from '@murphai/contracts'
+
+import {
   challengeStandingsResponseCardJsonSchema,
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
@@ -24,22 +29,22 @@ const INDIVIDUAL_CARD: ChallengeStandingsResponseCardV1 = {
       label: 'Maya',
       points: 120,
       coverage: 'complete',
-      detail: 'Run selfie + 10k steps',
+      detail: null,
     },
     {
       label: 'Jon',
       points: 90,
       coverage: 'partial',
-      detail: 'Verified through yesterday',
+      detail: null,
     },
     {
       label: 'Priya',
       points: null,
       coverage: 'unscored',
-      detail: 'Waiting for shared data',
+      detail: null,
     },
   ],
-  footer: 'Top three shown.',
+  footer: null,
 }
 
 const COLLECTIVE_CARD: ChallengeStandingsResponseCardV1 = {
@@ -51,7 +56,13 @@ const COLLECTIVE_CARD: ChallengeStandingsResponseCardV1 = {
   objective: { kind: 'target', targetPoints: 1_000 },
   collectivePoints: 640,
   coverage: 'partial',
-  footer: '360 points to unlock the lake-day victory lap.',
+  coverageCounts: {
+    completeParticipants: 1,
+    partialParticipants: 1,
+    totalParticipants: 3,
+    unscoredParticipants: 1,
+  },
+  footer: null,
 }
 
 function decodeAppCardUrl(url: string): unknown {
@@ -85,7 +96,7 @@ describe('challenge standings response cards', () => {
         label: 'North team',
         points: null,
         coverage: 'unscored',
-        detail: 'Average withheld until coverage is complete',
+        detail: null,
       }],
       footer: null,
     }
@@ -97,10 +108,19 @@ describe('challenge standings response cards', () => {
       ...COLLECTIVE_CARD,
       collectivePoints: null,
       coverage: 'unscored',
+      coverageCounts: {
+        completeParticipants: 0,
+        partialParticipants: 0,
+        totalParticipants: 3,
+        unscoredParticipants: 3,
+      },
       footer: null,
     }
     expect(renderAssistantResponseCardText(allUnscoredCollective)).toContain(
       'No verified score yet / 1,000 points',
+    )
+    expect(renderAssistantResponseCardText(allUnscoredCollective)).toContain(
+      'Coverage: 0 complete, 0 partial, 3 unscored (3 total).',
     )
     expect(buildLinqIMessageAppLayout(allUnscoredCollective).subcaption).toBe(
       'Waiting for score',
@@ -112,13 +132,11 @@ describe('challenge standings response cards', () => {
       [
         'Weird Health Week — Day 4 of 7',
         '',
-        '1. Maya: 120 points — Run selfie + 10k steps',
-        '2. Jon: 90+ points — Verified through yesterday',
-        '— Priya: unscored — Waiting for shared data',
+        '1. Maya: 120 points',
+        '2. Jon: 90+ points',
+        '— Priya: unscored',
         '',
         'Scores marked + are verified lower bounds.',
-        '',
-        'Top three shown.',
       ].join('\n'),
     )
 
@@ -145,9 +163,8 @@ describe('challenge standings response cards', () => {
         '',
         '640+ / 1,000 points',
         '360 points to go.',
+        'Coverage: 1 complete, 1 partial, 1 unscored (3 total).',
         'Verified lower-bound progress.',
-        '',
-        '360 points to unlock the lake-day victory lap.',
       ].join('\n'),
     )
 
@@ -181,5 +198,56 @@ describe('challenge standings response cards', () => {
       schemaVersion: 4,
       card: INDIVIDUAL_CARD,
     })
+
+    const maximumRankedCard: ChallengeStandingsResponseCardV1 = {
+      ...INDIVIDUAL_CARD,
+      title: 'T'.repeat(challengeStandingsCardV1Bounds.title),
+      subtitle: 'S'.repeat(challengeStandingsCardV1Bounds.subtitle),
+      entries: Array.from(
+        { length: challengeStandingsCardV1Bounds.entries },
+        (_, index) => ({
+          label: 'L'.repeat(challengeStandingsCardV1Bounds.entryLabel),
+          points: challengeStandingsCardV1Bounds.entries - index,
+          coverage: 'complete' as const,
+          detail: null,
+        }),
+      ),
+      footer: 'F'.repeat(challengeStandingsCardV1Bounds.footer),
+    }
+    const maximumUrl = encodeChallengeStandingsAppCardUrl(maximumRankedCard)
+    expect(maximumUrl.startsWith(IMESSAGE_APP_CARD_URL_PREFIX)).toBe(true)
+    expect(maximumUrl.length).toBe(1_945)
+
+    const makeBoundaryCard = (multibyteCharacters: number) => {
+      const titleMultibyteCharacters = Math.min(multibyteCharacters, 60)
+      const subtitleMultibyteCharacters = Math.max(
+        0,
+        multibyteCharacters - titleMultibyteCharacters,
+      )
+      return {
+        ...INDIVIDUAL_CARD,
+        title: `${'é'.repeat(titleMultibyteCharacters)}${'T'.repeat(
+          60 - titleMultibyteCharacters,
+        )}`,
+        subtitle: `${'é'.repeat(subtitleMultibyteCharacters)}${'S'.repeat(
+          120 - subtitleMultibyteCharacters,
+        )}`,
+        objective: {
+          kind: 'target' as const,
+          targetPoints: Number.MAX_SAFE_INTEGER,
+        },
+        entries: Array.from({ length: 8 }, (_, index) => ({
+          label: 'L'.repeat(40),
+          points: Number.MAX_SAFE_INTEGER - index,
+          coverage: 'complete' as const,
+          detail: null,
+        })),
+        footer: 'F'.repeat(120),
+      }
+    }
+    expect(encodeChallengeStandingsAppCardUrl(makeBoundaryCard(85)).length)
+      .toBe(2_047)
+    expect(() => encodeChallengeStandingsAppCardUrl(makeBoundaryCard(86)))
+      .toThrow('inline Messages card limit')
   })
 })

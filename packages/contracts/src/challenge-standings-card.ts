@@ -1,12 +1,17 @@
 import * as z from "./zod-runtime.ts";
 
+import {
+  IMESSAGE_APP_CARD_URL_MAX_LENGTH,
+  IMESSAGE_APP_CARD_URL_PREFIX,
+} from "./compact-table-card.ts";
+
 export const challengeStandingsCardV1Bounds = {
   title: 60,
   subtitle: 120,
   entryLabel: 60,
-  entryDetail: 80,
   footer: 120,
   entries: 8,
+  participants: 32,
   points: Number.MAX_SAFE_INTEGER,
 } as const;
 
@@ -18,10 +23,6 @@ export const challengeStandingsCoverageValues = [
 
 export type ChallengeStandingsCoverage =
   (typeof challengeStandingsCoverageValues)[number];
-
-const CHALLENGE_STANDINGS_APP_CARD_URL_PREFIX =
-  "https://murph.ai/#murph-card=";
-const CHALLENGE_STANDINGS_APP_CARD_URL_MAX_LENGTH = 2_048;
 
 function singleLineText(maxLength: number) {
   return z
@@ -75,9 +76,7 @@ export const challengeStandingsEntryV1Schema = z
     label: singleLineText(challengeStandingsCardV1Bounds.entryLabel),
     points: pointsSchema.nullable(),
     coverage: z.enum(challengeStandingsCoverageValues),
-    detail: singleLineText(
-      challengeStandingsCardV1Bounds.entryDetail,
-    ).nullable(),
+    detail: z.null(),
   })
   .strict()
   .superRefine((entry, context) => {
@@ -94,6 +93,49 @@ export const challengeStandingsEntryV1Schema = z
 
 export type ChallengeStandingsEntryV1 = z.infer<
   typeof challengeStandingsEntryV1Schema
+>;
+
+export const challengeStandingsCoverageCountsV1Schema = z
+  .object({
+    completeParticipants: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(challengeStandingsCardV1Bounds.participants),
+    partialParticipants: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(challengeStandingsCardV1Bounds.participants),
+    totalParticipants: z
+      .number()
+      .int()
+      .positive()
+      .max(challengeStandingsCardV1Bounds.participants),
+    unscoredParticipants: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(challengeStandingsCardV1Bounds.participants),
+  })
+  .strict()
+  .superRefine((counts, context) => {
+    if (
+      counts.completeParticipants
+        + counts.partialParticipants
+        + counts.unscoredParticipants
+      !== counts.totalParticipants
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Collective coverage counts must sum to the total participants.",
+        path: ["totalParticipants"],
+      });
+    }
+  });
+
+export type ChallengeStandingsCoverageCountsV1 = z.infer<
+  typeof challengeStandingsCoverageCountsV1Schema
 >;
 
 const challengeStandingsCommonV1Schema = {
@@ -152,6 +194,7 @@ export const collectiveChallengeStandingsResponseCardV1Schema = z
     objective: challengeStandingsTargetObjectiveV1Schema,
     collectivePoints: pointsSchema.nullable(),
     coverage: z.enum(challengeStandingsCoverageValues),
+    coverageCounts: challengeStandingsCoverageCountsV1Schema,
   })
   .strict()
   .superRefine((card, context) => {
@@ -162,6 +205,21 @@ export const collectiveChallengeStandingsResponseCardV1Schema = z
         message:
           "Complete and partial collective progress needs points; unscored progress must omit them.",
         path: ["collectivePoints"],
+      });
+    }
+    const expectedCoverage =
+      card.coverageCounts.completeParticipants
+        === card.coverageCounts.totalParticipants
+        ? "complete"
+        : card.coverageCounts.unscoredParticipants
+            === card.coverageCounts.totalParticipants
+          ? "unscored"
+          : "partial";
+    if (card.coverage !== expectedCoverage) {
+      context.addIssue({
+        code: "custom",
+        message: "Collective coverage must match its participant counts.",
+        path: ["coverage"],
       });
     }
   });
@@ -185,8 +243,8 @@ export const challengeStandingsResponseCardV1Schema = z
     const encodedLength =
       4 * Math.ceil(payloadByteLength / 3) - base64PaddingLength;
     if (
-      CHALLENGE_STANDINGS_APP_CARD_URL_PREFIX.length + encodedLength
-      >= CHALLENGE_STANDINGS_APP_CARD_URL_MAX_LENGTH
+      IMESSAGE_APP_CARD_URL_PREFIX.length + encodedLength
+      >= IMESSAGE_APP_CARD_URL_MAX_LENGTH
     ) {
       context.addIssue({
         code: "custom",

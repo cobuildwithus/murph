@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-08-08
+Last verified: 2026-08-09
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -39,6 +39,7 @@ Last verified: 2026-08-08
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats; one-to-five model-interpreted additive components; bounded shared-read composition; deterministic CLI scoring; and page-owned cumulative settlement. | Implemented |
 | `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful partial group-challenge standings plus an explicit bounded device-sync status share for evidence-backed recovery guidance. | Implemented |
+| `agent-docs/product-specs/challenge-standings-card.md` | Native Messages presentation for individual, team, and collective challenge standings with truthful partial and unscored states plus authenticated Linq group-only delivery. | Implemented |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Implemented |
 | `agent-docs/product-specs/consented-group-disclosure.md` | Exact per-member group disclosure consent with one private read-only candidate and one fresh outgoing reviewer. | Implemented |
 | `agent-docs/product-specs/private-group-consultation.md` | Proposed on-demand private-to-group Murph consultation with automatic membership resolution, a stateless encrypted mailbox request/reply, and a temporary read-only group turn. | Proposed |
