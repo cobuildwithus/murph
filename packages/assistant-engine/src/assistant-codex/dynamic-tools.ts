@@ -589,8 +589,22 @@ const newsletterArgumentsSchema = z.discriminatedUnion('action', [
 const sendVaultFileArgumentsSchema = z
   .object({
     ref: z.string().trim().min(1).max(1024),
+    retire_export_pack_ids: z
+      .array(z.string().trim().regex(/^[A-Za-z0-9_-]+$/u))
+      .min(1)
+      .max(20)
+      .optional(),
   })
   .strict()
+  .refine(
+    (value) => !value.retire_export_pack_ids
+      || new Set(value.retire_export_pack_ids).size
+        === value.retire_export_pack_ids.length,
+    {
+      message: 'retire_export_pack_ids must contain unique pack ids',
+      path: ['retire_export_pack_ids'],
+    },
+  )
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 const planUsageArgumentsSchema = z
@@ -1038,6 +1052,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'send-vault-file'
       ref: string
+      retireExportPackIds?: string[]
       toolCallId?: string
     }
   | {
@@ -1397,6 +1412,9 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'send-vault-file',
         ref: parsed.ref,
+        ...(parsed.retireExportPackIds
+          ? { retireExportPackIds: parsed.retireExportPackIds }
+          : {}),
         ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
@@ -1981,12 +1999,18 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       try {
-        const result = input.request.toolCallId === undefined
-          ? await sendVaultFile(input.request.ref)
-          : await sendVaultFile(
+        const result = input.request.retireExportPackIds
+          ? await sendVaultFile(
               input.request.ref,
               input.request.toolCallId,
+              input.request.retireExportPackIds,
             )
+          : input.request.toolCallId === undefined
+            ? await sendVaultFile(input.request.ref)
+            : await sendVaultFile(
+                input.request.ref,
+                input.request.toolCallId,
+              )
         switch (result.status) {
           case 'pending':
             return {
@@ -5123,7 +5147,7 @@ function parseDynamicToolCallRequest(
 function parseSendVaultFileArguments(
   value: unknown,
 ):
-  | { ok: true; ref: string }
+  | { ok: true; ref: string; retireExportPackIds?: string[] }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = sendVaultFileArgumentsSchema.safeParse(value)
   if (!parsed.success) {
@@ -5133,7 +5157,7 @@ function parseSendVaultFileArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.send_vault_file.input',
-        schemaRootKeys: ['ref'],
+        schemaRootKeys: ['ref', 'retire_export_pack_ids'],
         toolName: 'murph.send_vault_file',
       }),
     }
@@ -5141,6 +5165,9 @@ function parseSendVaultFileArguments(
   return {
     ok: true,
     ref: parsed.data.ref,
+    ...(parsed.data.retire_export_pack_ids
+      ? { retireExportPackIds: parsed.data.retire_export_pack_ids }
+      : {}),
   }
 }
 
