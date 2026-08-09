@@ -40,11 +40,13 @@ export { createBrowserVaultQueryClient } from "./browser-replica/query.ts";
 export {
   BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA,
   labResultRowMatchesFilters,
-  selectBrowserVaultLabBiomarkerDetail,
-  selectBrowserVaultMeasuredBiomarkers,
   sortBrowserVaultLabResultRows,
   toBrowserVaultLabResultRows,
 } from "./browser-replica/lab-results.ts";
+export {
+  selectBrowserVaultLabBiomarkerDetail,
+  selectBrowserVaultMeasuredBiomarkers,
+} from "./browser-replica/lab-result-status.ts";
 export type {
   BrowserVaultLabBiomarkerDetail,
   BrowserVaultLabBiomarkerSeriesPoint,

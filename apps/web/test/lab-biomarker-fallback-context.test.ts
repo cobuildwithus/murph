@@ -45,6 +45,17 @@ test("lab biomarker context merges page-authored and reviewed fallback ranges", 
     vitaminD.fallbackRanges.map((range) => range.unit),
     ["ng/mL", "nmol/L"],
   );
+
+  assert.deepEqual(resolveLabBiomarkerContext("free-t3").fallbackRanges, [
+    assertPartialRange("pg/mL", 2, 4.4),
+  ]);
+  assert.deepEqual(resolveLabBiomarkerContext("free-t4").fallbackRanges, [
+    assertPartialRange("ng/dL", 0.9, 1.7),
+  ]);
+  assert.deepEqual(
+    resolveLabBiomarkerContext("thyroid-stimulating-hormone").fallbackRanges,
+    [assertPartialRange("mIU/L", 0.3, 4.2)],
+  );
 });
 
 test("context-heavy biomarkers stay neutral when the current resolver cannot prove applicability", () => {
@@ -61,3 +72,20 @@ test("context-heavy biomarkers stay neutral when the current resolver cannot pro
     [],
   );
 });
+
+function assertPartialRange(unit: string, low: number, high: number) {
+  return {
+    applicability: resolveLabBiomarkerContext(
+      unit === "pg/mL"
+        ? "free-t3"
+        : unit === "ng/dL"
+          ? "free-t4"
+          : "thyroid-stimulating-hormone",
+    ).fallbackRanges[0]?.applicability,
+    eligibleSpecimenKinds: ["serum"],
+    label: "Mayo Clinic Laboratories adult serum reference interval",
+    lowerBound: { inclusive: true, value: low },
+    unit,
+    upperBound: { inclusive: true, value: high },
+  };
+}

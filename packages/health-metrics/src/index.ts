@@ -12,3 +12,4 @@ export * from "./goals.ts";
 export * from "./format.ts";
 export * from "./windows.ts";
 export * from "./lab-health-areas.ts";
+export * from "./lab-reference-ranges.ts";
