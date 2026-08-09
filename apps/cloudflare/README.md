@@ -162,6 +162,17 @@ Required worker vars:
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
+Optional hosted crypto compatibility inputs:
+
+- GitHub Environment variable
+  `HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON`
+- GitHub Environment secret
+  `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON`
+
+These inputs add non-active verification/decryption material; the required
+single-key variables remain the active generation. Follow the reader-first
+standby preload and future activation boundary in `DEPLOY.md`.
+
 `HOSTED_WEB_BASE_URL` must be an origin-only hosted web URL. Do not configure a
 subpath such as `https://example.test/app`; the worker appends its own internal
 callback routes to that origin.
@@ -197,11 +208,60 @@ application traffic is required to use transaction-mode PgBouncer on 6432 and
 the direct endpoint is migration-only. Adding another direct production client
 requires splitting that signal first.
 
-Unsafe samples open one incident. Two consecutive collection failures open the
-fallback monitoring incident. The object writes Linq provider-attempt admission
-before egress, never attempts more than once per 30 minutes across all incidents,
-and reuses the exact body plus idempotency key after an ambiguous send. The
-message reports actual collection time rather than the scheduled Cron slot.
+Each metric family is normalized independently. When a documented family is
+absent, the sample keeps that family unknown instead of substituting zero, still
+evaluates every available signal, and records the canonical missing metric names
+without retaining labels or raw scrape data. Unsafe available signals therefore
+still open an incident immediately. Two consecutive incomplete or failed
+collections open the fallback monitoring incident. An acknowledged
+telemetry-only page is one-shot for one unresolved operator-notification window.
+Crossing the two-failure threshold records one bounded alert obligation in the
+existing incident row. The first two-check window counts incomplete versus
+unavailable observations, unions only canonical missing families observed on
+partial checks, and identifies the threshold time as the window end. A bounded
+per-sample evidence value preserves that provenance across restart. An older
+pending page or direct-error priority cannot lose the obligation; recovery and
+another gap before acknowledgment coalesce into that same notification while
+the first threshold window remains authoritative. The obligation does not occupy
+a closed provider fence.
+At the same time, until an incident admits its first page, concrete evidence
+that appears on the threshold or a later sample, including a direct-error delta,
+persists in one combined immutable body. The exact pressure and truthful
+telemetry facts therefore share
+the next eligible attempt and one acknowledgment cycle. For
+acknowledged-incident recurrence, the next eligible sample
+supplies any still-current unsafe evidence while historical telemetry keeps its
+own observation time. Only acknowledgment of a
+telemetry-bearing page clears the obligation; a later complete sample then
+closes and rearms the incident. After acknowledgment, incomplete samples remain
+queryable but cannot repeat telemetry copy inside concrete-pressure pages unless
+a later rearmed threshold creates a new obligation. When a direct-error delta
+takes admission priority after an earlier page, any currently owed telemetry
+travels in that same immutable body while replayable gauges remain excluded;
+pure deferred evidence keeps its stored check time, an aggregate containing a
+new current delta uses the latest included check, and telemetry keeps its own
+condition-local observation time. Concrete unsafe conditions retain an hourly
+recurrence. The object writes Linq provider-attempt admission before egress,
+never attempts more than once per hour across all incidents, and reuses the
+exact body plus idempotency key after an ambiguous send. Concrete-pressure
+bodies select deterministically by persisted incident and alert identity from
+one hundred reviewed, observation-scoped openings. Those openings say only
+that the recorded check met alert criteria; condition-specific and current-
+state claims come from evidence that proves them. Retries therefore keep a
+truthful body after recovery, while consecutive pages avoid broadcast-shaped
+repetition without padding or filler. Telemetry-
+only pages remain evidence-led and one-shot for each unresolved monitoring
+window. The one-hundred-entry size is a bounded operator deliverability
+requirement, not a guarantee about carrier or platform filtering: at the hourly
+cap, one incident traverses one hundred reviewed leads before repeating one.
+The bank stays literal reviewed data rather than generated prose or another
+runtime dependency. The alert-state and sample-evidence columns are added idempotently without advancing the
+schema version, so the previously deployed Worker can ignore them during a
+rollback. If that Worker acknowledges a telemetry pending body, current code
+recognizes its cleared key/body plus retained marker and prevents duplicate
+re-admission after re-upgrade. The message reports actual collection time rather than the scheduled Cron
+slot and describes partial or unavailable telemetry without claiming database
+pressure.
 Before each message POST it requires the configured direct
 [Linq chat health](https://docs.linqapp.com/guides/chats/chat-health/) and its
 current [line reputation](https://docs.linqapp.com/guides/phone-numbers/phone-reputation/)
@@ -270,6 +330,58 @@ When hosted email sender identity is configured, deploy automation renders an en
 The runtime always includes the minimal `assistant` env profile. Deploy automation layers `exa`, `hosted-email`, `linq`, `mapbox`, and `telegram` on top by default. Cloudflare owns the configured profile string, runner-secret allowlisting, native parser toolchain binding inside the container image, and container transport rewrites such as local loopback host adaptation. The profile key sets and canonical hosted runtime launch spec are built by `@murphai/assistant-runtime`, so local and Cloudflare execution pass the same semantic runtime manifest shape. Hosted device-sync runtime config is derived into `runtime.resolvedConfig`, so it stays outside the runtime-env profile surface.
 
 Cloudflare keeps only the wake-payload decryption lane plus the worker-owned callback-signing key. Broad web-private-field encryption stays in `apps/web`, and the hosted runtime reaches the web control plane through the worker proxy instead of holding callback-signing material directly.
+
+## Private Operational Telemetry
+
+The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
+identifier-free data point only after UserRunner has decided to return
+`retry_later`. `index1` and `blob2` are the bounded retry reason, `blob1` is the
+schema `murph.hosted-runtime-retry.v1`, `double1` is the event count, and
+`double2` is the selected retry delay in milliseconds. The write is immediate,
+unawaited, best-effort, and absent from successful processing. Run
+[`scripts/runtime-retry-reasons.sql`](./scripts/runtime-retry-reasons.sql)
+through the private Cloudflare Analytics Engine SQL API or dashboard to get a
+sampling-corrected 24-hour reason breakdown.
+
+For the primary production control database, run the identifier-free cold-start
+report through the read-only helper:
+
+```sh
+murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
+```
+
+Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
+window. The report deduplicates causal rows by runtime attempt and keeps direct
+cold starts separate from Temporal recovery. A direct sample must be the only
+row in its runtime attempt whose Web direct-ensure orchestration id exactly
+matches the id attached only after that request acquires the fresh runtime
+fence. Active or warm wakes never receive launch identity. Ambiguous races,
+mismatches, backlog rows, and missing ids are omitted. Temporal-owned launches
+retain an explicit false direct-launch marker even if a later direct wake is
+merged into them. Exact direct samples
+begin only after the compatible Web and Cloudflare builds are deployed;
+historical rows are intentionally not inferred from timestamp proximity. The
+first table reports accepted-to-runner-job time only for those causal direct
+cold starts. The second reports Temporal-activity-to-runner-job time by exact
+recovery versus Temporal-only attempt; current Temporal-owned launches remain
+Temporal-only when a direct wake overlaps, while pre-deploy rows with legacy
+direct markers are labeled `legacy_unclassified` instead of being guessed.
+Current rows without either the launch-owned direct id or the explicit
+Temporal-owner marker are omitted: an activity can start before runner
+acceptance yet reach the runtime later as an active wake, so timestamp order is
+not launch evidence.
+The final cohort is resolved before attempt-level deduplication, so mailbox-local
+marker differences cannot discard a coherent multi-item invocation. Temporal
+activities that begin after runner acceptance are active wakes, not startup
+candidates, and are removed before ambiguity is assessed. Conflicting
+launch-owner evidence also fails closed. Warm direct
+wakes are omitted because they create no new runner job. The final table splits
+the same causal direct samples across Durable Object dispatch,
+consent locking, the existing health-data admission callback, runner-state
+operations, the parallel container-readiness and invocation-preparation
+branches, invocation launch, and runner-job acceptance. Per-phase chronology
+guards omit unavailable or reversed cross-runtime clock samples. It returns no
+member, mailbox, trace, or attempt identifiers.
 
 ## Runner Container Lifecycle
 

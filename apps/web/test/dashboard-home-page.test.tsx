@@ -539,7 +539,7 @@ test("HomePage does not show a blocked banner while purchased usage remains", as
   const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.doesNotMatch(markup, /Account notice/);
-  assert.doesNotMatch(markup, /New replies and other AI work are blocked/);
+  assert.doesNotMatch(markup, /Murph is paused/);
   assert.doesNotMatch(markup, />Add usage</);
   assert.equal(mocks.projectHostedPersonalAiUsageStatus.mock.calls.length, 0);
 });
@@ -580,9 +580,8 @@ test("HomePage shows blocked Pulse usage with an add-usage action", async () => 
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
   assert.match(markup, /Resets in 6 days/);
-  assert.match(markup, /New replies and other AI work are blocked/);
-  assert.match(markup, /until you add usage or your included usage resets/);
-  assert.match(markup, /You can add more usage now/);
+  assert.match(markup, /Murph is paused until you add usage or your allowance resets/);
+  assert.doesNotMatch(markup, /You can add more usage now/);
   assert.match(markup, />Add usage</);
   assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
   assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
@@ -590,6 +589,49 @@ test("HomePage shows blocked Pulse usage with an add-usage action", async () => 
   assert.equal(
     mocks.projectHostedPersonalAiUsageStatus.mock.calls[0]?.[0]?.decision.userNotice.code,
     "pulse_upgrade_edge",
+  );
+});
+
+test("HomePage identifies exhausted Max usage without Pulse or Edge copy", async () => {
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    allowanceSource: "direct_paid_member_plan",
+    billingPlanCode: "launch_max_monthly",
+    limitUsdMicros: 40_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-01T00:00:00.000Z"),
+    spentUsdMicros: 40_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
+    userNotice: {
+      code: "max_usage_limit_reached",
+      message:
+        "You've used 100% of this month's included Max usage. New usage is blocked.",
+    },
+  });
+  mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
+    generatedAt: "2026-05-26T12:00:00.000Z",
+    recommendedAction: {
+      kind: "add_usage",
+      label: "Add usage",
+      url: "/settings?addUsage=true#subscription",
+    },
+    status: "unavailable",
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
+
+  assert.match(markup, /included Max usage/u);
+  assert.doesNotMatch(markup, /included (?:Pulse|Edge) usage/u);
+  assert.match(markup, />Add usage</);
+  assert.equal(
+    mocks.projectHostedPersonalAiUsageStatus.mock.calls[0]?.[0]?.decision.userNotice.code,
+    "max_usage_limit_reached",
   );
 });
 
@@ -636,8 +678,7 @@ test("HomePage keeps the exhausted Pulse block notice when action resolution fai
   const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
-  assert.match(markup, /New replies and other AI work are blocked/);
-  assert.match(markup, /until your included usage resets/);
+  assert.match(markup, /Murph is paused until your included usage resets/);
   assert.doesNotMatch(markup, /You can add more usage now/);
   assert.doesNotMatch(markup, />Add usage</);
   assert.doesNotMatch(markup, /addUsage=true/);
@@ -672,8 +713,9 @@ test("UsageLimitBanner names the member plan Core while preserving group continu
   }));
 
   assert.match(markup, /included Core usage/u);
+  assert.match(markup, /Murph is paused until your included usage resets/u);
   assert.match(markup, /Core keeps you connected/u);
-  assert.match(markup, /group activity stays current/u);
+  assert.doesNotMatch(markup, /group activity stays current/u);
   assert.doesNotMatch(markup, /included Group usage/u);
 });
 
@@ -713,13 +755,13 @@ test("HomePage shows blocked Edge usage with an add-usage action", async () => {
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Edge usage/u);
   assert.match(markup, /Resets in 6 days/);
-  assert.match(markup, /New replies and other AI work are blocked/);
-  assert.match(markup, /until you add usage or your included usage resets/);
+  assert.match(markup, /Murph is paused until you add usage or your allowance resets/);
+  assert.doesNotMatch(markup, /You can add more usage now/);
   assert.match(markup, />Add usage</);
   assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
 });
 
-test("HomePage shows a blocked Family usage notice without a personal action", async () => {
+test("HomePage shows a blocked Family usage notice with the fallback add-usage action", async () => {
   mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
     allowanceSource: "family_sponsored_plan",
@@ -744,12 +786,12 @@ test("HomePage shows a blocked Family usage notice without a personal action", a
   const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /used 100% of your included usage this month/u);
-  assert.match(markup, /Other Family members have separate allowances/u);
-  assert.match(markup, /New replies and other AI work are blocked/);
-  assert.match(markup, /until your included usage resets/);
+  assert.doesNotMatch(markup, /Other Family members have separate allowances/u);
+  assert.match(markup, /Murph is paused until more usage is added or your allowance resets/);
   assert.doesNotMatch(markup, /shared allowance|Family(?:&#x27;|')s included usage/u);
   assert.match(markup, /Resets in 6 days/);
-  assert.doesNotMatch(markup, />Add usage</);
+  assert.match(markup, />Add usage</);
+  assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
 });
 
 test("HomePage shows blocked trial usage with the existing Start Pulse action", async () => {
@@ -787,8 +829,7 @@ test("HomePage shows blocked trial usage with the existing Start Pulse action", 
   const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /used 100% of your included trial usage/u);
-  assert.match(markup, /New replies and other AI work are blocked/);
-  assert.match(markup, /included trial usage is exhausted/);
+  assert.match(markup, /Murph is paused because your included trial usage is exhausted/);
   assert.match(markup, /Start Pulse to continue/iu);
   assert.match(markup, /Start from usage projection/);
   assert.match(markup, /href="https:\/\/example\.test\/settings#subscription"/);

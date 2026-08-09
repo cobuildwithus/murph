@@ -697,7 +697,7 @@ describe("hosted member assistant model preference", () => {
     })).rejects.toMatchObject({
       code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
       httpStatus: 403,
-      message: "GPT-5.6 Sol requires an active paid Edge plan.",
+      message: "GPT-5.6 Sol requires an active paid Edge or Max plan.",
     });
     expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });

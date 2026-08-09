@@ -831,7 +831,7 @@ export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
 
-export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 500;
+export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 2_000;
 
 const HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN = "[redacted]";
 
@@ -1012,7 +1012,6 @@ export interface HostedRuntimeGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
-  sponsorshipStatus: "not_sponsored" | "sponsored";
 }
 
 export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
@@ -1254,6 +1253,7 @@ export const HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS = 200
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS = 256;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS = 500;
 export const HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS = 48;
+export const HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS = 200;
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
@@ -1446,7 +1446,25 @@ export type HostedRuntimeGroupToolRequest =
       groupChatIconUrl: string;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
-  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "share_contact_card";
+      contactCardImageUrl?: never;
+      contactCardShareKey?: never;
+      directLinqChatId?: never;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
+  | {
+      action: "share_contact_card";
+      contactCardImageUrl: string;
+      contactCardShareKey: string;
+      /**
+       * Trusted-host chat id for a personalized card in a direct conversation.
+       * The trusted turn-context wrapper injects it before transport; Web then
+       * revalidates that exact direct chat against the member's route owner.
+       */
+      directLinqChatId?: string;
+      linqThread?: never;
+    }
   | {
       action: "revoke_own_email_share";
       participant?: HostedExecutionAcceptedGroupMessageParticipant | null;
@@ -1667,6 +1685,9 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "sent" }
         | { status: "already_shared" }
+        // Personalized cards only: the provider may have accepted this exact
+        // request and the send owner could not establish which.
+        | { status: "unconfirmed" }
         | { status: "unavailable"; unavailableReason: string };
     }
   | {
@@ -2057,9 +2078,10 @@ export type HostedRuntimeLatencyTraceMilestone =
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
-  // Control-plane orchestration stamps before the runner-container DO starts
-  // dispatch. These are epoch-ms values from different hosts, so they are for
-  // coarse span splitting only, not strict clock-order assertions.
+  // Control-plane orchestration diagnostics before the runner-container DO
+  // starts dispatch. Timestamps come from different hosts and are for coarse
+  // span splitting only. The two bounded ids correlate one Web direct ensure
+  // with the runtime invocation it launched.
   orchestration?: {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
@@ -2067,11 +2089,21 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     tokenAcquiredAtEpochMs?: number;
     directEnsureRequestStartedAtEpochMs?: number;
     directEnsureResponseReceivedAtEpochMs?: number;
+    directEnsureOrchestrationAttemptId?: string;
     runtimeControlAuthStartedAtEpochMs?: number;
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
+    runtimeInvocationOrchestrationAttemptId?: string;
     triggeredByWebDirect?: boolean;
+    userRunnerRpcStartedAtEpochMs?: number;
+    runtimeConsentLockAcquiredAtEpochMs?: number;
+    healthDataAdmissionReadStartedAtEpochMs?: number;
+    healthDataAdmissionReadFinishedAtEpochMs?: number;
     userRunnerEnsureStartedAtEpochMs?: number;
+    runnerStateBindStartedAtEpochMs?: number;
+    runnerStateBindFinishedAtEpochMs?: number;
+    runnerStateReadStartedAtEpochMs?: number;
+    runnerStateReadFinishedAtEpochMs?: number;
     activeFenceObservedAtEpochMs?: number;
     activeFenceTargetWasPriorVersion?: boolean;
     activeWakeStartedAtEpochMs?: number;
@@ -2234,11 +2266,21 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "tokenAcquiredAtEpochMs",
     "directEnsureRequestStartedAtEpochMs",
     "directEnsureResponseReceivedAtEpochMs",
+    "directEnsureOrchestrationAttemptId",
     "runtimeControlAuthStartedAtEpochMs",
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
+    "runtimeInvocationOrchestrationAttemptId",
     "triggeredByWebDirect",
+    "userRunnerRpcStartedAtEpochMs",
+    "runtimeConsentLockAcquiredAtEpochMs",
+    "healthDataAdmissionReadStartedAtEpochMs",
+    "healthDataAdmissionReadFinishedAtEpochMs",
     "userRunnerEnsureStartedAtEpochMs",
+    "runnerStateBindStartedAtEpochMs",
+    "runnerStateBindFinishedAtEpochMs",
+    "runnerStateReadStartedAtEpochMs",
+    "runnerStateReadFinishedAtEpochMs",
     "activeFenceObservedAtEpochMs",
     "activeFenceTargetWasPriorVersion",
     "activeWakeStartedAtEpochMs",
@@ -2599,6 +2641,15 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
+  if (
+    phase === "orchestration"
+    && (
+      leafKey === "directEnsureOrchestrationAttemptId"
+      || leafKey === "runtimeInvocationOrchestrationAttemptId"
+    )
+  ) {
+    return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+  }
   if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
     return typeof value === "string"
       && value.length <= 20
@@ -2609,6 +2660,13 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   }
 
   return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
+}
+
+export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+  value: unknown,
+): value is string {
+  return typeof value === "string"
+    && /^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
 }
 
 function isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value: unknown): value is number {
@@ -2848,6 +2906,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.retryable_payload_missing",
   "outbox.ambiguous",
   "outbox.delivery_finished",
+  "outbox.linq_app_card_fallback_error",
   "outbox.receipt_checkpointed",
   "runner.accepted_attempt_failed",
   "runner.error",

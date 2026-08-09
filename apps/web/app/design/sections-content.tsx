@@ -11,12 +11,18 @@ import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
+import { ReferralSection } from "@/src/components/homepage/referral-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
+import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
+import { ReferralPageContent } from "@/src/components/referrals/referral-page-content";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
+import {
+  HOSTED_PUBLIC_REFERRAL_REWARDS,
+} from "@/src/lib/hosted-growth/referral-program";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
@@ -44,6 +50,7 @@ import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
+import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import {
   GroupUsageFundingStudy,
@@ -105,6 +112,34 @@ export function SectionsContent() {
 
       <StudySection title="Homepage authentication readiness and phone handoff">
         <HomepageAuthWarmRuntimeStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage technical runtime · inference choice">
+        <div
+          id="homepage-technical-runtime"
+          data-design-section="homepage-technical-runtime"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <TechnicalCapabilitiesSection customInferenceAvailable veniceAvailable />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage technical runtime · provider flags off">
+        <div
+          data-design-section="homepage-technical-runtime-minimal"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <TechnicalCapabilitiesSection
+            customInferenceAvailable={false}
+            veniceAvailable={false}
+          />
+        </div>
       </StudySection>
 
       <Separator />
@@ -174,7 +209,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Secure approval pending and recorded states">
-        <ActionApprovalLifecycleStudy />
+        <div id="action-approval-lifecycle">
+          <ActionApprovalLifecycleStudy />
+        </div>
       </StudySection>
 
       <Separator />
@@ -223,13 +260,77 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage footer">
+      <StudySection title="Homepage referral program · days-only rewards">
+        <div
+          id="referral-program"
+          data-design-section="homepage-referral-program"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralSection rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage referral program · group rewards">
+        <div
+          data-design-section="homepage-referral-program-group-only"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralSection
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage referral program · signup reward">
+        <div
+          data-design-section="homepage-referral-program-signup-only"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralSection
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id === "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Referral rewards unavailable">
+        <div
+          data-design-section="referral-rewards-unavailable"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated={false}
+            identityKey={null}
+            rewards={[]}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage footer with vitals and split link columns">
         <div
           data-design-section="homepage-footer"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
-          <SiteFooter id="design-site-footer-preview" />
+          <SiteFooter
+            id="design-site-footer-preview"
+            referralsAvailable
+          />
         </div>
       </StudySection>
 
@@ -317,7 +418,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription and sponsored billing">
+      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and usage limits">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -329,7 +430,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Home partial-load recovery">
+      <StudySection title="Home partial-load and vault-unavailable recovery">
         <HomeLoadStateStudy />
       </StudySection>
 
@@ -353,13 +454,19 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group sponsorship and mobile one-time contribution">
+      <StudySection title="Group sponsorship with optional creative response">
         <GroupUsageFundingStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Overall AI usage, purchase reset, Family owner action, credits, and referrals">
+      <StudySection title="Reusable signup referral link and recipient claim states">
+        <SignupReferralFlowStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
@@ -377,7 +484,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with message-volume history and retention-limited sender evidence">
+      <StudySection title="Ops weekly growth compass with sponsorship accounting, messaging-activity, message-volume, and monthly-revenue history">
         <div inert>
           <GrowthScorecardStudy />
         </div>
@@ -398,7 +505,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Biomarker result detail">
-        <BiomarkerDetailStudy />
+        <div id="biomarker-result-range-bands">
+          <BiomarkerDetailStudy />
+        </div>
       </StudySection>
 
       <Separator />

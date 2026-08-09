@@ -49,13 +49,16 @@ export function projectRunnerStateRecord(input: {
 }): RunnerStateRecord {
   const writeFenceKind = readWriteFenceKind(input.meta.active_kind);
   const writeFenceGeneration = normalizeNonNegativeInteger(input.meta.active_generation);
+  const runnerContainerName = readRunnerContainerNameOrNull(
+    input.meta.active_runner_container_name,
+  );
   const writeFence = input.meta.active_attempt_id && input.meta.active_started_at && writeFenceKind
       ? {
         attemptId: input.meta.active_attempt_id,
         generation: writeFenceGeneration,
         kind: writeFenceKind,
         processingMode: readRunnerRuntimeProcessingMode(input.meta.active_reason),
-        runnerContainerName: readRunnerContainerNameOrNull(input.meta.active_runner_container_name),
+        runnerContainerName,
         startedAt: input.meta.active_started_at,
         workspaceVersion: input.meta.active_workspace_version,
       }
@@ -68,6 +71,7 @@ export function projectRunnerStateRecord(input: {
     lastErrorAt: input.meta.last_error_at,
     lastErrorCode: input.meta.last_error_code,
     lastInvocationAt: input.meta.last_invocation_at,
+    pendingRunnerContainerName: writeFence ? null : runnerContainerName,
     userId: input.meta.user_id,
   };
 }

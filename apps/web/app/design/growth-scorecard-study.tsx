@@ -2,12 +2,17 @@ import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessageSnapshot,
 } from "@/src/lib/hosted-ops/growth-message-series";
+import {
+  buildHostedGrowthMonthlyRevenueSeries,
+} from "@/src/lib/hosted-ops/growth-monthly-revenue-series";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
+import type { HostedGrowthSponsorshipMetrics } from "@/src/lib/hosted-ops/growth-sponsorship-metrics";
 import {
   GrowthScorecard,
   type GrowthScorecardProps,
 } from "../(dashboard)/ops/growth/growth-scorecard";
 import { GrowthCharts } from "../(dashboard)/ops/growth/growth-charts";
+import { GrowthSponsorships } from "../(dashboard)/ops/growth/growth-sponsorships";
 import { GrowthWeeklyTable } from "../(dashboard)/ops/growth/growth-weekly-table";
 import { TrialStartAttribution } from "../(dashboard)/ops/growth/trial-start-attribution";
 
@@ -32,8 +37,18 @@ const MESSAGE_SNAPSHOTS = GROWTH_DATES
     snapshotDate.setUTCDate(snapshotDate.getUTCDate() + 1);
     const messages = DAILY_MESSAGE_VOLUMES[messageIndex] ?? 0;
     const trackingAvailable = messageIndex >= MESSAGE_TRACKING_START_INDEX;
+    const activityIndex = messageIndex - 10;
+    const activeUsersTrailing7Days = activityIndex >= 0 && activityIndex !== 13
+      ? 68 + activityIndex * 2
+      : null;
 
     return [{
+      activeUsersPriorDay: activeUsersTrailing7Days === null
+        ? null
+        : activityIndex === 8
+          ? activeUsersTrailing7Days
+          : 12 + ((activityIndex * 5) % 17),
+      activeUsersTrailing7Days,
       inboundMessagesPriorDay: trackingAvailable
         ? Math.floor(messages * 0.45)
         : null,
@@ -63,6 +78,84 @@ const SNAPSHOT_SERIES = GROWTH_DATES.map((date, index) => ({
   payingCustomers: 54 + Math.floor(index * 0.8),
   trialingMembers: 16 + (index % 7),
 }));
+
+// March has purchase cash but no snapshot, so its total is withheld; April
+// predates the subscription split columns, so it renders as one unsplit
+// subscription value; February has no data and is trimmed; July is the
+// window-end month, so it renders as month to date.
+const MONTHLY_REVENUE_SERIES = buildHostedGrowthMonthlyRevenueSeries({
+  monthCount: 6,
+  purchases: [
+    {
+      cashAmountMinor: 800,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-03-12T15:00:00.000Z"),
+    },
+    {
+      cashAmountMinor: 1_000,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-04-19T16:20:00.000Z"),
+    },
+    {
+      cashAmountMinor: 2_000,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-05-11T09:05:00.000Z"),
+    },
+    {
+      cashAmountMinor: 500,
+      isGroupSponsorship: true,
+      paidAt: new Date("2026-05-27T21:40:00.000Z"),
+    },
+    {
+      cashAmountMinor: 1_500,
+      isGroupSponsorship: true,
+      paidAt: new Date("2026-07-03T12:00:00.000Z"),
+    },
+    {
+      cashAmountMinor: 1_000,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-07-14T18:30:00.000Z"),
+    },
+    {
+      cashAmountMinor: 1_500,
+      isGroupSponsorship: false,
+      paidAt: new Date("2026-07-24T07:55:00.000Z"),
+    },
+  ],
+  snapshots: [
+    {
+      familyMrrUsdCents: null,
+      individualMrrUsdCents: null,
+      mrrUsdCents: 6_200,
+      snapshotDate: new Date("2026-04-28T00:00:00.000Z"),
+    },
+    {
+      familyMrrUsdCents: 2_100,
+      individualMrrUsdCents: 7_000,
+      mrrUsdCents: 9_100,
+      snapshotDate: new Date("2026-05-30T00:00:00.000Z"),
+    },
+    {
+      familyMrrUsdCents: 3_200,
+      individualMrrUsdCents: 9_600,
+      mrrUsdCents: 12_800,
+      snapshotDate: new Date("2026-06-29T00:00:00.000Z"),
+    },
+    {
+      familyMrrUsdCents: 3_300,
+      individualMrrUsdCents: 10_600,
+      mrrUsdCents: 13_900,
+      snapshotDate: new Date("2026-07-15T00:00:00.000Z"),
+    },
+    {
+      familyMrrUsdCents: 4_300,
+      individualMrrUsdCents: 11_800,
+      mrrUsdCents: 16_100,
+      snapshotDate: new Date("2026-07-30T00:00:00.000Z"),
+    },
+  ],
+  windowEnd: new Date("2026-07-31T12:00:00.000Z"),
+});
 
 const TRIAL_START_ATTRIBUTION = {
   counts: {
@@ -130,8 +223,28 @@ const WEEKLY_ROWS: HostedGrowthDashboard["weeklyRows"] = [
   },
 ];
 
+const SPONSORSHIP_METRICS = {
+  activeMonthlyCapUsdCents: 3_000,
+  activeMonthlySponsorships: 2,
+  available: true,
+  monthlyPaidPurchasesThisMonth: 3,
+  monthlyPaidThisMonthUsdCents: 1_500,
+  oneTimePaidPurchasesThisMonth: 1,
+  oneTimePaidThisMonthUsdCents: 2_000,
+  paidPurchasesThisMonth: 4,
+  paidThisMonthUsdCents: 3_500,
+  remainingUsageUsdMicros: 11_750_000,
+  usageConsumedThisMonthUsdMicros: 4_250_000,
+} satisfies HostedGrowthSponsorshipMetrics;
+
+const UNAVAILABLE_SPONSORSHIP_METRICS = {
+  available: false,
+} satisfies HostedGrowthSponsorshipMetrics;
+
 const STUDY_INPUT = {
   activeUsers: {
+    today: 22,
+    todayComplete: true,
     trailing30Days: 143,
     trailing30DaysComplete: true,
     trailing7Days: 87,
@@ -163,6 +276,8 @@ const STUDY_INPUT = {
 const NO_SUPPORTING_BASELINES_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 0,
+    todayComplete: true,
     trailing30Days: 0,
     trailing30DaysComplete: true,
     trailing7Days: 0,
@@ -191,6 +306,8 @@ const NO_SUPPORTING_BASELINES_INPUT = {
 const PARTIAL_MAU_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 22,
+    todayComplete: true,
     trailing30Days: 119,
     trailing30DaysComplete: false,
     trailing7Days: 87,
@@ -203,6 +320,8 @@ const PARTIAL_MAU_INPUT = {
 const PARTIAL_WEEKLY_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
+    today: 19,
+    todayComplete: false,
     trailing30Days: 119,
     trailing30DaysComplete: false,
     trailing7Days: 82,
@@ -219,13 +338,14 @@ export function GrowthScorecardStudy() {
       data-design-study="ops-weekly-growth-compass"
       id="ops-weekly-growth-compass"
     >
-      <div id="growth-message-volume-charts">
+      <div id="growth-charts">
         <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Thirty-day movement
         </div>
         <GrowthCharts
           dailySeries={DAILY_SERIES}
           messageSeries={MESSAGE_SERIES}
+          monthlyRevenueSeries={MONTHLY_REVENUE_SERIES}
           snapshotSeries={SNAPSHOT_SERIES}
         />
       </div>
@@ -245,6 +365,24 @@ export function GrowthScorecardStudy() {
         <TrialStartAttribution
           attribution={EMPTY_TRIAL_START_ATTRIBUTION}
           titleId="design-empty-trial-start-attribution-title"
+        />
+      </div>
+      <div id="growth-sponsorships">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Group sponsorship accounting
+        </div>
+        <GrowthSponsorships
+          metrics={SPONSORSHIP_METRICS}
+          titleId="design-growth-sponsorship-title"
+        />
+      </div>
+      <div id="growth-sponsorships-unavailable">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Group sponsorship telemetry unavailable
+        </div>
+        <GrowthSponsorships
+          metrics={UNAVAILABLE_SPONSORSHIP_METRICS}
+          titleId="design-growth-sponsorship-unavailable-title"
         />
       </div>
       <div id="growth-weekly-intake-and-activation">

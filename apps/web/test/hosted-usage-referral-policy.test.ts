@@ -40,8 +40,7 @@ describe("hosted usage referral policy", () => {
         },
       },
       notificationKey: "usage-referral-reward:referral_1",
-      rewardLabel:
-        "$3.50 of cost-weighted usage credit for this room",
+      rewardLabel: "$3.50 of cost-weighted usage credit for this room",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
       styleBand: {
         humor: 8,
@@ -64,25 +63,24 @@ describe("hosted usage referral policy", () => {
     expect(wake.notification.instructions).toContain(
       "$3.50 of cost-weighted usage credit for this room",
     );
+    expect(wake.notification.instructions).toContain(
+      'Final message: include "$3.50 of cost-weighted usage credit for this room" exactly',
+    );
   });
 
-  it("labels rewards only as cost-weighted usage credit", () => {
+  it("labels each fixed mission reward as cost-weighted usage credit", () => {
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "group",
-      policyCode: "new_person_activation_v1",
-    })).toBe(
-      "$2.00 of cost-weighted usage credit for this room",
-    );
+      rewardUsdMicros: 2_000_000n,
+    })).toBe("$2.00 of cost-weighted usage credit for this room");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
-      policyCode: "active_group_v1",
-    })).toBe(
-      "$3.50 of cost-weighted usage credit for your Murph",
-    );
+      rewardUsdMicros: 3_500_000n,
+    })).toBe("$3.50 of cost-weighted usage credit for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
-      policyCode: "new_person_activation_v1",
-    })).toBe("$2.00 of cost-weighted usage credit for your Murph");
+      rewardUsdMicros: 2_750_000n,
+    })).toBe("$2.75 of cost-weighted usage credit for your Murph");
   });
 
   it("shares display copy and outstanding semantics with read-only projections", () => {
@@ -179,8 +177,7 @@ describe("hosted usage referral policy", () => {
       beneficiaryMemberId: "member_personal",
       destination,
       notificationKey: "usage-referral-reward:referral_personal",
-      rewardLabel:
-        "$2.00 of cost-weighted usage credit for your Murph",
+      rewardLabel: "$2.00 of cost-weighted usage credit for your Murph",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
       styleBand: {
         humor: 3,
@@ -239,8 +236,7 @@ describe("hosted usage referral policy", () => {
       beneficiaryMemberId: "member_personal",
       destination: linqDestination,
       notificationKey: "usage-referral-reward:referral_personal_linq",
-      rewardLabel:
-        "$2.00 of cost-weighted usage credit for your Murph",
+      rewardLabel: "$2.00 of cost-weighted usage credit for your Murph",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
       styleBand: {
         humor: 3,

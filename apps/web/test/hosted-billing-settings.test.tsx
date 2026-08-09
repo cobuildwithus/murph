@@ -50,7 +50,9 @@ function buildSubscriptionActionQuote(input: {
     ? 350
     : input.targetPlanCode === "launch_monthly"
       ? 800
-      : 2_000;
+      : input.targetPlanCode === "launch_max_monthly"
+        ? 5_000
+        : 2_000;
   return {
     action: "change_plan",
     expiresAt: "2026-07-10T12:10:00.000Z",
@@ -188,6 +190,96 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Current plan/);
     assert.match(markup, /Choose Edge/);
     assert.match(markup, /Manage billing/);
+  });
+
+  test("renders Max and an exact Edge-to-Max upgrade only when authorized", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const hiddenMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+    }));
+    const availableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      canUpgradeToMax: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      showMaxPlan: true,
+    }));
+
+    assert.doesNotMatch(hiddenMarkup, />Max</);
+    assert.match(availableMarkup, />Max</);
+    assert.match(availableMarkup, /\$50/);
+    assert.match(availableMarkup, /Highest included monthly AI usage/);
+    assert.match(availableMarkup, /Choose Max/);
+  });
+
+  test("uses exact period-end actions for Max downgrades", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      canSwitchToEdge: true,
+      canSwitchToPulse: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_max_monthly",
+      currentPeriodEnd: new Date("2026-09-01T00:00:00.000Z"),
+      showMaxPlan: true,
+    }));
+
+    assert.match(markup, /Max/);
+    assert.match(markup, /Current plan/);
+    assert.match(markup, /Choose Edge/);
+    assert.match(markup, /Choose Pulse/);
+    assert.doesNotMatch(markup, /Choose Max/);
+  });
+
+  test("keeps one recovery owner for a scheduled Max-to-Edge downgrade", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_max_monthly",
+      currentPeriodEnd: new Date("2026-09-01T00:00:00.000Z"),
+      scheduledBillingEffectiveAt: new Date("2026-09-01T00:00:00.000Z"),
+      scheduledBillingPlanCode: "launch_edge_monthly",
+      showMaxPlan: true,
+    }));
+
+    assert.match(markup, /Current plan/);
+    assert.match(markup, /Edge starts Sep 1, 2026/);
+    assert.match(markup, /Max stays active until then/);
+    assert.match(markup, /Scheduled to start Sep 1, 2026/);
+    assert.equal(
+      (markup.match(/Change scheduled plan/g) ?? []).length,
+      1,
+      "exactly one scheduled-plan recovery action",
+    );
+  });
+
+  test("does not expose Max inside Family billing", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      familyState: "owner",
+      showMaxPlan: true,
+    }));
+
+    assert.doesNotMatch(markup, />Max</);
+    assert.match(markup, /Manage Family billing/);
+    assert.match(markup, /End or change the Family plan first/);
   });
 
   test("suppresses every plan-changing action while webhook projection is pending", async () => {
@@ -1138,6 +1230,35 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
+  test("shows only the authorized Pulse recovery action for a paused Pulse trial", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const recoveryProps = {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      billingStatus: "paused",
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentBillingPlanCode: "launch_monthly",
+    } as const;
+    const eligibleMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      ...recoveryProps,
+      canStartPaidPulse: true,
+      canSwitchToGroup: false,
+      showGroupPlan: true,
+    }));
+    const ineligibleMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      ...recoveryProps,
+      canStartPaidPulse: false,
+    }));
+
+    assert.match(eligibleMarkup, /Start Pulse plan/);
+    assert.doesNotMatch(eligibleMarkup, />Start Core<\/button>/);
+    assert.doesNotMatch(eligibleMarkup, />Choose Pulse<\/button>/);
+    assert.doesNotMatch(ineligibleMarkup, /Start Pulse plan/);
+    assert.match(ineligibleMarkup, />Choose Pulse<\/button>/);
+  });
+
   test("suppresses every Start Pulse action with action-neutral copy while continuation is pending", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
     const usageStatus = buildUsageStatus({
@@ -1302,6 +1423,46 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /From \$7\/person/);
   });
 
+  test("routes a current Max member through the canonical Family owner", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: null,
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        billingStatus: "active",
+        canStartFamily: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_max_monthly",
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        showMaxPlan: true,
+      },
+    ));
+
+    const chooseFamilyButton = findButtonByText(
+      rendered.window.document,
+      "Choose Family",
+      rendered.window,
+    );
+    await act(async () => {
+      chooseFamilyButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+      method: "POST",
+      url: "/api/settings/billing/family/checkout",
+    });
+    await rendered.cleanup();
+  });
+
   test("posts the Join recovery Family action and keeps syncing feedback visible", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       alreadyActive: false,
@@ -1431,6 +1592,58 @@ describe("HostedBillingSettings", () => {
       url: "/api/settings/billing/switch-to-pulse",
     });
     assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+
+    await rendered.cleanup();
+  });
+
+  test("posts a confirmed Max-to-Edge switch and refreshes on success", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      effectiveAt: "2026-09-01T00:00:00.000Z",
+      scheduledBillingPlanCode: "launch_edge_monthly",
+      status: "scheduled",
+    });
+    const { HostedPlanChangeButton } = await import(
+      "@/src/components/settings/hosted-plan-change-button"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedPlanChangeButton,
+      {
+        currentPeriodEnd: "2026-09-01T00:00:00.000Z",
+        mode: "schedule",
+        targetPlanCode: "launch_edge_monthly",
+      },
+      "Choose Edge",
+    ));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your current plan continues through Sep 1, 2026\. Then Edge starts at \$20\/month\./,
+    );
+
+    const confirmButton = findButtonByText(
+      rendered.window.document,
+      "Confirm switch",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+      method: "POST",
+      payload: {
+        targetPlanCode: "launch_edge_monthly",
+      },
+      url: "/api/settings/billing/switch-plan",
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Could not schedule this plan change/,
+    );
 
     await rendered.cleanup();
   });

@@ -18,10 +18,10 @@ import {
 } from "@murphai/contracts";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import { readHostedGroupUsageStatus } from "../hosted-groups/group-usage-funding";
 import {
   lookupHostedGroupParticipantMemberByHandle,
 } from "../hosted-groups/participant-member";
+import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   appendHostedUsageCreditGrantTx,
 } from "../hosted-execution/usage-credit-grant";
@@ -53,11 +53,10 @@ import {
 } from "../hosted-routing/assistant-notification-destination";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
+import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
 
 export const HOSTED_USAGE_REFERRAL_POLICY_VERSION =
   "hosted-usage-referral-2026-07-v1";
-export const HOSTED_USAGE_REFERRALS_ENABLED_ENV =
-  "HOSTED_USAGE_REFERRALS_ENABLED";
 export const HOSTED_USAGE_REFERRAL_INTENT_TTL_MS =
   7 * 24 * 60 * 60 * 1_000;
 export const HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS =
@@ -83,6 +82,12 @@ const EXPECTED_REFERRAL_UNAVAILABLE_ERRORS = new Set([
   "too_many_referrals_in_progress",
   "usage_referral_not_available",
 ]);
+const HOSTED_USAGE_CREDIT_USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  currency: "USD",
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+  style: "currency",
+});
 
 type HostedUsageReferralPolicyDefinition = {
   code: HostedUsageReferralPolicyCode;
@@ -140,25 +145,17 @@ interface HostedUsageReferralCelebrationStyleBand {
 
 export function buildHostedUsageReferralRewardLabel(input: {
   destinationKind: "group" | "personal";
-  policyCode: HostedUsageReferralPolicyCode;
+  rewardUsdMicros: bigint;
 }): string {
-  // The reward is cost-weighted usage credit, so never translate the ledger
-  // amount into a message count.
   const subject = input.destinationKind === "group"
     ? "this room"
     : "your Murph";
-  const rewardUsdMicros = POLICIES[input.policyCode].rewardUsdMicros;
-  return `${formatHostedUsageCreditUsd(rewardUsdMicros)} of cost-weighted usage credit for ${subject}`;
+  return `${formatHostedUsageCreditUsd(input.rewardUsdMicros)} of cost-weighted usage credit for ${subject}`;
 }
 
 function formatHostedUsageCreditUsd(usdMicros: bigint): string {
-  const cents = Number(usdMicros / 10_000n);
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-    style: "currency",
-  }).format(cents / 100);
+  const cents = (usdMicros + 5_000n) / 10_000n;
+  return HOSTED_USAGE_CREDIT_USD_FORMATTER.format(Number(cents) / 100);
 }
 
 function outstandingHostedUsageReferralCommitmentWhere(
@@ -228,12 +225,6 @@ export interface HostedUsageReferralObservationResult {
 
 export interface HostedUsageReferralBindResult {
   referralIds: string[];
-}
-
-export function isHostedUsageReferralEnabled(
-  source: Readonly<Record<string, string | undefined>> = process.env,
-): boolean {
-  return source[HOSTED_USAGE_REFERRALS_ENABLED_ENV] === "1";
 }
 
 export function qualifiesHostedActiveGroupReferral(input: {
@@ -1076,8 +1067,8 @@ async function appendHostedUsageReferralCelebration(input: {
     select: {
       beneficiaryMemberId: true,
       celebrationQueuedAt: true,
-      policyCode: true,
       referrerMemberId: true,
+      rewardUsdMicros: true,
       rewardedAt: true,
       sourceConversationJson: true,
       status: true,
@@ -1136,7 +1127,6 @@ async function appendHostedUsageReferralCelebration(input: {
     memberId: input.beneficiaryMemberId,
     prisma: input.prisma,
   });
-  const policy = POLICIES[referral.policyCode];
   const effectiveStyle = resolveAssistantEffectiveStyle({
     ...(preferences.persona ? { persona: preferences.persona } : {}),
     personality: {
@@ -1168,7 +1158,7 @@ async function appendHostedUsageReferralCelebration(input: {
         notificationKey,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind,
-          policyCode: policy.code,
+          rewardUsdMicros: referral.rewardUsdMicros,
         }),
         rewardedAt,
         styleBand: {
@@ -1262,6 +1252,7 @@ export function buildHostedUsageReferralCelebrationWake(input: {
       instructions: [
         "Continue the source conversation by celebrating its completed usage challenge.",
         `The person who accepted it has already earned ${input.rewardLabel} for this conversation.`,
+        `Final message: include "${input.rewardLabel}" exactly and say it was already earned.`,
         "Make this feel like a funny shared achievement, not a billing receipt.",
         `Server-supplied destination style band: tone=${input.styleBand.tone}; Humor=${input.styleBand.humor}/10; Unhinged=${input.styleBand.unhinged}/10.`,
         "Match that band naturally without mentioning settings.",
@@ -1569,11 +1560,9 @@ async function hasHostedUsageReferralSourceAccess(input: {
   prisma: PrismaClient;
 }): Promise<boolean> {
   if (input.actor.beneficiaryMemberId !== input.actor.referrerMemberId) {
-    const status = await readHostedGroupUsageStatus({
+    return hasHostedRuntimeActiveAccess(input.actor.beneficiaryMemberId, {
       prisma: input.prisma,
-      runtimeMemberId: input.actor.beneficiaryMemberId,
     });
-    return status !== null;
   }
 
   const status = await readHostedPersonalAiUsageStatus({
@@ -1680,6 +1669,7 @@ async function readHostedUsageReferralSnapshot(input: {
     select: {
       expiresAt: true,
       policyCode: true,
+      rewardUsdMicros: true,
       status: true,
     },
   });
@@ -1727,7 +1717,7 @@ async function readHostedUsageReferralSnapshot(input: {
             policyCode: mission.policyCode,
             rewardLabel: buildHostedUsageReferralRewardLabel({
               destinationKind,
-              policyCode: mission.policyCode,
+              rewardUsdMicros: mission.rewardUsdMicros,
             }),
             state: mission.status === "armed" ? "armed" : "target_bound",
           }]
@@ -1746,7 +1736,7 @@ async function readHostedUsageReferralSnapshot(input: {
         requirementsLabel: POLICIES[code].requirementsLabel,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind,
-          policyCode: code,
+          rewardUsdMicros: POLICIES[code].rewardUsdMicros,
         }),
       })),
     trialCreditNotice:

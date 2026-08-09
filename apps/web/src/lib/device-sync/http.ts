@@ -5,6 +5,7 @@ import {
 import {
   buildPublicDeviceSyncErrorPayload,
   DeviceSyncError,
+  deviceSyncError,
   isDeviceSyncError,
 } from "@murphai/device-syncd/errors";
 import { NextResponse } from "next/server";
@@ -101,11 +102,84 @@ function matchDeviceSyncError(error: unknown): JsonErrorMapping | null {
   };
 }
 
+// Prisma reports every transaction-API fault as P2028, covering both a
+// transaction that expired mid-flight and one that never started in time.
+const PRISMA_TRANSACTION_FAULT_CODE = "P2028";
+// Raw queries fail with P2010; @prisma/adapter-pg nests the original Postgres
+// code under meta.driverAdapterError.cause.
+const PRISMA_RAW_QUERY_FAULT_CODE = "P2010";
+// Postgres raises 55P03 when a bounded `lock_timeout` wait gives up, which is
+// how the webhook admission member-row lock fails fast under fan-out bursts.
+const POSTGRES_LOCK_TIMEOUT_CODE = "55P03";
+
+const DEVICE_SYNC_STORE_CONTENTION_ERROR_CODE = "STORE_CONTENTION";
+
+/**
+ * Providers retry this path on a retryable 503 (`WEBHOOK_ACCOUNT_NOT_READY`,
+ * `WEBHOOK_TRACE_IN_PROGRESS`, ...); an unmapped 500 breaks that redelivery
+ * contract. Nothing is committed when a transaction expires, because the
+ * ingress releases the webhook trace claim, so contention faults are safe to
+ * retry.
+ */
+function matchDatabaseContentionError(error: unknown): JsonErrorMapping | null {
+  if (!isDatabaseContentionError(error)) {
+    return null;
+  }
+
+  return {
+    error: buildPublicDeviceSyncErrorPayload(deviceSyncError({
+      code: DEVICE_SYNC_STORE_CONTENTION_ERROR_CODE,
+      message: "The device-sync store timed out under contention. Retry later.",
+      retryable: true,
+      httpStatus: 503,
+    })).error,
+    log: { level: "warn" },
+    status: 503,
+  };
+}
+
+/**
+ * Both contention shapes arrive directly: the Prisma wrapper, the webhook
+ * trace-release catch, and the shared JSON route helper all rethrow the
+ * original error, so the classifier decodes exactly what the store emits.
+ */
+function isDatabaseContentionError(error: unknown): boolean {
+  if (error === null || typeof error !== "object") {
+    return false;
+  }
+
+  const record = error as { code?: unknown; meta?: unknown };
+  return record.code === PRISMA_TRANSACTION_FAULT_CODE
+    || (record.code === PRISMA_RAW_QUERY_FAULT_CODE && isAdapterPgLockTimeoutMeta(record.meta));
+}
+
+/**
+ * The production adapter-pg shape for a raw-query lock timeout: P2010 with the
+ * Postgres code at meta.driverAdapterError.cause.originalCode (or .code). The
+ * hosted member billing store decodes this exact shape for its own lock bound.
+ */
+function isAdapterPgLockTimeoutMeta(meta: unknown): boolean {
+  if (meta === null || typeof meta !== "object") {
+    return false;
+  }
+  const driverAdapterError = (meta as { driverAdapterError?: unknown }).driverAdapterError;
+  if (driverAdapterError === null || typeof driverAdapterError !== "object") {
+    return false;
+  }
+  const cause = (driverAdapterError as { cause?: unknown }).cause;
+  if (cause === null || typeof cause !== "object") {
+    return false;
+  }
+  const causeRecord = cause as { code?: unknown; originalCode?: unknown };
+  return causeRecord.originalCode === POSTGRES_LOCK_TIMEOUT_CODE
+    || causeRecord.code === POSTGRES_LOCK_TIMEOUT_CODE;
+}
+
 const deviceSyncJsonRouteHelpers = createJsonRouteHelpers({
   defaultHeaders: HOSTED_DEVICE_SYNC_DEFAULT_HEADERS,
   internalMessage: "Hosted device-sync route failed unexpectedly.",
   logMessage: "Hosted device-sync route failed.",
-  matchers: [matchDeviceSyncError],
+  matchers: [matchDeviceSyncError, matchDatabaseContentionError],
 });
 
 export const jsonOk = deviceSyncJsonRouteHelpers.jsonOk;

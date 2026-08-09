@@ -1,6 +1,6 @@
 # Experiment Adherence Confidence
 
-Last verified: 2026-07-16
+Last verified: 2026-08-09
 
 ## Current State
 
@@ -15,7 +15,12 @@ Adherence confidence is derived at read time from existing experiment run plans,
 - Non-sensable cadence targets use `assumed_after_grace` for missing linked-event evidence.
 - Device-observable activity targets keep `missed_after_grace`.
 - Explicit user corrections always outrank assumptions.
-- Progress and outcome surfaces can show confidence quality without changing the core completed-session count.
+- Calendar-backed linked-event progress counts occurrences rather than collapsing every date to one session. `expectedSessionsByNow` sums each due cell's `expectedCount`, and explicit evidence is capped at that count so duplicate same-date events cannot overstate progress.
+- Progress and outcome surfaces preserve the established completed/logged assumption contract while exposing sensed, confirmed, and assumed occurrence counts separately.
+
+Actual quantities such as repetitions are stricter than adherence progress: they must be summed from explicit canonical records carrying the quantity. Neither an assumed occurrence nor a theoretical schedule projection is evidence of a historical repetition total. `progress.adherence.sessionEventIds` follows the same capped occurrence selection, so downstream quantity reads do not reintroduce duplicate same-day logs.
+
+A new count-backed target with more than one expected occurrence per date requires explicit per-occurrence evidence. Assistant-managed repeated exercise targets must not use silence to backfill completion.
 
 Assumption is not a generated event. It is a status on a schedule cell after the planned session's grace window passes with no explicit evidence.
 
@@ -39,7 +44,7 @@ For linked-event adherence targets with `missing: assumed_after_grace`:
 
 1. Before the grace window closes, the planned cell remains `scheduled`.
 2. After grace with no evidence, the cell becomes `assumed`.
-3. `assumed` counts as completed/logged for progress and target pacing.
+3. `assumed` counts its expected occurrences as completed/logged for progress and target pacing, while `assumedSessions` keeps the confidence source explicit.
 4. UI copy for an assumed schedule cell is short and distinct: "Assumed done".
 5. Weekly digests and reminder tails can say: "I've been assuming your sauna sessions happened - say the word if any didn't and I'll update your log."
 

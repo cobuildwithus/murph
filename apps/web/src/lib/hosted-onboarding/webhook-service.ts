@@ -7,6 +7,7 @@ import { getPrisma } from "../prisma";
 import {
   requireHostedLinqMessageEditedEvent,
   requireHostedLinqParticipantChangedEvent,
+  requireHostedLinqTypingIndicatorStartedEvent,
   requireHostedLinqMessageReceivedEvent,
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
@@ -31,6 +32,7 @@ import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+  resolveHostedLinqTypingPrewarmMemberId,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -95,7 +97,7 @@ import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
 import {
-  startHostedDirectRuntimeWakeBestEffort,
+  startHostedRuntimeShellPrewarmBestEffort,
 } from "../hosted-execution/direct-runtime-wake";
 import {
   assertHostedThreadRouteEgressAuthority,
@@ -218,6 +220,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (event.event_type === "chat.typing_indicator.started") {
+      scheduleHostedLinqTypingShellPrewarmBestEffort({
+        event: requireHostedLinqTypingIndicatorStartedEvent(event),
+        prisma: input.prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
       const response: HostedOnboardingLinqWebhookResponse = {
         ignored: true,
         ok: true,
@@ -614,6 +621,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
+        // The member row is committed, so issue only the deterministic
+        // container start command while enrollment runs. This does not resolve
+        // a runtime owner, inspect workspace state, create a fence, or process
+        // mailbox work; the ordinary post-Temporal ensure owns those steps.
+        void startHostedRuntimeShellPrewarmBestEffort({
+          source: "linq-instant-start",
+          userId: instantStartEnrollment.memberId,
+        });
         let enrollmentFailed = false;
         try {
           const enrollment = await ensureHostedLinqInstantStartPulseTrialEnrollment({
@@ -646,15 +661,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
             },
           );
-        }
-        if (!enrollmentFailed) {
-          // Enrollment has now activated access. Start the container before
-          // the active-member replan so this best-effort hint warms the same
-          // foreground mode that will consume the appended conversation item.
-          void startHostedDirectRuntimeWakeBestEffort({
-            source: "linq-instant-start",
-            userId: instantStartEnrollment.memberId,
-          });
         }
         plan = await runPlan(!enrollmentFailed);
         if (plan.instantStartEnrollment) {
@@ -877,6 +883,62 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+function scheduleHostedLinqTypingShellPrewarmBestEffort(input: {
+  event: ReturnType<typeof requireHostedLinqTypingIndicatorStartedEvent>;
+  prisma?: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): void {
+  const task = async (): Promise<void> => {
+    try {
+      const memberId = await resolveHostedLinqTypingPrewarmMemberId({
+        event: input.event,
+        prisma: input.prisma ?? getPrisma(),
+      });
+      if (!memberId) {
+        logHostedOnboardingDiagnostic(
+          "linq-typing-shell-prewarm",
+          { outcome: "target-not-found" },
+        );
+        return;
+      }
+
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        { outcome: "target-resolved" },
+      );
+      await startHostedRuntimeShellPrewarmBestEffort({
+        source: "linq-typing-started",
+        userId: memberId,
+      });
+    } catch (error) {
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "failed",
+        },
+      );
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    try {
+      input.scheduleAfterResponse(task);
+      return;
+    } catch (error) {
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "schedule-failed",
+        },
+      );
+    }
+  }
+
+  void task();
 }
 
 interface HostedLinqPlanningEventResolution {

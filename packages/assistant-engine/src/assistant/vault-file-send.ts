@@ -30,6 +30,7 @@ import {
   adoptAssistantStateFileIntoExclusiveName,
 } from '@murphai/runtime-state/node/assistant-state-fs'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
+import { readMaterializedExportPackReceipt } from '@murphai/vault-usecases/export-packs'
 
 import {
   createAssistantOutboxIntent,
@@ -77,6 +78,7 @@ export async function requestAssistantVaultFileSend(input: {
   explicitTarget?: string | null
   identityId?: string | null
   ref: string
+  retireExportPackIds?: readonly string[]
   replyToMessageId?: string | null
   sessionId: string
   threadId?: string | null
@@ -97,6 +99,10 @@ export async function requestAssistantVaultFileSend(input: {
       })
     : null
   const mediaRef = generatedDelivery?.ownedRef ?? normalizedRef
+  const retireExportPackIds = normalizeRetireExportPackIds({
+    generatedDelivery,
+    packIds: input.retireExportPackIds,
+  })
   if (
     generatedDelivery !== null
     && await hasActivePriorTurnGeneratedVaultFileSendForTarget({
@@ -120,13 +126,23 @@ export async function requestAssistantVaultFileSend(input: {
       vaultRoot: input.vault,
     })
   }
-  const file = await resolveAssistantVaultFileResponseMedia({
+  const resolvedFile = await resolveAssistantVaultFileResponseMedia({
     ...(generatedDelivery === null
       ? {}
       : { displayFilename: generatedDelivery.displayFilename }),
     ref: mediaRef,
     vaultRoot: input.vault,
   })
+  const retireExportPacks = retireExportPackIds
+    ? (await Promise.allSettled(
+        retireExportPackIds.map((packId) =>
+          readMaterializedExportPackReceipt(input.vault, packId)
+        ),
+      )).flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
+    : []
+  const file: AssistantVaultFileResponseMedia = retireExportPacks.length > 0
+    ? { ...resolvedFile, retireExportPacks }
+    : resolvedFile
   const approval = await input.actionApprovalPort.request(
     buildAssistantVaultFileSendApprovalRequestForTarget({
       channel: input.channel ?? null,
@@ -186,6 +202,31 @@ export async function requestAssistantVaultFileSend(input: {
           }
         : { status: approval.status }),
   }
+}
+
+function normalizeRetireExportPackIds(input: {
+  generatedDelivery: { displayFilename: string; ownedRef: string } | null
+  packIds?: readonly string[]
+}): string[] | null {
+  if (input.packIds === undefined) {
+    return null
+  }
+  if (
+    input.generatedDelivery === null
+    || resolveSupportedAssistantVaultFileContentType(
+      input.generatedDelivery.displayFilename,
+    ) !== 'application/zip'
+    || input.packIds.length < 1
+    || input.packIds.length > 20
+    || input.packIds.some((packId) => !/^[A-Za-z0-9_-]+$/u.test(packId))
+    || new Set(input.packIds).size !== input.packIds.length
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_EXPORT_PACK_RETIREMENT_INVALID',
+      'Export-pack retirement requires an assistant-generated ZIP.',
+    )
+  }
+  return [...input.packIds]
 }
 
 export function buildAssistantVaultFileDeliveryIdempotencyKey(input: {

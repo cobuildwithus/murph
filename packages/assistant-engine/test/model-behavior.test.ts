@@ -1133,15 +1133,15 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Reserved support bypasses discovery/classification; follow Support')
     expect(prompt).toContain('Never retry after any tool result')
     expect(prompt).toContain('external/transient failures')
-    expect(prompt).toContain('Use `feature_request` for a missing path')
+    expect(prompt).toContain('Use `feature_request` for missing paths')
     expect(prompt).toContain(
-      'Record only kind, a concise product-only summary, and relevant changelog ids when known; ids are optional',
+      'Record only kind, a concise product-only summary, and optional changelog ids',
     )
-    expect(prompt).toContain('Prefix inferred summaries `Speculative:`')
-    expect(prompt).toContain('assistant-observed summaries `Murph-observed:`')
-    expect(prompt).toContain('Do not log vague low-confidence guesses')
     expect(prompt).toContain(
-      'raw user wording or conversation text, health details, identifiers, contact details, secrets, or provider payloads',
+      'append a privacy-safe `Reproduction:` section in that same summary field',
+    )
+    expect(prompt).toContain(
+      'follow the tool schema for prefixes, privacy, and exact contents',
     )
     expect(prompt).not.toContain('structured kind/topic')
     expect(prompt).not.toContain('feedback tags')
@@ -1908,7 +1908,7 @@ describe('assistant system prompt cache stability', () => {
       }),
     )
 
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_050)
     // This layer is resident on every turn for every member, so it is a ratchet,
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
@@ -2193,7 +2193,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd19758fd9e43558a832e9aa9f880c30e10d30ad6ce6fc35e0d0b360854f7f23e',
+      '32daf4a053a3a6fc5221b98400c6e65350983e29c0679d3988f00f4635dbfcd5',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

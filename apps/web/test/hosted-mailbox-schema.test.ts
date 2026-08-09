@@ -63,10 +63,10 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       "HostedMailboxPayload",
       "HostedMailboxLaneCounter",
       "HostedWorkspace",
-      "HostedRuntimeLog",
     ]) {
       expect(schema).toContain(`model ${modelName} {`);
     }
+    expect(schema).not.toContain("model HostedRuntimeLog {");
 
     for (const tableName of [
       "hosted_mailbox_item",

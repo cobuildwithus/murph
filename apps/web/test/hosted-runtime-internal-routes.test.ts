@@ -24,7 +24,6 @@ const mocks = vi.hoisted(() => ({
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   getPrisma: vi.fn(),
   isHostedRuntimeLogDatabaseConfigured: vi.fn(),
-  listDedicatedHostedRuntimeLogs: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
   claimHostedAcceptedAttemptFailureRecheck: vi.fn(),
@@ -97,12 +96,14 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOr
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
-  listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
   claimHostedAcceptedAttemptFailureRecheck:
     mocks.claimHostedAcceptedAttemptFailureRecheck,
   readHostedWorkspace: mocks.readHostedWorkspace,
-  recordHostedRuntimeLogs: mocks.recordHostedRuntimeLogs,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
+  writeHostedRuntimeLogs: mocks.recordHostedRuntimeLogs,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/database", async (importOriginal) => ({
@@ -113,7 +114,7 @@ vi.mock("@/src/lib/hosted-runtime-log/database", async (importOriginal) => ({
 
 vi.mock("@/src/lib/hosted-runtime-log/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-runtime-log/store")>()),
-  listHostedRuntimeLogs: mocks.listDedicatedHostedRuntimeLogs,
+  listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -267,8 +268,8 @@ describe("hosted runtime internal web routes", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_routes_1",
     });
-    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(false);
-    mocks.listDedicatedHostedRuntimeLogs.mockResolvedValue([]);
+    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
+    mocks.listHostedRuntimeLogs.mockResolvedValue([]);
   });
 
   it("signals a facts recheck after an authenticated runtime owner release", async () => {
@@ -2499,7 +2500,7 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledWith(expect.objectContaining({
       entries: [expect.objectContaining({
-        redacted: {
+        redactedJson: {
           count: 1,
           lane: "conversation",
           safeErrorMessage: "Codex app-server failed before producing a reply.",
@@ -2833,6 +2834,82 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("warns only for latency rows a trace row rejected, never for untraced inputs", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      mocks.recordHostedIngressProviderStarted.mockResolvedValue({
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+        untracedCount: 1,
+      });
+      const untracedResponse = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            assistantInputIds: ["input_untraced_1"],
+            at: FIXED_NOW,
+            providerRequestOrdinal: 0,
+            runtimeAttemptId: "attempt_routes_1",
+            source: "linq",
+            type: "provider_started",
+          },
+        },
+        runtimeWriteFenceHeaders(),
+      ));
+
+      expect(untracedResponse.status).toBe(200);
+      // Assert the raw body, not the parsed projection: the parser drops
+      // unknown keys, so reparsing here would still pass if the route leaked
+      // untracedCount to the runner. The wire contract must stay exactly these
+      // three fields so the runner's existing retry, which covers a staged
+      // callback still in flight, keeps working.
+      expect(await untracedResponse.json()).toEqual({
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+      });
+      expect(warn).not.toHaveBeenCalled();
+
+      mocks.recordHostedIngressProviderStarted.mockResolvedValue({
+        matchedCount: 1,
+        recorded: true,
+        unmatchedCount: 2,
+        untracedCount: 1,
+      });
+      const rejectedResponse = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            assistantInputIds: ["input_traced_1", "input_rejected_1", "input_untraced_1"],
+            at: FIXED_NOW,
+            providerRequestOrdinal: 0,
+            runtimeAttemptId: "attempt_routes_1",
+            source: "linq",
+            type: "provider_started",
+          },
+        },
+        runtimeWriteFenceHeaders(),
+      ));
+
+      expect(rejectedResponse.status).toBe(200);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted runtime latency trace callback had rejected rows.",
+        {
+          eventType: "provider_started",
+          matchedCount: 1,
+          rejectedCount: 1,
+          runtimeAttemptId: "attempt_routes_1",
+          source: "linq",
+          untracedCount: 1,
+        },
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("signals a stateless runtime recheck after an accepted runtime attempt failure log", async () => {
     mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
     mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
@@ -3063,17 +3140,10 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(payload)).not.toMatch(/payloadCiphertext|message|email|phone|token/u);
   });
 
-  it("merges isolated and legacy runtime-log windows in global recency order", async () => {
+  it("reads runtime-log windows from the dedicated store", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
-    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
     mocks.listHostedRuntimeLogs.mockResolvedValue([
-      buildRuntimeLogRecord({
-        at: "2026-04-26T00:00:00.000Z",
-        id: "runtime_log_legacy",
-      }),
-    ]);
-    mocks.listDedicatedHostedRuntimeLogs.mockResolvedValue([
       buildRuntimeLogRecord({
         at: "2026-04-26T00:00:01.000Z",
         id: "runtime_log_isolated",
@@ -3089,9 +3159,8 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(payload.recentLogs?.map((entry) => entry.at)).toEqual([
       "2026-04-26T00:00:01.000Z",
-      "2026-04-26T00:00:00.000Z",
     ]);
-    expect(mocks.listDedicatedHostedRuntimeLogs).toHaveBeenCalledWith({
+    expect(mocks.listHostedRuntimeLogs).toHaveBeenCalledWith({
       limit: 2,
       userId: "member_routes_1",
     });
@@ -3101,11 +3170,7 @@ describe("hosted runtime internal web routes", () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
-    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
-    mocks.listHostedRuntimeLogs.mockResolvedValue([
-      buildRuntimeLogRecord({ id: "runtime_log_legacy" }),
-    ]);
-    mocks.listDedicatedHostedRuntimeLogs.mockRejectedValueOnce(
+    mocks.listHostedRuntimeLogs.mockRejectedValueOnce(
       new Error("isolated database unavailable"),
     );
 
@@ -3130,12 +3195,10 @@ describe("hosted runtime internal web routes", () => {
     consoleWarn.mockRestore();
   });
 
-  it("returns an empty runtime-log window only after both stores succeed", async () => {
+  it("returns an empty runtime-log window after the dedicated read succeeds", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
-    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
     mocks.listHostedRuntimeLogs.mockResolvedValue([]);
-    mocks.listDedicatedHostedRuntimeLogs.mockResolvedValue([]);
 
     const response = await runtimeStatusRoute.GET(new Request(
       "https://join.example.test/api/internal/hosted-runtime/status?logLimit=1",
@@ -3146,10 +3209,25 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(payload.recentLogs).toEqual([]);
     expect(mocks.listHostedRuntimeLogs).toHaveBeenCalledOnce();
-    expect(mocks.listDedicatedHostedRuntimeLogs).toHaveBeenCalledOnce();
   });
 
-  it("skips both runtime-log databases when status requests no diagnostics", async () => {
+  it("returns no logs without reading when the dedicated database is unconfigured", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
+    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(false);
+
+    const response = await runtimeStatusRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/status?logLimit=1",
+      { method: "GET" },
+    ));
+    const payload = parseHostedRuntimeWebStatusResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.recentLogs).toEqual([]);
+    expect(mocks.listHostedRuntimeLogs).not.toHaveBeenCalled();
+  });
+
+  it("skips the runtime-log database when status requests no diagnostics", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
 
@@ -3162,7 +3240,6 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(payload.recentLogs).toEqual([]);
     expect(mocks.listHostedRuntimeLogs).not.toHaveBeenCalled();
-    expect(mocks.listDedicatedHostedRuntimeLogs).not.toHaveBeenCalled();
   });
 
   it("rejects partial numeric hosted runtime status log limits", async () => {

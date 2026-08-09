@@ -23,13 +23,10 @@ control database because `runner.accepted_attempt_failed` recovery shares this
 callback. A runtime-log database outage must not prevent a valid recovery claim
 from being authenticated and signaled.
 
-When `HOSTED_RUNTIME_LOG_STORAGE=dedicated`, new runtime-log rows never write to
-the primary `hosted_runtime_log` table. The explicit `primary` rollout mode
-keeps only new writes on the existing owner while the isolated schema and
-deletion owner deploy. Isolated reads, retention, and account deletion remain
-active in both production modes, including rollback. After cutover, the legacy
-table remains read-only except for retention and account deletion during the
-bounded migration window.
+The isolated database is the only runtime-log owner. Production fails closed
+when its URL is missing. Local development may leave it unconfigured; runtime
+log writes and reads then return empty best-effort results without provisioning
+another database.
 
 ## Data model
 
@@ -85,16 +82,11 @@ Every append runs in one short transaction:
 3. Return `loggedCount: 0` when the member is missing or suspended.
 4. Insert the validated batch with one SQL statement.
 
-The existing encrypted account-deletion cleanup receipt already owns the exact
-runtime-member id set after primary deletion commits. The additive completion
-column is nullable and intentionally has no default: neither an existing receipt
-nor a receipt inserted by pre-change code is assumed complete. A
-primary-database delete trigger refuses to remove a receipt while
-`runtime_logs_completed_at` is null, so an older Web deployment may leave
-cleanup pending during the first rollout but cannot erase the new target.
-Cleanup-aware code records completion only after the isolated delete succeeds;
-zero matching rows is idempotent success. Every immediate or hourly cleanup
-attempt enters one runtime-log database transaction:
+The encrypted account-deletion cleanup receipt owns the exact runtime-member id
+set after primary deletion commits. Its `runtime_logs_completed_at` completion
+field is recorded only after the isolated delete succeeds; zero matching rows
+is idempotent success. Every immediate or hourly cleanup attempt enters one
+runtime-log database transaction:
 
 1. Take every subject advisory lock in deterministic signed-lock-key order.
 2. Delete all matching runtime-log rows.
@@ -118,35 +110,25 @@ authority only after acquiring the same isolated advisory lock used by cleanup.
 
 ## Reads and retention
 
-For the migration window, status and latency dashboards merge the isolated
-store with the legacy primary table. IDs deduplicate merged rows and global
-limits still apply after the merge. No row is dual-written and no bulk backfill
-runs during deployment. If the isolated status read is unavailable, the Web
-status response omits its optional `recentLogs` window instead of presenting
-the incomplete legacy tail as complete. The orchestration projection therefore
-reports an unknown log count while workspace and mailbox status remain
-available.
+Status and latency dashboards read only the isolated store. If a dedicated
+status read is unavailable, the Web status response omits its optional
+`recentLogs` window. The orchestration projection therefore reports an unknown
+log count while workspace and mailbox status remain available.
 
-Both stores keep the existing policy until the legacy window drains:
+The dedicated store keeps the existing policy:
 
 - debug/info: 7 days
 - warn/error: 14 days
 - ordered batches of 5,000, at most four batches per hourly cleanup
 
-The normal retention cron runs primary cleanup first and then isolated cleanup
-serially through the isolated pool.
-
-Removal condition: once production has run the isolated writer for at least 14
-days and the legacy table is empty, remove the legacy status/latency reads,
-primary runtime-log retention/deletion code, Prisma model/relation, table, and
-cleanup-receipt compatibility trigger in one contract cleanup.
+The normal retention cron runs isolated cleanup serially through the diagnostic
+pool after the primary control-database cleanup completes.
 
 ## Configuration
 
 Runtime traffic:
 
 ```text
-HOSTED_RUNTIME_LOG_STORAGE=primary|dedicated
 HOSTED_RUNTIME_LOG_DATABASE_URL
 HOSTED_RUNTIME_LOG_DATABASE_POOL_MAX=5
 ```
@@ -175,10 +157,8 @@ Migration traffic:
 HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL
 ```
 
-Production requires an explicit storage mode and the isolated runtime-log URL
-in both modes. `primary` controls only new-write routing; the configured
-isolated owner must stay available for compatibility reads, retention, and
-account deletion. Static URL checks reject obvious aliases before connecting.
+Production requires the isolated runtime-log URL. Static URL checks reject
+obvious aliases before connecting.
 The migration preflight then proves the real endpoint topology in two steps:
 pooled and direct runtime-log endpoints must contend for the same random
 transaction advisory lock, and the direct primary and runtime-log endpoints
@@ -187,9 +167,9 @@ therefore requires a genuinely separate Postgres project or cluster; a second
 schema or logical database on the primary cluster is rejected because it would
 still share compute, storage, WAL, checkpoints, and connection capacity.
 
-Local development and tests default to primary mode. To exercise the isolated
-path locally, set `HOSTED_RUNTIME_LOG_STORAGE=dedicated`, provision a separate
-database, and run:
+Local development and tests may leave the runtime-log database unconfigured,
+which makes best-effort log writes and reads no-ops. To exercise the dedicated
+path locally, provision a separate database, configure its URLs, and run:
 
 ```bash
 pnpm --dir apps/web runtime-logs:migrate:deploy
@@ -214,37 +194,18 @@ verifies the canonical schema owner before invoking Prisma.
 
 ## Deployment
 
-1. Provision the isolated Postgres project or cluster, its dedicated runtime
-   role with the ten-second `statement_timeout`, and its direct migration
-   endpoint.
-2. Set the runtime/direct URLs, pool size, and
-   `HOSTED_RUNTIME_LOG_STORAGE=primary` in Vercel production.
-3. Deploy Web. The migration wrapper creates the isolated schema and the new
-   account-deletion cleanup owner while every deployment still writes primary.
-4. Let every pre-change Web deployment drain completely, including its maximum
-   request duration. The primary delete trigger may leave cleanup receipts
-   temporarily pending while an old handler is still active; a cleanup-aware
-   handler or the hourly sweep safely completes them. No isolated rows exist
-   yet, so handlers below the new compatibility floor cannot strand secondary
-   data.
-5. Change only `HOSTED_RUNTIME_LOG_STORAGE` to `dedicated` and promote that
-   deployment. No synchronized Cloudflare rollout is required; the signed log
-   protocol is unchanged.
-6. Verify isolated append rate, primary `hosted_runtime_log` insert cessation,
-   callback failures, retention counts, status continuity, and account deletion.
-
-Status and latency reads merge both stores throughout the rollout. There is no
-dual write and no bulk backfill. The Cloudflare change only requests
-`logLimit=0` on the invocation hot path; it is protocol-compatible with old Web
-and may deploy independently before or after the Web cutover.
+The dedicated database and URL configuration must remain in place for every
+production Web deployment. Deploy the Web build that no longer references the
+primary runtime-log table, let prior functions drain, then run the post-deploy
+contract migration that drops the legacy table. No synchronized Cloudflare
+rollout is required because the signed callback protocol is unchanged. Verify
+dedicated append rate, callback failures, retention counts, status continuity,
+account deletion, and absence of the primary table after the contract lane.
 
 ## Rollback
 
-Application rollback is safe without a database rollback only across the
-cleanup-aware compatibility floor. Set `HOSTED_RUNTIME_LOG_STORAGE=primary` and
-roll back to the first deployment of this change. That build returns new writes
-to primary while continuing isolated reads, retention, and account-deletion
-cleanup. Keep both isolated URLs configured. Once dedicated writes have existed,
-do not roll back to a pre-change build whose cleanup receipt can complete
-without deleting isolated rows. Do not repoint the isolated URL at the primary
-database, and leave the isolated schema in place during an incident.
+After the contract migration drops the primary table, the rollback floor is the
+first Web deployment that no longer references it. Restoring an older build
+requires re-expanding the primary schema first. Keep both isolated URLs
+configured, do not repoint them at the primary database, and leave the isolated
+schema in place during an incident.

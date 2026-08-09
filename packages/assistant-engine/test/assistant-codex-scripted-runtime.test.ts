@@ -35,6 +35,9 @@ import {
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  MURPH_ATTACH_RESPONSE_CARD_TOOL,
+} from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -133,6 +136,8 @@ interface ScriptedProviderRequestSummary {
     includesAutomation: boolean
     includesGroup: boolean
     includesReadShared: boolean
+    includesResponseCardCompactTableShape: boolean
+    includesResponseCardNutritionV2Shape: boolean
     includesSaveNewsletter: boolean
     includesToolSearch: boolean
   }
@@ -1496,6 +1501,79 @@ if (!tool) {
     ).toBeGreaterThan(4_000)
   })
 
+  it('preserves both response-card shapes through the real App Server boundary', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const cards = [
+      {
+        kind: 'compact_table',
+        version: 1,
+        title: 'Training sets',
+        subtitle: null,
+        rowHeader: 'Order',
+        columns: ['Set', 'Reps'],
+        rows: [
+          { label: 'First', values: ['1', '8'] },
+          { label: 'Second', values: ['2', '6'] },
+        ],
+        footer: null,
+        tracking: null,
+      },
+      {
+        kind: 'daily_nutrition',
+        version: 2,
+        localDate: '2026-08-08',
+        mealCount: 2,
+        totals: {
+          calories: { total: 900, mealCount: 2 },
+          proteinGrams: { total: 70, mealCount: 2 },
+          carbsGrams: { total: 80, mealCount: 2 },
+          fatGrams: { total: 30, mealCount: 2 },
+          fiberGrams: { total: 15, mealCount: 2 },
+        },
+        goals: {
+          calories: null,
+          proteinGrams: null,
+          carbsGrams: null,
+          fatGrams: null,
+          fiberGrams: null,
+        },
+      },
+    ] as const
+
+    for (const card of cards) {
+      const scenario = await prepareScriptedTurnScenario()
+      scenario.stub.captureProviderRequestDiagnostics()
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: { card },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        },
+        { text: 'CARD_ATTACHED' },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        groupConversation: false,
+        prompt: 'Attach the requested synthetic response card.',
+      })
+
+      expect(
+        scenario.stub.requestSummariesSinceBaseline()[0]
+          ?.providerRequestDiagnostics,
+      ).toMatchObject({
+        includesResponseCardCompactTableShape: true,
+        includesResponseCardNutritionV2Shape: true,
+      })
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.responseCard).toEqual(card)
+    }
+  })
+
   it('discovers deferred Murph schemas through native Codex tool_search', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -2391,7 +2469,6 @@ text(JSON.stringify(result));
     const authorizations: unknown[] = []
     const groupRequests: unknown[] = []
     const phoneCallStarts: unknown[] = []
-    const previewAuthorityChecks: unknown[] = []
     const userActionScope = {
       acceptedInputIds: [messageRef],
       conversationId: 'conversation_group_effect',
@@ -2402,12 +2479,6 @@ text(JSON.stringify(result));
     }
     const hostedToolContext: AssistantHostedToolContext = {
       computerToolsAvailable: false,
-      currentGroupPhoneCallPreviewAuthority: async (input) => {
-        previewAuthorityChecks.push(input)
-        return input?.confirmationInputId === messageRef
-          ? { assistantInputId: messageRef }
-          : null
-      },
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
       currentUserActionScope: () => userActionScope,
@@ -2521,22 +2592,6 @@ text(JSON.stringify(result));
     expect(groupRequests).toEqual([{
       action: 'revoke_own_email_share',
       participant,
-    }])
-    expect(previewAuthorityChecks).toEqual([{
-      brief: {
-        allowTransferToUser: false,
-        callerName: 'Murph',
-        goal: 'Confirm the office opening time.',
-        instructions: ['Ask only for the opening time.'],
-        shareableFacts: {},
-        successCriteria: 'The office states its opening time.',
-        timeZone: 'America/New_York',
-        to: {
-          label: 'The office',
-          phoneNumber: '+12125550123',
-        },
-      },
-      confirmationInputId: messageRef,
     }])
     expect(phoneCallStarts).toEqual([
       expect.objectContaining({
@@ -3181,6 +3236,23 @@ function readScriptedProviderRequestSummary(
             includesAutomation: requestBody.includes('"name":"automation"'),
             includesGroup: requestBody.includes('"name":"group"'),
             includesReadShared: requestBody.includes('read_shared'),
+            includesResponseCardCompactTableShape: [
+              'compact_table',
+              'columns',
+              'rowHeader',
+              'rows',
+              'values',
+              'tracking',
+              'snapshotAt',
+            ].every((field) => requestBody.includes(field)),
+            includesResponseCardNutritionV2Shape: [
+              'daily_nutrition',
+              'fiberGrams',
+              'goals',
+              'status',
+              'target',
+              'totals',
+            ].every((field) => requestBody.includes(field)),
             includesSaveNewsletter: requestBody.includes('save_newsletter'),
             includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
           },

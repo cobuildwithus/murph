@@ -176,6 +176,35 @@ async function reconcileAssistantCronTerminalDelivery(input: {
   })
 }
 
+/**
+ * Derives the scheduled-delivery cohort from durable cron owner state: every
+ * outbox intent currently referenced by a local job's or canonical runtime
+ * record's persisted pendingDeliveryIntentId. Because this reads owner state
+ * at call time, the cohort survives foreground preemption and process
+ * restarts without any pass-local bookkeeping.
+ */
+export async function listAssistantCronPendingDeliveryIntentIds(
+  vault: string,
+): Promise<string[]> {
+  const paths = resolveAssistantStatePaths(vault)
+  const [localStore, runtimeStore] = await Promise.all([
+    readAssistantCronStore(paths),
+    readAssistantCronCanonicalRuntimeStore(paths),
+  ])
+  const intentIds = new Set<string>()
+  for (const job of localStore.jobs) {
+    if (job.state.pendingDeliveryIntentId) {
+      intentIds.add(job.state.pendingDeliveryIntentId)
+    }
+  }
+  for (const runtimeState of runtimeStore.jobs) {
+    if (runtimeState.state.pendingDeliveryIntentId) {
+      intentIds.add(runtimeState.state.pendingDeliveryIntentId)
+    }
+  }
+  return [...intentIds]
+}
+
 export async function repairPendingAssistantCronDeliveries(input: {
   missingIntentStaleAfterMs?: number
   now?: Date

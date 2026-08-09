@@ -58,6 +58,7 @@ import type {
 } from './types.js'
 import type {
   AssistantMessageReaction,
+  AssistantProviderMessageEffect,
   AssistantResponseMedia,
   AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -517,6 +518,7 @@ export async function sendLinqMessage(
 ): Promise<{
   idempotencyKey?: string | null
   providerMessageId: string | null
+  providerMessageEffects?: AssistantProviderMessageEffect[]
   providerMessageIds?: string[]
   providerThreadId: string | null
   target: string | null
@@ -607,6 +609,10 @@ export async function sendLinqMessage(
       ) {
         throw error
       }
+      dependencies.onAppCardFallbackError?.({
+        error,
+        reason: 'capability_check_failed',
+      })
     }
     if (capabilityAvailable) {
       try {
@@ -622,8 +628,19 @@ export async function sendLinqMessage(
             ...(dependencies.signal ? { signal: dependencies.signal } : {}),
           },
         )
+        const providerMessageId = normalizeOptionalText(
+          delivered.message?.id ?? null,
+        )
         return {
-          providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+          providerMessageId,
+          ...(providerMessageId
+            ? {
+                providerMessageEffects: [{
+                  message: null,
+                  providerMessageId,
+                }],
+              }
+            : {}),
           providerThreadId: null,
           target,
         }
@@ -634,6 +651,10 @@ export async function sendLinqMessage(
         ) {
           throw error
         }
+        dependencies.onAppCardFallbackError?.({
+          error,
+          reason: 'app_card_rejected',
+        })
         appCardFallbackIdempotencyKey = `${idempotencyKey}:fallback`
       }
     }
@@ -686,6 +707,9 @@ export async function sendLinqMessage(
 
     return {
       providerMessageId: normalizeOptionalText(created.messageId),
+      ...(created.providerMessageEffects && created.providerMessageEffects.length > 0
+        ? { providerMessageEffects: [...created.providerMessageEffects] }
+        : {}),
       ...(created.providerMessageIds && created.providerMessageIds.length > 0
         ? { providerMessageIds: [...created.providerMessageIds] }
         : {}),
@@ -719,6 +743,9 @@ export async function sendLinqMessage(
       ? { idempotencyKey: appCardFallbackIdempotencyKey }
       : {}),
     providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+    ...(delivered.providerMessageEffects && delivered.providerMessageEffects.length > 0
+      ? { providerMessageEffects: [...delivered.providerMessageEffects] }
+      : {}),
     ...(delivered.providerMessageIds && delivered.providerMessageIds.length > 0
       ? { providerMessageIds: [...delivered.providerMessageIds] }
       : {}),

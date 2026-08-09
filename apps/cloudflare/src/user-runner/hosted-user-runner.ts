@@ -35,6 +35,7 @@ import {
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import { withSerializedLock } from "../serialized-lock.js";
 import type {
+  WorkerAnalyticsEngineDatasetLike,
   WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
 } from "../worker-contracts.js";
@@ -72,7 +73,6 @@ import {
   RuntimeProcessingController,
   type RuntimeProcessingInput,
 } from "./runtime-processing-controller.js";
-
 export type { DurableObjectStateLike } from "./types.js";
 
 export interface HostedRuntimeHealthDataConsentReconcileResult {
@@ -85,6 +85,9 @@ export interface HostedRuntimeHealthDataConsentReconcileResult {
 }
 
 const HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS = 60_000;
+// The retained hint measured a 693 ms provider-start p50 gain. Abandon its
+// optional admission before it can consume even half of that useful overlap.
+const HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS = 250;
 
 export class HostedUserRunner {
   protected readonly stateStore: RunnerStateStore;
@@ -96,6 +99,7 @@ export class HostedUserRunner {
   private readonly privateMediaBucket: R2BucketLike;
   private readonly privateMediaCapabilitySecret: string | null;
   private readonly privateMediaDeliveryOrigin: string;
+  private readonly runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null;
   private privateMediaMutationLock: Promise<void> | null = null;
   private runtimeConsentMutationLock: Promise<void> | null = null;
 
@@ -109,6 +113,7 @@ export class HostedUserRunner {
         runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
       }
     ).runnerContainerNamespace ?? null,
+    runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null = null,
   ) {
     this.stateStore = new RunnerStateStore(state);
     this.privateMediaBucket = bucket;
@@ -116,6 +121,7 @@ export class HostedUserRunner {
       readHostedPrivateMediaCapabilitySecret(runnerRuntimeEnvSource);
     this.privateMediaDeliveryOrigin =
       readHostedPrivateMediaDeliveryOrigin(runnerRuntimeEnvSource);
+    this.runtimeRetryAnalytics = runtimeRetryAnalytics;
     this.runnerStoreCache = new RunnerStoreCache({
       bucket,
       env,
@@ -141,6 +147,7 @@ export class HostedUserRunner {
       invocationService: runtimeInvocation,
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
+      runtimeRetryAnalytics,
       stateStore: this.stateStore,
     });
     this.runtimeProcessing = runtimeProcessing;
@@ -204,13 +211,15 @@ export class HostedUserRunner {
   }
 
   async deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult> {
-    return this.withPrivateMediaMutationLock(async () => {
-      this.runnerStoreCache.clearIfUser(userId);
-      return await deleteHostedRunnerUserData({
-        ...this.userDataDeletionInput,
-        userId,
-      });
-    });
+    return this.withRuntimeConsentMutationLock(async () =>
+      await this.withPrivateMediaMutationLock(async () => {
+        this.runnerStoreCache.clearIfUser(userId);
+        return await deleteHostedRunnerUserData({
+          ...this.userDataDeletionInput,
+          userId,
+        });
+      })
+    );
   }
 
   async publishHostedPrivateMedia(
@@ -257,9 +266,16 @@ export class HostedUserRunner {
     input: RuntimeProcessingInput,
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     return await this.withRuntimeConsentMutationLock(async () => {
+      const lockInput = withRuntimeOrchestration(input, {
+        runtimeConsentLockAcquiredAtEpochMs: Date.now(),
+        healthDataAdmissionReadStartedAtEpochMs: Date.now(),
+      });
       const admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
-        input.userId,
+        lockInput.userId,
       );
+      const processingInput = withRuntimeOrchestration(lockInput, {
+        healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
+      });
       if (!admission.processingAllowed) {
         return {
           kind: "retry_later",
@@ -268,7 +284,28 @@ export class HostedUserRunner {
           ).toISOString(),
         };
       }
-      return await this.runtimeProcessing.ensureForUser(input);
+      return await this.runtimeProcessing.ensureForUser(processingInput);
+    });
+  }
+
+  async prewarmRuntimeShellForUser(userId: string): Promise<void> {
+    if (this.runtimeConsentMutationLock) {
+      return;
+    }
+    await this.withRuntimeConsentMutationLock(async () => {
+      let admission: HostedRuntimeHealthDataAdmissionResponse;
+      try {
+        admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
+          userId,
+          { timeoutMs: HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS },
+        );
+      } catch {
+        return;
+      }
+      if (!admission.processingAllowed) {
+        return;
+      }
+      await this.runtimeProcessing.beginShellPrewarmForUser(userId);
     });
   }
 
@@ -516,6 +553,7 @@ export class HostedUserRunner {
 
   private async readHostedRuntimeHealthDataAdmissionFromWeb(
     userId: string,
+    input: { timeoutMs?: number } = {},
   ): Promise<HostedRuntimeHealthDataAdmissionResponse> {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       ...(this.env.hostedWebAllowHttpHosts
@@ -526,7 +564,7 @@ export class HostedUserRunner {
       callbackSigning: this.env.webCallbackSigning,
       method: "GET",
       path: HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
-      timeoutMs: this.env.webControlTimeoutMs,
+      timeoutMs: input.timeoutMs ?? this.env.webControlTimeoutMs,
     });
 
     if (!response.ok) {
@@ -581,4 +619,17 @@ export class HostedUserRunner {
   private readHostedWebControlBaseUrl(): string {
     return this.env.hostedWebBaseUrl;
   }
+}
+
+function withRuntimeOrchestration(
+  input: RuntimeProcessingInput,
+  orchestration: NonNullable<RuntimeProcessingInput["orchestration"]>,
+): RuntimeProcessingInput {
+  return {
+    ...input,
+    orchestration: {
+      ...(input.orchestration ?? {}),
+      ...orchestration,
+    },
+  };
 }

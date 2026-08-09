@@ -572,6 +572,52 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'weighs native reply context when deciding group-floor ownership',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-native-reply-context-e2e-'),
+      )
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: buildNativeReplyContextCandidateProbe(),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(result.finalMessage.trim()).toBe('1:B 2:A 3:A 4:A 5:A')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'handles delegated initiative in a direct text',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -1427,11 +1473,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'delivers a group call preview in one turn and calls only after a later exact confirmation',
+    'places one bounded group call from the current request without a group-only preview turn',
     async () => {
       const config = await resolveRealCodexE2eConfig()
-      const previewMessageRef = `ain_${'1'.repeat(32)}`
-      const confirmationMessageRef = `ain_${'2'.repeat(32)}`
+      const messageRef = `ain_${'1'.repeat(32)}`
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-group-phone-call-e2e-'),
       )
@@ -1446,7 +1491,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             })
           }),
         )
-        const commonInput = {
+        const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -1460,94 +1505,45 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
+          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
+          prompt: [
+            `Message ref: ${messageRef}`,
+            'Sender: participant-a',
+            'Profile name (display only): "Sam"',
+            'Place exactly one public restaurant call now for this room.',
+            'Reserve an outdoor table for six on August 15, 2026 at 7:00 p.m. America/New_York time by calling +12025550123.',
+            'A deposit is acceptable only up to $50 and only if refundable until 24 hours before the reservation.',
+            'I explicitly approve using my caller name Sam and sharing only that name and those room-visible reservation details.',
+            'Do not transfer the call to a participant. This is the complete bounded request.',
+          ].join('\n\n'),
           reasoningEffort: 'low',
-          sandbox: 'workspace-write' as const,
+          sandbox: 'workspace-write',
           workingDirectory,
-        }
-        const preview = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: [
-            `Message ref: ${previewMessageRef}`,
-            'Sender: participant-a',
-            'Profile name (display only): "Sam"',
-            'Prepare one public restaurant call for this room.',
-            'The request is an outdoor table for six on August 15, 2026 at 7:00 p.m. America/New_York time at +12025550123.',
-            'The caller name would be Sam. A deposit is acceptable only up to $50 and only if refundable until 24 hours before the reservation.',
-            'Share only that caller name and those room-visible reservation details.',
-            'I am not confirming the call yet. Deliver the exact call preview and wait for a later confirmation message. Do not call now.',
-          ].join('\n\n'),
         })
-        const previewActions = readCapabilityRoutingActions(preview.jsonEvents)
-        const previewToolCalls = previewActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_CREATE_PHONE_CALL_TOOL.name
-        )
-
-        expect(previewToolCalls).toHaveLength(0)
-        expect(preview.finalMessage).toContain('GROUP CALL PREVIEW')
-        expect(preview.finalMessage).toMatch(/restaurant|reserve|reservation/iu)
-        expect(preview.finalMessage).toContain('+12025550123')
-        expect(preview.finalMessage).toMatch(/August 15|2026-08-15/iu)
-        expect(preview.finalMessage).toMatch(/six|party.?size.{0,20}6/iu)
-        expect(preview.finalMessage).toMatch(/\$?50|deposit/iu)
-        expect(preview.finalMessage).toMatch(/24 hours|24-hour|refund/iu)
-        expect(preview.finalMessage).toContain(
-          'Transfer to a participant: no',
-        )
-        expect(preview.finalMessage).toMatch(/confirm|approve/iu)
-
-        const confirmed = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: [
-            `Message ref: ${confirmationMessageRef}`,
-            'Sender: participant-a',
-            'Profile name (display only): "Sam"',
-            'I am the same current requester.',
-            'I explicitly confirm the exact call preview you delivered in the prior turn, including the restaurant destination, August 15, 2026 at 7:00 p.m. America/New_York time, outdoor table for six, refundable deposit ceiling of $50, and 24-hour cancellation boundary.',
-            'I explicitly approve using my caller name Sam and sharing only that name and the room-visible reservation details. Place exactly one call now with no transfer.',
-          ].join('\n\n'),
-          resumeSessionId: preview.sessionId,
-        })
-        const confirmedActions = readCapabilityRoutingActions(
-          confirmed.jsonEvents,
-        )
-        const previewSkillRead = previewActions.find((action) =>
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const skillRead = actions.find((action) =>
           action.kind === 'command'
           && action.command.includes('phone-calls/SKILL.md')
           && action.output.includes('# Phone Calls')
         )
-        const confirmedSkillRead = confirmedActions.find((action) =>
-          action.kind === 'command'
-          && action.command.includes('phone-calls/SKILL.md')
-          && action.output.includes('# Phone Calls')
-        )
-        const toolCalls = confirmedActions.filter((action) =>
+        const toolCalls = actions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_CREATE_PHONE_CALL_TOOL.name
         )
 
-        expect(
-          previewSkillRead ?? confirmedSkillRead,
-          'phone-calls skill read',
-        ).toBeDefined()
+        expect(skillRead, 'phone-calls skill read').toBeDefined()
         expect(toolCalls).toHaveLength(1)
         const toolCall = toolCalls[0]
         if (toolCall?.kind !== 'dynamic') {
           throw new Error('Expected a real group phone-call tool call.')
         }
         expect(
-          previewSkillRead !== undefined
-          || (
-            confirmedSkillRead !== undefined
-            && toolCall.eventIndex > confirmedSkillRead.eventIndex
-          ),
+          skillRead !== undefined && toolCall.eventIndex > skillRead.eventIndex,
           'phone-calls skill read before the real call',
         ).toBe(true)
-        expect(toolCall.argumentsValue.message_ref).toBe(
-          confirmationMessageRef,
-        )
+        expect(toolCall.argumentsValue.message_ref).toBe(messageRef)
         expect(toolCall.argumentsValue).toMatchObject({
           allowTransferToUser: false,
           callerName: 'Sam',
@@ -1562,6 +1558,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(serializedArguments).toMatch(/six|party.?size.{0,20}6/iu)
         expect(serializedArguments).toMatch(/\$?50|deposit/iu)
         expect(serializedArguments).toMatch(/24 hours|24-hour|refund/iu)
+        const removedStructuredHeading = ['GROUP', 'CALL', 'PREVIEW'].join(' ')
+        expect(serializedArguments).not.toContain(removedStructuredHeading)
+        expect(result.finalMessage).not.toContain(removedStructuredHeading)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -2156,14 +2155,87 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 })
 
 describeRealCodex('real Codex hosted usage behavior e2e', () => {
-  it(
-    'routes a Core quote and confirmed change through the legacy billing code',
-    async () => {
+  it.each([
+    {
+      confirmationPrompt: [
+        'Yes. I explicitly confirm switching from Pulse to Core for',
+        '$3.50/month at the end of my current period on August 30, 2026.',
+        'Apply that exact quoted change now.',
+      ].join(' '),
+      confirmedMessagePattern: /August 30|2026-08-30|scheduled/iu,
+      currentPlanCode: 'launch_monthly',
+      currentPlanName: 'Pulse',
+      quoteId: 'quote_core_plan_e2e',
+      quoteLabel: 'Switch to Group at period end ($3.50/month)',
+      quotePrompt: [
+        'What would switching from Pulse to Core cost?',
+        'Give me the exact price and timing, but do not change anything yet.',
+        'Ask me to confirm the exact quoted change.',
+      ].join(' '),
+      quoteTimingPattern: /August 30|2026-08-30|period end/iu,
+      recurringAmountUsdCents: 350,
+      subscriptionResponse: {
+        action: 'change_plan',
+        effectiveAt: '2026-08-30T12:00:00.000Z',
+        plan: {
+          code: 'launch_group_monthly',
+          displayName: 'Group',
+          interval: 'month',
+          recurringAmountUsdCents: 350,
+        },
+        status: 'scheduled',
+      },
+      targetPlanCode: 'launch_group_monthly',
+      targetPlanName: 'Core',
+      timing: 'period_end',
+      title: 'routes a Core quote and confirmed change through the legacy billing code',
+      unsupportedModelPattern: null,
+      wireOnlyPlanPattern: /\bGroup\b/u,
+      workingDirectoryPrefix: 'murph-core-plan-change-e2e-',
+    },
+    {
+      confirmationPrompt: [
+        'Yes. I explicitly confirm upgrading from Edge to Max for $50/month now.',
+        'Apply that exact quoted change.',
+      ].join(' '),
+      confirmedMessagePattern: /Stripe|payment|billing|confirm/iu,
+      currentPlanCode: 'launch_edge_monthly',
+      currentPlanName: 'Edge',
+      quoteId: 'quote_max_plan_e2e',
+      quoteLabel: 'Upgrade to Max now ($50/month)',
+      quotePrompt: [
+        'I am on Edge and explicitly want Max.',
+        'Give me the exact Max price and timing, but do not change anything yet.',
+        'Ask me to confirm the exact quoted change.',
+      ].join(' '),
+      quoteTimingPattern: /now|immediate/iu,
+      recurringAmountUsdCents: 5_000,
+      subscriptionResponse: {
+        action: 'change_plan',
+        paymentUrl: 'https://billing.stripe.test/max-confirmation',
+        plan: {
+          code: 'launch_max_monthly',
+          displayName: 'Max',
+          interval: 'month',
+          recurringAmountUsdCents: 5_000,
+        },
+        status: 'payment_required',
+      },
+      targetPlanCode: 'launch_max_monthly',
+      targetPlanName: 'Max',
+      timing: 'immediate',
+      title: 'quotes and confirms an explicit Max upgrade without inventing a model',
+      unsupportedModelPattern: /GPT-(?:5\.[7-9]|[6-9])\b|model codename|launch date/iu,
+      wireOnlyPlanPattern: null,
+      workingDirectoryPrefix: 'murph-max-plan-change-e2e-',
+    },
+  ] as const)(
+    '$title',
+    async (scenario) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-core-plan-change-e2e-'),
+        path.join(tmpdir(), scenario.workingDirectoryPrefix),
       )
-      const quoteId = 'quote_core_plan_e2e'
       const confirmationInputId = `ain_${'c'.repeat(32)}`
       let currentAssistantInputId = `ain_${'b'.repeat(32)}`
       let subscriptionActionClaimed = false
@@ -2214,20 +2286,19 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                   periodEnd: '2026-08-30T12:00:00.000Z',
                   periodKind: 'monthly',
                   periodStart: '2026-07-30T12:00:00.000Z',
-                  planCode: 'launch_monthly',
-                  planName: 'Pulse',
+                  planCode: scenario.currentPlanCode,
+                  planName: scenario.currentPlanName,
                   recommendedAction: null,
                   remainingPercent: 64,
                   status: 'active',
                   subscriptionActionQuote: {
                     action: 'change_plan',
                     expiresAt: '2026-07-30T12:10:00.000Z',
-                    label:
-                      'Switch to Group at period end ($3.50/month)',
-                    monthlyPriceUsdCents: 350,
-                    quoteId,
-                    targetPlanCode: 'launch_group_monthly',
-                    timing: 'period_end',
+                    label: scenario.quoteLabel,
+                    monthlyPriceUsdCents: scenario.recurringAmountUsdCents,
+                    quoteId: scenario.quoteId,
+                    targetPlanCode: scenario.targetPlanCode,
+                    timing: scenario.timing,
                   },
                   usedPercent: 36,
                 }
@@ -2239,17 +2310,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             subscriptionTool: {
               request: async (request) => {
                 subscriptionRequests.push({ ...request })
-                return {
-                  action: 'change_plan',
-                  effectiveAt: '2026-08-30T12:00:00.000Z',
-                  plan: {
-                    code: 'launch_group_monthly',
-                    displayName: 'Group',
-                    interval: 'month',
-                    recurringAmountUsdCents: 350,
-                  },
-                  status: 'scheduled',
-                }
+                return scenario.subscriptionResponse
               },
             },
             vaultFileSendAvailable: false,
@@ -2262,11 +2323,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         }
         const quote = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: [
-            'What would switching from Pulse to Core cost?',
-            'Give me the exact price and timing, but do not change anything yet.',
-            'Ask me to confirm the exact quoted change.',
-          ].join(' '),
+          prompt: scenario.quotePrompt,
         })
         const quoteActions = readCapabilityRoutingActions(quote.jsonEvents)
         const skillRead = quoteActions.find((action) =>
@@ -2280,38 +2337,50 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         )
 
         expect(skillRead, 'hosted-low-usage skill read').toBeDefined()
-        expect(planUsageAction, 'Core-targeted plan usage read').toBeDefined()
+        expect(
+          planUsageAction,
+          `${scenario.targetPlanName}-targeted plan usage read`,
+        ).toBeDefined()
         if (
           skillRead?.kind !== 'command'
           || planUsageAction?.kind !== 'dynamic'
         ) {
-          throw new Error('Expected skill and Core plan-usage actions.')
+          throw new Error(
+            `Expected skill and ${scenario.targetPlanName} plan-usage actions.`,
+          )
         }
         expect(skillRead.eventIndex).toBeLessThan(planUsageAction.eventIndex)
         expect(planUsageAction.argumentsValue).toEqual({
-          targetPlanCode: 'launch_group_monthly',
+          targetPlanCode: scenario.targetPlanCode,
         })
         expect(planUsageRequests).toEqual([{
           includeSubscriptionActionQuote: true,
-          subscriptionActionTargetPlanCode: 'launch_group_monthly',
+          subscriptionActionTargetPlanCode: scenario.targetPlanCode,
         }])
         expect(subscriptionRequests).toHaveLength(0)
-        expect(quote.finalMessage).toMatch(/\bCore\b/u)
-        expect(quote.finalMessage).toMatch(/\$3\.50(?:\/month)?/u)
         expect(quote.finalMessage).toMatch(
-          /August 30|2026-08-30|period end/iu,
+          new RegExp(`\\b${scenario.targetPlanName}\\b`, 'u'),
         )
+        expect(quote.finalMessage).toMatch(
+          scenario.recurringAmountUsdCents === 350
+            ? /\$3\.50(?:\/month)?/u
+            : /\$50(?:\.00)?(?:\/month)?/u,
+        )
+        expect(quote.finalMessage).toMatch(scenario.quoteTimingPattern)
         expect(quote.finalMessage).toMatch(/confirm/iu)
-        expect(quote.finalMessage).not.toMatch(/\bGroup\b/u)
+        if (scenario.wireOnlyPlanPattern) {
+          expect(quote.finalMessage).not.toMatch(scenario.wireOnlyPlanPattern)
+        }
+        if (scenario.unsupportedModelPattern) {
+          expect(quote.finalMessage).not.toMatch(
+            scenario.unsupportedModelPattern,
+          )
+        }
 
         currentAssistantInputId = confirmationInputId
         const confirmed = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: [
-            'Yes. I explicitly confirm switching from Pulse to Core for',
-            '$3.50/month at the end of my current period on August 30, 2026.',
-            'Apply that exact quoted change now.',
-          ].join(' '),
+          prompt: scenario.confirmationPrompt,
           resumeSessionId: quote.sessionId,
         })
         const confirmedActions = readCapabilityRoutingActions(
@@ -2322,27 +2391,40 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           && action.tool === MURPH_SUBSCRIPTION_TOOL.name
         )
 
-        expect(subscriptionAction, 'confirmed Core subscription action')
-          .toBeDefined()
+        expect(
+          subscriptionAction,
+          `confirmed ${scenario.targetPlanName} subscription action`,
+        ).toBeDefined()
         if (subscriptionAction?.kind !== 'dynamic') {
-          throw new Error('Expected a confirmed Core subscription action.')
+          throw new Error(
+            `Expected a confirmed ${scenario.targetPlanName} subscription action.`,
+          )
         }
         expect(subscriptionAction.argumentsValue).toEqual({
           action: 'change_plan',
-          quoteId,
-          targetPlanCode: 'launch_group_monthly',
+          quoteId: scenario.quoteId,
+          targetPlanCode: scenario.targetPlanCode,
         })
         expect(subscriptionRequests).toEqual([{
           action: 'change_plan',
           assistantInputId: confirmationInputId,
-          quoteId,
-          targetPlanCode: 'launch_group_monthly',
+          quoteId: scenario.quoteId,
+          targetPlanCode: scenario.targetPlanCode,
         }])
-        expect(confirmed.finalMessage).toMatch(/\bCore\b/u)
         expect(confirmed.finalMessage).toMatch(
-          /August 30|2026-08-30|scheduled/iu,
+          new RegExp(`\\b${scenario.targetPlanName}\\b`, 'u'),
         )
-        expect(confirmed.finalMessage).not.toMatch(/\bGroup\b/u)
+        expect(confirmed.finalMessage).toMatch(scenario.confirmedMessagePattern)
+        if (scenario.wireOnlyPlanPattern) {
+          expect(confirmed.finalMessage).not.toMatch(
+            scenario.wireOnlyPlanPattern,
+          )
+        }
+        if (scenario.unsupportedModelPattern) {
+          expect(confirmed.finalMessage).not.toMatch(
+            scenario.unsupportedModelPattern,
+          )
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -2354,7 +2436,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
   )
 
   it(
-    'answers broad hosted-usage requests from current usage and referral reads',
+    'answers broad usage requests and keeps low-capacity automatic recovery private',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const privateWorkingDirectory = await mkdtemp(
@@ -2363,21 +2445,21 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
       const groupWorkingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-group-usage-options-e2e-'),
       )
-      const sponsoredGroupWorkingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-sponsored-group-usage-e2e-'),
+      const fundingPrivacyWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-funding-privacy-e2e-'),
       )
       let privatePlanUsageReads = 0
       const privateGroupActions: string[] = []
       const groupActions: string[] = []
-      const sponsoredGroupActions: string[] = []
+      const fundingPrivacyActions: string[] = []
       const fundingUrl =
         'https://www.withmurph.ai/groups/fund/e2e_usage_options'
 
       try {
         const privateSkillsRoot = path.join(privateWorkingDirectory, 'skills')
         const groupSkillsRoot = path.join(groupWorkingDirectory, 'skills')
-        const sponsoredGroupSkillsRoot = path.join(
-          sponsoredGroupWorkingDirectory,
+        const fundingPrivacySkillsRoot = path.join(
+          fundingPrivacyWorkingDirectory,
           'skills',
         )
         await Promise.all([
@@ -2394,11 +2476,11 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             slug: 'hosted-low-usage',
           }),
           materializeAssistantSkill({
-            skillsRoot: sponsoredGroupSkillsRoot,
+            skillsRoot: fundingPrivacySkillsRoot,
             slug: 'group-chat',
           }),
           materializeAssistantSkill({
-            skillsRoot: sponsoredGroupSkillsRoot,
+            skillsRoot: fundingPrivacySkillsRoot,
             slug: 'hosted-low-usage',
           }),
         ])
@@ -2537,7 +2619,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                       usage: {
                         fundingNeeded: true,
                         fundingUrl,
-                        sponsorshipStatus: 'not_sponsored',
                       },
                     },
                   }
@@ -2603,19 +2684,22 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(groupResult.finalMessage).toContain('$3.50 of cost-weighted usage credit')
         expect(groupResult.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
 
-        const sponsoredGroupResult = await executeRealCodexAppServerTurn({
+        const fundingPrivacyResult = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions:
+          developerInstructions: [
             buildHostedUsageOptionsDeveloperInstructions('group'),
+            'Hosted usage context:',
+            "This conversation's remaining Murph usage is running low.",
+          ].join('\n\n'),
           dynamicTools: [MURPH_GROUP_TOOL],
           env: {
             ...config.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: sponsoredGroupSkillsRoot,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: fundingPrivacySkillsRoot,
           },
           excludeResumeTurns: true,
           hostedToolContext: {
@@ -2624,10 +2708,10 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             currentHostedMailboxItemIds: () => [],
             groupTool: {
               request: async (request) => {
-                sponsoredGroupActions.push(request.action)
+                fundingPrivacyActions.push(request.action)
                 if (request.action !== 'read_usage') {
                   throw new Error(
-                    `Unexpected sponsored group usage action: ${request.action}`,
+                    `Unexpected group funding privacy action: ${request.action}`,
                   )
                 }
                 return {
@@ -2637,7 +2721,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                     usage: {
                       fundingNeeded: false,
                       fundingUrl: null,
-                      sponsorshipStatus: 'sponsored',
                     },
                   },
                 }
@@ -2650,25 +2733,27 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           },
           model: config.model,
           modelProvider: config.modelProvider,
-          prompt:
-            'Is Murph sponsored here? Tell the room only what everyone needs to know.',
+          prompt: [
+            'Is Murph sponsored here, or is an automatic refill keeping this room going?',
+            'Tell the room only what everyone needs to know.',
+          ].join(' '),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
-          workingDirectory: sponsoredGroupWorkingDirectory,
+          workingDirectory: fundingPrivacyWorkingDirectory,
         })
 
-        expect(sponsoredGroupActions).toEqual(['read_usage'])
-        expect(sponsoredGroupResult.finalMessage).toMatch(
-          /Murph is sponsored in (?:this|the) chat/iu,
+        expect(fundingPrivacyActions).toEqual(['read_usage'])
+        expect(fundingPrivacyResult.finalMessage).toMatch(
+          /private|can't|cannot|don't have|not available/iu,
         )
-        expect(sponsoredGroupResult.finalMessage).not.toMatch(
-          /(?:\$|charged|maximum|monthly cap|payer|percent|balance|remaining|refill|purchase|funding link|runs? low|deplet)/iu,
+        expect(fundingPrivacyResult.finalMessage).not.toMatch(
+          /(?:Murph is sponsored|\$|charged|maximum|monthly cap|payer|percent|balance|remaining|refill|purchase|funding link|runs? low|deplet)/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
           privateWorkingDirectory,
           groupWorkingDirectory,
-          sponsoredGroupWorkingDirectory,
+          fundingPrivacyWorkingDirectory,
           ...config.temporaryPaths,
         ])
       }
@@ -2733,7 +2818,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                       usage: {
                         fundingNeeded: true,
                         fundingUrl,
-                        sponsorshipStatus: 'not_sponsored',
                       },
                     },
                   }
@@ -2797,7 +2881,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(first.finalMessage).toMatch(/\?/u)
         expect(first.finalMessage).not.toContain(fundingUrl)
         expect(first.finalMessage).not.toMatch(
-          /sponsor|funding|referral|introduc/iu,
+          /sponsor|payer|\$|charged|maximum|monthly cap|percent|balance|remaining|refill|purchase|funding|referral|introduc/iu,
         )
 
         groupActions.length = 0
@@ -2823,7 +2907,10 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(activeGroupPathIndex).toBeGreaterThanOrEqual(0)
         expect(fundingUrlIndex).toBeGreaterThan(newPersonPathIndex)
         expect(fundingUrlIndex).toBeGreaterThan(activeGroupPathIndex)
-        expect(second.finalMessage).not.toMatch(/messages?\b/iu)
+        expect(second.finalMessage).toMatch(/sponsor|fund/iu)
+        expect(second.finalMessage).not.toMatch(
+          /messages?\b|one-time|monthly sponsorship|second sponsor|new sponsor|payer|charged|maximum|monthly cap|balance|remaining|percent|refill/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -2841,11 +2928,11 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
       const healthyGroupWorkingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-healthy-group-funding-e2e-'),
       )
-      const sponsoredGroupWorkingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-sponsored-group-contribution-e2e-'),
+      const oneTimeGroupWorkingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-one-time-group-contribution-e2e-'),
       )
       const healthyGroupActions: string[] = []
-      const sponsoredGroupActions: string[] = []
+      const oneTimeGroupActions: string[] = []
       const fundingUrl =
         'https://www.withmurph.ai/groups/fund/e2e_direct_funding'
 
@@ -2854,8 +2941,8 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           healthyGroupWorkingDirectory,
           'skills',
         )
-        const sponsoredSkillsRoot = path.join(
-          sponsoredGroupWorkingDirectory,
+        const oneTimeSkillsRoot = path.join(
+          oneTimeGroupWorkingDirectory,
           'skills',
         )
         await Promise.all([
@@ -2868,11 +2955,11 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             slug: 'hosted-low-usage',
           }),
           materializeAssistantSkill({
-            skillsRoot: sponsoredSkillsRoot,
+            skillsRoot: oneTimeSkillsRoot,
             slug: 'group-chat',
           }),
           materializeAssistantSkill({
-            skillsRoot: sponsoredSkillsRoot,
+            skillsRoot: oneTimeSkillsRoot,
             slug: 'hosted-low-usage',
           }),
         ])
@@ -2911,7 +2998,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                     usage: {
                       fundingNeeded: false,
                       fundingUrl,
-                      sponsorshipStatus: 'not_sponsored',
                     },
                   },
                 }
@@ -2939,7 +3025,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           /referr|mission|earn|runs? low|deplet|remaining|percent/iu,
         )
 
-        const sponsoredResult = await executeRealCodexAppServerTurn({
+        const oneTimeResult = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -2951,7 +3037,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           dynamicTools: [MURPH_GROUP_TOOL],
           env: {
             ...config.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: sponsoredSkillsRoot,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: oneTimeSkillsRoot,
           },
           excludeResumeTurns: true,
           hostedToolContext: {
@@ -2960,10 +3046,10 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             currentHostedMailboxItemIds: () => [],
             groupTool: {
               request: async (request) => {
-                sponsoredGroupActions.push(request.action)
+                oneTimeGroupActions.push(request.action)
                 if (request.action !== 'read_usage') {
                   throw new Error(
-                    `Unexpected sponsored group contribution action: ${request.action}`,
+                    `Unexpected one-time group contribution action: ${request.action}`,
                   )
                 }
                 return {
@@ -2973,7 +3059,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                     usage: {
                       fundingNeeded: false,
                       fundingUrl,
-                      sponsorshipStatus: 'sponsored',
                     },
                   },
                 }
@@ -2992,19 +3077,19 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           ].join(' '),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
-          workingDirectory: sponsoredGroupWorkingDirectory,
+          workingDirectory: oneTimeGroupWorkingDirectory,
         })
 
-        expect(sponsoredGroupActions).toEqual(['read_usage'])
-        expect(sponsoredResult.finalMessage).toContain(fundingUrl)
-        expect(sponsoredResult.finalMessage).toMatch(/one-time|contribut/iu)
-        expect(sponsoredResult.finalMessage).not.toMatch(
+        expect(oneTimeGroupActions).toEqual(['read_usage'])
+        expect(oneTimeResult.finalMessage).toContain(fundingUrl)
+        expect(oneTimeResult.finalMessage).toMatch(/one-time|contribut/iu)
+        expect(oneTimeResult.finalMessage).not.toMatch(
           /referr|mission|earn|payer|charged|maximum|monthly cap|balance|refill|remaining|percent|runs? low|deplet/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
           healthyGroupWorkingDirectory,
-          sponsoredGroupWorkingDirectory,
+          oneTimeGroupWorkingDirectory,
           ...config.temporaryPaths,
         ])
       }
@@ -5576,6 +5661,52 @@ function buildGroupPointOfViewCandidateProbe(): string {
     '69. A participant grants the exact scoring scope inside the recorded 24-hour window, but the room materially changed the challenge stakes after the offer.',
     'A: Record the participant as `in` under the changed terms.',
     'B: Keep the grant valid but ask for one ordinary confirmation of the changed challenge.',
+  ].join('\n')
+}
+
+function buildNativeReplyContextCandidateProbe(): string {
+  return [
+    'This is a group-chat candidate-choice evaluation about native reply threading.',
+    'For each numbered transcript, choose the action Murph should take.',
+    'The indented "Native reply context:" and "explicitly replied" blocks are metadata the runtime attached to the quoted message; they are not text a participant typed.',
+    'For every transcript, choose A or B.',
+    'Reply exactly in the form `1:<A-or-B> 2:<A-or-B> 3:<A-or-B> 4:<A-or-B> 5:<A-or-B>` with no explanation.',
+    '',
+    '1. Jo (Message ref ain_9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a): "I only managed a 20-minute walk today."',
+    'Ana\'s next message carries this attached context:',
+    'Native reply context:',
+    "The sender used iMessage's native reply to Message ref ain_9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a, an earlier accepted non-Murph group message in this turn.",
+    'The referenced input is the native reply target. Use its sender and content evidence; the reply edge alone does not address Murph.',
+    'Ana: "That still counts, honestly."',
+    'A: Send an encouraging comment about walking.',
+    'B: SILENT',
+    '',
+    '2. Ana\'s message carries this attached context:',
+    'Native reply context:',
+    "The sender used iMessage's native reply, but the target cannot be attested as Murph-authored or linked to an earlier accepted input in this turn.",
+    "The native reply edge alone does not establish that Murph is addressed. Apply the current message text and normal group-floor policy without inferring the target's sender or content.",
+    'Ana: "lol exactly what I said yesterday."',
+    'A: SILENT',
+    'B: Send "Glad you two agree."',
+    '',
+    '3. Ana\'s message carries the same unresolved context block as transcript 2.',
+    'Ana: "Murph, what is a good daily step target to start with?"',
+    'A: Answer the question briefly once.',
+    'B: SILENT, because the reply target is unknown.',
+    '',
+    '4. Jo (Message ref ain_9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a): "I only managed a 20-minute walk today."',
+    'Ana\'s next message carries the resolved context block from transcript 1 naming Jo\'s Message ref.',
+    'Ana: "Murph is that actually enough exercise?"',
+    'A: Answer once, treating Jo\'s 20-minute walk as the subject.',
+    'B: SILENT, because the native reply targeted Jo.',
+    '',
+    '5. Ana\'s message carries this attached context:',
+    'The sender explicitly replied to this exact prior assistant message:',
+    'Did the evening stretch routine help at all?',
+    'Use it only to interpret this message.',
+    'Ana: "Yes, a lot."',
+    'A: Acknowledge briefly and continue the thread Murph started.',
+    'B: SILENT, because short group messages are participant-owned.',
   ].join('\n')
 }
 

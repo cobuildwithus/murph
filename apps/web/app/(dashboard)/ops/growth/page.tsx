@@ -2,14 +2,18 @@ import type { Metadata } from "next";
 
 import { GrowthCharts } from "./growth-charts";
 import { GrowthScorecard } from "./growth-scorecard";
+import { GrowthSponsorships } from "./growth-sponsorships";
 import { GrowthWeeklyTable } from "./growth-weekly-table";
 import { TrialStartAttribution } from "./trial-start-attribution";
+import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
 import {
   captureHostedGrowthDailySnapshot,
   readHostedGrowthDashboard,
   type HostedGrowthStatusCounts,
 } from "@/src/lib/hosted-ops/growth-metrics";
-import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
+import {
+  readHostedGrowthSponsorshipMetrics,
+} from "@/src/lib/hosted-ops/growth-sponsorship-metrics";
 import { HOSTED_PULSE_TRIAL_DAYS } from "@/src/lib/hosted-onboarding/billing-plans";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
@@ -39,7 +43,10 @@ export default async function HostedOpsGrowthPage() {
 
   const now = new Date();
   await captureHostedGrowthDailySnapshot(now);
-  const dashboard = await readHostedGrowthDashboard(now);
+  const [dashboard, sponsorships] = await Promise.all([
+    readHostedGrowthDashboard(now),
+    readHostedGrowthSponsorshipMetrics(now),
+  ]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -78,6 +85,7 @@ export default async function HostedOpsGrowthPage() {
       <GrowthCharts
         dailySeries={dashboard.dailySeries}
         messageSeries={dashboard.messageSeries}
+        monthlyRevenueSeries={dashboard.monthlyRevenueSeries}
         snapshotSeries={dashboard.snapshotSeries}
       />
 
@@ -85,7 +93,7 @@ export default async function HostedOpsGrowthPage() {
 
       <section aria-labelledby="growth-revenue-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Recurring revenue comes from active paid plan definitions. The tracked top-up total starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
+          description="Recurring plan MRR comes from active paid plan definitions. Sponsorship stays separate because it is usage-backed rather than contracted recurring revenue. The tracked top-up count covers every fulfilled usage-credit purchase, including sponsorship charges, so it overlaps the sponsorship counts below and is not additive. It starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
           id="growth-revenue-title"
           title="Revenue mix"
         />
@@ -95,7 +103,7 @@ export default async function HostedOpsGrowthPage() {
               <TableRow>
                 <TableHead>Source</TableHead>
                 <TableHead className="text-right">Count</TableHead>
-                <TableHead className="text-right">MRR</TableHead>
+                <TableHead className="text-right">Plan MRR</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -115,6 +123,15 @@ export default async function HostedOpsGrowthPage() {
                 </TableCell>
                 <TableCell className="text-right">
                   {formatCurrency(dashboard.current.edgeMrrUsdCents)}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Max individuals</TableCell>
+                <TableCell className="text-right">
+                  {formatInteger(dashboard.current.maxPaidIndividuals)}
+                </TableCell>
+                <TableCell className="text-right">
+                  {formatCurrency(dashboard.current.maxMrrUsdCents)}
                 </TableCell>
               </TableRow>
               <TableRow>
@@ -144,6 +161,8 @@ export default async function HostedOpsGrowthPage() {
           </Table>
         </div>
       </section>
+
+      <GrowthSponsorships metrics={sponsorships} />
 
       <GrowthWeeklyTable rows={dashboard.weeklyRows} />
 
