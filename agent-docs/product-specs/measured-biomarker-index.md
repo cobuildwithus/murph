@@ -1,7 +1,7 @@
 # Measured Biomarker Index
 
 Status: Implemented
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Purpose
 
@@ -82,13 +82,22 @@ member-facing biomarker.
   is missing or when age, sex, pregnancy, fasting, treatment, or risk context is
   required. A qualified source range stays exact in the ledger and is not
   replaced by a comparator.
-- The initial reviewed comparator catalog is intentionally sparse: named Mayo
-  Clinic Laboratories adult serum intervals are authored for chloride, LDH,
-  phosphate, and total protein only. They provide published context, never an
-  inferred range for the reporting laboratory. Calcium is withheld because its
-  reviewed adult range changes with age and sex. The generated biomarker index
-  projects display fields and eligible specimen kinds; primary source metadata
-  remains with the authored Commons guidance.
+- The reviewed comparator catalog remains deliberately small: named Mayo Clinic
+  Laboratories adult serum intervals are authored for chloride, LDH, phosphate,
+  total protein, sodium, potassium, bicarbonate / total carbon dioxide, and total
+  bilirubin. They provide published context, never an inferred range for the
+  reporting laboratory. The generated biomarker index projects display fields
+  and eligible specimen kinds; primary source metadata remains with the authored
+  Commons guidance.
+- The 2026-08-09 audit reviewed all 115 canonical saved-lab identities rather
+  than treating every missing interval as unfinished work. Generic calculated
+  lipids, historical MDRD eGFR variants, BUN/creatinine ratio, anion gap, random
+  urine albumin without creatinine, POC troponin I, immature granulocytes,
+  reproductive hormones, and proprietary OmegaCheck outputs remain without
+  published fallback ranges because their useful limits depend on a named
+  formula, assay, analyzer, specimen, sex, reproductive stage, collection
+  context, or reporting laboratory. Decision thresholds such as ApoB or LDL-C
+  risk cutoffs also remain guidance, not display ranges.
 - Let the graph follow the latest-reading block without a redundant visible
   chart title or a single-result instruction. The accessible chart name still
   identifies the biomarker and reference context.
@@ -163,7 +172,7 @@ assay-specific troponin identity or cutoff. Historical MDRD outputs remain for
 report provenance but are not normalized into current race-free eGFR
 identities.
 
-Three evidence limitations remain explicit rather than being filled with false
+Five evidence limitations remain explicit rather than being filled with false
 precision:
 
 1. Generic `Mercury` does not identify specimen or chemical species, so no
@@ -172,7 +181,14 @@ precision:
 2. `POC Troponin I` does not identify an instrument or assay generation, so its
    exact 99th-percentile upper reference limit comes from the assay
    documentation and reporting source.
-3. Several living assay catalogs do not publish a stable publication year;
+3. Calculated lipids, BUN/creatinine ratio, anion gap, and named eGFR methods
+   retain their formula or method identity; they do not inherit a similarly
+   named measured analyte's interval.
+4. Random urine albumin concentration, reproductive hormones, immature
+   granulocytes, and proprietary fatty-acid panels need collection, demographic,
+   analyzer, or assay context that the portable comparator gate intentionally
+   does not own.
+5. Several living assay catalogs do not publish a stable publication year;
    source metadata records the 2026 review year with the exact title and URL.
 
 These are contextual limitations, not missing page coverage. The request's
@@ -209,4 +225,6 @@ interchangeable assays, or shared reference guidance.
   ledger structure, and Commons summary fallback.
 - Health Commons coverage tests resolve every requested lab and device identity,
   enforce the deliberate aliases and non-equivalences, validate one-sentence
-  summaries and source locators, and lock the guidance-classification counts.
+  summaries and source locators, lock the guidance-classification counts, pin all
+  eight authored comparators, and preserve context-dependent omissions for the
+  unportable calculated, assay-specific, demographic, and proprietary cases.
