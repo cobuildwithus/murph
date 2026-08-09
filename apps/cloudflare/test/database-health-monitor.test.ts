@@ -939,6 +939,85 @@ describe("database health monitor", () => {
       .not.toBe(firstAlert.message.idempotency_key);
   });
 
+  it("pages a fully unavailable telemetry outage with explicit unavailable copy", async () => {
+    const harness = createMonitorHarness({
+      serviceDiscoveryResponses: [
+        () => new Response(null, { status: 503 }),
+        () => new Response(null, { status: 503 }),
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "failed",
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [
+        {
+          failures: 2,
+          kind: "monitoring_unavailable",
+          missingMetrics: [],
+        },
+      ],
+      outcome: "alert_sent",
+      sampleStatus: "failed",
+    });
+
+    const alert = await readLinqRequestBody(harness.primaryLinqRequests[0]);
+    expect(alert.message.parts[0]?.value).toBe(
+      "Database monitor telemetry is unavailable for 2 checks. "
+      + "Checked 00:10 UTC.",
+    );
+    expect(alert.message.parts[0]?.value).not.toContain(
+      "database is under pressure",
+    );
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      failureCode: "service_discovery_failed",
+      scrapeStatus: "failed",
+    });
+  });
+
+  it("keeps an available unsafe signal when a present family lacks its required pod label", async () => {
+    const completeMaxConnectionsLine =
+      "planetscale_postgres_settings_max_connections{"
+      + `planetscale_database_branch_id="${BRANCH_ID}",`
+      + 'planetscale_pod="pod-primary",planetscale_role="primary"} 50';
+    const structurallyIncompleteMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+    }).replace(
+      completeMaxConnectionsLine,
+      "planetscale_postgres_settings_max_connections{"
+      + `planetscale_database_branch_id="${BRANCH_ID}",`
+      + 'planetscale_role="primary"} 50',
+    );
+    const harness = createMonitorHarness({
+      metricsBody: structurallyIncompleteMetricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({
+        conditions: [
+          {
+            kind: "client_wait",
+            seconds: 8,
+            waitingConnections: 3,
+          },
+        ],
+        outcome: "alert_sent",
+        sampleStatus: "failed",
+      });
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      clientWaitSeconds: 8,
+      failureCode: "required_metrics_missing",
+      postgresMaxConnections: null,
+      scrapeStatus: "failed",
+    });
+  });
+
   it("still pages an available unsafe signal when another metric is missing", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
@@ -973,48 +1052,147 @@ describe("database health monitor", () => {
     });
   });
 
-  it("retains the first telemetry page behind an existing incident fence", async () => {
-    const unsafeMetricsBody = buildMetricsBody({
-      branchId: BRANCH_ID,
-      clientWaitSeconds: 8,
-    });
-    const partialHealthyMetricsBody = buildMetricsBody({
-      branchId: BRANCH_ID,
-    }).replace(
-      /^planetscale_postgres_settings_max_connections.*$/mu,
-      "",
-    );
-    let metricsBody = unsafeMetricsBody;
+  it("retains a mixed telemetry obligation behind an older pending page", async () => {
+    let clientWaitSeconds = 8;
+    let omitMaxConnections = false;
     const harness = createMonitorHarness({
-      readMetricsBody: () => metricsBody,
+      linqResponses: [
+        () => {
+          throw new Error("ambiguous send");
+        },
+      ],
+      readMetricsBody: () => {
+        const body = buildMetricsBody({
+          branchId: BRANCH_ID,
+          clientWaitSeconds,
+        });
+        return omitMaxConnections
+          ? body.replace(
+            /^planetscale_postgres_settings_max_connections.*$/mu,
+            "",
+          )
+          : body;
+      },
     });
 
     await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
-      .toMatchObject({ outcome: "alert_sent", sampleStatus: "ok" });
-    metricsBody = partialHealthyMetricsBody;
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 2)).resolves
-      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 3)).resolves
-      .toMatchObject({ outcome: "alert_deferred", sampleStatus: "failed" });
-
-    const pendingAlert = harness.monitor.readAlertState();
-    expect(pendingAlert.pendingAlertMessage).toContain(
-      "Database monitor telemetry is incomplete for 2 checks",
+      .toMatchObject({ outcome: "alert_failed", sampleStatus: "ok" });
+    const olderPendingAlert = harness.monitor.readAlertState();
+    expect(olderPendingAlert.pendingAlertMessage).toContain(
+      "PgBouncer wait 8s",
     );
+
+    omitMaxConnections = true;
+    clientWaitSeconds = 0;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 2)).resolves
+      .toMatchObject({ outcome: "alert_deferred", sampleStatus: "failed" });
+    clientWaitSeconds = 8;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 3)).resolves
+      .toMatchObject({
+        conditions: [
+          {
+            kind: "client_wait",
+            seconds: 8,
+          },
+          {
+            failures: 2,
+            kind: "monitoring_unavailable",
+          },
+        ],
+        outcome: "alert_deferred",
+        sampleStatus: "failed",
+      });
+
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      monitoringAlertObligation: {
+        checkedAtMs: FIVE_MINUTES_MS * 3,
+        failures: 2,
+        missingMetrics: [
+          "planetscale_postgres_settings_max_connections",
+        ],
+      },
+      pendingAlertIdempotencyKey:
+        olderPendingAlert.pendingAlertIdempotencyKey,
+      pendingAlertMessage: olderPendingAlert.pendingAlertMessage,
+    });
+    harness.restartMonitor();
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      monitoringAlertObligation: expect.objectContaining({ failures: 2 }),
+      pendingAlertIdempotencyKey:
+        olderPendingAlert.pendingAlertIdempotencyKey,
+    });
+
+    clientWaitSeconds = 0;
+    omitMaxConnections = false;
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({
       outcome: "alert_sent",
-      sampleStatus: "failed",
+      sampleStatus: "ok",
     });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      monitoringAlertObligation: expect.objectContaining({ failures: 2 }),
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({
+      outcome: "alert_deferred",
+      sampleStatus: "ok",
+    });
+    const telemetryPendingAlert = harness.monitor.readAlertState();
+    expect(telemetryPendingAlert.pendingAlertMessage).toBe(
+      "Database monitor telemetry is incomplete for 2 checks "
+      + "(missing PlanetScale metric: Postgres max connections). "
+      + "Checked 00:15 UTC.",
+    );
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS * 2),
     ).resolves.toMatchObject({
-      outcome: "alert_deferred",
-      sampleStatus: "failed",
+      outcome: "alert_sent",
+      sampleStatus: "ok",
+    });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      incidentOpen: false,
+      monitoringAlertObligation: null,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
     });
 
-    expect(harness.primaryLinqRequests).toHaveLength(2);
+    expect(harness.primaryLinqRequests).toHaveLength(3);
+    const firstAttempt = await readLinqRequestBody(
+      harness.primaryLinqRequests[0],
+    );
+    const olderRetry = await readLinqRequestBody(
+      harness.primaryLinqRequests[1],
+    );
+    const telemetryAttempt = await readLinqRequestBody(
+      harness.primaryLinqRequests[2],
+    );
+    expect(olderRetry).toEqual(firstAttempt);
+    expect(telemetryAttempt.message.idempotency_key)
+      .toBe(telemetryPendingAlert.pendingAlertIdempotencyKey);
+    expect(telemetryAttempt.message.parts[0]?.value)
+      .toBe(telemetryPendingAlert.pendingAlertMessage);
+    const telemetryAttempts = (
+      await Promise.all(harness.allLinqRequests.map(readLinqRequestBody))
+    ).filter(
+      (body) =>
+        body.message.parts[0]?.value
+        === telemetryPendingAlert.pendingAlertMessage,
+    );
+    expect(telemetryAttempts).toHaveLength(2);
+    expect(telemetryAttempts.map((body) => body.to[0]).sort()).toEqual([
+      "+12025550123",
+      "+12025550124",
+    ]);
+    expect(telemetryAttempts.map(
+      (body) => body.message.idempotency_key,
+    ).sort()).toEqual([
+      telemetryPendingAlert.pendingAlertIdempotencyKey,
+      `${telemetryPendingAlert.pendingAlertIdempotencyKey}-recipient-2`,
+    ]);
   });
 
   it("advances an available direct-error baseline across partial samples", async () => {
@@ -1065,6 +1243,81 @@ describe("database health monitor", () => {
     expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
       directConnectionErrorDelta: 0,
       failureCode: "required_metrics_missing",
+    });
+  });
+
+  it("retains telemetry owed behind direct-only inside-fence admission", async () => {
+    let clientWaitSeconds = 8;
+    let directErrors = 5;
+    let omitMaxConnections = false;
+    const harness = createMonitorHarness({
+      readMetricsBody: () => {
+        const body = buildMetricsBody({
+          branchId: BRANCH_ID,
+          clientWaitSeconds,
+          directErrors,
+        });
+        return omitMaxConnections
+          ? body.replace(
+            /^planetscale_postgres_settings_max_connections.*$/mu,
+            "",
+          )
+          : body;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent", sampleStatus: "ok" });
+    clientWaitSeconds = 0;
+    omitMaxConnections = true;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 2)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    clientWaitSeconds = 9;
+    directErrors = 7;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 3)).resolves
+      .toMatchObject({
+        conditions: [
+          { kind: "client_wait", seconds: 9 },
+          { count: 2, kind: "direct_migration_admission_failures" },
+          { failures: 2, kind: "monitoring_unavailable" },
+        ],
+        outcome: "alert_deferred",
+        sampleStatus: "failed",
+      });
+
+    const directPendingAlert = harness.monitor.readAlertState();
+    expect(directPendingAlert).toMatchObject({
+      monitoringAlertObligation: expect.objectContaining({ failures: 2 }),
+      pendingAlertIncludesMonitoring: false,
+    });
+    expect(directPendingAlert.pendingAlertMessage).toContain(
+      "2 direct migration connection errors",
+    );
+    expect(directPendingAlert.pendingAlertMessage).not.toContain(
+      "telemetry",
+    );
+
+    clientWaitSeconds = 0;
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    const telemetryPendingAlert = harness.monitor.readAlertState();
+    expect(telemetryPendingAlert).toMatchObject({
+      monitoringAlertObligation: expect.objectContaining({ failures: 2 }),
+      pendingAlertIncludesMonitoring: true,
+    });
+    expect(telemetryPendingAlert.pendingAlertMessage).toContain(
+      "Database monitor telemetry is incomplete for 2 checks",
+    );
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      monitoringAlertObligation: null,
+      pendingAlertIdempotencyKey: null,
     });
   });
 

@@ -54,7 +54,9 @@ Updated: 2026-08-09
 ## Constraints
 
 - No metric is made optional and no missing value is treated as zero.
-- No new state owner, queue, dependency, external service, or schema migration.
+- No new state owner, queue, dependency, external service, or table. One
+  additive metadata-row migration may retain a bounded owed-page obligation
+  inside the existing Durable Object owner.
 - Preserve the existing transactional sample/admission boundary, global attempt
   fence, destination health checks, and exact-body retry contract.
 - Do not deploy from this repository; production deployment remains owned by the
@@ -72,10 +74,20 @@ Updated: 2026-08-09
 
 ## Verification log
 
-- Focused Node Vitest: 3 files and 59 tests passed.
+- Focused Node Vitest after review remediation: 4 files and 63 tests passed.
 - Focused Workers-runtime Vitest: 1 file and 1 test passed.
 - Cloudflare package typecheck passed.
 - Raw health/model/vault log guard passed.
 - Agent docs drift guard initially required the material owner-doc updates to be
   indexed; `agent-docs/index.md` was synchronized and the rerun passed.
 - `git diff --check` passed.
+- Preliminary ReviewGPT returned one accepted high-severity owed-page finding
+  and one accepted coverage finding. The implementation now retains a bounded
+  telemetry obligation behind older pending and direct-only pages across
+  restart and recovery. The attached coverage patch was downloaded from the
+  owned review thread, read in full, limited to one focused test file, and
+  passed `git apply --check`; its full-outage-copy and malformed-label scenarios
+  were incorporated and executed.
+- Final ReviewGPT round 1 independently found the same owed-page loss. No
+  additional finding was reported. Round 2 remains pending on the corrected
+  pushed head.

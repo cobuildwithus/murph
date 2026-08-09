@@ -1053,8 +1053,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
   never treated as zero. A telemetry-only incident pages once after two
-  consecutive incomplete or failed collections and rearms only after a complete
-  sample; concrete unsafe conditions retain paced recurrence. First-incident
+  consecutive incomplete or failed collections. One bounded obligation in the
+  existing incident row survives a busy pending slot, restart, and recovery
+  until a telemetry-bearing page is acknowledged; complete collection then
+  rearms the next outage. Concrete unsafe conditions retain paced recurrence. First-incident
   and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring

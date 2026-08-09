@@ -311,6 +311,21 @@ export class DatabaseHealthMonitor {
       this.store.setConsecutiveScrapeFailures(sample.failures);
     }
 
+    const currentMonitoringCondition = sample.conditions.find(
+      (condition) => condition.kind === "monitoring_unavailable",
+    );
+    if (
+      sample.status === "failed"
+      && sample.failures === MONITORING_FAILURE_ALERT_COUNT
+      && currentMonitoringCondition
+    ) {
+      this.store.recordMonitoringAlertObligation({
+        checkedAtMs: input.checkedAtMs,
+        failures: currentMonitoringCondition.failures,
+        missingMetrics: currentMonitoringCondition.missingMetrics,
+      });
+    }
+
     let alertState = this.store.readAlertState();
     const currentDirectError = sample.conditions.find(
       (condition) =>
@@ -339,37 +354,43 @@ export class DatabaseHealthMonitor {
     if (
       sample.conditions.length > 0
       || directErrorCountAvailableForAdmission > 0
+      || alertState.monitoringAlertObligation !== null
     ) {
       const isNewIncident = !alertState.incidentOpen;
       if (isNewIncident) {
         alertState = this.store.openIncident();
       }
-      const conditionsWithDeferredDirectErrors =
-        directErrorCountAvailableForAdmission > 0
-          ? [
-            ...sample.conditions.filter(
-              (condition) =>
-                condition.kind !== "direct_migration_admission_failures",
-            ),
-            {
-              count: directErrorCountAvailableForAdmission,
-              kind: "direct_migration_admission_failures" as const,
-            },
-          ]
-          : sample.conditions;
+      const monitoringAlertObligation =
+        alertState.monitoringAlertObligation;
+      const monitoringConditionForAdmission = monitoringAlertObligation
+        ? {
+          failures: monitoringAlertObligation.failures,
+          kind: "monitoring_unavailable" as const,
+          missingMetrics: monitoringAlertObligation.missingMetrics,
+        }
+        : currentMonitoringCondition;
+      const conditionsWithDeferredDirectErrors = [
+        ...sample.conditions.filter(
+          (condition) =>
+            condition.kind !== "direct_migration_admission_failures"
+            && condition.kind !== "monitoring_unavailable",
+        ),
+        ...(monitoringConditionForAdmission
+          ? [monitoringConditionForAdmission]
+          : []),
+        ...(directErrorCountAvailableForAdmission > 0
+          ? [{
+            count: directErrorCountAvailableForAdmission,
+            kind: "direct_migration_admission_failures" as const,
+          }]
+          : []),
+      ];
       const hasDirectConnectionError =
         directErrorCountAvailableForAdmission > 0;
       const isMonitoringOnly =
         conditionsWithDeferredDirectErrors.length > 0
         && conditionsWithDeferredDirectErrors.every(
           (condition) => condition.kind === "monitoring_unavailable",
-        );
-      const isInitialMonitoringAlert =
-        isMonitoringOnly
-        && conditionsWithDeferredDirectErrors.some(
-          (condition) =>
-            condition.kind === "monitoring_unavailable"
-            && condition.failures === MONITORING_FAILURE_ALERT_COUNT,
         );
       const attemptFenceOpen =
         alertState.lastAlertAttemptedAtMs === null
@@ -390,7 +411,15 @@ export class DatabaseHealthMonitor {
             (condition) =>
               condition.kind === "direct_migration_admission_failures",
           )
-          : conditionsWithDeferredDirectErrors;
+          : (
+            monitoringAlertObligation
+            && !isNewIncident
+            && !attemptFenceOpen
+          )
+            ? conditionsWithDeferredDirectErrors.filter(
+              (condition) => condition.kind === "monitoring_unavailable",
+            )
+            : conditionsWithDeferredDirectErrors;
       const admittedCheckedAtMs =
         admittedConditions.length === 1
         && admittedConditions[0]?.kind
@@ -398,7 +427,11 @@ export class DatabaseHealthMonitor {
         && currentDirectError === undefined
         && alertState.deferredDirectErrorCheckedAtMs !== null
           ? alertState.deferredDirectErrorCheckedAtMs
-          : input.checkedAtMs;
+          : admittedConditions.length === 1
+            && admittedConditions[0]?.kind === "monitoring_unavailable"
+            && monitoringAlertObligation
+              ? monitoringAlertObligation.checkedAtMs
+              : input.checkedAtMs;
       if (
         (
           !alertState.pendingAlertIdempotencyKey
@@ -408,12 +441,11 @@ export class DatabaseHealthMonitor {
           isNewIncident
           || hasDirectConnectionError
           || attemptFenceOpen
-          || isInitialMonitoringAlert
+          || monitoringAlertObligation !== null
         )
         && (
           !isMonitoringOnly
-          || isNewIncident
-          || isInitialMonitoringAlert
+          || monitoringAlertObligation !== null
         )
       ) {
         const nextAlertSequence = alertState.alertSequence + 1;
@@ -422,6 +454,9 @@ export class DatabaseHealthMonitor {
             alertSequence: nextAlertSequence,
             incidentSequence: alertState.incidentSequence,
           }),
+          includesMonitoring: admittedConditions.some(
+            (condition) => condition.kind === "monitoring_unavailable",
+          ),
           message: buildDatabaseAlertMessage({
             alertSequence: nextAlertSequence,
             checkedAtMs: admittedCheckedAtMs,
@@ -469,6 +504,7 @@ export class DatabaseHealthMonitor {
       input.conditions.length === 0
       && !hasPendingAlert
       && alertState.deferredDirectErrorCount === 0
+      && alertState.monitoringAlertObligation === null
     ) {
       if (
         input.sampleStatus === "ok"
@@ -597,6 +633,7 @@ export class DatabaseHealthMonitor {
         input.sampleStatus === "ok"
         && input.conditions.length === 0
         && stateAfterSuccess.deferredDirectErrorCount === 0
+        && stateAfterSuccess.monitoringAlertObligation === null
       ) {
         this.store.closeIncident();
       }

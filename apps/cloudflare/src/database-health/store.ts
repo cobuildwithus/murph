@@ -2,13 +2,21 @@ import type {
   DurableObjectSqlStorageLike,
   DurableObjectSqlValue,
 } from "../user-runner/types.js";
-import type {
-  DatabaseHealthCondition,
-  DatabaseMetricObservationSnapshot,
-  DatabaseMetricSnapshot,
+import {
+  DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
+  type DatabaseHealthRequiredMetricName,
+  type DatabaseHealthCondition,
+  type DatabaseMetricObservationSnapshot,
+  type DatabaseMetricSnapshot,
 } from "./metrics.js";
 
-const DATABASE_HEALTH_SCHEMA_VERSION = 1;
+const DATABASE_HEALTH_SCHEMA_VERSION = 2;
+
+export interface DatabaseHealthMonitoringAlertObligation {
+  checkedAtMs: number;
+  failures: number;
+  missingMetrics: readonly DatabaseHealthRequiredMetricName[];
+}
 
 export interface DatabaseHealthAlertState {
   alertSequence: number;
@@ -18,6 +26,8 @@ export interface DatabaseHealthAlertState {
   incidentOpen: boolean;
   incidentSequence: number;
   lastAlertAttemptedAtMs: number | null;
+  monitoringAlertObligation: DatabaseHealthMonitoringAlertObligation | null;
+  pendingAlertIncludesMonitoring: boolean;
   pendingAlertIdempotencyKey: string | null;
   pendingAlertMessage: string | null;
 }
@@ -44,6 +54,8 @@ interface DatabaseHealthMetaRow extends Record<string, DurableObjectSqlValue> {
   incident_open: number;
   incident_sequence: number;
   last_alert_attempted_at_ms: number | null;
+  monitoring_alert_owed_json: string | null;
+  pending_alert_includes_monitoring: number;
   pending_alert_idempotency_key: string | null;
   pending_alert_message: string | null;
   run_lease_until_ms: number;
@@ -105,6 +117,11 @@ export class DatabaseHealthStore {
       incidentOpen: row.incident_open === 1,
       incidentSequence: row.incident_sequence,
       lastAlertAttemptedAtMs: row.last_alert_attempted_at_ms,
+      monitoringAlertObligation: parseMonitoringAlertObligation(
+        row.monitoring_alert_owed_json,
+      ),
+      pendingAlertIncludesMonitoring:
+        row.pending_alert_includes_monitoring === 1,
       pendingAlertIdempotencyKey: row.pending_alert_idempotency_key,
       pendingAlertMessage: row.pending_alert_message,
     };
@@ -126,6 +143,7 @@ export class DatabaseHealthStore {
          incident_open = 1,
          incident_sequence = incident_sequence + 1,
          alert_sequence = 0,
+         pending_alert_includes_monitoring = 0,
          pending_alert_idempotency_key = NULL,
          pending_alert_message = NULL
        WHERE singleton = 1`,
@@ -139,6 +157,8 @@ export class DatabaseHealthStore {
        SET
          incident_open = 0,
          alert_sequence = 0,
+         monitoring_alert_owed_json = NULL,
+         pending_alert_includes_monitoring = 0,
          pending_alert_idempotency_key = NULL,
          pending_alert_message = NULL
        WHERE singleton = 1`,
@@ -147,19 +167,35 @@ export class DatabaseHealthStore {
 
   createPendingAlert(input: {
     idempotencyKey: string;
+    includesMonitoring: boolean;
     message: string;
   }): DatabaseHealthAlertState {
     this.sql.exec(
       `UPDATE database_health_meta
        SET
          alert_sequence = alert_sequence + 1,
+         pending_alert_includes_monitoring = ?,
          pending_alert_idempotency_key = ?,
          pending_alert_message = ?,
          deferred_direct_error_count = 0,
          deferred_direct_error_checked_at_ms = NULL
        WHERE singleton = 1`,
+      input.includesMonitoring ? 1 : 0,
       input.idempotencyKey,
       input.message,
+    );
+    return this.readAlertState();
+  }
+
+  recordMonitoringAlertObligation(
+    obligation: DatabaseHealthMonitoringAlertObligation,
+  ): DatabaseHealthAlertState {
+    this.sql.exec(
+      `UPDATE database_health_meta
+       SET monitoring_alert_owed_json = ?
+       WHERE singleton = 1
+         AND monitoring_alert_owed_json IS NULL`,
+      JSON.stringify(obligation),
     );
     return this.readAlertState();
   }
@@ -194,6 +230,11 @@ export class DatabaseHealthStore {
     this.sql.exec(
       `UPDATE database_health_meta
        SET
+         monitoring_alert_owed_json = CASE
+           WHEN pending_alert_includes_monitoring = 1 THEN NULL
+           ELSE monitoring_alert_owed_json
+         END,
+         pending_alert_includes_monitoring = 0,
          pending_alert_idempotency_key = NULL,
          pending_alert_message = NULL
        WHERE singleton = 1`,
@@ -382,6 +423,8 @@ export class DatabaseHealthStore {
          deferred_direct_error_count,
          deferred_direct_error_checked_at_ms,
          last_alert_attempted_at_ms,
+         monitoring_alert_owed_json,
+         pending_alert_includes_monitoring,
          pending_alert_idempotency_key,
          pending_alert_message
        FROM database_health_meta
@@ -408,6 +451,9 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
       deferred_direct_error_count INTEGER NOT NULL DEFAULT 0,
       deferred_direct_error_checked_at_ms INTEGER,
       last_alert_attempted_at_ms INTEGER,
+      monitoring_alert_owed_json TEXT,
+      pending_alert_includes_monitoring INTEGER NOT NULL DEFAULT 0
+        CHECK (pending_alert_includes_monitoring IN (0, 1)),
       pending_alert_idempotency_key TEXT,
       pending_alert_message TEXT,
       CHECK (
@@ -463,12 +509,80 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
       "Database health Durable Object schema is newer than this Worker.",
     );
   }
+  if (version < 2) {
+    ensureDatabaseHealthTableColumn(
+      sql,
+      "database_health_meta",
+      "monitoring_alert_owed_json",
+      "TEXT",
+    );
+    ensureDatabaseHealthTableColumn(
+      sql,
+      "database_health_meta",
+      "pending_alert_includes_monitoring",
+      "INTEGER NOT NULL DEFAULT 0 CHECK (pending_alert_includes_monitoring IN (0, 1))",
+    );
+  }
   sql.exec(
     `INSERT INTO database_health_schema_meta (key, value)
      VALUES ('schema_version', ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     DATABASE_HEALTH_SCHEMA_VERSION,
   );
+}
+
+function ensureDatabaseHealthTableColumn(
+  sql: DurableObjectSqlStorageLike,
+  tableName: string,
+  columnName: string,
+  definition: string,
+): void {
+  const columns = sql.exec<{ name: DurableObjectSqlValue }>(
+    `PRAGMA table_info(${tableName})`,
+  ).toArray().map((row) => row.name);
+  if (columns.includes(columnName)) {
+    return;
+  }
+  sql.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+}
+
+function parseMonitoringAlertObligation(
+  value: string | null,
+): DatabaseHealthMonitoringAlertObligation | null {
+  if (value === null) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("Stored database monitoring alert obligation is invalid.");
+  }
+  if (!isObjectRecord(parsed)) {
+    throw new Error("Stored database monitoring alert obligation is invalid.");
+  }
+  const checkedAtMs = parsed.checkedAtMs;
+  const failures = parsed.failures;
+  const missingMetrics = parsed.missingMetrics;
+  const allowedMetrics = new Set<string>(
+    DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
+  );
+  if (
+    typeof checkedAtMs !== "number"
+    || !Number.isSafeInteger(checkedAtMs)
+    || checkedAtMs <= 0
+    || typeof failures !== "number"
+    || !Number.isSafeInteger(failures)
+    || failures < 2
+    || !Array.isArray(missingMetrics)
+    || !missingMetrics.every(
+      (metric): metric is DatabaseHealthRequiredMetricName =>
+        typeof metric === "string" && allowedMetrics.has(metric),
+    )
+  ) {
+    throw new Error("Stored database monitoring alert obligation is invalid.");
+  }
+  return { checkedAtMs, failures, missingMetrics };
 }
 
 function parseNumberRecord(value: string): Record<string, number> {

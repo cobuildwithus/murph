@@ -203,9 +203,12 @@ evaluates every available signal, and records the canonical missing metric names
 without retaining labels or raw scrape data. Unsafe available signals therefore
 still open an incident immediately. Two consecutive incomplete or failed
 collections open the fallback monitoring incident. An acknowledged
-telemetry-only page is one-shot for that uninterrupted outage; a complete sample
-closes it and allows a later outage to page again. Concrete unsafe conditions
-retain their 30-minute recurrence. The object writes Linq provider-attempt
+telemetry-only page is one-shot for that uninterrupted outage. Crossing the
+two-failure threshold records one bounded alert obligation in the existing
+incident row, so an older pending page or direct-error priority cannot lose it;
+only acknowledgment of a telemetry-bearing page clears it. A complete sample
+closes and rearms the incident after any owed page is delivered. Concrete unsafe
+conditions retain their 30-minute recurrence. The object writes Linq provider-attempt
 admission before egress, never attempts more than once per 30 minutes across all
 incidents, and reuses the exact body plus idempotency key after an ambiguous
 send. The message reports actual collection time rather than the scheduled Cron

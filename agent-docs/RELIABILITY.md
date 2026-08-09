@@ -189,7 +189,11 @@ Last verified: 2026-08-07
   its canonical allowlisted name is retained with the failed sample and warning,
   and every available signal is still evaluated. No unknown value becomes zero.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
-  consecutive runs before paging the monitoring condition.
+  consecutive runs before paging the monitoring condition. Crossing that
+  threshold persists one bounded telemetry-page obligation in the existing
+  incident row. It survives an occupied pending-message slot, restart, recovery,
+  and direct-error-only prioritization; only acknowledgment of a pending body
+  that includes the monitoring condition clears it.
   A newly opened incident or one-shot direct migration admission failure admits
   its exact body and idempotency key in the same synchronous SQLite transaction
   that persists the sample and advances any direct-error counter baseline.
@@ -215,8 +219,9 @@ Last verified: 2026-08-07
   current gauge admits the recurrence. An acknowledged telemetry-only incident
   is one-shot while collection remains continuously incomplete or unavailable;
   its current samples remain queryable, but they do not admit repeated pages.
-  A complete healthy sample closes that incident and rearms a future telemetry
-  outage. An already pending page is
+  A complete healthy sample cannot discard an unacknowledged telemetry
+  obligation. Once any owed page is acknowledged, complete collection closes
+  that incident and rearms a future telemetry outage. An already pending page is
   processed or deferred before a later clean sample can close the incident,
   and only an acknowledged provider response clears it. Provider entry is
   globally fenced by the persisted last-attempt

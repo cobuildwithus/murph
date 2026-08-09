@@ -15,7 +15,8 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 
 Independent partial PlanetScale metric normalization, explicit unknown-family
 evidence, continued evaluation of available database signals, and one-shot
-telemetry-only operator paging are jointly specified by `ARCHITECTURE.md`,
+telemetry-only operator paging with durable owed-page preservation are jointly
+specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, `agent-docs/references/testing-ci-map.md`, and
 `apps/cloudflare/README.md`.
 
