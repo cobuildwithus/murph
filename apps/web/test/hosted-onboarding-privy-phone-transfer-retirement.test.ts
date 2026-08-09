@@ -297,8 +297,10 @@ describe("Privy phone-transfer source retirement", () => {
 
   it("ignores platform-authored Starter welcome attempt timestamps", async () => {
     const fixture = makeFixture({ starterSource: "web_onboarding" });
-    fixture.sourceShape.signupNotificationEmailAttemptedAt = NOW;
-    fixture.sourceShape.signupWelcomeEmailAttemptedAt = NOW;
+    Object.assign(fixture.sourceShape, {
+      signupNotificationEmailAttemptedAt: NOW,
+      signupWelcomeEmailAttemptedAt: NOW,
+    });
 
     await expect(prepare(fixture)).resolves.toEqual({
       autoTrialBilling: null,
@@ -337,7 +339,7 @@ describe("Privy phone-transfer source retirement", () => {
     });
   });
 
-  it("rejects a companion Starter scaffold with a Web welcome item", async () => {
+  it("accepts a companion Starter welcome before runtime controls are enqueued", async () => {
     const fixture = makeFixture({ starterSource: "companion_onboarding" });
     const activationEventId =
       `member.activated:hosted.starter_usage.enrolled:${SOURCE_MEMBER_ID}:`
@@ -355,8 +357,9 @@ describe("Privy phone-transfer source retirement", () => {
       { consumedSeq: 0n, lane: "system", nextSeq: 3n },
     ]);
 
-    await expect(prepare(fixture)).rejects.toMatchObject({
-      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: null,
+      sourceMemberId: SOURCE_MEMBER_ID,
     });
   });
 

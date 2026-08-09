@@ -1,6 +1,6 @@
 # non-expiring-starter-usage
 
-Status: active — draft PR candidate ready; exact-head CI and review pending
+Status: active — rebased draft PR candidate verified locally; exact-head CI pending
 Created: 2026-08-07
 Updated: 2026-08-09
 
@@ -109,16 +109,23 @@ Updated: 2026-08-09
 
 ## Verification
 
-- `git diff --check`: passed on the rebased candidate.
-- Changed TypeScript/TSX syntax parse: passed for 52 current changed files with zero parser failures.
-- Hosted Stripe billing source guard: passed after replacing Trial/Invoice/Resume cases with Starter-to-paid Checkout and paid-plan boundaries.
-- `git diff --cached --check`: passed after the final deletion and doc pass.
-- Dependency-less differential TypeScript check: zero new changed-file
-  diagnostics relative to base `15c126c77f92104ddc318c53fb7304d7929c408c`.
+- Rebased cleanly onto `f7359e41ad63bdd430b3d67d34e77161323091b0`,
+  including the Max paid-plan work, while keeping Starter as the sole free
+  entitlement model.
+- `git diff --check`: passed for the complete candidate and final audit fixes.
+- Changed TypeScript-family syntax parse: passed for 143 changed files with
+  zero parser diagnostics.
+- Repository PR-body and frontend-design guard tests: 15/15 passed.
+- Hosted Stripe billing source guard passed after replacing trial creation,
+  continuation, and resume paths with ordinary paid checkout plus bounded
+  legacy-event retirement.
+- Focused regression coverage now includes exact once-only Starter enrollment,
+  canonical full-grant-plus-consumption migration, redeemed-timestamp fallback
+  for incomplete legacy projections, delayed-event replay, and untouched
+  Starter account retirement during phone transfer.
 - Full pnpm-backed tests, generated Prisma checks, browser design proof,
-  ReviewGPT, and exact-head CI remain pending on the draft PR because this
-  checkout has no installed workspace dependencies and cannot reach the
-  package registry.
+  ReviewGPT, and exact-head CI must pass on the published PR head before this
+  plan is marked complete.
 
 ## Rollout checklist
 

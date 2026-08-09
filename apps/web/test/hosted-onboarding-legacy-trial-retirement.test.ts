@@ -109,6 +109,38 @@ describe("legacy Pulse trial retirement to Starter", () => {
     );
   });
 
+  it("uses the redeemed timestamp when an older row lost its trial-start projection", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce({
+      ...buildMemberSnapshot(),
+      billingRef: {
+        ...buildMemberSnapshot().billingRef,
+        currentTrialStartedAt: null,
+      },
+    });
+    const stripe = buildStripe("trialing");
+
+    await expect(retireHostedLegacyPulseTrialToStarter({
+      memberId: MEMBER_ID,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe: stripe as never,
+    })).resolves.toBe(true);
+
+    expect(
+      mocks.readHostedLegacyTrialConsumedUsageUsdMicrosTx,
+    ).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      trialStartedAt: TRIAL_STARTED_AT,
+      tx,
+    });
+    expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effectiveAt: TRIAL_STARTED_AT,
+        initialConsumedUsdMicros: 1_250_000n,
+      }),
+    );
+  });
+
   it("preserves a terminal member without granting new capacity", async () => {
     mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(
       buildMemberSnapshot({

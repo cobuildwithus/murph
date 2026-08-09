@@ -138,7 +138,10 @@ INNER JOIN "hosted_member_billing_ref" AS billing_ref
   ON billing_ref."member_id" = member."id"
 LEFT JOIN "hosted_ai_usage_period" AS period
   ON period."member_id" = member."id"
-  AND period."period_start" = billing_ref."current_trial_started_at"
+  AND period."period_start" = COALESCE(
+    billing_ref."current_trial_started_at",
+    billing_ref."pulse_trial_redeemed_at"
+  )
 WHERE member."suspended_at" IS NULL
   AND member."billing_status" IN ('active', 'paused', 'incomplete')
   AND billing_ref."current_billing_phase" IS DISTINCT FROM 'paid'

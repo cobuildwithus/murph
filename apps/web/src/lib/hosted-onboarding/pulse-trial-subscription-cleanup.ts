@@ -157,7 +157,10 @@ async function retireHostedLegacyPulseTrialWithPolicy(input: {
           const initialConsumedUsdMicros =
             await readHostedLegacyTrialConsumedUsageUsdMicrosTx({
               memberId: input.memberId,
-              trialStartedAt: billingRef.currentTrialStartedAt,
+              trialStartedAt:
+                billingRef.currentTrialStartedAt
+                ?? billingRef.pulseTrialRedeemedAt
+                ?? null,
               tx,
             });
           await ensureHostedStarterUsageGrantTx({

@@ -62,6 +62,12 @@ describe("non-expiring starter usage migration", () => {
     );
   });
 
+  it("falls back to the redeemed timestamp when an older row lost its trial-start projection", () => {
+    expect(migrationSql).toContain(
+      'period."period_start" = COALESCE(\n    billing_ref."current_trial_started_at",\n    billing_ref."pulse_trial_redeemed_at"\n  )',
+    );
+  });
+
   it("fails closed on malformed historical usage instead of overgranting capacity", () => {
     expect(migrationSql).toContain(
       'COALESCE(period."limit_usd_micros" < 0, FALSE)',
