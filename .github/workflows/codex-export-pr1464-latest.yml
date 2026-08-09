@@ -1,0 +1,41 @@
+name: Export latest PR 1464 refs
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-export-pr1464-latest.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Build latest ref bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main agent/non-expiring-starter-usage
+          git branch --force export-main origin/main
+          git branch --force export-pr origin/agent/non-expiring-starter-usage
+          git bundle create /tmp/pr1464-latest.bundle export-main export-pr
+          git rev-parse export-main > /tmp/pr1464-main.txt
+          git rev-parse export-pr > /tmp/pr1464-head.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr1464-latest-refs
+          path: |
+            /tmp/pr1464-latest.bundle
+            /tmp/pr1464-main.txt
+            /tmp/pr1464-head.txt
+          retention-days: 1
+          compression-level: 0
