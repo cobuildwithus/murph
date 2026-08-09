@@ -1,0 +1,425 @@
+name: One-shot Junction scale and BP context refactor
+
+on:
+  push:
+    branches:
+      - codex/junction-scale-bp-vault-awareness
+    paths:
+      - .github/workflows/one-shot-junction-scale-bp-context-refactor.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    if: contains(github.event.head_commit.message, '[junction-scale-bp-context-refactor]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/junction-scale-bp-vault-awareness
+
+      - name: Fold device availability into the existing context snapshot
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {count}")
+              target.write_text(text.replace(old, new, 1))
+
+          snapshot = "packages/assistant-engine/src/assistant/context-snapshot.ts"
+
+          replace_once(
+              snapshot,
+              """} from '@murphai/core'
+          import {
+            readVersionedJsonStateFile,
+          """,
+              """} from '@murphai/core'
+          import { listMetricPointsBatch } from '@murphai/query'
+          import {
+            readVersionedJsonStateFile,
+          """,
+          )
+          replace_once(
+              snapshot,
+              "export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 5",
+              "export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 6",
+          )
+          replace_once(
+              snapshot,
+              """const MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR = 200
+          """,
+              """const MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR = 200
+          const ASSISTANT_CONTEXT_DEVICE_METRIC_FILTERS = [
+            { metricKey: 'body-fat-percentage', limit: 1 },
+            { metricKey: 'body-weight', limit: 1 },
+            { metricKey: 'diastolic-blood-pressure', limit: 1 },
+            { metricKey: 'systolic-blood-pressure', limit: 1 },
+          ] as const
+          const ASSISTANT_CONTEXT_BODY_METRIC_KEYS = new Set([
+            'body-fat-percentage',
+            'body-weight',
+          ])
+          const ASSISTANT_CONTEXT_BLOOD_PRESSURE_METRIC_KEYS = new Set([
+            'diastolic-blood-pressure',
+            'systolic-blood-pressure',
+          ])
+          """,
+          )
+          replace_once(
+              snapshot,
+              """  const navigationEvidenceLines = [
+            coverage.bloodTestsLine,
+            coverage.healthContextLine,
+          """,
+              """  const navigationEvidenceLines = [
+            coverage.bloodTestsLine,
+            coverage.bodyMeasurementsLine,
+            coverage.bloodPressureMeasurementsLine,
+            coverage.healthContextLine,
+          """,
+          )
+          replace_once(
+              snapshot,
+              """  allergyCount: number
+            bloodTestsPresent: boolean
+            bloodTestsLine: string | null
+            conditionCount: number
+          """,
+              """  allergyCount: number
+            bloodTestsPresent: boolean
+            bloodTestsLine: string | null
+            bodyMeasurementsLine: string | null
+            bloodPressureMeasurementsLine: string | null
+            conditionCount: number
+          """,
+          )
+          replace_once(
+              snapshot,
+              """  const [bloodTestCoverage, goalRead, conditionRead, allergyRead, regimenRead, habitatRead] =
+            await Promise.all([
+              collectAssistantSnapshotBloodTestCoverage(input),
+              listAssistantSnapshotFrontmatterRecords(
+          """,
+              """  const [
+            bloodTestCoverage,
+            deviceMeasurementCoverage,
+            goalRead,
+            conditionRead,
+            allergyRead,
+            regimenRead,
+            habitatRead,
+          ] = await Promise.all([
+            collectAssistantSnapshotBloodTestCoverage(input),
+            collectAssistantSnapshotDeviceMeasurementCoverage(input),
+            listAssistantSnapshotFrontmatterRecords(
+          """,
+          )
+          replace_once(
+              snapshot,
+              """      : null,
+            conditionCount: conditions.length,
+          """,
+              """      : null,
+            bodyMeasurementsLine: renderAssistantSnapshotBodyMeasurementsLine(
+              deviceMeasurementCoverage.latestBodyMeasurementDate,
+            ),
+            bloodPressureMeasurementsLine:
+              renderAssistantSnapshotBloodPressureMeasurementsLine(
+                deviceMeasurementCoverage.latestBloodPressureMeasurementDate,
+              ),
+            conditionCount: conditions.length,
+          """,
+          )
+          replace_once(
+              snapshot,
+              """async function collectAssistantSnapshotBloodTestCoverage(input: {
+          """,
+              """function renderAssistantSnapshotBodyMeasurementsLine(
+            latestDate: string | null,
+          ): string | null {
+            if (!latestDate) {
+              return null
+            }
+
+            return `- Body/scale measurement history is present (latest ${latestDate}). Start with \`vault-cli wearables body list --limit 30 --format json\`; if a reading was saved as a canonical measurement event, use \`vault-cli measurement list --from ${latestDate} --limit 100 --format json\` and widen the date range when needed. Never substitute raw Junction artifacts for canonical history; missing canonical data is an ingestion problem.`
+          }
+
+          function renderAssistantSnapshotBloodPressureMeasurementsLine(
+            latestDate: string | null,
+          ): string | null {
+            if (!latestDate) {
+              return null
+            }
+
+            return `- Blood-pressure measurement history is present (latest ${latestDate}). Read canonical events with \`vault-cli measurement list --from ${latestDate} --limit 100 --format json\`; inspect \`systolic-blood-pressure\` and \`diastolic-blood-pressure\` entries, treating values as paired only when they come from the same event, and widen the date range when needed. Never substitute raw Junction artifacts for canonical history; missing canonical data is an ingestion problem.`
+          }
+
+          async function collectAssistantSnapshotDeviceMeasurementCoverage(input: {
+            shouldYield: (() => boolean) | null
+            signal: AbortSignal | null
+            vaultRoot: string
+          }): Promise<{
+            latestBloodPressureMeasurementDate: string | null
+            latestBodyMeasurementDate: string | null
+          }> {
+            assertAssistantContextSnapshotCanContinue(input)
+            const points = await listMetricPointsBatch(
+              input.vaultRoot,
+              ASSISTANT_CONTEXT_DEVICE_METRIC_FILTERS,
+            )
+            assertAssistantContextSnapshotCanContinue(input)
+
+            return {
+              latestBloodPressureMeasurementDate: latestAssistantSnapshotMetricDate(
+                points,
+                ASSISTANT_CONTEXT_BLOOD_PRESSURE_METRIC_KEYS,
+              ),
+              latestBodyMeasurementDate: latestAssistantSnapshotMetricDate(
+                points,
+                ASSISTANT_CONTEXT_BODY_METRIC_KEYS,
+              ),
+            }
+          }
+
+          function latestAssistantSnapshotMetricDate(
+            points: Awaited<ReturnType<typeof listMetricPointsBatch>>,
+            metricKeys: ReadonlySet<string>,
+          ): string | null {
+            return points
+              .filter((point) => metricKeys.has(point.metricKey))
+              .map((point) => point.effectiveDate)
+              .filter(isStrictIsoDate)
+              .sort((left, right) => right.localeCompare(left))[0]
+              ?? null
+          }
+
+          async function collectAssistantSnapshotBloodTestCoverage(input: {
+          """,
+          )
+
+          Path("packages/assistant-engine/src/assistant-context-snapshot.ts").write_text(
+              "export * from './assistant/context-snapshot.js'\n",
+          )
+          helper = Path(
+              "packages/assistant-engine/src/assistant/context-snapshot-device-availability.ts",
+          )
+          if not helper.exists():
+              raise SystemExit(f"missing expected helper: {helper}")
+          helper.unlink()
+
+          Path(
+              "packages/assistant-engine/test/assistant-context-snapshot-device-availability.test.ts",
+          ).write_text(r'''import { mkdtemp, rm } from 'node:fs/promises'
+          import { tmpdir } from 'node:os'
+          import path from 'node:path'
+
+          import {
+            addMeasurement,
+            initializeVault,
+          } from '@murphai/core'
+          import { writeAssistantStateVersionedJson } from '@murphai/runtime-state/node'
+          import { describe, expect, it } from 'vitest'
+
+          import {
+            ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA,
+            ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION,
+            isAssistantContextSnapshotRefreshPending,
+            markAssistantContextSnapshotDirty,
+            readAssistantContextSnapshotPrompt,
+            refreshAssistantContextSnapshot,
+            resolveAssistantContextSnapshotPath,
+          } from '../src/assistant-context-snapshot.js'
+
+          async function createDeviceMeasurementVault(): Promise<{
+            parentRoot: string
+            vaultRoot: string
+          }> {
+            const parentRoot = await mkdtemp(
+              path.join(tmpdir(), 'assistant-device-context-snapshot-'),
+            )
+            const vaultRoot = path.join(parentRoot, 'vault')
+            await initializeVault({
+              createdAt: '2026-08-08T00:00:00.000Z',
+              vaultRoot,
+            })
+            await addMeasurement({
+              vaultRoot,
+              draft: {
+                occurredAt: '2026-08-08T12:00:00.000Z',
+                source: 'device',
+                title: 'Connected health measurements',
+                measurements: [
+                  {
+                    metric: 'body-weight',
+                    unit: 'kg',
+                    value: 82.5,
+                  },
+                  {
+                    metric: 'systolic-blood-pressure',
+                    unit: 'mmHg',
+                    value: 121,
+                  },
+                  {
+                    metric: 'diastolic-blood-pressure',
+                    unit: 'mmHg',
+                    value: 79,
+                  },
+                ],
+              },
+            })
+            await markAssistantContextSnapshotDirty({
+              domains: ['blood_tests'],
+              vaultRoot,
+            })
+            return { parentRoot, vaultRoot }
+          }
+
+          describe('assistant context snapshot device availability', () => {
+            it('advertises canonical scale and blood-pressure reads without injecting values', async () => {
+              const { parentRoot, vaultRoot } = await createDeviceMeasurementVault()
+
+              try {
+                await expect(refreshAssistantContextSnapshot({
+                  now: () => '2026-08-08T12:05:00.000Z',
+                  vaultRoot,
+                })).resolves.toMatchObject({
+                  pendingDirtyDomains: [],
+                  refreshed: true,
+                  skipped: false,
+                })
+
+                const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+                expect(prompt).toContain('Body/scale measurement history is present')
+                expect(prompt).toContain(
+                  'vault-cli wearables body list --limit 30 --format json',
+                )
+                expect(prompt).toContain(
+                  'Blood-pressure measurement history is present',
+                )
+                expect(prompt).toContain(
+                  'vault-cli measurement list --from 2026-08-08 --limit 100 --format json',
+                )
+                expect(prompt).toContain('systolic-blood-pressure')
+                expect(prompt).toContain('diastolic-blood-pressure')
+                expect(prompt).toContain('latest 2026-08-08')
+                expect(prompt).toContain(
+                  'Never substitute raw Junction artifacts for canonical history',
+                )
+                expect(prompt).not.toContain('82.5')
+                expect(prompt).not.toContain('121')
+                expect(prompt).not.toContain('79')
+                await expect(
+                  isAssistantContextSnapshotRefreshPending({ vaultRoot }),
+                ).resolves.toBe(false)
+              } finally {
+                await rm(parentRoot, {
+                  force: true,
+                  recursive: true,
+                })
+              }
+            })
+
+            it('rebuilds snapshots written with the previous schema version', async () => {
+              const { parentRoot, vaultRoot } = await createDeviceMeasurementVault()
+
+              try {
+                await writeAssistantStateVersionedJson({
+                  filePath: resolveAssistantContextSnapshotPath(vaultRoot),
+                  schema: ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA,
+                  schemaVersion: ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION - 1,
+                  value: {
+                    dirtySequence: 0,
+                    lastCompleted: {
+                      generatedAt: '2026-08-08T12:01:00.000Z',
+                      includedDomains: [],
+                      promptBlock: 'Legacy context snapshot.',
+                      sectionPresence: {
+                        activeExperiments: false,
+                        bloodTests: false,
+                        habitat: false,
+                        healthContext: false,
+                      },
+                      sourceDirtySequence: 0,
+                    },
+                    lastRefreshAttempt: null,
+                    pendingDirtyDomains: [],
+                  },
+                })
+                await expect(
+                  isAssistantContextSnapshotRefreshPending({ vaultRoot }),
+                ).resolves.toBe(true)
+
+                await expect(refreshAssistantContextSnapshot({
+                  now: () => '2026-08-08T12:06:00.000Z',
+                  vaultRoot,
+                })).resolves.toMatchObject({
+                  pendingDirtyDomains: [],
+                  refreshed: true,
+                  skipped: false,
+                })
+                await expect(readAssistantContextSnapshotPrompt({ vaultRoot }))
+                  .resolves.toContain('Body/scale measurement history is present')
+                await expect(
+                  isAssistantContextSnapshotRefreshPending({ vaultRoot }),
+                ).resolves.toBe(false)
+              } finally {
+                await rm(parentRoot, {
+                  force: true,
+                  recursive: true,
+                })
+              }
+            })
+          })
+          '''.replace('\n          ', '\n').lstrip())
+
+          audit = "agent-docs/exec-plans/completed/2026-08-09-junction-scale-blood-pressure-vault-awareness.md"
+          replace_once(
+              audit,
+              """- Added a small device-availability snapshot composer that queries the canonical metric projection for body weight/body fat and systolic/diastolic blood pressure.
+          - The composer injects availability, the latest canonical date, and exact CLI navigation commands, but never injects the reading values themselves.
+          - The block explicitly requires a canonical read before Murph quotes, compares, or interprets a value and forbids raw Junction artifacts as the normal read path.
+          - The existing snapshot file stores a small composer-version marker. Canonical event-ledger writes already invalidate the base snapshot; the public refresh facade then rebuilds the base snapshot and recomposes device availability under the same runtime write lock.
+          - Completed snapshots from before this change are lazily migrated without requiring a canonical data rewrite.
+          """,
+              """- Extended the existing assistant context-snapshot builder to query the canonical metric projection for body weight/body fat and systolic/diastolic blood pressure in the same batched refresh as blood-test and saved-health-context coverage.
+          - The snapshot injects availability, the latest canonical date, and exact CLI navigation commands, but never injects the reading values themselves.
+          - The block explicitly requires a canonical read before Murph quotes, compares, or interprets a value and treats missing canonical data as an ingestion problem rather than falling back to raw Junction artifacts.
+          - Canonical event-ledger writes already invalidate the snapshot. Bumping the existing snapshot schema rebuilds previously completed snapshots once, with no second cache, marker, locking pass, or datastore.
+          """,
+          )
+          replace_once(
+              audit,
+              """- Concurrent canonical writes win: the composer refuses to publish if the snapshot dirty sequence changes during its read.
+          """,
+              """- Concurrent canonical writes keep the existing snapshot dirty-sequence guard and win over a stale background refresh.
+          """,
+          )
+          replace_once(
+              audit,
+              """  - asserts an already-completed pre-composer snapshot is detected and migrated once.
+          """,
+              """  - asserts a snapshot written with the previous schema version is detected and rebuilt once.
+          """,
+          )
+
+          workflow = Path(
+              ".github/workflows/one-shot-junction-scale-bp-context-refactor.yml",
+          )
+          workflow.unlink()
+
+      - name: Commit simplified implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: fold device availability into context snapshot"
+          git push origin HEAD:codex/junction-scale-bp-vault-awareness
