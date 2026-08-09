@@ -3,9 +3,8 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import {
-  resolveAssistantSkillsRoot,
-} from '../src/assistant-skill-assets.js'
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
+import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 const FUNCTION_DOCUMENTS_URL = 'https://my.functionhealth.com/documents'
 const TELADOC_EXPORT_URL =
@@ -19,8 +18,25 @@ function connectedAppsPath(...segments: readonly string[]): string {
   return path.join(resolveAssistantSkillsRoot(), 'connected-apps', ...segments)
 }
 
+function buildDirectPrompt(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'imessage',
+    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    currentLocalDate: '2026-08-09',
+    currentTimeZone: 'America/New_York',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
 describe('assistant manual provider export guidance', () => {
-  it('routes unsupported health and fitness sources through verified export handoffs', async () => {
+  it('keeps unsupported-provider export guidance reachable through the existing owner', async () => {
     const [skill, reference] = await Promise.all([
       readFile(connectedAppsPath('SKILL.md'), 'utf8'),
       readFile(
@@ -29,6 +45,9 @@ describe('assistant manual provider export guidance', () => {
       ),
     ])
 
+    expect(buildDirectPrompt()).toContain(
+      'Read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.',
+    )
     expect(skill).toContain('references/provider-data-exports.md')
     expect(skill).toContain(
       'manual export or one-time import rather than a live sync',
@@ -36,34 +55,73 @@ describe('assistant manual provider export guidance', () => {
     expect(skill).toContain(
       'does not make that service a connected-app provider',
     )
-    expect(reference).toContain(
+    const normalizedReference = reference.replace(/\s+/gu, ' ')
+
+    expect(normalizedReference).toContain(
       'manual export or one-time import, not a live sync',
     )
-    expect(reference).toContain(
+    expect(normalizedReference).toContain(
       'The trusted live provider list in the current prompt is authoritative',
     )
-    expect(reference).toContain(
+    expect(normalizedReference).toContain(
       'Ask for the original downloaded file as-is',
+    )
+    expect(normalizedReference).toContain(
+      'In a group conversation, do not ask someone to upload private account data to the room',
     )
   })
 
-  it('keeps each provider route grounded in its official export instructions', async () => {
+  it('keeps each provider route narrow, truthful, and importable', async () => {
     const reference = await readFile(
       connectedAppsPath('references', 'provider-data-exports.md'),
       'utf8',
     )
 
+    const normalizedReference = reference.replace(/\s+/gu, ' ')
+
     expect(reference).toContain(FUNCTION_DOCUMENTS_URL)
     expect(reference).toContain(TELADOC_EXPORT_URL)
     expect(reference).toContain(STRONG_EXPORT_URL)
     expect(reference).toContain(HEVY_EXPORT_URL)
+
+    expect(reference).toContain('## Livongo / Teladoc Condition Management')
+    expect(normalizedReference).toContain(
+      'Use this recipe only for Livongo or Teladoc `Condition Management` data',
+    )
+    expect(normalizedReference).toContain(
+      'A generic Teladoc request for virtual-visit notes',
+    )
     expect(reference).toContain('`Reports and Data`')
-    expect(reference).toContain('does not state the file format')
+    expect(normalizedReference).toContain(
+      "download contains all of the member's data but does not state the file format",
+    )
+    expect(normalizedReference).toContain(
+      'does not document an equivalent export menu',
+    )
+    expect(normalizedReference).toContain(
+      'one-time snapshot, not continuous Teladoc sync',
+    )
+
     expect(reference).toContain('`Export Strong Data`')
+    expect(reference).toContain(
+      'vault-cli workout import inspect <file> --vault "$VAULT" --source strong --format json',
+    )
+    expect(reference).toContain(
+      'vault-cli workout import csv <file> --vault "$VAULT" --source strong --format json',
+    )
+
     expect(reference).toContain('`Export Workouts`')
     expect(reference).toContain('`Export Measurements`')
     expect(reference).toContain(
-      'Treat `Teladoc`, `Teladoc Health`, and `Livongo` as aliases',
+      'vault-cli workout import inspect <file> --vault "$VAULT" --source hevy --format json',
+    )
+    expect(normalizedReference).toContain(
+      'A Hevy measurements export is not a workout CSV',
+    )
+
+    expect(reference).toContain('Lab Results of Record')
+    expect(normalizedReference).toContain(
+      'The `computer-use` skill explicitly forbids automating Function login',
     )
   })
 
