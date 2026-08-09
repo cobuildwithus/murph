@@ -289,6 +289,22 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Homepage referral program · signup reward">
+        <div
+          data-design-section="homepage-referral-program-signup-only"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralSection
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id === "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Referral rewards unavailable">
         <div
           data-design-section="referral-rewards-unavailable"
