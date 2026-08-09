@@ -1,0 +1,37 @@
+name: PR 1446 post-merge audit export
+
+on:
+  push:
+    branches:
+      - agent/pr1446-postmerge-final-audit
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Package exact source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > audit-head.txt
+          tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude=murph-source.tgz \
+            -czf murph-source.tgz .
+
+      - name: Upload source tree
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pr1446-postmerge-source
+          path: murph-source.tgz
+          if-no-files-found: error
+          retention-days: 1
