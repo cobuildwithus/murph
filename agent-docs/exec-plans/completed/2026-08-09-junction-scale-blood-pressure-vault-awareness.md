@@ -1,6 +1,6 @@
 # Junction scale and blood-pressure vault awareness
 
-Status: completed implementation; exact-head CI pending
+Status: implementation complete; exact-head verification is recorded in the pull request
 Date: 2026-08-09
 
 ## Outcome
