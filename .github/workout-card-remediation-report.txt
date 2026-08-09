@@ -1,0 +1,71 @@
+HEAD ref: refs/heads/agent/imessage-workout-session-card
+
+[packages/contracts/src/compact-table-card.ts]
+0 'import { ID_PREFIXES } from "./constants.ts";'
+0 'const COMPACT_TABLE_APP_CARD_URL_PREFIX ='
+0 '"https://murph.ai/#murph-card=";'
+0 'const COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH = 2_048;'
+1 'COMPACT_TABLE_APP_CARD_URL_PREFIX'
+1 'COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH'
+1 'IMESSAGE_APP_CARD_URL_PREFIX'
+2 'MURPH_PRODUCT_ORIGIN'
+
+[packages/operator-config/src/assistant-response-cards.ts]
+1 "import * as z from '@murphai/contracts/zod-runtime'"
+0 "export const LINQ_IMESSAGE_APP_CARD_ORIGIN = 'https://murph.ai'"
+0 'const APP_CARD_URL_PREFIX ='
+0 'const LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048'
+7 'const parsed = assistantResponseCardSchema.parse(card)'
+1 "parsed.kind !== 'compact_table' || parsed.workout === undefined"
+1 'function createAssistantResponseCardJsonSchema() {'
+
+[packages/operator-config/test/workout-session-response-card.test.ts]
+1 'import {\n  assistantResponseCardSchema,'
+1 "const APP_CARD_URL_PREFIX = 'https://murph.ai/#murph-card='"
+0 "describe('workout session response card'"
+
+[packages/operator-config/test/workout-session-cross-platform-fixture.test.ts]
+1 'https://murph.ai/#murph-card='
+0 'https://www.withmurph.ai/#murph-card='
+
+[agent-docs/product-specs/index.md]
+1 'Last verified: 2026-08-08'
+1 'agent-docs/product-specs/measured-biomarker-index.md'
+0 'agent-docs/product-specs/imessage-workout-tracking.md'
+
+[agent-docs/index.md]
+1 'bounded offline V3 compact-table fragments'
+1 '| `agent-docs/product-specs/index.md` |'
+0 'agent-docs/product-specs/imessage-workout-tracking.md'
+
+[agent-docs/operations/imessage-deliverability.md]
+1 'Last verified: 2026-08-07'
+1 'New V1, V2, and V3 cards use the same bounded HTTPS Base64URL fragment family'
+0 'New V1, V2, V3, and V4 cards'
+
+--- selected lines: packages/contracts/src/compact-table-card.ts ---
+1: import * as z from "./zod-runtime.ts";
+3: import { ID_PREFIXES, MURPH_PRODUCT_ORIGIN } from "./constants.ts";
+23: export const IMESSAGE_APP_CARD_URL_PREFIX =
+24:   `${MURPH_PRODUCT_ORIGIN}/#murph-card=`;
+25: export const IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048;
+92:   return COMPACT_TABLE_APP_CARD_URL_PREFIX.length + encodedLength;
+194:       COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH
+
+--- selected lines: packages/operator-config/src/assistant-response-cards.ts ---
+4:   IMESSAGE_APP_CARD_URL_MAX_LENGTH,
+5:   IMESSAGE_APP_CARD_URL_PREFIX,
+6:   MURPH_PRODUCT_ORIGIN,
+21: import * as z from '@murphai/contracts/zod-runtime'
+52: export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
+113:   createAssistantResponseCardJsonSchema()
+122:   const parsed = assistantResponseCardSchema.parse(card)
+139:   const parsed = assistantResponseCardSchema.parse(card)
+151:   const parsed = assistantResponseCardSchema.parse(card)
+211:   const parsed = assistantResponseCardSchema.parse(card)
+223:   const parsed = assistantResponseCardSchema.parse(card)
+237:   const parsed = assistantResponseCardSchema.parse(card)
+260:   const parsed = assistantResponseCardSchema.parse(card)
+285:   const url = `${IMESSAGE_APP_CARD_URL_PREFIX}${encoded}`
+286:   if (url.length >= IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
+519: function createAssistantResponseCardJsonSchema() {
