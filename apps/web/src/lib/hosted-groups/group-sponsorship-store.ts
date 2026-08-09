@@ -9,7 +9,10 @@ import {
   sealHostedUserSecureBoxStrings,
 } from "../hosted-crypto/secure-box";
 import { readHostedAppSessionHmacKey } from "../hosted-onboarding/app-session-config";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import {
   HOSTED_GROUP_SPONSORSHIP_CREATIVE_FORMATS,
   HOSTED_GROUP_SPONSORSHIP_CREATIVE_PROMPT_MAX_CODE_POINTS,
@@ -359,7 +362,7 @@ export async function readHostedGroupSponsorshipMomentForNotification(input: {
         purchaseId: row.purchaseId,
         runningBitRequestEncrypted: row.runningBitRequestEncrypted,
         sponsorMessageEncrypted: row.sponsorMessageEncrypted,
-      })
+      }, { invalidCreativeRequest: "omit" })
     : null;
   const draft = canonicalizeModernHostedGroupSponsorshipDraft(openedDraft);
   return {
@@ -584,6 +587,9 @@ function parseStoredHostedGroupSponsorshipCreativeRequest(
 
 async function openSponsorshipDraft(
   input: EncryptedSponsorshipDraft,
+  options: { invalidCreativeRequest: "omit" | "reject" } = {
+    invalidCreativeRequest: "reject",
+  },
 ): Promise<HostedGroupSponsorshipDraft | null> {
   const hasEncryptedCreativeRequest =
     input.creativeRequestEncrypted !== null;
@@ -604,15 +610,33 @@ async function openSponsorshipDraft(
     lane: "hosted-member-private-field",
     prisma: input.prisma,
   });
-  const creativeRequest = parseStoredHostedGroupSponsorshipCreativeRequest(
-    creativeRequestPayload,
-  );
+  const creativeRequest = options.invalidCreativeRequest === "omit"
+    ? parseStoredHostedGroupSponsorshipCreativeRequestForNotification(
+        creativeRequestPayload,
+      )
+    : parseStoredHostedGroupSponsorshipCreativeRequest(creativeRequestPayload);
   return parseHostedGroupSponsorshipDraft({
     ...(creativeRequest ? { creativeRequest } : {}),
     publicAlias,
     runningBitRequest,
     sponsorMessage,
   });
+}
+
+function parseStoredHostedGroupSponsorshipCreativeRequestForNotification(
+  value: string | null,
+): HostedGroupSponsorshipCreativeRequest | null {
+  try {
+    return parseStoredHostedGroupSponsorshipCreativeRequest(value);
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error) &&
+      error.code === "HOSTED_GROUP_SPONSORSHIP_INVALID"
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function openSponsorshipRunningBit(

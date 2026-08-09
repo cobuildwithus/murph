@@ -3602,7 +3602,7 @@ describe("createHostedUsageCreditCheckout", () => {
     )).toMatchObject({
       creativeRequestEncrypted: `sealed:${JSON.stringify({
         request: {
-          format: "song",
+          format: "message",
           prompt: "For whatever adventure comes next.",
           styleRequest: null,
         },

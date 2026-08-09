@@ -239,6 +239,13 @@ fulfilled group purchase, Web idempotently:
 4. appends one purchase-deduplicated creative notification to the existing
    mailbox.
 
+Permanent schema validation failure in a decrypted optional creative envelope
+projects as no creative request at this notification boundary. Activation,
+including an otherwise valid running bit, commits and Stripe receipt completion
+continues through the independent near-cap owner. Creator recovery stays strict,
+and secure-box, decryption, database, and other operational failures continue to
+propagate for ordinary retry rather than being mislabeled as quiet content.
+
 A monthly activation is the actual `$5` purchase eligible for the optional
 social response. Its private monthly maximum never changes the public
 acknowledgment or creates a running bit.

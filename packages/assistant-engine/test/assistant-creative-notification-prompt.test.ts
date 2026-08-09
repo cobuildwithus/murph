@@ -35,6 +35,10 @@ describe('assistant creative notification prompt', () => {
     expect(prompt).toContain('recognizable melody')
     expect(prompt).toContain('signature arrangement')
     expect(prompt).toContain(
+      'Never imitate or name a real artist, band, song, or lyrics.',
+    )
+    expect(prompt).not.toContain('unless it is independently')
+    expect(prompt).toContain(
       'For message or poem, `text` is the complete creative response.',
     )
   })

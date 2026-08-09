@@ -61,6 +61,12 @@ Updated: 2026-08-09
    Mitigation: require exactly one generated voice-memo attachment before any
    receipt, transcript persistence, or delivery; otherwise use the existing
    optional-creative failure settlement without changing the granted credit.
+5. Risk: permanently malformed optional creative content rolls back activation
+   and controls unrelated Stripe settlement state.
+   Mitigation: omit only schema-invalid creative content at the notification
+   projection boundary after activation while preserving running-bit state;
+   creator recovery stays strict and operational crypto/database failures still
+   propagate.
 
 ## Tasks
 
@@ -79,6 +85,11 @@ Updated: 2026-08-09
 - A pre-feature generic note remains eligible only as a plain-message request;
   it is never song consent. Legacy rows without a participant-authored note are
   quiet.
+- Named style references are converted to broad traits under one system-level
+  no-naming rule; the lower task prompt has no contradictory premise exception.
+- A schema-invalid decrypted creative envelope settles quietly without rolling
+  back activation or blocking receipt completion. Decryption and other
+  operational failures remain retryable errors.
 - No production data mutation is required for the code correction.
 
 ## Verification
@@ -97,5 +108,10 @@ Updated: 2026-08-09
 - The real design-catalog flow was rendered through the repository Playwright
   fallback at desktop and mobile viewports. Quiet-default and explicit creative
   states were inspected locally and after hosted proof upload.
-- Remaining gates: exact-head preliminary specialist ReviewGPT, final ReviewGPT,
-  GitHub Actions, parent final review, and clean merge proof.
+- The preliminary specialist retry inspected eight exact-head desktop/mobile
+  renders and found two gaps: malformed optional creative state controlling
+  settlement, and conflicting reference-naming prompt rules. Both are corrected;
+  277 focused Web tests, the focused assistant prompt test, changed-Web ESLint,
+  Web typecheck, assistant-engine typecheck, and `git diff --check` pass.
+- Remaining gates: final ReviewGPT, exact-head GitHub Actions, parent final
+  review, and clean merge proof.

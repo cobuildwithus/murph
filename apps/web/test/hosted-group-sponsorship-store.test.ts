@@ -195,6 +195,19 @@ describe("hosted group sponsorship store", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_GROUP_SPONSORSHIP_INVALID",
     });
+    const quietNotification =
+      await readHostedGroupSponsorshipMomentForNotification({
+        customContentAuthorized: true,
+        offerCode: "usage_10_usd",
+        prisma: harness.prisma as never,
+        purchaseId: "purchase_123",
+      });
+    expect(quietNotification).toMatchObject({
+      publicAlias: draft.publicAlias,
+      runningBitRequest: draft.runningBitRequest,
+      sponsorMessage: null,
+    });
+    expect(quietNotification).not.toHaveProperty("creativeRequest");
     await expect(readHostedActiveGroupRunningBit({
       now: new Date("2026-07-27T13:00:00.000Z"),
       prisma: harness.prisma as never,
@@ -205,6 +218,26 @@ describe("hosted group sponsorship store", () => {
       requestedBit: draft.runningBitRequest,
       schema: "murph.group-sponsorship-bit.v1",
     });
+
+    setHostedSecureBoxStringTestCodecForTests({
+      decrypt: ({ value }) => {
+        if (value === harness.row.creativeRequestEncrypted) {
+          throw new Error("Creative request decryption unavailable.");
+        }
+        return Buffer.from(
+          value.slice("sealed:".length),
+          "base64url",
+        ).toString("utf8");
+      },
+      encrypt: ({ value }) =>
+        `sealed:${Buffer.from(value, "utf8").toString("base64url")}`,
+    });
+    await expect(readHostedGroupSponsorshipMomentForNotification({
+      customContentAuthorized: true,
+      offerCode: "usage_10_usd",
+      prisma: harness.prisma as never,
+      purchaseId: "purchase_123",
+    })).rejects.toThrow("Creative request decryption unavailable.");
   });
 
   it("upgrades a legacy-shaped note into a modern message envelope", async () => {

@@ -223,6 +223,9 @@ describe("group sponsorship notification", () => {
     expect(envelope.notification.instructions).toContain(
       "translate any named song, show, soundtrack, artist, or genre into broad traits",
     );
+    expect(envelope.notification.instructions).not.toContain(
+      "unless it is independently part of the group's premise",
+    );
     expect(envelope.notification.instructions).toContain(
       "without inventing personal facts or referring to sensitive history",
     );
