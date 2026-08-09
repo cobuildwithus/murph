@@ -459,7 +459,7 @@ function canonicalizeModernHostedGroupSponsorshipDraft(
   }
   const creativeRequest = draft.creativeRequest ?? (draft.sponsorMessage
     ? {
-        format: "song" as const,
+        format: "message" as const,
         prompt: draft.sponsorMessage,
         styleRequest: null,
       }

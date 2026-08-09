@@ -1462,11 +1462,11 @@ test("shows and preserves exact modern creative details when retrying payment", 
   }
 });
 
-test("keeps a legacy frozen song note recoverable without reinterpreting it", async () => {
+test("keeps a legacy frozen note recoverable as a plain message", async () => {
   const frozenSponsorship = {
     publicAlias: "Legacy sponsor",
     runningBitRequest: null,
-    sponsorMessage: "Keep the old song request intact.",
+    sponsorMessage: "Keep the old note intact.",
   };
   mocks.requestHostedOnboardingJson.mockImplementation(
     (request: { method: string }) =>
@@ -1501,10 +1501,10 @@ test("keeps a legacy frozen song note recoverable without reinterpreting it", as
 
   try {
     await clickButton(rendered.container, rendered.window, "Check payment");
-    assert.match(rendered.container.textContent ?? "", /Song note/u);
+    assert.match(rendered.container.textContent ?? "", /Note/u);
     assert.match(
       rendered.container.textContent ?? "",
-      /Keep the old song request intact\./u,
+      /Keep the old note intact\./u,
     );
     await clickButton(rendered.container, rendered.window, "Retry payment");
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({

@@ -89,7 +89,7 @@ function GroupSponsorshipDialog({
   const [creativeFormat, setCreativeFormat] =
     useState<HostedGroupSponsorshipCreativeFormat>(
       frozenCreativeRequest?.format
-        ?? (frozenSponsorship?.sponsorMessage ? "song" : "message"),
+        ?? "message",
     );
   const [creativePrompt, setCreativePrompt] = useState(
     frozenCreativeRequest?.prompt ?? frozenSponsorship?.sponsorMessage ?? "",
@@ -704,7 +704,7 @@ function FrozenSponsorshipDetails({
         ],
         ["Creative prompt", creativeRequest?.prompt ?? null],
         ["Genre or style", creativeRequest?.styleRequest ?? null],
-        ["Song note", sponsorship.sponsorMessage],
+        ["Note", sponsorship.sponsorMessage],
         ["Running bit", sponsorship.runningBitRequest],
       ].filter((entry): entry is [string, string] => entry[1] !== null)
     : [];

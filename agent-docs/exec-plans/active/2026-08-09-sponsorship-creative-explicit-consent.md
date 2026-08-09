@@ -39,9 +39,10 @@ Updated: 2026-08-09
   idempotency, and design-catalog component; keep the migration additive and
   rolling-deploy safe.
 - Product/process constraints: explicit consent is fail-closed; missing,
-  malformed, unauthorized, or legacy creative state must be quiet. Preserve
-  unrelated changes and update the existing draft PR rather than opening a
-  competing implementation.
+  malformed, or unauthorized creative state must be quiet. A pre-feature
+  participant-authored generic note may remain a plain message, but never a
+  song. Preserve unrelated changes and update the existing draft PR rather than
+  opening a competing implementation.
 
 ## Risks and mitigations
 
@@ -70,8 +71,8 @@ Updated: 2026-08-09
 
 ## Decisions
 
-- Existing legacy rows with an explicit legacy song note may remain eligible as
-  an explicit request; legacy rows with no participant-authored song request are
+- A pre-feature generic note remains eligible only as a plain-message request;
+  it is never song consent. Legacy rows without a participant-authored note are
   quiet.
 - No production data mutation is required for the code correction.
 

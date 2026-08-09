@@ -207,7 +207,7 @@ describe("hosted group sponsorship store", () => {
     });
   });
 
-  it("upgrades a legacy-shaped new request into the modern creative envelope", async () => {
+  it("upgrades a legacy-shaped note into a modern message envelope", async () => {
     const harness = createHarness();
     const legacyDraft = {
       publicAlias: "The Group Historian",
@@ -237,7 +237,7 @@ describe("hosted group sponsorship store", () => {
       purchaseId: "purchase_old_client",
     })).resolves.toEqual({
       creativeRequest: {
-        format: "song",
+        format: "message",
         prompt: legacyDraft.sponsorMessage,
         styleRequest: null,
       },
@@ -252,7 +252,7 @@ describe("hosted group sponsorship store", () => {
       purchaseId: "purchase_old_client",
     })).resolves.toMatchObject({
       creativeRequest: {
-        format: "song",
+        format: "message",
         prompt: legacyDraft.sponsorMessage,
         styleRequest: null,
       },
@@ -322,9 +322,9 @@ describe("hosted group sponsorship store", () => {
     });
     expect(legacy).not.toHaveProperty("creativeRequest");
 
-    const legacySongPrompt = "Make a short song about finishing together.";
+    const legacyNote = "Celebrate everyone finishing together.";
     harness.row.sponsorMessageEncrypted =
-      `sealed:${Buffer.from(legacySongPrompt, "utf8").toString("base64url")}`;
+      `sealed:${Buffer.from(legacyNote, "utf8").toString("base64url")}`;
     await expect(readHostedGroupSponsorshipMomentForNotification({
       customContentAuthorized: true,
       offerCode: "usage_5_usd",
@@ -332,8 +332,8 @@ describe("hosted group sponsorship store", () => {
       purchaseId: "purchase_quiet",
     })).resolves.toMatchObject({
       creativeRequest: {
-        format: "song",
-        prompt: legacySongPrompt,
+        format: "message",
+        prompt: legacyNote,
         styleRequest: null,
       },
       publicAlias: aliasOnlyDraft.publicAlias,

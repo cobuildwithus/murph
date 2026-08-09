@@ -212,9 +212,10 @@ only as broad traits such as mood, tempo, instrumentation, and structure. They
 never authorize copied melody, lyrics, catchphrases, vocal identity, or a
 signature arrangement. The encrypted creative envelope is versioned and exists
 only for an explicit request. A null creative-request column means quiet for
-both current and pre-feature rows. A pre-feature encrypted song note remains an
-explicit song request and is normalized into the versioned envelope when read;
-pre-feature rows without that note never produce a creative response.
+both current and pre-feature rows. A pre-feature encrypted generic note is
+normalized only into a plain-message request; it can never be reinterpreted as
+song consent. Pre-feature rows without that note never produce a creative
+response.
 
 A valid funding locator remains sufficient to contribute anonymously. It is
 not sufficient to publish content into the room. Web checks current
