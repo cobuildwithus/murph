@@ -93,7 +93,7 @@ Every newly created Linq or Telegram group thread starts with a persisted $7.50
 included-usage limit. This is prospective: existing group-thread rows keep
 their stored limit.
 
-Usage is cost-weighted capacity across models and modalities. It is not a token
+Usage is normalized capacity across models and modalities. It is not a token
 count or cash balance. Used and remaining percentages are bounded integers that
 sum to 100. The display window starts at the current allowance period or, when
 later, the beneficiary's latest fulfilled purchase grant in that period. Its

@@ -1,0 +1,88 @@
+# Remove cost-weighted referral copy
+
+Status: active
+Created: 2026-08-09
+Updated: 2026-08-09
+
+## Goal
+
+- Replace the internal “cost-weighted” phrase across live product surfaces and
+  owner documentation, while presenting public referral rewards as days of
+  Murph and preserving exact server-owned usage-credit receipts.
+
+## Success criteria
+
+- Referral page reward cards and receipt previews show 10 or 14 days of Murph
+  without dollar-denominated public reward copy.
+- Assistant reward confirmations keep the exact server-provided usage-credit
+  label without calculating days or messages.
+- Live tracked sources and docs contain no remaining form of the retired term;
+  immutable completed-plan snapshots remain unchanged.
+- Production referral states are represented in the design catalog and have
+  inspected desktop/mobile evidence.
+- Focused tests, typecheck, docs drift, required ReviewGPT specialist review,
+  and exact-head PR checks pass.
+
+## Scope
+
+- In scope: public referral presentation, exact assistant receipt wording,
+  changelog visuals, focused regression coverage, design-catalog studies, and
+  current product/usage owner documentation.
+- Out of scope: ledger values, Stripe behavior, qualification rules, referral
+  settlement, allowance calculations, and immutable completed-plan snapshots.
+
+## Constraints
+
+- Technical constraints: keep the persisted USD-micros ledger and all reward
+  ownership unchanged; derive public days from the existing referral policy;
+  reuse production presentation components in catalog studies.
+- Product/process constraints: do not expose private evidence; preserve the
+  current design-system prohibition on historical funding labels in the live
+  catalog; use the PR worktree and exact-head review gates.
+
+## Risks and mitigations
+
+1. Risk: public day labels could be confused with an exact capacity guarantee.
+   Mitigation: retain copy that calls them typical duration and explains that
+   actual duration varies by model, tools, media, and task complexity.
+2. Risk: rendering the full referral page in the large design catalog can time
+   out server-side verification.
+   Mitigation: expose the existing reward receipt and card presentation pieces
+   and render synthetic reward subsets directly.
+3. Risk: terminology cleanup could alter internal accounting semantics.
+   Mitigation: change presentation and terminology only; keep ledger fields,
+   calculations, identifiers, and server authority intact.
+
+## Tasks
+
+1. Remove the retired wording from public web, assistant, changelog, and live
+   owner-doc surfaces while preserving exact accounting behavior.
+2. Add focused tests and design-catalog states for signup-only, group-only, and
+   combined referral rewards.
+3. Capture and inspect desktop/mobile evidence for every changed state.
+4. Run focused verification, push the candidate, and correct exact-head CI
+   failures attributable to the PR.
+5. Retry the preliminary ReviewGPT pass after correcting its prior evidence
+   gap, resolve findings, and close the plan with the final scoped commit.
+
+## Decisions
+
+- Public referral surfaces use days of Murph; assistant receipts use the exact
+  usage-credit label supplied by the server.
+- Shared visual props, rather than new wrapper components, keep the production
+  changelog render and evidence harness aligned without publishing historical
+  wording into the current component catalog.
+- The final cross-cutting ReviewGPT gate is not applicable because the patch is
+  presentation/prompt-primary and does not change runtime ownership or behavior;
+  the mandatory preliminary specialist lenses remain applicable.
+
+## Verification
+
+- Commands to run: focused web and assistant tests; web and assistant-engine
+  typechecks; `pnpm test:frontend-design-proof`; `pnpm docs:drift`; stale-copy
+  scan; `git diff --check`; ReviewGPT head preflight/specialist pass; exact-head
+  GitHub Actions.
+- Expected outcomes: all checks pass, credential-gated real-provider cases may
+  skip explicitly, the stale-copy scan is empty outside immutable completed
+  plans, and the specialist response is substantive with no accepted findings
+  left unresolved.
