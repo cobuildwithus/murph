@@ -1,6 +1,6 @@
 # non-expiring-starter-usage
 
-Status: active — exact-head CI rerunning after fixture type cleanup
+Status: active — exact-head CI rerunning after latest-main merge
 Created: 2026-08-07
 Updated: 2026-08-09
 
@@ -109,7 +109,7 @@ Updated: 2026-08-09
 
 ## Verification
 
-- Merged current `main` through `41dfbf7a3f6cf3af1cf78c91f0fe32354e32a5b5`
+- Merged current `main` through `7816f428d428a51f3bf3791b4fceef4168d8becf`
   after the final audit fixes, with GitHub reporting the PR mergeable.
 - `git diff --check`: passed for the complete candidate and final audit fixes.
 - Changed TypeScript-family syntax parse: passed for 143 changed files with
@@ -125,8 +125,8 @@ Updated: 2026-08-09
   later Starter usage lowers the grant projection.
 - A fresh exact-head Web typecheck isolated four test-fixture typing defects;
   commit `308dd70bdc12e2163fafb8f8d99440cdd33c71d5` fixes them without changing
-  runtime behavior, and the full suite is rerunning from this human-authored
-  audit checkpoint.
+  runtime behavior. The current-main merge head is being verified again before
+  the PR leaves draft.
 - Full pnpm-backed tests, generated Prisma checks, browser design proof,
   ReviewGPT, and exact-head CI must pass on the published PR head before this
   plan is marked complete.
