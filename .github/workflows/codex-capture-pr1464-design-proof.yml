@@ -8,7 +8,7 @@ on:
       - .github/workflows/codex-capture-pr1464-design-proof.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   capture:
@@ -85,14 +85,29 @@ jobs:
           fi
           rm apps/web/e2e/capture-pr1464-design-proof.spec.ts
 
-      - name: Upload verified design screenshots
-        env:
-          CLOUDFLARE_IMAGES_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_IMAGES_ACCOUNT_ID }}
-          CLOUDFLARE_IMAGES_API_KEY: ${{ secrets.CLOUDFLARE_IMAGES_API_KEY }}
+      - name: Publish verified screenshots on the helper branch
+        shell: bash
         run: |
-          pnpm design-proof:upload -- \
-            /tmp/pr1464-starter-desktop.png \
-            /tmp/pr1464-starter-mobile.png | tee /tmp/pr1464-design-urls.txt
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin codex/starter-usage-export-final
+          git checkout -B codex/starter-usage-export-final \
+            origin/codex/starter-usage-export-final
+          proof_dir="agent-docs/design-proofs/pr1464-starter-usage"
+          mkdir -p "$proof_dir"
+          cp /tmp/pr1464-starter-desktop.png "$proof_dir/desktop.png"
+          cp /tmp/pr1464-starter-mobile.png "$proof_dir/mobile.png"
+          git add "$proof_dir/desktop.png" "$proof_dir/mobile.png"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: publish PR 1464 design proof"
+            git push origin HEAD:refs/heads/codex/starter-usage-export-final
+          fi
+          proof_sha="$(git rev-parse HEAD)"
+          {
+            echo "https://raw.githubusercontent.com/cobuildwithus/murph/${proof_sha}/${proof_dir}/desktop.png"
+            echo "https://raw.githubusercontent.com/cobuildwithus/murph/${proof_sha}/${proof_dir}/mobile.png"
+          } | tee /tmp/pr1464-design-urls.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
