@@ -1423,6 +1423,46 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /From \$7\/person/);
   });
 
+  test("routes a current Max member through the canonical Family owner", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: null,
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        billingStatus: "active",
+        canStartFamily: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_max_monthly",
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        showMaxPlan: true,
+      },
+    ));
+
+    const chooseFamilyButton = findButtonByText(
+      rendered.window.document,
+      "Choose Family",
+      rendered.window,
+    );
+    await act(async () => {
+      chooseFamilyButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+      method: "POST",
+      url: "/api/settings/billing/family/checkout",
+    });
+    await rendered.cleanup();
+  });
+
   test("posts the Join recovery Family action and keeps syncing feedback visible", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       alreadyActive: false,
