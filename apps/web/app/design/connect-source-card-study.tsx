@@ -30,11 +30,34 @@ const ZEPP_CONNECT_SOURCE: ConnectSource = {
   setupGuideId: "zepp-apple-health",
 };
 
+const MOBVOI_CONNECT_SOURCE: ConnectSource = {
+  description:
+    "TicWatch sleep, activity, heart rate, and workouts through Android Health Connect.",
+  id: "mobvoi-health",
+  logo: {
+    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+    height: 40,
+    src: "/brand-logos/connect/wearable-relay.svg",
+    width: 64,
+  },
+  name: "Mobvoi / TicWatch",
+  unavailableActionLabel: "Download app",
+  unavailableActionUrl:
+    "https://play.google.com/store/apps/details?id=ai.withmurph.app",
+  unavailableMessage:
+    "In Mobvoi Health, turn on Google Fit sharing, then allow those categories in Health Connect before opening Murph on Android.",
+};
+
 const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
     authenticated: true,
     errorMessage: null,
     source: ZEPP_CONNECT_SOURCE,
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: MOBVOI_CONNECT_SOURCE,
   },
   {
     authenticated: true,

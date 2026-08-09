@@ -370,7 +370,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source actions and disconnect lifecycle">
+      <StudySection title="Connect source actions, Health Connect relay, and disconnect lifecycle">
         <ConnectSourceCardStudy />
       </StudySection>
 

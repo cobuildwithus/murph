@@ -12,6 +12,7 @@ const CONNECT_SOURCE_POPULARITY_ORDER = [
   "garmin",
   "fitbit",
   "google-fit",
+  "mobvoi-health",
   "strava",
   "xiaomi-mi-fitness",
   "zepp",
