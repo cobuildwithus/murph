@@ -86,10 +86,10 @@ function buildFaqs(input: {
   signupAvailable: boolean;
 }) {
   const ownerDescription = input.signupAvailable && input.groupAvailable
-    ? "Signup rewards go to your Murph. Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the same credit faster."
+    ? "Signup rewards go to your Murph. Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster."
     : input.signupAvailable
     ? "Signup rewards go to your personal Murph."
-    : "Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the same credit faster.";
+    : "Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster.";
   const tellMurphAnswer = input.signupAvailable && input.groupAvailable
     ? "Your personal referral link works without asking Murph first. Group missions need one extra step: tell Murph which mission you want, and wait for the confirmation before creating the fresh group."
     : input.signupAvailable

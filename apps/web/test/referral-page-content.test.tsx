@@ -78,6 +78,7 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.doesNotMatch(markup, /the reward is added automatically/);
   assert.match(markup, /Rewards add usage capacity, not cash or extra calendar time\./);
   assert.match(markup, /does not extend a trial or subscription period/);
+  assert.doesNotMatch(markup, /\$|cost-weighted|usage credit/i);
   assert.match(markup, /Health is hard\./);
   assert.match(markup, /Bring someone with you\./);
   assert.equal(

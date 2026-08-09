@@ -98,6 +98,7 @@ describe("public referral program projection", () => {
     expect(signup.description).not.toContain(
       "the reward is added automatically",
     );
+    expect(signup.description).not.toMatch(/\$|cost-weighted|usage credit/iu);
     expect(newPersonGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );

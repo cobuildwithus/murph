@@ -35,7 +35,7 @@ export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
   {
     availabilityLabel: "Personal referral link",
     description:
-      "Share your stable link. A genuinely new completed signup can earn the fixed usage credit after Murph’s eligibility and rolling-limit checks pass.",
+      "Share your stable link. A genuinely new completed signup can earn more days of Murph usage after Murph’s eligibility and rolling-limit checks pass.",
     id: "signup-link",
     policyCode: "new_person_activation_v1",
     policyVersion: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,

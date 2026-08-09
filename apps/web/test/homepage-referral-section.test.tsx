@@ -28,7 +28,7 @@ test("ReferralSection presents every available referral path on the homepage", (
   assert.match(markup, /See the referral program/);
   assert.match(markup, /Qualifying rewards are applied automatically to the Murph they/);
   assert.match(markup, /Day estimates reflect typical Murph use/);
-  assert.doesNotMatch(markup, /\$2\.00|\$3\.50|cost-weighted/);
+  assert.doesNotMatch(markup, /\$|cost-weighted|usage credit/i);
   assert.match(markup, /If eligible/);
   assert.doesNotMatch(markup, /applies earned usage automatically when/);
 });
