@@ -70,6 +70,17 @@ describe('assistant food journal skill', () => {
     expect(skill).toContain(
       'Provide calorie and macro estimates by default when logging a meal',
     )
+    expect(skill).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
+    )
+    expect(skill).toContain('require all five canonical daily goals')
+    expect(skill).toContain(
+      'first setup response explains a paused canonical proposal in ordinary text',
+    )
+    expect(skill).toContain('does not attach a goal-less card')
+    expect(skill).toContain(
+      'Only a later eligible response may use the\naccepted active goals in a card.',
+    )
     expect(skill).toContain('vault-cli food search-labels`')
     expect(skill).toContain('vault-cli food search-labels-batch`')
     expect(skill).toContain('Use `--generic` for ordinary ingredients')

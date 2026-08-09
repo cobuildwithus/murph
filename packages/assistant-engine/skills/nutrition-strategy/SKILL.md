@@ -46,6 +46,16 @@ The lowest useful tracking burden wins:
 
 Do not give unsolicited calorie, macro, or weight-loss estimates. Past tracking does not imply current consent. Treat appetite cues as information, not a test of virtue or a guarantee of adequacy.
 
+### Daily nutrition-card goals
+
+An explicit request for a numeric daily nutrition card supplies numeric intent
+for that card workflow, subject to the safety rules below. Before any first card
+without five usable daily goals, read and follow
+`references/daily-nutrition-card-goals.md`. It owns evidence-grounded default
+derivation, the single canonical Goal proposal, and the explanation-before-card
+sequence. Do not send a goal-less card, create a second goal store, or reuse the
+workflow as unsolicited diet planning.
+
 ## Practical Levers
 
 ### Meal structure

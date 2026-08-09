@@ -26,6 +26,12 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 - Use weekly averages and waist trends instead of one scale day.
 - Ask about history of disordered eating before recommending tracking-heavy tactics when risk is plausible.
 
+For a daily nutrition-card calorie target, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`.
+This skill owns whether the direction is maintenance/recomp, muscle gain, or fat
+loss; the reference owns the researched estimate, conservative adjustment, and
+explanation-before-card sequence.
+
 ## If Context Is Thin
 
 Ask: "Are you trying to lose fat, gain muscle, recomp slowly, or understand whether the current trend is a real plateau?"
