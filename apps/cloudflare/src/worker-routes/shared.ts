@@ -49,6 +49,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse>;
+  prewarmRuntimeShellForUser?(userId: string): Promise<void>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;

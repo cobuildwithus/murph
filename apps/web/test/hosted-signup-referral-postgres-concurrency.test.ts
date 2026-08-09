@@ -7,6 +7,10 @@ import {
   settleHostedSignupReferralReward,
 } from "@/src/lib/hosted-growth/signup-referral-reward";
 import {
+  appendHostedSignupReferralRewardNotice,
+} from "@/src/lib/hosted-growth/signup-referral-notification";
+import { readHostedAiUsageActivity } from "@/src/lib/hosted-execution/usage-activity";
+import {
   claimHostedSignupReferralLink,
   issueHostedSignupReferralLink,
 } from "@/src/lib/hosted-growth/signup-referral";
@@ -339,6 +343,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             qualifiedAt: true,
             rewardedAt: true,
             status: true,
+            terminalAt: true,
             terminalReason: true,
           },
           where: { introducedMemberId: { in: introducedMemberIds } },
@@ -350,6 +355,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             qualifiedAt: activatedAt[index],
             rewardedAt: expect.any(Date),
             status: "rewarded",
+            terminalAt: expect.any(Date),
             terminalReason: null,
           })),
         );
@@ -358,8 +364,46 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           qualifiedAt: null,
           rewardedAt: null,
           status: "disqualified",
+          terminalAt: expect.any(Date),
           terminalReason: "signup_referral_referrer_reward_cap_reached",
         });
+        receipts.forEach((receipt, index) => {
+          if (!receipt.terminalAt) {
+            throw new TypeError("Expected a terminal signup receipt.");
+          }
+          expect(receipt.terminalAt.getTime()).toBeGreaterThan(
+            activatedAt[index]!.getTime(),
+          );
+        });
+
+        const disqualifiedReferral =
+          await observer.hostedUsageReferral.findFirstOrThrow({
+            select: { id: true },
+            where: { introducedMemberId: introducedMemberIds[5] },
+          });
+        await expect(issueHostedSignupReferralLink({
+          now,
+          prisma: observer,
+          publicBaseUrl: "https://www.withmurph.ai",
+          referrerMemberId,
+        })).resolves.toMatchObject({
+          signupUrl: expect.stringMatching(
+            /^https:\/\/www\.withmurph\.ai\/r\//u,
+          ),
+        });
+        const settingsActivity = await readHostedAiUsageActivity({
+          memberId: referrerMemberId,
+          missionsEnabled: true,
+          now,
+          prisma: observer,
+        });
+        expect(settingsActivity.missions.map(({ id }) => id)).not.toContain(
+          disqualifiedReferral.id,
+        );
+        await expect(appendHostedSignupReferralRewardNotice({
+          prisma: observer,
+          referralId: disqualifiedReferral.id,
+        })).resolves.toBeNull();
 
         await expect(Promise.all([
           observer.hostedUsageCreditEntry.count({
@@ -372,6 +416,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             where: {
               entry: { beneficiaryMemberId: referrerMemberId },
             },
+          }),
+          observer.hostedUsageCreditGrant.count({
+            where: { entry: { referralId: disqualifiedReferral.id } },
           }),
           observer.hostedMember.findUniqueOrThrow({
             select: {
@@ -388,6 +435,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ])).resolves.toEqual([
           5,
           5,
+          0,
           {
             usageCreditBalanceUsdMicros: 10_000_000n,
             usageCreditLedgerVersion: 5n,

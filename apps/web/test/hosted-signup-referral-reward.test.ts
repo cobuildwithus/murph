@@ -131,6 +131,24 @@ describe("hosted signup referral rewards", () => {
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
+  it("bounds a re-enabled recovery scan to the preceding 30 days", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([]);
+    const now = new Date("2026-08-07T12:05:00.000Z");
+
+    await expect(recoverPendingHostedSignupReferralRewards({
+      enabled: true,
+      now,
+      prisma: { $queryRaw: queryRaw } as never,
+    })).resolves.toEqual({ failed: 0, rewarded: 0, scanned: 0 });
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    const [query, lookback, limit] = queryRaw.mock.calls[0] ?? [];
+    expect(Array.isArray(query)).toBe(true);
+    expect(query.join(" ")).toContain('mailbox."occurred_at" >=');
+    expect(lookback).toEqual(new Date("2026-07-08T12:05:00.000Z"));
+    expect(limit).toBe(50);
+  });
+
   it("does not settle a later activation after an earlier referrer failure", async () => {
     const prisma = {
       $queryRaw: vi.fn().mockResolvedValue([

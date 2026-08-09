@@ -4641,6 +4641,171 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("binds a persisted direct iMessage route to generated contact cards through the real operation scope", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-contact-card-route-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const contactCardRequests: HostedRuntimeGroupToolRequest[] = [];
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/contact-card.jpg?exp=2000000000`;
+    const groupToolPort: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    > = {
+      async request(request) {
+        contactCardRequests.push(request);
+        if (request.action === "share_contact_card") {
+          return {
+            action: "share_contact_card" as const,
+            result: { status: "sent" as const },
+          };
+        }
+        throw new Error(`Unexpected group tool request: ${request.action}`);
+      },
+    };
+    const buildContactCardEvent = (input: {
+      index: number;
+      threadIsDirect: boolean;
+    }) => ({
+      content: {
+        text: `contact card request ${input.index}`,
+        transcriptText: `contact card request ${input.index}`,
+        userMessageContent: [{
+          text: `contact card request ${input.index}`,
+          type: "text" as const,
+        }],
+      },
+      conversation: {
+        accountId: `hid_${"1".repeat(32)}`,
+        actorId: `hid_${"2".repeat(32)}`,
+        actorIsSelf: false,
+        source: "linq",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: input.threadIsDirect,
+      },
+      occurredAt: `2026-04-27T00:00:0${input.index}.000Z`,
+      receivedAt: `2026-04-27T00:00:0${input.index}.500Z`,
+      replyTarget: {
+        channel: "linq",
+        messageId: `message_contact_card_${input.index}`,
+        threadId: input.threadIsDirect
+          ? "chat_direct_contact_card"
+          : "chat_group_contact_card",
+      },
+      sourceMetadata: {
+        // An ordinary direct wake carries no external thread-route authority:
+        // its route lives in the member's own routing record. A group wake
+        // does. This is the exact shape the production webhook persists.
+        externalThreadRouteAuthorityPresent: !input.threadIsDirect,
+        kind: "linq" as const,
+        partCount: 0,
+        reactionEligible: false,
+        replyToMessageId: null,
+        senderHandle: "+15555550123",
+        service: "iMessage",
+      },
+      sourceRef: {
+        dedupeKey: `dedupe_contact_card_${input.index}`,
+        eventId: `event_contact_card_${input.index}`,
+        itemId: `mailbox_item_contact_card_${input.index}`,
+        kind: "hosted-mailbox" as const,
+        lane: "conversation" as const,
+        laneSeq: String(input.index),
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        payloadSource: "inline" as const,
+        source: "hosted-mailbox" as const,
+        wakeSchema: "murph.hosted-execution-wake.v1",
+      },
+    });
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      const directInput = await upsertAssistantInputEvent({
+        event: buildContactCardEvent({ index: 0, threadIsDirect: true }),
+        vault: vaultRoot,
+      });
+      const groupInput = await upsertAssistantInputEvent({
+        event: buildContactCardEvent({ index: 1, threadIsDirect: false }),
+        vault: vaultRoot,
+      });
+      const assistantAutomation = await vi.importActual<
+        typeof import("@murphai/assistant-engine/assistant-automation")
+      >("@murphai/assistant-engine/assistant-automation");
+      mocks.readAssistantInputEvent.mockImplementation(
+        assistantAutomation.readAssistantInputEvent,
+      );
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [directInput.inputId, groupInput.inputId],
+        importedCount: 2,
+        runtimeGroupToolPort: groupToolPort,
+        vaultRoot,
+      }));
+
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+
+      const routeStatuses: unknown[] = [];
+      const runShare = async (inputId: string) =>
+        await operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [inputId],
+          operation: async (executionContext) => {
+            const groupTool = executionContext.hosted?.groupTool;
+            if (!groupTool) {
+              throw new Error("Expected operation-scoped group tool.");
+            }
+            routeStatuses.push(groupTool.directAttachmentRouteStatus?.());
+            return await groupTool.request({
+              action: "share_contact_card",
+              contactCardImageUrl,
+              contactCardShareKey: inputId,
+            });
+          },
+          turnEnvironment: null,
+        });
+
+      await expect(runShare(directInput.inputId)).resolves.toMatchObject({
+        action: "share_contact_card",
+        result: { status: "sent" },
+      });
+      // A group input must not read as a direct attachment route or
+      // forward a partial personalized transport request.
+      await expect(runShare(groupInput.inputId)).resolves.toEqual({
+        action: "share_contact_card",
+        result: {
+          status: "unavailable",
+          unavailableReason: "direct_attachment_route_unavailable",
+        },
+      });
+
+      expect(routeStatuses).toEqual([
+        { status: "ok" },
+        {
+          status: "unavailable",
+          unavailableReason: "direct_attachment_route_unavailable",
+        },
+      ]);
+      expect(contactCardRequests).toEqual([
+        // The trusted host's exact direct chat, carried without any group
+        // thread-route authority, which a direct home chat cannot have.
+        {
+          action: "share_contact_card",
+          contactCardImageUrl,
+          contactCardShareKey: directInput.inputId,
+          directLinqChatId: "chat_direct_contact_card",
+        },
+      ]);
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
 
   it("scopes automation and group mutation authority to each durable accepted input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-tool-"));

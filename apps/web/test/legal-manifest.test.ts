@@ -48,9 +48,23 @@ test("legal manifest keeps the current PDF set versioned and deterministic", () 
     assert.equal(document.source.startsWith("apps/web/legal/"), true);
   }
 
+  const expectedVersions = new Map([
+    ["consumer-health-data-notice", "2026-07-23"],
+    ["health-ai-safety-disclosure", "2026-07-23"],
+    ["legal-documents", "2026-08-09"],
+    ["privacy-policy", "2026-07-23"],
+    ["subprocessors", "2026-08-09"],
+    ["terms-of-service", "2026-07-23"],
+  ]);
+
   for (const document of manifest.documents) {
-    assert.equal(document.version, "2026-07-23");
-    assert.match(document.versions[0]?.path ?? "", /^\/legal\/.+-2026-07-23\.pdf$/u);
+    const expectedVersion = expectedVersions.get(document.id);
+    assert.ok(expectedVersion, `Unexpected legal document: ${document.id}`);
+    assert.equal(document.version, expectedVersion);
+    assert.match(
+      document.versions[0]?.path ?? "",
+      new RegExp(`^/legal/.+-${expectedVersion}\\.pdf$`, "u"),
+    );
   }
 
   const consumerHealthNotice = manifest.documents.find((document) =>

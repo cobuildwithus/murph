@@ -2,6 +2,8 @@ import { Buffer } from 'node:buffer'
 
 import {
   assistantResponseCardSchema,
+  compactTableResponseCardV1Schema,
+  dailyNutritionResponseCardV2Schema,
   type AssistantResponseCard,
   type CompactTableResponseCardV1,
   type DailyNutritionResponseCard,
@@ -378,13 +380,19 @@ function isDailyNutritionResponseCardV2(
 }
 
 function createAssistantResponseCardJsonSchema() {
+  // Retained nutrition V1 cards remain valid at the runtime boundary. New tool
+  // calls author only the current nutrition version or a compact table.
+  const authoringSchema = z.union([
+    dailyNutritionResponseCardV2Schema,
+    compactTableResponseCardV1Schema,
+  ])
   const {
     $schema: _dialect,
     ...portableSchema
-  } = z.toJSONSchema(assistantResponseCardSchema)
+  } = z.toJSONSchema(authoringSchema)
   return {
     ...portableSchema,
     description:
-      'One closed Murph response card: daily_nutrition for a canonical daily meal summary, or compact_table for a bounded one-off table or a refreshed snapshot backed by one canonical workout event.',
+      'Current card authoring contract: daily_nutrition V2 or compact_table V1.',
   }
 }

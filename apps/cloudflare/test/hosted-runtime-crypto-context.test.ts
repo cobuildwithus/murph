@@ -14,6 +14,13 @@ import {
 } from "@murphai/runtime-state";
 
 import {
+  buildHostedWorkerSecretsPayload,
+  buildHostedWranglerDeployConfig,
+  HOSTED_WORKER_REQUIRED_SECRET_NAMES,
+  readHostedDeployAutomationEnvironment,
+} from "../scripts/deploy-automation.js";
+
+import {
   fetchHostedWorkerRuntimeRoots,
   fetchHostedWorkerRuntimeRoot,
   unwrapHostedWorkerRuntimeRoots,
@@ -96,6 +103,100 @@ test("Cloudflare hosted runtime crypto context verifies signatures and unwraps i
       env: { ...env, HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "other-key" },
     }),
   ).rejects.toThrow(/not available for decrypt/u);
+});
+
+test("rendered production standby keyrings preserve active envelope reads", async () => {
+  const activeRecipient = await generateP256EcdhKeyPair();
+  const standbyRecipient = await generateP256EcdhKeyPair();
+  const activeSigner = await generateP256SigningKeyPair();
+  const standbySigner = await generateP256SigningKeyPair();
+  const activeAuthorityKeyVersion =
+    "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+  const standbyAuthorityKeyVersion =
+    "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2";
+  const requiredSecretFixtures = Object.fromEntries(
+    HOSTED_WORKER_REQUIRED_SECRET_NAMES.map((name) => [
+      name,
+      `${name.toLowerCase()}-fixture-value`,
+    ]),
+  );
+  const deploySource = {
+    ...requiredSecretFixtures,
+    CF_BUNDLES_BUCKET: "hosted-bundles",
+    CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+    CF_PUBLIC_BASE_URL: "https://hosted-worker.example.test",
+    CF_WORKER_NAME: "hosted-worker",
+    HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: activeAuthorityKeyVersion,
+    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: activeSigner.publicKeyPem,
+    HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+      [standbyAuthorityKeyVersion]: {
+        publicKeyPem: standbySigner.publicKeyPem,
+        status: "verify_only",
+      },
+    }),
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID:
+      "cloudflare-automation:v1",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
+      activeRecipient.privateJwk,
+    ),
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON: JSON.stringify({
+      "cloudflare-automation:v2": {
+        privateJwk: standbyRecipient.privateJwk,
+        recipient: "cloudflare-automation-secret",
+        status: "decrypt_only",
+      },
+    }),
+    HOSTED_CRYPTO_ENV: "production",
+    HOSTED_R2_PRESIGN_ACCOUNT_ID: "account-fixture",
+    HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
+    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: JSON.stringify(
+      activeSigner.privateJwk,
+    ),
+  };
+  const renderedConfig = buildHostedWranglerDeployConfig(
+    readHostedDeployAutomationEnvironment(deploySource),
+  ) as { vars: Record<string, string> };
+  const renderedSecrets = buildHostedWorkerSecretsPayload(deploySource);
+  const environment = readHostedExecutionEnvironment(
+    createHostedExecutionTestEnv({
+      ...renderedConfig.vars,
+      ...renderedSecrets,
+    }),
+  );
+  const ingressRoot = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => index + 90);
+  const ingress = await createSignedWorkerEnvelope({
+    cryptoEnv: "production",
+    domain: "ingress",
+    keyVersionName: activeAuthorityKeyVersion,
+    publicJwk: activeRecipient.publicJwk,
+    recipientKeyId: "cloudflare-automation:v1",
+    rootKey: ingressRoot,
+    signer: activeSigner.privateKey,
+    userId: "user-1",
+  });
+  const runtime = await createSignedWorkerEnvelope({
+    cryptoEnv: "production",
+    domain: "runtime",
+    keyVersionName: activeAuthorityKeyVersion,
+    publicJwk: activeRecipient.publicJwk,
+    recipientKeyId: "cloudflare-automation:v1",
+    rootKey: runtimeRoot,
+    signer: activeSigner.privateKey,
+    userId: "user-1",
+  });
+
+  const unwrapped = await unwrapHostedWorkerRuntimeRoots({
+    context: {
+      envelopes: { ingress, runtime },
+      schema: "murph.hosted-runtime-crypto-context.v1",
+      userId: "user-1",
+    },
+    env: environment.hostedCrypto,
+  });
+
+  assert.deepEqual(unwrapped.ingress.rootKey, ingressRoot);
+  assert.deepEqual(unwrapped.runtime.rootKey, runtimeRoot);
 });
 
 test("Cloudflare hosted runtime crypto context can verify and decrypt rotated keyring entries", async () => {

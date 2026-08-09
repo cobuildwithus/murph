@@ -58,6 +58,7 @@ import {
 import {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
+  ensureHostedRuntimeLogDatabaseForTest,
   issueHostedAppSessionForTest,
   listHostedRuntimeLogsForTest,
   readHostedDeviceSyncConnectionForTest,
@@ -237,6 +238,7 @@ export async function startHostedLocalFullStackScenario(input: {
     scenarioPrefix: input.persistDirPrefix,
   });
   const localDatabaseUrl = localDatabase.url;
+  const runtimeLogDatabaseUrl = localDatabase.runtimeLogUrl;
   const testControls = resolveHostedLocalScenarioTestControls(input);
   const baseEnvironment = await loadHostedLocalBaseEnvironment();
   const assistantProviderMode =
@@ -315,6 +317,7 @@ export async function startHostedLocalFullStackScenario(input: {
       ...(input.additionalEnv ?? {}),
       ...assistantProviderRecorderEnv,
       DATABASE_URL: localDatabaseUrl,
+      HOSTED_RUNTIME_LOG_DATABASE_URL: runtimeLogDatabaseUrl,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: mergeRequiredEnvProfile(
         baseEnvironment.HOSTED_EXECUTION_RUNNER_ENV_PROFILES,
         input.requiredRunnerEnvProfile,
@@ -353,6 +356,7 @@ export async function startHostedLocalFullStackScenario(input: {
       webProcessEnvOverrides: {
         ...buildHostedLocalFullStackWebProcessEnvOverrides(runtimeEnv),
         ...(input.webProcessEnvOverrides ?? {}),
+        HOSTED_RUNTIME_LOG_DATABASE_URL: runtimeLogDatabaseUrl,
       },
     });
     preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
@@ -366,6 +370,7 @@ export async function startHostedLocalFullStackScenario(input: {
     ): NodeJS.ProcessEnv => ({
       ...seedEnvironment,
       DATABASE_URL: localDatabaseUrl,
+      HOSTED_RUNTIME_LOG_DATABASE_URL: runtimeLogDatabaseUrl,
       NODE_ENV: "test",
       VITEST: "1",
       ...overrides,
@@ -605,27 +610,34 @@ export async function startHostedLocalFullStackScenario(input: {
 export function buildHostedLocalFullStackWebProcessEnvOverrides(
   source: Readonly<NodeJS.ProcessEnv>,
 ): NodeJS.ProcessEnv {
+  const overrides: NodeJS.ProcessEnv = {};
+  const runtimeLogDatabaseUrl = source.HOSTED_RUNTIME_LOG_DATABASE_URL?.trim();
+  if (runtimeLogDatabaseUrl) {
+    overrides.HOSTED_RUNTIME_LOG_DATABASE_URL = runtimeLogDatabaseUrl;
+  }
+
   const configuredLinqBaseUrl = source.LINQ_API_BASE_URL?.trim();
   if (!configuredLinqBaseUrl) {
-    return {};
+    return overrides;
   }
 
   let linqBaseUrl: URL;
   try {
     linqBaseUrl = new URL(configuredLinqBaseUrl);
   } catch {
-    return {};
+    return overrides;
   }
 
   // The Linq E2E stub listens on one host port. Runner containers reach that
   // port through Docker's host alias, while the host web process must use
   // loopback on Linux. Keep the runner URL authoritative everywhere else.
   if (linqBaseUrl.protocol !== "http:" || linqBaseUrl.hostname !== "host.docker.internal") {
-    return {};
+    return overrides;
   }
 
   linqBaseUrl.hostname = "127.0.0.1";
   return {
+    ...overrides,
     LINQ_API_BASE_URL: linqBaseUrl.toString().replace(/\/$/u, ""),
   };
 }
@@ -659,6 +671,9 @@ export async function assertHostedRunNoProviderEgressAuthFailures(input: {
     limit: 1_500,
     userId: input.userId,
   });
+  if (logs.length === 0) {
+    throw new Error(`Hosted run for ${input.userId} completed without runtime-log evidence.`);
+  }
   const failures = logs.filter(isHostedRuntimeEgressAuthFailureLog);
   if (failures.length === 0) {
     return;
@@ -735,6 +750,7 @@ function summarizeHostedRecentLogsForFailure(
 
 interface HostedLocalScenarioDatabaseLease {
   cleanup(): Promise<void>;
+  runtimeLogUrl: string;
   url: string;
 }
 
@@ -748,8 +764,11 @@ async function resolveHostedLocalScenarioDatabase(input: {
     explicitDatabaseUrl
     && (input.reuseDatabase === true || shouldReuseExplicitHostedLocalScenarioDatabaseUrl())
   ) {
+    const runtimeLogUrl = buildHostedLocalRuntimeLogDatabaseUrl(explicitDatabaseUrl);
+    await ensureHostedRuntimeLogDatabaseForTest({ databaseUrl: runtimeLogUrl });
     return {
       cleanup: async () => {},
+      runtimeLogUrl,
       url: explicitDatabaseUrl,
     };
   }
@@ -772,20 +791,44 @@ async function createEphemeralHostedLocalDatabase(
 ): Promise<HostedLocalScenarioDatabaseLease> {
   const adminUrl = new URL(DEFAULT_DATABASE_URL);
   const databaseName = buildEphemeralHostedLocalDatabaseName(scenarioPrefix);
+  const runtimeLogDatabaseName = buildHostedLocalRuntimeLogDatabaseNameForTest(databaseName);
   const commandArgs = buildPostgresDatabaseCommandArgs(adminUrl, databaseName);
   const commandEnv = buildPostgresDatabaseCommandEnv(adminUrl);
+  const createdDatabaseNames: string[] = [];
 
-  await execFileAsync("createdb", commandArgs, { env: commandEnv });
+  try {
+    await execFileAsync("createdb", commandArgs, { env: commandEnv });
+    createdDatabaseNames.push(databaseName);
+    createdDatabaseNames.push(runtimeLogDatabaseName);
+  } catch (error) {
+    await dropHostedLocalDatabases(adminUrl, createdDatabaseNames).catch(() => {});
+    throw error;
+  }
 
   const targetUrl = new URL(DEFAULT_DATABASE_URL);
   targetUrl.pathname = `/${databaseName}`;
+  const runtimeLogTargetUrl = new URL(DEFAULT_DATABASE_URL);
+  runtimeLogTargetUrl.pathname = `/${runtimeLogDatabaseName}`;
+
+  try {
+    await ensureHostedRuntimeLogDatabaseForTest({
+      databaseUrl: runtimeLogTargetUrl.toString(),
+    });
+  } catch (error) {
+    try {
+      await dropHostedLocalDatabases(adminUrl, createdDatabaseNames);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Hosted local runtime-log database setup and cleanup failed.",
+      );
+    }
+    throw error;
+  }
 
   return {
-    cleanup: async () => {
-      await execFileAsync("dropdb", ["--if-exists", "--force", ...commandArgs], {
-        env: commandEnv,
-      });
-    },
+    cleanup: async () => await dropHostedLocalDatabases(adminUrl, createdDatabaseNames),
+    runtimeLogUrl: runtimeLogTargetUrl.toString(),
     url: targetUrl.toString(),
   };
 }
@@ -801,6 +844,46 @@ function buildEphemeralHostedLocalDatabaseName(scenarioPrefix: string): string {
   const databaseName = `murph_e2e_${scenarioSlug || "hosted"}_${randomSuffix}`;
 
   return databaseName.slice(0, 63);
+}
+
+export function buildHostedLocalRuntimeLogDatabaseNameForTest(
+  primaryDatabaseName: string,
+): string {
+  const suffix = "_runtime_logs";
+  return `${primaryDatabaseName.slice(0, 63 - suffix.length)}${suffix}`;
+}
+
+function buildHostedLocalRuntimeLogDatabaseUrl(primaryDatabaseUrl: string): string {
+  const primaryUrl = new URL(primaryDatabaseUrl);
+  const primaryDatabaseName = decodeURIComponent(primaryUrl.pathname.replace(/^\/+/, ""));
+  if (!primaryDatabaseName) {
+    throw new Error("Hosted local reusable DATABASE_URL must name a database.");
+  }
+
+  const runtimeLogDatabaseName = buildHostedLocalRuntimeLogDatabaseNameForTest(primaryDatabaseName);
+  const runtimeLogUrl = new URL(primaryUrl);
+  runtimeLogUrl.pathname = `/${runtimeLogDatabaseName}`;
+  return runtimeLogUrl.toString();
+}
+
+async function dropHostedLocalDatabases(
+  adminUrl: URL,
+  databaseNames: readonly string[],
+): Promise<void> {
+  const commandEnv = buildPostgresDatabaseCommandEnv(adminUrl);
+  const results = await Promise.allSettled(databaseNames.map(async (databaseName) =>
+    await execFileAsync("dropdb", [
+      "--if-exists",
+      "--force",
+      ...buildPostgresDatabaseCommandArgs(adminUrl, databaseName),
+    ], { env: commandEnv })
+  ));
+  const failures = results.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : []
+  );
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Hosted local database cleanup failed.");
+  }
 }
 
 function buildPostgresDatabaseCommandArgs(url: URL, databaseName: string): string[] {

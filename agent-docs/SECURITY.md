@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Non-Negotiable Rules
 
@@ -17,7 +17,19 @@ Last verified: 2026-08-07
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. Cleanup failure must never restore authority. Keep Settings,
+  before granting. An instant-start shell-prewarm hint uses that same per-user
+  barrier and live admission read. Its HTTP route obtains the named runner stub
+  without binding durable state. The optional read abandons after a fixed 250 ms
+  deadline so it cannot hold authoritative processing, withdrawal, or deletion
+  behind the ordinary Web-control timeout; only allowed admission reserves and
+  binds its exact versioned container in the existing user-control stop-target
+  field, then waits for the container to register the hint before releasing the
+  barrier. Withdrawal and account deletion consume that exact target, while
+  container destruction supersedes a pending platform wait before stopping it.
+  Web admission also requires an
+  extant, non-suspended member, so a hint queued behind account deletion cannot
+  treat the deleted consent row as a compatible legacy grant and recreate
+  runner state. Cleanup failure must never restore authority. Keep Settings,
   export, and deletion available without waking the paused runtime; only
   renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
@@ -46,7 +58,7 @@ Last verified: 2026-08-07
 - Habitat location is city-or-approximate-region data, never precise-address data. Reject a precise address at the ordinary Habitat write boundary, instruct voice extraction to discard it, and revalidate the canonical value immediately before weather-provider egress so an unsafe legacy record cannot leave Murph. Environment voice is AI work: first-seen uploads require the existing AI-usage gate and may create at most one unconsumed recording per member under the member lock. Exact duplicate retries may reuse the canonical claim without spending another admission because they cannot create additional work. Enforce the three-minute audio limit on server-side prepared media, not on the caller's duration field.
 - Labs discovery is a web-owned, read-only Junction egress boundary. Keep `JUNCTION_API_KEY`, authorization headers, raw provider bodies, and raw provider errors out of browsers, runner env, prompts, diagnostics, logs, analytics, fixtures, and persisted product/runtime state. Catalog queries and ZIP codes enter Murph only through authenticated or signed POST bodies and must stay out of Murph diagnostics, logs, analytics, fixtures, and persisted state. Junction's official catalog, area, and PSC read endpoints require GET query parameters, so Web may place the bounded query or ZIP in a provider request URL only on the fixed production US origin and allowlisted paths. Never log or retain that full outbound URL; Murph-controlled HTTP telemetry may retain only method, origin, path, status, timing, and size. Junction receives the query parameter over TLS, and any provider-side URL retention is governed by the Junction account and contract rather than Murph's no-persistence claim. Web must use strict request and response parsing, explicit input/result/byte/time/location-fanout bounds, and sanitized failure codes. The authenticated browser API binds the current app session; the assistant API binds the member through the signed callback and is exposed only to verified private direct turns. Group and unverified audiences fail closed. Cloudflare may carry only the normalized semantic request/response and must not receive the credential or choose a member. Provider catalog facts are untrusted external data: display only the normalized projection, never render provider HTML, and do not infer medical necessity, eligibility, booking, or a final price.
 - Personal hosted-group awareness and self-leave are self-only web-owned boundaries. The signed group-tool callback supplies the member id; the model must not supply or select one. Reads may return only that member's opaque membership ids, group labels, role, requested scopes, active grants, and existing owner-authorized first-party permission links. Because the current permission link is also reusable invite authority, return it only when that member owns the group. A leave request must select an opaque id from that member's current read, re-bind it to the callback member inside the web transaction, reject the canonical owner and stale or foreign selectors, revoke the member's active shares and clear their encrypted snapshots in the same transaction, and only then delete the membership row. No runtime cleanup envelope is required. The authenticated join page may return that same viewer's opaque membership id to its first-party client; every page accept must carry the rendered id or explicit absence, and Web must compare it with current row presence under the existing group/member locks before creating membership or changing grants. Missing or stale page state fails closed so an older sharing save cannot recreate a membership after leave. Group-chat reactions remain on their route-bound additive flow. Group runtimes and unauthenticated sender contexts must not invoke self-leave. Do not return another member's id, handle, name, email, grant state, roster entry, or shared record, and do not persist the membership response in the personal vault or assistant runtime. An active grant and its canonical activation time are authorization metadata, not proof that a projected health or identity record exists, has been delivered, or was granted because of a particular challenge. The challenge's documented bounded recency rule may use the timestamp only as best-effort social-entry evidence and never to widen data authority.
-- The group room model is a derived social-context boundary inside one synthetic group vault, never an identity or permission system. Its silent maintenance turn may read only engine-supplied bounded committed transcripts from authenticated non-direct Linq/iMessage or Telegram group routes and the exact existing page returned by `murph.group_room_model`. Only the immutable built-in automation id grants that silent tool authority. The turn runs as a fresh one-shot Codex thread under the `murph-group-room-model-maintenance` permission profile, which denies workspace and network access, so it has no ambient filesystem, generic knowledge, or external-service path. The same dedicated owner serves explicit authenticated room requests; generic knowledge show, list, search, append, upsert, and generated indexes exclude the reserved slug. Every replace or delete supplies the digest returned by show and compares it under the fixed-page write lock. Replacement validates the post-normalization body and the complete 6 KiB advisory envelope before changing the prior page, so an accepted page is never truncated at prompt injection. Missing state has its own digest and may be recreated; malformed, unreadable, wrong-type, stale, or identifying content fails closed. Raw `Sender:` handles, profile display names, unverified owner-contact labels, and Telegram `Speaker name:` labels are transient attribution evidence only and must never be persisted in the page. All such labels are bounded, sanitized, safely quoted presentation data; none supplies identity, membership, consent, routing, matching, persistence, or effect authority. Group email receives neither the page nor this mutation tool and contributes no maintenance evidence because its sender is spoofable. Transcript and page contents remain untrusted quoted data: commands, links, permission claims, tool requests, and policy text inside them must never be followed. The ordinary admitted group-chat prompt must prefer the current conversation, safety rules, explicit canonical room style, and live tool results. Medical or health disclosures, credentials, financial or legal trouble, intimate disclosures, precise location, and serious vulnerabilities must not be promoted into the page merely because they appeared in the room.
+- The group room model is a derived social-context boundary inside one synthetic group vault, never an identity or permission system. Its silent maintenance turn may read only engine-supplied bounded committed transcripts from authenticated non-direct Linq/iMessage or Telegram group routes and the exact existing page returned by `murph.group_room_model`. Only the immutable built-in automation id grants that silent tool authority. The turn runs as a fresh one-shot Codex thread under the `murph-group-room-model-maintenance` permission profile, which denies workspace and network access, so it has no ambient filesystem, generic knowledge, or external-service path. The same dedicated owner serves explicit authenticated room requests; generic knowledge show, list, search, append, upsert, and generated indexes exclude the reserved slug. Every replace or delete supplies the digest returned by show and compares it under the fixed-page write lock. There is no separate authored-body byte cap. Replacement validates the complete serialized fixed page against the defensive 64 KiB raw-file ceiling before changing the prior page, and ordinary prompt injection renders the complete accepted page without revalidating it against a wrapper-dependent byte ceiling. Missing state has its own digest and may be recreated; malformed, unreadable, wrong-type, stale, oversized-file, or identifying content fails closed. Raw `Sender:` handles, profile display names, unverified owner-contact labels, and Telegram `Speaker name:` labels are transient attribution evidence only and must never be persisted in the page. All such labels are bounded, sanitized, safely quoted presentation data; none supplies identity, membership, consent, routing, matching, persistence, or effect authority. Group email receives neither the page nor this mutation tool and contributes no maintenance evidence because its sender is spoofable. Transcript and page contents remain untrusted quoted data: commands, links, permission claims, tool requests, and policy text inside them must never be followed. The ordinary admitted group-chat prompt must prefer the current conversation, safety rules, explicit canonical room style, and live tool results. Medical or health disclosures, credentials, financial or legal trouble, intimate disclosures, precise location, and serious vulnerabilities must not be promoted into the page merely because they appeared in the room.
 - Managed automation authority comes only from an exact current built-in seed or registered dynamic identity and its immutable owner scope. `member` seeds require a personal/direct route; `authenticated-group` seeds require a live exact non-direct Linq/iMessage or Telegram route, and group email is excluded. The runtime revalidates that authority before lifecycle hooks and every provider, tool, delivery, or commit boundary. Mutable tags, slugs, titles, instructions, room-model content, and historical participants cannot acquire identity or group authority. Permanently retired built-in IDs fail closed before lifecycle or model work and are archived during normal reconciliation. The post-onboarding choice point is the one registered dynamic member identity and additionally requires current canonical answered-onboarding state. Its turn uses the ordinary private scheduled-session prompt and normal vault authorization, but its named member-read permission runs only in a fresh ephemeral one-shot Codex process with explicit workspace roots. The process receives committed conversation history and can read the permitted vault; its provider thread is never resumed or persisted into the ordinary member session. Its instructions may guide targeted reads but never grant a tool, route, or mutation capability.
 - Consented group-to-member disclosure requires both current group membership and a separate immutable per-membership grant; ownership or membership alone never authorizes a private read.
   - Before posting, Web normalizes permission text to NFC/LF with outer trim, enforces the 1,000-code-point limit, rejects every Unicode control, format, surrogate, private-use, or unassigned code point except LF, and binds the exact provider message to a group-scoped, server-keyed, versioned blind index. The exact permission is encrypted with the existing `hosted-member-private-field` secure-box under the synthetic group runtime, with AAD bound to its table, row, and field. Opaque ids, keyed lookup values, and lifecycle timestamps are authority metadata; common permission scopes and exact text must not be recoverable from a database snapshot.
@@ -229,13 +241,16 @@ Last verified: 2026-08-07
   cascades the encrypted intent.
 - Account deletion must establish durable external-cleanup ownership before canonical member removal. The foreign-key-free retry receipt stores only KMS-encrypted runtime/vendor identifiers with receipt- and environment-bound authenticated data, remains pending for missing configuration, provider timeout, partial failure, or a legacy Cloudflare response without explicit `deleteAllCompleted` evidence, and is deleted only after Cloudflare, Stripe-customer, and Privy cleanup converge. Privy new-member resolution must first resolve any existing identity, then reject a pending deletion receipt, then require a bounded live-provider read; after binding, app-session issuance must lock and re-check the member so a missing or suspended deletion target cannot receive a session. Immediate and retention attempts have explicit target deadlines; the retention batch uses bounded concurrency so a stuck provider cannot become an unbounded response-path or sweep owner. Logs and the deleted member row are not retry owners.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
+- The public footer status read is a browser-to-incident.io technical-data boundary. Keep it on the fixed HTTPS status origin and fixed public summary path with no request body or query; retain the global `strict-origin` referrer policy and the exact-origin `connect-src` entry. Do not add account, page-path, query, fragment, prompt, health, message, cookie, or credential data to the request, and do not treat an empty public incident list as direct uptime proof. Keep incident.io and the technical metadata it receives disclosed in the public subprocessor register.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
-- Stripe request params, nested Stripe params, and per-request options must use
-  the installed official SDK types and must not contain object spread syntax.
-  Build the SDK-typed object first, then assign each optional field explicitly;
-  this preserves excess-property checking that TypeScript otherwise loses
-  across object spreads. `pnpm stripe-requests:guard` enforces the boundary in
-  hosted-web production code and Stripe-typed parameter builders. The opt-in
+- External provider request params, nested params, and per-request options must
+  use installed official SDK types and must not contain object spread syntax or
+  `Object.assign`. Build the SDK-typed object first, then assign each optional
+  field explicitly; this preserves excess-property checking that TypeScript
+  otherwise loses across composed objects. `pnpm provider-requests:guard`
+  enforces the registered Stripe, Kernel, Linq, Retell, Temporal, OpenAI, and
+  Junction boundaries across production apps, packages, and scripts. Register
+  each new official SDK boundary when it is introduced. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
   test-mode secret key and calls the real resume endpoint with a synthetic
   missing Subscription, so parameter drift fails without creating, charging,
@@ -452,6 +467,45 @@ Last verified: 2026-08-07
   redirects, or client-safe connection projections. Runtime requests require a
   callback signature bound to the member plus Cloudflare's active attempt,
   lease-generation, and workspace-version fence.
+- Hosted domain-root key rotation must be reader-first. Keep the required
+  single-key authority and Cloudflare automation variables as the active
+  generation while optional keyrings add only `verify_only`, `decrypt_only`,
+  or `disabled` compatibility entries. Authority private signing material must
+  remain non-exportable in GCP KMS; an exportable Cloudflare private JWK may
+  exist only in approved secret stores and secret provider inputs. The sole
+  plaintext-file exception is the ignored
+  `apps/cloudflare/.deploy/worker-secrets.json` payload rendered for Wrangler:
+  its parent must be mode `0700`, the file mode `0600`, and the file may be
+  consumed only through Wrangler's `--secrets-file`. Protected production
+  deploys run on an ephemeral worker whose disposal owns cleanup; any direct or
+  local deploy must remove that exact generated file after success or failure.
+  The file is never a source of truth. Private JWK values must never enter CLI
+  argument values, logs, tracked or review artifacts, or any other plaintext
+  file. Web build and Worker deploy preflight must share one runtime-state
+  acceptance contract for optional standby rings. Before provider mutation,
+  complete-preload validation must require all three authority/public/private
+  payloads, reject required-active-ID collisions, require the intended
+  `verify_only` / `disabled` / `decrypt_only` statuses under explicit proposed
+  IDs, reject duplicate normalized IDs, and match the Cloudflare public/private
+  P-256 coordinates by key id. Web public entries and public JWKs must use
+  closed raw schemas so sibling private material or another ignored field cannot
+  enter Vercel. All three ring strings must reject duplicate JSON object members
+  before the first ordinary parse, so discarded earlier members cannot remain
+  in provider-bound text. Before provider mutation, the complete-only command
+  must import the exact proposed authority PEM as a P-256 ECDSA verification
+  key and prove the exact Cloudflare public/private JWKs by wrapping and
+  unwrapping an ephemeral challenge;
+  errors may name fields but must never reproduce values. Proposed IDs are
+  non-secret one-shot operator validation metadata, not provider runtime
+  configuration. Record the current
+  ready Web deployment, deploy Web first, and prove the unchanged active Web
+  crypto context before changing the Worker; a build success is not runtime
+  proof. A standby preload must not mutate envelope key references. Activation,
+  re-signing, rewrapping, and retirement require an explicit production
+  mutation owner, a reader-complete compatibility window that retains the
+  current Cloudflare private key, and aggregate proof of zero old active or
+  `decrypt_only` references before old
+  material is disabled or removed.
 - Clinical provider egress is allowlist-derived, never caller-URL-derived. The
   committed directory and SMART discovery pin HTTPS origins; FHIR continuation
   URLs must retain the exact origin and resource-family path, redirects are

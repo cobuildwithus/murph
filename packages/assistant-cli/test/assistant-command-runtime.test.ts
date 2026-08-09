@@ -273,6 +273,30 @@ test('canUseAssistantDaemonForMessage declines turns that need local-only state'
     ),
     false,
   )
+
+  for (const localOnlyInput of [
+    {
+      allowBindingRebind: true,
+      vault: '/tmp/vault',
+      prompt: 'hello from daemon',
+    },
+    {
+      actorId: 'engine-actor',
+      vault: '/tmp/vault',
+      prompt: 'hello from daemon',
+    },
+  ]) {
+    assert.equal(
+      canUseAssistantDaemonForMessage(
+        localOnlyInput,
+        {
+          MURPH_ASSISTANTD_BASE_URL: 'http://127.0.0.1:50242',
+          MURPH_ASSISTANTD_CONTROL_TOKEN: 'assistant-test-token',
+        },
+      ),
+      false,
+    )
+  }
 })
 
 test('maybeSendAssistantMessageViaDaemon sends the prompt through the daemon and parses the response', async () => {

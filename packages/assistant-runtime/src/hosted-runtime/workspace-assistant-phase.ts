@@ -360,6 +360,20 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
   const emailIngressPresent = input.groupEmailIngress === true
     || (input.emailDeliveryContexts?.length ?? 0) > 0;
   return {
+    directAttachmentRouteStatus() {
+      const linqRoute = resolveHostedDirectToolLinqRouteContext(
+        input.linqDeliveryContexts,
+      );
+      if (linqRoute?.service === "imessage") {
+        return { status: "ok" };
+      }
+      return {
+        status: "unavailable",
+        unavailableReason: linqRoute?.service === "sms"
+          ? "sms_attachments_unsupported"
+          : "direct_attachment_route_unavailable",
+      };
+    },
     async request(request, context) {
       const forwardRequest = (forwardedRequest: HostedRuntimeGroupToolRequest) =>
         context
@@ -463,6 +477,29 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
           );
         }
         return await forwardRequest(request);
+      }
+      if (
+        request.action === "share_contact_card"
+        && request.contactCardImageUrl !== undefined
+      ) {
+        const linqRoute = resolveHostedDirectToolLinqRouteContext(
+          input.linqDeliveryContexts,
+        );
+        if (linqRoute?.service === "imessage") {
+          return await forwardRequest({
+            ...request,
+            directLinqChatId: linqRoute.chatId,
+          });
+        }
+        return linqRoute?.service === "sms"
+          ? buildHostedGroupSmsUnsupportedResponse(request)
+          : {
+            action: "share_contact_card",
+            result: {
+              status: "unavailable",
+              unavailableReason: "direct_attachment_route_unavailable",
+            },
+          };
       }
       if (
         request.action !== "update_display_name"
@@ -752,6 +789,47 @@ type HostedGroupToolLinqRouteContext = {
   thread: HostedRuntimeGroupToolLinqThreadContext;
 };
 
+/**
+ * Direct home conversations are owned by `hostedMemberRouting`, not by the
+ * group thread-route store, and one chat may never live in both. So a direct
+ * route carries only the trusted host's exact chat id and service; Web
+ * revalidates it against the direct owner at the send boundary. Fabricating a
+ * thread-route authority here would assert an owner that cannot exist.
+ */
+type HostedDirectToolLinqRouteContext = {
+  chatId: string;
+  service: HostedGroupToolLinqService;
+};
+
+function resolveHostedDirectToolLinqRouteContext(
+  contexts: readonly HostedAssistantLinqDeliveryContext[],
+): HostedDirectToolLinqRouteContext | null {
+  const eligible = new Map<string, HostedDirectToolLinqRouteContext>();
+  let hasInvalidCandidate = false;
+  for (const context of contexts) {
+    if (context.threadIsDirect !== true) {
+      if (context.threadIsDirect !== false) {
+        hasInvalidCandidate = true;
+      }
+      continue;
+    }
+    const service = normalizeHostedGroupToolLinqService(context.service);
+    const chatId = normalizeAssistantRouteString(context.target);
+    if (!service || !chatId) {
+      hasInvalidCandidate = true;
+      continue;
+    }
+    const routeKey = JSON.stringify([chatId, service]);
+    if (!eligible.has(routeKey)) {
+      eligible.set(routeKey, { chatId, service });
+    }
+  }
+  if (hasInvalidCandidate || eligible.size !== 1) {
+    return null;
+  }
+  return [...eligible.values()][0] ?? null;
+}
+
 function resolveHostedGroupToolLinqRouteContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
 ): HostedGroupToolLinqRouteContext | null {
@@ -1034,12 +1112,24 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
   const event = input.event;
   const sourceMetadata = event?.sourceMetadata;
   const replyTarget = event?.replyTarget;
+  // Admit Linq events from either thread shape and carry the event's real
+  // value through. Group consumers select `false` and require the external
+  // thread-route authority these events carry. A direct home conversation
+  // structurally cannot have that authority — its route lives in
+  // `hostedMemberRouting` — so it is admitted on the trusted reply target
+  // alone and revalidated against its own owner at the Web send boundary.
   if (
     !event
     || sourceMetadata?.kind !== "linq"
-    || sourceMetadata.externalThreadRouteAuthorityPresent !== true
-    || event.conversation?.threadIsDirect !== false
+    || typeof event.conversation?.threadIsDirect !== "boolean"
     || replyTarget?.channel !== "linq"
+  ) {
+    return null;
+  }
+  const threadIsDirect = event.conversation.threadIsDirect;
+  if (
+    !threadIsDirect
+    && sourceMetadata.externalThreadRouteAuthorityPresent !== true
   ) {
     return null;
   }
@@ -1052,14 +1142,19 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
       normalizeAssistantRouteString(sourceMetadata.senderHandle),
     fromPhoneNumber: null,
     replyToMessageId: normalizeAssistantRouteString(replyTarget.messageId),
-    routeAuthority: {
-      channel: "linq",
-      containerMemberId: input.memberId,
-      threadId,
-    },
+    // Only a group thread carries external thread-route authority. Leaving it
+    // null for a direct conversation keeps the group resolvers structurally
+    // unable to select it.
+    routeAuthority: threadIsDirect
+      ? null
+      : {
+        channel: "linq",
+        containerMemberId: input.memberId,
+        threadId,
+      },
     service: normalizeAssistantRouteString(sourceMetadata.service),
     target: threadId,
-    threadIsDirect: false,
+    threadIsDirect,
   };
 }
 
@@ -1800,6 +1895,7 @@ export async function runHostedWorkspaceAssistantPhase(
             source: "linq",
           },
           linqDeliveryContexts: initialLinqDeliveryContexts,
+          platform: input.runtime.platform,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
           publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
@@ -6290,6 +6386,7 @@ async function drainHostedPostCheckpointDelivery(input: {
             yieldedEffectCount,
           );
         },
+        platform: input.input.runtime.platform,
         platformEnv: input.input.runtime.platformEnv,
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,

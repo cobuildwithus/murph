@@ -29,9 +29,9 @@ export async function appendHostedSignupReferralRewardNotice(input: {
     select: {
       beneficiaryMemberId: true,
       celebrationQueuedAt: true,
-      policyCode: true,
       policyVersion: true,
       referrerMemberId: true,
+      rewardUsdMicros: true,
       rewardedAt: true,
       status: true,
     },
@@ -73,7 +73,7 @@ export async function appendHostedSignupReferralRewardNotice(input: {
         notificationKey,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind: "personal",
-          policyCode: referral.policyCode,
+          rewardUsdMicros: referral.rewardUsdMicros,
         }),
         rewardedAt,
       }),
@@ -163,9 +163,10 @@ export function buildHostedSignupReferralRewardNoticeWake(input: {
       instructions: [
         "Tell the member that someone completed Murph setup through their referral link.",
         `The member has already received ${input.rewardLabel}.`,
+        `Final message: include "${input.rewardLabel}" exactly and say it is already applied.`,
         "Celebrate in one concise sentence and make clear that the reward is already applied.",
         "Do not identify, name, or guess who joined.",
-        "Do not mention dollars, internal accounting, qualification checks, caps, or server policy.",
+        "Do not mention internal accounting, qualification checks, caps, or server policy.",
         "Do not ask the member to complete another step.",
       ].join(" "),
       responsePolicy: { kind: "require_send" },

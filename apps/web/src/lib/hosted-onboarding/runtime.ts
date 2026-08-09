@@ -179,7 +179,7 @@ async function requireValidatedHostedStripeBillingPlanConfigWithRequestOptions(
   let price: Stripe.Price;
 
   try {
-    const retrieveParams = {
+    const retrieveParams: Stripe.PriceRetrieveParams = {
       expand: ["currency_options"],
     };
     price = input?.requestOptions

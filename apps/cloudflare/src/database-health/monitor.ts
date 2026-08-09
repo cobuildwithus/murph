@@ -550,7 +550,6 @@ async function fetchPlanetScaleMetrics(input: {
         accept: "application/json",
       },
       method: "GET",
-      redirect: "error",
     },
   ).catch(() => {
     throw new DatabaseHealthFetchError("service_discovery_failed");
@@ -582,7 +581,6 @@ async function fetchPlanetScaleMetrics(input: {
         accept: "text/plain",
       },
       method: "GET",
-      redirect: "error",
     },
   ).catch(() => {
     throw new DatabaseHealthFetchError("metrics_scrape_failed");
@@ -738,7 +736,6 @@ async function resolveDatabaseHealthLinqDestination(input: {
         {
           headers: { authorization },
           method: "GET",
-          redirect: "error",
         },
       ),
       fetchWithTimeout(
@@ -747,7 +744,6 @@ async function resolveDatabaseHealthLinqDestination(input: {
         {
           headers: { authorization },
           method: "GET",
-          redirect: "error",
         },
       ),
     ]);
@@ -821,7 +817,6 @@ async function sendDatabaseHealthLinqAlert(input: {
         "idempotency-key": input.idempotencyKey,
       },
       method: "POST",
-      redirect: "error",
     },
   );
   if (!response.ok) {
@@ -1066,6 +1061,10 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   return await fetchImplementation(input, {
     ...init,
+    // Workers fetch rejects redirect: "error" outright (TypeError before any
+    // network I/O); "manual" keeps the fail-closed intent because a 3xx
+    // response is !ok for every caller.
+    redirect: "manual",
     signal: AbortSignal.timeout(DATABASE_HEALTH_FETCH_TIMEOUT_MS),
   });
 }

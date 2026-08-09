@@ -125,7 +125,16 @@ export interface HostedPulseTrialExtensionSubscription {
   trial_start: number | null;
 }
 
-type HostedPulseTrialExtensionStripeUpdateParams =
+export type HostedPulseTrialExtensionStripeResumeParams = Parameters<
+  Stripe["subscriptions"]["resume"]
+>[1] & {
+  billing_cycle_anchor: "unchanged";
+  proration_behavior: "none";
+};
+
+export type HostedPulseTrialExtensionStripeUpdateParams = Parameters<
+  Stripe["subscriptions"]["update"]
+>[1] & (
   | {
       metadata: Record<string, string>;
       proration_behavior?: never;
@@ -135,12 +144,8 @@ type HostedPulseTrialExtensionStripeUpdateParams =
       metadata: Record<string, string>;
       proration_behavior: "none";
       trial_end: number;
-    };
-
-interface HostedPulseTrialExtensionStripeResumeParams {
-  billing_cycle_anchor: "unchanged";
-  proration_behavior: "none";
-}
+    }
+);
 
 interface HostedPulseTrialExtensionStripeClient {
   retrieveSubscription(

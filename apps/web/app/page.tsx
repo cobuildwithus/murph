@@ -18,22 +18,25 @@ import { MealPhotosSection } from "@/src/components/homepage/meal-photos-section
 import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { pickRandomMurphHeadshotSrc } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
+import { ReferralSection } from "@/src/components/homepage/referral-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
+import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
-import {
-  formatHostedLandingTrialDurationPhrase,
-  formatHostedLandingTrialPricingNote,
-} from "@/src/lib/hosted-onboarding/billing-plans";
+import { isHostedCustomInferenceEnabled } from "@/src/lib/hosted-inference/feature";
+import { formatHostedLandingPricingShortSummary } from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
+import {
+  getAvailableHostedPublicReferralRewards,
+} from "@/src/lib/hosted-growth/referral-program";
 import {
   createMurphPageMetadata,
   MURPH_DEFAULT_METADATA_DESCRIPTION,
@@ -105,6 +108,7 @@ export default async function HomePage() {
   const country = headerList.get("x-vercel-ip-country") ?? "";
   const messengerChannel = resolveHeroMessengerChannel(country);
   const murphHeadshotSrc = pickRandomMurphHeadshotSrc();
+  const referralRewards = getAvailableHostedPublicReferralRewards();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
   const signupCta: HomepageSignupCta = authenticated
@@ -119,11 +123,8 @@ export default async function HomePage() {
     : {
         body: null,
         eyebrow: "Sign up",
-        metaItems: [
-          `${formatHostedLandingTrialDurationPhrase()} free trial`,
-          "Open source",
-        ],
-        note: formatHostedLandingTrialPricingNote(),
+        metaItems: [formatHostedLandingPricingShortSummary(), "Open source"],
+        note: "Cancel anytime.",
         signupLabel: "Get started",
         title: "Whatever your goal, you don’t have to hit it alone.",
       };
@@ -154,8 +155,15 @@ export default async function HomePage() {
         <IntegrationsSection authenticated={authenticated} />
         <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
         <HowItWorksSection />
+        <TechnicalCapabilitiesSection
+          customInferenceAvailable={isHostedCustomInferenceEnabled()}
+          veniceAvailable={isHostedVeniceAssistantEnabled()}
+        />
         <SecurityTeaserSection />
         <FaqSection veniceAvailable={isHostedVeniceAssistantEnabled()} />
+        {referralRewards.length > 0
+          ? <ReferralSection rewards={referralRewards} />
+          : null}
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
         <LocalRunSection installCommandUrl={installCommandUrl} />
       </main>

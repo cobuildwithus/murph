@@ -8593,6 +8593,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 replacementFenceClearElapsedMs: 5,
                 replacementFenceClearedAtEpochMs: 1_776_999_999_950,
                 replacementFenceClearStartedAtEpochMs: 1_776_999_999_945,
+                triggeredByWebDirect: false,
               },
               dispatch: {
                 invokeReceivedAtEpochMs: 1_777_000_000_000,
@@ -8640,7 +8641,7 @@ describe("hosted workspace runtime entrypoint", () => {
               replacementFenceClearElapsedMs: 5,
               replacementFenceClearedAtEpochMs: 1_776_999_999_950,
               replacementFenceClearStartedAtEpochMs: 1_776_999_999_945,
-              triggeredByWebDirect: true,
+              triggeredByWebDirect: false,
             },
             dispatch: {
               invokeReceivedAtEpochMs: 1_777_000_000_000,

@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs'
-import { readFile, readdir, rm } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { rawImportManifestSchema } from '@murphai/contracts'
 import { z } from 'incur'
@@ -9,6 +9,10 @@ import {
   type QueryRuntimeModule,
   type QueryCanonicalEntity as AssessmentEntity,
 } from '@murphai/vault-usecases/runtime'
+import {
+  readMaterializedExportPackReceipt,
+  retireMaterializedExportPack,
+} from '@murphai/vault-usecases/export-packs'
 import { materializeExportPack, resolveVaultRelativePath } from '@murphai/vault-usecases/helpers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
@@ -458,9 +462,14 @@ export async function materializeStoredExportPack(input: {
 export async function pruneStoredExportPack(vaultRoot: string, packId: string) {
   const { manifest } = await readStoredExportPackManifest(vaultRoot, packId)
   const relativePackDirectory = packDirectory(packId)
-  const absolutePackDirectory = await resolveVaultRelativePath(vaultRoot, relativePackDirectory)
-
-  await rm(absolutePackDirectory, { recursive: true, force: true })
+  const receipt = await readMaterializedExportPackReceipt(vaultRoot, packId)
+  const pruned = await retireMaterializedExportPack(vaultRoot, receipt)
+  if (!pruned) {
+    throw new VaultCliError(
+      'export_pack_changed',
+      `Export pack "${packId}" changed before it could be pruned.`,
+    )
+  }
 
   return {
     vault: vaultRoot,
