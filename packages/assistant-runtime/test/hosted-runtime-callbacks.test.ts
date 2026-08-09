@@ -32,6 +32,9 @@ import {
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from "@murphai/runtime-state/assistant-generated-deliveries";
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 import type { HostedRuntimeLogPort } from "../src/hosted-runtime/platform.ts";
 
@@ -1501,10 +1504,16 @@ describe("hosted runtime callbacks", () => {
 
   it("reconciles one canonical causal approval before unrelated due work", async () => {
     const vaultFile = {
-      contentType: "application/pdf",
-      filename: "report.pdf",
+      approvalGeneration: null,
+      approvalId: null,
+      contentType: "application/zip",
+      filename: "export.zip",
       kind: "vault_file" as const,
-      ref: "documents/report.pdf",
+      ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/export.zip`,
+      retireExportPacks: [{
+        manifestSha256: "d".repeat(64),
+        packId: "pack-one",
+      }],
       sha256: "a".repeat(64),
       sizeBytes: 42,
     };
@@ -1668,6 +1677,16 @@ describe("hosted runtime callbacks", () => {
     );
     expect(sideEffects).toHaveLength(1);
     expect(sideEffects[0]?.effectId).toBe("intent_vault_file_2");
+    expect(sideEffects[0]?.payload.media).toEqual([{
+      approvalGeneration: null,
+      approvalId: null,
+      contentType: "application/zip",
+      filename: "export.zip",
+      kind: "vault_file",
+      ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/export.zip`,
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    }]);
     expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
 
     actionApprovalPort.read.mockClear();
