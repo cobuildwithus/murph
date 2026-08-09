@@ -2,7 +2,6 @@ import Link from "next/link";
 import { ArrowRight, Link2, UsersRound } from "lucide-react";
 
 import {
-  formatHostedPublicReferralRewardAmount,
   formatHostedPublicReferralRewardDays,
   type HostedPublicReferralReward,
 } from "@/src/lib/hosted-growth/referral-program";
@@ -75,16 +74,11 @@ export function ReferralSection({
                       {reward.title}
                     </p>
                   </div>
-                  <div className="col-span-2 flex items-end justify-between gap-3 border-t border-white/10 pt-3 sm:col-span-1 sm:block sm:border-0 sm:pt-0 sm:text-right">
+                  <div className="col-span-2 border-t border-white/10 pt-3 sm:col-span-1 sm:border-0 sm:pt-0 sm:text-right">
                     <p className="text-base font-semibold text-[#f5f0e8]">
                       {formatHostedPublicReferralRewardDays(
                         reward.estimatedUsageDays,
                       )}
-                    </p>
-                    <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#d4b87a] sm:mt-1">
-                      {formatHostedPublicReferralRewardAmount(
-                        reward.rewardUsdMicros,
-                      )} credit
                     </p>
                   </div>
                 </article>

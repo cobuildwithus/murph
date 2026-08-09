@@ -243,6 +243,9 @@ export async function executeCodexAssistantTurnAttempt(
     environments: input.environments ?? undefined,
     ephemeral: input.providerThreadEphemeral ?? undefined,
     fetchImpl: input.providerFetch ?? undefined,
+    ...(input.generateSongPolicy
+      ? { generateSongPolicy: input.generateSongPolicy }
+      : {}),
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,

@@ -6,8 +6,8 @@ const OVERFLOW_TOLERANCE_PX = 1;
 const REFERRAL_STUDIES = [
   {
     dayLabels: [
-      { count: 2, label: "≈10 days of Murph" },
-      { count: 1, label: "≈14 days of Murph" },
+      { count: 2, label: "10 days of Murph" },
+      { count: 1, label: "14 days of Murph" },
     ],
     description: "Share your link or start a group with Murph.",
     rewardCount: 3,
@@ -21,8 +21,8 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "≈10 days of Murph" },
-      { count: 1, label: "≈14 days of Murph" },
+      { count: 1, label: "10 days of Murph" },
+      { count: 1, label: "14 days of Murph" },
     ],
     description: "Start a fresh group with Murph.",
     rewardCount: 2,
@@ -32,7 +32,7 @@ const REFERRAL_STUDIES = [
     titles: ["Bring someone new to Murph", "Start an active group"],
   },
   {
-    dayLabels: [{ count: 1, label: "≈10 days of Murph" }],
+    dayLabels: [{ count: 1, label: "10 days of Murph" }],
     description: "Share your personal link with someone new.",
     rewardCount: 1,
     selector:
@@ -176,6 +176,7 @@ test.describe("homepage referral design proof", () => {
           ).toHaveCount(dayLabel.count);
         }
         await expect(study.getByText(/If eligible/)).toHaveCount(0);
+        await expect(study.getByText(/≈|\$[0-9]/)).toHaveCount(0);
 
         const overflowPx = await study.evaluate((element) =>
           element.scrollWidth - element.clientWidth

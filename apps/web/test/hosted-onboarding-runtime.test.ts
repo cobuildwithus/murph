@@ -55,6 +55,7 @@ function createHostedOnboardingEnvironment(
     stripePriceIdsByPlan: {
       launch_edge_monthly: "price_edge_monthly_123",
       launch_group_monthly: "price_group_monthly_123",
+      launch_max_monthly: "price_max_monthly_123",
       launch_monthly: "price_monthly_123",
     },
     stripeUsageCreditPriceIdsByOffer: {
@@ -204,6 +205,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripePriceIdsByPlan: {
           launch_edge_monthly: "price_edge_monthly_123",
           launch_group_monthly: "price_monthly_123",
+          launch_max_monthly: "price_max_monthly_123",
           launch_monthly: "price_monthly_123",
         },
       });
@@ -224,6 +226,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripePriceIdsByPlan: {
           launch_edge_monthly: "price_edge_monthly_123",
           launch_group_monthly: "price_monthly_123",
+          launch_max_monthly: "price_max_monthly_123",
           launch_monthly: "price_monthly_123",
         },
       });
@@ -293,6 +296,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripePriceIdsByPlan: {
           launch_edge_monthly: "price_edge_monthly_123",
           launch_group_monthly: null,
+          launch_max_monthly: "price_max_monthly_123",
           launch_monthly: "price_monthly_123",
         },
       });

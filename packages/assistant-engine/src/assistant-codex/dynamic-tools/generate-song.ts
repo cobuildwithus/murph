@@ -3,6 +3,9 @@ import * as z from '@murphai/contracts/zod-runtime'
 import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantGenerateSongTurnPolicy,
+} from '../../assistant/providers/types.js'
 import type { SafeToolCallValidationDigest } from '../../assistant/tool-validation-digest.js'
 import {
   executeGenerateSongTool,
@@ -62,6 +65,11 @@ const generateSongArgumentsSchema = z
   })
   .strict()
 
+export interface GenerateSongTurnState {
+  attemptCount: number
+  policy: AssistantGenerateSongTurnPolicy
+}
+
 export function parseGenerateSongArguments(
   value: unknown,
 ):
@@ -78,12 +86,30 @@ export async function executeGenerateSongDynamicTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  turnState?: GenerateSongTurnState | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<DynamicToolResult> {
+  const turnState = input.turnState ?? null
+  if (turnState) {
+    if (turnState.attemptCount >= turnState.policy.maxAttempts) {
+      return wrapVoiceMemoToolResult({
+        rpcSuccess: false,
+        rpcText:
+          'song generation attempt limit reached for this turn; no song ran',
+      })
+    }
+    turnState.attemptCount += 1
+  }
+
   return wrapVoiceMemoToolResult(
     await executeGenerateSongTool({
       abortSignal: input.abortSignal ?? null,
-      args: input.args,
+      args: turnState
+        ? {
+            ...input.args,
+            durationSeconds: turnState.policy.requiredDurationSeconds,
+          }
+        : input.args,
       currentResponseMedia: input.currentResponseMedia ?? [],
       runtime: input.voiceMemoRuntime ?? null,
     }),

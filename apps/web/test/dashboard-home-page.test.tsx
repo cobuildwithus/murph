@@ -592,6 +592,49 @@ test("HomePage shows blocked Pulse usage with an add-usage action", async () => 
   );
 });
 
+test("HomePage identifies exhausted Max usage without Pulse or Edge copy", async () => {
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    allowanceSource: "direct_paid_member_plan",
+    billingPlanCode: "launch_max_monthly",
+    limitUsdMicros: 40_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-01T00:00:00.000Z"),
+    spentUsdMicros: 40_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
+    userNotice: {
+      code: "max_usage_limit_reached",
+      message:
+        "You've used 100% of this month's included Max usage. New usage is blocked.",
+    },
+  });
+  mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
+    generatedAt: "2026-05-26T12:00:00.000Z",
+    recommendedAction: {
+      kind: "add_usage",
+      label: "Add usage",
+      url: "/settings?addUsage=true#subscription",
+    },
+    status: "unavailable",
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
+
+  assert.match(markup, /included Max usage/u);
+  assert.doesNotMatch(markup, /included (?:Pulse|Edge) usage/u);
+  assert.match(markup, />Add usage</);
+  assert.equal(
+    mocks.projectHostedPersonalAiUsageStatus.mock.calls[0]?.[0]?.decision.userNotice.code,
+    "max_usage_limit_reached",
+  );
+});
+
 test("HomePage keeps the exhausted Pulse block notice when action resolution fails closed", async () => {
   mocks.readHostedMemberBillingEligibilityState.mockRejectedValue(
     new Error("billing eligibility unavailable"),

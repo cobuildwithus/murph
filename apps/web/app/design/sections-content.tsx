@@ -260,7 +260,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage referral program">
+      <StudySection title="Homepage referral program · days-only rewards">
         <div
           id="referral-program"
           data-design-section="homepage-referral-program"
@@ -418,7 +418,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery, sponsored billing, and usage limits">
+      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and usage limits">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -460,7 +460,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Reusable signup referral link and recipient claim states">
+      <StudySection title="Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states">
         <SignupReferralFlowStudy />
       </StudySection>
 

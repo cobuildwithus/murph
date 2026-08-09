@@ -32,6 +32,17 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
+Independent partial PlanetScale metric normalization, explicit unknown-family
+evidence, continued evaluation of available database signals, and one-shot
+telemetry-only operator paging with unresolved-window coalescing, current-pressure
+priority including direct errors in one combined pre-first-page incident,
+post-ack recurrence suppression, durable owed-page preservation inside
+non-replayable direct-error admission, truthful direct-error and mixed telemetry
+window provenance, and rollback-compatible additive state are
+jointly specified by `ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`, `agent-docs/references/testing-ci-map.md`, and
+`apps/cloudflare/README.md`.
+
 Automatic meal-photo schema-v2 enrollment ordering, including the one-row
 per-installation revision fence, credential-free revocation tombstone,
 prepared-before-active iOS credential handoff, bodyless scoped activation,
