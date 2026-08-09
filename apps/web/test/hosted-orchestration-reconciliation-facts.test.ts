@@ -709,9 +709,9 @@ describe("hosted orchestration reconciliation facts", () => {
     const linkedNotice =
       `${deniedDecision.userNotice.message}\n\nAdd usage: ` +
       "https://www.withmurph.ai/settings?addUsage=true#subscription";
-    mocks.projectHostedAiUsageLimitNoticeForDelivery.mockResolvedValue(
-      linkedNotice,
-    );
+    mocks.projectHostedAiUsageLimitNoticeForDelivery
+      .mockRejectedValueOnce(new Error("mandatory recovery URL unavailable"))
+      .mockResolvedValueOnce(linkedNotice);
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
         conversationImportedSeq: "2",

@@ -117,6 +117,11 @@ type BillingServiceInvite = {
   id: string;
   inviteCode: string;
   member: {
+    billingRef?: {
+      currentBillingPhase: string | null;
+      currentCheckoutOffer: string | null;
+      stripeSubscriptionLookupKey: string | null;
+    } | null;
     billingStatus: HostedBillingStatus;
     id: string;
     identity: {
@@ -176,6 +181,11 @@ describe("createHostedBillingCheckout", () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(
       makeInvite({
         member: {
+          billingRef: {
+            currentBillingPhase: "paid",
+            currentCheckoutOffer: "standard",
+            stripeSubscriptionLookupKey: "subscription_lookup_paid",
+          },
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           identity: null,
@@ -1050,6 +1060,11 @@ describe("createHostedBillingCheckout", () => {
         eligibleMember,
         eligibleMember,
         {
+          billingRef: {
+            currentBillingPhase: "paid",
+            currentCheckoutOffer: "standard",
+            stripeSubscriptionLookupKey: "subscription_lookup_paid",
+          },
           billingStatus: HostedBillingStatus.active,
           suspendedAt: null,
         },
@@ -1165,6 +1180,11 @@ function makePrisma(input: {
   } | null;
   memberBillingStatus?: HostedBillingStatus;
   memberFindUniqueResults?: Array<{
+    billingRef?: {
+      currentBillingPhase: string | null;
+      currentCheckoutOffer: string | null;
+      stripeSubscriptionLookupKey: string | null;
+    } | null;
     billingStatus: HostedBillingStatus;
     suspendedAt: Date | null;
   } | null>;

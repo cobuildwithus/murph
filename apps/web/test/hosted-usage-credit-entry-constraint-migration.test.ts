@@ -237,5 +237,9 @@ function readPrismaEnumValues(source: string, enumName: string): string[] {
 }
 
 function normalizeSql(value: string): string {
-  return value.replace(/\s+/gu, " ").trim();
+  return value
+    .replace(/\s+/gu, " ")
+    .replace(/\(\s+/gu, "(")
+    .replace(/\s+\)/gu, ")")
+    .trim();
 }

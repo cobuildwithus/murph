@@ -29,7 +29,6 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/ops/growth",
   "/ops/runtime-latency",
   "/ops/runtime-maintenance",
-  "/ops/trials",
   "/ops/usage",
   "/overview",
   "/pitch",

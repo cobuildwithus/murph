@@ -186,6 +186,7 @@ describe("hosted ops growth metrics", () => {
       trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValue([]);
+    mocks.hostedUsageCreditEntry.findMany.mockResolvedValue([]);
     mocks.hostedUsageCreditPurchase.findMany.mockResolvedValue([]);
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValue({
       _count: {

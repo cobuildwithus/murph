@@ -216,9 +216,9 @@ test("HomePage renders the canonical landing page at the root route", async () =
     pricingStart,
     markup.indexOf("</section>", pricingStart),
   );
-  assert.match(pricingSection, /\$8\/mo/);
+  assert.match(pricingSection, /Free starter usage/);
   assert.match(pricingSection, /Open source/);
-  assert.match(pricingSection, /Cancel anytime\./);
+  assert.match(pricingSection, /Starter usage does not expire\./);
   assert.doesNotMatch(pricingSection, /free trial/i);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(

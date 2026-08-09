@@ -196,7 +196,7 @@ test("JoinInvitePageView keeps the desktop invite rail sticky", () => {
   assert.match(markup, /md:sticky/);
   assert.match(markup, /md:top-0/);
   assert.match(markup, /md:h-svh/);
-  assert.match(markup, /Get Pulse/);
+  assert.match(markup, /data-starter-usage-island="true"/);
   expect(mocks.statusRefreshProps).toMatchObject({
     current: buildJoinInviteStatusRefreshSnapshot(model.status),
     inviteCode: "invite-code",

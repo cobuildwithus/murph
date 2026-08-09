@@ -120,37 +120,37 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
-  it("returns an evidence-backed trial forecast and server-selected Pulse action", async () => {
+  it("returns an evidence-backed Starter forecast and server-selected Pulse action", async () => {
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      hasStripeCustomerId: true,
-      hasStripeSubscriptionId: true,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      hasStripeCustomerId: false,
+      hasStripeSubscriptionId: false,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowanceSource: "direct_starter",
       limitUsdMicros: 4_500_000n,
       remainingUsdMicros: 2_250_000n,
       spentUsdMicros: 2_250_000n,
+      usageCreditLedgerVersion: 1n,
     }));
-    const prisma = buildPrisma(new Date("2026-07-01T12:00:00.000Z"));
+    const prisma = buildPrisma(
+      new Date("2026-07-01T12:00:00.000Z"),
+      null,
+      2_250_000n,
+    );
 
-    await expect(readHostedPersonalAiUsageStatus({
+    const result = await readHostedPersonalAiUsageStatus({
       memberId: "member_usage_1",
       now: NOW,
       prisma: prisma as never,
       publicBaseUrl: "https://example.test",
-    })).resolves.toEqual({
+    });
+    expect(result).toMatchObject({
       accessKind: "starter",
-      availablePlans: [
-        {
-          code: "launch_monthly",
-          displayName: "Pulse",
-          monthlyPriceUsdCents: 800,
-          selectable: true,
-        },
-      ],
       forecast: {
         estimatedDaysRemaining: 2,
         estimatedExhaustionAt: "2026-07-05T12:00:00.000Z",
@@ -161,10 +161,9 @@ describe("readHostedPersonalAiUsageStatus", () => {
       periodStart: PERIOD_START.toISOString(),
       planCode: "launch_monthly",
       planName: "Starter",
-      recommendedPlanCode: "launch_monthly",
       recommendedAction: {
         kind: "change_plan",
-        label: "Keep Pulse after your trial ($8/month)",
+        label: "Start Pulse now ($8/month)",
         targetPlanCode: "launch_monthly",
         url: "https://example.test/settings#subscription",
       },
@@ -172,6 +171,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       status: "active",
       usedPercent: 50,
     });
+    expect(result).not.toHaveProperty("availablePlans");
   });
 
   it("recommends adding usage for an eligible paid Pulse member after the usage threshold", async () => {
@@ -480,32 +480,35 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
-  it("returns current Pulse terms for an explicit trial request below the recommendation threshold", async () => {
+  it("returns current Pulse terms for an explicit Starter request below the recommendation threshold", async () => {
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      hasStripeCustomerId: true,
-      hasStripeSubscriptionId: true,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      hasStripeCustomerId: false,
+      hasStripeSubscriptionId: false,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowanceSource: "direct_starter",
       limitUsdMicros: 10_000_000n,
       remainingUsdMicros: 9_000_000n,
       spentUsdMicros: 1_000_000n,
+      usageCreditLedgerVersion: 1n,
     }));
 
     await expect(readHostedPersonalAiUsageStatus({
       includeSubscriptionActionQuote: true,
       memberId: "member_usage_explicit_pulse",
       now: NOW,
-      prisma: buildPrisma(null) as never,
+      prisma: buildPrisma(null, null, 1_000_000n) as never,
       publicBaseUrl: null,
     })).resolves.toMatchObject({
       recommendedAction: null,
       subscriptionActionQuote: {
         action: "change_plan",
-        label: "Keep Pulse after your trial ($8/month)",
+        label: "Start Pulse now ($8/month)",
         targetPlanCode: "launch_monthly",
         timing: "now",
       },
@@ -513,13 +516,15 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
-  it("keeps an exhausted active trial on its natural end-date Group timing", async () => {
+  it("quotes an immediate Group start for exhausted Starter usage", async () => {
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      hasStripeCustomerId: true,
-      hasStripeSubscriptionId: true,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      hasStripeCustomerId: false,
+      hasStripeSubscriptionId: false,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowed: false,
@@ -535,6 +540,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       now: NOW,
       prisma: buildPrisma(null, true) as never,
       publicBaseUrl: "https://example.test",
+      subscriptionActionTargetPlanCode: "launch_group_monthly",
     })).resolves.toMatchObject({
       recommendedAction: {
         kind: "change_plan",
@@ -1124,6 +1130,7 @@ function buildPrisma(
     latestPurchaseGrantAt: Date;
     spentSincePurchaseUsdMicros: bigint;
   } | null = null,
+  lifetimeSpentUsdMicros: bigint | null = null,
 ) {
   const hasConfirmedGroupMembership = usageContext === true;
   const usageMeter =
@@ -1143,9 +1150,21 @@ function buildPrisma(
         : null),
     },
     hostedUsageCreditEntry: {
-      findFirst: vi.fn(async () => usageMeter
-        ? { effectiveAt: usageMeter.latestPurchaseGrantAt }
-        : null),
+      aggregate: vi.fn(async () => ({
+        _sum: {
+          amountUsdMicros: lifetimeSpentUsdMicros === null
+            ? null
+            : -lifetimeSpentUsdMicros,
+        },
+      })),
+      findFirst: vi.fn(async (query: { where?: { kind?: string } }) =>
+        query.where?.kind === "usage_debit"
+          ? firstUsageAt
+            ? { effectiveAt: firstUsageAt }
+            : null
+          : usageMeter
+            ? { effectiveAt: usageMeter.latestPurchaseGrantAt }
+            : null),
     },
     hostedGroupMember: {
       findFirst: vi.fn(async () =>

@@ -787,7 +787,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledOnce();
   });
 
-  it("does not let a delayed participant observation reactivate an expired Telegram container", async () => {
+  it("keeps a delayed participant observation active past a retained trial timestamp", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
@@ -863,9 +863,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
       secretToken: "telegram-secret",
     })).resolves.toEqual({
-      ignored: true,
       ok: true,
-      reason: "group-chat-provision-unavailable",
+      reason: "wake-appended-active-group",
     });
 
     expect(participantUpsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -873,10 +872,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         lastSeenAt: new Date("2026-03-26T10:56:41.000Z"),
       }),
     }));
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledOnce();
   });
 
-  it("does not provision a delayed Telegram group message sent during a trial that has expired by processing time", async () => {
+  it("keeps a delayed Telegram group message active past a retained trial timestamp", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const prisma = withPrismaTransaction({
       hostedMember: {
@@ -930,13 +929,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
       secretToken: "telegram-secret",
     })).resolves.toEqual({
-      ignored: true,
       ok: true,
-      reason: "inactive-member",
+      reason: "wake-appended-active-group",
     });
 
-    expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedThreadContainerRouteTx).toHaveBeenCalledOnce();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledOnce();
   });
 
   it("repairs non-empty corrupt Telegram delivery material on owner ingress", async () => {

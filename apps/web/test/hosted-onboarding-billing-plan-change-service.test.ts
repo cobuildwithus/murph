@@ -483,7 +483,7 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
-  test("rejects paid plan changes from a trial", async () => {
+  test("requires paid billing for a retained legacy trial", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
       currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
@@ -493,7 +493,7 @@ describe("upgradeHostedBillingPlan", () => {
       memberId: "member_fixture",
       targetPlanCode: "launch_edge_monthly",
     })).rejects.toMatchObject({
-      code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
+      code: "HOSTED_PAID_SUBSCRIPTION_REQUIRED",
       httpStatus: 409,
     });
   });

@@ -636,7 +636,13 @@ async function resolveAvailableSubscriptionOffer(input: {
             ? "launch_edge_monthly"
             : null
     );
-  if (!targetPlanCode || targetPlanCode === input.planCode) {
+  if (
+    !targetPlanCode
+    || (
+      targetPlanCode === input.planCode
+      && input.accessKind !== "starter"
+    )
+  ) {
     return EMPTY_SUBSCRIPTION_OFFER;
   }
   if (

@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
+  readHostedMemberPulseTrialBillingDecisionSnapshot: vi.fn(),
   reconcileHostedUsageCreditStripeEvent: vi.fn(),
   readHostedMemberStripeBillingLookupState: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
@@ -129,6 +130,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   return {
     ...actual,
     readHostedMemberBillingSnapshot: mocks.readHostedMemberBillingSnapshot,
+    readHostedMemberPulseTrialBillingDecisionSnapshot:
+      mocks.readHostedMemberPulseTrialBillingDecisionSnapshot,
   };
 });
 
@@ -403,6 +406,9 @@ describe("hosted Stripe event reconciliation", () => {
       true,
     );
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(null);
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot.mockResolvedValue(
+      null,
+    );
     mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue(null);
     mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({ handled: false });
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
@@ -1707,6 +1713,7 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
       expect.anything(),
       expect.any(Map),
+      undefined,
     );
   });
 
@@ -2195,6 +2202,7 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
       prisma.client,
       expect.any(Map),
+      undefined,
     );
     expect(mocks.cleanupHostedFamilySponsoredDirectSubscription).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -2353,6 +2361,13 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue(member);
     mocks.findMemberForStripeSubscription.mockResolvedValue(member);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot.mockResolvedValue({
+      core: member.core,
+      currentBillingPhase: member.billingRef?.currentBillingPhase ?? null,
+      currentTrialStartedAt: null,
+      pulseTrialRedeemedAt: member.billingRef?.pulseTrialRedeemedAt ?? null,
+      stripeSubscriptionLookupKey: null,
+    });
     mocks.stripe.events.retrieve.mockImplementation(async (eventId: string) => {
       const event = eventsById.get(eventId);
       if (!event) {
@@ -2555,6 +2570,7 @@ describe("hosted Stripe event reconciliation", () => {
       }),
       expect.anything(),
       preparedFamilyCryptoDomainRoots,
+      undefined,
     );
     expect(mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots)
       .toHaveBeenCalledWith({
@@ -2620,6 +2636,7 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
       expect.anything(),
       preparedFamilyCryptoDomainRoots,
+      undefined,
     );
     expect(
       mocks.prepareHostedStripeDirectMemberActivationCrypto,
@@ -3219,6 +3236,7 @@ describe("hosted Stripe event reconciliation", () => {
       }),
       expect.anything(),
       expect.any(Map),
+      undefined,
     );
   });
 

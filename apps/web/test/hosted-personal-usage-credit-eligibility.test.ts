@@ -86,32 +86,12 @@ describe("readHostedPersonalUsageCreditOfferCodes", () => {
       "a missing member",
       (): ReturnType<typeof buildEligibleMember> | null => null,
     ],
-    ["a missing billing row", () => buildEligibleMember({ billingRef: null })],
     ["inactive own billing", () => buildEligibleMember({
       billingStatus: HostedBillingStatus.canceled,
     })],
     ["a suspended payer", () => buildEligibleMember({
       suspendedAt: new Date("2026-07-16T18:00:00.000Z"),
     })],
-    ["a trial phase", () => {
-      const eligible = buildEligibleMember();
-      return buildEligibleMember({
-        billingRef: {
-          ...eligible.billingRef,
-          currentBillingPhase: "trial",
-          currentCheckoutOffer: "pulse_trial_7d",
-        },
-      });
-    }],
-    ["an unsupported plan", () => {
-      const eligible = buildEligibleMember();
-      return buildEligibleMember({
-        billingRef: {
-          ...eligible.billingRef,
-          currentBillingPlanCode: "legacy_monthly",
-        },
-      });
-    }],
   ] as const)("fails closed for %s", async (_label, buildMember) => {
     const findUnique = vi.fn(async () => buildMember());
 
@@ -122,23 +102,55 @@ describe("readHostedPersonalUsageCreditOfferCodes", () => {
   });
 
   it.each([
-    { stripeCustomerLookupKey: null },
-    { stripeSubscriptionLookupKey: null },
-  ])("fails closed when a canonical Stripe binding is missing", async (
-    billingRefOverride,
-  ) => {
-    const eligible = buildEligibleMember();
-    const findUnique = vi.fn(async () => buildEligibleMember({
-      billingRef: {
-        ...eligible.billingRef,
-        ...billingRefOverride,
-      },
-    }));
+    ["there is no billing row", () => buildEligibleMember({ billingRef: null })],
+    ["it retains a historical trial phase", () => {
+      const member = buildEligibleMember();
+      return buildEligibleMember({
+        billingRef: {
+          ...member.billingRef,
+          currentBillingPhase: "trial",
+          currentCheckoutOffer: "pulse_trial_7d",
+        },
+      });
+    }],
+    ["it retains an unsupported plan label", () => {
+      const member = buildEligibleMember();
+      return buildEligibleMember({
+        billingRef: {
+          ...member.billingRef,
+          currentBillingPlanCode: "legacy_monthly",
+        },
+      });
+    }],
+    ["its historical customer binding is absent", () => {
+      const member = buildEligibleMember();
+      return buildEligibleMember({
+        billingRef: {
+          ...member.billingRef,
+          stripeCustomerLookupKey: null,
+        },
+      });
+    }],
+    ["its historical subscription binding is absent", () => {
+      const member = buildEligibleMember();
+      return buildEligibleMember({
+        billingRef: {
+          ...member.billingRef,
+          stripeSubscriptionLookupKey: null,
+        },
+      });
+    }],
+  ] as const)("authorizes Starter top-ups when %s", async (_label, buildMember) => {
+    const findUnique = vi.fn(async () => buildMember());
 
     await expect(readHostedPersonalUsageCreditOfferCodes({
-      memberId: "member_missing_binding",
+      memberId: "member_starter",
       prisma: buildPrisma(findUnique),
-    })).resolves.toEqual([]);
+    })).resolves.toEqual([
+      "usage_5_usd",
+      "usage_10_usd",
+      "usage_25_usd",
+    ]);
   });
 
   it.each([

@@ -1610,9 +1610,10 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
         periodEnd: resolved.periodEnd,
         periodStart: resolved.periodStart,
       };
-  const retryAfter = period.periodEnd.getTime() > input.at.getTime()
-    ? period.periodEnd
-    : new Date(input.at.getTime() + 15 * 60_000);
+  // Inactive access changes only through an external account or billing
+  // transition. Lifetime Starter periods use a far-future structural end, so
+  // they must not suppress the bounded recovery recheck.
+  const retryAfter = new Date(input.at.getTime() + 15 * 60_000);
 
   return {
     allowed: false,

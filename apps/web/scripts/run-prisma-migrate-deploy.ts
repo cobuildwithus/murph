@@ -127,6 +127,15 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // removing it only permits independent automatic refill purchases.
     new Set(["ADD CONSTRAINT CHECK", "DROP INDEX"]),
   ],
+  [
+    "20260807204000_non_expiring_starter_usage",
+    // The replacement ledger checks are supersets of the existing checks:
+    // every old writer remains valid, while the new Starter grant becomes an
+    // ordinary positive grant. NOT VALID keeps the replacement lock bounded;
+    // PostgreSQL still enforces both checks for every new row before the later
+    // validation scan.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
 ]);
 
 const incompatiblePredeploySqlPatterns = [

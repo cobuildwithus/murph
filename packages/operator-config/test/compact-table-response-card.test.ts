@@ -34,7 +34,7 @@ const TRACKED_WORKOUT_CARD = {
   },
 } satisfies AssistantResponseCard
 
-const APP_CARD_URL_PREFIX = 'https://murph.ai/#murph-card='
+const APP_CARD_URL_PREFIX = 'https://www.withmurph.ai/#murph-card='
 
 function encodeEnvelopeUrl(card: unknown): string {
   return `${APP_CARD_URL_PREFIX}${Buffer.from(
@@ -99,37 +99,34 @@ describe('compact table response cards', () => {
     })
   })
 
-  it('measures the actual V3 presentation at the inline URL boundary', () => {
-    const makeBoundaryCard = (cellLength: number) => ({
+  it('keeps schema acceptance aligned with the canonical URL boundary', () => {
+    const makeBoundaryCard = (lastCellLength: number) => ({
       ...TRACKED_WORKOUT_CARD,
       title: 'Eight-exercise workout',
       subtitle: 'Verified canonical workout snapshot for today',
       columns: ['Set 1', 'Set 2', 'Set 3', 'Set 4'],
       rows: Array.from({ length: 8 }, (_, rowIndex) => ({
         label: `Exercise ${rowIndex + 1} movement pattern`,
-        values: Array.from({ length: 4 }, (_, columnIndex) =>
-          `${rowIndex + columnIndex + 1}`.padEnd(cellLength, 'x')
-        ),
+        values: Array.from({ length: 4 }, (_, columnIndex) => {
+          const cellLength = rowIndex === 7 && columnIndex === 3
+            ? lastCellLength
+            : 22
+          return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, 'x')
+        }),
       })),
       footer: 'Assists and spotted reps remain on the exact set note.',
     })
 
-    const trackedCard = makeBoundaryCard(20)
-    const { tracking: _tracking, ...presentationCard } = trackedCard
-    expect(encodeEnvelopeUrl(trackedCard).length).toBeGreaterThanOrEqual(2_048)
-    expect(encodeEnvelopeUrl(presentationCard).length).toBeLessThan(2_048)
-    expect(assistantResponseCardSchema.parse(trackedCard)).toEqual(trackedCard)
-    expect(encodeCompactTableAppCardUrl(trackedCard).length).toBeLessThan(2_048)
+    const acceptedCard = makeBoundaryCard(24)
+    const { tracking: _acceptedTracking, ...acceptedPresentation } = acceptedCard
+    expect(encodeEnvelopeUrl(acceptedPresentation).length).toBe(2_047)
+    expect(assistantResponseCardSchema.parse(acceptedCard)).toEqual(acceptedCard)
+    expect(encodeCompactTableAppCardUrl(acceptedCard).length).toBe(2_047)
 
-    const presentationOversizedCard = makeBoundaryCard(24)
-    const {
-      tracking: _oversizedTracking,
-      ...oversizedPresentationCard
-    } = presentationOversizedCard
-    expect(encodeEnvelopeUrl(oversizedPresentationCard).length)
-      .toBeGreaterThanOrEqual(2_048)
-    expect(assistantResponseCardSchema.safeParse(presentationOversizedCard).success)
-      .toBe(false)
+    const rejectedCard = makeBoundaryCard(25)
+    const { tracking: _rejectedTracking, ...rejectedPresentation } = rejectedCard
+    expect(encodeEnvelopeUrl(rejectedPresentation).length).toBe(2_048)
+    expect(assistantResponseCardSchema.safeParse(rejectedCard).success).toBe(false)
   })
 
   it('keeps internal tracking out of the pipe-free user fallback', () => {

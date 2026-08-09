@@ -1569,8 +1569,10 @@ describe("applyStripeCheckoutCompleted", () => {
       ),
     ).resolves.toEqual({
       activatedMemberId: null,
+      activatedMembers: [],
       cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -1613,8 +1615,10 @@ describe("applyStripeCheckoutCompleted", () => {
       ),
     ).resolves.toEqual({
       activatedMemberId: null,
+      activatedMembers: [],
       cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -1957,8 +1961,10 @@ describe("applyStripeCheckoutCompleted", () => {
       ),
     ).resolves.toEqual({
       activatedMemberId: null,
+      activatedMembers: [],
       cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
       hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
 

@@ -1739,7 +1739,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(executeRaw).toHaveBeenCalledTimes(1);
   });
 
-  it("forgives late usage from a retained trial period after paid Pulse starts a distinct period", async () => {
+  it("forgives usage predating a paid reset without reconstructing the retired trial window", async () => {
     const trialStart = new Date("2026-03-01T00:00:00.000Z");
     const trialEnd = new Date("2026-03-08T00:00:00.000Z");
     const paidPeriodEnd = new Date("2026-04-08T00:00:00.000Z");
@@ -1776,15 +1776,24 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         allowanceCounted: false,
-        allowancePeriodEnd: trialEnd,
-        allowancePeriodStart: trialStart,
+        allowancePeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        allowancePeriodStart: trialEnd,
         allowancePricingSnapshotJson: expect.objectContaining({
           allowanceDisposition: "forgiven_plan_reset",
           planResetAt: resetAt.toISOString(),
         }),
       }),
     }));
-    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          memberId: "member_123",
+          periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+          periodStart: trialStart,
+        }),
+        skipDuplicates: true,
+      }),
+    );
     expect(executeRaw).not.toHaveBeenCalled();
   });
 
@@ -2222,7 +2231,15 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
       },
       skipDuplicates: true,
     });
-    expect(tx.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(tx.hostedAiUsagePeriod.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          billingPlanCode: "launch_monthly",
+          limitUsdMicros: 0n,
+          periodEnd,
+        }),
+      }),
+    );
   });
 
   it("repairs starter-owned period fields while preserving spend and block state", async () => {
@@ -4249,14 +4266,10 @@ describe("checkHostedAiUsageGate", () => {
   });
 
   it("records blocked metadata when the mutating gate confirms exhaustion", async () => {
-    const update = vi.fn(async (args?: unknown) => {
-      void args;
-      return undefined;
-    });
     const prisma = createGatePrisma({
       spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
-      update,
     });
+    const update = prisma.hostedAiUsagePeriod.update;
     prisma.hostedMember.findUnique = vi.fn(async () => ({
       billingRef: {
         currentBillingPhase: null,
