@@ -153,16 +153,32 @@ describe("PlanetScale database health metrics", () => {
     )).toBe(0);
   });
 
-  it("fails closed when a required metric or selected label set is malformed", () => {
+  it("identifies the canonical required metric families that are missing", () => {
     const missingMaxConnections = buildMetricsBody({
       branchId: BRANCH_ID,
     }).replace(
       /^planetscale_postgres_settings_max_connections.*$/mu,
       "",
     );
-    expect(() =>
-      parsePlanetScaleDatabaseMetrics(missingMaxConnections, BRANCH_ID)
-    ).toThrowError(DatabaseMetricsParseError);
+
+    try {
+      parsePlanetScaleDatabaseMetrics(missingMaxConnections, BRANCH_ID);
+      throw new Error("Expected required metrics parsing to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(DatabaseMetricsParseError);
+      if (!(error instanceof DatabaseMetricsParseError)) {
+        throw error;
+      }
+      expect(error).toMatchObject({
+        code: "required_metrics_missing",
+        missingMetrics: [
+          "planetscale_postgres_settings_max_connections",
+        ],
+      });
+    }
+  });
+
+  it("fails closed when a selected label set is malformed", () => {
 
     const malformedLabels = buildMetricsBody({
       branchId: BRANCH_ID,

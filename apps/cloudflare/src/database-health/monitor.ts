@@ -1,15 +1,21 @@
 import type { DurableObjectSqlStorageLike } from "../user-runner/types.js";
 import {
   calculateDirectConnectionErrorDelta,
+  DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
   DatabaseMetricsParseError,
   evaluateDatabaseMetricSnapshot,
-  parsePlanetScaleDatabaseMetrics,
+  parsePlanetScaleDatabaseMetricObservation,
+  requireCompleteDatabaseMetricSnapshot,
   type DatabaseHealthCondition,
+  type DatabaseHealthRequiredMetricName,
+  type DatabaseMetricObservationSnapshot,
   type DatabaseMetricSnapshot,
 } from "./metrics.js";
 import {
   DatabaseHealthStore,
   type DatabaseHealthAlertState,
+  type DatabaseHealthMonitoringAlertObligation,
+  type DatabaseHealthMonitoringEvidence,
   type DatabaseHealthStoredSample,
 } from "./store.js";
 
@@ -39,6 +45,22 @@ const DATABASE_ALERT_OPENINGS = [
   "Database connection health is degraded.",
   "The database is still reporting an unsafe condition.",
 ] as const;
+
+const DATABASE_METRIC_ALERT_LABELS: Readonly<
+  Record<DatabaseHealthRequiredMetricName, string>
+> = {
+  planetscale_edge_postgres_connection_errors_total:
+    "direct connection errors",
+  planetscale_pgbouncer_current_connections:
+    "PgBouncer current connections",
+  planetscale_pgbouncer_pools_client: "PgBouncer client pools",
+  planetscale_pgbouncer_pools_client_maxwait_seconds:
+    "PgBouncer client wait",
+  planetscale_pgbouncer_pools_server: "PgBouncer server pools",
+  planetscale_postgres_connection_state: "Postgres connection states",
+  planetscale_postgres_settings_max_connections:
+    "Postgres max connections",
+};
 
 export interface DatabaseHealthMonitorEnvironment {
   HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?: string;
@@ -100,8 +122,11 @@ type DatabaseHealthCollectedSample =
   }
   | {
     conditions: DatabaseHealthCondition[];
+    directConnectionErrorDelta: number | null;
     failureCode: DatabaseHealthFailureCode;
     failures: number;
+    monitoringEvidence: DatabaseHealthMonitoringEvidence;
+    snapshot: DatabaseMetricObservationSnapshot | null;
     status: "failed";
   };
 
@@ -194,10 +219,51 @@ export class DatabaseHealthMonitor {
         config: this.config,
         fetchImplementation: this.fetchImplementation,
       });
-      const snapshot = parsePlanetScaleDatabaseMetrics(
+      const observation = parsePlanetScaleDatabaseMetricObservation(
         metricsBody,
         this.config.branchId,
       );
+      if (observation.missingMetrics.length > 0) {
+        const directConnectionErrorDelta =
+          observation.snapshot.directConnectionErrorCounters === null
+            ? null
+            : calculateDirectConnectionErrorDelta(
+              observation.snapshot.directConnectionErrorCounters,
+              this.store.readLatestDirectConnectionErrorCounters(),
+            );
+        const conditions = evaluateDatabaseMetricSnapshot(
+          observation.snapshot,
+          directConnectionErrorDelta,
+        );
+        const priorFailures =
+          this.store.readAlertState().consecutiveScrapeFailures;
+        const failures = priorFailures + 1;
+        if (failures >= MONITORING_FAILURE_ALERT_COUNT) {
+          conditions.push({
+            failures,
+            kind: "monitoring_unavailable",
+            missingMetrics: observation.missingMetrics,
+          });
+        }
+        console.warn("Database health metrics collection failed.", {
+          failureCode: "required_metrics_missing",
+          failures,
+          missingMetrics: observation.missingMetrics,
+        });
+        return {
+          conditions,
+          directConnectionErrorDelta,
+          failureCode: "required_metrics_missing",
+          failures,
+          monitoringEvidence: {
+            availability: "incomplete",
+            missingMetrics: observation.missingMetrics,
+          },
+          snapshot: observation.snapshot,
+          status: "failed",
+        };
+      }
+      const snapshot = requireCompleteDatabaseMetricSnapshot(observation);
       const directConnectionErrorDelta =
         calculateDirectConnectionErrorDelta(
           snapshot.directConnectionErrorCounters,
@@ -215,21 +281,31 @@ export class DatabaseHealthMonitor {
       };
     } catch (error) {
       const failureCode = classifyDatabaseHealthFailure(error);
+      const missingMetrics = error instanceof DatabaseMetricsParseError
+        ? error.missingMetrics
+        : [];
       const priorFailures =
         this.store.readAlertState().consecutiveScrapeFailures;
       const failures = priorFailures + 1;
       const conditions: DatabaseHealthCondition[] =
         failures >= MONITORING_FAILURE_ALERT_COUNT
-          ? [{ failures, kind: "monitoring_unavailable" }]
+          ? [{ failures, kind: "monitoring_unavailable", missingMetrics }]
           : [];
       console.warn("Database health metrics collection failed.", {
         failureCode,
         failures,
+        missingMetrics,
       });
       return {
         conditions,
+        directConnectionErrorDelta: null,
         failureCode,
         failures,
+        monitoringEvidence: {
+          availability: "unavailable",
+          missingMetrics: [],
+        },
+        snapshot: null,
         status: "failed",
       };
     }
@@ -245,6 +321,33 @@ export class DatabaseHealthMonitor {
       this.store.setConsecutiveScrapeFailures(0);
     } else {
       this.store.setConsecutiveScrapeFailures(sample.failures);
+    }
+
+    const currentMonitoringCondition = sample.conditions.find(
+      (condition) => condition.kind === "monitoring_unavailable",
+    );
+    if (
+      sample.status === "failed"
+      && sample.failures === MONITORING_FAILURE_ALERT_COUNT
+      && currentMonitoringCondition
+    ) {
+      const priorEvidence = this.store.readLatestMonitoringEvidence();
+      if (priorEvidence === null) {
+        throw new Error(
+          "Database monitoring threshold is missing prior evidence.",
+        );
+      }
+      const monitoringAlertObligation = buildMonitoringAlertObligation({
+        checkedAtMs: input.checkedAtMs,
+        failures: currentMonitoringCondition.failures,
+        observations: [priorEvidence, sample.monitoringEvidence],
+      });
+      Object.assign(currentMonitoringCondition, {
+        incompleteChecks: monitoringAlertObligation.incompleteChecks,
+        missingMetrics: monitoringAlertObligation.missingMetrics,
+        unavailableChecks: monitoringAlertObligation.unavailableChecks,
+      });
+      this.store.recordMonitoringAlertObligation(monitoringAlertObligation);
     }
 
     let alertState = this.store.readAlertState();
@@ -275,24 +378,40 @@ export class DatabaseHealthMonitor {
     if (
       sample.conditions.length > 0
       || directErrorCountAvailableForAdmission > 0
+      || alertState.monitoringAlertObligation !== null
     ) {
       const isNewIncident = !alertState.incidentOpen;
       if (isNewIncident) {
         alertState = this.store.openIncident();
       }
-      const conditionsWithDeferredDirectErrors =
-        directErrorCountAvailableForAdmission > 0
-          ? [
-            ...sample.conditions.filter(
-              (condition) =>
-                condition.kind !== "direct_migration_admission_failures",
-            ),
-            {
-              count: directErrorCountAvailableForAdmission,
-              kind: "direct_migration_admission_failures" as const,
-            },
-          ]
-          : sample.conditions;
+      const monitoringAlertObligation =
+        alertState.monitoringAlertObligation;
+      const monitoringConditionForAdmission = monitoringAlertObligation
+        ? {
+          failures: monitoringAlertObligation.failures,
+          incompleteChecks: monitoringAlertObligation.incompleteChecks,
+          kind: "monitoring_unavailable" as const,
+          missingMetrics: monitoringAlertObligation.missingMetrics,
+          unavailableChecks: monitoringAlertObligation.unavailableChecks,
+        }
+        : null;
+      const currentReplayableConditions = sample.conditions.filter(
+        (condition) =>
+          condition.kind !== "direct_migration_admission_failures"
+          && condition.kind !== "monitoring_unavailable",
+      );
+      const conditionsWithDeferredDirectErrors = [
+        ...currentReplayableConditions,
+        ...(monitoringConditionForAdmission
+          ? [monitoringConditionForAdmission]
+          : []),
+        ...(directErrorCountAvailableForAdmission > 0
+          ? [{
+            count: directErrorCountAvailableForAdmission,
+            kind: "direct_migration_admission_failures" as const,
+          }]
+          : []),
+      ];
       const hasDirectConnectionError =
         directErrorCountAvailableForAdmission > 0;
       const attemptFenceOpen =
@@ -305,30 +424,52 @@ export class DatabaseHealthMonitor {
         (
           isPromotingDeferredDirectError
           || (
-            !isNewIncident
+            alertState.alertSequence > 0
             && !attemptFenceOpen
             && hasDirectConnectionError
           )
         )
           ? conditionsWithDeferredDirectErrors.filter(
             (condition) =>
-              condition.kind === "direct_migration_admission_failures",
+              condition.kind === "direct_migration_admission_failures"
+              || condition.kind === "monitoring_unavailable",
           )
           : conditionsWithDeferredDirectErrors;
+      const shouldHoldMonitoringForFence =
+        monitoringAlertObligation !== null
+        && !attemptFenceOpen
+        && !hasDirectConnectionError
+        && (
+          alertState.alertSequence > 0
+          || currentReplayableConditions.length === 0
+        );
       const admittedCheckedAtMs =
-        admittedConditions.length === 1
-        && admittedConditions[0]?.kind
-          === "direct_migration_admission_failures"
+        isPromotingDeferredDirectError
+        && admittedConditions.some(
+          (condition) =>
+            condition.kind === "direct_migration_admission_failures",
+        )
         && currentDirectError === undefined
         && alertState.deferredDirectErrorCheckedAtMs !== null
           ? alertState.deferredDirectErrorCheckedAtMs
-          : input.checkedAtMs;
+          : admittedConditions.length === 1
+            && admittedConditions[0]?.kind === "monitoring_unavailable"
+            && monitoringAlertObligation
+              ? monitoringAlertObligation.checkedAtMs
+              : input.checkedAtMs;
       if (
         (
           !alertState.pendingAlertIdempotencyKey
           || !alertState.pendingAlertMessage
         )
-        && (isNewIncident || hasDirectConnectionError || attemptFenceOpen)
+        && admittedConditions.length > 0
+        && !shouldHoldMonitoringForFence
+        && (
+          isNewIncident
+          || hasDirectConnectionError
+          || attemptFenceOpen
+          || monitoringAlertObligation !== null
+        )
       ) {
         const nextAlertSequence = alertState.alertSequence + 1;
         const pendingState = this.store.createPendingAlert({
@@ -336,11 +477,16 @@ export class DatabaseHealthMonitor {
             alertSequence: nextAlertSequence,
             incidentSequence: alertState.incidentSequence,
           }),
+          includesMonitoring: admittedConditions.some(
+            (condition) => condition.kind === "monitoring_unavailable",
+          ),
           message: buildDatabaseAlertMessage({
             alertSequence: nextAlertSequence,
             checkedAtMs: admittedCheckedAtMs,
             conditions: admittedConditions,
             incidentSequence: alertState.incidentSequence,
+            monitoringCheckedAtMs:
+              monitoringAlertObligation?.checkedAtMs ?? null,
           }),
         });
         if (
@@ -362,8 +508,11 @@ export class DatabaseHealthMonitor {
     } else {
       this.store.recordFailedSample({
         conditions: sample.conditions,
+        directConnectionErrorDelta: sample.directConnectionErrorDelta,
         failureCode: sample.failureCode,
+        monitoringEvidence: sample.monitoringEvidence,
         observedAtMs: input.observedAtMs,
+        snapshot: sample.snapshot,
       });
     }
   }
@@ -381,6 +530,7 @@ export class DatabaseHealthMonitor {
       input.conditions.length === 0
       && !hasPendingAlert
       && alertState.deferredDirectErrorCount === 0
+      && alertState.monitoringAlertObligation === null
     ) {
       if (
         input.sampleStatus === "ok"
@@ -509,6 +659,7 @@ export class DatabaseHealthMonitor {
         input.sampleStatus === "ok"
         && input.conditions.length === 0
         && stateAfterSuccess.deferredDirectErrorCount === 0
+        && stateAfterSuccess.monitoringAlertObligation === null
       ) {
         this.store.closeIncident();
       }
@@ -833,7 +984,24 @@ function buildDatabaseAlertMessage(input: {
   checkedAtMs: number;
   conditions: readonly DatabaseHealthCondition[];
   incidentSequence: number;
+  monitoringCheckedAtMs: number | null;
 }): string {
+  const checkedAt = new Date(input.checkedAtMs).toISOString().slice(11, 16);
+  if (
+    input.conditions.length > 0
+    && input.conditions.every(
+      (condition) => condition.kind === "monitoring_unavailable",
+    )
+  ) {
+    const evidence = input.conditions
+      .map((condition) => formatDatabaseHealthCondition(
+        condition,
+        input.checkedAtMs,
+        input.monitoringCheckedAtMs,
+      ))
+      .join("; ");
+    return `${evidence}. Window ended ${checkedAt} UTC.`;
+  }
   const openingIndex =
     (
       input.incidentSequence
@@ -843,8 +1011,13 @@ function buildDatabaseAlertMessage(input: {
   const opening =
     DATABASE_ALERT_OPENINGS[openingIndex]
     ?? DATABASE_ALERT_OPENINGS[0];
-  const evidence = input.conditions.map(formatDatabaseHealthCondition).join("; ");
-  const checkedAt = new Date(input.checkedAtMs).toISOString().slice(11, 16);
+  const evidence = input.conditions.map((condition) =>
+    formatDatabaseHealthCondition(
+      condition,
+      input.checkedAtMs,
+      input.monitoringCheckedAtMs,
+    )
+  ).join("; ");
   return `${opening} ${evidence}. Checked ${checkedAt} UTC.`;
 }
 
@@ -935,6 +1108,8 @@ function hasHealthyLinqSenderLine(input: {
 
 function formatDatabaseHealthCondition(
   condition: DatabaseHealthCondition,
+  checkedAtMs: number,
+  monitoringCheckedAtMs: number | null,
 ): string {
   switch (condition.kind) {
     case "client_wait":
@@ -962,10 +1137,84 @@ function formatDatabaseHealthCondition(
         condition.count === 1 ? "connection error" : "connection errors"
       }`;
     case "monitoring_unavailable":
-      return `PlanetScale metrics unavailable for ${formatCount(
-        condition.failures,
-      )} checks`;
+      return formatMonitoringUnavailableCondition(
+        condition,
+        monitoringCheckedAtMs !== null
+          && monitoringCheckedAtMs !== checkedAtMs
+          ? monitoringCheckedAtMs
+          : null,
+      );
   }
+}
+
+function formatMonitoringUnavailableCondition(
+  condition: Extract<
+    DatabaseHealthCondition,
+    { kind: "monitoring_unavailable" }
+  >,
+  observedAtMs: number | null,
+): string {
+  const incompleteChecks = condition.incompleteChecks
+    ?? (condition.missingMetrics.length > 0 ? condition.failures : 0);
+  const unavailableChecks = condition.unavailableChecks
+    ?? (condition.missingMetrics.length > 0 ? 0 : condition.failures);
+  const missingMetricLabels = condition.missingMetrics.map(
+    (name) => DATABASE_METRIC_ALERT_LABELS[name],
+  );
+  const details = [
+    observedAtMs === null
+      ? null
+      : `window ended ${
+        new Date(observedAtMs).toISOString().slice(11, 16)
+      } UTC`,
+    incompleteChecks > 0 && unavailableChecks > 0
+      ? `${formatCount(incompleteChecks)} incomplete, ${formatCount(
+        unavailableChecks,
+      )} unavailable`
+      : null,
+    missingMetricLabels.length === 0
+      ? null
+      : `missing PlanetScale ${
+        missingMetricLabels.length === 1 ? "metric" : "metrics"
+      } observed: ${missingMetricLabels.join(", ")}`,
+  ].filter((detail): detail is string => detail !== null);
+  const detailEvidence = details.length === 0
+    ? ""
+    : ` (${details.join("; ")})`;
+  const availability = incompleteChecks > 0 && unavailableChecks > 0
+    ? "impaired"
+    : incompleteChecks > 0
+      ? "incomplete"
+      : "unavailable";
+  return `Database monitor telemetry was ${availability} for ${formatCount(
+    condition.failures,
+  )} checks${detailEvidence}`;
+}
+
+function buildMonitoringAlertObligation(input: {
+  checkedAtMs: number;
+  failures: number;
+  observations: readonly DatabaseHealthMonitoringEvidence[];
+}): DatabaseHealthMonitoringAlertObligation {
+  if (input.observations.length !== input.failures) {
+    throw new Error("Database monitoring window evidence is incomplete.");
+  }
+  const incompleteChecks = input.observations.filter(
+    (observation) => observation.availability === "incomplete",
+  ).length;
+  const unavailableChecks = input.observations.length - incompleteChecks;
+  const observedMissingMetrics = new Set(
+    input.observations.flatMap((observation) => observation.missingMetrics),
+  );
+  return {
+    checkedAtMs: input.checkedAtMs,
+    failures: input.failures,
+    incompleteChecks,
+    missingMetrics: DATABASE_HEALTH_REQUIRED_METRIC_NAMES.filter(
+      (name) => observedMissingMetrics.has(name),
+    ),
+    unavailableChecks,
+  };
 }
 
 function buildDatabaseAlertIdempotencyKey(input: {

@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     description: "Join Murph, your private health assistant.",
     title: "Join Murph",
   }),
-  referrer: "no-referrer",
+  referrer: "strict-origin",
   robots: {
     follow: false,
     index: false,
