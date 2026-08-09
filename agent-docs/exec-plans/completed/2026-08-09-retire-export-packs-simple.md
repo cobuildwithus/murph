@@ -1,6 +1,6 @@
 # Retire exact export packs after successful generated ZIP delivery
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -70,12 +70,12 @@ Updated: 2026-08-09
 
 ## Tasks
 
-1. Trace and document the minimal creation-to-delivery ownership contract.
-2. Add the manifest receipt/removal seam and generated-ZIP tool metadata.
-3. Invoke bounded best-effort cleanup after durable `sent` persistence.
-4. Add focused success, refusal, mutation, and non-success tests.
-5. Run focused verification and inspect source/test/docs line shape.
-6. Commit, push, open the replacement PR, and complete ReviewGPT plus CI.
+1. [x] Trace and document the minimal creation-to-delivery ownership contract.
+2. [x] Add the manifest receipt/removal seam and generated-ZIP tool metadata.
+3. [x] Invoke bounded best-effort cleanup after durable `sent` persistence.
+4. [x] Add focused success, refusal, mutation, and non-success tests.
+5. [x] Run focused verification and inspect source/test/docs line shape.
+6. [x] Commit, push, open the replacement PR, and complete ReviewGPT plus CI.
 
 ## Decisions
 
@@ -93,9 +93,25 @@ Updated: 2026-08-09
 
 ## Verification
 
-- Commands to run: focused assistant vault-file/outbox tests, focused
-  vault-usecases and CLI export-pack tests, affected package typechecks,
-  `git diff --check`, exact-head ReviewGPT, and required GitHub Actions.
-- Expected outcomes: only a confirmed generated ZIP send removes unchanged
-  claimed packs; changed or non-success cases retain them; all checks pass with
-  no unresolved accepted review finding.
+- Passed 127 focused assistant-engine tests covering generated delivery files,
+  vault-file handoff, and outbox behavior.
+- Passed focused vault-usecases tests, 7 CLI export-intake tests, and the hosted
+  current-approval transport-projection regression.
+- Passed typechecks for operator-config, vault-usecases, assistant-engine,
+  assistant-runtime, and CLI.
+- Passed the incremental workspace build, CLI schema generation, workspace
+  boundary and package-cycle guards, diff check, and identifier-leak scan.
+- Required GitHub Actions passed on the final behavior head.
+- Preliminary ReviewGPT findings were remediated; final ReviewGPT round 1 found
+  the hosted projection gap, and round 2 returned `ROUND_OUTCOME: PASS` with no
+  qualifying findings.
+
+## Outcome
+
+- Closed oversized PR #1375 without merging and opened replacement PR #1474.
+- The final behavior diff has 258 source additions and 15 source deletions,
+  about 90% less authored-source churn than the closed PR.
+- Delivery remains the primary invariant: unavailable cleanup evidence is
+  omitted, provider transport never receives cleanup authority, and only the
+  original sent outbox intent can retire an unchanged derived pack.
+Completed: 2026-08-09
