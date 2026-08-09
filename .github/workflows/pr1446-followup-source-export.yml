@@ -24,13 +24,12 @@ jobs:
           tar \
             --exclude=.git \
             --exclude=node_modules \
-            --exclude=source.tgz \
-            -czf source.tgz .
+            -czf /tmp/source.tgz .
 
       - name: Upload source tree
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pr1446-followup-source
-          path: source.tgz
+          path: /tmp/source.tgz
           if-no-files-found: error
           retention-days: 1
