@@ -75,7 +75,8 @@ test("Vital handoff leads with the connection and credits Vital underneath", asy
 
   assert.match(markup, /Connect Fitbit to Murph/u);
   assert.match(markup, /brand-logos\/connect\/fitbit\.svg/u);
-  assert.match(markup, /logo\.svg/u);
+  assert.match(markup, /icons\/murph-mark\.svg/u);
+  assert.doesNotMatch(markup, /src="\/logo\.svg"/u);
   assert.match(
     markup,
     /We use <a href="https:\/\/www\.junction\.com"[^>]*>Vital<\/a> to connect this health source to Murph\./u,

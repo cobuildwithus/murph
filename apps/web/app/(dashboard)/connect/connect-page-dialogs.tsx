@@ -62,13 +62,13 @@ export function VitalConnectionDialog({
                 <span className="size-1 rounded-full bg-muted-foreground/40" />
                 <span className="size-1 rounded-full bg-muted-foreground/40" />
               </span>
-              <span className="flex h-16 items-center rounded-2xl bg-background px-4 ring-1 ring-border">
+              <span className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-background p-2.5 ring-1 ring-border">
                 <Image
-                  src="/logo.svg"
+                  src="/icons/murph-mark.svg"
                   alt=""
-                  width={197}
+                  width={66}
                   height={44}
-                  className="h-5 w-auto"
+                  className="h-auto w-full"
                 />
               </span>
             </div>
