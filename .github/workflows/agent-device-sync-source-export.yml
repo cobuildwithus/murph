@@ -1,0 +1,29 @@
+name: Agent device-sync source export
+
+on:
+  push:
+    branches:
+      - agent/device-sync-connection-cas
+    paths:
+      - .github/workflows/agent-device-sync-source-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Archive tracked source
+        shell: bash
+        run: git archive --format=tar.gz --output=murph-source.tar.gz HEAD
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-sync-source
+          path: murph-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
