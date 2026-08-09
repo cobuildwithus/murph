@@ -437,7 +437,7 @@ describe('assistant turns', () => {
     ])
   })
 
-  it('serializes quarantine writes while skipping multiple corrupt and missing inventory entries', async () => {
+  it('serializes quarantine writes while skipping corrupt, unreadable, and missing inventory entries', async () => {
     const { paths, vaultRoot } = await createAssistantPaths(
       'assistant-turns-list-invalid-batch-',
     )
@@ -447,6 +447,7 @@ describe('assistant turns', () => {
       { turnId: 'turn-corrupt-batch-a', startedAt: '2026-04-08T05:00:01.000Z' },
       { turnId: 'turn-corrupt-batch-b', startedAt: '2026-04-08T05:00:02.000Z' },
       { turnId: 'turn-missing-batch', startedAt: '2026-04-08T05:00:03.000Z' },
+      { turnId: 'turn-unreadable-batch', startedAt: '2026-04-08T05:00:04.000Z' },
     ]
     for (const record of records) {
       await createAssistantTurnReceipt({
@@ -474,14 +475,19 @@ describe('assistant turns', () => {
       paths,
       'turn-missing-batch',
     )
+    const unreadablePath = resolveAssistantTurnReceiptPath(
+      paths,
+      'turn-unreadable-batch',
+    )
     const corruptRawA = '{bad-json-a'
     const corruptRawB = '{bad-json-b'
     await writeFile(corruptPathA, corruptRawA, 'utf8')
     await writeFile(corruptPathB, corruptRawB, 'utf8')
     const validRaw = await readFile(validPath, 'utf8')
-    const corruptPaths = new Set([
+    const quarantinedPaths = new Set([
       path.resolve(corruptPathA),
       path.resolve(corruptPathB),
+      path.resolve(unreadablePath),
     ])
     let activeQuarantineRenames = 0
     let maxActiveQuarantineRenames = 0
@@ -489,9 +495,15 @@ describe('assistant turns', () => {
       filePath: string,
       encoding: 'utf8',
     ): Promise<string> => {
-      if (path.resolve(filePath) === path.resolve(missingPath)) {
+      const resolvedPath = path.resolve(filePath)
+      if (resolvedPath === path.resolve(missingPath)) {
         throw Object.assign(new Error('receipt disappeared'), {
           code: 'ENOENT',
+        })
+      }
+      if (resolvedPath === path.resolve(unreadablePath)) {
+        throw Object.assign(new Error('receipt read failed'), {
+          code: 'EACCES',
         })
       }
       return await readFile(filePath, encoding)
@@ -500,7 +512,7 @@ describe('assistant turns', () => {
       oldPath: string,
       newPath: string,
     ): Promise<void> => {
-      const tracksQuarantine = corruptPaths.has(path.resolve(oldPath))
+      const tracksQuarantine = quarantinedPaths.has(path.resolve(oldPath))
       if (tracksQuarantine) {
         activeQuarantineRenames += 1
         maxActiveQuarantineRenames = Math.max(
@@ -549,16 +561,22 @@ describe('assistant turns', () => {
       artifactKind: 'turn-receipt',
       limit: 10,
     })
-    expect(quarantines).toHaveLength(2)
+    expect(quarantines).toHaveLength(3)
     expect(quarantines.map((entry) => entry.originalPath)).toEqual(
-      expect.arrayContaining([corruptPathA, corruptPathB]),
+      expect.arrayContaining([corruptPathA, corruptPathB, unreadablePath]),
     )
+    expect(quarantines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        errorCode: 'EACCES',
+        originalPath: unreadablePath,
+      }),
+    ]))
     expect(quarantines.map((entry) => entry.originalPath)).not.toContain(missingPath)
 
     const runtimeEvents = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath)
     expect(
       runtimeEvents.filter((event) => event.kind === 'turn.receipt.quarantined'),
-    ).toHaveLength(2)
+    ).toHaveLength(3)
   })
 
   it('quarantines corrupted turn receipts and skips them from reads and listings', async () => {
