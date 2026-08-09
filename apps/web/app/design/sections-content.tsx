@@ -260,7 +260,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage referral program">
+      <StudySection title="Homepage referral program · days-only rewards">
         <div
           id="referral-program"
           data-design-section="homepage-referral-program"
