@@ -1,9 +1,7 @@
 name: Finalize challenge standings integration
 
 on:
-  push:
-    branches:
-      - agent/challenge-standings-card
+  workflow_dispatch:
 
 permissions:
   contents: write

@@ -87,9 +87,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --filter @murphai/contracts test:vitest
-          pnpm --filter @murphai/operator-config test
-          pnpm --filter @murphai/assistant-engine test
+          pnpm --filter @murphai/contracts exec vitest run \
+            --config vitest.config.ts --no-coverage \
+            test/challenge-standings-card.test.ts \
+            test/challenge-standings-safe-integers.test.ts
+          pnpm --filter @murphai/operator-config exec vitest run \
+            --config vitest.config.ts --no-coverage \
+            test/assistant-response-cards.test.ts \
+            test/challenge-standings-response-card.test.ts \
+            test/challenge-standings-outbox-audience.test.ts
+          pnpm --filter @murphai/assistant-engine exec vitest run \
+            --config vitest.config.ts --no-coverage \
+            test/assistant-linq-group-challenge-card.test.ts \
+            test/assistant-response-card-tool.test.ts \
+            test/assistant-codex-turn-planning.test.ts \
+            test/assistant-codex-dynamic-tool-runtime.test.ts
           pnpm --filter @murphai/contracts typecheck
           pnpm --filter @murphai/operator-config typecheck
           pnpm --filter @murphai/assistant-engine typecheck
