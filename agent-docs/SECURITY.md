@@ -17,9 +17,16 @@ Last verified: 2026-08-09
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. An instant-start shell-prewarm hint uses that same per-user
-  barrier and live admission read. Its HTTP route obtains the named runner stub
-  without binding durable state. The optional read abandons after a fixed 250 ms
+  before granting. An instant-start or authenticated established-direct-chat
+  typing shell-prewarm hint uses that same per-user barrier and live admission
+  read. The typing producer resolves only the private home-chat blind index and
+  performs an advisory active-access/root check after acknowledging the webhook;
+  it receives no member id from Linq and grants no runtime authority. The shared
+  HTTP route obtains the named runner stub without binding durable state.
+  Because this hint is optional, it is admitted only when the barrier is idle;
+  repeated hints and hints arriving during authoritative ensure, withdrawal, or
+  deletion return without joining the FIFO. The
+  optional read abandons after a fixed 250 ms
   deadline so it cannot hold authoritative processing, withdrawal, or deletion
   behind the ordinary Web-control timeout; only allowed admission reserves and
   binds its exact versioned container in the existing user-control stop-target
