@@ -3,7 +3,7 @@ name: Agent mailbox current main export
 on:
   push:
     branches:
-      - agent/mailbox-current-main-source
+      - agent/mailbox-current-main-source-v2
     paths:
       - .github/workflows/agent-mailbox-current-main-export.yml
 
@@ -25,7 +25,7 @@ jobs:
       - name: Upload source worktree
         uses: actions/upload-artifact@v4
         with:
-          name: murph-mailbox-current-main
+          name: murph-mailbox-current-main-v2
           path: murph-source.tar.gz
           if-no-files-found: error
           retention-days: 1
