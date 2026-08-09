@@ -1,0 +1,44 @@
+name: One-shot scope viewport overflow test
+
+on:
+  push:
+    branches:
+      - codex/fix-viewport-overflow-test-scope
+    paths:
+      - .github/workflows/one-shot-fix-viewport-overflow-test-scope.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: contains(github.event.head_commit.message, '[fix-viewport-overflow-test-scope]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/fix-viewport-overflow-test-scope
+
+      - name: Scope the command to the intended overflow spec
+        shell: python
+        run: |
+          from pathlib import Path
+
+          target = Path('apps/web/package.json')
+          text = target.read_text()
+          old = '"test:viewport-overflow": "playwright test",'
+          new = '"test:viewport-overflow": "playwright test e2e/viewport-overflow.spec.ts",'
+          if text.count(old) != 1:
+              raise RuntimeError(f'expected one viewport-overflow script, found {text.count(old)}')
+          target.write_text(text.replace(old, new, 1))
+          Path('.github/workflows/one-shot-fix-viewport-overflow-test-scope.yml').unlink()
+
+      - name: Commit the focused CI fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: scope viewport overflow CI to its intended spec"
+          git push origin HEAD:codex/fix-viewport-overflow-test-scope
