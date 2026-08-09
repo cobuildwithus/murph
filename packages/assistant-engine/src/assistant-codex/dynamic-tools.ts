@@ -3729,6 +3729,12 @@ async function executeGroupTool(input: {
       }))
     }
     const contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null
+    if (!contactCardShareKey) {
+      return toolTextResult(
+        false,
+        'personalized contact cards require fresh user-sourced input for this turn',
+      )
+    }
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
       // The accepted request, not the tool call: a replay must reuse this
@@ -3762,7 +3768,7 @@ async function executeGroupTool(input: {
       // to one card while a genuinely new request inside the throttle window
       // still sends. Deliberately not the tool call id: a retry re-emits the
       // call with a new id but keeps the same accepted input.
-      ...(contactCardShareKey ? { contactCardShareKey } : {}),
+      contactCardShareKey,
     }
     usageDraft = prepared.usageDraft ?? null
     generatedAvatarCapture = prepared.savedImageRef

@@ -556,7 +556,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_shared: "participant_aware",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
-      share_contact_card: "participant_aware",
+      share_contact_card: "owner_active",
       update_display_name: "owner_active",
     });
   });
@@ -4660,6 +4660,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "share_contact_card",
         contactCardImageUrl,
+        contactCardShareKey: "input_direct_1",
         directLinqChatId: "chat_direct_1",
       },
     })).resolves.toEqual({
@@ -4684,6 +4685,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         idempotencyKeyPrefix: "personalized-contact-card",
         imageUrl: contactCardImageUrl,
         memberId: "member_container",
+        shareKey: "input_direct_1",
       }),
     );
   });
@@ -4713,6 +4715,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "share_contact_card",
         contactCardImageUrl,
+        contactCardShareKey: "input_direct_1",
         directLinqChatId: "chat_direct_1",
       },
     })).resolves.toEqual({
@@ -4723,6 +4726,33 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     });
 
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before group authorization when a personalized request lacks direct binding", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        contactCardShareKey: "input_direct_1",
+        linqThread: LINQ_THREAD,
+      } as never,
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+    });
+
+    expect(mocks.assertHostedLinqRecentInboundEngagementForRuntime)
+      .not.toHaveBeenCalled();
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
     expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
   });
 
@@ -4737,6 +4767,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "share_contact_card",
         contactCardImageUrl: "https://example.invalid/avatar.png",
+        contactCardShareKey: "input_direct_1",
         directLinqChatId: "chat_direct_1",
       },
     })).resolves.toEqual({

@@ -482,6 +482,7 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
       memberId: "member_123",
       now,
       prisma: prisma.client as never,
+      shareKey: "input_first",
       signal,
     })).resolves.toEqual({ status: "sent" });
 
@@ -494,7 +495,7 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
     });
     expect(shareSendMocks.sendHostedLinqAttachmentMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        idempotencyKey: `personalized-contact-card:chat_123:${now.getTime()}`,
+        idempotencyKey: "personalized-contact-card:chat_123:input_first",
       }),
     );
   });
@@ -609,7 +610,7 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
     expect(prisma.rows).toHaveLength(1);
   });
 
-  it("reads a replay's provider key conflict as already sent, and nothing else", async () => {
+  it("reads only a personalized replay's provider key conflict as already sent", async () => {
     const prisma = createContactCardSharePrismaStub();
     const imageUrl =
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
@@ -617,45 +618,50 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
       base64: "aGVsbG8=",
       type: "JPEG",
     });
-    const share = (shareKey?: string) =>
+    const personalizedShare = () =>
       shareMurphHostedLinqContactCardVcfToChat({
         chatId: "chat_123",
         idempotencyKeyPrefix: "personalized-contact-card",
         imageUrl,
         memberId: "member_123",
         prisma: prisma.client as never,
-        ...(shareKey ? { shareKey } : {}),
+        shareKey: "input_first",
       });
 
-    // A replay re-creates the attachment, so the provider sees the same key
-    // with a different body. That is proof the card already landed.
     const conflict = Object.assign(new Error("conflict"), {
       details: { idempotencyKeyReuseConflict: true, status: 409 },
     });
     shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(conflict);
-    await expect(share("input_first")).resolves.toEqual({ status: "already_shared" });
+    await expect(personalizedShare()).resolves.toEqual({
+      status: "already_shared",
+    });
 
-    // Without a per-request key the conflict proves nothing about intent.
+    // A canonical reservation key does not identify this accepted request.
+    const canonicalPrisma = createContactCardSharePrismaStub();
     shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(conflict);
-    await expect(share()).resolves.toEqual({
+    await expect(shareMurphHostedLinqContactCardVcfToChat({
+      chatId: "chat_456",
+      idempotencyKeyPrefix: "group-contact-card",
+      memberId: "member_123",
+      prisma: canonicalPrisma.client as never,
+    })).resolves.toEqual({
       status: "failed",
       reason: "send_failed",
       error: conflict,
     });
 
-    // An ordinary provider failure stays a failure even with a request key.
     const otherFailure = Object.assign(new Error("boom"), {
       details: { status: 409 },
     });
     shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(otherFailure);
-    await expect(share("input_first")).resolves.toEqual({
+    await expect(personalizedShare()).resolves.toEqual({
       status: "failed",
       reason: "send_failed",
       error: otherFailure,
     });
   });
 
-  it("reports an unresolved acknowledgement as unconfirmed, and only per request", async () => {
+  it("reports an unresolved acknowledgement as unconfirmed only per request", async () => {
     const prisma = createContactCardSharePrismaStub();
     const imageUrl =
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
@@ -663,35 +669,52 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
       base64: "aGVsbG8=",
       type: "JPEG",
     });
-    const share = (shareKey?: string) =>
+    const personalizedShare = () =>
       shareMurphHostedLinqContactCardVcfToChat({
         chatId: "chat_123",
         idempotencyKeyPrefix: "personalized-contact-card",
         imageUrl,
         memberId: "member_123",
         prisma: prisma.client as never,
-        ...(shareKey ? { shareKey } : {}),
+        shareKey: "input_first",
       });
 
-    // The send owner reconciled the identical body under this key and still
-    // could not learn whether the provider accepted it.
     const unconfirmed = Object.assign(new Error("acknowledgement unconfirmed"), {
       details: { acknowledgementUnconfirmed: true },
     });
     shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(unconfirmed);
-    await expect(share("input_first")).resolves.toEqual({ status: "unconfirmed" });
+    await expect(personalizedShare()).resolves.toEqual({ status: "unconfirmed" });
 
-    // A canonical share has no per-request identity to report, so it keeps the
-    // existing failure contract that shipped runners already understand.
+    const canonicalPrisma = createContactCardSharePrismaStub();
     shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(unconfirmed);
-    await expect(share()).resolves.toEqual({
+    await expect(shareMurphHostedLinqContactCardVcfToChat({
+      chatId: "chat_456",
+      idempotencyKeyPrefix: "group-contact-card",
+      memberId: "member_123",
+      prisma: canonicalPrisma.client as never,
+    })).resolves.toEqual({
       status: "failed",
       reason: "send_failed",
       error: unconfirmed,
     });
 
-    // Nothing was proven undelivered, so no reservation is freed.
-    expect(prisma.rows[0]?.lastContactCardShareAttemptedAt).not.toBeNull();
+    // Nothing was proven undelivered, so the canonical reservation stays.
+    expect(canonicalPrisma.rows[0]?.lastContactCardShareAttemptedAt)
+      .not.toBeNull();
+  });
+
+  it("rejects a partial personalized composer input before provider work", async () => {
+    await expect(shareMurphHostedLinqContactCardVcfToChat({
+      chatId: "chat_123",
+      idempotencyKeyPrefix: "personalized-contact-card",
+      imageUrl:
+        "https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/avatar.jpg",
+      memberId: "member_123",
+      prisma: createContactCardSharePrismaStub().client as never,
+    } as never)).rejects.toThrow(/imageUrl and shareKey must be provided together/u);
+
+    expect(shareSendMocks.getHostedLinqChatHandles).not.toHaveBeenCalled();
+    expect(shareSendMocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
   it("refuses a personalized card when the current Murph line is stale or ambiguous", async () => {

@@ -393,28 +393,45 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   return { status: "sent" };
 }
 
-/**
- * Share Murph's first-party vCard into a Linq chat as an attachment. This is
- * the discretionary group-tool mechanism and never calls Linq's native
- * contact-card share. Callers own eligibility and thread authority; this owns
- * line resolution, the per-chat throttle reservation, the build and send, and
- * releasing the reservation when a failure provably never reached the chat.
- * Send failures are returned, not thrown.
- */
-export async function shareMurphHostedLinqContactCardVcfToChat(input: {
+type MurphHostedLinqContactCardVcfShareInput = {
   chatId: string;
   idempotencyKeyPrefix: string;
-  imageUrl?: string;
   memberId: string;
   now?: Date;
   prisma: PrismaClient;
-  shareKey?: string;
   signal?: AbortSignal;
-}): Promise<MurphHostedLinqContactCardVcfShareOutcome> {
+} & (
+  | { imageUrl: string; shareKey: string }
+  | { imageUrl?: never; shareKey?: never }
+);
+
+/**
+ * Share Murph's first-party vCard into a Linq chat as an attachment. This is
+ * the discretionary group-tool mechanism and never calls Linq's native
+ * contact-card share. Callers own eligibility and thread authority. Canonical
+ * sends retain the shared reservation; personalized sends carry one stable
+ * accepted-request provider identity instead. Send failures are returned, not
+ * thrown.
+ */
+export async function shareMurphHostedLinqContactCardVcfToChat(
+  input: MurphHostedLinqContactCardVcfShareInput,
+): Promise<MurphHostedLinqContactCardVcfShareOutcome> {
+  let personalized: { imageUrl: string; shareKey: string } | null = null;
+  if (input.imageUrl !== undefined || input.shareKey !== undefined) {
+    if (input.imageUrl === undefined || input.shareKey === undefined) {
+      throw new TypeError(
+        "Personalized contact-card imageUrl and shareKey must be provided together.",
+      );
+    }
+    personalized = {
+      imageUrl: input.imageUrl,
+      shareKey: input.shareKey,
+    };
+  }
+
   // A personalized card is saved over the member's working Murph contact, so
   // an obsolete or ambiguous line is worse than no card. Require exactly one
   // active self handle, matching the native line-card path.
-  const requireUnambiguousActiveLine = input.imageUrl !== undefined;
   let linePhoneNumber: string | null = null;
   let rosterPresent = false;
   try {
@@ -423,7 +440,7 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
       ...(input.signal ? { signal: input.signal } : {}),
     });
     rosterPresent = handles.length > 0;
-    if (requireUnambiguousActiveLine) {
+    if (personalized) {
       const activeSelfHandles = handles.filter((handle) =>
         handle.isMe && handle.status?.trim().toLowerCase() === "active",
       );
@@ -445,28 +462,29 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
     return { status: "skipped", reason: "line_unresolved" };
   }
 
-  // Personalized sends carry their own stable send identity (below) and must
-  // not use the wall-clock reservation: one attempt includes an image
-  // generation bounded far above the reservation window, so the reservation
-  // could expire mid-attempt and admit a duplicate for the same request.
-  const reservation = input.shareKey
-    ? null
-    : await reserveHostedLinqContactCardShareAttempt({
+  let reservation: Extract<
+    HostedLinqContactCardShareReserveDecision,
+    { action: "share" }
+  > | null = null;
+  if (!personalized) {
+    const decision = await reserveHostedLinqContactCardShareAttempt({
       chatId: input.chatId,
       memberId: input.memberId,
       ...(input.now ? { now: input.now } : {}),
       prisma: input.prisma,
     });
-  if (reservation && reservation.action !== "share") {
-    return reservation.reason === "recent_attempt"
-      ? { status: "already_shared" }
-      : { status: "skipped", reason: reservation.reason };
+    if (decision.action !== "share") {
+      return decision.reason === "recent_attempt"
+        ? { status: "already_shared" }
+        : { status: "skipped", reason: decision.reason };
+    }
+    reservation = decision;
   }
 
   const [photo, backupPhoneNumber] = await Promise.all([
-    input.imageUrl
+    personalized
       ? fetchMurphHostedLinqContactCardVcfPhoto({
-          imageUrl: input.imageUrl,
+          imageUrl: personalized.imageUrl,
           ...(input.signal ? { signal: input.signal } : {}),
         })
       : fetchMurphHostedLinqContactCardVcfPhoto(
@@ -477,24 +495,19 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
       prisma: input.prisma,
     }),
   ]);
-  if (input.imageUrl && !photo) {
-    // A personalized card without its generated photo would falsely report
-    // success for the exact thing the member requested. Nothing reached the
-    // chat, so free any reservation and let a later retry proceed.
-    if (reservation) {
-      try {
-        await releaseHostedLinqContactCardShareAttempt({
-          attemptedAt: reservation.attemptedAt,
-          chatId: input.chatId,
-          memberId: input.memberId,
-          prisma: input.prisma,
-        });
-      } catch {
-        // Best effort: a stuck reservation only delays the next attempt.
-      }
-    }
+  if (personalized && !photo) {
     return { status: "skipped", reason: "photo_unavailable" };
   }
+
+  const idempotencyKey = personalized
+    ? `${input.idempotencyKeyPrefix}:${input.chatId}:${personalized.shareKey}`
+    : reservation
+      ? `${input.idempotencyKeyPrefix}:${input.chatId}:${reservation.attemptedAt.getTime()}`
+      : null;
+  if (!idempotencyKey) {
+    throw new Error("Contact-card send identity is unavailable.");
+  }
+
   const vcf = buildMurphHostedLinqContactCardVcf({
     backupPhoneNumber,
     phoneNumber: linePhoneNumber,
@@ -506,35 +519,21 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
       chatId: input.chatId,
       contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
       fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
-      // The provider owns duplicate collapse for this send. A personalized
-      // card keys on its trusted-host accepted-request id, which is stable for
-      // the whole lifetime of one request no matter how long generation or a
-      // retry takes; a distinct request is a distinct key. Canonical shares
-      // key on the reservation instant as before. The chat id is Linq's own
-      // identifier, so no new exposure.
-      idempotencyKey: input.shareKey
-        ? `${input.idempotencyKeyPrefix}:${input.chatId}:${input.shareKey}`
-        : `${input.idempotencyKeyPrefix}:${input.chatId}:${reservation?.attemptedAt.getTime() ?? 0}`,
+      idempotencyKey,
       ...(input.signal ? { signal: input.signal } : {}),
     });
   } catch (error) {
-    // A replay of this exact accepted request: the provider proved the key was
-    // already accepted with a different attachment body, so the card is
-    // already in the chat. Only the per-request key can claim this; a
-    // canonical share's key is time-derived and proves nothing about intent.
-    if (input.shareKey && isHostedLinqIdempotencyKeyReuseFailure(error)) {
+    // A replay re-creates the attachment, so Linq may prove the stable key was
+    // already accepted by rejecting the changed body under that key.
+    if (personalized && isHostedLinqIdempotencyKeyReuseFailure(error)) {
       return { status: "already_shared" };
     }
-    // The send owner already reconciled the identical body under this request's
-    // key and still could not learn the provider's answer. Saying "failed"
-    // would contradict a card that may be sitting in the conversation, so this
-    // request ends explicitly unresolved instead.
-    if (input.shareKey && isHostedLinqUnconfirmedAcknowledgementFailure(error)) {
+    if (personalized && isHostedLinqUnconfirmedAcknowledgementFailure(error)) {
       return { status: "unconfirmed" };
     }
     if (reservation && isHostedLinqAttachmentSendPrepareFailure(error)) {
-      // Nothing reached the chat; free the throttle reservation so a later
-      // retry is not locked out. Ambiguous message-send failures keep it.
+      // Nothing reached the chat; free the canonical throttle reservation so a
+      // later retry is not locked out. Ambiguous message-send failures keep it.
       try {
         await releaseHostedLinqContactCardShareAttempt({
           attemptedAt: reservation.attemptedAt,

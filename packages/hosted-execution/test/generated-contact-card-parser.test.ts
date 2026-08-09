@@ -10,84 +10,108 @@ const LINQ_THREAD = {
   authority: {
     accountLookupKey: "hplk_current_line",
     channel: "linq" as const,
-    containerMemberId: "member_personal",
-    threadId: "chat_direct_1",
+    containerMemberId: "member_group",
+    threadId: "chat_group_1",
   },
-  chatId: "chat_direct_1",
+  chatId: "chat_group_1",
 };
 
+const parse = (request: unknown) =>
+  parseHostedRuntimeGroupToolRequest(request, {
+    privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
+  });
+
 describe("generated contact-card runtime request", () => {
-  it("accepts only a private generated image URL with exact thread authority", () => {
-    expect(parseHostedRuntimeGroupToolRequest({
+  it("accepts the canonical variant with optional exact group authority", () => {
+    expect(parse({ action: "share_contact_card" })).toEqual({
       action: "share_contact_card",
-      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+    });
+    expect(parse({
+      action: "share_contact_card",
       linqThread: LINQ_THREAD,
-    }, {
-      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
     })).toEqual({
       action: "share_contact_card",
-      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
       linqThread: LINQ_THREAD,
     });
   });
 
-  it("carries a bounded host-owned share key and rejects an oversized one", () => {
-    expect(parseHostedRuntimeGroupToolRequest({
+  it("accepts only the complete bound personalized variant", () => {
+    expect(parse({
       action: "share_contact_card",
       contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
       contactCardShareKey: "asst_input_abc123",
-      linqThread: LINQ_THREAD,
-    }, {
-      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
+      directLinqChatId: "chat_direct_1",
     })).toEqual({
       action: "share_contact_card",
       contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
       contactCardShareKey: "asst_input_abc123",
-      linqThread: LINQ_THREAD,
+      directLinqChatId: "chat_direct_1",
     });
+  });
 
-    expect(() => parseHostedRuntimeGroupToolRequest({
+  it.each([
+    {
+      label: "image without a share key or direct chat",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+      },
+    },
+    {
+      label: "image and share key without a direct chat",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+        contactCardShareKey: "asst_input_abc123",
+      },
+    },
+    {
+      label: "share key and direct chat without an image",
+      request: {
+        action: "share_contact_card",
+        contactCardShareKey: "asst_input_abc123",
+        directLinqChatId: "chat_direct_1",
+      },
+    },
+    {
+      label: "personalized fields mixed with group authority",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+        contactCardShareKey: "asst_input_abc123",
+        directLinqChatId: "chat_direct_1",
+        linqThread: LINQ_THREAD,
+      },
+    },
+  ])("rejects $label", ({ request }) => {
+    expect(() => parse(request)).toThrow(/must be either canonical/u);
+  });
+
+  it("bounds both trusted-host identifiers", () => {
+    expect(() => parse({
       action: "share_contact_card",
       contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
       contactCardShareKey: "a".repeat(201),
-      linqThread: LINQ_THREAD,
-    }, {
-      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
+      directLinqChatId: "chat_direct_1",
     })).toThrow(/contactCardShareKey/u);
-  });
 
-  it("carries a bounded direct chat id and rejects an oversized one", () => {
-    expect(parseHostedRuntimeGroupToolRequest({
+    expect(() => parse({
       action: "share_contact_card",
       contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
-      directLinqChatId: "chat_direct_1",
-    }, {
-      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
-    })).toEqual({
-      action: "share_contact_card",
-      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
-      directLinqChatId: "chat_direct_1",
-    });
-
-    expect(() => parseHostedRuntimeGroupToolRequest({
-      action: "share_contact_card",
-      contactCardImageUrl: CONTACT_CARD_IMAGE_URL,
+      contactCardShareKey: "asst_input_abc123",
       directLinqChatId: "c".repeat(201),
-    }, {
-      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
     })).toThrow(/directLinqChatId/u);
   });
 
-  it("rejects untrusted image origins and model-supplied extra fields", () => {
-    expect(() => parseHostedRuntimeGroupToolRequest({
+  it("rejects untrusted image origins and model-only fields", () => {
+    expect(() => parse({
       action: "share_contact_card",
       contactCardImageUrl: "https://example.invalid/avatar.png",
-      linqThread: LINQ_THREAD,
-    }, {
-      privateMediaDeliveryOrigin: PRIVATE_MEDIA_ORIGIN,
+      contactCardShareKey: "asst_input_abc123",
+      directLinqChatId: "chat_direct_1",
     })).toThrow(/contactCardImageUrl is invalid/u);
 
-    expect(() => parseHostedRuntimeGroupToolRequest({
+    expect(() => parse({
       action: "share_contact_card",
       avatarPrompt: "model-only field",
     })).toThrow(/avatarPrompt is not allowed/u);

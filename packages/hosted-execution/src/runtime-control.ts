@@ -1448,16 +1448,22 @@ export type HostedRuntimeGroupToolRequest =
     }
   | {
       action: "share_contact_card";
-      contactCardImageUrl?: string;
-      contactCardShareKey?: string;
+      contactCardImageUrl?: never;
+      contactCardShareKey?: never;
+      directLinqChatId?: never;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
+  | {
+      action: "share_contact_card";
+      contactCardImageUrl: string;
+      contactCardShareKey: string;
       /**
        * Trusted-host chat id for a personalized card in a direct conversation.
-       * Direct routes are owned by the member's own routing record rather than
-       * the group thread-route store, so they carry no thread authority here
-       * and Web revalidates the chat against that owner before sending.
+       * The trusted turn-context wrapper injects it before transport; Web then
+       * revalidates that exact direct chat against the member's route owner.
        */
       directLinqChatId?: string;
-      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+      linqThread?: never;
     }
   | {
       action: "revoke_own_email_share";

@@ -4775,8 +4775,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         action: "share_contact_card",
         result: { status: "sent" },
       });
-      // A group input must not read as a direct attachment route.
-      await runShare(groupInput.inputId);
+      // A group input must not read as a direct attachment route or
+      // forward a partial personalized transport request.
+      await expect(runShare(groupInput.inputId)).resolves.toEqual({
+        action: "share_contact_card",
+        result: {
+          status: "unavailable",
+          unavailableReason: "direct_attachment_route_unavailable",
+        },
+      });
 
       expect(routeStatuses).toEqual([
         { status: "ok" },
@@ -4793,12 +4800,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           contactCardImageUrl,
           contactCardShareKey: directInput.inputId,
           directLinqChatId: "chat_direct_contact_card",
-        },
-        // No direct route, so nothing binds a chat and Web fails closed.
-        {
-          action: "share_contact_card",
-          contactCardImageUrl,
-          contactCardShareKey: groupInput.inputId,
         },
       ]);
     } finally {

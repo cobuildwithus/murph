@@ -1521,48 +1521,54 @@ export function parseHostedRuntimeGroupToolRequest(
       ]),
       label,
     );
+    const hasOwn = (key: string): boolean =>
+      Object.prototype.hasOwnProperty.call(record, key);
+    const hasContactCardImageUrl = hasOwn("contactCardImageUrl");
+    const hasContactCardShareKey = hasOwn("contactCardShareKey");
+    const hasDirectLinqChatId = hasOwn("directLinqChatId");
+    const hasLinqThread = hasOwn("linqThread");
+    const personalizedFieldCount = Number(hasContactCardImageUrl)
+      + Number(hasContactCardShareKey)
+      + Number(hasDirectLinqChatId);
+
+    if (personalizedFieldCount === 0) {
+      if (!hasLinqThread || record.linqThread === null) {
+        return { action };
+      }
+      return {
+        action,
+        linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+          record.linqThread,
+          `${label} linqThread`,
+        ),
+      };
+    }
+
+    if (personalizedFieldCount !== 3 || hasLinqThread) {
+      throw new TypeError(
+        `${label} must be either canonical with optional linqThread, or personalized with contactCardImageUrl, contactCardShareKey, and directLinqChatId only.`,
+      );
+    }
+
     return {
       action,
-      ...(record.contactCardImageUrl === undefined
-        || record.contactCardImageUrl === null
-        ? {}
-        : {
-            contactCardImageUrl: parseHostedRuntimeGroupChatIconUrl(
-              record.contactCardImageUrl,
-              options.privateMediaDeliveryOrigin,
-              `${label} contactCardImageUrl`,
-            ),
-          }),
-      ...(record.contactCardShareKey === undefined
-        || record.contactCardShareKey === null
-        ? {}
-        : {
-            contactCardShareKey: parseHostedRuntimeGroupAskBoundedText({
-              label: `${label} contactCardShareKey`,
-              maxCodePoints:
-                HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
-              value: record.contactCardShareKey,
-            }),
-          }),
-      ...(record.directLinqChatId === undefined
-        || record.directLinqChatId === null
-        ? {}
-        : {
-            directLinqChatId: parseHostedRuntimeGroupAskBoundedText({
-              label: `${label} directLinqChatId`,
-              maxCodePoints:
-                HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
-              value: record.directLinqChatId,
-            }),
-          }),
-      ...(record.linqThread === undefined || record.linqThread === null
-        ? {}
-        : {
-            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
-              record.linqThread,
-              `${label} linqThread`,
-            ),
-          }),
+      contactCardImageUrl: parseHostedRuntimeGroupChatIconUrl(
+        record.contactCardImageUrl,
+        options.privateMediaDeliveryOrigin,
+        `${label} contactCardImageUrl`,
+      ),
+      contactCardShareKey: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} contactCardShareKey`,
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+        value: record.contactCardShareKey,
+      }),
+      directLinqChatId: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} directLinqChatId`,
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+        value: record.directLinqChatId,
+      }),
     };
   }
   if (action === "revoke_own_email_share") {

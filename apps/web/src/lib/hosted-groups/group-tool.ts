@@ -200,7 +200,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
-  share_contact_card: "participant_aware",
+  share_contact_card: "owner_active",
   update_display_name: "owner_active",
 } as const satisfies Record<
   HostedRuntimeGroupToolAction,
@@ -350,10 +350,26 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (input.request.action === "share_contact_card") {
+    if (input.request.contactCardImageUrl !== undefined) {
+      if (!input.request.directLinqChatId) {
+        return {
+          action: "share_contact_card",
+          result: {
+            status: "unavailable",
+            unavailableReason: "direct_attachment_route_unavailable",
+          },
+        };
+      }
+      return handleHostedRuntimeGroupShareContactCard({
+        kind: "personalized",
+        contactCardImageUrl: input.request.contactCardImageUrl,
+        contactCardShareKey: input.request.contactCardShareKey,
+        directLinqChatId: input.request.directLinqChatId,
+        memberId: input.memberId,
+      });
+    }
     return handleHostedRuntimeGroupShareContactCard({
-      contactCardImageUrl: input.request.contactCardImageUrl ?? null,
-      contactCardShareKey: input.request.contactCardShareKey ?? null,
-      directLinqChatId: input.request.directLinqChatId ?? null,
+      kind: "canonical",
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -2250,39 +2266,59 @@ function logHostedThreadContainerParticipantReconcileCapped(input: {
   });
 }
 
-async function handleHostedRuntimeGroupShareContactCard(input: {
-  contactCardImageUrl: string | null;
-  contactCardShareKey: string | null;
-  directLinqChatId: string | null;
-  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
-  memberId: string;
-}): Promise<HostedRuntimeGroupToolResponse> {
+type HostedRuntimeGroupShareContactCardInput =
+  | {
+      kind: "canonical";
+      linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+      memberId: string;
+    }
+  | {
+      kind: "personalized";
+      contactCardImageUrl: string;
+      contactCardShareKey: string;
+      directLinqChatId: string;
+      memberId: string;
+    };
+
+async function handleHostedRuntimeGroupShareContactCard(
+  input: HostedRuntimeGroupShareContactCardInput,
+): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "share_contact_card",
     result: { status: "unavailable", unavailableReason },
   });
 
-  // A direct conversation is owned by the member's own routing record, so it
-  // is revalidated through the direct egress owner rather than the group
-  // thread-route store, which structurally cannot hold this chat.
-  const authorized = input.directLinqChatId
+  const authorized = input.kind === "personalized"
     ? await authorizeHostedRuntimeDirectLinqChat({
       chatId: input.directLinqChatId,
       memberId: input.memberId,
     })
-    : await authorizeHostedRuntimeGroupLinqThread(input);
+    : await authorizeHostedRuntimeGroupLinqThread({
+      linqThread: input.linqThread,
+      memberId: input.memberId,
+    });
   if ("unavailableReason" in authorized) {
     return unavailable(authorized.unavailableReason);
   }
 
   const prisma = getPrisma();
-  const contactCardImageUrl = input.contactCardImageUrl === null
-    ? null
-    : normalizeHostedGroupChatIconUrl(input.contactCardImageUrl);
-  if (input.contactCardImageUrl !== null && contactCardImageUrl === null) {
-    return unavailable("contact_card_image_url_unavailable");
-  }
-  if (contactCardImageUrl === null) {
+  let outcome: Awaited<ReturnType<typeof shareMurphHostedLinqContactCardVcfToChat>>;
+  if (input.kind === "personalized") {
+    const contactCardImageUrl = normalizeHostedGroupChatIconUrl(
+      input.contactCardImageUrl,
+    );
+    if (!contactCardImageUrl) {
+      return unavailable("contact_card_image_url_unavailable");
+    }
+    outcome = await shareMurphHostedLinqContactCardVcfToChat({
+      chatId: authorized.chatId,
+      idempotencyKeyPrefix: "personalized-contact-card",
+      imageUrl: contactCardImageUrl,
+      memberId: input.memberId,
+      prisma,
+      shareKey: input.contactCardShareKey,
+    });
+  } else {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
       prisma,
@@ -2290,32 +2326,20 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
     if (ownerAccess.status !== "ok") {
       return unavailable(ownerAccess.unavailableReason);
     }
+    outcome = await shareMurphHostedLinqContactCardVcfToChat({
+      chatId: authorized.chatId,
+      idempotencyKeyPrefix: "group-contact-card",
+      memberId: input.memberId,
+      prisma,
+    });
   }
 
-  const outcome = await shareMurphHostedLinqContactCardVcfToChat({
-    chatId: authorized.chatId,
-    idempotencyKeyPrefix: contactCardImageUrl
-      ? "personalized-contact-card"
-      : "group-contact-card",
-    ...(contactCardImageUrl ? { imageUrl: contactCardImageUrl } : {}),
-    memberId: input.memberId,
-    prisma,
-    // Host-owned per-request token. Retries of one accepted request collapse;
-    // a distinct request gets its own reservation instead of reading as a
-    // duplicate.
-    ...(contactCardImageUrl && input.contactCardShareKey
-      ? { shareKey: input.contactCardShareKey }
-      : {}),
-  });
   if (outcome.status === "already_shared") {
     return {
       action: "share_contact_card",
       result: { status: "already_shared" },
     };
   }
-  // Only the personalized path can reach this: it is the one send whose key
-  // identifies a single member request, so it is the one that can honestly
-  // report that the card may already have arrived.
   if (outcome.status === "unconfirmed") {
     return {
       action: "share_contact_card",

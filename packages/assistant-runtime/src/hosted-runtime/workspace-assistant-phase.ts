@@ -493,7 +493,13 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         }
         return linqRoute?.service === "sms"
           ? buildHostedGroupSmsUnsupportedResponse(request)
-          : await forwardRequest(request);
+          : {
+            action: "share_contact_card",
+            result: {
+              status: "unavailable",
+              unavailableReason: "direct_attachment_route_unavailable",
+            },
+          };
       }
       if (
         request.action !== "update_display_name"

@@ -1090,24 +1090,41 @@ function buildHostedLinqRequestFailedError(input: {
   });
 }
 
-const HOSTED_LINQ_IDEMPOTENCY_CONFLICT_PATTERN =
-  /conflicting[\s_-]*linq[\s_-]*idempotency[\s_-]*key[\s_-]*reuse/iu;
+const HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE =
+  "Conflicting Linq idempotency-key reuse.";
 
 /**
  * Narrow reader for the provider's exact same-key/different-payload conflict.
- * Bounded and shape-specific on purpose: a generic 409 must not be mistaken
- * for a proven duplicate.
+ * Bounded and shape-specific on purpose: a generic 409 or wrapped phrase must
+ * not be mistaken for a proven duplicate.
  */
 async function isHostedLinqIdempotencyKeyReuseConflict(
   response: Response,
 ): Promise<boolean> {
   let body: string;
   try {
-    body = (await response.clone().text()).slice(0, 500);
+    body = await response.clone().text();
   } catch {
     return false;
   }
-  return HOSTED_LINQ_IDEMPOTENCY_CONFLICT_PATTERN.test(body);
+  if (body.length > 500) {
+    return false;
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return false;
+  }
+  const keys = Object.keys(payload);
+  return keys.length === 1
+    && keys[0] === "error"
+    && Reflect.get(payload, "error")
+      === HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE;
 }
 
 /**

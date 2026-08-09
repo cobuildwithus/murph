@@ -103,7 +103,7 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
       }
       if (control?.kind === "pre_accept_unrelated_conflict") {
         response.writeHead(409, { "content-type": "application/json" });
-        response.end(JSON.stringify({ error: "Chat is locked." }));
+        response.end(JSON.stringify({ error: "Proxy wrapped: Conflicting Linq idempotency-key reuse." }));
         return;
       }
 
@@ -292,7 +292,7 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(provider.acceptedMessageIds).toEqual([]);
   });
 
-  it("leaves an unrelated conflict an ordinary failure", async () => {
+  it("leaves a wrapped conflict phrase as an ordinary failure", async () => {
     provider.arm({ kind: "pre_accept_unrelated_conflict", responses: 1 });
 
     const { error } = await send();

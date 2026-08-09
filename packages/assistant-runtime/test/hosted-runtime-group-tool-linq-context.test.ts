@@ -560,12 +560,14 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     await groupTool.request({
       action: "share_contact_card",
       contactCardImageUrl,
+      contactCardShareKey: "input_direct_1",
     });
 
     // The chat id, never a fabricated group thread authority.
     expect(request).toHaveBeenCalledExactlyOnceWith({
       action: "share_contact_card",
       contactCardImageUrl,
+      contactCardShareKey: "input_direct_1",
       directLinqChatId: "chat_direct_1",
     });
   });
@@ -594,6 +596,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     await expect(groupTool.request({
       action: "share_contact_card",
       contactCardImageUrl,
+      contactCardShareKey: "input_direct_sms",
     })).resolves.toEqual({
       action: "share_contact_card",
       result: {
@@ -607,13 +610,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
   it("does not choose between two direct iMessage routes for a personalized card", async () => {
     const contactCardImageUrl =
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
-    const request = vi.fn().mockResolvedValue({
-      action: "share_contact_card",
-      result: {
-        status: "unavailable",
-        unavailableReason: "linq_thread_unavailable",
-      },
-    });
+    const request = vi.fn();
     const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
       linqDeliveryContexts: [
@@ -638,15 +635,19 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       ],
     });
 
-    await groupTool.request({
+    await expect(groupTool.request({
       action: "share_contact_card",
       contactCardImageUrl,
+      contactCardShareKey: "input_direct_ambiguous",
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
     });
 
-    expect(request).toHaveBeenCalledExactlyOnceWith({
-      action: "share_contact_card",
-      contactCardImageUrl,
-    });
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("fails closed when the turn carries two distinct route-authorized threads", async () => {
