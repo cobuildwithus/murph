@@ -111,7 +111,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage technical runtime">
+      <StudySection title="Homepage technical runtime · inference choice">
         <div
           id="homepage-technical-runtime"
           data-design-section="homepage-technical-runtime"
