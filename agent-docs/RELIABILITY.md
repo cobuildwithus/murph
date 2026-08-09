@@ -284,7 +284,11 @@ Last verified: 2026-08-09
   opening may say only that the recorded check met alert criteria; current-state
   or condition-specific claims must come from evidence that proves them. The
   recorded evidence and check time make each body specific, while a retry
-  retains that truthful exact body after recovery.
+  retains that truthful exact body after recovery. The bank size is an explicit
+  bounded operator deliverability contract rather than a claim about platform
+  filtering: at the hourly cap, one incident traverses one hundred reviewed
+  leads before repeating one. Literal reviewed data avoids a prose generator,
+  provider dependency, or second runtime copy owner.
   Telemetry-only copy instead states that monitoring is incomplete or
   unavailable and cannot claim that the database itself is under pressure.
   Message variation must remain contextual and deterministic, never random

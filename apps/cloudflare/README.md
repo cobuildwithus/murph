@@ -251,7 +251,11 @@ state claims come from evidence that proves them. Retries therefore keep a
 truthful body after recovery, while consecutive pages avoid broadcast-shaped
 repetition without padding or filler. Telemetry-
 only pages remain evidence-led and one-shot for each unresolved monitoring
-window. The alert-state and sample-evidence columns are added idempotently without advancing the
+window. The one-hundred-entry size is a bounded operator deliverability
+requirement, not a guarantee about carrier or platform filtering: at the hourly
+cap, one incident traverses one hundred reviewed leads before repeating one.
+The bank stays literal reviewed data rather than generated prose or another
+runtime dependency. The alert-state and sample-evidence columns are added idempotently without advancing the
 schema version, so the previously deployed Worker can ignore them during a
 rollback. If that Worker acknowledges a telemetry pending body, current code
 recognizes its cleared key/body plus retained marker and prevents duplicate
