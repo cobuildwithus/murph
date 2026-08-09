@@ -30,14 +30,27 @@ async function readSkills(): Promise<{
   nutrition: string
   foodJournal: string
   gut: string
+  bodyComposition: string
+  cardGoals: string
 }> {
   const root = resolveAssistantSkillsRoot()
-  const [nutrition, foodJournal, gut] = await Promise.all([
-    readFile(path.join(root, 'nutrition-strategy', 'SKILL.md'), 'utf8'),
-    readFile(path.join(root, 'food-journal', 'SKILL.md'), 'utf8'),
-    readFile(path.join(root, 'gut-digestion', 'SKILL.md'), 'utf8'),
-  ])
-  return { nutrition, foodJournal, gut }
+  const [nutrition, foodJournal, gut, bodyComposition, cardGoals] =
+    await Promise.all([
+      readFile(path.join(root, 'nutrition-strategy', 'SKILL.md'), 'utf8'),
+      readFile(path.join(root, 'food-journal', 'SKILL.md'), 'utf8'),
+      readFile(path.join(root, 'gut-digestion', 'SKILL.md'), 'utf8'),
+      readFile(path.join(root, 'body-composition', 'SKILL.md'), 'utf8'),
+      readFile(
+        path.join(
+          root,
+          'nutrition-strategy',
+          'references',
+          'daily-nutrition-card-goals.md',
+        ),
+        'utf8',
+      ),
+    ])
+  return { nutrition, foodJournal, gut, bodyComposition, cardGoals }
 }
 
 describe('assistant nutrition strategy skill', () => {
@@ -124,6 +137,81 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).not.toContain('### GI comfort and performance')
   })
 
+  it('grounds first-card goals in one researched, explanation-first owner', async () => {
+    const { bodyComposition, cardGoals, nutrition } = await readSkills()
+    const compactGoals = cardGoals.replace(/\s+/gu, ' ').trim()
+
+    expect(nutrition).toContain('### Daily nutrition-card goals')
+    expect(nutrition).toContain('references/daily-nutrition-card-goals.md')
+    expect(nutrition).toContain('the single canonical Goal proposal')
+    expect(nutrition).toContain('explanation-before-card')
+    expect(bodyComposition).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
+    )
+
+    for (const source of [
+      'https://www.ncbi.nlm.nih.gov/books/NBK591034/',
+      'https://www.ncbi.nlm.nih.gov/books/NBK208874/',
+      'https://link.springer.com/article/10.1186/s12970-017-0177-8',
+      'https://www.ncbi.nlm.nih.gov/books/NBK208887/',
+      'https://pubmed.ncbi.nlm.nih.gov/35233712/',
+      'https://pubmed.ncbi.nlm.nih.gov/31247944/',
+      'https://pubmed.ncbi.nlm.nih.gov/34623696/',
+    ]) {
+      expect(cardGoals).toContain(source)
+    }
+
+    expect(compactGoals).toContain('2023 National Academies EER equation')
+    expect(cardGoals).toContain('5-10% above maintenance')
+    expect(cardGoals).toContain('10-20% below maintenance')
+    expect(cardGoals).toContain('1.6 g/kg/day')
+    expect(cardGoals).toContain('1.4 g/kg/day')
+    expect(cardGoals).toContain('0.8 g/kg/day')
+    expect(cardGoals).toContain('adult 10-35% protein AMDR')
+    expect(cardGoals).toContain('45-65% AMDR')
+    expect(cardGoals).toContain('fat within 20-35%')
+    expect(cardGoals).toContain('14 g per 1,000 kcal')
+    expect(cardGoals).toContain('Round the final target to the nearest 100 kcal')
+    expect(compactGoals).toContain('Round to the nearest 5 g')
+
+    expect(compactGoals).toContain(
+      'Reuse at most one Goal with slug `murph-daily-nutrition-starting-targets`.',
+    )
+    expect(compactGoals).toContain('status `paused`')
+    expect(compactGoals).toContain('vault-cli goal import-json --input -')
+    expect(compactGoals).toContain('kind: "metric"')
+    expect(compactGoals).toContain(
+      'A turn that creates or changes the paused proposal must be ordinary text, never a card.',
+    )
+    expect(compactGoals).toContain(
+      'Briefly name all five effective values, which facts and labeled assumptions materially drove them, and why calories, protein, carbohydrate, fat, and fiber landed there.',
+    )
+    expect(compactGoals).toContain(
+      'Call them provisional and invite correction or acceptance.',
+    )
+    expect(compactGoals).toContain(
+      'vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active',
+    )
+    expect(compactGoals).toContain(
+      'Only a later eligible response with five scalar values resolved from active canonical goals may attach the card.',
+    )
+    expect(compactGoals).toContain(
+      'A member- or clinician-chosen active target always wins for its metric.',
+    )
+    expect(compactGoals).toContain(
+      'remove only that overlapping metric from the managed Goal; never edit the explicit Goal.',
+    )
+    expect(compactGoals).toContain(
+      'If the member declines, update the same Goal to `abandoned`.',
+    )
+    expect(compactGoals).toContain(
+      'On an interactive card request, explain an existing paused proposal again',
+    )
+    expect(compactGoals).toContain(
+      'an abandoned or completed record is an opt-out and must not be recreated automatically.',
+    )
+  })
+
   it('keeps performance numbers bounded and qualified', async () => {
     const { nutrition } = await readSkills()
 
@@ -139,9 +227,19 @@ describe('assistant nutrition strategy skill', () => {
   })
 
   it('protects under-fueled, eating-disorder-sensitive, and acute contexts', async () => {
-    const { nutrition } = await readSkills()
+    const { cardGoals, nutrition } = await readSkills()
 
     expect(nutrition).toContain('can occur at any body size')
+    expect(cardGoals).toContain(
+      'Do not derive, save, or surface numeric goals',
+    )
+    const compactGoals = cardGoals.replace(/\s+/gu, ' ').trim()
+
+    expect(compactGoals).toContain('under-fueling or RED-S concern')
+    expect(cardGoals).toContain('anyone under 18')
+    expect(compactGoals).toContain('pregnancy or breastfeeding')
+    expect(compactGoals).toContain('glucose-lowering medication')
+    expect(compactGoals).toContain('another clinician-managed nutrition context')
     expect(nutrition).toContain('Do not calculate energy availability or diagnose RED-S')
     expect(nutrition).toContain('little or nothing for about five days')
     expect(nutrition).toContain('refeeding can require medical monitoring')

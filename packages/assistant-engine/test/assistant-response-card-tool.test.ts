@@ -175,6 +175,30 @@ describe('murph.attach_response_card', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'never calculate or reuse totals',
     )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Require one scalar active canonical daily goal for all five metrics',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'nutrition-strategy/references/daily-nutrition-card-goals.md',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'save one paused canonical proposal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'activate it only after member acceptance',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Only a later eligible response may use the accepted goals',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Explicit active targets win metric by metric',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'one consolidated question, never a goal-less card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'conflicts, ranges, unsafe numbers, or missing responsible calorie inputs',
+    )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
       'available only to the managed private-direct closeout',
     )

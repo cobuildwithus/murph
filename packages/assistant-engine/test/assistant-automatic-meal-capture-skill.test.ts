@@ -13,6 +13,10 @@ import {
 } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
+function compact(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim()
+}
+
 function buildPrompt(input: {
   currentLocalDate?: string
   scheduledOccurrenceAt?: string
@@ -110,68 +114,69 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('vault-cli meal closeout-work')
     expect(skill).toContain('oldest bounded batch')
     expect(skill).not.toContain('preceding 31 local days')
-    expect(skill).toContain('partial totals as partial')
+    expect(compact(skill)).toContain('partial totals as partial')
     expect(skill).toContain('each retained photo as pending closeout work')
     expect(skill).toContain('late import gets one dated catch-up')
     expect(skill).toContain('latest `recordedAt` is at or after')
     expect(skill).toContain('partial-cleanup failure loses no meal')
     expect(skill).toMatch(
-      /canonical\s+`vault-cli meal totals --from <date> --to <date>` read/,
+      /canonical\s+`vault-cli meal totals --from <date> --to\s+<date>` read/,
     )
-    expect(skill).toContain(
-      'Run it immediately before any response-card attachment',
+    expect(compact(skill)).toContain(
+      'immediately before any response-card attachment',
     )
-    expect(skill).toContain(
-      'vault-cli goal list\n   --status active --limit 200 --format json',
+    const compactSkill = compact(skill)
+    expect(compactSkill).toContain(
+      'nutrition-strategy/references/daily-nutrition-card-goals.md',
     )
-    expect(skill).toContain(
-      'vault-cli goal show\n   <goal-id> --format json',
+    expect(compactSkill).toContain(
+      'Resolve all five targets from active canonical Goals.',
     )
-    expect(skill).toContain(
-      'If the list\n   returns 200 records, its bounded result may be incomplete',
+    expect(compactSkill).toContain(
+      'If the workflow creates or changes its paused proposal, return only the required ordinary-text explanation and stop; do not attach a card.',
     )
-    expect(skill).toContain(
-      'exactly one qualifying\n   active record unambiguously names that daily nutrition metric',
+    expect(compactSkill).toContain(
+      'If the proposal already exists but remains paused, retain the ordinary compact closeout without repeating the automatic proposal every night.',
     )
-    expect(skill).toContain(
-      'multiple matches (even if their values agree)',
+    expect(compactSkill).toContain(
+      "Never infer a target from this day's meal total or one wearable day.",
     )
-    expect(skill).toContain("Never infer a target\n   from the day's total")
-    expect(skill).toContain(
-      'When the run covers exactly one local date',
+    expect(compactSkill).toContain(
+      'When the run covers exactly one local date, the canonical read includes a calorie total',
     )
-    expect(skill).toContain('the canonical read includes a\n   calorie total')
-    expect(skill).toContain('numerical output is permitted for the member')
+    expect(compactSkill).toContain(
+      'numerical output is permitted for the member',
+    )
     expect(skill).toContain('`murph.attach_response_card`')
     expect(skill).toContain(
       '`card: { kind: "daily_nutrition", version: 2, localDate: <the single',
     )
     expect(skill).toContain('mealCount: <top-level mealCount>')
-    expect(skill).toContain(
+    expect(compactSkill).toContain(
       'proteinGrams, carbsGrams, fatGrams, fiberGrams }, goals: { calories,',
     )
-    expect(skill).toContain(
-      "Copy every metric's\n   complete `{ total, mealCount }` pair unchanged",
+    expect(compactSkill).toContain(
+      "Copy every metric's complete `{ total, mealCount }` pair unchanged",
     )
     expect(skill).toContain('including `fiberGrams`')
-    expect(skill).toContain('There is no universal\n   percentage threshold')
-    expect(skill).toContain(
-      'A metric whose total is missing or whose\n   `mealCount` is below the top-level `mealCount` must use `unavailable`',
-    )
-    expect(skill).toContain(
-      'Use `null` when no trustworthy\n   target exists; never fabricate one',
+    expect(compactSkill).toContain('There is no universal percentage threshold')
+    expect(compactSkill).toContain(
+      'A metric whose total is missing or whose `mealCount` is below the top-level `mealCount` must use `unavailable`',
     )
     expect(skill).toContain('Do not author a second nutrition summary')
     expect(skill).toMatch(/For\s+multi-date catch-up, missing calories/u)
     expect(skill).toMatch(
-      /retain the current\s+compact text or suppression behavior/u,
+      /retain the current compact text,\s+one-question, or non-numeric behavior/u,
     )
     expect(skill.indexOf('vault-cli meal remove-photo <meal-id>')).toBeLessThan(
-      skill.indexOf('vault-cli meal totals --from <date> --to <date>'),
+      skill.indexOf('vault-cli meal totals --from <date> --to'),
+    )
+    const attachCardIndex = compactSkill.indexOf(
+      'call `murph.attach_response_card` with this exact mapping',
     )
     expect(
-      skill.indexOf('vault-cli meal totals --from <date> --to <date>'),
-    ).toBeLessThan(skill.indexOf('murph.attach_response_card'))
+      compactSkill.indexOf('vault-cli meal totals --from <date> --to'),
+    ).toBeLessThan(attachCardIndex)
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')
@@ -187,7 +192,7 @@ describe('assistant automatic meal capture skill', () => {
     )
   })
 
-  it('maps canonical totals and trusted goal context into the closed V2 card', () => {
+  it('maps all five canonical target metrics into the closed V2 card', () => {
     const canonicalTotals = {
       mealCount: 4,
       totals: {
@@ -197,6 +202,20 @@ describe('assistant automatic meal capture skill', () => {
         fatGrams: { total: 71, mealCount: 3 },
         fiberGrams: { total: 26, mealCount: 2 },
       },
+    }
+    const canonicalTargets = [
+      { metricKey: 'dietary-calories', unit: 'kcal', value: 2_400 },
+      { metricKey: 'protein-grams', unit: 'g', value: 150 },
+      { metricKey: 'carbs-grams', unit: 'g', value: 270 },
+      { metricKey: 'fat-grams', unit: 'g', value: 80 },
+      { metricKey: 'fiber-grams', unit: 'g', value: 35 },
+    ] as const
+    const resolveTarget = (metricKey: string, unit: string): number => {
+      const matches = canonicalTargets.filter(
+        (target) => target.metricKey === metricKey && target.unit === unit,
+      )
+      expect(matches).toHaveLength(1)
+      return matches[0]!.value
     }
     const expectedArgument = {
       card: {
@@ -212,11 +231,26 @@ describe('assistant automatic meal capture skill', () => {
           fiberGrams: canonicalTotals.totals.fiberGrams,
         },
         goals: {
-          calories: null,
-          proteinGrams: { target: 150, status: 'unavailable' },
-          carbsGrams: null,
-          fatGrams: null,
-          fiberGrams: { target: 30, status: 'unavailable' },
+          calories: {
+            target: resolveTarget('dietary-calories', 'kcal'),
+            status: 'on_target',
+          },
+          proteinGrams: {
+            target: resolveTarget('protein-grams', 'g'),
+            status: 'unavailable',
+          },
+          carbsGrams: {
+            target: resolveTarget('carbs-grams', 'g'),
+            status: 'unavailable',
+          },
+          fatGrams: {
+            target: resolveTarget('fat-grams', 'g'),
+            status: 'unavailable',
+          },
+          fiberGrams: {
+            target: resolveTarget('fiber-grams', 'g'),
+            status: 'unavailable',
+          },
         },
       },
     } as const
@@ -224,6 +258,7 @@ describe('assistant automatic meal capture skill', () => {
     expect(assistantResponseCardSchema.parse(expectedArgument.card)).toEqual(
       expectedArgument.card,
     )
+    expect(Object.values(expectedArgument.card.goals)).not.toContain(null)
     expect(expectedArgument.card.totals.fiberGrams).toBe(
       canonicalTotals.totals.fiberGrams,
     )
