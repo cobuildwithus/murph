@@ -141,5 +141,28 @@ Updated: 2026-08-09
   test-mode Stripe authority; its Family Max test price and repository variable
   must be configured before merging to `main` so the protected-main live
   billing lane can run.
-- Pending: exact pushed-head preliminary specialists, final ReviewGPT pass,
-  required GitHub Actions, parent final review, and plan closure.
+- Exact pushed-head review and CI status:
+- Preliminary specialists packaged the exact first head after one transient ZIP
+  race retry, then returned `INVALID` solely because required desktop/mobile
+  renders were absent. It reported no code finding or patch. Retry remains
+  blocked on an attached in-app browser target.
+- Final ReviewGPT round 1 returned one accepted High finding: the historical
+  two-tier Family postdeploy contract migration remained scheduled after the
+  new Prisma migration took ownership of the same constraints. The smallest
+  correction marks that exact historical ID superseded and extends the existing
+  omission proof; 52 focused migration/guard tests, Web typecheck, focused
+  ESLint, and `git diff --check` pass after the correction.
+- Round 1 also identified a deployment-note discrepancy. Neither old Web plus
+  new runner nor new Web plus an old warm runner is fully compatible with a Max
+  action, so the corrected plan requires a tandem runner/Web rollout after the
+  database constraint migration instead of claiming a one-way compatible
+  order. Current aggregate exposure remains two sponsored members and zero
+  pending transitions, so no compatibility state machine is justified.
+- Exact-head CI produced 12 green checks. The release-app/summary failures are
+  a base-commit design-title assertion mismatch, and the viewport failure is a
+  base-commit PR-specific screenshot spec that requires an unset output
+  directory; the Family Max diff touches neither owner. Frontend design proof
+  remains blocked by the missing required screenshot artifacts.
+- Pending: push the reviewed correction, run final ReviewGPT round 2 and the
+  new CI head, capture/retry the preliminary pass when a browser target exists,
+  configure the test Stripe sandbox price, then close the plan.

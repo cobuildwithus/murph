@@ -877,6 +877,7 @@ describe("hosted web production migration guard", () => {
     const migrations = await listHostedWebContractMigrations();
 
     for (const migrationId of [
+      "20260714150000_require_hosted_family_plan_codes",
       "20260720233000_hosted_group_usage_funding_invariants",
       "20260726123000_allow_hosted_usage_referral_credit_entries",
     ]) {
