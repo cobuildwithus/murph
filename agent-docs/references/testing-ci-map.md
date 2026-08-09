@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Current Repo Checks
 
@@ -547,8 +547,11 @@ supported provider credential.
   normalization, recovery reset and rearming, post-ack monitoring suppression
   inside concrete-pressure
   recurrence, stale pressure retry isolation from a later rearmed obligation,
-  global 30-minute wall-time provider-attempt pacing across incident recovery,
-  current actual-check-time and rotated evidence-bearing recurrence copy,
+  global one-hour wall-time provider-attempt pacing across incident recovery,
+  current actual-check-time and full reachability of the one-hundred-opening
+  deterministic observation-scoped recurrence bank, neutral-opening coverage
+  across condition families, and delayed post-recovery delivery through the
+  scheduled Worker and real SQLite Durable Object boundary,
   no stale fenced gauge page after recovery, exact body/idempotency reuse after
   an ambiguous Linq send, transactional rollback before direct
   counter-baseline advancement, one-sample direct errors admitted inside the
