@@ -43,6 +43,7 @@ async function run<T>(cli: Cli.Cli, args: string[]) {
 
 interface WorkoutResult {
   eventId: string
+  activityType: string
   distanceKm: number | null
   note: string
   workout: {
@@ -100,12 +101,14 @@ test('live workout commands keep one canonical session and target one set', asyn
   const started = requireData((await run<WorkoutResult>(cli, [
     'workout', 'start',
     '--routine', 'push-day',
+    '--type', 'Strength Training',
     '--started-at', '2026-08-09T18:00:00.000Z',
     '--vault', vaultRoot,
   ])).envelope)
+  assert.equal(started.activityType, 'strength-training')
   assert.equal(started.workout?.sourceApp, 'murph-live')
   assert.equal(started.workout?.sessionNote, 'Keep the tempo controlled.')
-  assert.equal(started.note, 'Planned 5 km cooldown after lifting.')
+  assert.equal(started.note, 'Push Day')
   assert.equal(started.distanceKm, null)
   assert.deepEqual(started.workout?.exercises[0]?.sets, [
     { order: 1, type: 'warmup' },

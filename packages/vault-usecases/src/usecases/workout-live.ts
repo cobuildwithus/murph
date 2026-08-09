@@ -23,6 +23,7 @@ import {
 import {
   compactSetPatch,
   findActiveLiveWorkouts,
+  normalizeLiveWorkoutActivityType,
   normalizeOptionalText,
   normalizeWorkoutTimestamp,
   optionalString,
@@ -59,6 +60,7 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
   )
   const name = normalizeOptionalText(input.name)
   const note = normalizeOptionalText(input.note)
+  const activityTypeOverride = normalizeOptionalText(input.activityType)
   const durationMinutes = elapsedDurationMinutes(
     startedAt,
     new Date().toISOString(),
@@ -80,12 +82,6 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
       startedAt,
       sessionNote: note,
     })
-    const eventNote =
-      note ??
-      optionalString(routine.entity.data.templateText) ??
-      optionalString(routine.entity.data.text) ??
-      workout.sessionNote ??
-      routineTitle
 
     return addStructuredWorkoutRecord({
       vault: input.vault,
@@ -93,11 +89,11 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
         occurredAt: startedAt,
         source: 'manual',
         title: name ?? routineTitle,
-        note: eventNote,
-        activityType:
-          normalizeOptionalText(input.activityType) ??
-          optionalString(routine.entity.data.activityType) ??
-          'strength-training',
+        note: note ?? routineTitle,
+        activityType: activityTypeOverride
+          ? normalizeLiveWorkoutActivityType(activityTypeOverride)
+          : optionalString(routine.entity.data.activityType) ??
+            'strength-training',
         durationMinutes,
         workout,
       },
@@ -118,8 +114,9 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
       source: 'manual',
       title,
       note: note ?? title,
-      activityType:
-        normalizeOptionalText(input.activityType) ?? 'strength-training',
+      activityType: activityTypeOverride
+        ? normalizeLiveWorkoutActivityType(activityTypeOverride)
+        : 'strength-training',
       durationMinutes,
       workout,
     },

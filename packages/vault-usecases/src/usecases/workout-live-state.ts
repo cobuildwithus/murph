@@ -239,6 +239,22 @@ export function normalizeWorkoutTimestamp(value: string, label: string): string 
   return normalized
 }
 
+export function normalizeLiveWorkoutActivityType(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+
+  if (!normalized) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Workout type must include at least one letter or number.',
+    )
+  }
+  return normalized
+}
+
 export function normalizeExerciseName(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/gu, ' ')
 }
