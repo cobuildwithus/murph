@@ -31,6 +31,8 @@ test("TechnicalCapabilitiesSection renders the agent runtime and every enabled i
     markup,
     /You choose the model, the reasoning effort, and who supplies the inference\./,
   );
+  assert.match(markup, />The inference path is yours\.<\/h3>/);
+  assert.doesNotMatch(markup, /The agent stays\./);
   assert.doesNotMatch(markup, /changes model and reasoning effort/);
   assert.match(markup, /Codex CLI \+ App Server/);
   assert.match(markup, /be the most capable health agent in the world/);
