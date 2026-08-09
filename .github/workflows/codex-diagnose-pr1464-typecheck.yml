@@ -45,13 +45,16 @@ jobs:
 
           pnpm --dir apps/web health-commons:generate
           pnpm --dir apps/web prisma:generate
+          set +e
           pnpm --dir apps/web typecheck:prepared > /tmp/pr1464-typecheck.log 2>&1
           status=$?
+          set -e
           echo "$status" > /tmp/pr1464-typecheck-status.txt
-          grep -n -C 5 "error TS" /tmp/pr1464-typecheck.log > /tmp/pr1464-typecheck-errors.txt || true
+          grep -n -C 8 "error TS" /tmp/pr1464-typecheck.log > /tmp/pr1464-typecheck-errors.txt || true
           exit 0
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: pr1464-typecheck-diagnostics
           path: |
