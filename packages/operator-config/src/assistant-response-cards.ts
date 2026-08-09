@@ -3,6 +3,9 @@ import { Buffer } from 'node:buffer'
 import {
   IMESSAGE_APP_CARD_URL_MAX_LENGTH,
   IMESSAGE_APP_CARD_URL_PREFIX,
+  IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
+  IMESSAGE_NUTRITION_CARD_IMAGE_PATH_PREFIX,
+  IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX,
   MURPH_PRODUCT_ORIGIN,
   assistantResponseCardSchema,
   compactTableResponseCardV1Schema,
@@ -12,8 +15,6 @@ import {
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
-  type NutritionCardGoalSnapshot,
-  type NutritionCardGoalStatus,
   type NutritionCardMetric,
 } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -36,15 +37,6 @@ const NUTRITION_CARD_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
   useGrouping: true,
 })
-const NUTRITION_CARD_GOAL_STATUS_LABELS = {
-  far_over_target: 'FAR OVER TARGET',
-  far_under_target: 'FAR UNDER TARGET',
-  on_target: 'ON TARGET',
-  over_target: 'OVER TARGET',
-  unavailable: 'STATUS UNAVAILABLE',
-  under_target: 'UNDER TARGET',
-} as const satisfies Record<NutritionCardGoalStatus, string>
-
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
 export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
@@ -66,6 +58,7 @@ export type AppCardEnvelopeV3 = {
 
 export type LinqIMessageAppLayout = {
   caption: string
+  image_url?: string
   subcaption: string
   trailing_caption?: string
   trailing_subcaption?: string
@@ -145,38 +138,38 @@ export function buildLinqIMessageAppLayout(
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const calorieTotal = readRequiredCalorieTotal(parsed)
   const partial = renderPartialNutritionLabel(parsed) !== null
-  const primaryGoal = isDailyNutritionResponseCardV2(parsed)
-    ? renderPrimaryNutritionGoal(parsed)
-    : null
-  const trailingCaption = [
-    renderNutritionMetric(parsed.totals.proteinGrams, 'g protein'),
-    renderNutritionMetric(parsed.totals.carbsGrams, 'g carbs'),
-  ].filter((value): value is string => value !== null)
-  const trailingSubcaption = [
-    renderNutritionMetric(parsed.totals.fatGrams, 'g fat'),
-    ...(isDailyNutritionResponseCardV2(parsed)
-      ? [renderNutritionMetric(parsed.totals.fiberGrams, 'g fiber')]
-      : []),
-  ].filter((value): value is string => value !== null)
 
   return {
-    caption: [
+    caption: 'Murph',
+    image_url: buildLinqIMessageAppCardImageUrl(parsed),
+    subcaption: [
       `${formatNutritionCardDate(parsed.localDate)} · ${
         parsed.mealCount
       } ${mealLabel}`,
       ...(partial ? ['PARTIAL TOTALS'] : []),
     ].join(' · '),
-    subcaption: [
-      `${formatNutritionCardNumber(calorieTotal)} cal`,
-      ...(primaryGoal === null ? [] : [primaryGoal]),
-    ].join(' · '),
-    ...(trailingCaption.length === 0
-      ? {}
-      : { trailing_caption: trailingCaption.join(' · ') }),
-    ...(trailingSubcaption.length === 0
-      ? {}
-      : { trailing_subcaption: trailingSubcaption.join(' · ') }),
+    trailing_caption: `${formatNutritionCardNumber(calorieTotal)} cal`,
   }
+}
+
+export function buildLinqIMessageAppCardImageUrl(
+  card: DailyNutritionResponseCard,
+): string {
+  const parsed = assistantResponseCardSchema.parse(card)
+  if (parsed.kind !== 'daily_nutrition') {
+    throw new TypeError('Expected a daily nutrition response card.')
+  }
+  const encoded = encodeDailyNutritionAppCardPayload(parsed)
+  if (encoded.length > IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
+    throw new TypeError('The encoded app card image payload is too large.')
+  }
+  const url = `${MURPH_PRODUCT_ORIGIN}${
+    IMESSAGE_NUTRITION_CARD_IMAGE_PATH_PREFIX
+  }${encoded}${IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX}`
+  if (url.length >= IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
+    throw new TypeError('The encoded app card image exceeds the inline size limit.')
+  }
+  return url
 }
 
 export function buildLinqIMessageAppCardUrl(
@@ -195,11 +188,17 @@ export function encodeDailyNutritionAppCardUrl(
   if (parsed.kind !== 'daily_nutrition') {
     throw new TypeError('Expected a daily nutrition response card.')
   }
+  return encodeAppCardEnvelopeUrl(encodeDailyNutritionAppCardPayload(parsed))
+}
+
+function encodeDailyNutritionAppCardPayload(
+  card: DailyNutritionResponseCard,
+): string {
   const envelope: AppCardEnvelopeV1 | AppCardEnvelopeV2 =
-    isDailyNutritionResponseCardV2(parsed)
-      ? { schemaVersion: 2, card: parsed }
-      : { schemaVersion: 1, card: parsed }
-  return encodeAppCardEnvelope(envelope)
+    isDailyNutritionResponseCardV2(card)
+      ? { schemaVersion: 2, card }
+      : { schemaVersion: 1, card }
+  return encodeAppCardEnvelopePayload(envelope)
 }
 
 export function encodeCompactTableAppCardUrl(
@@ -214,14 +213,17 @@ export function encodeCompactTableAppCardUrl(
     schemaVersion: 3,
     card: presentationCard,
   }
-  return encodeAppCardEnvelope(envelope)
+  return encodeAppCardEnvelopeUrl(encodeAppCardEnvelopePayload(envelope))
 }
 
-function encodeAppCardEnvelope(
+function encodeAppCardEnvelopePayload(
   envelope: AppCardEnvelopeV1 | AppCardEnvelopeV2 | AppCardEnvelopeV3,
 ): string {
-  const encoded = Buffer.from(JSON.stringify(envelope), 'utf8')
+  return Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')
+}
+
+function encodeAppCardEnvelopeUrl(encoded: string): string {
   const url = `${IMESSAGE_APP_CARD_URL_PREFIX}${encoded}`
   if (url.length >= IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
     throw new TypeError('The encoded app card exceeds the inline size limit.')
@@ -292,32 +294,6 @@ function renderNutritionMetric(
   return metric.total === null
     ? null
     : `${formatNutritionCardNumber(metric.total)}${unit}`
-}
-
-function renderPrimaryNutritionGoal(
-  card: DailyNutritionResponseCardV2,
-): string | null {
-  const candidates: ReadonlyArray<readonly [
-    NutritionCardGoalSnapshot | null,
-    string,
-  ]> = [
-    [card.goals.calories, ' cal goal'],
-    [card.goals.proteinGrams, 'g protein goal'],
-    [card.goals.carbsGrams, 'g carbs goal'],
-    [card.goals.fatGrams, 'g fat goal'],
-    [card.goals.fiberGrams, 'g fiber goal'],
-  ]
-  const selected = candidates.find(([goal]) => goal !== null)
-  if (selected === undefined) {
-    return null
-  }
-  const [goal, unit] = selected
-  if (goal === null) {
-    return null
-  }
-  return `${formatNutritionCardNumber(goal.target)}${unit} · ${
-    NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]
-  }`
 }
 
 function readRequiredCalorieTotal(card: DailyNutritionResponseCard): number {

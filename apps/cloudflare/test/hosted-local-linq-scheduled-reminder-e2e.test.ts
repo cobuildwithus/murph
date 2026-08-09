@@ -438,10 +438,12 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         fallback_text: "Ask Murph for this card in text",
         interactive: true,
         layout: {
-          caption: "Jul 28 · 3 meals",
-          subcaption: "1,490.25 cal",
-          trailing_caption: "94.5g protein · 193.125g carbs",
-          trailing_subcaption: "34.75g fat",
+          caption: "Murph",
+          image_url: expect.stringMatching(
+            /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+          ),
+          subcaption: "Jul 28 · 3 meals",
+          trailing_caption: "1,490.25 cal",
         },
         type: "imessage_app",
         url: expect.stringMatching(/^https:\/\/www\.withmurph\.ai\/#murph-card=/u),

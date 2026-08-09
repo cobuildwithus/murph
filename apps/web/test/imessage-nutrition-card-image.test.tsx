@@ -1,0 +1,165 @@
+import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
+
+import type { DailyNutritionResponseCardV2 } from "@murphai/contracts";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, expect, test, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  imageResponse: vi.fn(),
+  readFile: vi.fn(async (path: string | URL) => {
+    const value = String(path);
+    if (value.includes("Fraunces-600.ttf")) return Buffer.from([1, 2, 3]);
+    if (value.includes("DMSans-400.ttf")) return Buffer.from([4, 5, 6]);
+    if (value.endsWith("public/logo.svg")) return Buffer.from("<svg />");
+    throw new Error("Unexpected nutrition card asset read.");
+  }),
+}));
+
+type MockImageResponseInit = {
+  fonts?: Array<{ data: ArrayBuffer; name: string; weight: number }>;
+  headers?: HeadersInit;
+  height?: number;
+  width?: number;
+};
+
+vi.mock("node:fs/promises", () => ({
+  readFile: mocks.readFile,
+}));
+
+vi.mock("next/og", () => ({
+  ImageResponse: class ImageResponse extends Response {
+    constructor(input: unknown, init: MockImageResponseInit) {
+      mocks.imageResponse(input, init);
+      super("mock image", {
+        headers: {
+          "Content-Type": "image/png",
+          ...headersInitToRecord(init.headers),
+        },
+        status: 200,
+      });
+    }
+  },
+}));
+
+const CARD: DailyNutritionResponseCardV2 = {
+  kind: "daily_nutrition",
+  version: 2,
+  localDate: "2026-06-18",
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_840, mealCount: 3 },
+    proteinGrams: { total: 112, mealCount: 3 },
+    carbsGrams: { total: 206, mealCount: 3 },
+    fatGrams: { total: 61, mealCount: 3 },
+    fiberGrams: { total: 24, mealCount: 2 },
+  },
+  goals: {
+    calories: { target: 2_200, status: "under_target" },
+    proteinGrams: { target: 120, status: "under_target" },
+    carbsGrams: null,
+    fatGrams: null,
+    fiberGrams: { target: 30, status: "unavailable" },
+  },
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+test("nutrition card image route renders the bounded V2 snapshot without caching", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({ schemaVersion: 2, card: CARD });
+  const request = new Request(
+    `https://www.withmurph.ai/imessage/card/v1/${payload}`,
+  );
+
+  const response = await GET(request, {
+    params: Promise.resolve({ payload }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Type"), "image/png");
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow, noarchive");
+  expect(mocks.readFile).toHaveBeenCalledTimes(3);
+  expect(mocks.imageResponse).toHaveBeenCalledTimes(1);
+
+  const [imageTree, init] = getImageResponseCall();
+  assert.equal(init.width, 1_200);
+  assert.equal(init.height, 630);
+  assert.deepEqual(
+    init.fonts?.map((font) => [font.name, font.weight]),
+    [["Fraunces", 600], ["DM Sans", 400]],
+  );
+  assert.match(JSON.stringify(imageTree), /2026-06-18/u);
+  assert.match(JSON.stringify(imageTree), /1840/u);
+});
+
+test("nutrition card image component renders totals, partial support, and goals", async () => {
+  const { NutritionCardImage } = await import(
+    "@/src/components/imessage/nutrition-card-image"
+  );
+  const serialized = renderToStaticMarkup(
+    <NutritionCardImage
+      card={CARD}
+      logoDataUri="data:image/svg+xml;base64,PHN2Zy8+"
+    />,
+  );
+
+  assert.match(serialized, /Jun 18, 2026/u);
+  assert.match(serialized, /1,840/u);
+  assert.match(serialized, /112/u);
+  assert.match(serialized, /206/u);
+  assert.match(serialized, /61/u);
+  assert.match(serialized, /24/u);
+  assert.match(serialized, /PARTIAL TOTALS/u);
+  assert.match(serialized, /2 of 3 meals/u);
+  assert.match(serialized, /2,200/u);
+  assert.match(serialized, /Under target/u);
+  assert.match(serialized, /Status unavailable/u);
+});
+
+test("nutrition card image route rejects malformed, non-nutrition, and query-bearing URLs before asset reads", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const invalidPayloads = [
+    "not-base64.png",
+    encodePayload({ schemaVersion: 3, card: { kind: "compact_table" } }),
+    encodePayload({ schemaVersion: 2, card: CARD, extra: true }),
+    `${"a".repeat(1_901)}.png`,
+  ];
+
+  for (const payload of invalidPayloads) {
+    const response = await GET(
+      new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+      { params: Promise.resolve({ payload }) },
+    );
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  }
+
+  const validPayload = encodePayload({ schemaVersion: 2, card: CARD });
+  const queryResponse = await GET(
+    new Request(
+      `https://www.withmurph.ai/imessage/card/v1/${validPayload}?source=test`,
+    ),
+    { params: Promise.resolve({ payload: validPayload }) },
+  );
+  assert.equal(queryResponse.status, 404);
+  expect(mocks.imageResponse).not.toHaveBeenCalled();
+  expect(mocks.readFile).not.toHaveBeenCalled();
+});
+
+function encodePayload(value: unknown): string {
+  return `${Buffer.from(JSON.stringify(value), "utf8").toString("base64url")}.png`;
+}
+
+function getImageResponseCall(): [unknown, MockImageResponseInit] {
+  const call = mocks.imageResponse.mock.calls[0];
+  assert.ok(call, "Expected ImageResponse to be constructed.");
+  return call as [unknown, MockImageResponseInit];
+}
+
+function headersInitToRecord(headers: HeadersInit | undefined): Record<string, string> {
+  return Object.fromEntries(new Headers(headers).entries());
+}

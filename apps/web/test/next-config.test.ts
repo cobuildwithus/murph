@@ -439,6 +439,19 @@ test("next.config traces generated Health Commons route files without the monoli
   );
 });
 
+test("next.config traces bundled image assets for the iMessage nutrition route", () => {
+  const sharedImageAssets =
+    productionNextConfig.outputFileTracingIncludes?.["/opengraph-image"];
+
+  assert.ok(sharedImageAssets);
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.[
+      "/imessage/card/v1/[payload]"
+    ],
+    sharedImageAssets,
+  );
+});
+
 test("next.config disables the Turbopack dev filesystem cache by default and honors explicit opt-in", () => {
   const previousValue = process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
 
