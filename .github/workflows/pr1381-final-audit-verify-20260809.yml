@@ -31,8 +31,6 @@ jobs:
           git apply /tmp/pr1381-audit-fixes.patch
           git diff --check
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
