@@ -11,6 +11,9 @@ import {
   isHostedSignupReferralPolicyVersion,
 } from "../hosted-growth/signup-referral-policy";
 import {
+  formatHostedReferralRewardUsageDays,
+} from "../hosted-growth/referral-reward-days";
+import {
   buildHostedUsageReferralOutstandingWhere,
   getHostedUsageReferralPolicyDisplay,
 } from "../hosted-growth/usage-referral";
@@ -185,7 +188,12 @@ function projectHostedUsageMissionActivity(input: {
       : "the group",
     id: input.row.id,
     requirementsLabel: policy.requirementsLabel,
-    rewardLabel: formatUsdMicros(input.row.rewardUsdMicros),
+    rewardLabel: formatHostedReferralRewardUsageDays({
+      policyCode: input.row.policyCode,
+      policyVersion: input.row.policyVersion,
+      rewardUsdMicros: input.row.rewardUsdMicros,
+      sentenceCase: true,
+    }),
     selectedLabel: formatDate(input.row.armedAt),
     status,
     statusLabel: projectHostedUsageMissionStatusLabel(status),

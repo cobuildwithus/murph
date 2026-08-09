@@ -141,7 +141,7 @@ describe('assistant execution prompt contract', () => {
       'Group reply cadence applies before the first text reply in an ordinary interactive Linq/iMessage or Telegram group turn.',
     )
     expect(groupPrompt).toContain(
-      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 4`.',
+      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 8`.',
     )
     expect(groupPrompt).toContain(
       'If new human input arrives during that pause, re-evaluate safety, time sensitivity, and floor ownership as soon as the sleep finishes',
@@ -156,12 +156,12 @@ describe('assistant execution prompt contract', () => {
       'take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
     )
     expect(groupPrompt).toContain(
-      'Never sleep more than 10 seconds total.',
+      'Never sleep more than 14 seconds total.',
     )
     expect(groupPrompt).toContain(
       'Do not answer each accepted message separately, recap the burst point by point, or mention waiting, sleeping, or commands.',
     )
-    expect(directPrompt).not.toContain('run shell `sleep 4`')
+    expect(directPrompt).not.toContain('run shell `sleep 8`')
     expect(directPrompt).not.toContain('Group texting rhythm:')
     expect(groupPrompt).toContain(
       'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and the bounded shell `sleep` required by group reply cadence',

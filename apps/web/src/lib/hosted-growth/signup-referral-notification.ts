@@ -73,6 +73,8 @@ export async function appendHostedSignupReferralRewardNotice(input: {
         notificationKey,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind: "personal",
+          policyCode: "new_person_activation_v1",
+          policyVersion: referral.policyVersion,
           rewardUsdMicros: referral.rewardUsdMicros,
         }),
         rewardedAt,
