@@ -38,7 +38,11 @@ type ProviderControl =
   | { kind: "pre_accept_unrelated_conflict"; responses: number }
   | { kind: "post_accept_stalled_body"; responses: number }
   | { kind: "conflict_stalled_body"; responses: number }
-  | { kind: "attachment_create_stalled_body"; responses: number };
+  | { kind: "attachment_create_stalled_body"; responses: number }
+  | { kind: "attachment_create_failure_stalled_body"; responses: number }
+  | { kind: "upload_stalled_body"; responses: number }
+  | { kind: "post_accept_retryable_stalled_body"; responses: number }
+  | { kind: "definitive_stalled_body"; responses: number };
 
 interface AcceptedMessage {
   body: string;
@@ -51,8 +55,12 @@ interface ProviderDouble {
   arm(control: ProviderControl): void;
   baseUrl: string;
   close(): Promise<void>;
-  /** Sockets the provider still has open, counted server-side. */
-  openConnectionCount(): number;
+  /**
+   * Sockets carrying a response this double deliberately never finished. A
+   * completed response's socket stays open under keep-alive and that is not a
+   * leak; a stalled one can only end because the client ended it.
+   */
+  liveStalledResponseCount(): number;
   observedSendBodies: string[];
 }
 
@@ -74,8 +82,11 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
     return control;
   };
 
-  const openConnections = new Set<import("node:net").Socket>();
+  const stalledSockets = new Set<import("node:net").Socket>();
   const server = createServer(async (request, response) => {
+    const stall = () => {
+      stalledSockets.add(request.socket);
+    };
     const chunks: Buffer[] = [];
     for await (const chunk of request) {
       chunks.push(chunk as Buffer);
@@ -89,6 +100,14 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
         consumeArmed();
         response.writeHead(200, { "content-type": "application/json" });
         response.write("{");
+        stall();
+        return;
+      }
+      if (armed?.kind === "attachment_create_failure_stalled_body") {
+        consumeArmed();
+        response.writeHead(500, { "content-type": "application/json" });
+        response.write("{");
+        stall();
         return;
       }
       response.writeHead(200, { "content-type": "application/json" });
@@ -101,6 +120,13 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
     }
 
     if (request.method === "PUT" && url.startsWith("/uploads/")) {
+      if (armed?.kind === "upload_stalled_body") {
+        consumeArmed();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.write("{");
+        stall();
+        return;
+      }
       response.writeHead(200);
       response.end();
       return;
@@ -114,10 +140,17 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
         response.end(JSON.stringify({ error: "Synthetic definitive Linq send failure." }));
         return;
       }
+      if (control?.kind === "definitive_stalled_body") {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.write("{");
+        stall();
+        return;
+      }
       if (control?.kind === "conflict_stalled_body") {
         // Headers say 409, then the body never arrives.
         response.writeHead(409, { "content-type": "application/json" });
         response.write("{");
+        stall();
         return;
       }
       if (control?.kind === "pre_accept_unrelated_conflict") {
@@ -154,10 +187,20 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
         request.socket.destroy();
         return;
       }
+      if (control?.kind === "post_accept_retryable_stalled_body") {
+        // Accepted, then retryable headers whose body never finishes. Nothing
+        // in this branch ever reads that body, so only an explicit end closes
+        // it before reconciliation opens the next connection.
+        response.writeHead(503, { "content-type": "application/json" });
+        response.write("{");
+        stall();
+        return;
+      }
       if (control?.kind === "post_accept_stalled_body") {
         // Accepted, headers returned inside the budget, body never finishes.
         response.writeHead(200, { "content-type": "application/json" });
         response.write("{");
+        stall();
         return;
       }
       if (control?.kind === "post_accept_timeout") {
@@ -177,12 +220,6 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
     response.end();
   });
 
-  server.on("connection", (socket) => {
-    openConnections.add(socket);
-    socket.on("close", () => {
-      openConnections.delete(socket);
-    });
-  });
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
@@ -198,7 +235,8 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
       armed = control;
     },
     baseUrl,
-    openConnectionCount: () => openConnections.size,
+    liveStalledResponseCount: () =>
+      [...stalledSockets].filter((socket) => !socket.destroyed).length,
     async close() {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => {
@@ -393,12 +431,18 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(provider.observedSendBodies).toHaveLength(2);
   });
 
-  const expectProviderConnectionsClosed = async () => {
-    // Production code has to end these, not the teardown below: a bound that
-    // returns while its reader and socket stay alive is not a bound at all.
+  // The operation must have released every stalled response before it settles;
+  // the production code joins its cancellation rather than firing it off. What
+  // this can observe is the far side of that: the provider sees its socket end
+  // promptly, with no further client action. Closure travels over the socket,
+  // so it cannot land in the same tick the caller settles — but it does land,
+  // which is exactly what an unowned body never does. The previous
+  // implementation leaves these open indefinitely and fails here.
+  const PROVIDER_CLOSE_GRACE_MS = 1_000;
+  const expectNoLiveProviderConnections = async () => {
     await vi.waitFor(() => {
-      expect(provider.openConnectionCount()).toBe(0);
-    }, { interval: 25, timeout: 5_000 });
+      expect(provider.liveStalledResponseCount()).toBe(0);
+    }, { interval: 10, timeout: PROVIDER_CLOSE_GRACE_MS });
   };
 
   it("ends the provider connection when a stalled body hits its deadline", async () => {
@@ -421,7 +465,90 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
 
     expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(true);
     expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
-    await expectProviderConnectionsClosed();
+    await expectNoLiveProviderConnections();
+  });
+
+  it.each([
+    {
+      arm: { kind: "attachment_create_failure_stalled_body", responses: 1 } as const,
+      label: "an attachment-create failure whose body stalls",
+    },
+    {
+      arm: { kind: "upload_stalled_body", responses: 1 } as const,
+      label: "an upload response whose body stalls",
+    },
+    {
+      arm: { kind: "definitive_stalled_body", responses: 1 } as const,
+      label: "a definitive send rejection whose body stalls",
+    },
+    {
+      arm: { kind: "post_accept_retryable_stalled_body", responses: 2 } as const,
+      label: "retryable send responses whose bodies stall",
+    },
+  ])("leaves no live provider connection after $label", async ({ arm }) => {
+    // These branches only ever need the status, so nothing reads their bodies
+    // and fetchLinqApi's own timer is already cleared. Without an explicit end
+    // each one holds its connection open behind a settled operation.
+    provider.arm(arm);
+    const startedAt = Date.now();
+
+    await sendHostedLinqAttachmentMessage({
+      bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+      chatId: "chat_direct_1",
+      contentType: "text/vcard",
+      fileName: "murph.vcf",
+      idempotencyKey: REQUEST_KEY,
+      prepareDeadlineAt: startedAt + 4_000,
+      sendDeadlineAt: startedAt + 12_000,
+    }).catch(() => undefined);
+
+    await expectNoLiveProviderConnections();
+  });
+
+  it("refuses the send when the pre-send deadline already passed", async () => {
+    // The abort callback is a scheduling mechanism; a busy event loop can run
+    // it late. The comparison has to be synchronous or the POST goes out.
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        prepareDeadlineAt: Date.now() - 1,
+        sendDeadlineAt: Date.now() + 12_000,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isHostedLinqAttachmentSendPrepareFailure(error)).toBe(true);
+    expect(provider.observedSendBodies).toEqual([]);
+    expect(provider.acceptedMessageIds).toEqual([]);
+    await expectNoLiveProviderConnections();
+  });
+
+  it("never dispatches a send whose deadline has already elapsed", async () => {
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        sendDeadlineAt: Date.now() - 1,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    // A zero-millisecond abort still lets fetch dispatch first, so the budget
+    // has to be checked before the request rather than around it.
+    expect(provider.observedSendBodies).toEqual([]);
+    expect(provider.acceptedMessageIds).toEqual([]);
   });
 
   it("bounds a stalled attachment-create body and never reaches the send", async () => {
@@ -450,7 +577,7 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(Date.now() - startedAt).toBeLessThan(5_000);
     expect(provider.observedSendBodies).toEqual([]);
     expect(provider.acceptedMessageIds).toEqual([]);
-    await expectProviderConnectionsClosed();
+    await expectNoLiveProviderConnections();
   });
 
   it("keeps both send attempts inside one caller deadline", async () => {
