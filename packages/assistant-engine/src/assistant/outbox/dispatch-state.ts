@@ -4,6 +4,7 @@ import {
   type AssistantChannelDelivery,
   type AssistantDeliveryError,
   type AssistantOutboxIntent,
+  type AssistantProviderMessageEffect,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { retireMaterializedExportPack } from '@murphai/vault-usecases/export-packs'
@@ -940,6 +941,10 @@ export function sameAssistantChannelDelivery(
       left.providerMessageIds,
       right.providerMessageIds,
     ) &&
+    sameAssistantDeliveryProviderMessageEffects(
+      left.providerMessageEffects,
+      right.providerMessageEffects,
+    ) &&
     sameAssistantDeliveryCleanupMessages(
       readAssistantDeliveryCleanupMessages(left),
       readAssistantDeliveryCleanupMessages(right),
@@ -950,6 +955,21 @@ export function sameAssistantChannelDelivery(
     ) &&
     left.providerThreadId === right.providerThreadId
   )
+}
+
+function sameAssistantDeliveryProviderMessageEffects(
+  left: readonly AssistantProviderMessageEffect[] | undefined,
+  right: readonly AssistantProviderMessageEffect[] | undefined,
+): boolean {
+  const normalizedLeft = left ?? []
+  const normalizedRight = right ?? []
+  return normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((effect, index) => {
+      const other = normalizedRight[index]
+      return other !== undefined &&
+        effect.providerMessageId === other.providerMessageId &&
+        effect.message === other.message
+    })
 }
 
 function sameAssistantDeliveryProviderMessageIds(

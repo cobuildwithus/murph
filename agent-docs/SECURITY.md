@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Non-Negotiable Rules
 
@@ -17,7 +17,19 @@ Last verified: 2026-08-07
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. Cleanup failure must never restore authority. Keep Settings,
+  before granting. An instant-start shell-prewarm hint uses that same per-user
+  barrier and live admission read. Its HTTP route obtains the named runner stub
+  without binding durable state. The optional read abandons after a fixed 250 ms
+  deadline so it cannot hold authoritative processing, withdrawal, or deletion
+  behind the ordinary Web-control timeout; only allowed admission reserves and
+  binds its exact versioned container in the existing user-control stop-target
+  field, then waits for the container to register the hint before releasing the
+  barrier. Withdrawal and account deletion consume that exact target, while
+  container destruction supersedes a pending platform wait before stopping it.
+  Web admission also requires an
+  extant, non-suspended member, so a hint queued behind account deletion cannot
+  treat the deleted consent row as a compatible legacy grant and recreate
+  runner state. Cleanup failure must never restore authority. Keep Settings,
   export, and deletion available without waking the paused runtime; only
   renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.

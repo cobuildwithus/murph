@@ -3183,6 +3183,12 @@ describe('assistant outbox runtime', () => {
         idempotencyKey: null,
         messageLength: 0,
         providerMessageId: 'linq-voice-message',
+        providerMessageEffects: [
+          {
+            message: null,
+            providerMessageId: 'linq-voice-message',
+          },
+        ],
         providerThreadId: 'thread-linq-voice',
         sentAt: '2026-04-08T03:30:00.000Z',
         target: 'thread-linq-voice',
@@ -3216,6 +3222,12 @@ describe('assistant outbox runtime', () => {
       idempotencyKey: `assistant-outbox:${seeded.intentId}`,
       messageLength: 0,
       providerMessageId: 'linq-voice-message',
+      providerMessageEffects: [
+        {
+          message: null,
+          providerMessageId: 'linq-voice-message',
+        },
+      ],
       target: 'thread-linq-voice',
     })
     expect(dispatched.intent.media).toEqual(media)

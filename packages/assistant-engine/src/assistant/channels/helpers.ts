@@ -5,8 +5,10 @@ import {
 import {
   assistantBindingDeliverySchema,
   assistantChannelDeliverySchema,
+  assistantProviderMessageEffectSchema,
   type AssistantBindingDelivery,
   type AssistantBindingDeliveryKind,
+  type AssistantProviderMessageEffect,
   type AssistantResponseMedia,
   type AssistantResponseMediaKind,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -118,6 +120,7 @@ export function createAssistantChannelAdapter(
         threadIsDirect: typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
       })
       const cleanupMessages = readDeliveredCleanupMessages(delivered)
+      const providerMessageEffects = readDeliveredProviderMessageEffects(delivered)
       const providerMessageIds = readDeliveredProviderMessageIds(delivered)
       const cleanupTargetAliases = readDeliveredCleanupTargetAliases(delivered)
 
@@ -132,6 +135,7 @@ export function createAssistantChannelAdapter(
         sentAt: new Date().toISOString(),
         messageLength: input.message.length,
         providerMessageId: readDeliveredProviderMessageId(delivered),
+        ...(providerMessageEffects ? { providerMessageEffects } : {}),
         ...(providerMessageIds ? { providerMessageIds } : {}),
         ...(cleanupMessages ? { cleanupMessages } : {}),
         ...(cleanupTargetAliases ? { cleanupTargetAliases } : {}),
@@ -424,6 +428,25 @@ export function readDeliveredProviderMessageIds(
     .filter((value): value is string => value !== null)
 
   return ids.length > 0 ? ids : null
+}
+
+export function readDeliveredProviderMessageEffects(
+  delivered: unknown,
+): AssistantProviderMessageEffect[] | null {
+  if (
+    !delivered ||
+    typeof delivered !== 'object' ||
+    !('providerMessageEffects' in delivered) ||
+    !Array.isArray(delivered.providerMessageEffects)
+  ) {
+    return null
+  }
+
+  const parsed = assistantProviderMessageEffectSchema
+    .array()
+    .min(1)
+    .safeParse(delivered.providerMessageEffects)
+  return parsed.success ? parsed.data : null
 }
 
 export function readDeliveredCleanupTargetAliases(

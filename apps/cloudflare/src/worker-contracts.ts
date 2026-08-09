@@ -127,6 +127,7 @@ export interface WorkerRunnerContainerNamespaceLike<
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
+  prewarmRuntimeShellForUser?(userId: string): Promise<void>;
   reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;
   publishHostedPrivateMedia?(
     input: HostedPrivateMediaPublishInput,

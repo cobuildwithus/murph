@@ -12,6 +12,7 @@ import {
 
 import type { ConversationRef } from '../src/assistant/conversation-ref.ts'
 import { ASSISTANT_CHANNEL_ADAPTERS } from '../src/assistant/channels/descriptors.ts'
+import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import {
   createAssistantBindingDelivery,
   createAssistantChannelAdapter,
@@ -24,7 +25,10 @@ import {
   resolveRequiredDeliveryCandidate,
 } from '../src/assistant/channels/helpers.ts'
 import { inferAssistantBindingDelivery } from '../src/assistant/channels/registry.ts'
-import type { AssistantChannelActivityHandle } from '../src/assistant/channels/types.ts'
+import type {
+  AssistantChannelActivityHandle,
+  AssistantChannelDependencies,
+} from '../src/assistant/channels/types.ts'
 
 const FIXED_NOW = new Date('2026-04-08T12:34:56.000Z')
 type ImageMedia = Extract<AssistantResponseMedia, { kind: 'image' }>
@@ -1184,6 +1188,10 @@ describe('channel helper seams', () => {
   it('sends Linq voice memo media through the dedicated endpoint after optional text', async () => {
     const sendLinq = vi.fn().mockResolvedValue({
       providerMessageId: 'linq-text-message',
+      providerMessageEffects: [{
+        message: 'Listen to this',
+        providerMessageId: 'linq-text-message',
+      }],
       target: 'thread-linq-voice',
     })
     const sendLinqVoiceMemo = vi.fn().mockResolvedValue({
@@ -1255,6 +1263,16 @@ describe('channel helper seams', () => {
     })
     expect(delivery).toMatchObject({
       providerMessageId: 'linq-voice-message',
+      providerMessageEffects: [
+        {
+          message: 'Listen to this',
+          providerMessageId: 'linq-text-message',
+        },
+        {
+          message: null,
+          providerMessageId: 'linq-voice-message',
+        },
+      ],
       providerMessageIds: ['linq-text-message', 'linq-voice-message'],
       providerThreadId: 'thread-linq-voice',
       target: 'thread-linq-voice',
@@ -1500,12 +1518,20 @@ describe('channel helper seams', () => {
     const sendLinq = vi.fn()
       .mockResolvedValueOnce({
         providerMessageId: 'linq-text-message',
+        providerMessageEffects: [{
+          message: 'Text before memo',
+          providerMessageId: 'linq-text-message',
+        }],
         providerThreadId: 'thread-linq-voice',
         target: 'thread-linq-voice',
         targetKind: 'thread',
       })
       .mockResolvedValueOnce({
         providerMessageId: 'linq-fallback-message',
+        providerMessageEffects: [{
+          message: 'Have you had any recent blood tests?',
+          providerMessageId: 'linq-fallback-message',
+        }],
         providerThreadId: 'thread-linq-voice',
         target: 'thread-linq-voice',
         targetKind: 'thread',
@@ -1557,10 +1583,155 @@ describe('channel helper seams', () => {
     })
     expect(delivery).toMatchObject({
       providerMessageId: 'linq-fallback-message',
+      providerMessageEffects: [
+        {
+          message: 'Text before memo',
+          providerMessageId: 'linq-text-message',
+        },
+        {
+          message: 'Have you had any recent blood tests?',
+          providerMessageId: 'linq-fallback-message',
+        },
+      ],
       providerMessageIds: ['linq-text-message', 'linq-fallback-message'],
       providerThreadId: 'thread-linq-voice',
       target: 'thread-linq-voice',
       targetKind: 'thread',
+    })
+  })
+
+  it('records a media-only Linq voice fallback as the visible transcript text', async () => {
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-fallback-message',
+      providerMessageEffects: [{
+        message: 'Visible fallback transcript.',
+        providerMessageId: 'linq-fallback-message',
+      }],
+      providerThreadId: 'thread-linq-voice',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+    const sendLinqVoiceMemo = vi.fn().mockRejectedValue(
+      new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Linq voice memo delivery failed.',
+        { retryable: true },
+      ),
+    )
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+      {
+        actorId: null,
+        bindingDelivery: createAssistantBindingDelivery(
+          'thread',
+          'thread-linq-voice',
+        ),
+        explicitTarget: null,
+        idempotencyKey: 'idem-media-only-fallback',
+        identityId: null,
+        media: [
+          createVoiceMemoMedia({
+            transcript: 'Visible fallback transcript.',
+          }),
+        ],
+        message: '',
+        replyToMessageId: null,
+      },
+      {
+        sendLinq,
+        sendLinqVoiceMemo,
+      },
+    )
+
+    expect(delivery).toMatchObject({
+      messageLength: 0,
+      providerMessageEffects: [
+        {
+          message: 'Visible fallback transcript.',
+          providerMessageId: 'linq-fallback-message',
+        },
+      ],
+      providerMessageId: 'linq-fallback-message',
+      providerMessageIds: ['linq-fallback-message'],
+    })
+  })
+
+  it('preserves physical Linq effects when a media-only voice fallback is split into text and a rich link', async () => {
+    let requestCount = 0
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>(
+      async (request) => await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: vi.fn(async () => {
+          requestCount += 1
+          return new Response(JSON.stringify({
+            chat_id: 'thread-linq-voice',
+            message: {
+              id: requestCount === 1
+                ? 'linq-fallback-text'
+                : 'linq-fallback-link',
+            },
+          }), {
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }),
+      }),
+    )
+    const sendLinqVoiceMemo = vi.fn().mockRejectedValue(
+      new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Linq voice memo delivery failed.',
+        { retryable: true },
+      ),
+    )
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+      {
+        actorId: null,
+        bindingDelivery: createAssistantBindingDelivery(
+          'thread',
+          'thread-linq-voice',
+        ),
+        explicitTarget: null,
+        idempotencyKey: 'idem-media-only-split-fallback',
+        identityId: null,
+        media: [
+          createVoiceMemoMedia({
+            transcript: [
+              'Visible fallback transcript.',
+              'https://example.test/follow-up',
+            ].join('\n'),
+          }),
+        ],
+        message: '',
+        replyToMessageId: null,
+      },
+      {
+        sendLinq,
+        sendLinqVoiceMemo,
+      },
+    )
+
+    expect(requestCount).toBe(2)
+    expect(delivery).toMatchObject({
+      messageLength: 0,
+      providerMessageEffects: [
+        {
+          message: 'Visible fallback transcript.',
+          providerMessageId: 'linq-fallback-text',
+        },
+        {
+          message: null,
+          providerMessageId: 'linq-fallback-link',
+        },
+      ],
+      providerMessageId: 'linq-fallback-link',
+      providerMessageIds: [
+        'linq-fallback-text',
+        'linq-fallback-link',
+      ],
     })
   })
 

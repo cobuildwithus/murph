@@ -3600,10 +3600,17 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.sponsorshipMoments.get(
       onlyPurchase(fake.purchases).id as string,
     )).toMatchObject({
+      creativeRequestEncrypted: `sealed:${JSON.stringify({
+        request: {
+          format: "message",
+          prompt: "For whatever adventure comes next.",
+          styleRequest: null,
+        },
+        schema: "murph.group-sponsorship-creative.v1",
+      })}`,
       publicAliasEncrypted: "sealed:The Group Historian",
       runningBitRequestEncrypted: "sealed:Treat me like the exhausted CFO.",
-      sponsorMessageEncrypted:
-        "sealed:For whatever adventure comes next.",
+      sponsorMessageEncrypted: null,
     });
   });
 
