@@ -60,6 +60,9 @@ jobs:
             apps/web/test/hosted-group-current-sender-assistant-ask.test.ts \
             apps/web/test/hosted-group-tool.test.ts
 
+      - name: Build workspace dependencies
+        run: pnpm build:workspace:incremental
+
       - name: Typecheck
         run: pnpm typecheck
 
