@@ -25,11 +25,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          expected_main="f7359e41ad63bdd430b3d67d34e77161323091b0"
+          expected_main="7e11b9c7d35370e3ce4f7989021d2bd1ec409273"
           expected_old_head="0feeae892ec981a0515ae2474b51dfdff1dd646e"
-          expected_final_tree="afcde634f72a93b544a20c9f13851aaa78231d28"
+          expected_final_tree="71669e7e68997a066ace0e295bdde3fed89873a7"
           expected_harden_sha="c1295ffe14ce59c853d564c2065b3cc7862dbc9ce823e0929a3aa503e14d1e5f"
           expected_supplement_sha="8fe82c99d222c3cfc36fe814e002e31644d407f90e9e42b833158f049e3594e6"
+          expected_edges_sha="0066dcf8b0f83978b26610915f45c22ae70ec996475f88131f76a7a1ed634474"
           implementation_commit="3a27da086599bf186120cf7061b978930553b2dd"
           workflow_commit="0feeae892ec981a0515ae2474b51dfdff1dd646e"
           helper_ref="origin/codex/starter-usage-export-final"
@@ -40,31 +41,42 @@ jobs:
             agent/non-expiring-starter-usage \
             codex/starter-usage-export-final
 
-          test "$(git rev-parse origin/main)" = "$expected_main"
-          test "$(git rev-parse origin/agent/non-expiring-starter-usage)" = "$expected_old_head"
+          actual_main="$(git rev-parse origin/main)"
+          actual_old_head="$(git rev-parse origin/agent/non-expiring-starter-usage)"
+          echo "main=$actual_main"
+          echo "old_head=$actual_old_head"
+          test "$actual_main" = "$expected_main"
+          test "$actual_old_head" = "$expected_old_head"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --detach "$expected_main"
 
-          mkdir -p /tmp/pr1464-base /tmp/pr1464-supplement
-          while IFS= read -r path; do
-            git show "$helper_ref:$path"
-          done < <(
-            git ls-tree -r --name-only "$helper_ref" -- \
-              '.github/pr1464-publish/payload-*' | sort
-          ) | base64 --decode | xz --decompress > /tmp/pr1464-base.tar
+          extract_payload() {
+            local directory="$1"
+            local output_tar="$2"
+            local path
+            while IFS= read -r path; do
+              git show "$helper_ref:$path"
+            done < <(
+              git ls-tree -r --name-only "$helper_ref" -- "$directory" \
+                | grep '/payload-' \
+                | sort
+            ) | base64 --decode | xz --decompress > "$output_tar"
+          }
+
+          mkdir -p /tmp/pr1464-base /tmp/pr1464-supplement /tmp/pr1464-edges
+          extract_payload .github/pr1464-publish /tmp/pr1464-base.tar
           tar -C /tmp/pr1464-base -xf /tmp/pr1464-base.tar
           test "$(sha256sum /tmp/pr1464-base/harden.patch | cut -d' ' -f1)" = "$expected_harden_sha"
 
-          while IFS= read -r path; do
-            git show "$helper_ref:$path"
-          done < <(
-            git ls-tree -r --name-only "$helper_ref" -- \
-              '.github/pr1464-supplement/payload-*' | sort
-          ) | base64 --decode | xz --decompress > /tmp/pr1464-supplement.tar
+          extract_payload .github/pr1464-supplement /tmp/pr1464-supplement.tar
           tar -C /tmp/pr1464-supplement -xf /tmp/pr1464-supplement.tar
           test "$(sha256sum /tmp/pr1464-supplement/supplement.patch | cut -d' ' -f1)" = "$expected_supplement_sha"
+
+          extract_payload .github/pr1464-edges /tmp/pr1464-edges.tar
+          tar -C /tmp/pr1464-edges -xf /tmp/pr1464-edges.tar
+          test "$(sha256sum /tmp/pr1464-edges/edges.patch | cut -d' ' -f1)" = "$expected_edges_sha"
 
           set +e
           git cherry-pick "$implementation_commit"
@@ -112,9 +124,12 @@ jobs:
 
           git apply --index /tmp/pr1464-supplement/supplement.patch
           git commit -m "Compose Starter usage with current paid plans"
+          git am /tmp/pr1464-edges/edges.patch
 
           git diff --check "$expected_main"..HEAD
-          test "$(git rev-parse 'HEAD^{tree}')" = "$expected_final_tree"
+          actual_tree="$(git rev-parse 'HEAD^{tree}')"
+          echo "final_tree=$actual_tree"
+          test "$actual_tree" = "$expected_final_tree"
 
           git push origin "HEAD:$target_ref" \
             --force-with-lease="$target_ref:$expected_old_head"
