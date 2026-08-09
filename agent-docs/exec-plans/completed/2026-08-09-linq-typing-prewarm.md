@@ -1,6 +1,6 @@
 # Linq typing-start container prewarm
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -73,7 +73,7 @@ Updated: 2026-08-09
    diff review.
 5. [completed] Commit, push, open the PR, then run preliminary specialist and
    final ReviewGPT concurrently with exact-head CI.
-6. [in progress] Resolve findings, close this plan with `scripts/finish-task`, and
+6. [completed] Resolve findings, close this plan with `scripts/finish-task`, and
    push the final head.
 
 ## Decisions
@@ -131,6 +131,33 @@ Updated: 2026-08-09
 - Preliminary ReviewGPT — findings resolved; no rerun is required by policy.
 - Final ReviewGPT round one — finding reproduced and resolved; full-snapshot
   round two is pending on the remediated exact head.
-- Exact-head CI — the initial head's unrelated assistant coverage failure is
-  fixed on current `main`; the remediated branch will incorporate that base and
-  rerun the required checks.
+- Blacksmith Testbox `tbx_01kzkt04qeqv5ky4pkka81bz6p` (Actions run
+  `31327187285`) completed the one allowed remote `test:diff` attempt. It stopped
+  on the unrelated hosted-local Docker-bridge failures described above after
+  changed messaging-ingress tests passed.
+- Final ReviewGPT round two — `ROUND_OUTCOME: PASS` on
+  `8e982fe567b3f73086377f280181e03ff4bada05`; it explicitly verified both
+  accepted corrections and found no qualifying security, reliability,
+  complexity, purpose, or material-experience issue. Requested model was
+  `gpt-5.6-sol`; the captured response model slug was `gpt-5-6-pro`.
+- Exact-head GitHub Actions on `8e982fe567b3f73086377f280181e03ff4bada05`
+  — all required build/typecheck, app verification, package coverage, host
+  matrix, fixture, billing, frontend proof, hygiene, and umbrella release checks
+  passed. The optional live hosted-local Stripe browser matrix was skipped by
+  its normal gate; a superseded duplicate frontend-proof run was cancelled while
+  the current run passed.
+- Parent final diff review — passed with no unresolved finding; the PR remained
+  mergeable after incorporating current `main` through an ordinary merge.
+
+## Result
+
+- Authenticated Linq typing-start events now prewarm only established direct
+  hosted members through the existing shell-prewarm owner, after immediate
+  webhook acknowledgement and without creating conversational work.
+- Optional hints cannot amplify the consent FIFO: at most one admitted hint can
+  precede authoritative ensure, and hints during ensure, withdrawal, deletion,
+  or another prewarm return immediately.
+- The PR documents a Cloudflare Worker-first rollout followed by Web; no runner
+  container image, persisted state, environment, or credential migration is
+  required.
+Completed: 2026-08-09
