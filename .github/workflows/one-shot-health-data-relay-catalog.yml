@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   apply:
-    if: contains(github.event.head_commit.message, '[apply-health-data-relay-catalog-v2]')
+    if: contains(github.event.head_commit.message, '[apply-health-data-relay-catalog-v3]')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -63,7 +63,7 @@ jobs:
           
           replace_exact('replacement-14', 'apps/web/test/connect-page.test.ts', '  assert.match(markup, />34 of 34 sources</);\n', '  assert.match(markup, />41 of 41 sources</);\n', 1)
           
-          replace_exact('replacement-15', 'apps/web/test/connect-page.test.ts', '  assert.equal(sources.length, 34);\n', '  assert.equal(sources.length, 41);\n', 2)
+          replace_exact('replacement-15', 'apps/web/test/connect-page.test.ts', '  assert.equal(sources.length, 34);\n', '  assert.equal(sources.length, 41);\n', 1)
           
           replace_exact('replacement-16', 'apps/web/test/connect-page.test.ts', '  assert.equal(\n    markup.match(/>Not available<\/button>/gu)?.length,\n    sources.length - 8,\n  );\n', '  assert.equal(\n    markup.match(/>Not available<\/button>/gu)?.length,\n    sources.length - 15,\n  );\n', 1)
           
