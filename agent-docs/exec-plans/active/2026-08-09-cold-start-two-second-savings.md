@@ -20,7 +20,7 @@ Updated: 2026-08-09
   ensure and the existing overlap between container boot and fenced invocation
   preparation.
 - The separate first-contact instant-start shell hint cannot race a health-data
-  consent withdrawal.
+  consent withdrawal or recreate runtime state after account deletion.
 - Focused tests and typechecks, exact-head CI, and the required ReviewGPT gates
   complete with no unresolved finding.
 
@@ -70,9 +70,11 @@ Updated: 2026-08-09
   and parallel boot plus invocation preparation.
 - The pre-existing first-contact instant-start hint remains because enrollment
   gives it a separate, materially longer lead. Its route now resolves the
-  `UserRunner`, re-reads live admission under the consent-mutation barrier, and
-  holds that barrier through platform start so consent withdrawal cannot race a
-  late shell.
+  `UserRunner`, re-reads live admission under the consent-mutation barrier,
+  reserves the exact target, and holds that barrier only until the container
+  acknowledges registration. The platform wait continues behind the existing
+  container lifecycle owner and can be superseded by foreground readiness or
+  exact-target destruction.
 - The current evidence does not support an honest two-second patch. Container
   scheduling/Node startup and authenticated restore are the only buckets large
   enough; the inspected shortcuts either move work later, discard overlap, or
@@ -110,6 +112,15 @@ Updated: 2026-08-09
 - Deployment must use immediate container rollout because an older deployed
   Worker can still have created unrecorded shell hints. The new Worker becomes
   the rollback floor after it writes the first reserved stop target.
+- Final ReviewGPT round 3 proved that sharing the mutation barrier was not
+  sufficient for account deletion: a hint already queued behind successful
+  cleanup could read the deleted consent grant as legacy `missing`, recreate
+  `runner_meta`, and start a shell after deletion returned. The correction
+  remains in the existing Web admission owner: processing now requires an
+  extant, non-suspended member in addition to a non-revoked grant. Missing-grant
+  compatibility remains only for extant legacy members, and the Cloudflare
+  ordering test proves that a queued hint settles without addressing a
+  container or recreating runner state.
 
 ## Evidence
 

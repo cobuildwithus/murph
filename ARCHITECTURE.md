@@ -2016,7 +2016,10 @@ container's registration acknowledgement. The platform wait continues under
 the container's existing lifecycle owner after the barrier releases, so
 authoritative readiness or exact-target destruction can supersede it. A later
 current-version start destroys any different pending target before binding its
-fence. The hint creates no workspace or processing authority; the later
+fence. Web admits the hint only for an extant, non-suspended member whose
+health-data grant is not revoked; this preserves legacy missing-grant
+compatibility without letting a hint queued behind account deletion recreate
+runner state. The hint creates no workspace or processing authority; the later
 post-Temporal direct ensure remains authoritative.
 
 Hosted Linq message edits are immutable correction inputs, not mutations of an

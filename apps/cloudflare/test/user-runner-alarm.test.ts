@@ -4996,6 +4996,41 @@ describe("HostedUserRunner execution coordination", () => {
     expect(currentDestroyInstance).not.toHaveBeenCalled();
   });
 
+  it("does not recreate runner state when shell prewarm was queued behind account deletion", async () => {
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => {
+      destroyStarted.resolve(undefined);
+      await releaseDestroy.promise;
+    });
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      destroyInstance,
+      healthDataProcessingAllowed: false,
+      prewarmShell,
+      readHealthDataConsentState: () => "missing",
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const deletion = runner.deleteHostedUserData(TEST_USER_ID);
+    await destroyStarted.promise;
+    let prewarmSettled = false;
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID).finally(() => {
+      prewarmSettled = true;
+    });
+    await Promise.resolve();
+    expect(prewarmSettled).toBe(false);
+
+    releaseDestroy.resolve(undefined);
+    await expect(deletion).resolves.toMatchObject({ ok: true });
+    await expect(prewarm).resolves.toBeUndefined();
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toHaveLength(1);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});
     const bucket = new ListableMemoryEncryptedR2Bucket();
@@ -6113,6 +6148,7 @@ function createRunnerHarness(input: {
     | "missing"
     | "revoked"
     | Promise<"granted" | "missing" | "revoked">;
+  healthDataProcessingAllowed?: boolean | (() => boolean);
   onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
   onStatusRead?: () => Promise<void> | void;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
@@ -6278,6 +6314,7 @@ function createRunnerHarness(input: {
   };
 
   installWebControlResponses(input.workspace ?? createWorkspaceState(), {
+    healthDataProcessingAllowed: input.healthDataProcessingAllowed,
     readMailboxLag: () => input.mailboxLag ?? [createMailboxLag()],
     onCryptoContextRead: input.onCryptoContextRead,
     readHealthDataConsentState: input.readHealthDataConsentState,
@@ -6477,6 +6514,7 @@ function createDurableObjectState(input: {
 function installWebControlResponses(
   workspace: HostedWorkspaceState | null,
   hooks: {
+    healthDataProcessingAllowed?: boolean | (() => boolean);
     onCryptoContextRead?: () => Promise<void> | void;
     readHealthDataConsentState?: () =>
       | "granted"
@@ -6516,9 +6554,13 @@ function installWebControlResponses(
 
       if (input.path === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
         const consentState = await hooks.readHealthDataConsentState?.() ?? "granted";
+        const processingAllowed =
+          typeof hooks.healthDataProcessingAllowed === "function"
+            ? hooks.healthDataProcessingAllowed()
+            : hooks.healthDataProcessingAllowed ?? consentState !== "revoked";
         return jsonResponse({
           consentState,
-          processingAllowed: consentState !== "revoked",
+          processingAllowed,
           userId: input.boundUserId,
         });
       }

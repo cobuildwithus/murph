@@ -22,9 +22,12 @@ Last verified: 2026-08-09
   the existing user-control stop-target field, and waits for the container to
   register the hint before releasing the barrier. Withdrawal and account
   deletion consume that exact target, while container destruction supersedes a
-  pending platform wait before stopping it. Cleanup failure must never restore
-  authority. Keep Settings, export, and deletion available without waking the
-  paused runtime; only renewed consent may restore processing.
+  pending platform wait before stopping it. Web admission also requires an
+  extant, non-suspended member, so a hint queued behind account deletion cannot
+  treat the deleted consent row as a compatible legacy grant and recreate
+  runner state. Cleanup failure must never restore authority. Keep Settings,
+  export, and deletion available without waking the paused runtime; only
+  renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
 - Do not add third-party advertising pixels, retargeting SDKs, behavioral ad attribution, customer-list matching, tag-manager destinations, or analytics destinations that receive health data or health-context metadata; use `agent-docs/compliance/health-data-tracking-and-ads-rule.md` for any telemetry or marketing-tool review.
 - Hosted Web must keep the global `Referrer-Policy` at `strict-origin` or

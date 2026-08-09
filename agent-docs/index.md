@@ -11,7 +11,9 @@ Hosted cold-start ownership keeps established-member startup on the ordinary
 post-Temporal direct ensure so container boot can overlap fenced invocation
 preparation. The separate first-contact shell hint is serialized by the
 per-user health-data consent barrier through exact stop-target reservation and
-container registration, after which foreground readiness and exact-target
+container registration. Web admits it only for an extant, non-suspended member
+whose grant is not revoked, preserving missing-grant compatibility only for
+legacy members that still exist. Foreground readiness and exact-target
 destruction retain priority over the platform wait. This contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
