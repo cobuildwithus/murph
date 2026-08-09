@@ -24,7 +24,7 @@ export type AppleHealthRelayConnectSourceId =
 
 function providerAppLogo(fileName: string): LogoAsset {
   return {
-    className: "size-11 object-contain",
+    className: "size-11 rounded-md object-contain",
     height: 44,
     src: `/brand-logos/connect/${fileName}`,
     width: 44,
