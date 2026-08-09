@@ -444,7 +444,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
           trailing_subcaption: "34.75g fat",
         },
         type: "imessage_app",
-        url: expect.stringMatching(/^https:\/\/murph\.ai\/#murph-card=/u),
+        url: expect.stringMatching(/^https:\/\/www\.withmurph\.ai\/#murph-card=/u),
       });
       expect(requireLinqStub().countObservedSends(reminderPath))
         .toBe(overlapForegroundSendBaselineCount + 1);
