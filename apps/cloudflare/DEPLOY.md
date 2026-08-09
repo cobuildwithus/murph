@@ -432,8 +432,8 @@ The group-tool `read_usage` parser accepts the exact current privacy-safe
 response, the immediately preceding exact response, and a prospective optional
 `includedUsageUsedPercent` field. The first reader phase validates and strips
 that field, preserving the current product projection while making a later
-producer-first skew non-failing. Read-side tolerance is the first deployment
-step.
+producer-first skew non-failing. This matters because read-side tolerance is
+only the first deployment step.
 
 1. Deploy the Cloudflare Worker and runner bundle first with
    `container_rollout=immediate`. Require managed-container smoke to report the

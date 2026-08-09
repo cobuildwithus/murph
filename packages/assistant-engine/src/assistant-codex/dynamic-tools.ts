@@ -4100,6 +4100,7 @@ async function executeGroupTool(input: {
   } catch (error) {
     const runtimeIssueInput = buildGroupToolFailureRuntimeIssueInput({
       action: input.request.action,
+      callerSignalAborted: input.abortSignal?.aborted === true,
       error,
     })
     return {
@@ -4125,9 +4126,10 @@ type GroupToolFailureCategory =
 
 function buildGroupToolFailureRuntimeIssueInput(input: {
   action: MurphGroupToolRequest['action']
+  callerSignalAborted: boolean
   error: unknown
 }): AssistantRuntimeIssueInput | null {
-  if (isCallerAbortedGroupToolRequest(input.error)) {
+  if (input.callerSignalAborted) {
     return null
   }
   const classification = classifyGroupToolFailure(input.error)
@@ -4156,15 +4158,6 @@ function buildGroupToolFailureRuntimeIssueInput(input: {
         : { statusClass: classification.statusClass }),
     },
   }
-}
-
-function isCallerAbortedGroupToolRequest(error: unknown): boolean {
-  if (!error || typeof error !== 'object' || Array.isArray(error)) {
-    return false
-  }
-  const record = error as Record<string, unknown>
-  return record.hostedRuntimeFetchCauseKind === 'abort'
-    && record.hostedRuntimeFetchCallerSignalAborted === true
 }
 
 function classifyGroupToolFailure(error: unknown): {
@@ -4212,7 +4205,11 @@ function classifyGroupToolFailure(error: unknown): {
   const fetchCauseKind = typeof record?.hostedRuntimeFetchCauseKind === 'string'
     ? record.hostedRuntimeFetchCauseKind
     : null
-  if (fetchCauseKind === 'timeout') {
+  const errorName = error instanceof Error ? error.name : null
+  if (
+    fetchCauseKind === 'timeout'
+    || errorName === 'TimeoutError'
+  ) {
     return {
       category: 'timeout',
       errorCode: 'HOSTED_GROUP_TOOL_TIMEOUT',
@@ -4220,7 +4217,7 @@ function classifyGroupToolFailure(error: unknown): {
       statusClass: null,
     }
   }
-  if (fetchCauseKind !== null) {
+  if (fetchCauseKind !== null || errorName === 'AbortError') {
     return {
       category: 'transport',
       errorCode: 'HOSTED_GROUP_TOOL_TRANSPORT_FAILED',

@@ -2395,6 +2395,43 @@ describe("murph.group dynamic tool", () => {
     },
     {
       errorFields: {
+        hostedRuntimeFetchCallerSignalAborted: true,
+        hostedRuntimeFetchCauseKind: "abort",
+      },
+      expectedIssue: {
+        component: "assistant.group-tool",
+        details: {
+          action: "read_usage",
+          failureCategory: "transport",
+        },
+        errorCode: "HOSTED_GROUP_TOOL_TRANSPORT_FAILED",
+        issueKind: "tool_error",
+        operation: "read_usage",
+        phase: "tool_call",
+        severity: "warning",
+        summary: "Hosted group tool request failed.",
+      },
+    },
+    {
+      errorFields: {
+        name: "AbortError",
+      },
+      expectedIssue: {
+        component: "assistant.group-tool",
+        details: {
+          action: "read_usage",
+          failureCategory: "transport",
+        },
+        errorCode: "HOSTED_GROUP_TOOL_TRANSPORT_FAILED",
+        issueKind: "tool_error",
+        operation: "read_usage",
+        phase: "tool_call",
+        severity: "warning",
+        summary: "Hosted group tool request failed.",
+      },
+    },
+    {
+      errorFields: {
         code: "PRIVATE_UNKNOWN_DETAIL",
       },
       expectedIssue: {
@@ -2452,11 +2489,39 @@ describe("murph.group dynamic tool", () => {
     if (!request || request.kind !== "group") {
       throw new Error("Expected group request.");
     }
+    const abortController = new AbortController();
+    const privateDetail = "private caller cancellation reason";
     const groupRequest = vi.fn<GroupToolRequest>(async () => {
-      throw Object.assign(new Error("caller cancelled"), {
-        hostedRuntimeFetchCallerSignalAborted: true,
-        hostedRuntimeFetchCauseKind: "abort",
-      });
+      abortController.abort(new DOMException(privateDetail, "AbortError"));
+      throw abortController.signal.reason;
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      abortSignal: abortController.signal,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.runtimeIssueInputs).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain(privateDetail);
+  });
+
+  it("records a raw group-tool body deadline as a bounded timeout", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_usage",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const privateDetail = "private response body timeout reason";
+    const groupRequest = vi.fn<GroupToolRequest>(async () => {
+      throw new DOMException(privateDetail, "TimeoutError");
     });
 
     const result = await executeMurphDynamicToolRequest({
@@ -2469,8 +2534,24 @@ describe("murph.group dynamic tool", () => {
       vaultRoot: null,
     });
 
-    expect(result.rpcResult.success).toBe(false);
-    expect(result.runtimeIssueInputs).toBeUndefined();
+    expect(result.rpcResult).toEqual({
+      contentItems: [{ type: "inputText", text: "group tool request failed" }],
+      success: false,
+    });
+    expect(result.runtimeIssueInputs).toEqual([{
+      component: "assistant.group-tool",
+      details: {
+        action: "read_usage",
+        failureCategory: "timeout",
+      },
+      errorCode: "HOSTED_GROUP_TOOL_TIMEOUT",
+      issueKind: "timeout",
+      operation: "read_usage",
+      phase: "tool_call",
+      severity: "warning",
+      summary: "Hosted group tool request failed.",
+    }]);
+    expect(JSON.stringify(result)).not.toContain(privateDetail);
   });
 
   it.each([
