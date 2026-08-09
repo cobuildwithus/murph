@@ -94,11 +94,27 @@ test("open invites reuse the shared auth panel with every supported method", asy
   expect(mocks.authPanelProps).toMatchObject({
     inviteCode: "invite-code",
     methods: ["phone", "email", "telegram"],
+    onCompleted: expect.any(Function),
+    onSignOut: expect.any(Function),
     requireLaunchConsentOnCompletion: true,
     size: "compact",
   });
   expect(mocks.emailAuthProps).toBeNull();
   expect(mocks.phoneAuthProps).toBeNull();
+
+  const onCompleted = mocks.authPanelProps?.onCompleted;
+  if (typeof onCompleted !== "function") {
+    throw new Error("Expected shared auth completion callback.");
+  }
+  await onCompleted();
+  expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+  const onSignOut = mocks.authPanelProps?.onSignOut;
+  if (typeof onSignOut !== "function") {
+    throw new Error("Expected shared auth sign-out callback.");
+  }
+  await onSignOut();
+  expect(mocks.refresh).toHaveBeenCalledTimes(2);
 
   await cleanup();
 });
