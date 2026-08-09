@@ -67,6 +67,7 @@ function createPrisma(input: {
         policyCode: "new_person_activation_v1",
         policyVersion: SIGNUP_POLICY_VERSION,
         referrerMemberId: "member_referrer",
+        rewardUsdMicros: 2_750_000n,
         rewardedAt: REWARDED_AT,
         status: "rewarded",
       }),
@@ -94,7 +95,7 @@ describe("hosted signup referral reward notice", () => {
       },
     });
     mocks.buildHostedUsageReferralRewardLabel.mockReturnValue(
-      "about 100 more messages for your Murph",
+      "$2.75 of cost-weighted usage credit for your Murph",
     );
   });
 
@@ -103,7 +104,7 @@ describe("hosted signup referral reward notice", () => {
       beneficiaryMemberId: "member_referrer",
       destination: DIRECT_LINQ_DESTINATION,
       notificationKey: "usage-referral-reward:hur_signup",
-      rewardLabel: "about 100 more messages for your Murph",
+      rewardLabel: "$2.75 of cost-weighted usage credit for your Murph",
       rewardedAt: REWARDED_AT,
     });
 
@@ -115,7 +116,10 @@ describe("hosted signup referral reward notice", () => {
       "someone completed Murph setup through their referral link",
     );
     expect(wake.notification.instructions).toContain(
-      "already received about 100 more messages for your Murph",
+      "already received $2.75 of cost-weighted usage credit for your Murph",
+    );
+    expect(wake.notification.instructions).toContain(
+      'Final message: include "$2.75 of cost-weighted usage credit for your Murph" exactly',
     );
     expect(wake.notification.instructions).toContain(
       "Do not identify, name, or guess who joined",
@@ -123,7 +127,9 @@ describe("hosted signup referral reward notice", () => {
     expect(wake.notification.instructions).toContain(
       "Do not ask the member to complete another step",
     );
-    expect(wake.notification.instructions).not.toContain("$2");
+    expect(wake.notification.instructions).not.toContain(
+      "Do not mention dollars",
+    );
   });
 
   it("queues the notice and marks the existing receipt atomically", async () => {
@@ -155,7 +161,7 @@ describe("hosted signup referral reward notice", () => {
       mocks.buildHostedUsageReferralRewardLabel,
     ).toHaveBeenCalledExactlyOnceWith({
       destinationKind: "personal",
-      policyCode: "new_person_activation_v1",
+      rewardUsdMicros: 2_750_000n,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
@@ -181,7 +187,7 @@ describe("hosted signup referral reward notice", () => {
     });
   });
 
-  it("rotates a route-less notice without creating another queue", async () => {
+  it("retries a route-less notice with the persisted reward amount", async () => {
     const { prisma } = createPrisma({ destinationAvailable: false });
 
     await expect(appendHostedSignupReferralRewardNotice({
@@ -199,6 +205,26 @@ describe("hosted signup referral reward notice", () => {
         status: "rewarded",
       },
     });
+
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(
+      DIRECT_LINQ_DESTINATION,
+    );
+    await expect(appendHostedSignupReferralRewardNotice({
+      prisma: prisma as never,
+      referralId: "hur_signup",
+    })).resolves.toEqual(expect.objectContaining({
+      mailboxItemId: "mailbox_signup_notice",
+    }));
+
+    expect(mocks.buildHostedUsageReferralRewardLabel).toHaveBeenCalledWith({
+      destinationKind: "personal",
+      rewardUsdMicros: 2_750_000n,
+    });
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
+      ?.envelope;
+    expect(envelope?.notification.instructions).toContain(
+      "$2.75 of cost-weighted usage credit for your Murph",
+    );
   });
 
   it("fails closed if another worker wins the notice fence", async () => {

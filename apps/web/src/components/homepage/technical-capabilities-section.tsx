@@ -168,7 +168,7 @@ export function TechnicalCapabilitiesSection({
                 Inference is a choice
               </p>
               <h3 className="mt-5 max-w-[22ch] text-balance font-serif text-[clamp(1.625rem,3vw,2.25rem)] font-semibold leading-[1.1] tracking-[-0.02em]">
-                The agent stays. The inference path is yours.
+                The inference path is yours.
               </h3>
             </div>
 
