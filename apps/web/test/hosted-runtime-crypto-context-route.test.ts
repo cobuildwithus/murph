@@ -39,7 +39,7 @@ describe("hosted runtime crypto-context route", () => {
     });
   });
 
-  it("returns signed runtime crypto context for paused-member retention with a provisioned workspace", async () => {
+  it("returns signed workspace-bound crypto context without repeating caller admission", async () => {
     const prisma = createPrisma({
       workspace: { userId: "member_crypto_1" },
     });

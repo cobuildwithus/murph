@@ -6,9 +6,10 @@ Updated: 2026-08-09
 
 ## Goal
 
-- Let signed hosted retention runs obtain the workspace crypto they need for
-  paused members while keeping ordinary inactive-member assistant work blocked
-  by the existing mode-aware reconciliation and Temporal admission owner.
+- Let signed workspace-bound callers obtain the crypto they are independently
+  authorized to use, including paused-member retention and Settings vault
+  export, while keeping ordinary inactive-member assistant work blocked by its
+  existing admission owners.
 
 ## Success criteria
 
@@ -16,11 +17,13 @@ Updated: 2026-08-09
   member entitlement checks after signed callback authentication.
 - Both callbacks still require the callback-bound user, a provisioned hosted
   workspace, and the existing signed/encrypted crypto-envelope authority.
-- Focused route tests prove paused members with workspaces succeed, missing
-  workspaces remain forbidden, and requests cannot reach crypto reads before
-  callback authentication succeeds.
+- Focused route tests prove signed workspace-bound reads succeed without
+  duplicate caller admission, missing workspaces remain forbidden, and requests
+  cannot reach crypto reads before callback authentication succeeds.
 - Existing inactive-member orchestration proof continues to confine execution
   to `inbox_media_retention`, never default processing.
+- A full-stack regression covers the paused-member Temporal-to-Cloudflare
+  retention handoff and asserts that it emits no assistant-provider request.
 - Focused tests, typecheck, preliminary coverage review, final ReviewGPT,
   exact-head CI, mergeability proof, and parent final review complete without
   unresolved accepted findings.
@@ -28,8 +31,8 @@ Updated: 2026-08-09
 ## Scope
 
 - In scope: the two hosted runtime crypto-context routes, their focused Web
-  tests, and any minimal durable contract clarification required by the trust
-  boundary.
+  tests, one existing full-stack Temporal regression, its narrow test support,
+  and the durable contract clarification required by the trust boundary.
 - Out of scope: changing runtime admission, Temporal scheduling, billing state,
   crypto formats, keys, envelopes, workspace provisioning, or Cloudflare code.
 
@@ -45,11 +48,11 @@ Updated: 2026-08-09
 
 ## Risks and mitigations
 
-1. Risk: removing the route-local entitlement gate could appear to authorize
-   ordinary paused-member execution.
-   Mitigation: retain callback/workspace/crypto authority at the routes and
-   directly re-run the existing orchestration test proving inactive members
-   receive retention-only processing.
+1. Risk: removing the route-local entitlement gate could be mistaken for
+   operation admission.
+   Mitigation: retain callback/workspace/crypto resource authority at the
+   routes, document each caller's independent admission owner, and prove
+   inactive runtime work receives retention-only processing.
 2. Risk: the historical-root route remains blocked and fails only when older
    ciphertext is encountered.
    Mitigation: make and test the same owner-bound correction on both crypto
@@ -61,27 +64,28 @@ Updated: 2026-08-09
 ## Tasks
 
 1. Remove the redundant active-member query from both signed crypto callbacks.
-2. Replace entitlement-specific fixtures with paused-member, workspace, and
-   auth-boundary route regressions.
-3. Run focused Web tests, the existing inactive-retention orchestration proof,
-   hosted Web typecheck, diff hygiene, and parent diff review.
+2. Replace entitlement-specific fixtures with workspace and auth-boundary route
+   regressions; add a paused-member full-stack Temporal regression.
+3. Run focused Web tests, inactive-retention owner proof, Web and Cloudflare
+   typechecks, diff hygiene, and parent diff review.
 4. Commit and push the exact candidate, open the PR, run the preliminary
    coverage pass plus final ReviewGPT with CI, resolve accepted findings, and
    close this plan through the repository finish path.
 
 ## Decisions
 
-- Use deletion at the two incorrect ownership points. Do not add a retention
-  flag to the crypto request or a new authorization mechanism because the
-  mode-aware runtime owner already authorizes the only work inactive members
-  may execute.
+- Use deletion at the two incorrect ownership points. Do not add a purpose flag
+  or a new authorization mechanism because runtime mode, Settings
+  session/MFA/consent, and ordinary active-access owners already admit their
+  respective operations.
 - Preserve the provisioned-workspace check as the route-local resource boundary.
 
 ## Verification
 
 - Focused route tests for current and historical crypto context.
 - Existing inactive workspace retention reconciliation/orchestration test.
-- Hosted Web typecheck and `git diff --check`.
+- Full-stack paused-member Temporal-to-Cloudflare retention scenario.
+- Hosted Web and Cloudflare typechecks and `git diff --check`.
 - Exact-head CI plus preliminary coverage and final ReviewGPT trust-boundary
   review.
 
@@ -92,3 +96,19 @@ Updated: 2026-08-09
   runtime signaling.
 - Hosted Web typecheck passed.
 - Agent-doc drift, diff whitespace, and direct-identifier guards passed.
+- ReviewGPT round 1 identified the shared Settings-export resource boundary;
+  the durable contract and route-test language now state caller-owned admission.
+- Preliminary coverage review requested a real paused-member owner-handoff
+  regression; the existing hosted-local Temporal scenario now seeds an active
+  workspace, pauses the member, makes retention due, and asserts successful
+  completion without an assistant-provider request.
+- Hosted Web and Cloudflare typechecks passed after that regression.
+- Private Temporal owner suite passed 16 files and 122 tests, including due
+  retention for an inactive member. Signed Cloudflare crypto transport passed
+  two tests, and focused assistant-runtime retention-only processing passed two
+  tests.
+- The full-stack scenario could not start locally: the first setup exhausted
+  its existing hook timeout; after producing missing build artifacts through
+  supported scripts, runner-bundle validation failed on the unrelated existing
+  entrypoint byte budget (9,934,039 bytes versus 9,920,209). No scenario test
+  executed, and this change does not alter the runner bundle.

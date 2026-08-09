@@ -79,6 +79,7 @@ import { Client } from "pg";
 import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject-key";
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
+import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
 
 const hostedRuntimeLogTestMigrationTable = "_murph_e2e_runtime_log_migration";
 const hostedRuntimeLogTestMigrationsRoot = new URL(
@@ -183,6 +184,7 @@ interface HostedTestPrismaFactoryClient {
   };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
+    update(args: unknown): Promise<{ id: string }>;
   };
 }
 
@@ -1187,6 +1189,23 @@ export async function seedHostedWorkspaceInboxMediaRetentionWakeForTest(input: {
         "Hosted-local retention wake seed requires exactly one existing workspace.",
       );
     }
+  });
+}
+
+export async function updateHostedMemberBillingStatusForTest(input: {
+  billingStatus: HostedBillingStatusForTest;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    await deps.prisma.hostedMember.update({
+      data: {
+        billingStatus: input.billingStatus,
+      },
+      where: {
+        id: input.memberId,
+      },
+    });
   });
 }
 

@@ -88,7 +88,7 @@ describe("hosted runtime crypto root route", () => {
     });
   });
 
-  it("returns historical crypto roots for paused-member retention", async () => {
+  it("returns historical workspace roots without repeating caller admission", async () => {
     const prisma = createPrisma({
       workspace: {
         userId: "member_123",

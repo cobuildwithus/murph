@@ -90,9 +90,10 @@ uses only the canonical ENAM binding. The contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `apps/cloudflare/README.md`.
 
-Signed hosted runtime crypto callbacks require callback-bound user authority
-and a provisioned workspace without duplicating active-member entitlement;
-mode-aware orchestration confines inactive members to retention-only work. The
+Signed hosted runtime crypto callbacks are user-bound, workspace-scoped
+resource authority without duplicate operation admission. Temporal/UserRunner,
+Settings vault export, and ordinary active-member runtime surfaces retain their
+own mode, session/MFA/consent, and active-access admission respectively. The
 contract is specified by `agent-docs/references/hosted-runtime-protocol.md` and
 `agent-docs/references/hosted-temporal-orchestration.md`.
 
