@@ -1,6 +1,8 @@
 "use client";
 
-import { HOSTED_ASSISTANT_OPENAI_PROVIDER } from "@murphai/hosted-execution/assistant-model";
+import {
+  HOSTED_ASSISTANT_OPENAI_PROVIDER,
+} from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, CheckIcon, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
@@ -57,7 +59,9 @@ import {
 } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
-import { resolveAuthDialogHeaderPresentation } from "@/src/components/hosted-onboarding/auth-dialog";
+import {
+  resolveAuthDialogHeaderPresentation,
+} from "@/src/components/hosted-onboarding/auth-dialog";
 import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
 import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
 import { HostedAuthenticatedPhoneAuthState } from "@/src/components/hosted-onboarding/hosted-phone-auth-views";
@@ -75,12 +79,7 @@ import { Button, buttonVariants } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import { Badge } from "@/src/components/ui/badge";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/src/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { Progress } from "@/src/components/ui/progress";
 import { Separator } from "@/src/components/ui/separator";
 import { Input } from "@/src/components/ui/input";
@@ -92,11 +91,7 @@ import {
   FieldLabel,
 } from "@/src/components/ui/field";
 import { Textarea } from "@/src/components/ui/textarea";
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "@/src/components/ui/input-otp";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
 import { Label } from "@/src/components/ui/label";
 import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
 import { Skeleton } from "@/src/components/ui/skeleton";
@@ -111,61 +106,14 @@ import {
   type SegmentedControlOption,
 } from "@/src/components/ui/segmented-control";
 import { ScrollArea } from "@/src/components/ui/scroll-area";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/src/components/ui/tooltip";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/src/components/ui/dialog";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/src/components/ui/sheet";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/src/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/src/components/ui/dropdown-menu";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/src/components/ui/collapsible";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/src/components/ui/table";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/src/components/ui/card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/src/components/ui/tooltip";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/src/components/ui/dialog";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/src/components/ui/sheet";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/src/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/src/components/ui/dropdown-menu";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/src/components/ui/collapsible";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/src/components/ui/table";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
 import {
   IN_APP_BROWSER_DESCRIPTION,
@@ -233,7 +181,8 @@ const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
   flow: "fill-gaps",
-  idleDescription: "Two short topics, based on what Murph does not know yet.",
+  idleDescription:
+    "Two short topics, based on what Murph does not know yet.",
   idleTitle: "Only the missing details",
   topics: [
     {
@@ -266,9 +215,7 @@ function Section({
 }) {
   return (
     <div id={id} className="flex flex-col gap-6">
-      <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-        {title}
-      </h2>
+      <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
     </div>
   );
@@ -300,18 +247,10 @@ function PlanBulletListStudy({
   );
 }
 
-function DialogPreviewFrame({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function DialogPreviewFrame({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-3">
-      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-        {label}
-      </p>
+      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
       <div className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06] md:p-7">
         <DialogPreviewHeader />
         <div className="mt-5">{children}</div>
@@ -339,16 +278,15 @@ function DialogPreviewHeader() {
 
 function resolveDesignPhoneCountryOption(value: string) {
   const option =
-    HOSTED_PHONE_COUNTRY_OPTIONS.find(
-      (candidate) => candidate.code === value,
-    ) ??
-    HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === "US") ??
-    HOSTED_PHONE_COUNTRY_OPTIONS[0];
+    HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === value)
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === "US")
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS[0];
   if (!option) {
     throw new Error("Phone country options are empty.");
   }
   return option;
 }
+
 
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
@@ -660,20 +598,11 @@ export function ComponentsContent() {
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
   const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
-  const [vitalConnectionDialogSource, setVitalConnectionDialogSource] =
-    useState<{
-      id: string;
-      logo: {
-        className: string;
-        height: number;
-        src: string;
-        width: number;
-      };
-      name: string;
-    } | null>(null);
-  const [assistantStylePickerStep, setAssistantStylePickerStep] = useState<
-    "tone" | "voice" | null
+  const [vitalConnectionDialogSource, setVitalConnectionDialogSource] = useState<
+    Pick<ConnectSource, "id" | "logo" | "name" | "requiresReconnect"> | null
   >(null);
+  const [assistantStylePickerStep, setAssistantStylePickerStep] =
+    useState<"tone" | "voice" | null>(null);
   const [segmentedControlValue, setSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("phone");
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
@@ -691,27 +620,17 @@ export function ComponentsContent() {
   const [phoneTransferSupportDialogOpen, setPhoneTransferSupportDialogOpen] =
     useState(false);
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
-  const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] =
+  const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
+  const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
     useState(false);
-  const [
-    whoopCapacityNoContactPreviewOpen,
-    setWhoopCapacityNoContactPreviewOpen,
-  ] = useState(false);
-  const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(
-    phoneInputCountryCode,
-  );
+  const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
     <TooltipProvider>
       <div className="mx-auto flex max-w-5xl flex-col gap-16 px-6 py-12 sm:px-10 lg:px-16">
         <div>
-          <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
-            Components
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Shadcn base UI + custom Murph components. Colors and typography live
-            in the Brand tab.
-          </p>
+          <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
 
         <Separator />
@@ -809,10 +728,7 @@ export function ComponentsContent() {
               <DialogPreviewFrame label="Hydrated email session recovery">
                 <div className="space-y-4">
                   <HostedResumableAuthState
-                    auth={{
-                      identityLabel: "member@example.com",
-                      method: "email",
-                    }}
+                    auth={{ identityLabel: "member@example.com", method: "email" }}
                     disabled={false}
                     onContinue={() => {}}
                     onSignOut={() => {}}
@@ -865,9 +781,7 @@ export function ComponentsContent() {
                   />
                   <HostedInlineAuthButton
                     disabled
-                    icon={
-                      <CheckCircle2 aria-hidden="true" className="size-5" />
-                    }
+                    icon={<CheckCircle2 aria-hidden="true" className="size-5" />}
                     onClick={() => {}}
                   >
                     Email
@@ -981,8 +895,7 @@ export function ComponentsContent() {
                     Connect devices
                   </h2>
                   <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                    Stale legal consent does not block configured device
-                    connections.
+                    Stale legal consent does not block configured device connections.
                   </p>
                 </div>
               </div>
@@ -1063,10 +976,10 @@ export function ComponentsContent() {
         >
           <Section title="Environment voice processing feedback">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              The open report keeps ownership after upload: processing, updated,
-              no-clear-facts, and delayed recovery remain visible without
-              requiring a reload. Processing stays animated, and the delayed
-              action rechecks the existing accepted job.
+              The open report keeps ownership after upload: processing,
+              updated, no-clear-facts, and delayed recovery remain visible
+              without requiring a reload. Processing stays animated, and the
+              delayed action rechecks the existing accepted job.
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
@@ -1116,10 +1029,7 @@ export function ComponentsContent() {
         <Separator />
 
         <Section title="Payment Button">
-          <p className="text-sm text-muted-foreground">
-            Async action button with spinner → checkmark animation. Auth-gated
-            by default. Click to see the flow.
-          </p>
+          <p className="text-sm text-muted-foreground">Async action button with spinner → checkmark animation. Auth-gated by default. Click to see the flow.</p>
           <div className="flex flex-wrap items-center gap-4">
             <PaymentButton
               onClick={() => new Promise((r) => setTimeout(r, 2000))}
@@ -1143,6 +1053,7 @@ export function ComponentsContent() {
           </div>
         </Section>
 
+
         <Separator />
 
         <Section title="Input & Label">
@@ -1154,15 +1065,16 @@ export function ComponentsContent() {
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="notes-ds">Notes</FieldLabel>
-                <Textarea id="notes-ds" placeholder="Add a plain-text note" />
+                <Textarea
+                  id="notes-ds"
+                  placeholder="Add a plain-text note"
+                />
                 <FieldDescription>
                   A multiline field with supporting help text.
                 </FieldDescription>
               </Field>
               <Field data-invalid="true">
-                <FieldLabel htmlFor="invalid-notes-ds">
-                  Invalid notes
-                </FieldLabel>
+                <FieldLabel htmlFor="invalid-notes-ds">Invalid notes</FieldLabel>
                 <Textarea
                   aria-invalid="true"
                   defaultValue="This example needs attention."
@@ -1171,9 +1083,7 @@ export function ComponentsContent() {
                 <FieldError>Review this value before continuing.</FieldError>
               </Field>
               <Field data-disabled="true">
-                <FieldLabel htmlFor="disabled-notes-ds">
-                  Disabled notes
-                </FieldLabel>
+                <FieldLabel htmlFor="disabled-notes-ds">Disabled notes</FieldLabel>
                 <Textarea
                   defaultValue="Locked value"
                   disabled
@@ -1222,9 +1132,7 @@ export function ComponentsContent() {
         <Section title="Select">
           <div className="max-w-xs">
             <Select>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose experiment" />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Choose experiment" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="sauna">Finnish Sauna Protocol</SelectItem>
                 <SelectItem value="cold">Cold Exposure</SelectItem>
@@ -1252,15 +1160,9 @@ export function ComponentsContent() {
 
         <Section title="Avatar">
           <div className="flex items-center gap-3">
-            <Avatar>
-              <AvatarFallback>RP</AvatarFallback>
-            </Avatar>
-            <Avatar>
-              <AvatarFallback>AH</AvatarFallback>
-            </Avatar>
-            <Avatar>
-              <AvatarFallback>PA</AvatarFallback>
-            </Avatar>
+            <Avatar><AvatarFallback>RP</AvatarFallback></Avatar>
+            <Avatar><AvatarFallback>AH</AvatarFallback></Avatar>
+            <Avatar><AvatarFallback>PA</AvatarFallback></Avatar>
           </div>
         </Section>
 
@@ -1268,10 +1170,7 @@ export function ComponentsContent() {
 
         <Section title="Toggle & Toggle Group">
           <div className="flex flex-col gap-4">
-            <div className="flex gap-2">
-              <Toggle>Bold</Toggle>
-              <Toggle>Italic</Toggle>
-            </div>
+            <div className="flex gap-2"><Toggle>Bold</Toggle><Toggle>Italic</Toggle></div>
             <ToggleGroup defaultValue={["7d"]}>
               <ToggleGroupItem value="7d">7d</ToggleGroupItem>
               <ToggleGroupItem value="21d">21d</ToggleGroupItem>
@@ -1408,13 +1307,11 @@ export function ComponentsContent() {
 
         <Section title="Setup Loader">
           <p className="text-sm text-muted-foreground">
-            Full-page loader shown on{" "}
-            <code className="font-mono text-xs">/join/[inviteCode]</code> while
-            the auto-trial is provisioned. The Murph mark fires a sonar ripple
-            from its two largest core dots outward — each dot&apos;s delay is
-            proportional to its distance from center, so the wave radiates
-            through the constellation rather than pulsing uniformly. Honors{" "}
-            <code className="font-mono text-xs">prefers-reduced-motion</code>.
+            Full-page loader shown on <code className="font-mono text-xs">/join/[inviteCode]</code> while
+            the auto-trial is provisioned. The Murph mark fires a sonar ripple from its two
+            largest core dots outward — each dot&apos;s delay is proportional to its distance
+            from center, so the wave radiates through the constellation rather than pulsing
+            uniformly. Honors <code className="font-mono text-xs">prefers-reduced-motion</code>.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col items-center justify-center gap-6 rounded-2xl bg-[#FAF8F4] px-8 py-16 ring-1 ring-[#1A1F16]/[0.06]">
@@ -1436,18 +1333,8 @@ export function ComponentsContent() {
 
         <Section title="Alert">
           <div className="flex flex-col gap-4">
-            <Alert>
-              <AlertTitle>Experiment in progress</AlertTitle>
-              <AlertDescription>
-                Day 15 of 28. Next session scheduled for this evening.
-              </AlertDescription>
-            </Alert>
-            <Alert variant="destructive">
-              <AlertTitle>Oura disconnected</AlertTitle>
-              <AlertDescription>
-                Reconnect your ring to continue tracking metrics.
-              </AlertDescription>
-            </Alert>
+            <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 15 of 28. Next session scheduled for this evening.</AlertDescription></Alert>
+            <Alert variant="destructive"><AlertTitle>Oura disconnected</AlertTitle><AlertDescription>Reconnect your ring to continue tracking metrics.</AlertDescription></Alert>
           </div>
         </Section>
 
@@ -1486,9 +1373,7 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-3">
             <Alert variant="destructive">
               <AlertTitle>Unable to update Telegram</AlertTitle>
-              <AlertDescription>
-                This verified session conflicts with an existing Murph account.
-              </AlertDescription>
+              <AlertDescription>This verified session conflicts with an existing Murph account.</AlertDescription>
             </Alert>
             <ContactSupportAction
               body="Hi Murph support,\n\nI need help with an account conflict."
@@ -1503,16 +1388,9 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-4">
               <Skeleton className="size-12 rounded-full" />
-              <div className="flex flex-col gap-2">
-                <Skeleton className="h-4 w-48" />
-                <Skeleton className="h-3 w-32" />
-              </div>
+              <div className="flex flex-col gap-2"><Skeleton className="h-4 w-48" /><Skeleton className="h-3 w-32" /></div>
             </div>
-            <div className="flex gap-3">
-              <Skeleton className="h-24 flex-1 rounded-xl" />
-              <Skeleton className="h-24 flex-1 rounded-xl" />
-              <Skeleton className="h-24 flex-1 rounded-xl" />
-            </div>
+            <div className="flex gap-3"><Skeleton className="h-24 flex-1 rounded-xl" /><Skeleton className="h-24 flex-1 rounded-xl" /><Skeleton className="h-24 flex-1 rounded-xl" /></div>
           </div>
         </Section>
 
@@ -1520,14 +1398,8 @@ export function ComponentsContent() {
 
         <Section title="Tooltip">
           <Tooltip>
-            <div className="flex">
-              <TooltipTrigger
-                render={<Button variant="outline">Hover me</Button>}
-              />
-            </div>
-            <TooltipContent>
-              <p>92% match based on your Oura data</p>
-            </TooltipContent>
+            <div className="flex"><TooltipTrigger render={<Button variant="outline">Hover me</Button>} /></div>
+            <TooltipContent><p>92% match based on your Oura data</p></TooltipContent>
           </Tooltip>
         </Section>
 
@@ -1535,21 +1407,10 @@ export function ComponentsContent() {
 
         <Section title="Dialog">
           <Dialog>
-            <div className="flex">
-              <DialogTrigger render={<Button>Open Dialog</Button>} />
-            </div>
+            <div className="flex"><DialogTrigger render={<Button>Open Dialog</Button>} /></div>
             <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Start Experiment</DialogTitle>
-                <DialogDescription>
-                  This will begin a 14-day baseline period followed by 14 days
-                  of active tracking.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline">Cancel</Button>
-                <Button>Confirm</Button>
-              </div>
+              <DialogHeader><DialogTitle>Start Experiment</DialogTitle><DialogDescription>This will begin a 14-day baseline period followed by 14 days of active tracking.</DialogDescription></DialogHeader>
+              <div className="flex justify-end gap-2 pt-4"><Button variant="outline">Cancel</Button><Button>Confirm</Button></div>
             </DialogContent>
           </Dialog>
         </Section>
@@ -1592,7 +1453,10 @@ export function ComponentsContent() {
               <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                 Immediate upgrade entry
               </p>
-              <div className="rounded-2xl bg-muted/45 p-6" inert>
+              <div
+                className="rounded-2xl bg-muted/45 p-6"
+                inert
+              >
                 <UpgradeToEdgeButton expectedCurrentPlanCode="launch_monthly" />
               </div>
             </div>
@@ -1631,19 +1495,13 @@ export function ComponentsContent() {
           <Section title="WHOOP Completion Dialog">
             <p className="max-w-2xl text-sm text-muted-foreground">
               Production WHOOP completion and capacity fallback. The normal flow
-              starts with confirmation; the capacity path opens the same setup
-              guide directly.
+              starts with confirmation; the capacity path opens the same setup guide directly.
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={() => setWhoopCompletionPreviewKey((key) => key + 1)}
-              >
+              <Button onClick={() => setWhoopCompletionPreviewKey((key) => key + 1)}>
                 Preview WHOOP completion
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => setWhoopCapacityPreviewOpen(true)}
-              >
+              <Button variant="outline" onClick={() => setWhoopCapacityPreviewOpen(true)}>
                 Preview capacity fallback
               </Button>
               <Button
@@ -1715,9 +1573,9 @@ export function ComponentsContent() {
               id="group-usage-funding-component"
             >
               <GroupUsageFundingShell
-                action={
+                action={(
                   <GroupUsageFundingActions
-                    monthlyAction={
+                    monthlyAction={(
                       <GroupSponsorshipDialog
                         checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
@@ -1728,8 +1586,8 @@ export function ComponentsContent() {
                         offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
                         payerMemberId="design_usage_top_up_payer"
                       />
-                    }
-                    oneTimeAction={
+                    )}
+                    oneTimeAction={(
                       <GroupSponsorshipDialog
                         checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
@@ -1740,9 +1598,9 @@ export function ComponentsContent() {
                         triggerSize="default"
                         triggerVariant="link"
                       />
-                    }
+                    )}
                   />
-                }
+                )}
                 groupName="Sunday sleep crew"
               />
             </div>
@@ -1811,6 +1669,96 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Vital-backed health source handoff">
+          <div className="flex flex-col items-start gap-3">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Reusable handoff shown before every Vital-backed authorization.
+              It leads with the connection, credits Vital underneath with a
+              link, and keeps Garmin&apos;s Historical Data reminder inside
+              the same dialog.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                {
+                  label: "Preview standard handoff",
+                  source: {
+                    id: "fitbit",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/fitbit.svg",
+                      width: 44,
+                    },
+                    name: "Fitbit",
+                  },
+                  variant: "default" as const,
+                },
+                {
+                  label: "Preview Garmin handoff",
+                  source: {
+                    id: "garmin",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/garmin.png",
+                      width: 44,
+                    },
+                    name: "Garmin",
+                  },
+                  variant: "outline" as const,
+                },
+                {
+                  label: "Preview wide logo",
+                  source: {
+                    id: "runkeeper",
+                    logo: {
+                      className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+                      height: 20,
+                      src: "/brand-logos/connect/runkeeper.svg",
+                      width: 132,
+                    },
+                    name: "Runkeeper",
+                  },
+                  variant: "outline" as const,
+                },
+                {
+                  label: "Preview long label",
+                  source: {
+                    id: "dexcom-g6-and-older",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/dexcom-g6-and-older.png",
+                      width: 44,
+                    },
+                    name: "Dexcom (G6 and older)",
+                  },
+                  variant: "outline" as const,
+                },
+              ].map((preview) => (
+                <Button
+                  key={preview.source.id}
+                  variant={preview.variant}
+                  onClick={() => setVitalConnectionDialogSource(preview.source)}
+                >
+                  {preview.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <VitalConnectionDialog
+            source={vitalConnectionDialogSource}
+            onContinue={() => setVitalConnectionDialogSource(null)}
+            onOpenChange={(open) => {
+              if (!open) {
+                setVitalConnectionDialogSource(null);
+              }
+            }}
+          />
+        </Section>
+
+        <Separator />
+
         <Section
           id="experiment-start-channel-picker-study"
           title="Experiment Start Channel Picker"
@@ -1840,104 +1788,12 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Vital-backed health source handoff">
-          <div className="flex flex-col items-start gap-3">
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Reusable handoff shown before every Vital-backed authorization.
-              It leads with the connection, credits Vital underneath with a
-              link, and keeps Garmin&apos;s Historical Data reminder inside
-              the same dialog.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={() =>
-                  setVitalConnectionDialogSource({
-                    id: "fitbit",
-                    logo: {
-                      className: "size-11 object-contain",
-                      height: 44,
-                      src: "/brand-logos/connect/fitbit.svg",
-                      width: 44,
-                    },
-                    name: "Fitbit",
-                  })
-                }
-              >
-                Preview standard handoff
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setVitalConnectionDialogSource({
-                    id: "garmin",
-                    logo: {
-                      className: "size-11 object-contain",
-                      height: 44,
-                      src: "/brand-logos/connect/garmin.png",
-                      width: 44,
-                    },
-                    name: "Garmin",
-                  })
-                }
-              >
-                Preview Garmin handoff
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setVitalConnectionDialogSource({
-                    id: "runkeeper",
-                    logo: {
-                      className:
-                        "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-                      height: 20,
-                      src: "/brand-logos/connect/runkeeper.svg",
-                      width: 132,
-                    },
-                    name: "Runkeeper",
-                  })
-                }
-              >
-                Preview wide logo
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setVitalConnectionDialogSource({
-                    id: "dexcom-g6-and-older",
-                    logo: {
-                      className: "size-11 object-contain",
-                      height: 44,
-                      src: "/brand-logos/connect/dexcom-g6-and-older.png",
-                      width: 44,
-                    },
-                    name: "Dexcom (G6 and older)",
-                  })
-                }
-              >
-                Preview long label
-              </Button>
-            </div>
-          </div>
-          <VitalConnectionDialog
-            source={vitalConnectionDialogSource}
-            onContinue={() => setVitalConnectionDialogSource(null)}
-            onOpenChange={(open) => {
-              if (!open) {
-                setVitalConnectionDialogSource(null);
-              }
-            }}
-          />
-        </Section>
-
-        <Separator />
-
         <Section title="Email Murph Picker">
           <p className="text-sm text-muted-foreground">
-            Settings link that opens a chooser between the native mail app and
-            the user&apos;s webmail provider. Provider is detected from the
-            member&apos;s email domain; addresses on unknown providers fall
-            through to a plain mailto link (no dialog).
+            Settings link that opens a chooser between the native mail app and the
+            user&apos;s webmail provider. Provider is detected from the member&apos;s
+            email domain; addresses on unknown providers fall through to a plain
+            mailto link (no dialog).
           </p>
           <div className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3">
             <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -1953,36 +1809,12 @@ export function ComponentsContent() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             {[
-              {
-                label: "Gmail",
-                userEmail: "member@gmail.com",
-                icon: "Gmail" as const,
-              },
-              {
-                label: "Outlook",
-                userEmail: "member@outlook.com",
-                icon: "Outlook" as const,
-              },
-              {
-                label: "Yahoo Mail",
-                userEmail: "member@yahoo.com",
-                icon: "Yahoo Mail" as const,
-              },
-              {
-                label: "Proton Mail",
-                userEmail: "member@proton.me",
-                icon: "Proton Mail" as const,
-              },
-              {
-                label: "Fastmail",
-                userEmail: "member@fastmail.com",
-                icon: "Fastmail" as const,
-              },
-              {
-                label: "Custom domain (no dialog)",
-                userEmail: "member@example.com",
-                icon: null,
-              },
+              { label: "Gmail", userEmail: "member@gmail.com", icon: "Gmail" as const },
+              { label: "Outlook", userEmail: "member@outlook.com", icon: "Outlook" as const },
+              { label: "Yahoo Mail", userEmail: "member@yahoo.com", icon: "Yahoo Mail" as const },
+              { label: "Proton Mail", userEmail: "member@proton.me", icon: "Proton Mail" as const },
+              { label: "Fastmail", userEmail: "member@fastmail.com", icon: "Fastmail" as const },
+              { label: "Custom domain (no dialog)", userEmail: "member@example.com", icon: null },
             ].map((variant) => (
               <div
                 key={variant.label}
@@ -1990,10 +1822,7 @@ export function ComponentsContent() {
               >
                 <div className="flex items-center gap-2">
                   {variant.icon ? (
-                    <WebmailIcon
-                      label={variant.icon}
-                      className="size-4 shrink-0"
-                    />
+                    <WebmailIcon label={variant.icon} className="size-4 shrink-0" />
                   ) : (
                     <span className="size-4 shrink-0" aria-hidden="true" />
                   )}
@@ -2014,13 +1843,13 @@ export function ComponentsContent() {
 
         <Section id="phone-account-linking" title="Phone Account Linking">
           <p className="text-sm leading-6 text-muted-foreground">
-            Settings opens the authenticated identity provider directly, with no
-            second Murph confirmation. After verification or an approved account
-            transfer, Murph saves the exact provider-owned result. If Privy
-            already has a verified phone that Murph has not recorded, Settings
-            repairs that projection directly. A declined transfer closes
-            quietly, and a failed save retries without reopening Privy. Existing
-            phone accounts use the same surface for replacement.
+            Settings opens the authenticated identity provider directly, with
+            no second Murph confirmation. After verification or an approved
+            account transfer, Murph saves the exact provider-owned result. If
+            Privy already has a verified phone that Murph has not recorded,
+            Settings repairs that projection directly. A declined transfer
+            closes quietly, and a failed save retries without reopening Privy.
+            Existing phone accounts use the same surface for replacement.
             Support-required conflicts stop retrying and leave one direct email
             action without putting account identifiers in the message.
             Privacy-safe lifecycle diagnostics observe these states without
@@ -2084,11 +1913,11 @@ export function ComponentsContent() {
             </div>
           </div>
           <p className="text-sm leading-6 text-muted-foreground">
-            The join card composes that action with its reserved status line and
-            the Telegram alternative. The status line holds its height while
-            empty so the button never moves when a message arrives, so these
-            previews show the real resting spacing between the two contact
-            channels.
+            The join card composes that action with its reserved status line
+            and the Telegram alternative. The status line holds its height
+            while empty so the button never moves when a message arrives, so
+            these previews show the real resting spacing between the two
+            contact channels.
           </p>
           <div
             aria-label="Composed contact channel card previews"
@@ -2166,16 +1995,18 @@ export function ComponentsContent() {
             >
               Preview terminal dialog
             </Button>
-            {phoneTransferSupportDialogOpen ? (
-              <HostedPhonePrivyHandOffStatus
-                errorMessage="That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely."
-                isLinking={false}
-                isRetryAllowed={false}
-                isSyncing={false}
-                onAborted={() => setPhoneTransferSupportDialogOpen(false)}
-                onRetry={() => {}}
-              />
-            ) : null}
+            {phoneTransferSupportDialogOpen
+              ? (
+                  <HostedPhonePrivyHandOffStatus
+                    errorMessage="That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely."
+                    isLinking={false}
+                    isRetryAllowed={false}
+                    isSyncing={false}
+                    onAborted={() => setPhoneTransferSupportDialogOpen(false)}
+                    onRetry={() => {}}
+                  />
+                )
+              : null}
           </div>
         </Section>
 
@@ -2183,8 +2014,8 @@ export function ComponentsContent() {
 
         <Section title="Hosted AI usage credits and referrals">
           <p className="text-sm text-muted-foreground">
-            Read-only Settings detail keeps current referrals visible and moves
-            completed referrals and purchased credits into quiet history.
+            Read-only Settings detail keeps current referrals visible and
+            moves completed referrals and purchased credits into quiet history.
           </p>
           <div
             aria-label="Read-only hosted AI usage activity previews"
@@ -2256,8 +2087,8 @@ export function ComponentsContent() {
         <Section title="Hosted Family Manager">
           <p className="text-sm text-muted-foreground">
             Family members and pending invites use cards under 768px and the
-            compact table layout above it. This fixture keeps all contact
-            details synthetic and does not submit settings mutations.
+            compact table layout above it. This fixture keeps all contact details
+            synthetic and does not submit settings mutations.
           </p>
           <div
             aria-label="Read-only hosted Family preview"
@@ -2301,20 +2132,8 @@ export function ComponentsContent() {
                 },
               ]}
               plans={{
-                edge: {
-                  active: 1,
-                  billed: 2,
-                  invited: 1,
-                  remaining: 0,
-                  used: 2,
-                },
-                pulse: {
-                  active: 1,
-                  billed: 1,
-                  invited: 0,
-                  remaining: 0,
-                  used: 1,
-                },
+                edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+                pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
               }}
               seats={{
                 active: 2,
@@ -2345,10 +2164,7 @@ export function ComponentsContent() {
             <Button onClick={() => setAssistantStylePickerStep("tone")}>
               Preview tone step
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() => setAssistantStylePickerStep("voice")}
-            >
+            <Button variant="secondary" onClick={() => setAssistantStylePickerStep("voice")}>
               Preview voice step
             </Button>
           </div>
@@ -2400,10 +2216,9 @@ export function ComponentsContent() {
         <Section title="Contact Card Picker">
           <p className="text-sm text-muted-foreground">
             Post-signup drawer/dialog where a new member picks the photo on
-            Murph&apos;s contact card, then adds Murph as a contact. Drawer
-            under 768px, dialog above. The chosen avatar only changes the
-            picture on the vCard the member saves; Murph stays the same
-            everywhere else.
+            Murph&apos;s contact card, then adds Murph as a contact. Drawer under
+            768px, dialog above. The chosen avatar only changes the picture on
+            the vCard the member saves; Murph stays the same everywhere else.
           </p>
           <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -2481,19 +2296,8 @@ export function ComponentsContent() {
 
         <Section title="Sheet">
           <Sheet>
-            <div className="flex">
-              <SheetTrigger
-                render={<Button variant="outline">Open Sheet</Button>}
-              />
-            </div>
-            <SheetContent>
-              <SheetHeader>
-                <SheetTitle>Experiment Settings</SheetTitle>
-                <SheetDescription>
-                  Adjust protocol parameters before starting.
-                </SheetDescription>
-              </SheetHeader>
-            </SheetContent>
+            <div className="flex"><SheetTrigger render={<Button variant="outline">Open Sheet</Button>} /></div>
+            <SheetContent><SheetHeader><SheetTitle>Experiment Settings</SheetTitle><SheetDescription>Adjust protocol parameters before starting.</SheetDescription></SheetHeader></SheetContent>
           </Sheet>
         </Section>
 
@@ -2501,11 +2305,7 @@ export function ComponentsContent() {
 
         <Section title="Dropdown Menu">
           <DropdownMenu>
-            <div className="flex">
-              <DropdownMenuTrigger
-                render={<Button variant="outline">Actions ▾</Button>}
-              />
-            </div>
+            <div className="flex"><DropdownMenuTrigger render={<Button variant="outline">Actions ▾</Button>} /></div>
             <DropdownMenuContent>
               <DropdownMenuItem>View protocol</DropdownMenuItem>
               <DropdownMenuItem>Share results</DropdownMenuItem>
@@ -2518,18 +2318,9 @@ export function ComponentsContent() {
 
         <Section title="Collapsible">
           <Collapsible open={collapsibleOpen} onOpenChange={setCollapsibleOpen}>
-            <CollapsibleTrigger
-              render={
-                <Button variant="outline">
-                  {collapsibleOpen ? "Hide" : "Show"} completed timeline
-                </Button>
-              }
-            />
+            <CollapsibleTrigger render={<Button variant="outline">{collapsibleOpen ? "Hide" : "Show"} completed timeline</Button>} />
             <CollapsibleContent className="mt-3">
-              <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                Timeline content that was collapsed. 8 sessions logged, 2
-                checkpoints reached.
-              </div>
+              <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">Timeline content that was collapsed. 8 sessions logged, 2 checkpoints reached.</div>
             </CollapsibleContent>
           </Collapsible>
         </Section>
@@ -2539,11 +2330,7 @@ export function ComponentsContent() {
         <Section title="Scroll Area">
           <ScrollArea className="h-48 max-w-sm rounded-xl border border-border bg-card p-4">
             <div className="flex flex-col gap-3">
-              {Array.from({ length: 12 }, (_, i) => (
-                <div key={i} className="text-sm">
-                  Mar {18 + i} · Session {i + 1} logged
-                </div>
-              ))}
+              {Array.from({ length: 12 }, (_, i) => (<div key={i} className="text-sm">Mar {18 + i} · Session {i + 1} logged</div>))}
             </div>
           </ScrollArea>
         </Section>
@@ -2552,44 +2339,12 @@ export function ComponentsContent() {
 
         <Section title="Table">
           <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Metric</TableHead>
-                <TableHead>Before → After</TableHead>
-                <TableHead className="text-right">Change</TableHead>
-              </TableRow>
-            </TableHeader>
+            <TableHeader><TableRow><TableHead>Metric</TableHead><TableHead>Before → After</TableHead><TableHead className="text-right">Change</TableHead></TableRow></TableHeader>
             <TableBody>
-              <TableRow>
-                <TableCell className="font-semibold">HRV</TableCell>
-                <TableCell>46.5 → 53.8 ms</TableCell>
-                <TableCell className="text-right font-semibold text-primary">
-                  +15.7%
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell className="font-semibold">Resting HR</TableCell>
-                <TableCell>64.2 → 60.1 bpm</TableCell>
-                <TableCell className="text-right font-semibold text-primary">
-                  −6.4%
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell className="font-semibold">Deep Sleep</TableCell>
-                <TableCell>1h 28m → 1h 44m</TableCell>
-                <TableCell className="text-right font-semibold text-primary">
-                  +18.2%
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell className="font-semibold">
-                  Respiratory Rate
-                </TableCell>
-                <TableCell>11.6 → 11.3 br/min</TableCell>
-                <TableCell className="text-right text-muted-foreground">
-                  −2.6%
-                </TableCell>
-              </TableRow>
+              <TableRow><TableCell className="font-semibold">HRV</TableCell><TableCell>46.5 → 53.8 ms</TableCell><TableCell className="text-right font-semibold text-primary">+15.7%</TableCell></TableRow>
+              <TableRow><TableCell className="font-semibold">Resting HR</TableCell><TableCell>64.2 → 60.1 bpm</TableCell><TableCell className="text-right font-semibold text-primary">−6.4%</TableCell></TableRow>
+              <TableRow><TableCell className="font-semibold">Deep Sleep</TableCell><TableCell>1h 28m → 1h 44m</TableCell><TableCell className="text-right font-semibold text-primary">+18.2%</TableCell></TableRow>
+              <TableRow><TableCell className="font-semibold">Respiratory Rate</TableCell><TableCell>11.6 → 11.3 br/min</TableCell><TableCell className="text-right text-muted-foreground">−2.6%</TableCell></TableRow>
             </TableBody>
           </Table>
         </Section>
@@ -2598,30 +2353,9 @@ export function ComponentsContent() {
 
         <Section title="Tabs">
           <Tabs defaultValue="protocol" className="w-full">
-            <TabsList>
-              <TabsTrigger value="protocol">Protocol</TabsTrigger>
-              <TabsTrigger value="results">Your Results</TabsTrigger>
-            </TabsList>
-            <TabsContent value="protocol">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Protocol content</CardTitle>
-                  <CardDescription>
-                    Description of the experiment protocol.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </TabsContent>
-            <TabsContent value="results">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Your Results content</CardTitle>
-                  <CardDescription>
-                    Metrics, charts, and timeline.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </TabsContent>
+            <TabsList><TabsTrigger value="protocol">Protocol</TabsTrigger><TabsTrigger value="results">Your Results</TabsTrigger></TabsList>
+            <TabsContent value="protocol"><Card><CardHeader><CardTitle>Protocol content</CardTitle><CardDescription>Description of the experiment protocol.</CardDescription></CardHeader></Card></TabsContent>
+            <TabsContent value="results"><Card><CardHeader><CardTitle>Your Results content</CardTitle><CardDescription>Metrics, charts, and timeline.</CardDescription></CardHeader></Card></TabsContent>
           </Tabs>
         </Section>
 
@@ -2630,15 +2364,9 @@ export function ComponentsContent() {
         <Section title="Progress">
           <div className="flex flex-col gap-2">
             <div className="flex justify-between">
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-primary">
-                Baseline · 14d ✓
-              </span>
-              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em]">
-                Active · Day 1 of 14
-              </span>
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
-                Analysis
-              </span>
+              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-primary">Baseline · 14d ✓</span>
+              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em]">Active · Day 1 of 14</span>
+              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">Analysis</span>
             </div>
             <Progress value={54} className="h-1.5" />
           </div>
@@ -2648,32 +2376,8 @@ export function ComponentsContent() {
 
         <Section title="Card">
           <div className="grid grid-cols-2 gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Default Card</CardTitle>
-                <CardDescription>
-                  Standard card with header and content.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  Card content goes here.
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Research</CardTitle>
-                <CardDescription>
-                  8 studies · 6,890 participants
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  Strong evidence base with 20-year follow-up.
-                </p>
-              </CardContent>
-            </Card>
+            <Card><CardHeader><CardTitle>Default Card</CardTitle><CardDescription>Standard card with header and content.</CardDescription></CardHeader><CardContent><p className="text-sm text-muted-foreground">Card content goes here.</p></CardContent></Card>
+            <Card><CardHeader><CardTitle>Research</CardTitle><CardDescription>8 studies · 6,890 participants</CardDescription></CardHeader><CardContent><p className="text-sm text-muted-foreground">Strong evidence base with 20-year follow-up.</p></CardContent></Card>
           </div>
         </Section>
 
@@ -2681,32 +2385,9 @@ export function ComponentsContent() {
 
         <Section title="Metric Card">
           <div className="flex gap-3">
-            <MetricCard
-              label="HRV"
-              value="53.8"
-              unit="ms"
-              delta="+15.7%"
-              direction="up"
-              baseline="46.5"
-              expected="+10–25%"
-            />
-            <MetricCard
-              label="Resting HR"
-              value="60.1"
-              unit="bpm"
-              delta="−6.4%"
-              direction="down"
-              baseline="64.2"
-              expected="−3–8 bpm"
-            />
-            <MetricCard
-              label="Deep Sleep"
-              value="1h44m"
-              delta="+18.2%"
-              direction="up"
-              baseline="1h28m"
-              expected="+15–30%"
-            />
+            <MetricCard label="HRV" value="53.8" unit="ms" delta="+15.7%" direction="up" baseline="46.5" expected="+10–25%" />
+            <MetricCard label="Resting HR" value="60.1" unit="bpm" delta="−6.4%" direction="down" baseline="64.2" expected="−3–8 bpm" />
+            <MetricCard label="Deep Sleep" value="1h44m" delta="+18.2%" direction="up" baseline="1h28m" expected="+15–30%" />
           </div>
         </Section>
 
@@ -2714,63 +2395,16 @@ export function ComponentsContent() {
 
         <Section title="Timeline">
           <div className="max-w-sm rounded-xl border border-border bg-card p-5">
-            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-              Plan & Timeline
-            </span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Plan & Timeline</span>
             <div className="mt-4 flex flex-col gap-4">
-              <TimelineEntry
-                date="Apr 15"
-                label="End"
-                title="Experiment ends"
-                description="Final analysis generated"
-                variant="default"
-                upcoming
-              />
-              <TimelineEntry
-                date="Apr 14"
-                label="Checkpoint"
-                title="Week 2 review"
-                variant="outline"
-                upcoming
-              />
-              <TimelineEntry
-                date="Apr 6"
-                label="Upcoming"
-                title="Session 3 of 3"
-                upcoming
-              />
-              <TimelineEntry
-                date="Apr 5"
-                label="Today"
-                title="Session logged"
-                description="20 min at 85°C. Deep sleep was 1h50m last night."
-              />
-              <TimelineEntry
-                date="Apr 4"
-                title="HRV milestone"
-                description="HRV crossed 50ms for the first time."
-              />
-              <TimelineEntry
-                date="Apr 3"
-                title="Skipped session"
-                description="Feeling unwell, rest day."
-                variant="muted"
-              />
-              <TimelineEntry
-                date="Apr 1"
-                label="Checkpoint"
-                title="Baseline complete"
-                description="Baseline captured. Active phase started."
-                variant="outline"
-              />
-              <TimelineEntry
-                date="Mar 18"
-                label="Start"
-                title="Experiment started"
-                description="Finnish Sauna Protocol · 28 days"
-                variant="primary"
-                last
-              />
+              <TimelineEntry date="Apr 15" label="End" title="Experiment ends" description="Final analysis generated" variant="default" upcoming />
+              <TimelineEntry date="Apr 14" label="Checkpoint" title="Week 2 review" variant="outline" upcoming />
+              <TimelineEntry date="Apr 6" label="Upcoming" title="Session 3 of 3" upcoming />
+              <TimelineEntry date="Apr 5" label="Today" title="Session logged" description="20 min at 85°C. Deep sleep was 1h50m last night." />
+              <TimelineEntry date="Apr 4" title="HRV milestone" description="HRV crossed 50ms for the first time." />
+              <TimelineEntry date="Apr 3" title="Skipped session" description="Feeling unwell, rest day." variant="muted" />
+              <TimelineEntry date="Apr 1" label="Checkpoint" title="Baseline complete" description="Baseline captured. Active phase started." variant="outline" />
+              <TimelineEntry date="Mar 18" label="Start" title="Experiment started" description="Finnish Sauna Protocol · 28 days" variant="primary" last />
             </div>
           </div>
         </Section>
@@ -2778,37 +2412,16 @@ export function ComponentsContent() {
         <Separator />
 
         <Section title="Next Step Card">
-          <NextStepCard
-            title="Sauna session · 15–20 min @ 80–100°C"
-            when="Today evening"
-            instructions="Stay hydrated, electrolytes after"
-            context="Session 2 of 3 this week"
-            nextSession="Friday"
-          />
+          <NextStepCard title="Sauna session · 15–20 min @ 80–100°C" when="Today evening" instructions="Stay hydrated, electrolytes after" context="Session 2 of 3 this week" nextSession="Friday" />
         </Section>
 
         <Separator />
 
         <Section title="Expected Signal Card">
           <div className="flex gap-4">
-            <ExpectedSignalCard
-              label="HRV"
-              expected="+10–25%"
-              direction="up"
-              description="Heat stress trains the autonomic nervous system, increasing parasympathetic dominance at rest."
-            />
-            <ExpectedSignalCard
-              label="Resting HR"
-              expected="-3–8 bpm"
-              direction="down"
-              description="Repeated heat exposure improves cardiac output efficiency, lowering resting heart rate."
-            />
-            <ExpectedSignalCard
-              label="Deep Sleep"
-              expected="+15–30%"
-              direction="up"
-              description="Core temp drop after sauna triggers deeper slow-wave sleep via thermoregulatory pathways."
-            />
+            <ExpectedSignalCard label="HRV" expected="+10–25%" direction="up" description="Heat stress trains the autonomic nervous system, increasing parasympathetic dominance at rest." />
+            <ExpectedSignalCard label="Resting HR" expected="-3–8 bpm" direction="down" description="Repeated heat exposure improves cardiac output efficiency, lowering resting heart rate." />
+            <ExpectedSignalCard label="Deep Sleep" expected="+15–30%" direction="up" description="Core temp drop after sauna triggers deeper slow-wave sleep via thermoregulatory pathways." />
           </div>
         </Section>
 
@@ -2816,55 +2429,10 @@ export function ComponentsContent() {
 
         <Section title="Conclusion Card">
           <div className="flex flex-col gap-4">
-            <ConclusionCard
-              title="What worked"
-              variant="positive"
-              items={[
-                {
-                  icon: "↑",
-                  text: "HRV +15.7% — well above ±4% normal variation.",
-                },
-                {
-                  icon: "↑",
-                  text: "Deep sleep +18.2% — evening timing was key.",
-                },
-              ]}
-            />
-            <ConclusionCard
-              title="What didn't change"
-              variant="neutral"
-              items={[
-                {
-                  icon: "→",
-                  text: "Respiratory rate -2.6% — within normal variation.",
-                },
-              ]}
-            />
-            <ConclusionCard
-              title="Key insights"
-              variant="insight"
-              items={[
-                {
-                  icon: "•",
-                  text: "Evening sessions drove sleep gains. Morning sessions showed no benefit.",
-                },
-                {
-                  icon: "•",
-                  text: "2–3x/week appears sufficient. Skipping one session had no negative impact.",
-                },
-              ]}
-            />
-            <ConclusionCard
-              title="Recommendations"
-              variant="recommendation"
-              items={[
-                { icon: "→", text: "Continue sauna 2x/week as maintenance." },
-                {
-                  icon: "→",
-                  text: "Add cold exposure post-sauna for contrast protocol.",
-                },
-              ]}
-            />
+            <ConclusionCard title="What worked" variant="positive" items={[{ icon: "↑", text: "HRV +15.7% — well above ±4% normal variation." }, { icon: "↑", text: "Deep sleep +18.2% — evening timing was key." }]} />
+            <ConclusionCard title="What didn't change" variant="neutral" items={[{ icon: "→", text: "Respiratory rate -2.6% — within normal variation." }]} />
+            <ConclusionCard title="Key insights" variant="insight" items={[{ icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." }, { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." }]} />
+            <ConclusionCard title="Recommendations" variant="recommendation" items={[{ icon: "→", text: "Continue sauna 2x/week as maintenance." }, { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." }]} />
           </div>
         </Section>
 
@@ -2884,38 +2452,10 @@ export function ComponentsContent() {
 
         <Section title="Health Domain Card">
           <div className="grid grid-cols-2 gap-4">
-            <HealthDomainCard
-              title="Sleep & Recovery"
-              description="Deep sleep and HRV below your potential."
-              score={42}
-              status="biggest-opportunity"
-              statusLabel="Biggest opportunity"
-              secondaryInfo="3 experiments available"
-            />
-            <HealthDomainCard
-              title="Cardiovascular & Fitness"
-              description="RHR decent but flat. Zone 2 experiment running."
-              score={64}
-              status="experiment-active"
-              statusLabel="Experiment active"
-              secondaryInfo="Zone 2 RHR Reset · Day 14"
-            />
-            <HealthDomainCard
-              title="Supplements"
-              description="No experiments run yet."
-              score={null}
-              status="not-started"
-              statusLabel="Not started"
-              secondaryInfo="5 experiments available"
-            />
-            <HealthDomainCard
-              title="Stress & Calm"
-              description="HRV patterns suggest elevated baseline stress."
-              score={35}
-              status="worth-attention"
-              statusLabel="Worth attention"
-              secondaryInfo="4 experiments available"
-            />
+            <HealthDomainCard title="Sleep & Recovery" description="Deep sleep and HRV below your potential." score={42} status="biggest-opportunity" statusLabel="Biggest opportunity" secondaryInfo="3 experiments available" />
+            <HealthDomainCard title="Cardiovascular & Fitness" description="RHR decent but flat. Zone 2 experiment running." score={64} status="experiment-active" statusLabel="Experiment active" secondaryInfo="Zone 2 RHR Reset · Day 14" />
+            <HealthDomainCard title="Supplements" description="No experiments run yet." score={null} status="not-started" statusLabel="Not started" secondaryInfo="5 experiments available" />
+            <HealthDomainCard title="Stress & Calm" description="HRV patterns suggest elevated baseline stress." score={35} status="worth-attention" statusLabel="Worth attention" secondaryInfo="4 experiments available" />
           </div>
         </Section>
 
@@ -2942,45 +2482,20 @@ export function ComponentsContent() {
 
         <Section title="Plan selling points">
           <p className="-mt-3 text-xs text-muted-foreground">
-            Canonical bullet lists from lib/hosted-onboarding/plan-features.ts.
-            The join page, billing settings, and the plan dialogs all render
-            from these lists, so a wording change here is the wording change
-            everywhere. Only Edge may claim the most capable AI models; the top
-            model requires an active paid Edge plan.
+            Canonical bullet lists from lib/hosted-onboarding/plan-features.ts. The join page,
+            billing settings, and the plan dialogs all render from these lists, so a wording
+            change here is the wording change everywhere. Only Edge may claim the most capable
+            AI models; the top model requires an active paid Edge plan.
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <PlanBulletListStudy
-              title="Pulse trial · join page"
-              features={PULSE_TRIAL_FEATURES}
-            />
-            <PlanBulletListStudy
-              title="Pulse · join page"
-              features={JOIN_PULSE_FEATURES}
-            />
-            <PlanBulletListStudy
-              title="Edge · join page"
-              features={JOIN_EDGE_FEATURES}
-            />
-            <PlanBulletListStudy
-              title="Family · join page"
-              features={JOIN_FAMILY_FEATURES}
-            />
-            <PlanBulletListStudy
-              title="Core · settings"
-              features={SETTINGS_CORE_FEATURES}
-            />
-            <PlanBulletListStudy
-              title="Pulse · settings"
-              features={SETTINGS_PULSE_FEATURES}
-            />
-            <PlanBulletListStudy
-              title="Edge · settings"
-              features={SETTINGS_EDGE_FEATURES}
-            />
-            <PlanBulletListStudy
-              title="Family · settings"
-              features={SETTINGS_FAMILY_FEATURES}
-            />
+            <PlanBulletListStudy title="Pulse trial · join page" features={PULSE_TRIAL_FEATURES} />
+            <PlanBulletListStudy title="Pulse · join page" features={JOIN_PULSE_FEATURES} />
+            <PlanBulletListStudy title="Edge · join page" features={JOIN_EDGE_FEATURES} />
+            <PlanBulletListStudy title="Family · join page" features={JOIN_FAMILY_FEATURES} />
+            <PlanBulletListStudy title="Core · settings" features={SETTINGS_CORE_FEATURES} />
+            <PlanBulletListStudy title="Pulse · settings" features={SETTINGS_PULSE_FEATURES} />
+            <PlanBulletListStudy title="Edge · settings" features={SETTINGS_EDGE_FEATURES} />
+            <PlanBulletListStudy title="Family · settings" features={SETTINGS_FAMILY_FEATURES} />
             <PlanBulletListStudy
               title="Pulse · start-paid dialog"
               features={CHECKOUT_PULSE_FEATURES}
@@ -2998,10 +2513,9 @@ export function ComponentsContent() {
 
         <Section title="Trial Billing Banner">
           <p className="-mt-3 text-xs text-muted-foreground">
-            Shown on Home when a Pulse trial is paused with billing still
-            attached. It is the dashboard&apos;s only billing-recovery action,
-            which is why lapsed members are sent to the Subscription controls
-            rather than here.
+            Shown on Home when a Pulse trial is paused with billing still attached. It is the
+            dashboard&apos;s only billing-recovery action, which is why lapsed members are sent
+            to the Subscription controls rather than here.
           </p>
           <TrialBillingBanner />
         </Section>
@@ -3010,14 +2524,7 @@ export function ComponentsContent() {
 
         <Section title="Active Experiment Banner & Profile Stats">
           <div className="flex items-stretch gap-4">
-            <div className="flex-1">
-              <ActiveExperimentBanner
-                id="demo"
-                title="Zone 2 RHR Reset"
-                day={14}
-                totalDays={28}
-              />
-            </div>
+            <div className="flex-1"><ActiveExperimentBanner id="demo" title="Zone 2 RHR Reset" day={14} totalDays={28} /></div>
             <ProfileStats completed={2} daysTracked={47} />
           </div>
         </Section>
@@ -3026,19 +2533,14 @@ export function ComponentsContent() {
 
         <Section title="Floating Island">
           <p className="-mt-3 text-xs text-muted-foreground">
-            Used on the computer handoff page to confirm a manual browser step.
-            Drag the chip by the icon.
+            Used on the computer handoff page to confirm a manual browser step. Drag the chip by the icon.
           </p>
           <div className="relative h-64 overflow-hidden rounded-2xl bg-foreground">
             <div className="absolute inset-x-0 bottom-0 flex justify-center px-3 pb-4">
-              <ComputerHandoffFloatingIsland
-                persistKey={null}
+              <ComputerHandoffFloatingIsland persistKey={null}
                 handle={
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                    <Monitor
-                      className="h-3.5 w-3.5 text-primary"
-                      aria-hidden="true"
-                    />
+                    <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
                   </span>
                 }
               >
@@ -3080,11 +2582,11 @@ async function acceptDesignDashboardConsentScope(
       missingDocuments: [],
     };
   });
-  const launchScopes = input.currentStatus.launchScopes.map((scopeStatus) =>
+  const launchScopes = input.currentStatus.launchScopes.map((scopeStatus) => (
     scopeStatus.scope === input.scope
       ? { ...scopeStatus, granted: true, missingDocuments: [] }
-      : scopeStatus,
-  );
+      : scopeStatus
+  ));
 
   return {
     ...input.currentStatus,
