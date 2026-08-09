@@ -21,9 +21,11 @@ import {
 } from '../src/assistant/automation/reply.ts'
 import {
   createAssistantOutboxIntent,
+  dispatchAssistantOutboxIntent,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
+import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 
 const replyEventPathMocks = vi.hoisted(() => ({
   listAssistantOutboxIntents: vi.fn(),
@@ -675,6 +677,100 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('linq-msg-murph-split-text')
     expect(prompt).not.toContain('linq-msg-murph-split-link')
     expect(prompt).not.toContain('memo-split-fallback.m4a')
+  })
+
+  it('persists ordinary physical Linq effects before resolving native replies', async () => {
+    const vault = await createTempVault()
+    const requestedMessage = 'Read this\nhttps://example.test/report'
+    const intent = await createAssistantOutboxIntent({
+      actorId: null,
+      channel: 'linq',
+      dedupeToken: 'ordinary-physical-effects',
+      explicitTarget: 'thread-1',
+      identityId: 'identity-1',
+      message: requestedMessage,
+      sessionId: 'session-ordinary-physical-effects',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+      turnId: 'turn-ordinary-physical-effects',
+      vault,
+    })
+    let requestCount = 0
+    const sendLinq = vi.fn(async (request) => await sendLinqMessage(request, {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: vi.fn(async () => {
+        requestCount += 1
+        return new Response(JSON.stringify({
+          chat_id: 'thread-1',
+          message: {
+            id: requestCount === 1
+              ? 'linq-msg-ordinary-text'
+              : 'linq-msg-ordinary-link',
+          },
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    }))
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-08-07T21:09:00.000Z'),
+      vault,
+    })
+    expect(requestCount).toBe(2)
+    expect(dispatched.intent.status).toBe('sent')
+    const persisted = await readAssistantOutboxIntent(vault, intent.intentId)
+    if (!persisted) {
+      throw new Error('expected persisted ordinary Linq delivery')
+    }
+    expect(persisted.delivery).toMatchObject({
+      providerMessageEffects: [
+        {
+          message: 'Read this',
+          providerMessageId: 'linq-msg-ordinary-text',
+        },
+        {
+          message: null,
+          providerMessageId: 'linq-msg-ordinary-link',
+        },
+      ],
+      providerMessageIds: [
+        'linq-msg-ordinary-text',
+        'linq-msg-ordinary-link',
+      ],
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([persisted])
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createLinqGroupCandidate({
+        inputId: 'ain_16161616161616161616161616161616',
+        messageId: 'linq-msg-reply-to-ordinary-link',
+        occurredAt: '2026-08-07T21:10:00.000Z',
+        replyToMessageId: 'linq-msg-ordinary-link',
+        text: 'What about this link?',
+      })),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const linkPrompt = readSentPrompt()
+    expect(linkPrompt).toContain(
+      'The sender explicitly replied to an exact prior assistant media delivery',
+    )
+    expect(linkPrompt).not.toContain('Read this')
+    expect(linkPrompt).not.toContain('https://example.test/report')
+    expect(linkPrompt).not.toContain('linq-msg-ordinary-text')
+    expect(linkPrompt).not.toContain('linq-msg-ordinary-link')
   })
 
   it('preserves the explicit-reply boundary for private provider placeholders', async () => {

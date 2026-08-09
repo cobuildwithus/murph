@@ -639,6 +639,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: deliveredTarget ?? providerThreadId ?? candidate.target,
       targetKind: inferDeliveredLinqTargetKind(candidate.kind, delivered),
       providerMessageId: readDeliveredProviderMessageId(delivered),
+      providerMessageEffects: readDeliveredProviderMessageEffects(delivered),
       providerMessageIds: readDeliveredProviderMessageIds(delivered),
       providerThreadId: providerThreadId ?? deliveredTarget,
     }
