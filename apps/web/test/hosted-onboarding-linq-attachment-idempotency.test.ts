@@ -319,18 +319,47 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(provider.acceptedMessageIds).toEqual([]);
   });
 
-  it("still reports a card sent when its accepted response body stalls", async () => {
+  it("reconciles an accepted send whose response body stalls", async () => {
     provider.arm({ kind: "post_accept_stalled_body", responses: 1 });
 
     const { error, result } = await send();
 
-    // The 200 already proved acceptance; only the message identity is lost, and
-    // no caller of this send depends on it. Crucially the read is bounded, so
-    // the attempt cannot outlive the budget its caller was promised.
+    // Headers said accepted but the answer never finished arriving, so nothing
+    // was established. The same-key resubmission replays the original message
+    // rather than accepting a second one, which is what makes it safe.
+    expect(error).toBeNull();
+    expect(result).toEqual({ chatId: "chat_direct_1", messageId: "linq_msg_1" });
+    expect(provider.observedSendBodies).toHaveLength(2);
+    expect(provider.observedSendBodies[0]).toBe(provider.observedSendBodies[1]);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+  });
+
+  it("reports unconfirmed when the reconciled body also never arrives", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 2 });
+
+    const { error } = await send();
+
+    // Reconciliation was the one attempt available and it could not be read
+    // either, so the request ends explicitly unresolved rather than claiming
+    // a delivery it never established — and still exactly one card exists.
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(true);
+    expect(isHostedLinqIdempotencyKeyReuseFailure(error)).toBe(false);
+    expect(provider.observedSendBodies).toHaveLength(2);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+  });
+
+  it("keeps an unkeyed accepted send sent when its body stalls", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 1 });
+
+    const { error, result } = await send(null);
+
+    // Without a key a resubmission would accept a second message, so there is
+    // no safe way to learn more. The 200 already proved acceptance; only the
+    // message identity is lost, and no caller of this send uses it.
     expect(error).toBeNull();
     expect(result).toEqual({ chatId: null, messageId: null });
-    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
     expect(provider.observedSendBodies).toHaveLength(1);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
   });
 
   it("treats a conflict whose body never arrives as unresolved, not as failed", async () => {

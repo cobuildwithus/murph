@@ -914,9 +914,19 @@ export async function sendHostedLinqAttachmentMessage(input: {
     throw failure;
   }
 
-  // The 200 already proves acceptance, so a body we cannot finish reading only
-  // costs the message identity, which no caller of this send depends on.
-  return readHostedLinqAttachmentSendResult(await readRemainingBody(sendResponse));
+  const acceptedBody = await readRemainingBody(sendResponse);
+  if (acceptedBody === null && idempotencyKey !== null) {
+    // Accepted, but the answer never finished arriving, so the send owner has
+    // not established anything it can report. The same-key resubmission is the
+    // one way to turn that into a fact, and it replays rather than accepting a
+    // second message. An unkeyed send has no such move, so it keeps the 200.
+    return await reconcileHostedLinqAttachmentSend({
+      cause: buildHostedLinqUnreadAcknowledgementCause(sendResponse.status),
+      readRemainingBody,
+      submitSend,
+    });
+  }
+  return readHostedLinqAttachmentSendResult(acceptedBody);
 }
 
 /**
@@ -942,9 +952,14 @@ async function reconcileHostedLinqAttachmentSend(input: {
     throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
   }
   if (response.ok) {
-    return readHostedLinqAttachmentSendResult(
-      await input.readRemainingBody(response),
-    );
+    const body = await input.readRemainingBody(response);
+    if (body === null) {
+      // Same rule as everywhere else on this boundary: an answer we could not
+      // finish reading is not an answer. Reconciliation was the one attempt
+      // available, so this is where the request ends unresolved.
+      throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
+    }
+    return readHostedLinqAttachmentSendResult(body);
   }
   if (
     response.status === 409
@@ -1234,6 +1249,16 @@ async function readHostedLinqIdempotencyKeyReuseConflictBody(
 export function isHostedLinqIdempotencyKeyReuseFailure(error: unknown): boolean {
   return isHostedOnboardingError(error)
     && error.details?.idempotencyKeyReuseConflict === true;
+}
+
+function buildHostedLinqUnreadAcknowledgementCause(status: number) {
+  return hostedOnboardingError({
+    code: "LINQ_SEND_FAILED",
+    details: { status },
+    httpStatus: 502,
+    message: "Linq attachment send response body did not finish arriving.",
+    retryable: true,
+  });
 }
 
 function buildHostedLinqUnconfirmedAcknowledgementError(cause: unknown) {
