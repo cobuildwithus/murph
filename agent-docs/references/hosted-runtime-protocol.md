@@ -1499,8 +1499,12 @@ image operation; a retry requires user authorization in a later turn. Old
 readers continue to understand the unchanged failed envelope. The diagnostic may contain only the adapter's bounded
 structured error message, code, request id, and fixed local context, never an
 authorization header, credential, raw response body, prompt payload, or image
-bytes. Normal foreground selection therefore keeps fresh conversation ahead of
-the completion and owns completion retry and terminal evidence. Provider
+bytes. The runtime carries the exact ready completion input into the next Codex
+admission instead of rediscovering it through mailbox priority. If newer
+conversation input is already waiting, the same frozen batch places the trusted
+completion immediately before that input; later input still joins through the
+existing live foreground loop. The ordinary pending input index owns durable
+completion retry and terminal evidence. Provider
 completion starts the existing generic usage recorder without awaiting it, and
 image delivery never waits for accounting or diagnostic writes. When the model
 attaches the private ref, the assistant boundary reloads it and derives

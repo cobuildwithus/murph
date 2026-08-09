@@ -18812,6 +18812,200 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("admits a ready image completion before newly arrived conversation input", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-completion-preemption-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_image_completion_preemption_origin",
+      laneSeq: "1",
+    })];
+    const generatedMedia = {
+      alt: "Generated landscape",
+      contentType: "image/webp" as const,
+      filename: "generated-landscape.webp",
+      kind: "vault_image" as const,
+      ref: "raw/captures/2026/04/generated-landscape.webp",
+      sha256: "c".repeat(64),
+      sizeBytes: 18,
+      source: "gpt-image-2",
+    };
+    const freshInputImported = createDeferred<void>();
+    const imageReady = createDeferred<void>();
+    const combinedPhaseObserved = createDeferred<void>();
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPhaseCalls = 0;
+    let completionInputId: string | null = null;
+    let freshInputId: string | null = null;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_image_completion_preemption",
+            budget: { maxMailboxItems: 10 },
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "5".repeat(64),
+                key: "users/bundles/member-synthetic/image-completion-preemption.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              threadId: "thread_image_completion_preemption",
+              vaultRoot,
+            });
+            if (item.item.laneSeq === "2") {
+              freshInputId = inputId;
+              freshInputImported.resolve();
+            }
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(phaseInput) {
+            assistantPhaseCalls += 1;
+            const assistantInputIds =
+              phaseInput.initialAssistantInputBatch?.assistantInputIds
+              ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+              ?? [];
+            assert.equal(assistantInputIds.length, assistantPhaseCalls === 1 ? 1 : 2);
+            const releaseProviderInputs =
+              await phaseInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: assistantInputIds.map((id) => ({
+                  id,
+                  source: "assistant-input" as const,
+                })),
+              });
+
+            if (assistantPhaseCalls === 1) {
+              const assistantInputId = assistantInputIds[0]!;
+              const imageGenerationLauncher = phaseInput.imageGenerationLauncher;
+              assert.ok(imageGenerationLauncher);
+              assert.equal(
+                imageGenerationLauncher.launch({
+                  continuationSessionId: "asst_image_completion_preemption",
+                  operationId: "image_operation_completion_preemption",
+                  originAssistantInputId: assistantInputId,
+                  originAssistantInputIdExact: false,
+                  scopeId: "session_image_completion_preemption",
+                  async run() {
+                    await imageReady.promise;
+                    return {
+                      media: generatedMedia,
+                      runtimeIssue: null,
+                      savedImageRef: generatedMedia.ref,
+                    };
+                  },
+                }),
+                "started",
+              );
+              imageReady.resolve();
+              await withRealTimeout(
+                (async () => {
+                  while (
+                    imageGenerationLauncher.readStatus?.(
+                      "session_image_completion_preemption",
+                    ) !== "queued"
+                  ) {
+                    await new Promise<void>((resolve) => setImmediate(resolve));
+                  }
+                })(),
+                1_000,
+                () => events.join(","),
+              );
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_image_completion_preemption_fresh",
+                laneSeq: "2",
+                occurredAt: new Date(Date.now() + 1_000).toISOString(),
+              }));
+              runtimeWakeSignal.notify();
+            } else if (assistantPhaseCalls === 2) {
+              completionInputId = assistantInputIds[0]!;
+              const completion = await readAssistantInputEvent({
+                inputId: completionInputId,
+                vault: vaultRoot,
+              });
+              assert.equal(
+                completion?.sourceRef.kind === "hosted-mailbox"
+                  ? completion.sourceRef.payloadSchema
+                  : null,
+                "murph.hosted-image-completion.v1",
+              );
+              assert.ok(freshInputId);
+              assert.deepEqual(assistantInputIds, [completionInputId, freshInputId]);
+              assert.deepEqual(
+                phaseInput.initialAssistantInputBatch?.assistantInputRecords?.map(
+                  (record) => record.assistantInputId,
+                ),
+                assistantInputIds,
+              );
+              combinedPhaseObserved.resolve();
+            } else {
+              throw new Error("Unexpected extra image completion preemption phase.");
+            }
+
+            for (const assistantInputId of assistantInputIds) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: assistantInputId,
+                vaultRoot,
+              });
+            }
+            await releaseProviderInputs?.();
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              foregroundReplyFailed: 0,
+              nextWakeAt: null,
+              progressed: true,
+            };
+          },
+          shutdownSignal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        combinedPhaseObserved.promise,
+        15_000,
+        () => events.join(","),
+      );
+      assert.equal(assistantPhaseCalls, 2);
+    } finally {
+      runtimeAbortController.abort(
+        new DOMException("Synthetic test cleanup.", "AbortError"),
+      );
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("retains queued image state until its committed delivery intent is terminal", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-evidence-retry-"));
     const events: string[] = [];

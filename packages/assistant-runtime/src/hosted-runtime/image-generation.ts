@@ -45,7 +45,7 @@ export interface HostedImageGenerationController {
     inputIds: readonly string[],
     hasCompleteTerminalEvidence: (inputId: string) => Promise<boolean>,
   ): Promise<void>;
-  stageCompleted(): Promise<number>;
+  stageCompleted(): Promise<readonly string[]>;
 }
 
 export function createHostedImageGenerationController(input: {
@@ -252,7 +252,7 @@ export function createHostedImageGenerationController(input: {
       return flushed;
     },
     async stageCompleted() {
-      let staged = 0;
+      const stagedInputIds: string[] = [];
       while (completed.length > 0) {
         const completion = completed[0]!;
         let completionInputId: string | null = null;
@@ -270,7 +270,7 @@ export function createHostedImageGenerationController(input: {
             break;
           } catch {
             if (attempt === 1) {
-              return staged;
+              return stagedInputIds;
             }
           }
         }
@@ -287,9 +287,11 @@ export function createHostedImageGenerationController(input: {
             scopeId: completion.scopeId,
           });
         }
-        staged += 1;
+        if (completionInputId) {
+          stagedInputIds.push(completionInputId);
+        }
       }
-      return staged;
+      return stagedInputIds;
     },
     hasCompleted() {
       return completed.length > 0;
