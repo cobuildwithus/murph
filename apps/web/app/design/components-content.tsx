@@ -1811,6 +1811,35 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section
+          id="experiment-start-channel-picker-study"
+          title="Experiment Start Channel Picker"
+        >
+          <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
+                Continue in the app you already use
+              </p>
+              <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+                The compact picker keeps the selected experiment visible and
+                prepares a short message for review.
+              </p>
+            </div>
+            <Button onClick={() => setChannelPickerOpen(true)}>
+              Preview picker
+            </Button>
+          </div>
+          <StartExperimentChannelDialog
+            onOpenChange={setChannelPickerOpen}
+            open={channelPickerOpen}
+            options={EXPERIMENT_START_CHANNEL_OPTIONS}
+            protocolDays={14}
+            protocolTitle="Example Evening Routine"
+          />
+        </Section>
+
+        <Separator />
+
         <Section title="Vital-backed health source handoff">
           <div className="flex flex-col items-start gap-3">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
