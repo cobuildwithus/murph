@@ -380,14 +380,8 @@ export function HostedBillingSettings(props: {
       name: "Edge",
       note: familyOwner
         ? "End or change the Family plan first, then switch to an individual plan."
-        : maxCurrent && hasPendingEdgeSwitch && pendingEdgeSwitchDate
-          ? (
-              <PendingPlanChangeNote
-                currentPlanName="Max"
-                effectiveAt={pendingEdgeSwitchDate}
-                targetPlanName="Edge"
-              />
-            )
+        : !edgeCurrent && hasPendingEdgeSwitch && pendingEdgeSwitchDate
+          ? `Scheduled to start ${pendingEdgeSwitchDate}`
         : edgeCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
         ? (
             <PendingPlanChangeNote

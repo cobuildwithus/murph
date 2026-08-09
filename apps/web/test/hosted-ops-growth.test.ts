@@ -243,25 +243,34 @@ describe("hosted ops growth metrics", () => {
         {
           billingRef: {
             currentBillingPhase: "paid",
+            currentBillingPlanCode: "launch_max_monthly",
+          },
+          id: "member_max",
+        },
+        {
+          billingRef: {
+            currentBillingPhase: "paid",
             currentBillingPlanCode: "retired_plan",
           },
           id: "member_unknown",
         },
       ],
       statusCounts: zeroStatusCounts,
-      totalMembers: 4,
+      totalMembers: 5,
       trialCandidates: [],
       windowEnd: new Date("2026-07-06T12:00:00.000Z"),
     });
 
     expect(metrics.pulsePaidIndividuals).toBe(1);
     expect(metrics.edgePaidIndividuals).toBe(1);
-    expect(metrics.payingIndividuals).toBe(3);
+    expect(metrics.maxPaidIndividuals).toBe(1);
+    expect(metrics.maxMrrUsdCents).toBe(5_000);
+    expect(metrics.payingIndividuals).toBe(4);
     expect(metrics.payingFamilyGroups).toBe(1);
     expect(metrics.payingFamilySeats).toBe(3);
-    expect(metrics.coveredMembers).toBe(4);
+    expect(metrics.coveredMembers).toBe(5);
     expect(metrics.familyMrrUsdCents).toBe(2 * 700 + 1_900);
-    expect(metrics.mrrUsdCents).toBe(800 + 2_000 + 2 * 700 + 1_900);
+    expect(metrics.mrrUsdCents).toBe(800 + 2_000 + 5_000 + 2 * 700 + 1_900);
     expect(metrics.unpricedPaidMembers).toBe(1);
   });
 

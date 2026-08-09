@@ -33,6 +33,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.group_upgrade_pulse",
+  "linq.ai_usage.max_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
   "linq.ai_usage.thread_limit_funding",
@@ -63,6 +64,9 @@ const TEST_CONTEXT_BY_KEY = {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.group_upgrade_pulse": {
+    homeUrl: "https://withmurph.ai/home",
+  },
+  "linq.ai_usage.max_limit_reached": {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.billing_inactive": {
@@ -193,6 +197,7 @@ describe("user-facing message variants", () => {
   it("keeps direct paid limit templates neutral until delivery-time projection", () => {
     for (const key of [
       "linq.ai_usage.edge_limit_reached",
+      "linq.ai_usage.max_limit_reached",
       "linq.ai_usage.pulse_upgrade_edge",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {
@@ -240,6 +245,7 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
       "linq.ai_usage.group_upgrade_pulse",
+      "linq.ai_usage.max_limit_reached",
       "linq.ai_usage.pulse_upgrade_edge",
       "linq.ai_usage.thread_limit_reached",
     ] as const) {
@@ -268,6 +274,7 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
       "linq.ai_usage.group_upgrade_pulse",
+      "linq.ai_usage.max_limit_reached",
       "linq.ai_usage.pulse_upgrade_edge",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {

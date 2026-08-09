@@ -118,6 +118,15 @@ export default async function HostedOpsGrowthPage() {
                 </TableCell>
               </TableRow>
               <TableRow>
+                <TableCell>Max individuals</TableCell>
+                <TableCell className="text-right">
+                  {formatInteger(dashboard.current.maxPaidIndividuals)}
+                </TableCell>
+                <TableCell className="text-right">
+                  {formatCurrency(dashboard.current.maxMrrUsdCents)}
+                </TableCell>
+              </TableRow>
+              <TableRow>
                 <TableCell>Family seats</TableCell>
                 <TableCell className="text-right">
                   {formatInteger(dashboard.current.payingFamilySeats)}
