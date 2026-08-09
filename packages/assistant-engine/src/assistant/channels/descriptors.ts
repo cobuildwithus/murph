@@ -804,7 +804,6 @@ async function sendLinqVoiceMemoDelivery(input: {
     appendDeliveredProviderMessageEffects(
       providerMessageEffects,
       deliveredText,
-      text,
     )
   }
 
@@ -865,7 +864,6 @@ async function sendLinqVoiceMemoDelivery(input: {
         appendDeliveredProviderMessageEffects(
           providerMessageEffects,
           deliveredFallback,
-          fallbackText,
         )
         return {
           target: readDeliveredTarget(deliveredFallback) ?? voiceMemoTarget,
@@ -908,10 +906,9 @@ async function sendLinqVoiceMemoDelivery(input: {
     })
   }
   appendDeliveredProviderMessageIds(providerMessageIds, deliveredVoiceMemo)
-  appendDeliveredProviderMessageEffects(
+  appendDeliveredProviderMediaEffects(
     providerMessageEffects,
     deliveredVoiceMemo,
-    null,
   )
   const voiceMessageId = readDeliveredProviderMessageId(deliveredVoiceMemo)
 
@@ -1113,7 +1110,22 @@ function appendDeliveredProviderMessageEffects(
         providerMessageEffects?: AssistantProviderMessageEffect[] | null
       }
     | void,
-  message: string | null,
+): void {
+  const deliveredEffects = readDeliveredProviderMessageEffects(delivered)
+  if (deliveredEffects) {
+    output.push(...deliveredEffects)
+  }
+}
+
+function appendDeliveredProviderMediaEffects(
+  output: AssistantProviderMessageEffect[],
+  delivered:
+    | {
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerMessageEffects?: AssistantProviderMessageEffect[] | null
+      }
+    | void,
 ): void {
   const deliveredEffects = readDeliveredProviderMessageEffects(delivered)
   if (deliveredEffects) {
@@ -1128,7 +1140,7 @@ function appendDeliveredProviderMessageEffects(
         providerMessageId !== null,
     )
   for (const providerMessageId of providerMessageIds) {
-    output.push({ message, providerMessageId })
+    output.push({ message: null, providerMessageId })
   }
 }
 

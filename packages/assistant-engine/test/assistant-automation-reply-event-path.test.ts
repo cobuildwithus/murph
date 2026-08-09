@@ -595,6 +595,88 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('memo-fallback.m4a')
   })
 
+  it.each([
+    {
+      expectedContext: 'The sender explicitly replied to this exact prior assistant message:',
+      expectedMessage: 'Visible fallback transcript.',
+      inputId: 'ain_14141414141414141414141414141414',
+      label: 'primary text bubble',
+      replyToMessageId: 'linq-msg-murph-split-text',
+      unexpectedContext: 'prior assistant media delivery',
+    },
+    {
+      expectedContext: 'The sender explicitly replied to an exact prior assistant media delivery',
+      expectedMessage: null,
+      inputId: 'ain_15151515151515151515151515151515',
+      label: 'native rich-link bubble',
+      replyToMessageId: 'linq-msg-murph-split-link',
+      unexpectedContext: 'this exact prior assistant message:',
+    },
+  ])('uses only the attested effect for a split voice fallback $label', async ({
+    expectedContext,
+    expectedMessage,
+    inputId,
+    replyToMessageId,
+    unexpectedContext,
+  }) => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-attested-split-voice-fallback',
+        media: [{ filename: 'memo-split-fallback.m4a', kind: 'voice_memo' }],
+        message: '',
+        providerMessageEffects: [
+          {
+            message: 'Visible fallback transcript.',
+            providerMessageId: 'linq-msg-murph-split-text',
+          },
+          {
+            message: null,
+            providerMessageId: 'linq-msg-murph-split-link',
+          },
+        ],
+        providerMessageId: 'linq-msg-murph-split-link',
+        providerMessageIds: [
+          'linq-msg-murph-split-text',
+          'linq-msg-murph-split-link',
+        ],
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId,
+      messageId: `reply-${replyToMessageId}`,
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId,
+      text: 'Got it.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(expectedContext)
+    if (expectedMessage) {
+      expect(prompt).toContain(expectedMessage)
+    } else {
+      expect(prompt).not.toContain('Visible fallback transcript.')
+    }
+    expect(prompt).not.toContain(unexpectedContext)
+    expect(prompt).not.toContain('linq-msg-murph-split-text')
+    expect(prompt).not.toContain('linq-msg-murph-split-link')
+    expect(prompt).not.toContain('memo-split-fallback.m4a')
+  })
+
   it('preserves the explicit-reply boundary for private provider placeholders', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
