@@ -999,27 +999,37 @@ therefore relinquishes the existing lifecycle boundary without leaving a stale
 hint or partially initialized start ahead of foreground work. If a Worker
 version changes before authoritative start, the `UserRunner` destroys and
 clears a different pending versioned target before binding the current fence.
-Cloudflare logs one bounded admission outcome (`scheduled`,
+The existing Web helper carries its bounded `linq-instant-start` or
+`linq-typing-started` source through the same request and RPC. During additive
+rollout an empty legacy request remains accepted and is recorded as `unknown`;
+unknown is never assumed to mean typing. Cloudflare logs one bounded admission outcome (`scheduled`,
 `skipped_consent_busy`, `skipped_admission_unavailable`,
 `skipped_processing_disallowed`, or `skipped_runtime_busy`) at the existing
-decision point. The runner container records one completion outcome for each
+decision point. The runner container records one completion outcome for the
 coalesced operation after that asynchronous operation settles; the unawaited
-microtask log contains only the outcome, elapsed milliseconds, coalesced hint
-count, and whether the container lifecycle observed a cold start. These records
+microtask log contains only the bounded trigger source, outcome, elapsed
+milliseconds, coalesced hint count, and whether the container lifecycle
+observed a cold start. These records
 do not imply port or health readiness.
 
 The container also consumes its in-memory hint observation on the next
-authoritative `ensureReadyForProcessing` call. The existing readiness response
-carries first/last hint timestamps, last completion time and duration, plus
-hint, start-issued, cold-start-observed, superseded, and failed counts. Fresh
-runtime preparation maps those numeric leaves into the existing orchestration
-latency phase breakdown; it adds no request, persisted state owner, awaited
-reporting step, or work on the message-ingress path. A stop, explicit destroy,
-or Durable Object eviction may erase the optional observation, so an absent
-observation means `no observed prewarm`, not proof that no typing hint occurred.
-The aggregate cold-start report compares these same-container causal cohorts
-against runner-job, provider-start, and accepted-reply latency without exposing
-member, mailbox, trace, or runtime-attempt identifiers.
+authoritative `ensureReadyForProcessing` call. One observation belongs to one
+shell-prewarm operation and carries its triggering source, first causal hint
+timestamp, completion time and duration, coalesced hint count, and one terminal
+outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
+After that operation settles, later hints may only increment its bounded hint
+count until readiness consumes it; they cannot launch a second operation or
+replace the causal timestamp. Fresh runtime preparation maps those bounded
+leaves into the existing orchestration latency phase breakdown; it adds no
+request, persisted state owner, awaited reporting step, or work on the
+message-ingress path. A stop, explicit destroy, or Durable Object eviction may
+erase the optional observation, so an absent observation means `no observed
+prewarm`, not proof that no typing hint occurred. The aggregate cold-start
+report includes only typing-sourced, chronology-safe, uniquely matched
+Web-direct traces whose reply belongs to the same runtime attempt. It omits
+instant-start, unknown-source, ambiguous, backlog, and attempt-handoff rows
+rather than guessing, and returns no member, mailbox, trace, delivery, or
+runtime-attempt identifiers.
 The signal
 reconciles both the foreground conversation lane and the already-durable
 activation item. Web then

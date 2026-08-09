@@ -8,25 +8,55 @@
 -- This aggregate report intentionally compares them with a UTC-naive cutoff
 -- and never returns member, mailbox, trace, or attempt identifiers.
 \echo 'Typing shell-prewarm cohorts (milliseconds)'
-WITH ranked_attempts AS (
+WITH direct_candidates AS (
   SELECT
     trace.accepted_at,
     trace.runner_job_accepted_at,
     trace.provider_start_at,
     delivery.accepted_at AS reply_accepted_at,
+    trace.runtime_attempt_id,
     trace.phase_breakdown_json #> '{orchestration}' AS orchestration,
-    row_number() OVER (
+    count(*) OVER (
       PARTITION BY trace.runtime_attempt_id
-      ORDER BY trace.accepted_at, trace.created_at
-    ) AS attempt_row
+    ) AS causal_candidate_count
   FROM hosted_ingress_latency_trace AS trace
-  LEFT JOIN hosted_linq_delivery AS delivery
+  INNER JOIN hosted_linq_delivery AS delivery
     ON delivery.id = trace.linq_delivery_id
   WHERE trace.accepted_at >=
       (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - make_interval(hours => :window_hours)
     AND trace.source = 'linq'
     AND trace.runtime_attempt_id IS NOT NULL
+    AND trace.reply_runtime_attempt_id = trace.runtime_attempt_id
+    AND trace.runner_job_accepted_at >= trace.accepted_at
+    AND trace.provider_start_at >= trace.accepted_at
+    AND delivery.accepted_at >= trace.accepted_at
+    AND trace.phase_breakdown_json #>> '{orchestration,triggeredByWebDirect}' = 'true'
     AND trace.phase_breakdown_json #> '{orchestration,freshStartRequestedAtEpochMs}' IS NOT NULL
+    AND trace.phase_breakdown_json #>> '{orchestration,directEnsureOrchestrationAttemptId}' =
+      trace.phase_breakdown_json #>> '{orchestration,runtimeInvocationOrchestrationAttemptId}'
+    AND trace.phase_breakdown_json #> '{orchestration,directEnsureOrchestrationAttemptId}' IS NOT NULL
+    AND (trace.phase_breakdown_json #>> '{orchestration,directEnsureRequestStartedAtEpochMs}')::double precision >=
+      EXTRACT(EPOCH FROM (trace.accepted_at - TIMESTAMP '1970-01-01')) * 1000
+    AND (trace.phase_breakdown_json #>> '{orchestration,directEnsureResponseReceivedAtEpochMs}')::double precision >=
+      (trace.phase_breakdown_json #>> '{orchestration,directEnsureRequestStartedAtEpochMs}')::double precision
+    AND (
+      (
+        trace.phase_breakdown_json #>> '{orchestration,shellPrewarmSource}' = 'linq-typing-started'
+        AND trace.phase_breakdown_json #>> '{orchestration,shellPrewarmOutcome}' IN (
+          'cold_start_observed',
+          'failed',
+          'start_issued_warm',
+          'superseded'
+        )
+        AND (trace.phase_breakdown_json #>> '{orchestration,shellPrewarmFirstHintAtEpochMs}')::double precision <=
+          EXTRACT(EPOCH FROM (trace.accepted_at - TIMESTAMP '1970-01-01')) * 1000
+      )
+      OR (
+        trace.phase_breakdown_json #> '{orchestration,shellPrewarmSource}' IS NULL
+        AND trace.phase_breakdown_json #> '{orchestration,shellPrewarmOutcome}' IS NULL
+        AND trace.phase_breakdown_json #> '{orchestration,shellPrewarmFirstHintAtEpochMs}' IS NULL
+      )
+    )
 ), attempt_samples AS (
   SELECT
     accepted_at,
@@ -35,20 +65,12 @@ WITH ranked_attempts AS (
     reply_accepted_at,
     orchestration,
     CASE
-      WHEN (orchestration ->> 'shellPrewarmFailedCount')::numeric > 0
-        THEN 'prewarm_failed'
-      WHEN (orchestration ->> 'shellPrewarmSupersededCount')::numeric > 0
-        THEN 'prewarm_superseded'
-      WHEN (orchestration ->> 'shellPrewarmColdStartObservedCount')::numeric > 0
-        THEN 'prewarm_cold_start_observed'
-      WHEN (orchestration ->> 'shellPrewarmStartIssuedCount')::numeric > 0
-        THEN 'prewarm_start_issued_warm'
-      WHEN orchestration -> 'shellPrewarmHintCount' IS NOT NULL
-        THEN 'prewarm_observed_no_start'
+      WHEN orchestration ->> 'shellPrewarmSource' = 'linq-typing-started'
+        THEN 'prewarm_' || (orchestration ->> 'shellPrewarmOutcome')
       ELSE 'no_observed_prewarm'
     END AS cohort
-  FROM ranked_attempts
-  WHERE attempt_row = 1
+  FROM direct_candidates
+  WHERE causal_candidate_count = 1
 ), metric_samples AS (
   SELECT
     cohort,
@@ -58,9 +80,9 @@ WITH ranked_attempts AS (
   CROSS JOIN LATERAL (
     VALUES
       (
-        'Last typing hint -> ingress accepted',
+        'Causal typing hint -> ingress accepted',
         EXTRACT(EPOCH FROM (accepted_at - TIMESTAMP '1970-01-01')) * 1000
-          - (orchestration ->> 'shellPrewarmLastHintAtEpochMs')::double precision
+          - (orchestration ->> 'shellPrewarmFirstHintAtEpochMs')::double precision
       ),
       (
         'Ingress accepted -> runner job',

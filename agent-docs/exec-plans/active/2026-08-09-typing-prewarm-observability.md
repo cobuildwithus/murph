@@ -20,9 +20,13 @@ Updated: 2026-08-09
 - The container emits one metadata-only completion/failure record after the
   already-asynchronous prewarm operation settles.
 - A fresh runtime start that consumes a prior prewarm observation carries its
-  hint timing and terminal outcome into the existing latency phase breakdown.
+  trigger source, causal hint timing, and single terminal outcome into the
+  existing latency phase breakdown.
 - Repeated typing hints coalesce into one bounded observation instead of one
-  completion log per provider event.
+  completion log per provider event or multiple mixed operation outcomes.
+- The aggregate report selects one exact direct ingress/reply attempt and omits
+  onboarding instant-start, unknown-source, backlog, ambiguous, and handoff
+  traces rather than attributing them to typing.
 - Focused tests prove the response still settles before the container-start
   promise, no extra request is made, and no member or provider identifier enters
   the new telemetry fields.

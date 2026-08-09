@@ -1597,10 +1597,12 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.beginShellPrewarm({
+      source: "linq-typing-started",
       timeoutMs: 7_500,
       userId: "member_123",
     })).resolves.toEqual({ accepted: true });
     await expect(container.beginShellPrewarm({
+      source: "linq-typing-started",
       timeoutMs: 7_500,
       userId: "member_123",
     })).resolves.toEqual({ accepted: true });
@@ -1623,11 +1625,19 @@ describe("RunnerContainer", () => {
             shellPrewarmColdStartObserved: true,
             shellPrewarmHintCountAtCompletion: 2,
             shellPrewarmOutcome: "start_issued",
+            shellPrewarmSource: "linq-typing-started",
           }),
           message: "Hosted runner shell prewarm operation completed.",
         }),
       )
     );
+
+    await expect(container.beginShellPrewarm({
+      source: "linq-typing-started",
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({ accepted: true });
+    expect(start).toHaveBeenCalledOnce();
 
     const readiness = await container.ensureReadyForProcessing({
       timeoutMs: 7_500,
@@ -1637,15 +1647,12 @@ describe("RunnerContainer", () => {
       action: "already_warm",
       kind: "ready",
       shellPrewarmObservation: {
-        coldStartObservedCount: 1,
-        failedCount: 0,
         firstHintAtEpochMs: expect.any(Number),
-        hintCount: 2,
-        lastFinishedAtEpochMs: expect.any(Number),
-        lastHintAtEpochMs: expect.any(Number),
-        lastOperationElapsedMs: expect.any(Number),
-        startIssuedCount: 1,
-        supersededCount: 0,
+        finishedAtEpochMs: expect.any(Number),
+        hintCount: 3,
+        operationElapsedMs: expect.any(Number),
+        outcome: "cold_start_observed",
+        source: "linq-typing-started",
       },
     });
     expect(JSON.stringify(readiness.shellPrewarmObservation))
@@ -1694,6 +1701,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.beginShellPrewarm({
+      source: "linq-typing-started",
       timeoutMs: 7_500,
       userId: "member_123",
     })).resolves.toEqual({ accepted: true });
@@ -1702,6 +1710,7 @@ describe("RunnerContainer", () => {
         expect.objectContaining({
           details: expect.objectContaining({
             shellPrewarmOutcome: "failed",
+            shellPrewarmSource: "linq-typing-started",
           }),
           message: "Hosted runner shell prewarm failed after acceptance.",
         }),
@@ -1714,11 +1723,9 @@ describe("RunnerContainer", () => {
       action: "started",
       kind: "ready",
       shellPrewarmObservation: {
-        coldStartObservedCount: 0,
-        failedCount: 1,
         hintCount: 1,
-        startIssuedCount: 0,
-        supersededCount: 0,
+        outcome: "failed",
+        source: "linq-typing-started",
       },
     });
 
@@ -1805,6 +1812,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.beginShellPrewarm({
+      source: "linq-typing-started",
       timeoutMs: 20_000,
       userId: "member_123",
     })).resolves.toEqual({ accepted: true });
@@ -1817,11 +1825,9 @@ describe("RunnerContainer", () => {
       action: "started",
       kind: "ready",
       shellPrewarmObservation: {
-        coldStartObservedCount: 0,
-        failedCount: 0,
         hintCount: 1,
-        startIssuedCount: 0,
-        supersededCount: 1,
+        outcome: "superseded",
+        source: "linq-typing-started",
       },
     });
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
@@ -1831,6 +1837,7 @@ describe("RunnerContainer", () => {
           details: expect.objectContaining({
             shellPrewarmColdStartObserved: false,
             shellPrewarmOutcome: "superseded",
+            shellPrewarmSource: "linq-typing-started",
           }),
         }),
       )

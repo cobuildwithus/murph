@@ -1,4 +1,7 @@
 import { Container, type StopParams } from "@cloudflare/containers";
+import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
@@ -207,15 +210,23 @@ export interface RunnerContainerEnsureReadyForProcessingResult {
 }
 
 export interface RunnerContainerShellPrewarmObservation {
-  coldStartObservedCount: number;
-  failedCount: number;
   firstHintAtEpochMs: number;
   hintCount: number;
-  lastFinishedAtEpochMs?: number;
-  lastHintAtEpochMs: number;
-  lastOperationElapsedMs?: number;
-  startIssuedCount: number;
-  supersededCount: number;
+  finishedAtEpochMs?: number;
+  operationElapsedMs?: number;
+  outcome?: RunnerContainerShellPrewarmOutcome;
+  source: CloudflareHostedControlRuntimeShellPrewarmSource | "unknown";
+}
+
+export type RunnerContainerShellPrewarmOutcome =
+  | "cold_start_observed"
+  | "failed"
+  | "start_issued_warm"
+  | "superseded";
+
+export interface RunnerContainerBeginShellPrewarmInput
+  extends RunnerContainerEnsureReadyForProcessingInput {
+  source?: CloudflareHostedControlRuntimeShellPrewarmSource;
 }
 
 export type RunnerContainerPrewarmShellResult =
@@ -253,7 +264,7 @@ export interface HostedExecutionContainerStubLike {
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
   beginShellPrewarm?(
-    input: RunnerContainerEnsureReadyForProcessingInput,
+    input: RunnerContainerBeginShellPrewarmInput,
   ): Promise<RunnerContainerBeginShellPrewarmResult>;
   prewarmShell?(
     input: RunnerContainerEnsureReadyForProcessingInput,
@@ -797,11 +808,19 @@ export class RunnerContainer extends Container {
    * work; this hint never reads a workspace or creates a runtime fence.
    */
   async beginShellPrewarm(
-    payload: RunnerContainerEnsureReadyForProcessingInput,
+    payload: RunnerContainerBeginShellPrewarmInput,
   ): Promise<RunnerContainerBeginShellPrewarmResult> {
     this.noteContainerInteraction();
-    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    const observation = this.recordShellPrewarmHint();
+    const input = parseRunnerContainerBeginShellPrewarmInput(payload);
+    const existingObservation = this.shellPrewarmObservation;
+    if (existingObservation) {
+      existingObservation.hintCount = Math.min(
+        Number.MAX_SAFE_INTEGER,
+        existingObservation.hintCount + 1,
+      );
+      return { accepted: true };
+    }
+    const observation = this.recordShellPrewarmHint(input.source);
     const operation = this.getOrBeginShellPrewarm(input);
     this.observeShellPrewarmOperation({
       observation,
@@ -2775,23 +2794,14 @@ export class RunnerContainer extends Container {
     return true;
   }
 
-  private recordShellPrewarmHint(): RunnerContainerShellPrewarmObservation {
+  private recordShellPrewarmHint(
+    source: CloudflareHostedControlRuntimeShellPrewarmSource | undefined,
+  ): RunnerContainerShellPrewarmObservation {
     const hintedAtMs = Date.now();
-    const existing = this.shellPrewarmObservation;
-    if (existing) {
-      existing.hintCount = Math.min(Number.MAX_SAFE_INTEGER, existing.hintCount + 1);
-      existing.lastHintAtEpochMs = hintedAtMs;
-      return existing;
-    }
-
     const observation: RunnerContainerShellPrewarmObservation = {
-      coldStartObservedCount: 0,
-      failedCount: 0,
       firstHintAtEpochMs: hintedAtMs,
       hintCount: 1,
-      lastHintAtEpochMs: hintedAtMs,
-      startIssuedCount: 0,
-      supersededCount: 0,
+      source: source ?? "unknown",
     };
     this.shellPrewarmObservation = observation;
     return observation;
@@ -2812,29 +2822,17 @@ export class RunnerContainer extends Container {
         const coldStartObserved = result.action === "start_issued"
           && !input.operation.coldStartAlreadyObserved
           && this.containerStartedAtMs !== null;
-        if (result.action === "start_issued") {
-          input.observation.startIssuedCount = Math.min(
-            Number.MAX_SAFE_INTEGER,
-            input.observation.startIssuedCount + 1,
-          );
-        } else {
-          input.observation.supersededCount = Math.min(
-            Number.MAX_SAFE_INTEGER,
-            input.observation.supersededCount + 1,
-          );
-        }
-        if (coldStartObserved) {
-          input.observation.coldStartObservedCount = Math.min(
-            Number.MAX_SAFE_INTEGER,
-            input.observation.coldStartObservedCount + 1,
-          );
-        }
-        input.observation.lastFinishedAtEpochMs = finishedAtMs;
+        input.observation.outcome = result.action === "superseded"
+          ? "superseded"
+          : coldStartObserved
+          ? "cold_start_observed"
+          : "start_issued_warm";
+        input.observation.finishedAtEpochMs = finishedAtMs;
         const elapsedMs = Math.max(
           0,
           finishedAtMs - input.operation.startedAtMs,
         );
-        input.observation.lastOperationElapsedMs = elapsedMs;
+        input.observation.operationElapsedMs = elapsedMs;
         queueMicrotask(() => {
           emitHostedExecutionStructuredLog({
             component: "runner.container",
@@ -2843,6 +2841,7 @@ export class RunnerContainer extends Container {
               shellPrewarmElapsedMs: elapsedMs,
               shellPrewarmHintCountAtCompletion: input.observation.hintCount,
               shellPrewarmOutcome: result.action,
+              shellPrewarmSource: input.observation.source,
             },
             message: "Hosted runner shell prewarm operation completed.",
             phase: "container.starting",
@@ -2852,16 +2851,13 @@ export class RunnerContainer extends Container {
       },
       (error: unknown) => {
         const finishedAtMs = Date.now();
-        input.observation.failedCount = Math.min(
-          Number.MAX_SAFE_INTEGER,
-          input.observation.failedCount + 1,
-        );
-        input.observation.lastFinishedAtEpochMs = finishedAtMs;
+        input.observation.outcome = "failed";
+        input.observation.finishedAtEpochMs = finishedAtMs;
         const elapsedMs = Math.max(
           0,
           finishedAtMs - input.operation.startedAtMs,
         );
-        input.observation.lastOperationElapsedMs = elapsedMs;
+        input.observation.operationElapsedMs = elapsedMs;
         queueMicrotask(() => {
           emitHostedExecutionStructuredLog({
             component: "runner.container",
@@ -2870,6 +2866,7 @@ export class RunnerContainer extends Container {
               shellPrewarmElapsedMs: elapsedMs,
               shellPrewarmHintCountAtCompletion: input.observation.hintCount,
               shellPrewarmOutcome: "failed",
+              shellPrewarmSource: input.observation.source,
             },
             error,
             level: "warn",
@@ -3711,6 +3708,23 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
   return {
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
+  };
+}
+
+function parseRunnerContainerBeginShellPrewarmInput(
+  payload: RunnerContainerBeginShellPrewarmInput,
+): RunnerContainerBeginShellPrewarmInput {
+  const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+  if (
+    payload.source !== undefined
+    && payload.source !== "linq-instant-start"
+    && payload.source !== "linq-typing-started"
+  ) {
+    throw new TypeError("payload.source must be a supported shell-prewarm source.");
+  }
+  return {
+    ...input,
+    ...(payload.source === undefined ? {} : { source: payload.source }),
   };
 }
 

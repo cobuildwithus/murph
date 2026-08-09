@@ -167,8 +167,39 @@ describe("HostedUserRunner execution coordination", () => {
       expect.objectContaining({
         details: {
           shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+          shellPrewarmSource: "unknown",
         },
         message: "Hosted runner shell prewarm admission decided.",
+      }),
+    );
+  });
+
+  it("carries the bounded shell-prewarm source through the existing container RPC", async () => {
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+    });
+
+    await runner.prewarmRuntimeShellForUser(
+      TEST_USER_ID,
+      "linq-typing-started",
+    );
+
+    expect(prewarmShell).toHaveBeenCalledWith({
+      source: "linq-typing-started",
+      timeoutMs: 20_000,
+      userId: TEST_USER_ID,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "scheduled",
+          shellPrewarmSource: "linq-typing-started",
+        },
       }),
     );
   });
@@ -218,6 +249,7 @@ describe("HostedUserRunner execution coordination", () => {
       expect.objectContaining({
         details: {
           shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
+          shellPrewarmSource: "unknown",
         },
         level: "warn",
       }),
@@ -282,6 +314,7 @@ describe("HostedUserRunner execution coordination", () => {
       expect.objectContaining({
         details: {
           shellPrewarmAdmissionOutcome: "scheduled",
+          shellPrewarmSource: "unknown",
         },
       }),
     );
@@ -527,6 +560,7 @@ describe("HostedUserRunner execution coordination", () => {
       expect.objectContaining({
         details: {
           shellPrewarmAdmissionOutcome: "skipped_runtime_busy",
+          shellPrewarmSource: "unknown",
         },
       }),
     );
@@ -1700,15 +1734,12 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => ({
       kind: "ready",
       shellPrewarmObservation: {
-        coldStartObservedCount: 1,
-        failedCount: 0,
         firstHintAtEpochMs: 1_777_000_000_010,
+        finishedAtEpochMs: 1_777_000_000_030,
         hintCount: 2,
-        lastFinishedAtEpochMs: 1_777_000_000_030,
-        lastHintAtEpochMs: 1_777_000_000_020,
-        lastOperationElapsedMs: 20,
-        startIssuedCount: 1,
-        supersededCount: 0,
+        operationElapsedMs: 20,
+        outcome: "cold_start_observed",
+        source: "linq-typing-started",
       },
     }));
     const { invoke, runner } = createRunnerHarness({
@@ -1785,15 +1816,12 @@ describe("HostedUserRunner execution coordination", () => {
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
       runtimeStoreEnsureElapsedMs: 250,
-      shellPrewarmColdStartObservedCount: 1,
-      shellPrewarmFailedCount: 0,
       shellPrewarmFirstHintAtEpochMs: 1_777_000_000_010,
+      shellPrewarmFinishedAtEpochMs: 1_777_000_000_030,
       shellPrewarmHintCount: 2,
-      shellPrewarmLastFinishedAtEpochMs: 1_777_000_000_030,
-      shellPrewarmLastHintAtEpochMs: 1_777_000_000_020,
-      shellPrewarmLastOperationElapsedMs: 20,
-      shellPrewarmStartIssuedCount: 1,
-      shellPrewarmSupersededCount: 0,
+      shellPrewarmOperationElapsedMs: 20,
+      shellPrewarmOutcome: "cold_start_observed",
+      shellPrewarmSource: "linq-typing-started",
       workspaceReadElapsedMs: 1_000,
     });
     expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)

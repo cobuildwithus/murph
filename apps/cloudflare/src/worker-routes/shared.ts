@@ -7,6 +7,9 @@ import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
+import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
 
@@ -49,7 +52,10 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse>;
-  prewarmRuntimeShellForUser?(userId: string): Promise<void>;
+  prewarmRuntimeShellForUser?(
+    userId: string,
+    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+  ): Promise<void>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;

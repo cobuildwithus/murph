@@ -2,6 +2,9 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
+import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -131,19 +134,18 @@ function toShellPrewarmOrchestrationDiagnostics(
     return null;
   }
   return {
-    shellPrewarmColdStartObservedCount: observation.coldStartObservedCount,
-    shellPrewarmFailedCount: observation.failedCount,
     shellPrewarmFirstHintAtEpochMs: observation.firstHintAtEpochMs,
     shellPrewarmHintCount: observation.hintCount,
-    ...(observation.lastFinishedAtEpochMs === undefined ? {} : {
-      shellPrewarmLastFinishedAtEpochMs: observation.lastFinishedAtEpochMs,
+    ...(observation.finishedAtEpochMs === undefined ? {} : {
+      shellPrewarmFinishedAtEpochMs: observation.finishedAtEpochMs,
     }),
-    shellPrewarmLastHintAtEpochMs: observation.lastHintAtEpochMs,
-    ...(observation.lastOperationElapsedMs === undefined ? {} : {
-      shellPrewarmLastOperationElapsedMs: observation.lastOperationElapsedMs,
+    ...(observation.operationElapsedMs === undefined ? {} : {
+      shellPrewarmOperationElapsedMs: observation.operationElapsedMs,
     }),
-    shellPrewarmStartIssuedCount: observation.startIssuedCount,
-    shellPrewarmSupersededCount: observation.supersededCount,
+    ...(observation.outcome === undefined ? {} : {
+      shellPrewarmOutcome: observation.outcome,
+    }),
+    shellPrewarmSource: observation.source,
   };
 }
 
@@ -194,7 +196,10 @@ export class RuntimeProcessingController {
     });
   }
 
-  async beginShellPrewarmForUser(userId: string): Promise<void> {
+  async beginShellPrewarmForUser(
+    userId: string,
+    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+  ): Promise<void> {
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
       throw new Error("Runner container namespace is unavailable.");
@@ -217,6 +222,7 @@ export class RuntimeProcessingController {
         component: "hosted.runner",
         details: {
           shellPrewarmAdmissionOutcome: "skipped_runtime_busy",
+          shellPrewarmSource: source ?? "unknown",
         },
         message: "Hosted runner shell prewarm admission decided.",
         phase: "scheduled",
@@ -225,6 +231,7 @@ export class RuntimeProcessingController {
       return;
     }
     await container.beginShellPrewarm({
+      ...(source === undefined ? {} : { source }),
       timeoutMs: RUNTIME_SHELL_PREWARM_TIMEOUT_MS,
       userId,
     });
@@ -232,6 +239,7 @@ export class RuntimeProcessingController {
       component: "hosted.runner",
       details: {
         shellPrewarmAdmissionOutcome: "scheduled",
+        shellPrewarmSource: source ?? "unknown",
       },
       message: "Hosted runner shell prewarm admission decided.",
       phase: "scheduled",
