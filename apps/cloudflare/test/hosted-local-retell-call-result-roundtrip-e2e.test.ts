@@ -38,6 +38,10 @@ const resultSummary = "The pharmacy confirmed the prescription will be ready thi
 const resultReply = "The pharmacy confirmed your prescription will be ready this afternoon. No follow-up is needed.";
 const setupQuestion = "Can you keep this conversation open while I wait for a pharmacy update?";
 const setupReply = "Yes, I’ll be here when you have an update.";
+const temporalMailboxSignalFaultPreloadUrl = new URL(
+  "../../web/test/support/hosted-local-temporal-mailbox-signal-fault-preload.ts",
+  import.meta.url,
+).href;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -49,6 +53,7 @@ let scenario: HostedLocalFullStackScenario | null = null;
 vi.mock("server-only", () => ({}));
 
 afterAll(async () => {
+  await scenario?.harness.clearTemporalMailboxSignalFaultForTest(userId).catch(() => {});
   await scenario?.stop();
   scenario = null;
   await linqStub?.stop();
@@ -72,14 +77,20 @@ describe("hosted local Retell result roundtrip e2e", () => {
         RETELL_API_KEY: retellApiKey,
       },
       assistantProviderStubModelId: assistantModel,
+      faultInjection: true,
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-retell-result-",
       requiredRunnerEnvProfile: "linq",
       scenarioLabel: "Local hosted Retell result roundtrip e2e",
       streamLogs: streamDevLogs,
+      testControls: true,
       webProcessEnvOverrides: {
-        MURPH_HOSTED_LOCAL_E2E_FAIL_FIRST_RETELL_RESULT_RUNTIME_SIGNAL: "1",
+        MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID: userId,
+        NODE_OPTIONS: appendNodeImportOption(
+          process.env.NODE_OPTIONS,
+          temporalMailboxSignalFaultPreloadUrl,
+        ),
       },
     });
   }, 300_000);
@@ -170,16 +181,21 @@ describe("hosted local Retell result roundtrip e2e", () => {
     const baselineProviderRequests = countAssistantProviderRequests();
     const payload = buildRetellCallAnalyzedPayload();
     const signedPayload = buildSignedRetellWebhookRequest(payload);
-    const firstResponse = await postSignedRetellWebhook(signedPayload);
-    expect(firstResponse.status).toBe(500);
-
     const notificationDedupeKey =
       `assistant.notification.requested:phone-call-result:${phoneCallId}`;
-    const committedMailboxItem = await readHostedMailboxItemForTest({
+    const firstResponsePromise = postSignedRetellWebhook(signedPayload);
+    const committedMailboxItem = await waitForHostedMailboxItem({
       dedupeKey: notificationDedupeKey,
       environment: requireScenario().runtimeEnv,
       userId,
     });
+    await requireScenario().harness.armTemporalMailboxSignalFaultForTest(
+      userId,
+      committedMailboxItem.id,
+    );
+    const firstResponse = await firstResponsePromise;
+    expect(firstResponse.status).toBe(500);
+
     expect(committedMailboxItem).toMatchObject({
       consumedAt: null,
       dedupeKey: notificationDedupeKey,
@@ -348,6 +364,38 @@ async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Re
       method: "POST",
     },
   );
+}
+
+async function waitForHostedMailboxItem(input: {
+  dedupeKey: string;
+  environment: NodeJS.ProcessEnv;
+  userId: string;
+}): Promise<Awaited<ReturnType<typeof readHostedMailboxItemForTest>>> {
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+  while (Date.now() - startedAt < 30_000) {
+    try {
+      return await readHostedMailboxItemForTest(input);
+    } catch (error) {
+      lastError = error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  throw new Error(
+    "Timed out waiting for the committed Retell notification mailbox item.",
+    { cause: lastError },
+  );
+}
+
+function appendNodeImportOption(
+  existingNodeOptions: string | undefined,
+  importUrl: string,
+): string {
+  const existing = existingNodeOptions?.trim();
+  return existing
+    ? `${existing} --import=${importUrl}`
+    : `--import=${importUrl}`;
 }
 
 function countAssistantProviderRequests(): number {
