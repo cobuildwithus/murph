@@ -6692,9 +6692,9 @@ export function parseHostedRuntimeHealthDataAdmissionResponse(
     record.processingAllowed,
     "Hosted runtime health-data admission response processingAllowed",
   );
-  if (processingAllowed !== (consentState !== "revoked")) {
+  if (processingAllowed && consentState === "revoked") {
     throw new TypeError(
-      "Hosted runtime health-data admission response processingAllowed did not match consentState.",
+      "Hosted runtime health-data admission response cannot allow processing after consent revocation.",
     );
   }
 

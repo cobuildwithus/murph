@@ -26,9 +26,6 @@ import {
 } from "@murphai/cloudflare-hosted-control/routes";
 
 import {
-  resolveHostedExecutionRunnerContainerName,
-} from "../../hosted-runner-container-identity.ts";
-import {
   json,
   requireJsonObject,
 } from "../../json.ts";
@@ -56,8 +53,6 @@ import {
 import {
   decodeRouteParam,
 } from "../route-utils/route-params.ts";
-
-const RUNTIME_SHELL_PREWARM_TIMEOUT_MS = 20_000;
 
 const runtimeEnsureProcessingRoute = {
   authorizeBeforeMethod: true,
@@ -302,18 +297,11 @@ async function handleRuntimeShellPrewarmRoute(
       throw new TypeError("Hosted runtime shell prewarm request must be empty.");
     }
 
-    const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-      source: context.env,
-      userId,
-    });
-    const container = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
-    if (!container.prewarmShell) {
-      throw new Error("Runner container shell-prewarm RPC is unavailable.");
+    const stub = context.env.USER_RUNNER.getByName(userId);
+    if (!stub.prewarmRuntimeShellForUser) {
+      throw new Error("User runner shell-prewarm RPC is unavailable.");
     }
-    await container.prewarmShell({
-      timeoutMs: RUNTIME_SHELL_PREWARM_TIMEOUT_MS,
-      userId,
-    });
+    await stub.prewarmRuntimeShellForUser(userId);
     return json({ accepted: true }, 202);
   } catch (error) {
     emitHostedExecutionStructuredLog({

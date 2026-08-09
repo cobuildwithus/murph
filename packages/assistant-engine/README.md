@@ -50,21 +50,23 @@ formatter uses a fresh ephemeral thread on the resident App Server. Its
 thread-local deny configuration does not change the ordinary process launch
 identity or persist a resumable notification thread.
 
-The `creative-response` notification prompt profile is an isolated system
-continuation for verified social moments. Its prompt is built only from the
-engine-supplied task and bounded committed conversation history. Planning
-projects only `generate_song`, applies the output-only turn's native-capability
-deny set, and runs as a fresh ephemeral thread on the resident process. The
-application-owned song tool retains the bound provider transport plus the
-existing authority-free public transport required for a validated signed Linq
-upload; those transports are not native Codex browsing capabilities. The
-ordinary response-media and outbox owners remain unchanged. The prompt tells
-the model to call that tool exactly once and pass `durationSeconds: 15` for one
-short original sponsor song. The notification task supplies the
-room-specific current-conversation premise and lyric pacing. A creative provider
-failure settles the optional notification instead of starting another song
-attempt; a committed delivery intent retains the ordinary outbox retry and
-deduplication behavior.
+The `creative-response` and `creative-response-text` notification prompt
+profiles are isolated system continuations for verified, explicitly requested
+social moments. Both prompts are built only from the engine-supplied task and
+bounded committed conversation history. Message and poem requests use an
+output-only turn profile with no tools. Song format projects only
+`generate_song`, the sole format-specific tool, and requires exactly one call
+with `durationSeconds: 15`. The application-owned song tool retains the bound
+provider transport plus the existing authority-free public transport required
+for a validated signed Linq upload; those transports are not native Codex
+browsing capabilities. The ordinary response-media and outbox owners remain
+unchanged. Named style references are reduced to broad musical traits rather
+than copied melody, lyrics, catchphrases, vocal identity, or signature
+arrangement. A creative provider failure settles the optional notification
+instead of starting another song attempt. A selected song without exactly one
+generated voice-memo attachment fails before receipt, transcript persistence,
+or delivery and is never replaced by a text-only response. A committed delivery
+intent retains the ordinary outbox retry and deduplication behavior.
 
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain

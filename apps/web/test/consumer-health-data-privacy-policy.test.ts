@@ -130,3 +130,17 @@ test("SiteFooter exposes the public status page in the product nav column", () =
   assert.match(markup, />Status<\/a>/u);
   assert.match(markup, /href="https:\/\/status\.withmurph\.ai" target="_blank" rel="noreferrer"/u);
 });
+
+test("SiteFooter exposes referrals only while a reward path is available", () => {
+  const availableMarkup = renderToStaticMarkup(
+    createElement(SiteFooter, { referralsAvailable: true }),
+  );
+  const unavailableMarkup = renderToStaticMarkup(
+    createElement(SiteFooter, { referralsAvailable: false }),
+  );
+
+  assert.match(availableMarkup, /href="\/refer"/u);
+  assert.match(availableMarkup, />Referrals<\/a>/u);
+  assert.doesNotMatch(unavailableMarkup, /href="\/refer"/u);
+  assert.doesNotMatch(unavailableMarkup, />Referrals<\/a>/u);
+});

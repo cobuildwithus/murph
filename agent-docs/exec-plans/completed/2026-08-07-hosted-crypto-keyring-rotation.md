@@ -1,8 +1,34 @@
 # Preload hosted crypto standby keys
 
-Status: active
+Status: completed
 Created: 2026-08-07
-Updated: 2026-08-07
+Updated: 2026-08-09
+
+## Outcome
+
+- The reviewed keyring contract merged to public `main` after exact-head CI,
+  the completion-specialist pass, and final ReviewGPT round 8 passed.
+- One new non-exportable authority-signing version and one new P-256
+  Cloudflare automation recipient generation were created with approved
+  platform or operating-system randomness.
+- Vercel Production was deployed first with the non-active authority and public
+  recipient keyrings. Signed live crypto-context reads succeeded against the
+  current production envelopes before the Worker changed.
+- The protected production deploy then synchronized the non-active authority
+  and private recipient keyrings to Cloudflare. All hosted-local gates,
+  deploy preflight, bundle validation, Worker deployment, managed-container
+  smoke, direct-R2 proof, and the live model turn passed.
+- Privacy-safe aggregate checks before and after both deploys showed one active
+  authority generation, one active Cloudflare recipient generation, complete
+  active recipient-wrap coverage, no non-active envelope history, no references
+  to either proposed generation, and no active reference drift.
+- Live metadata inspection confirmed that the existing active bindings remain
+  present, both standby bindings are present on Web and Worker, Worker traffic
+  is fully on the deployed version, and the authority standby version remains
+  enabled in KMS without being selected as active.
+- Activation, envelope migration, key retirement, and removal of the current
+  active material remain intentionally blocked on a separate reviewed
+  production mutation owner.
 
 ## Goal
 
@@ -148,20 +174,23 @@ Updated: 2026-08-07
 
 ## Tasks
 
-1. Revalidate the current source-to-runtime path, provider capabilities,
+1. [x] Revalidate the current source-to-runtime path, provider capabilities,
    credential availability, and aggregate production key state.
-2. Add the two missing public Worker deploy-contract names, regression tests,
+2. [x] Add the two missing public Worker deploy-contract names, regression tests,
    and a durable rotation runbook.
-3. Run focused proof, commit/push the candidate, open the PR, and complete
+3. [x] Run focused proof, commit/push the candidate, open the PR, and complete
    required ReviewGPT and CI gates.
-4. Add the shared Web/Worker standby validation found in final ReviewGPT round
+4. [x] Add the shared Web/Worker standby validation found in final ReviewGPT round
    2, then complete the final ReviewGPT and CI gates on the remediated head.
-5. Merge and deploy the keyring contract; verify live Web/Worker readiness.
-6. Create a new non-exportable GCP authority-signing key version and new P-256
+5. [x] Merge and deploy the keyring contract; verify live Web/Worker readiness.
+6. [x] Create a new non-exportable GCP authority-signing key version and new P-256
    Cloudflare automation keypair; preload both generations without switching
    active writers.
-7. Verify live bindings and unchanged production envelope references, record
-   the separately blocked activation phase, and archive the plan/worktree.
+7. [x] Verify live bindings and unchanged production envelope references, record
+   the separately blocked activation phase, and archive the plan. Guarded
+   worktree retirement was attempted and remains fail-closed because an
+   ownership-ambiguous orphan process still holds its working directory there;
+   no process was signaled.
 
 ## Decisions
 
@@ -206,3 +235,4 @@ Updated: 2026-08-07
     configured only as standby.
   - Final production aggregates are unchanged by preload and all live
     health/smoke checks pass.
+Completed: 2026-08-09

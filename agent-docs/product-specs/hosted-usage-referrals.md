@@ -15,11 +15,24 @@ Two rollout gates control their respective mutations:
 - `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED=1` enables rewards for attributed
   signup-link activations.
 
+Public referral marketing derives from those same gates at server render. The
+homepage section and footer link appear only when at least one earning path is
+enabled, and `/refer` lists only the enabled paths. When both gates are off,
+`/refer` shows one temporary-unavailability state without reward quantities or
+a share action. Gate-derived availability is program-level, not a promise that
+an individual member has enough rolling capacity for the next reward. Public
+signup-link copy therefore states that a completed signup can earn credit only
+after the later settlement eligibility and rolling-limit checks pass.
+
 The stable referral link remains available to an eligible signed-in member when
-either reward gate is disabled. The paths share one rolling cap at their first
-durable accounting commitment: conversational missions reserve capacity when
-armed, while an attributed activation claims capacity only when recovery
-atomically creates its receipt and grant under the same referrer lock.
+either reward gate is disabled, but a disabled signup reward is not marketed or
+currently promised as an earning path. If the gate is re-enabled, bounded
+recovery may still settle an attributed activation from the preceding 30 days
+under the ordinary eligibility and capacity checks. The paths share one rolling
+cap at their first durable accounting commitment: conversational missions
+reserve capacity when armed, while an attributed activation claims capacity
+only when recovery atomically creates its receipt and grant under the same
+referrer lock.
 
 ## Product behavior
 
@@ -36,14 +49,14 @@ active at the same time.
 A shareable signup link is different. Murph creates it only when the member
 explicitly asks for a signup, invite, referral, or shareable link. Sharing or
 opening the link is not a completed referral and does not guarantee a reward.
-Murph may explain in one short sentence that a qualifying reward is applied
-automatically after the recipient completes their own Murph setup. Murph never
-chooses or contacts the recipient and never promises an amount the tool did not
-return.
+Murph may explain in one short sentence that a genuinely new completed signup
+can earn credit after Murph's later settlement eligibility and rolling-limit
+checks pass. Murph never chooses or contacts the recipient and never promises
+an amount the tool did not return.
 
 | Path | Qualification | Public reward label |
 | --- | --- | --- |
-| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member. | $2.00 of cost-weighted usage credit |
+| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member, and the referral passes settlement eligibility and rolling-cap checks. | $2.00 of cost-weighted usage credit |
 | `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | $2.00 of cost-weighted usage credit |
 | `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 of cost-weighted usage credit |
 
@@ -313,14 +326,14 @@ conversation. Group notifications carry live external-thread authority. Personal
 notifications require the frozen direct thread and never move to a newer home
 conversation.
 
-After a qualifying signup-link reward commits, Murph sends one concise personal
-confirmation through the member's current authorized Linq or Telegram route. It
-states that someone completed setup through the referral link and that the
-receipt's persisted dollar-denominated cost-weighted usage credit is already
-applied. It does not identify or guess who joined, mention internal qualification
-logic, or ask the member to do another step. A missing route delays only this
-notice; it never delays, reverses, or duplicates the reward. Settings history
-remains the durable visible receipt.
+After a qualifying signup-link reward commits, Settings history is the durable
+visible receipt. When the member has a current authorized Linq or Telegram
+route, Murph also sends one concise personal confirmation. It states that
+someone completed setup through the referral link and that the receipt's
+persisted dollar-denominated cost-weighted usage credit is already applied. It
+does not identify or guess who joined, mention internal qualification logic, or
+ask the member to do another step. A missing route delays only this notice; it
+never delays, reverses, or duplicates the reward.
 
 Once a notification mailbox item is durable, failed signaling leaves that same
 item eligible for the next bounded pass regardless of its lane. A notification
