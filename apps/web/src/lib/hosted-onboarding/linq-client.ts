@@ -37,6 +37,12 @@ const HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS =
 const HOSTED_LINQ_RICH_LINK_ATTEMPT_TIMEOUT_MS =
   Math.floor(HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS / 2);
 const HOSTED_LINQ_ERROR_RESPONSE_MAX_BYTES = 16 * 1024;
+// One attachment-send attempt when the caller supplies a deadline, covering
+// headers and body together. Owned here because this is the layer that spends
+// it; callers size their own budgets against it rather than restating it. Two
+// of these plus the pre-send stretch must fit inside the caller's window, so it
+// is deliberately tighter than the shared default.
+export const HOSTED_LINQ_ATTACHMENT_SEND_ATTEMPT_TIMEOUT_MS = 7 * 1000;
 
 export type HostedLinqSendResult = {
   chatId: string | null;
@@ -764,10 +770,25 @@ export async function sendHostedLinqAttachmentMessage(input: {
    * caller signal: cutting an irreversible send short is worse than waiting.
    */
   prepareSignal?: AbortSignal;
+  /**
+   * Absolute deadline for the prepare phase, covering its response bodies too.
+   * `fetchLinqApi` stops its own timer once headers arrive, so without this an
+   * attachment-create body could stall past the pre-send bound.
+   */
+  prepareDeadlineAt?: number;
+  /** Absolute deadline shared by the message POST and its one reconciliation. */
+  sendDeadlineAt?: number;
   signal?: AbortSignal;
 }): Promise<HostedLinqSendResult> {
   const chatId = normalizeRequiredString(input.chatId, "chat id");
   const prepareSignal = input.prepareSignal ?? input.signal;
+  const readPrepareBody = async (response: Response) =>
+    input.prepareDeadlineAt === undefined
+      ? await response.text().catch(() => null)
+      : await readHostedLinqBoundedResponseText(
+        response,
+        input.prepareDeadlineAt - Date.now(),
+      );
   // Everything before the final message POST is tagged phase "prepare":
   // failures here provably never created a chat message, so callers may undo
   // side effects such as share reservations. The message POST itself stays
@@ -792,11 +813,11 @@ export async function sendHostedLinqAttachmentMessage(input: {
         status: createResponse.status,
       });
     }
-    const created = await readHostedLinqOptionalJsonResponse<{
+    const created = parseHostedLinqOptionalJson<{
       attachment_id?: unknown;
       required_headers?: unknown;
       upload_url?: unknown;
-    }>(createResponse);
+    }>(await readPrepareBody(createResponse));
     const createdAttachmentId = normalizeNullableString(created?.attachment_id);
     const uploadUrl = normalizeNullableString(created?.upload_url);
     if (!createdAttachmentId || !uploadUrl) {
@@ -846,7 +867,15 @@ export async function sendHostedLinqAttachmentMessage(input: {
   // Otherwise a stalled body outlives the budget the caller was promised.
   let attemptDeadlineAt = 0;
   const submitSend = async () => {
-    attemptDeadlineAt = Date.now() + LINQ_API_DEFAULT_TIMEOUT_MS;
+    // Each attempt gets its own budget, never more than what the caller's
+    // deadline still allows, so two attempts cannot outlive one operation.
+    const attemptBudgetMs = input.sendDeadlineAt === undefined
+      ? LINQ_API_DEFAULT_TIMEOUT_MS
+      : Math.max(0, Math.min(
+        HOSTED_LINQ_ATTACHMENT_SEND_ATTEMPT_TIMEOUT_MS,
+        input.sendDeadlineAt - Date.now(),
+      ));
+    attemptDeadlineAt = Date.now() + attemptBudgetMs;
     return await fetchHostedLinqApiOrThrow({
       body: sendBody,
       method: "POST",
@@ -854,6 +883,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
       path: sendPath,
       signal: input.signal,
       timeoutMessage: "Linq attachment send timed out.",
+      ...(input.sendDeadlineAt === undefined ? {} : { timeoutMs: attemptBudgetMs }),
     });
   };
   const readRemainingBody = async (response: Response) =>
@@ -1323,14 +1353,12 @@ function readHostedLinqProviderErrorDiagnostics(payload: unknown): {
   return { providerErrorCode };
 }
 
-async function readHostedLinqOptionalJsonResponse<T>(response: Response): Promise<T | null> {
+function parseHostedLinqOptionalJson<T>(body: string | null): T | null {
+  if (!body?.trim()) {
+    return null;
+  }
   try {
-    const text = await response.text();
-    if (!text.trim()) {
-      return null;
-    }
-
-    return JSON.parse(text) as T;
+    return JSON.parse(body) as T;
   } catch {
     return null;
   }

@@ -37,7 +37,8 @@ type ProviderControl =
   | { kind: "pre_accept_definitive"; responses: number }
   | { kind: "pre_accept_unrelated_conflict"; responses: number }
   | { kind: "post_accept_stalled_body"; responses: number }
-  | { kind: "conflict_stalled_body"; responses: number };
+  | { kind: "conflict_stalled_body"; responses: number }
+  | { kind: "attachment_create_stalled_body"; responses: number };
 
 interface AcceptedMessage {
   body: string;
@@ -81,6 +82,12 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
 
     if (request.method === "POST" && url === "/attachments") {
       const attachmentId = `attachment_${++nextAttachmentSequence}`;
+      if (armed?.kind === "attachment_create_stalled_body") {
+        consumeArmed();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.write("{");
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({
         attachment_id: attachmentId,
@@ -374,6 +381,60 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(result).toEqual({ chatId: "chat_direct_1", messageId: "linq_msg_1" });
     expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
     expect(provider.observedSendBodies).toHaveLength(2);
+  });
+
+  it("bounds a stalled attachment-create body and never reaches the send", async () => {
+    provider.arm({ kind: "attachment_create_stalled_body", responses: 1 });
+    const startedAt = Date.now();
+
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        prepareDeadlineAt: startedAt + 1_000,
+        sendDeadlineAt: startedAt + 15_000,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    // Headers arrived, so fetchLinqApi's own timer was already done; only the
+    // prepare deadline can stop this. It is provably before the message POST.
+    expect(isHostedLinqAttachmentSendPrepareFailure(error)).toBe(true);
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(provider.observedSendBodies).toEqual([]);
+    expect(provider.acceptedMessageIds).toEqual([]);
+  });
+
+  it("keeps both send attempts inside one caller deadline", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 2 });
+    const startedAt = Date.now();
+
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        sendDeadlineAt: startedAt + 14_000,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    // The send and its one reconciliation share the caller's window, so the
+    // owner returns its own terminal result rather than outliving the turn.
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(16_000);
+    expect(provider.observedSendBodies).toHaveLength(2);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
   });
 
   it("treats a prepare-deadline expiry as provably unsent", async () => {

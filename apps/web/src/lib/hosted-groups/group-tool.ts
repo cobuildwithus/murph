@@ -49,7 +49,7 @@ import {
   updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
 import {
-  HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS,
+  resolveHostedLinqPersonalizedContactCardDeadlines,
   shareMurphHostedLinqContactCardVcfToChat,
 } from "../hosted-onboarding/linq-contact-card-share";
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
@@ -211,6 +211,12 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 export async function handleHostedRuntimeGroupTool(input: {
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
+  /**
+   * When the web-control request arrived, owned by the route so body reading,
+   * signature verification, and nonce consumption are charged to the same
+   * budget as the work below. Direct unit callers may omit it.
+   */
+  requestStartedAtMs?: number;
   scheduleMailboxWake?: (input: {
     expectedUserId: string;
     mailboxItemId: string;
@@ -367,6 +373,9 @@ export async function handleHostedRuntimeGroupTool(input: {
         contactCardShareKey: input.request.contactCardShareKey,
         directLinqChatId: input.request.directLinqChatId,
         memberId: input.memberId,
+        ...(input.requestStartedAtMs === undefined
+          ? {}
+          : { requestStartedAtMs: input.requestStartedAtMs }),
       });
     }
     return handleHostedRuntimeGroupShareContactCard({
@@ -2279,6 +2288,7 @@ type HostedRuntimeGroupShareContactCardInput =
       contactCardShareKey: string;
       directLinqChatId: string;
       memberId: string;
+      requestStartedAtMs?: number;
     };
 
 async function handleHostedRuntimeGroupShareContactCard(
@@ -2289,12 +2299,17 @@ async function handleHostedRuntimeGroupShareContactCard(
     result: { status: "unavailable", unavailableReason },
   });
 
-  // Started before the first await, so it bounds the whole pre-send stretch
-  // rather than only the part inside the share owner. Authorization and the
-  // backup-number read take no signal, so they are checked against it instead;
-  // everything after them either consumes it or is past the point of no return.
-  const preSendSignal = input.kind === "personalized"
-    ? AbortSignal.timeout(HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS)
+  // Anchored to when the web-control request arrived, so the body read,
+  // signature verification, and nonce consumption that already happened are
+  // charged to the same budget as the work below. Falling back to now is only
+  // for direct unit callers; production always supplies the route's value.
+  // Authorization and the backup-number read take no signal, so they are
+  // checked against the deadline instead; everything after them either
+  // consumes it or is past the point of no return.
+  const deadlines = input.kind === "personalized"
+    ? resolveHostedLinqPersonalizedContactCardDeadlines(
+      input.requestStartedAtMs ?? Date.now(),
+    )
     : null;
 
   const authorized = input.kind === "personalized"
@@ -2322,7 +2337,7 @@ async function handleHostedRuntimeGroupShareContactCard(
     // Authorization takes no signal, so this is where its cost is charged
     // against the deadline. Refusing here is provably before any provider
     // work, which is why it is an ordinary unavailable rather than uncertainty.
-    if (preSendSignal?.aborted) {
+    if (deadlines && Date.now() >= deadlines.preSendDeadlineAt) {
       return unavailable("contact_card_presend_deadline_exceeded");
     }
     outcome = await shareMurphHostedLinqContactCardVcfToChat({
@@ -2332,7 +2347,7 @@ async function handleHostedRuntimeGroupShareContactCard(
       memberId: input.memberId,
       prisma,
       shareKey: input.contactCardShareKey,
-      ...(preSendSignal ? { preSendSignal } : {}),
+      ...(deadlines ? { operationDeadlineAt: deadlines.operationDeadlineAt } : {}),
     });
   } else {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
