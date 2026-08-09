@@ -282,6 +282,15 @@ const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
 ]);
 const DEFAULT_SUMMARY_BACKFILL_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays;
 const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
+// Sparse paired readings are cheap enough to backfill across the full
+// summary-history window. Dense timeseries retain the bounded default
+// below, and an explicit timeseriesBackfillDays override still wins.
+const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES = Object.freeze([
+  "blood_pressure",
+] as const);
+const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
+  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
+);
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
@@ -309,6 +318,13 @@ export function createJunctionDeviceSyncProvider(
   const { providerFilter, summaryResources, timeseriesResources } = runtimeConfig;
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
+  const extendedTimeseriesBackfillDays = config.timeseriesBackfillDays ?? summaryBackfillDays;
+  const boundedBackfillTimeseriesResources = timeseriesResources.filter(
+    (resource) => !JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource),
+  );
+  const extendedBackfillTimeseriesResources = timeseriesResources.filter(
+    (resource) => JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource),
+  );
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
   const pushSourceRecoveryEnabled = config.pushSourceRecoveryEnabled === true;
   const reconcileIntervalMs = config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS;
@@ -948,6 +964,9 @@ export function createJunctionDeviceSyncProvider(
     const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(
       summaryNormalizationEvidence,
     );
+    const jobTimeseriesResources = job.kind === "backfill"
+      ? boundedBackfillTimeseriesResources
+      : timeseriesResources;
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
@@ -989,8 +1008,11 @@ export function createJunctionDeviceSyncProvider(
       window,
     );
     if (
-      job.kind === "backfill"
-      || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
+      jobTimeseriesResources.length > 0
+      && (
+        job.kind === "backfill"
+        || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
+      )
     ) {
       const timeseriesImport = await importTimeseriesDailySnapshots(
         context,
@@ -998,6 +1020,7 @@ export function createJunctionDeviceSyncProvider(
         timeseriesWindowStart,
         window.windowEnd,
         skippedOptionalResources,
+        jobTimeseriesResources,
       );
       if (timeseriesImport.yieldedAt) {
         return withJunctionSkippedResourceMetadata(
@@ -2581,34 +2604,72 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
-  function buildInitialJobs(
-    now: string,
-    sourceProviderSlug?: string | null,
-  ): DeviceSyncJobInput[] {
-    const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
-    const payload = normalizedSourceProviderSlug
-      ? { sourceProviderSlug: normalizedSourceProviderSlug }
-      : undefined;
-    return [
-      buildWindowJob({
-        kind: "backfill",
-        now,
-        payload,
-        windowStart: subtractDays(now, summaryBackfillDays),
-        priority: 30,
-      }),
-      buildWindowJob({
-        kind: "reconcile",
-        now,
-        payload,
-        windowStart: subtractDays(now, reconcileDays),
-        priority: 40,
-      }),
-    ];
-  }
+  function buildExtendedTimeseriesBackfillJob(input: {
+  now: string;
+  resource: string;
+  sourceProviderSlug: string | null;
+}): DeviceSyncJobInput {
+  const windowStart = subtractDays(input.now, extendedTimeseriesBackfillDays);
+  const payload = {
+    resource: input.resource,
+    resourceCategory: "timeseries",
+    ...(input.sourceProviderSlug
+      ? { sourceProviderSlug: input.sourceProviderSlug }
+      : {}),
+    windowStart,
+    windowEnd: input.now,
+  } satisfies JunctionDeviceSyncJobPayloads["resource"];
 
   return {
-    provider: "junction",
+    kind: "resource",
+    payload,
+    priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
+    dedupeKey: sha256Text(JSON.stringify([
+      "junction",
+      "extended-timeseries-backfill",
+      input.sourceProviderSlug,
+      input.resource,
+      windowStart,
+      input.now,
+    ])),
+  };
+}
+
+function buildInitialJobs(
+  now: string,
+  sourceProviderSlug?: string | null,
+): DeviceSyncJobInput[] {
+  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  const payload = normalizedSourceProviderSlug
+    ? { sourceProviderSlug: normalizedSourceProviderSlug }
+    : undefined;
+  return [
+    buildWindowJob({
+      kind: "backfill",
+      now,
+      payload,
+      windowStart: subtractDays(now, summaryBackfillDays),
+      priority: 30,
+    }),
+    ...extendedBackfillTimeseriesResources.map((resource) =>
+      buildExtendedTimeseriesBackfillJob({
+        now,
+        resource,
+        sourceProviderSlug: normalizedSourceProviderSlug,
+      })
+    ),
+    buildWindowJob({
+      kind: "reconcile",
+      now,
+      payload,
+      windowStart: subtractDays(now, reconcileDays),
+      priority: 40,
+    }),
+  ];
+}
+
+return {
+  provider: "junction",
     descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
     credentialPolicy: {
       kind: "provider_config",
