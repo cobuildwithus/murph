@@ -7,9 +7,6 @@ import type {
 import { UsageLimitBanner } from "@/src/components/home/usage-limit-banner";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
-import {
-  StartPaidPlanConfirmationContent,
-} from "@/src/components/settings/hosted-start-paid-pulse-button";
 
 const CORE_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   accessKind: "paid",
@@ -49,38 +46,34 @@ export function GroupMemberPlanStudy() {
       id="group-member-plan-section"
     >
       <StudyState
-        label="Confirmed group member on the free trial"
-        state="trial"
+        label="Starter usage does not expire"
+        state="starter"
       >
         <div inert>
           <HostedBillingSettings
             authenticated
             billingStatus="active"
-            canStartPaidPulse
-            canSwitchToGroup
-            currentBillingPhase="trial"
-            currentBillingPlanCode="launch_monthly"
-            currentCheckoutOffer="pulse_trial_7d"
-            currentPeriodEnd={new Date("2026-08-12T04:00:00.000Z")}
+            canStartDirectPlan
             showGroupPlan
-          />
-        </div>
-      </StudyState>
-
-      <StudyState
-        label="Paused Pulse trial ready to resume after payment recovery"
-        state="payment-recovery"
-      >
-        <div inert>
-          <HostedBillingSettings
-            authenticated
-            billingStatus="paused"
-            canStartPaidPulse
-            currentBillingPhase="trial"
-            currentBillingPlanCode="launch_monthly"
-            currentCheckoutOffer="pulse_trial_7d"
-            groupPaymentMethodSaved
-            showGroupPlan
+            usageStatus={{
+              accessKind: "starter",
+              forecast: null,
+              generatedAt: "2026-08-07T20:00:00.000Z",
+              periodEnd: "2099-12-31T23:59:59.999Z",
+              periodKind: "lifetime",
+              periodStart: "2026-08-07T20:00:00.000Z",
+              planCode: "launch_monthly",
+              planName: "Starter",
+              recommendedAction: {
+                kind: "change_plan",
+                label: "Choose Pulse",
+                targetPlanCode: "launch_monthly",
+                url: "/settings#subscription",
+              },
+              remainingPercent: 68,
+              status: "active",
+              usedPercent: 32,
+            }}
           />
         </div>
       </StudyState>
@@ -151,7 +144,6 @@ export function GroupMemberPlanStudy() {
             billingStatus="past_due"
             currentBillingPhase="paid"
             currentBillingPlanCode="launch_monthly"
-            currentCheckoutOffer="standard"
             showGroupPlan
           />
         </div>
@@ -287,25 +279,6 @@ export function GroupMemberPlanStudy() {
         </div>
       </StudyState>
 
-      <StudyState
-        label="Continue with Core when the trial ends"
-        state="trial-core-confirmation"
-      >
-        <div
-          className="mx-auto grid w-full max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7"
-          inert
-        >
-          <StartPaidPlanConfirmationContent
-            errorMessage={null}
-            onClose={() => undefined}
-            onConfirm={() => undefined}
-            staticPresentation
-            status="idle"
-            targetPlanCode="launch_group_monthly"
-            timing="at_trial_end"
-          />
-        </div>
-      </StudyState>
     </div>
   );
 }

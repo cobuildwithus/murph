@@ -47,7 +47,6 @@ import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
-import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
@@ -408,12 +407,6 @@ export function SectionsContent() {
 
       <StudySection title="Settings sign-in required">
         <SettingsAuthRequiredStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Pulse billing return confirmation">
-        <PulseTrialBillingContinuationStudy />
       </StudySection>
 
       <Separator />

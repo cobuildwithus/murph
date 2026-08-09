@@ -6,12 +6,7 @@ import {
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import {
-  isHostedPulseTrialBillingState,
-  parseHostedBillingPhase,
-  parseHostedBillingPlanCode,
-} from "./billing-plans";
-import { hasHostedMemberOwnActiveBilling } from "./entitlement";
+import { hasHostedMemberOwnActiveAccess } from "./entitlement";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
@@ -41,15 +36,6 @@ const hostedPersonalUsageCreditEligibilitySelect =
         suspendedAt: null,
       },
     },
-    billingRef: {
-      select: {
-        currentBillingPhase: true,
-        currentBillingPlanCode: true,
-        currentCheckoutOffer: true,
-        stripeCustomerLookupKey: true,
-        stripeSubscriptionLookupKey: true,
-      },
-    },
     billingStatus: true,
     suspendedAt: true,
     threadContainer: {
@@ -76,28 +62,12 @@ export async function readHostedPersonalUsageCreditOfferCodes(input: {
     select: hostedPersonalUsageCreditEligibilitySelect,
     where: { id: input.memberId },
   });
-  const billingRef = member?.billingRef;
-  const billingPlanCode = parseHostedBillingPlanCode(
-    billingRef?.currentBillingPlanCode,
-  );
-
   if (
     !member ||
-    !billingRef ||
-    !hasHostedMemberOwnActiveBilling(member) ||
+    !hasHostedMemberOwnActiveAccess(member) ||
     member.threadContainer !== null ||
     member.accountGroupsOwned.length > 0 ||
-    member.accountGroupMemberships.length > 0 ||
-    parseHostedBillingPhase(billingRef.currentBillingPhase) !== "paid" ||
-    (billingPlanCode !== "launch_monthly" &&
-      billingPlanCode !== "launch_edge_monthly" &&
-      billingPlanCode !== "launch_max_monthly") ||
-    isHostedPulseTrialBillingState({
-      currentBillingPhase: billingRef.currentBillingPhase,
-      currentCheckoutOffer: billingRef.currentCheckoutOffer,
-    }) ||
-    !billingRef.stripeCustomerLookupKey ||
-    !billingRef.stripeSubscriptionLookupKey
+    member.accountGroupMemberships.length > 0
   ) {
     return [];
   }

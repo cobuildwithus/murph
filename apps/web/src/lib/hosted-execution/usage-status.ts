@@ -10,32 +10,26 @@ import {
 import { getPrisma } from "../prisma";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
-  canStartHostedPulseTrialPaidPlan,
   canScheduleHostedBillingPlanChange,
   canUpgradeHostedBillingPlan,
-  getHostedBillingPlanDefinition,
   isHostedBillingPlanChangePortalConfigured,
   parseHostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
 import {
   hasConfirmedHostedGroupMembership,
-  resolveHostedTrialContinuationOffer,
 } from "../hosted-onboarding/billing-plan-eligibility";
 import {
   buildHostedBillingPlanQuoteState,
   createHostedBillingPlanQuote,
 } from "../hosted-onboarding/billing-plan-quote";
-import { hasHostedMemberOwnActiveBilling } from "../hosted-onboarding/entitlement";
+import { hasHostedMemberOwnPaidBilling } from "../hosted-onboarding/entitlement";
 import {
   readHostedMemberBillingEligibilityState,
 } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import { sanitizeHostedOnboardingStructuredLogDetails } from "../hosted-onboarding/logging";
 import { readHostedPersonalUsageCreditOfferCodes } from "../hosted-onboarding/personal-usage-credit-eligibility";
-import {
-  getHostedOnboardingEnvironment,
-  isHostedBillingPlanSelectionAvailable,
-} from "../hosted-onboarding/runtime";
+import { isHostedBillingPlanSelectionAvailable } from "../hosted-onboarding/runtime";
 import {
   readHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
@@ -133,44 +127,6 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     && decision.reason === "ai_usage_limit_exceeded";
 
   if (!decision.allowed && !usageLimitExceeded) {
-    const trialConversionPending =
-      decision.reason === "trial_expired_pending_billing";
-    const shouldResolveAvailableAction = trialConversionPending
-      && (includeSubscriptionActionQuote || actionUrl !== null);
-    const availableOffer = shouldResolveAvailableAction
-      ? await resolveAvailableSubscriptionOffer({
-          accessKind: "trial",
-          memberId: input.memberId,
-          now,
-          planCode: decision.billingPlanCode,
-          prisma,
-          requestedTargetPlanCode:
-            input.subscriptionActionTargetPlanCode,
-          trialTiming: "now",
-        })
-      : EMPTY_SUBSCRIPTION_OFFER;
-    return {
-      ...projectSubscriptionOffer(availableOffer),
-      ...projectHostedScheduledPlanExpansion(scheduledPlan),
-      generatedAt,
-      reason: trialConversionPending
-        ? "trial_conversion_pending"
-        : "hosted_access_inactive",
-      recommendedAction: trialConversionPending
-        ? buildRecommendedAction({
-            action: availableOffer.quote,
-            actionUrl,
-          })
-        : null,
-      ...projectSubscriptionActionQuoteExpansion({
-        include: includeSubscriptionActionQuote,
-        quote: availableOffer.quote,
-      }),
-      status: "unavailable",
-    };
-  }
-
-  if (decision.limitUsdMicros <= 0n) {
     return {
       ...projectHostedScheduledPlanExpansion(scheduledPlan),
       generatedAt,
@@ -185,20 +141,27 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   }
 
   const exhausted = usageLimitExceeded;
-  const meterWindow = exhausted
-    ? {
-        resetAt: null,
-        spentUsdMicros: decision.spentUsdMicros,
-      }
-    : await readHostedUsageMeterWindow({
+  const starterAccess = decision.allowanceSource === "direct_starter";
+  const meterWindow = starterAccess
+    ? await readHostedLifetimeUsageCreditMeterWindow({
         beneficiaryMemberId: input.memberId,
         ledgerVersion: decision.usageCreditLedgerVersion,
-        now,
-        periodStart: decision.periodStart,
-        planResetAt: decision.planResetAt,
-        periodSpentUsdMicros: decision.spentUsdMicros,
         prisma,
-      });
+      })
+    : exhausted
+      ? {
+          resetAt: null,
+          spentUsdMicros: decision.spentUsdMicros,
+        }
+      : await readHostedUsageMeterWindow({
+          beneficiaryMemberId: input.memberId,
+          ledgerVersion: decision.usageCreditLedgerVersion,
+          now,
+          periodStart: decision.periodStart,
+          planResetAt: decision.planResetAt,
+          periodSpentUsdMicros: decision.spentUsdMicros,
+          prisma,
+        });
   // Admission still follows all effective capacity. The display meter starts a
   // fresh window after the latest fulfilled purchase so newly added usage reads
   // as unused until the beneficiary spends against it.
@@ -211,25 +174,34 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   });
   const forecast = exhausted || meterWindow.spentUsdMicros <= 0n
     ? null
-    : await buildUsageForecast({
-        capacity: totalCapacityUsdMicros,
-        memberId: input.memberId,
-        now,
-        observedAfter: meterWindow.resetAt,
-        periodEnd: decision.periodEnd,
-        periodStart: decision.periodStart,
-        prisma,
-        spent: meterWindow.spentUsdMicros,
-      });
-  const accessKind = decision.allowanceSource === "direct_trial"
-    ? "trial"
+    : starterAccess
+      ? await buildLifetimeUsageForecast({
+          capacity: totalCapacityUsdMicros,
+          ledgerVersion: decision.usageCreditLedgerVersion,
+          memberId: input.memberId,
+          now,
+          prisma,
+          spent: meterWindow.spentUsdMicros,
+        })
+      : await buildUsageForecast({
+          capacity: totalCapacityUsdMicros,
+          memberId: input.memberId,
+          now,
+          observedAfter: meterWindow.resetAt,
+          periodEnd: decision.periodEnd,
+          periodStart: decision.periodStart,
+          prisma,
+          spent: meterWindow.spentUsdMicros,
+        });
+  const accessKind = starterAccess
+    ? "starter"
     : decision.allowanceSource === "family_sponsored_plan"
       ? "family_sponsored"
       : "paid";
   const planName = accessKind === "family_sponsored"
     ? "Family"
-    : accessKind === "trial"
-      ? "Pulse Trial"
+    : accessKind === "starter"
+      ? "Starter"
       : decision.billingPlanCode === "launch_max_monthly"
         ? "Max"
         : decision.billingPlanCode === "launch_edge_monthly"
@@ -244,14 +216,14 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     includeSubscriptionActionQuote
     || (
       shouldRecommendAction
+      && actionUrl !== null
       && (
-        accessKind === "trial"
+        accessKind === "starter"
         || (
           accessKind === "paid"
           && decision.billingPlanCode === "launch_group_monthly"
         )
       )
-      && actionUrl !== null
     );
   const shouldResolvePersonalUsageCreditOffers =
     shouldRecommendAction
@@ -268,7 +240,6 @@ export async function projectHostedPersonalAiUsageStatus(input: {
         prisma,
         requestedTargetPlanCode:
           input.subscriptionActionTargetPlanCode,
-        trialTiming: "at_trial_end",
       })
     : EMPTY_SUBSCRIPTION_OFFER;
   const personalUsageCreditOfferCodes = shouldResolvePersonalUsageCreditOffers
@@ -294,24 +265,22 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     forecast,
     generatedAt,
     periodEnd: decision.periodEnd.toISOString(),
-    periodKind: accessKind === "trial" ? "trial" : "monthly",
+    periodKind: accessKind === "starter" ? "lifetime" : "monthly",
     periodStart: decision.periodStart.toISOString(),
     planCode: decision.billingPlanCode,
     planName,
     recommendedAction: shouldRecommendAction
-      ? accessKind === "trial"
+      ? (
+          accessKind === "starter"
+          || decision.billingPlanCode === "launch_group_monthly"
+        )
         ? buildRecommendedAction({
             action: availableSubscriptionOffer.quote,
             actionUrl,
           })
-        : decision.billingPlanCode === "launch_group_monthly"
-          ? buildRecommendedAction({
-              action: availableSubscriptionOffer.quote,
-              actionUrl,
-            })
-          : personalUsageCreditOfferCodes.length > 0
-            ? buildAddUsageRecommendedAction()
-            : null
+        : personalUsageCreditOfferCodes.length > 0
+          ? buildAddUsageRecommendedAction()
+          : null
       : null,
     ...projectSubscriptionActionQuoteExpansion({
       include: includeSubscriptionActionQuote,
@@ -337,6 +306,40 @@ function calculateUsedPercent(input: {
 
   const floored = Number((input.spent * 100n) / input.capacity);
   return Math.min(99, Math.max(1, floored));
+}
+
+async function readHostedLifetimeUsageCreditMeterWindow(input: {
+  beneficiaryMemberId: string;
+  ledgerVersion: bigint;
+  prisma: HostedPlanUsageClient;
+}): Promise<{
+  resetAt: null;
+  spentUsdMicros: bigint;
+}> {
+  if (input.ledgerVersion <= 0n) {
+    return {
+      resetAt: null,
+      spentUsdMicros: 0n,
+    };
+  }
+
+  const usageDebits = await input.prisma.hostedUsageCreditEntry.aggregate({
+    _sum: {
+      amountUsdMicros: true,
+    },
+    where: {
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      beneficiarySequence: {
+        lte: input.ledgerVersion,
+      },
+      kind: "usage_debit",
+    },
+  });
+  const netDebitUsdMicros = BigInt(usageDebits._sum.amountUsdMicros ?? 0);
+  return {
+    resetAt: null,
+    spentUsdMicros: netDebitUsdMicros < 0n ? -netDebitUsdMicros : 0n,
+  };
 }
 
 async function readHostedUsageMeterWindow(input: {
@@ -459,8 +462,60 @@ async function buildUsageForecast(input: {
     return null;
   }
 
-  const elapsedMs = input.now.getTime() - observedFrom.getTime();
-  if (elapsedMs < DAY_MS) {
+  return projectHostedUsageForecast({
+    capacity: input.capacity,
+    now: input.now,
+    observedFrom,
+    periodEnd: input.periodEnd,
+    spent: input.spent,
+  });
+}
+
+async function buildLifetimeUsageForecast(input: {
+  capacity: bigint;
+  ledgerVersion: bigint;
+  memberId: string;
+  now: Date;
+  prisma: HostedPlanUsageClient;
+  spent: bigint;
+}): Promise<HostedPlanUsageAvailableStatus["forecast"]> {
+  const firstUsageDebit = await input.prisma.hostedUsageCreditEntry.findFirst({
+    orderBy: {
+      beneficiarySequence: "asc",
+    },
+    select: {
+      effectiveAt: true,
+    },
+    where: {
+      beneficiaryMemberId: input.memberId,
+      beneficiarySequence: {
+        lte: input.ledgerVersion,
+      },
+      kind: "usage_debit",
+    },
+  });
+  const observedFrom = firstUsageDebit?.effectiveAt ?? null;
+  if (!observedFrom) {
+    return null;
+  }
+
+  return projectHostedUsageForecast({
+    capacity: input.capacity,
+    now: input.now,
+    observedFrom,
+    spent: input.spent,
+  });
+}
+
+function projectHostedUsageForecast(input: {
+  capacity: bigint;
+  now: Date;
+  observedFrom: Date;
+  periodEnd?: Date;
+  spent: bigint;
+}): HostedPlanUsageAvailableStatus["forecast"] {
+  const elapsedMs = input.now.getTime() - input.observedFrom.getTime();
+  if (elapsedMs < DAY_MS || input.spent <= 0n) {
     return null;
   }
 
@@ -471,14 +526,17 @@ async function buildUsageForecast(input: {
   }
 
   const estimatedExhaustionAt = new Date(
-    observedFrom.getTime() + Number(projectedDurationMs),
+    input.observedFrom.getTime() + Number(projectedDurationMs),
   );
   if (!Number.isFinite(estimatedExhaustionAt.getTime())) {
     return null;
   }
   if (
     estimatedExhaustionAt.getTime() <= input.now.getTime()
-    || estimatedExhaustionAt.getTime() >= input.periodEnd.getTime()
+    || (
+      input.periodEnd
+      && estimatedExhaustionAt.getTime() >= input.periodEnd.getTime()
+    )
   ) {
     return null;
   }
@@ -519,7 +577,6 @@ async function resolveAvailableSubscriptionOffer(input: {
     | "launch_monthly"
     | "launch_edge_monthly"
     | "launch_max_monthly";
-  trialTiming?: "at_trial_end" | "now";
 }): Promise<HostedResolvedSubscriptionOffer> {
   if (input.accessKind === "family_sponsored") {
     return EMPTY_SUBSCRIPTION_OFFER;
@@ -559,88 +616,25 @@ async function resolveAvailableSubscriptionOffer(input: {
     return EMPTY_SUBSCRIPTION_OFFER;
   }
 
-  if (input.accessKind === "trial") {
-    if (!canStartHostedPulseTrialPaidPlan({
-        billingStatus: member.billingStatus,
-        currentBillingPhase: billingState.currentBillingPhase,
-        currentBillingPlanCode: billingState.currentBillingPlanCode,
-        currentCheckoutOffer: billingState.currentCheckoutOffer,
-        hasStripeCustomerId: billingState.hasStripeCustomerId,
-        hasStripeSubscriptionId: billingState.hasStripeSubscriptionId,
-        suspendedAt: member.suspendedAt,
-    })) {
-      return EMPTY_SUBSCRIPTION_OFFER;
-    }
-
-    const hasConfirmedGroupMembership =
-      await hasConfirmedHostedGroupMembership({
-        memberId: input.memberId,
-        prisma: input.prisma,
-      });
-    const groupPlanAvailable =
-      hasConfirmedGroupMembership
-      && getHostedOnboardingEnvironment()
-        .stripePriceIdsByPlan.launch_group_monthly !== null
-      && await isHostedBillingPlanSelectionAvailable({
-        billingPlanCode: "launch_group_monthly",
-      });
-    const trialOffer = resolveHostedTrialContinuationOffer({
-      groupPlanConfigured: groupPlanAvailable,
-      hasConfirmedGroupMembership,
-    });
-    const targetPlanCode =
-      input.requestedTargetPlanCode
-      ?? trialOffer.recommendedPlanCode;
-    if (
-      targetPlanCode !== "launch_group_monthly"
-      && targetPlanCode !== "launch_monthly"
-    ) {
-      return EMPTY_SUBSCRIPTION_OFFER;
-    }
-    if (!trialOffer.availablePlanCodes.includes(targetPlanCode)) {
-      return EMPTY_SUBSCRIPTION_OFFER;
-    }
-    if (
-      targetPlanCode !== "launch_group_monthly"
-      && !await isHostedBillingPlanSelectionAvailable({
-        billingPlanCode: targetPlanCode,
-      })
-    ) {
-      return EMPTY_SUBSCRIPTION_OFFER;
-    }
-    return {
-      availablePlans: trialOffer.availablePlanCodes.map((planCode) => {
-        const definition = getHostedBillingPlanDefinition(planCode);
-        return {
-          code: planCode,
-          displayName:
-            planCode === "launch_group_monthly" ? "Group" : "Pulse",
-          monthlyPriceUsdCents: definition.recurringAmountUsdCents,
-          selectable: true as const,
-        };
-      }),
-      quote: createHostedBillingPlanQuote({
-        memberId: input.memberId,
-        now: input.now,
-        state: buildHostedBillingPlanQuoteState({
-          billingState,
-          billingStatus: member.billingStatus,
-        }),
-        targetPlanCode,
-        timing: input.trialTiming ?? "now",
-      }),
-      recommendedPlanCode: trialOffer.recommendedPlanCode,
-    };
-  }
-
-  const hasOwnActiveBilling = hasHostedMemberOwnActiveBilling(member);
+  const hasOwnPaidBilling = hasHostedMemberOwnPaidBilling({
+    ...member,
+    billingRef: {
+      currentBillingPhase: billingState.currentBillingPhase,
+      currentCheckoutOffer: billingState.currentCheckoutOffer,
+      stripeSubscriptionLookupKey: billingState.hasStripeSubscriptionId
+        ? "configured"
+        : null,
+    },
+  });
   const targetPlanCode = input.requestedTargetPlanCode
     ?? (
-      input.planCode === "launch_group_monthly"
+      input.accessKind === "starter"
         ? "launch_monthly"
-        : input.planCode === "launch_monthly"
-          ? "launch_edge_monthly"
-          : null
+        : input.planCode === "launch_group_monthly"
+          ? "launch_monthly"
+          : input.planCode === "launch_monthly"
+            ? "launch_edge_monthly"
+            : null
     );
   if (!targetPlanCode || targetPlanCode === input.planCode) {
     return EMPTY_SUBSCRIPTION_OFFER;
@@ -674,7 +668,7 @@ async function resolveAvailableSubscriptionOffer(input: {
     return EMPTY_SUBSCRIPTION_OFFER;
   }
 
-  const canUpgrade = hasOwnActiveBilling
+  const canUpgrade = hasOwnPaidBilling
     && billingState.hasStripeCustomerId
     && billingState.hasStripeSubscriptionId
     && canUpgradeHostedBillingPlan({
@@ -683,7 +677,7 @@ async function resolveAvailableSubscriptionOffer(input: {
       currentCheckoutOffer: billingState.currentCheckoutOffer,
       targetPlanCode,
     });
-  const canSchedule = hasOwnActiveBilling
+  const canSchedule = hasOwnPaidBilling
     && billingState.hasStripeCustomerId
     && billingState.hasStripeSubscriptionId
     && canScheduleHostedBillingPlanChange({
@@ -696,11 +690,16 @@ async function resolveAvailableSubscriptionOffer(input: {
       suspendedAt: member.suspendedAt,
       targetPlanCode,
     });
+  const canStartDirectPlan = !hasOwnPaidBilling
+    && input.accessKind === "starter"
+    && member.billingStatus === "active";
   const timing = canUpgrade
     ? "immediate" as const
     : canSchedule
       ? "period_end" as const
-      : null;
+      : canStartDirectPlan
+        ? "now" as const
+        : null;
 
   return {
     quote: timing
