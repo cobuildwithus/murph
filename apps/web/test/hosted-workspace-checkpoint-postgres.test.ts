@@ -335,6 +335,216 @@ describe.skipIf(!runPostgresProof)(
       });
     });
 
+    it("loses a blocked CAS without mailbox mutation when a concurrent checkpoint commits first", async () => {
+      const observerClient = requirePrisma(observer);
+      const checkpoint = requirePrisma(checkpointClient);
+      const winner = requirePrisma(blockerClient);
+      const userId = await createMember(observerClient, memberIds);
+      const itemId = createId("concurrent_stale_item");
+      const originalSnapshotRef = createBundleRef("checkpoint_pg_race_original");
+      const winnerSnapshotRef = createBundleRef("checkpoint_pg_race_winner");
+      const winnerReady = createDeferred();
+      const releaseWinner = createDeferred();
+      const checkpointPidReady = createDeferred<number>();
+
+      await observerClient.hostedWorkspace.create({
+        data: {
+          snapshotRef: originalSnapshotRef,
+          userId,
+          version: 4n,
+        },
+      });
+      await observerClient.hostedMailboxLaneCounter.createMany({
+        data: [
+          {
+            consumedSeq: 0n,
+            lane: "conversation",
+            nextSeq: 2n,
+            userId,
+          },
+          {
+            consumedSeq: 0n,
+            lane: "system",
+            nextSeq: 2n,
+            userId,
+          },
+        ],
+      });
+      await observerClient.hostedMailboxItem.create({
+        data: mailboxItem({
+          createdAt: new Date(),
+          id: itemId,
+          laneSeq: 1n,
+          userId,
+        }),
+      });
+
+      const winnerTask = winner.$transaction(async (tx) => {
+        const result = await checkpointHostedWorkspaceTx({
+          expectedVersion: 4n,
+          reason: "canonical_runtime_commit",
+          snapshotRef: winnerSnapshotRef,
+          tx,
+          userId,
+        });
+        winnerReady.resolve();
+        await releaseWinner.promise;
+        return result;
+      });
+      await winnerReady.promise;
+
+      const checkpointTask = checkpoint.$transaction(async (tx) => {
+        checkpointPidReady.resolve(await readBackendPid(tx));
+        return checkpointHostedWorkspaceTx({
+          expectedVersion: 4n,
+          handledConversationMailboxItemIds: [itemId],
+          reason: "idle_shutdown",
+          redactedStatusJson: {
+            hostedMailboxConversationImportedSeq: "1",
+            hostedMailboxSystemHandledThroughSeq: "1",
+          },
+          snapshotRef: createBundleRef("checkpoint_pg_race_loser"),
+          tx,
+          userId,
+        });
+      });
+      const checkpointPid = await checkpointPidReady.promise;
+
+      try {
+        await waitForBlockedBackend({
+          observer: observerClient,
+          pid: checkpointPid,
+        });
+      } finally {
+        releaseWinner.resolve();
+      }
+
+      await expect(winnerTask).resolves.toMatchObject({
+        replacedSnapshotRef: originalSnapshotRef,
+        status: "updated",
+        workspace: {
+          snapshotRef: winnerSnapshotRef,
+          version: "5",
+        },
+      });
+      await expect(checkpointTask).resolves.toMatchObject({
+        replacedSnapshotRef: null,
+        status: "conflict",
+        workspace: {
+          snapshotRef: winnerSnapshotRef,
+          version: "5",
+        },
+      });
+      await expect(observerClient.hostedMailboxItem.findUnique({
+        select: { consumedAt: true },
+        where: { id: itemId },
+      })).resolves.toEqual({ consumedAt: null });
+      await expect(readCounter(observerClient, userId, "conversation")).resolves.toBe(0n);
+      await expect(readCounter(observerClient, userId, "system")).resolves.toBe(0n);
+      await expect(observerClient.hostedWorkspace.findUnique({
+        select: { snapshotRef: true, version: true },
+        where: { userId },
+      })).resolves.toEqual({
+        snapshotRef: winnerSnapshotRef,
+        version: 5n,
+      });
+    });
+
+    it("rolls back the workspace CAS when the blocked mailbox statement fails", async () => {
+      const observerClient = requirePrisma(observer);
+      const checkpoint = requirePrisma(checkpointClient);
+      const blocker = requirePrisma(blockerClient);
+      const userId = await createMember(observerClient, memberIds);
+      const itemId = createId("rollback_item");
+      const oldSnapshotRef = createBundleRef("checkpoint_pg_rollback_old");
+      const releaseBlocker = createDeferred();
+      const blockerReady = createDeferred();
+
+      await observerClient.hostedWorkspace.create({
+        data: {
+          snapshotRef: oldSnapshotRef,
+          userId,
+          version: 4n,
+        },
+      });
+      await observerClient.hostedMailboxLaneCounter.createMany({
+        data: [
+          {
+            consumedSeq: 0n,
+            lane: "conversation",
+            nextSeq: 2n,
+            userId,
+          },
+          {
+            consumedSeq: 0n,
+            lane: "system",
+            nextSeq: 2n,
+            userId,
+          },
+        ],
+      });
+      await observerClient.hostedMailboxItem.create({
+        data: mailboxItem({
+          createdAt: new Date(),
+          id: itemId,
+          laneSeq: 1n,
+          userId,
+        }),
+      });
+
+      const blockerTask = blocker.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT next_seq
+          FROM hosted_mailbox_lane_counter
+          WHERE user_id = ${userId}
+            AND lane = 'conversation'
+          FOR UPDATE
+        `;
+        blockerReady.resolve();
+        await releaseBlocker.promise;
+      });
+      await blockerReady.promise;
+
+      const checkpointTask = checkpoint.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT set_config('lock_timeout', '500ms', true)
+        `;
+        return checkpointHostedWorkspaceTx({
+          expectedVersion: 4n,
+          handledConversationMailboxItemIds: [itemId],
+          reason: "idle_shutdown",
+          redactedStatusJson: {
+            hostedMailboxConversationImportedSeq: "1",
+            hostedMailboxSystemHandledThroughSeq: "1",
+          },
+          snapshotRef: createBundleRef("checkpoint_pg_rollback_next"),
+          tx,
+          userId,
+        });
+      });
+
+      try {
+        await expect(checkpointTask).rejects.toThrow(/55P03|lock timeout/u);
+      } finally {
+        releaseBlocker.resolve();
+      }
+
+      await blockerTask;
+      await expect(observerClient.hostedMailboxItem.findUnique({
+        select: { consumedAt: true },
+        where: { id: itemId },
+      })).resolves.toEqual({ consumedAt: null });
+      await expect(readCounter(observerClient, userId, "conversation")).resolves.toBe(0n);
+      await expect(readCounter(observerClient, userId, "system")).resolves.toBe(0n);
+      await expect(observerClient.hostedWorkspace.findUnique({
+        select: { snapshotRef: true, version: true },
+        where: { userId },
+      })).resolves.toEqual({
+        snapshotRef: oldSnapshotRef,
+        version: 4n,
+      });
+    });
+
     it("commits a valid checkpoint and reports a newer append that wins while the CAS waits", async () => {
       const observerClient = requirePrisma(observer);
       const checkpoint = requirePrisma(checkpointClient);
@@ -567,7 +777,7 @@ async function waitForBlockedBackend(input: {
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error("Expected the checkpoint CAS to wait on the workspace row.");
+  throw new Error("Expected the checkpoint backend to wait on a database lock.");
 }
 
 function requirePrisma(value: PrismaClient | null): PrismaClient {
