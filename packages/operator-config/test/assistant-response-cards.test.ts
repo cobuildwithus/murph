@@ -57,7 +57,7 @@ describe('assistant response cards', () => {
     expect(assistantResponseCardJsonSchema).not.toHaveProperty('$schema')
     expect(assistantResponseCardJsonSchema).toMatchObject({
       description: expect.stringContaining('compact_table'),
-      anyOf: [
+      anyOf: expect.arrayContaining([
         {
           anyOf: [
             {
@@ -172,7 +172,7 @@ describe('assistant response cards', () => {
             version: { const: 1 },
           },
         },
-      ],
+      ]),
     })
   })
 

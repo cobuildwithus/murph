@@ -1,0 +1,190 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  assistantResponseCardSchema,
+  challengeStandingsCardV1Bounds,
+  challengeStandingsResponseCardV1Schema,
+  type ChallengeStandingsResponseCardV1,
+} from "../src/index.ts";
+
+const INDIVIDUAL_CARD: ChallengeStandingsResponseCardV1 = {
+  kind: "challenge_standings",
+  version: 1,
+  format: "individual",
+  title: "Weird Health Week",
+  subtitle: "Day 4 of 7",
+  objective: { kind: "ranking" },
+  entries: [
+    {
+      label: "Maya",
+      points: 120,
+      coverage: "complete",
+      detail: "Run selfie + 10k steps",
+    },
+    {
+      label: "Jon",
+      points: 90,
+      coverage: "partial",
+      detail: "Verified through yesterday",
+    },
+    {
+      label: "Priya",
+      points: null,
+      coverage: "unscored",
+      detail: "Waiting for shared data",
+    },
+  ],
+  footer: "Top three shown.",
+};
+
+const COLLECTIVE_CARD: ChallengeStandingsResponseCardV1 = {
+  kind: "challenge_standings",
+  version: 1,
+  format: "collective",
+  title: "Move Atlanta Together",
+  subtitle: "Updated after Friday's check-in",
+  objective: { kind: "target", targetPoints: 1_000 },
+  collectivePoints: 640,
+  coverage: "partial",
+  footer: "360 points to unlock the lake-day victory lap.",
+};
+
+describe("challenge standings response-card contract", () => {
+  it("accepts ranked individual, team, and collective snapshots", () => {
+    expect(challengeStandingsResponseCardV1Schema.parse(INDIVIDUAL_CARD)).toEqual(
+      INDIVIDUAL_CARD,
+    );
+    expect(assistantResponseCardSchema.parse(INDIVIDUAL_CARD)).toEqual(
+      INDIVIDUAL_CARD,
+    );
+
+    const teamCard: ChallengeStandingsResponseCardV1 = {
+      ...INDIVIDUAL_CARD,
+      format: "teams",
+      objective: { kind: "target", targetPoints: 250 },
+      entries: [
+        {
+          label: "Cold Plungers",
+          points: 210,
+          coverage: "complete",
+          detail: "3 people",
+        },
+        {
+          label: "Sauna Goblins",
+          points: 180,
+          coverage: "complete",
+          detail: "3 people",
+        },
+      ],
+    };
+    expect(challengeStandingsResponseCardV1Schema.parse(teamCard)).toEqual(
+      teamCard,
+    );
+    expect(challengeStandingsResponseCardV1Schema.parse(COLLECTIVE_CARD)).toEqual(
+      COLLECTIVE_CARD,
+    );
+  });
+
+  it("keeps scored and unscored coverage honest", () => {
+    for (const invalidEntry of [
+      { ...INDIVIDUAL_CARD.entries[0]!, coverage: "unscored" as const },
+      { ...INDIVIDUAL_CARD.entries[2]!, coverage: "partial" as const },
+    ]) {
+      expect(challengeStandingsResponseCardV1Schema.safeParse({
+        ...INDIVIDUAL_CARD,
+        entries: [invalidEntry],
+      }).success).toBe(false);
+    }
+
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...COLLECTIVE_CARD,
+      coverage: "unscored",
+    }).success).toBe(false);
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...COLLECTIVE_CARD,
+      collectivePoints: null,
+      coverage: "unscored",
+    }).success).toBe(true);
+  });
+
+  it("requires descending ranked entries with unscored entries last", () => {
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...INDIVIDUAL_CARD,
+      entries: [INDIVIDUAL_CARD.entries[1]!, INDIVIDUAL_CARD.entries[0]!],
+    }).success).toBe(false);
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...INDIVIDUAL_CARD,
+      entries: [INDIVIDUAL_CARD.entries[2]!, INDIVIDUAL_CARD.entries[0]!],
+    }).success).toBe(false);
+
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...INDIVIDUAL_CARD,
+      entries: [
+        INDIVIDUAL_CARD.entries[0]!,
+        { ...INDIVIDUAL_CARD.entries[0]!, label: "Tied friend" },
+      ],
+    }).success).toBe(true);
+  });
+
+  it("requires collective challenges to use a positive target", () => {
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...COLLECTIVE_CARD,
+      objective: { kind: "ranking" },
+    }).success).toBe(false);
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...COLLECTIVE_CARD,
+      objective: { kind: "target", targetPoints: 0 },
+    }).success).toBe(false);
+  });
+
+  it("enforces compact shape, text, and URL bounds", () => {
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...INDIVIDUAL_CARD,
+      entries: Array.from(
+        { length: challengeStandingsCardV1Bounds.entries + 1 },
+        (_, index) => ({
+          label: `Friend ${index + 1}`,
+          points: 100 - index,
+          coverage: "complete" as const,
+          detail: null,
+        }),
+      ),
+    }).success).toBe(false);
+
+    for (const title of [" Weird Health Week", "Weird\nHealth Week"]) {
+      expect(challengeStandingsResponseCardV1Schema.safeParse({
+        ...INDIVIDUAL_CARD,
+        title,
+      }).success).toBe(false);
+    }
+
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...INDIVIDUAL_CARD,
+      title: "T".repeat(challengeStandingsCardV1Bounds.title),
+      subtitle: "S".repeat(challengeStandingsCardV1Bounds.subtitle),
+      entries: Array.from(
+        { length: challengeStandingsCardV1Bounds.entries },
+        (_, index) => ({
+          label: `${String(index + 1).padStart(2, "0")}${"L".repeat(
+            challengeStandingsCardV1Bounds.entryLabel - 2,
+          )}`,
+          points: challengeStandingsCardV1Bounds.entries - index,
+          coverage: "complete" as const,
+          detail: "D".repeat(challengeStandingsCardV1Bounds.entryDetail),
+        }),
+      ),
+      footer: "F".repeat(challengeStandingsCardV1Bounds.footer),
+    }).success).toBe(false);
+  });
+
+  it("rejects unknown fields and unsupported kinds", () => {
+    expect(challengeStandingsResponseCardV1Schema.safeParse({
+      ...INDIVIDUAL_CARD,
+      extra: true,
+    }).success).toBe(false);
+    expect(assistantResponseCardSchema.safeParse({
+      ...INDIVIDUAL_CARD,
+      kind: "leaderboard",
+    }).success).toBe(false);
+  });
+});
