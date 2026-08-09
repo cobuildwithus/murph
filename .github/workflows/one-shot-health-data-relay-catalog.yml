@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   apply:
-    if: contains(github.event.head_commit.message, '[apply-health-data-relay-catalog-v3]')
+    if: contains(github.event.head_commit.message, '[apply-health-data-relay-catalog-v4]')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -71,7 +71,7 @@ jobs:
           
           replace_exact('replacement-18', 'apps/web/test/connect-page.test.ts', '  assert.doesNotMatch(markup, />Health Connect</u);\n  assert.doesNotMatch(markup, />Samsung Health</u);\n', '  assert.match(markup, />Health Connect</u);\n  assert.match(markup, />Samsung Health</u);\n', 1)
           
-          replace_exact('replacement-19', 'apps/web/test/connect-page.test.ts', '  assert.ok(\n    sourceHeadingIndex(markup, "Apple Health") <\n      sourceHeadingIndex(markup, "Garmin"),\n  );\n', '  assert.ok(\n    sourceHeadingIndex(markup, "Apple Health") <\n      sourceHeadingIndex(markup, "Health Connect"),\n  );\n  assert.ok(\n    sourceHeadingIndex(markup, "Health Connect") <\n      sourceHeadingIndex(markup, "Samsung Health"),\n  );\n  assert.ok(\n    sourceHeadingIndex(markup, "Samsung Health") <\n      sourceHeadingIndex(markup, "Garmin"),\n  );\n', 1)
+          replace_exact('replacement-19', 'apps/web/test/connect-page.test.ts', '  assert.ok(\n    sourceHeadingIndex(markup, "Apple Health") <\n      sourceHeadingIndex(markup, "Garmin"),\n  );\n', '  assert.ok(\n    sourceHeadingIndex(markup, "Apple Health") <\n      sourceHeadingIndex(markup, "Health Connect"),\n  );\n  assert.ok(\n    sourceHeadingIndex(markup, "Health Connect") <\n      sourceHeadingIndex(markup, "Samsung Health"),\n  );\n  assert.ok(\n    sourceHeadingIndex(markup, "Samsung Health") <\n      sourceHeadingIndex(markup, "Garmin"),\n  );\n', 2)
           
           replace_exact('replacement-20', 'apps/web/test/connect-page.test.ts', '  assert.ok(\n    sourceHeadingIndex(markup, "Withings") < sourceHeadingIndex(markup, "Oura"),\n  );\n', '  assert.ok(\n    sourceHeadingIndex(markup, "Withings") <\n      sourceHeadingIndex(markup, "Wyze Scale"),\n  );\n  assert.ok(\n    sourceHeadingIndex(markup, "Wyze Scale") <\n      sourceHeadingIndex(markup, "Eufy Smart Scale / eufyLife"),\n  );\n  assert.ok(\n    sourceHeadingIndex(markup, "Eufy Smart Scale / eufyLife") <\n      sourceHeadingIndex(markup, "VeSync / Etekcity"),\n  );\n  assert.ok(\n    sourceHeadingIndex(markup, "VeSync / Etekcity") <\n      sourceHeadingIndex(markup, "A&D Heart Track"),\n  );\n  assert.ok(\n    sourceHeadingIndex(markup, "A&D Heart Track") <\n      sourceHeadingIndex(markup, "Microlife Connected Health+"),\n  );\n  assert.ok(\n    sourceHeadingIndex(markup, "Microlife Connected Health+") <\n      sourceHeadingIndex(markup, "Oura"),\n  );\n', 1)
           
