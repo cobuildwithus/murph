@@ -318,7 +318,23 @@ export async function createAssistantOutboxIntent(
       ...input,
       replyToMessageId,
     })
-    if (card !== null && persistedTarget.threadIsDirect !== true) {
+    if (
+      card?.kind === 'challenge_standings' &&
+      !(
+        persistedTarget.threadIsDirect === false &&
+        persistedTarget.channel?.trim().toLowerCase() === 'linq'
+      )
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
+        'A challenge standings response card requires an authenticated Linq group conversation.',
+      )
+    }
+    if (
+      card !== null &&
+      card.kind !== 'challenge_standings' &&
+      persistedTarget.threadIsDirect !== true
+    ) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
         'A response card requires a private direct conversation.',
