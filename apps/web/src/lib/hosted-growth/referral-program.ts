@@ -93,5 +93,5 @@ export function formatHostedPublicReferralRewardAmount(
 export function formatHostedPublicReferralRewardDays(
   estimatedUsageDays: number,
 ): string {
-  return `≈${estimatedUsageDays} days of Murph`;
+  return `${estimatedUsageDays} days of Murph`;
 }

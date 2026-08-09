@@ -22,10 +22,9 @@ test("ReferralSection presents every available referral path on the homepage", (
   assert.match(markup, /Invite someone to Murph/);
   assert.match(markup, /Bring someone new to Murph/);
   assert.match(markup, /Start an active group/);
-  assert.match(markup, /≈10 days of Murph/);
-  assert.match(markup, /≈14 days of Murph/);
-  assert.match(markup, /\$2\.00 credit/);
-  assert.match(markup, /\$3\.50 credit/);
+  assert.match(markup, /10 days of Murph/);
+  assert.match(markup, /14 days of Murph/);
+  assert.doesNotMatch(markup, /≈|\$[0-9]/);
   assert.match(markup, /href="\/refer"/);
   assert.match(markup, /See ways to earn/);
   assert.match(markup, /Typical-use estimate\. Actual capacity varies\./);
@@ -58,8 +57,9 @@ test("ReferralSection keeps disabled referral paths out of its copy and rewards"
   assert.match(groupMarkup, /Start a fresh group with Murph\./);
   assert.match(groupMarkup, /Bring someone new to Murph/);
   assert.match(groupMarkup, /Start an active group/);
-  assert.match(groupMarkup, /≈10 days of Murph/);
-  assert.match(groupMarkup, /≈14 days of Murph/);
+  assert.match(groupMarkup, /10 days of Murph/);
+  assert.match(groupMarkup, /14 days of Murph/);
+  assert.doesNotMatch(groupMarkup, /≈|\$[0-9]/);
   assert.doesNotMatch(groupMarkup, /personal link/i);
   assert.doesNotMatch(groupMarkup, /Invite someone to Murph/);
 
