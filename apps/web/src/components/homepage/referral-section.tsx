@@ -23,7 +23,7 @@ export function ReferralSection({
   const description = signupAvailable && groupAvailable
     ? "Explore your personal link or a group mission. Eligibility, rolling-limit, and completion checks determine whether Murph applies usage automatically."
     : signupAvailable
-    ? "Share your personal link. A genuinely new signup can earn usage if eligibility and rolling-limit checks pass when setup completes."
+    ? "Share your personal link. A genuinely new completed signup can earn usage after Murph’s eligibility and rolling-limit checks pass."
     : "Explore a group mission. Murph applies usage automatically after the mission is accepted and reaches its real-participation requirements.";
 
   return (

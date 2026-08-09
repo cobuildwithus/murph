@@ -21,7 +21,7 @@ export function buildReferralPageMetadata(
   const description = signupAvailable && groupAvailable
     ? "Explore Murph referral options. Qualifying link and group rewards add usage after eligibility, rolling-limit, and completion checks pass."
     : signupAvailable
-    ? "Share Murph with friends through your referral link. A genuinely new signup can earn usage if eligibility and rolling-limit checks pass when setup completes."
+    ? "Share Murph with friends through your referral link. A genuinely new completed signup can earn usage after Murph’s eligibility and rolling-limit checks pass."
     : groupAvailable
     ? "Explore a fresh-group mission with Murph. Qualifying missions earn usage after acceptance and completion requirements are met."
     : "Murph referral rewards are temporarily unavailable. Check back for current referral options.";

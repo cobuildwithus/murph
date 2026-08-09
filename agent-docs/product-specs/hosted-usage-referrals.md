@@ -21,8 +21,8 @@ enabled, and `/refer` lists only the enabled paths. When both gates are off,
 `/refer` shows one temporary-unavailability state without reward quantities or
 a share action. Gate-derived availability is program-level, not a promise that
 an individual member has enough rolling capacity for the next reward. Public
-signup-link copy therefore states that eligibility and rolling-limit checks run
-when setup completes.
+signup-link copy therefore states that a completed signup can earn credit only
+after the later settlement eligibility and rolling-limit checks pass.
 
 The stable referral link remains available to an eligible signed-in member when
 either reward gate is disabled, but a disabled signup reward is not marketed or
@@ -49,10 +49,10 @@ active at the same time.
 A shareable signup link is different. Murph creates it only when the member
 explicitly asks for a signup, invite, referral, or shareable link. Sharing or
 opening the link is not a completed referral and does not guarantee a reward.
-Murph may explain in one short sentence that eligibility and rolling-limit
-checks run when the recipient completes their own setup and that a qualifying
-reward is then applied automatically. Murph never chooses or contacts the
-recipient and never promises an amount the tool did not return.
+Murph may explain in one short sentence that a genuinely new completed signup
+can earn credit after Murph's later settlement eligibility and rolling-limit
+checks pass. Murph never chooses or contacts the recipient and never promises
+an amount the tool did not return.
 
 | Path | Qualification | Public reward label |
 | --- | --- | --- |

@@ -95,7 +95,7 @@ test("ReferralPageContent advertises only signup rewards when group missions are
   );
 
   assert.match(markup, /Share your personal link\./);
-  assert.match(markup, /passes eligibility and rolling-limit checks/);
+  assert.match(markup, /completed signup can earn the usage reward after Murph’s eligibility and rolling-limit checks pass/);
   assert.match(markup, /Invite someone to Murph/);
   assert.match(markup, /Their private conversations and health data are never visible to you/);
   assert.match(markup, /what they share privately with Murph stays private/);
@@ -108,6 +108,7 @@ test("ReferralPageContent advertises only signup rewards when group missions are
   assert.doesNotMatch(markup, /sends you a short confirmation/);
   assert.doesNotMatch(markup, /Murph tells you that/);
   assert.doesNotMatch(markup, /the reward is added automatically/);
+  assert.doesNotMatch(markup, /when setup completes|checks at completion/);
   assert.doesNotMatch(markup, /Shared-group messages remain visible/);
   assert.doesNotMatch(markup, /Start an active group/);
   assert.doesNotMatch(markup, /Bring someone new to Murph/);

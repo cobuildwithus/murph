@@ -42,6 +42,7 @@ test("ReferralSection keeps disabled referral paths out of its copy and rewards"
 
   assert.match(signupMarkup, /Share your personal link\./);
   assert.match(signupMarkup, /eligibility and rolling-limit checks pass/);
+  assert.doesNotMatch(signupMarkup, /when setup completes|checks at completion/);
   assert.match(signupMarkup, /Invite someone to Murph/);
   assert.doesNotMatch(signupMarkup, /group mission/i);
   assert.doesNotMatch(signupMarkup, /Start an active group/);

@@ -343,6 +343,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             qualifiedAt: true,
             rewardedAt: true,
             status: true,
+            terminalAt: true,
             terminalReason: true,
           },
           where: { introducedMemberId: { in: introducedMemberIds } },
@@ -354,6 +355,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             qualifiedAt: activatedAt[index],
             rewardedAt: expect.any(Date),
             status: "rewarded",
+            terminalAt: expect.any(Date),
             terminalReason: null,
           })),
         );
@@ -362,7 +364,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           qualifiedAt: null,
           rewardedAt: null,
           status: "disqualified",
+          terminalAt: expect.any(Date),
           terminalReason: "signup_referral_referrer_reward_cap_reached",
+        });
+        receipts.forEach((receipt, index) => {
+          if (!receipt.terminalAt) {
+            throw new TypeError("Expected a terminal signup receipt.");
+          }
+          expect(receipt.terminalAt.getTime()).toBeGreaterThan(
+            activatedAt[index]!.getTime(),
+          );
         });
 
         const disqualifiedReferral =

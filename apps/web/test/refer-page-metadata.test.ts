@@ -49,6 +49,10 @@ test("ReferPage metadata does not promise disabled reward paths", () => {
   assert.match(String(signupMetadata.description), /rolling-limit checks pass/);
   assert.doesNotMatch(String(signupMetadata.description), /group/);
   assert.doesNotMatch(String(signupMetadata.description), /earn more AI usage when/);
+  assert.doesNotMatch(
+    String(signupMetadata.description),
+    /when setup completes|checks at completion/,
+  );
 
   const groupMetadata = buildReferralPageMetadata(
     HOSTED_PUBLIC_REFERRAL_REWARDS.filter(({ id }) => id !== "signup-link"),

@@ -167,7 +167,7 @@ export function ReferralPageContent({
   const heroDescription = signupAvailable && groupAvailable
     ? "Explore your personal link or a group mission. Murph applies a reward automatically only after that path’s eligibility, rolling-limit, and completion checks pass."
     : signupAvailable
-    ? "Share your personal link. If a genuinely new member completes setup through it and the referral passes eligibility and rolling-limit checks then, Murph adds the usage reward automatically."
+    ? "Share your personal link. A genuinely new completed signup can earn the usage reward after Murph’s eligibility and rolling-limit checks pass."
     : "Explore a qualifying group mission. Murph adds the usage reward automatically after the mission is accepted and its participation requirements are met.";
   const qualificationLead = signupAvailable && groupAvailable
     ? "Opening a link or creating a group alone is never enough."
@@ -177,7 +177,7 @@ export function ReferralPageContent({
   const ownerDescription = signupAvailable && groupAvailable
     ? "Eligible link rewards go to your personal Murph. Mission rewards go to the personal or group Murph the mission was accepted for, once Murph confirms the mission."
     : signupAvailable
-    ? "Link rewards go to your personal Murph when a genuinely new signup passes the eligibility and rolling-limit checks at completion."
+    ? "Eligible link rewards go to your personal Murph after settlement checks pass."
     : "Mission rewards go to the personal or group Murph the mission was accepted for, once Murph confirms the mission.";
   const artifactReward = signupAvailable
     ? rewards.find(({ id }) => id === "signup-link")!
