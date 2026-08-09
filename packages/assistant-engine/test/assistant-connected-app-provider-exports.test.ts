@@ -55,8 +55,14 @@ describe('assistant manual provider export guidance', () => {
     expect(skill).toContain(
       'does not make that service a connected-app provider',
     )
+
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
     const normalizedReference = reference.replace(/\s+/gu, ' ')
 
+    expect(normalizedSkill).toContain(
+      'verified fallback routes for Function Health, Livongo/Teladoc Condition Management, Strong, and Hevy',
+    )
+    expect(normalizedSkill).not.toContain('Teladoc Health/Livongo')
     expect(normalizedReference).toContain(
       'manual export or one-time import, not a live sync',
     )

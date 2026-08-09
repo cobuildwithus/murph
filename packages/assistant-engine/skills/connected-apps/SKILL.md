@@ -43,10 +43,10 @@ substitute a manual export.
 
 When no direct connection is proven and the member wants existing data from the
 service, read `references/provider-data-exports.md`. That reference owns the
-verified fallback routes for Function Health, Teladoc Health/Livongo, Strong,
-and Hevy. Do not use `murph.connected_apps_search` to hunt for an arbitrary
-health integration, and do not claim support because a provider appears in the
-reference.
+verified fallback routes for Function Health, Livongo/Teladoc Condition
+Management, Strong, and Hevy. Do not use `murph.connected_apps_search` to hunt
+for an arbitrary health integration, and do not claim support because a provider
+appears in the reference.
 
 Give the provider's official export link and the smallest useful steps, ask for
 the original downloaded file, and describe the result as a manual export or
