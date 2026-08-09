@@ -12,8 +12,8 @@ import {
   waitForHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
-  parseHostedPlanCode,
-  type HostedPlanCode,
+  parseHostedFamilyPlanCode,
+  type HostedFamilyPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { hostedOnboardingError, isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -34,12 +34,12 @@ export const POST = withJsonError(async (request: Request) => {
     typeof body.targetPhoneNumber === "string" ? body.targetPhoneNumber : null;
   const targetTelegramUsername =
     typeof body.targetTelegramUsername === "string" ? body.targetTelegramUsername : null;
-  const planCode = parseHostedPlanCode(body.planCode ?? "pulse");
+  const planCode = parseHostedFamilyPlanCode(body.planCode ?? "pulse");
   if (!planCode) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_PLAN_CODE_INVALID",
       httpStatus: 400,
-      message: "Choose Pulse or Edge for this Family member.",
+      message: "Choose Pulse, Edge, or Max for this Family member.",
     });
   }
 
@@ -132,7 +132,7 @@ function isSeatLimitError(error: unknown): boolean {
 async function addSeatThenInvite<T>(
   prisma: ReturnType<typeof getPrisma>,
   ownerMemberId: string,
-  planCode: HostedPlanCode,
+  planCode: HostedFamilyPlanCode,
   issueInvite: () => Promise<T>,
 ): Promise<{ invite: T } | "syncing" | "unavailable"> {
   // Re-check before buying: a concurrent invite for the same target may have just
@@ -169,6 +169,7 @@ async function addSeatThenInvite<T>(
   }
   const targetCapacities = {
     edge: snapshot.plans.edge.billed,
+    max: snapshot.plans.max.billed,
     pulse: snapshot.plans.pulse.billed,
     [planCode]: snapshot.plans[planCode].billed + 1,
   };

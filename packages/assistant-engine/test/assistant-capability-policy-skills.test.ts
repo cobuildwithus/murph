@@ -128,7 +128,10 @@ describe('assistant capability policy skills', () => {
     const skill = await readSkill('murph-family')
     const normalized = normalizeWhitespace(skill)
 
-    expect(normalized).toContain('2–6 sponsored Pulse ($7/month) or Edge ($19/month) seats')
+    expect(normalized).toContain(
+      '2–6 sponsored Pulse ($7/month), Edge ($19/month), or Max ($49/month) seats',
+    )
+    expect(normalized).toContain('`planCode: "max"` for Max')
     expect(normalized).toContain('owners cannot see member conversations or health data')
     expect(normalized).toContain('`action: "read_status"`')
     expect(normalized).toContain('`action: "start_checkout"`')

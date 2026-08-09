@@ -27,7 +27,7 @@ describe("assistant family plan tool", () => {
         arguments: {
           action: "create_invite",
           invite: {
-            planCode: "edge",
+            planCode: "max",
             targetLabel: "dad",
             targetPhoneNumber: "+48 600 000 000",
             targetTelegramUsername: "dad_username",
@@ -43,7 +43,7 @@ describe("assistant family plan tool", () => {
       request: {
         action: "create_invite",
         invite: {
-          planCode: "edge",
+          planCode: "max",
           targetLabel: "dad",
           targetPhoneNumber: "+48 600 000 000",
           targetTelegramUsername: "dad_username",
@@ -61,7 +61,7 @@ describe("assistant family plan tool", () => {
           invite: {
             acceptUrl: null,
             expiresAt: "2026-06-25T00:00:00.000Z",
-            planCode: "edge" as const,
+            planCode: "max" as const,
             status: "pending",
             targetLabel: "dad",
             targetPhoneHint: "+48 *** *** 000",
@@ -69,6 +69,13 @@ describe("assistant family plan tool", () => {
           },
           plans: {
             edge: {
+              active: 0,
+              billed: 0,
+              invited: 0,
+              remaining: 0,
+              used: 0,
+            },
+            max: {
               active: 0,
               billed: 1,
               invited: 1,
@@ -121,7 +128,7 @@ describe("assistant family plan tool", () => {
     expect(familyPlanTool.request).toHaveBeenCalledWith({
       action: "create_invite",
       invite: {
-        planCode: "edge",
+        planCode: "max",
         targetLabel: "dad",
         targetPhoneNumber: "+48 600 000 000",
         targetTelegramUsername: "dad_username",
@@ -214,6 +221,13 @@ describe("assistant family plan tool", () => {
           preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
           plans: {
             edge: {
+              active: 0,
+              billed: 0,
+              invited: 0,
+              remaining: 0,
+              used: 0,
+            },
+            max: {
               active: 0,
               billed: 0,
               invited: 0,

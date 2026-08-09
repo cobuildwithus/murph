@@ -127,6 +127,14 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // removing it only permits independent automatic refill purchases.
     new Set(["ADD CONSTRAINT CHECK", "DROP INDEX"]),
   ],
+  [
+    "20260809160000_add_hosted_family_max_plan_code",
+    // Each replacement only widens the existing Pulse/Edge vocabulary with
+    // Max. Old writers remain valid before, during, and after the transaction,
+    // and a failed application build can safely leave the relaxed checks in
+    // place.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
 ]);
 
 const incompatiblePredeploySqlPatterns = [

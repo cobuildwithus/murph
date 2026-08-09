@@ -3,20 +3,20 @@ import type Stripe from "stripe";
 import {
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
-  HOSTED_PLAN_CODES,
-  parseHostedPlanCode,
-  type HostedPlanCode,
+  HOSTED_FAMILY_PLAN_CODES,
+  parseHostedFamilyPlanCode,
+  type HostedFamilyPlanCode,
 } from "./billing-plans";
 
-export type HostedFamilyPlanCapacities = Record<HostedPlanCode, number>;
+export type HostedFamilyPlanCapacities = Record<HostedFamilyPlanCode, number>;
 
 export interface HostedFamilyStripePlanState {
   capacities: HostedFamilyPlanCapacities;
-  itemsByPlan: Partial<Record<HostedPlanCode, Stripe.SubscriptionItem>>;
+  itemsByPlan: Partial<Record<HostedFamilyPlanCode, Stripe.SubscriptionItem>>;
 }
 
 export function createEmptyHostedFamilyPlanCapacities(): HostedFamilyPlanCapacities {
-  return { edge: 0, pulse: 0 };
+  return { edge: 0, max: 0, pulse: 0 };
 }
 
 export function readHostedFamilyPlanCapacities(
@@ -24,12 +24,16 @@ export function readHostedFamilyPlanCapacities(
   legacyPulseQuantity: number | null = null,
 ): HostedFamilyPlanCapacities | null {
   if (rows.length === 0 && legacyPulseQuantity !== null) {
-    return parseHostedFamilyPlanCapacities({ edge: 0, pulse: legacyPulseQuantity });
+    return parseHostedFamilyPlanCapacities({
+      edge: 0,
+      max: 0,
+      pulse: legacyPulseQuantity,
+    });
   }
 
   const capacities = createEmptyHostedFamilyPlanCapacities();
   for (const row of rows) {
-    const planCode = parseHostedPlanCode(row.planCode);
+    const planCode = parseHostedFamilyPlanCode(row.planCode);
     if (
       !planCode ||
       !Number.isInteger(row.billedQuantity) ||
@@ -51,12 +55,12 @@ export function parseHostedFamilyPlanCapacities(
     return null;
   }
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !parseHostedPlanCode(key))) {
+  if (Object.keys(record).some((key) => !parseHostedFamilyPlanCode(key))) {
     return null;
   }
 
   const capacities = createEmptyHostedFamilyPlanCapacities();
-  for (const planCode of HOSTED_PLAN_CODES) {
+  for (const planCode of HOSTED_FAMILY_PLAN_CODES) {
     const quantity = record[planCode] ?? 0;
     if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 0) {
       return null;
@@ -67,15 +71,15 @@ export function parseHostedFamilyPlanCapacities(
 }
 
 export function readHostedFamilyStripePlanState(input: {
-  priceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  priceIdsByPlan: Readonly<Record<HostedFamilyPlanCode, string | null>>;
   subscription: Stripe.Subscription;
 }): HostedFamilyStripePlanState | null {
   if (input.subscription.items?.has_more) {
     return null;
   }
 
-  const planByPriceId = new Map<string, HostedPlanCode>();
-  for (const planCode of HOSTED_PLAN_CODES) {
+  const planByPriceId = new Map<string, HostedFamilyPlanCode>();
+  for (const planCode of HOSTED_FAMILY_PLAN_CODES) {
     const priceId = input.priceIdsByPlan[planCode];
     if (!priceId) {
       continue;
@@ -87,7 +91,7 @@ export function readHostedFamilyStripePlanState(input: {
   }
 
   const capacities = createEmptyHostedFamilyPlanCapacities();
-  const itemsByPlan: Partial<Record<HostedPlanCode, Stripe.SubscriptionItem>> = {};
+  const itemsByPlan: Partial<Record<HostedFamilyPlanCode, Stripe.SubscriptionItem>> = {};
   let currency: string | null = null;
   for (const item of input.subscription.items?.data ?? []) {
     const planCode = planByPriceId.get(item.price.id);
@@ -121,7 +125,7 @@ export function readHostedFamilyStripePlanState(input: {
 
 export function buildHostedFamilyStripeCapacityUpdateItems(input: {
   current: HostedFamilyStripePlanState;
-  priceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  priceIdsByPlan: Readonly<Record<HostedFamilyPlanCode, string | null>>;
   target: HostedFamilyPlanCapacities;
 }): Stripe.SubscriptionUpdateParams.Item[] {
   if (!hasValidHostedFamilyPlanCapacityTotal(input.target)) {
@@ -129,7 +133,7 @@ export function buildHostedFamilyStripeCapacityUpdateItems(input: {
   }
 
   const items: Stripe.SubscriptionUpdateParams.Item[] = [];
-  for (const planCode of HOSTED_PLAN_CODES) {
+  for (const planCode of HOSTED_FAMILY_PLAN_CODES) {
     const currentItem = input.current.itemsByPlan[planCode];
     const targetQuantity = input.target[planCode];
     if (input.current.capacities[planCode] === targetQuantity) {
@@ -156,20 +160,25 @@ export function hostedFamilyPlanCapacitiesEqual(
   left: HostedFamilyPlanCapacities,
   right: HostedFamilyPlanCapacities,
 ): boolean {
-  return HOSTED_PLAN_CODES.every((planCode) => left[planCode] === right[planCode]);
+  return HOSTED_FAMILY_PLAN_CODES.every(
+    (planCode) => left[planCode] === right[planCode],
+  );
 }
 
 export function sumHostedFamilyPlanCapacities(
   capacities: HostedFamilyPlanCapacities,
 ): number {
-  return HOSTED_PLAN_CODES.reduce((sum, planCode) => sum + capacities[planCode], 0);
+  return HOSTED_FAMILY_PLAN_CODES.reduce(
+    (sum, planCode) => sum + capacities[planCode],
+    0,
+  );
 }
 
 export function hasValidHostedFamilyPlanCapacityTotal(
   capacities: HostedFamilyPlanCapacities,
 ): boolean {
   const total = sumHostedFamilyPlanCapacities(capacities);
-  return HOSTED_PLAN_CODES.every(
+  return HOSTED_FAMILY_PLAN_CODES.every(
     (planCode) => Number.isInteger(capacities[planCode]) && capacities[planCode] >= 0,
   ) && total >= HOSTED_FAMILY_MIN_SEATS && total <= HOSTED_FAMILY_MAX_SEATS;
 }

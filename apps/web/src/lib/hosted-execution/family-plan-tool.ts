@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  HostedFamilyPlanCode,
   HostedRuntimeFamilyPlanCreateInviteRequest,
   HostedRuntimeFamilyPlanToolInvite,
   HostedRuntimeFamilyPlanToolRequest,
@@ -238,7 +239,7 @@ async function readHostedRuntimeFamilyPlanToolStatus(
 function projectHostedRuntimeFamilyPlanToolInvite(input: {
   acceptUrl: string | null;
   expiresAt: Date;
-  planCode: "edge" | "pulse";
+  planCode: HostedFamilyPlanCode;
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -261,7 +262,7 @@ function projectPreparedHostedRuntimeFamilyPlanToolInvite(
     acceptUrl: string | null;
     expiresAt: Date;
     id: string;
-    planCode: "edge" | "pulse";
+    planCode: HostedFamilyPlanCode;
     status: string;
     targetLabel: string | null;
     targetPhoneHint: string | null;
@@ -285,6 +286,7 @@ function projectPreparedHostedRuntimeFamilyPlanToolInvite(
 function emptyHostedRuntimeFamilyPlanPlans() {
   return {
     edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+    max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
     pulse: {
       active: 0,
       billed: HOSTED_FAMILY_MIN_SEATS,

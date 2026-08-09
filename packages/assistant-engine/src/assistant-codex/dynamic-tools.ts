@@ -12,7 +12,7 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
@@ -659,7 +659,7 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('start_checkout'),
       invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
+        planCode: z.enum(HOSTED_FAMILY_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
@@ -669,7 +669,7 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('create_invite'),
       invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
+        planCode: z.enum(HOSTED_FAMILY_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),

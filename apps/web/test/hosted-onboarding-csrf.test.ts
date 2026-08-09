@@ -202,6 +202,7 @@ function createHostedOnboardingEnvironment(
     publicBaseUrl: null,
     stripeFamilyPriceIdsByPlan: {
       edge: null,
+      max: null,
       pulse: null,
     },
     stripePriceIdsByPlan: {

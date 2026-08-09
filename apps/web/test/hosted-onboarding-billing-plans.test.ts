@@ -9,6 +9,9 @@ import {
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedBillingPlanDefinition,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
+  getHostedFamilyBillingOfferDefinition,
+  getHostedFamilyBillingPlanCode,
+  getHostedFamilyRuntimePlanCode,
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
   HOSTED_FAMILY_PLAN_DISPLAY,
@@ -18,6 +21,7 @@ import {
   listHostedBillingPlanPresentations,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
+  parseHostedFamilyPlanCode,
   parseHostedPublicBillingCheckoutOffer,
   requireHostedPulseTrialPolicy,
   resolveConfiguredHostedBillingPlanCodes,
@@ -55,6 +59,7 @@ describe("hosted billing launch plan Stripe configuration", () => {
       plans: [
         { code: "pulse", recurringAmountUsdCents: 700 },
         { code: "edge", recurringAmountUsdCents: 1_900 },
+        { code: "max", recurringAmountUsdCents: 4_900 },
       ],
       recurringAmountUsdCentsPerSeat: 700,
     });
@@ -72,6 +77,20 @@ describe("hosted billing launch plan Stripe configuration", () => {
       .toBe(5_600_000n);
     expect(getHostedFamilyAiUsageMonthlyAllowanceForPlan("edge"))
       .toBe(15_200_000n);
+    expect(getHostedFamilyAiUsageMonthlyAllowanceForPlan("max"))
+      .toBe(39_200_000n);
+  });
+
+  it("maps Family Max billing to the existing Edge runtime capability", () => {
+    expect(parseHostedFamilyPlanCode("max")).toBe("max");
+    expect(getHostedFamilyBillingOfferDefinition("max")).toMatchObject({
+      billingPlanCode: "launch_max_monthly",
+      displayName: "Max",
+      recurringAmountUsdCents: 4_900,
+      runtimePlanCode: "edge",
+    });
+    expect(getHostedFamilyBillingPlanCode("max")).toBe("launch_max_monthly");
+    expect(getHostedFamilyRuntimePlanCode("max")).toBe("edge");
   });
 
   it("keeps Pulse Trial as a checkout offer instead of a billing plan", () => {

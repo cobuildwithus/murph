@@ -83,14 +83,14 @@ export const CHECKOUT_CORE_FEATURES = [
 
 export const JOIN_FAMILY_FEATURES = [
   "2 to 6 people, one bill",
-  "Choose Pulse or Edge for each person",
+  "Choose Pulse, Edge, or Max for each person",
   "Each person keeps a private Murph",
   "Family members' chats and health data stay private",
 ] as const;
 
 export const SETTINGS_FAMILY_FEATURES = [
   "2 to 6 people, one bill",
-  "Choose Pulse or Edge for each person",
+  "Choose Pulse, Edge, or Max for each person",
   "Each person keeps a private Murph",
   "You can't see members' chats or health data",
 ] as const;

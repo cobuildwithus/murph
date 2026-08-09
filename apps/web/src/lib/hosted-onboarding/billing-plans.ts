@@ -1,12 +1,19 @@
 import {
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PLAN_CODES,
+  type HostedFamilyPlanCode,
   type HostedPlanCode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
 } from "@murphai/hosted-execution/plan-usage";
 
-export { HOSTED_PLAN_CODES, type HostedPlanCode };
+export {
+  HOSTED_FAMILY_PLAN_CODES,
+  HOSTED_PLAN_CODES,
+  type HostedFamilyPlanCode,
+  type HostedPlanCode,
+};
 
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
@@ -186,22 +193,38 @@ const HOSTED_PLAN_DEFINITIONS = {
 >;
 
 export interface HostedFamilyBillingOfferDefinition {
-  readonly planCode: HostedPlanCode;
+  readonly billingPlanCode: HostedBillingPlanCode;
+  readonly displayName: string;
+  readonly planCode: HostedFamilyPlanCode;
   readonly priceIdEnvKey: string;
   readonly recurringAmountUsdCents: number;
+  readonly runtimePlanCode: HostedPlanCode;
 }
 
 const HOSTED_FAMILY_BILLING_OFFERS = {
   pulse: {
+    billingPlanCode: "launch_monthly",
+    displayName: "Pulse",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
     recurringAmountUsdCents: 700,
+    runtimePlanCode: "pulse",
   },
   edge: {
+    billingPlanCode: "launch_edge_monthly",
+    displayName: "Edge",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
     recurringAmountUsdCents: 1_900,
+    runtimePlanCode: "edge",
+  },
+  max: {
+    billingPlanCode: "launch_max_monthly",
+    displayName: "Max",
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY",
+    recurringAmountUsdCents: 4_900,
+    runtimePlanCode: "edge",
   },
 } as const satisfies Record<
-  HostedPlanCode,
+  HostedFamilyPlanCode,
   Omit<HostedFamilyBillingOfferDefinition, "planCode">
 >;
 
@@ -214,9 +237,9 @@ export const HOSTED_FAMILY_PLAN_DISPLAY = {
   minSeats: HOSTED_FAMILY_MIN_SEATS,
   recurringAmountUsdCentsPerSeat:
     HOSTED_FAMILY_BILLING_OFFERS.pulse.recurringAmountUsdCents,
-  plans: HOSTED_PLAN_CODES.map((code) => ({
+  plans: HOSTED_FAMILY_PLAN_CODES.map((code) => ({
     code,
-    displayName: HOSTED_PLAN_DEFINITIONS[code].displayName,
+    displayName: HOSTED_FAMILY_BILLING_OFFERS[code].displayName,
     recurringAmountUsdCents:
       HOSTED_FAMILY_BILLING_OFFERS[code].recurringAmountUsdCents,
   })),
@@ -230,12 +253,24 @@ export function getHostedPlanDefinition(code: HostedPlanCode): HostedPlanDefinit
 }
 
 export function getHostedFamilyBillingOfferDefinition(
-  code: HostedPlanCode,
+  code: HostedFamilyPlanCode,
 ): HostedFamilyBillingOfferDefinition {
   return {
     ...HOSTED_FAMILY_BILLING_OFFERS[code],
     planCode: code,
   };
+}
+
+export function getHostedFamilyBillingPlanCode(
+  code: HostedFamilyPlanCode,
+): HostedBillingPlanCode {
+  return HOSTED_FAMILY_BILLING_OFFERS[code].billingPlanCode;
+}
+
+export function getHostedFamilyRuntimePlanCode(
+  code: HostedFamilyPlanCode,
+): HostedPlanCode {
+  return HOSTED_FAMILY_BILLING_OFFERS[code].runtimePlanCode;
 }
 
 export function getHostedPlanCodeForBillingPlan(
@@ -263,8 +298,17 @@ export function parseHostedPlanCode(value: unknown): HostedPlanCode | null {
     : null;
 }
 
+export function parseHostedFamilyPlanCode(
+  value: unknown,
+): HostedFamilyPlanCode | null {
+  return typeof value === "string" &&
+    HOSTED_FAMILY_PLAN_CODES.includes(value as HostedFamilyPlanCode)
+    ? value as HostedFamilyPlanCode
+    : null;
+}
+
 export function getHostedFamilyAiUsageMonthlyAllowanceForPlan(
-  code: HostedPlanCode,
+  code: HostedFamilyPlanCode,
 ): bigint {
   return calculateHostedPaidAiUsageAllowanceUsdMicros(
     HOSTED_FAMILY_BILLING_OFFERS[code].recurringAmountUsdCents,

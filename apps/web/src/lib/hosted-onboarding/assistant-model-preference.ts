@@ -32,9 +32,10 @@ import {
 } from "@murphai/hosted-execution/assistant-inference";
 
 import {
+  getHostedFamilyRuntimePlanCode,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
-  parseHostedPlanCode,
+  parseHostedFamilyPlanCode,
 } from "./billing-plans";
 import { hasActiveHostedMemberAccess } from "./member-access";
 import { hostedOnboardingError } from "./errors";
@@ -182,14 +183,16 @@ export function isHostedMemberSolModelEligible(input: {
       directBillingPlanCode === "launch_edge_monthly"
       || directBillingPlanCode === "launch_max_monthly"
     );
-  const hasFamilyEdgeAccess = input.accountGroupMemberships.some(
-    (membership) => membership.status === "active"
-      && parseHostedPlanCode(membership.planCode) === "edge"
+  const hasFamilyPremiumAccess = input.accountGroupMemberships.some((membership) => {
+    const familyPlanCode = parseHostedFamilyPlanCode(membership.planCode);
+    return membership.status === "active"
+      && familyPlanCode !== null
+      && getHostedFamilyRuntimePlanCode(familyPlanCode) === "edge"
       && membership.group.billingStatus === HostedBillingStatus.active
-      && membership.group.suspendedAt === null,
-  );
+      && membership.group.suspendedAt === null;
+  });
 
-  return hasDirectPaidPremiumAccess || hasFamilyEdgeAccess;
+  return hasDirectPaidPremiumAccess || hasFamilyPremiumAccess;
 }
 
 export async function readHostedMemberAssistantModelPreference(input: {

@@ -3774,7 +3774,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "create_invite",
       invite: {
-        planCode: "edge",
+        planCode: "max",
         targetEmail: "dad@example.com",
         targetLabel: "dad",
         targetPhoneNumber: null,
@@ -3783,7 +3783,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     })).toEqual({
       action: "create_invite",
       invite: {
-        planCode: "edge",
+        planCode: "max",
         targetEmail: "dad@example.com",
         targetLabel: "dad",
         targetPhoneNumber: null,
@@ -3844,6 +3844,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         ],
         plans: {
           edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+          max: { active: 0, billed: 1, invited: 0, remaining: 1, used: 0 },
           pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
         },
         seats: { active: 2, billed: 3, invited: 1, max: 6, min: 2, remaining: 0, used: 3 },
@@ -3854,6 +3855,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         pendingInvites: [{ planCode: "edge" }],
         plans: {
           edge: { billed: 2, used: 2 },
+          max: { billed: 1, used: 0 },
           pulse: { billed: 1, used: 1 },
         },
       },
@@ -3948,6 +3950,13 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         owner: true,
         plans: {
           edge: {
+            active: 0,
+            billed: 0,
+            invited: 0,
+            remaining: 0,
+            used: 0,
+          },
+          max: {
             active: 0,
             billed: 0,
             invited: 0,

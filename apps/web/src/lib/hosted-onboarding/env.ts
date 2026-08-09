@@ -6,9 +6,9 @@ import {
   getHostedBillingPlanDefinition,
   getHostedFamilyBillingOfferDefinition,
   HOSTED_BILLING_PLAN_CODES,
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   type HostedBillingPlanCode,
-  type HostedPlanCode,
+  type HostedFamilyPlanCode,
 } from "./billing-plans";
 import { normalizePhoneNumber } from "./phone";
 import {
@@ -119,7 +119,9 @@ export interface HostedOnboardingEnvironment {
   privyVerificationKey: string | null;
   publicBaseUrl: string | null;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
-  stripeFamilyPriceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  stripeFamilyPriceIdsByPlan: Readonly<
+    Record<HostedFamilyPlanCode, string | null>
+  >;
   stripeUsageCreditPriceIdsByOffer: Readonly<
     Record<HostedUsageCreditOfferCode, string | null>
   >;
@@ -550,13 +552,13 @@ function readHostedStripePriceIdsByPlan(
 
 function readHostedStripeFamilyPriceIdsByPlan(
   source: HostedOnboardingEnvSource,
-): Record<HostedPlanCode, string | null> {
+): Record<HostedFamilyPlanCode, string | null> {
   return Object.fromEntries(
-    HOSTED_PLAN_CODES.map((planCode) => {
+    HOSTED_FAMILY_PLAN_CODES.map((planCode) => {
       const offer = getHostedFamilyBillingOfferDefinition(planCode);
       return [planCode, readEnv(source, offer.priceIdEnvKey)];
     }),
-  ) as Record<HostedPlanCode, string | null>;
+  ) as Record<HostedFamilyPlanCode, string | null>;
 }
 
 function readHostedStripeUsageCreditPriceIdsByOffer(

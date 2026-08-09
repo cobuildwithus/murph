@@ -2127,12 +2127,13 @@ export function ComponentsContent() {
                   joinedAtIso: "2026-07-07T00:00:00.000Z",
                   label: "Partner",
                   memberId: "design-member",
-                  pendingPlanCode: null,
+                  pendingPlanCode: "max",
                   planCode: "edge",
                 },
               ]}
               plans={{
                 edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+                max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
                 pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
               }}
               seats={{
@@ -2145,8 +2146,24 @@ export function ComponentsContent() {
                 used: 3,
               }}
               tiers={[
-                { name: "Pulse", planCode: "pulse", priceLabel: "$7/mo" },
-                { name: "Edge", planCode: "edge", priceLabel: "$19/mo" },
+                {
+                  name: "Pulse",
+                  planCode: "pulse",
+                  priceLabel: "$7/mo",
+                  recurringAmountUsdCents: 700,
+                },
+                {
+                  name: "Edge",
+                  planCode: "edge",
+                  priceLabel: "$19/mo",
+                  recurringAmountUsdCents: 1_900,
+                },
+                {
+                  name: "Max",
+                  planCode: "max",
+                  priceLabel: "$49/mo",
+                  recurringAmountUsdCents: 4_900,
+                },
               ]}
             />
           </div>

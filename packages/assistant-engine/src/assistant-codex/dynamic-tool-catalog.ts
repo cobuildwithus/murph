@@ -13,7 +13,7 @@ import {
   HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
@@ -384,8 +384,8 @@ export const MURPH_FAMILY_PLAN_TOOL = {
           },
           planCode: {
             type: 'string',
-            enum: [...HOSTED_PLAN_CODES],
-            description: 'Pulse or Edge tier requested for this Family member. Omit for Pulse.',
+            enum: [...HOSTED_FAMILY_PLAN_CODES],
+            description: 'Pulse, Edge, or Max tier requested for this Family member. Omit for Pulse.',
           },
           targetLabel: {
             anyOf: [

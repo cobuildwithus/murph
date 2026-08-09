@@ -8,10 +8,11 @@ description: Use only for Murph Family product questions or account actions invo
 Murph Family is a private billing and sponsored-access product. It is not a
 shared health record or family-health context system.
 
-Family supports 2–6 sponsored Pulse ($7/month) or Edge ($19/month) seats.
-Owners pay and can see seat and invite status. Members retain private Murph
-access; owners cannot see member conversations or health data. Shared records
-or supervision require separate consent through their owning flows.
+Family supports 2–6 sponsored Pulse ($7/month), Edge ($19/month), or Max
+($49/month) seats. Owners pay and can see seat and invite status. Members
+retain private Murph access; owners cannot see member conversations or health
+data. Shared records or supervision require separate consent through their
+owning flows.
 
 ## Read status before account-specific guidance
 
@@ -50,8 +51,8 @@ handoff owned by `murph.plan_usage`.
 
 For an active plan and explicit invite request, use
 `action: "create_invite"` with the provided phone, email, or Telegram target.
-Pass `planCode: "edge"` for Edge; omission means Pulse. If no target was
-provided, ask one narrow question.
+Pass `planCode: "edge"` for Edge or `planCode: "max"` for Max; omission means
+Pulse. If no target was provided, ask one narrow question.
 
 Telegram usernames and other owner-provided destinations are routing context,
 not proof the invite is bound or delivered to that account. Describe the result

@@ -17,6 +17,7 @@ export const HOSTED_STRIPE_BILLING_PRICE_ENV_KEYS = [
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
+  "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY",
 ] as const;
 export const HOSTED_STRIPE_BILLING_PORTAL_CONFIGURATION_ENV_KEY =
   "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY";
@@ -42,6 +43,7 @@ export interface HostedStripeBillingLiveConfig {
   priceIds: {
     edge: string;
     familyEdge: string;
+    familyMax: string;
     familyPulse: string;
     pulse: string;
   };
@@ -182,6 +184,10 @@ export function resolveHostedStripeBillingLiveConfig(
         familyEdge: requireNormalized(
           environment,
           "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
+        ),
+        familyMax: requireNormalized(
+          environment,
+          "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY",
         ),
         familyPulse: requireNormalized(
           environment,

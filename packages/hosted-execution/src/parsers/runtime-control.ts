@@ -43,7 +43,7 @@ import {
 } from "../assistant-ask-payload.ts";
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
@@ -128,9 +128,9 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  type HostedFamilyPlanCode,
   type HostedRuntimeIMessageContactToolRequest,
   type HostedRuntimeIMessageContactToolResponse,
-  type HostedPlanCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeAssistantConfigurationControlRequest,
   type HostedRuntimeAssistantConfigurationToolRequest,
@@ -5029,7 +5029,7 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
   return {
     ...(invite.planCode === undefined
       ? {}
-      : { planCode: parseHostedRuntimePlanCode(invite.planCode) }),
+      : { planCode: parseHostedRuntimeFamilyPlanCode(invite.planCode) }),
     ...(targetEmail === undefined ? {} : { targetEmail }),
     targetLabel,
     targetPhoneNumber,
@@ -5419,6 +5419,7 @@ function parseHostedRuntimeFamilyPlanPlans(
   if (value === undefined) {
     return {
       edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
       pulse: {
         active: legacySeats.active,
         billed: legacySeats.billed,
@@ -5429,7 +5430,16 @@ function parseHostedRuntimeFamilyPlanPlans(
     };
   }
   const record = requireObject(value, "Hosted runtime family plan plans");
-  return Object.fromEntries(HOSTED_PLAN_CODES.map((planCode) => {
+  return Object.fromEntries(HOSTED_FAMILY_PLAN_CODES.map((planCode) => {
+    if (planCode === "max" && record[planCode] === undefined) {
+      return [planCode, {
+        active: 0,
+        billed: 0,
+        invited: 0,
+        remaining: 0,
+        used: 0,
+      }];
+    }
     const status = requireObject(
       record[planCode],
       `Hosted runtime family plan ${planCode} status`,
@@ -5449,7 +5459,7 @@ function parseHostedRuntimeFamilyPlanPlans(
       ),
       used: requireNumber(status.used, `Hosted runtime family plan ${planCode} used`),
     }];
-  })) as Record<HostedPlanCode, {
+  })) as Record<HostedFamilyPlanCode, {
     active: number;
     billed: number;
     invited: number;
@@ -5458,11 +5468,12 @@ function parseHostedRuntimeFamilyPlanPlans(
   }>;
 }
 
-function parseHostedRuntimePlanCode(value: unknown): HostedPlanCode {
+function parseHostedRuntimeFamilyPlanCode(value: unknown): HostedFamilyPlanCode {
   const planCode = requireString(value, "Hosted runtime Family plan code");
-  if (HOSTED_PLAN_CODES.includes(planCode as HostedPlanCode)) {
-    return planCode as HostedPlanCode;
+  if (HOSTED_FAMILY_PLAN_CODES.includes(planCode as HostedFamilyPlanCode)) {
+    return planCode as HostedFamilyPlanCode;
   }
+
   throw new TypeError("Hosted runtime Family plan code is not supported.");
 }
 
@@ -5485,7 +5496,7 @@ function parseHostedRuntimeFamilyPlanMember(value: unknown) {
     ),
     planCode: record.planCode === undefined
       ? "pulse" as const
-      : parseHostedRuntimePlanCode(record.planCode),
+      : parseHostedRuntimeFamilyPlanCode(record.planCode),
     role: requireString(record.role, "Hosted runtime family plan member role"),
     status: requireString(record.status, "Hosted runtime family plan member status"),
   };
@@ -5518,7 +5529,7 @@ function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
     ),
     planCode: record.planCode === undefined
       ? "pulse" as const
-      : parseHostedRuntimePlanCode(record.planCode),
+      : parseHostedRuntimeFamilyPlanCode(record.planCode),
     status: requireString(record.status, "Hosted runtime family plan invite status"),
     targetLabel: readNullableString(
       record.targetLabel,
