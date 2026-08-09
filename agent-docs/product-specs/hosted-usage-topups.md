@@ -210,11 +210,11 @@ an optional premise; a song may additionally include one genre or style
 reference. Named songs, shows, soundtracks, artists, and genres are interpreted
 only as broad traits such as mood, tempo, instrumentation, and structure. They
 never authorize copied melody, lyrics, catchphrases, vocal identity, or a
-signature arrangement. The encrypted creative envelope is versioned. A fixed,
-non-sensitive v1 marker represents an explicit modern quiet request without
-invoking the secure-box owner. A null creative-request column identifies a
-pre-feature row and preserves its legacy automatic-song behavior without
-treating new quiet sponsorships as legacy.
+signature arrangement. The encrypted creative envelope is versioned and exists
+only for an explicit request. A null creative-request column means quiet for
+both current and pre-feature rows. A pre-feature encrypted song note remains an
+explicit song request and is normalized into the versioned envelope when read;
+pre-feature rows without that note never produce a creative response.
 
 A valid funding locator remains sufficient to contribute anonymously. It is
 not sufficient to publish content into the room. Web checks current
@@ -223,8 +223,8 @@ payment. Losing that authority suppresses the new authored creative request
 without changing the grant. A public alias is retained only when an opted-in
 response or active running-bit request can actually use it; both the client
 builder and server canonicalizer discard an alias-only quiet request, so quiet
-funding does not store an unused public identity. Legacy rows may still receive
-their generic pre-feature song, but no expired private copy is read or exposed.
+funding does not store an unused public identity. No expired private copy is
+read or exposed.
 
 Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:
@@ -1276,13 +1276,13 @@ Web cannot activate or safely manage it. Recover from that point with a forward
 fix on the compatible schema, Web, and runtime rather than restoring the older
 producer.
 
-The first non-null `creative_request_encrypted` value is also an old-Web rollback
-floor. Pre-feature Web does not understand the modern quiet marker and would
-reinterpret a newly quiet sponsorship as a legacy automatic-song row during a
-later paid-event retry. Disable new sponsorship intake before rollback and keep
-the compatible Web reader and reconciler deployed. Rolling below that floor
-requires proof that no non-null creative-request value exists and no compatible
-event can still be retried; otherwise forward-fix.
+The optional-creative Web producer is also an old-Web rollback floor.
+Pre-feature Web does not understand the creative envelope and unconditionally
+materializes a song for every fulfilled group contribution, including a quiet
+one. Disable new sponsorship intake before rollback and keep the compatible Web
+reader and reconciler deployed. Rolling below that floor requires proof that no
+group contribution can still be materialized or retried; otherwise
+forward-fix.
 
 ## Verification
 

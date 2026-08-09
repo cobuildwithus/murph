@@ -139,7 +139,6 @@ beforeEach(() => {
       styleRequest: "Warm ensemble-sitcom theme with a bright acoustic intro.",
     },
     expiresAt: new Date("2026-07-28T12:00:00.000Z"),
-    legacyAutomaticSong: false,
     publicAlias: "The Group Historian",
     runningBitRequest: "Treat me like the exhausted CFO.",
     sponsorMessage: null,
@@ -252,7 +251,6 @@ describe("group sponsorship notification", () => {
     mocks.readMoment.mockResolvedValueOnce({
       celebrationScale: "medium",
       expiresAt: null,
-      legacyAutomaticSong: false,
       publicAlias: "The Group Historian",
       runningBitRequest: "Treat me like the exhausted CFO.",
       sponsorMessage: null,
@@ -283,7 +281,6 @@ describe("group sponsorship notification", () => {
           styleRequest: null,
         },
         expiresAt: null,
-        legacyAutomaticSong: false,
         publicAlias: null,
         runningBitRequest: null,
         sponsorMessage: null,
@@ -308,12 +305,11 @@ describe("group sponsorship notification", () => {
     },
   );
 
-  it("preserves the automatic song for a legacy sponsorship row", async () => {
+  it("keeps a legacy sponsorship row silent without an explicit creative request", async () => {
     const prisma = createPrismaHarness();
     mocks.readMoment.mockResolvedValueOnce({
       celebrationScale: "small",
       expiresAt: null,
-      legacyAutomaticSong: true,
       publicAlias: null,
       runningBitRequest: null,
       sponsorMessage: null,
@@ -322,11 +318,11 @@ describe("group sponsorship notification", () => {
     await expect(materializeHostedGroupSponsorshipIfApplicable({
       prisma: prisma as never,
       purchaseId: "purchase_private_123",
-    })).resolves.toBe(true);
+    })).resolves.toBe(false);
 
-    expect(
-      mocks.appendMailbox.mock.calls[0]?.[0]?.envelope.notification.instructions,
-    ).toContain("calling murph.generate_song exactly once");
+    expect(mocks.resolveDestination).not.toHaveBeenCalled();
+    expect(mocks.appendMailbox).not.toHaveBeenCalled();
+    expect(mocks.signalRuntime).not.toHaveBeenCalled();
   });
 
   it("uses the actual $5 activation for the public moment, not the private monthly maximum", async () => {
@@ -377,7 +373,6 @@ describe("group sponsorship notification", () => {
     mocks.readMoment.mockResolvedValueOnce({
       celebrationScale: "medium",
       expiresAt: null,
-      legacyAutomaticSong: false,
       publicAlias: null,
       runningBitRequest: null,
       sponsorMessage: null,

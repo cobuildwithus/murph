@@ -50,8 +50,6 @@ const SPONSORSHIP_PRIVATE_CONTENT_PURPOSE =
   "hosted-group-sponsorship-moment-private-content";
 const SPONSORSHIP_CREATIVE_REQUEST_SCHEMA =
   "murph.group-sponsorship-creative.v1";
-const SPONSORSHIP_CREATIVE_REQUEST_NONE_SENTINEL =
-  "murph.group-sponsorship-creative.v1:none";
 const FORBIDDEN_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/u;
 const CREATIVE_FORMATS = new Set<string>(
   HOSTED_GROUP_SPONSORSHIP_CREATIVE_FORMATS,
@@ -73,7 +71,6 @@ export interface HostedGroupSponsorshipMomentProjection
   extends HostedGroupSponsorshipDraft {
   celebrationScale: "small" | "medium" | "large";
   expiresAt: Date | null;
-  legacyAutomaticSong: boolean;
 }
 
 export interface HostedGroupRunningBitProjection {
@@ -235,8 +232,7 @@ export async function createHostedGroupSponsorshipMomentTx(input: {
       configurationDigest: digestHostedGroupSponsorshipDraft(
         authorizedDraft,
       ),
-      creativeRequestEncrypted:
-        encryptedCreativeRequest ?? SPONSORSHIP_CREATIVE_REQUEST_NONE_SENTINEL,
+      creativeRequestEncrypted: encryptedCreativeRequest,
       creatorMemberId: input.creatorMemberId,
       publicAliasEncrypted:
         encryptedByField.get("public_alias_encrypted") ?? null,
@@ -278,19 +274,24 @@ export async function hostedGroupSponsorshipRequestMatchesTx(input: {
   if (!moment) {
     return false;
   }
-  const expectedDraft = moment.creativeRequestEncrypted === null
-    ? input.draft
-    : canonicalizeModernHostedGroupSponsorshipDraft(input.draft);
-  const expected = Buffer.from(
-    digestHostedGroupSponsorshipDraft(expectedDraft),
-    "utf8",
-  );
   const actual = Buffer.from(
     moment?.configurationDigest ?? digestHostedGroupSponsorshipDraft(null),
     "utf8",
   );
-  return expected.byteLength === actual.byteLength
-    && timingSafeEqual(expected, actual);
+  const expectedDrafts = moment.creativeRequestEncrypted === null
+    ? [
+        input.draft,
+        canonicalizeModernHostedGroupSponsorshipDraft(input.draft),
+      ]
+    : [canonicalizeModernHostedGroupSponsorshipDraft(input.draft)];
+  return expectedDrafts.some((draft) => {
+    const expected = Buffer.from(
+      digestHostedGroupSponsorshipDraft(draft),
+      "utf8",
+    );
+    return expected.byteLength === actual.byteLength
+      && timingSafeEqual(expected, actual);
+  });
 }
 
 export async function activateHostedGroupSponsorshipMomentTx(input: {
@@ -349,7 +350,7 @@ export async function readHostedGroupSponsorshipMomentForNotification(input: {
   if (!row) {
     return null;
   }
-  const draft = input.customContentAuthorized
+  const openedDraft = input.customContentAuthorized
     ? await openSponsorshipDraft({
         creativeRequestEncrypted: row.creativeRequestEncrypted,
         creatorMemberId: row.creatorMemberId,
@@ -360,6 +361,7 @@ export async function readHostedGroupSponsorshipMomentForNotification(input: {
         sponsorMessageEncrypted: row.sponsorMessageEncrypted,
       })
     : null;
+  const draft = canonicalizeModernHostedGroupSponsorshipDraft(openedDraft);
   return {
     celebrationScale:
       getHostedGroupSponsorshipExperiencePolicy(input.offerCode).celebrationScale,
@@ -367,7 +369,6 @@ export async function readHostedGroupSponsorshipMomentForNotification(input: {
       ? { creativeRequest: draft.creativeRequest }
       : {}),
     expiresAt: row.expiresAt,
-    legacyAutomaticSong: row.creativeRequestEncrypted === null,
     publicAlias: draft?.publicAlias ?? null,
     runningBitRequest: draft?.runningBitRequest ?? null,
     sponsorMessage: draft?.sponsorMessage ?? null,
@@ -585,9 +586,7 @@ async function openSponsorshipDraft(
   input: EncryptedSponsorshipDraft,
 ): Promise<HostedGroupSponsorshipDraft | null> {
   const hasEncryptedCreativeRequest =
-    input.creativeRequestEncrypted !== null
-    && input.creativeRequestEncrypted
-      !== SPONSORSHIP_CREATIVE_REQUEST_NONE_SENTINEL;
+    input.creativeRequestEncrypted !== null;
   const [
     publicAlias,
     sponsorMessage,

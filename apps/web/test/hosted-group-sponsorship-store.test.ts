@@ -165,7 +165,6 @@ describe("hosted group sponsorship store", () => {
       purchaseId: "purchase_123",
     })).resolves.toMatchObject({
       celebrationScale: "medium",
-      legacyAutomaticSong: false,
       ...draft,
     });
     await expect(readHostedGroupSponsorshipDraftForCreator({
@@ -257,12 +256,11 @@ describe("hosted group sponsorship store", () => {
         prompt: legacyDraft.sponsorMessage,
         styleRequest: null,
       },
-      legacyAutomaticSong: false,
       sponsorMessage: null,
     });
   });
 
-  it("distinguishes an explicit quiet sponsorship from a legacy automatic song", async () => {
+  it("keeps modern and legacy rows quiet without an explicit creative request", async () => {
     const harness = createHarness();
     const aliasOnlyDraft = {
       publicAlias: "Unused private identity",
@@ -278,9 +276,7 @@ describe("hosted group sponsorship store", () => {
       tx: harness.prisma as never,
     });
 
-    expect(harness.row.creativeRequestEncrypted).toBe(
-      "murph.group-sponsorship-creative.v1:none",
-    );
+    expect(harness.row.creativeRequestEncrypted).toBeNull();
     expect(harness.row.publicAliasEncrypted).toBeNull();
     expect(harness.row.sponsorMessageEncrypted).toBeNull();
     await expect(assertHostedGroupSponsorshipRequestMatchesTx({
@@ -295,7 +291,6 @@ describe("hosted group sponsorship store", () => {
       purchaseId: "purchase_quiet",
     });
     expect(quiet).toMatchObject({
-      legacyAutomaticSong: false,
       sponsorMessage: null,
     });
     expect(quiet).not.toHaveProperty("creativeRequest");
@@ -316,7 +311,31 @@ describe("hosted group sponsorship store", () => {
       prisma: harness.prisma as never,
       purchaseId: "purchase_quiet",
     })).resolves.toMatchObject({
-      legacyAutomaticSong: true,
+      publicAlias: null,
+      sponsorMessage: null,
+    });
+    const legacy = await readHostedGroupSponsorshipMomentForNotification({
+      customContentAuthorized: true,
+      offerCode: "usage_5_usd",
+      prisma: harness.prisma as never,
+      purchaseId: "purchase_quiet",
+    });
+    expect(legacy).not.toHaveProperty("creativeRequest");
+
+    const legacySongPrompt = "Make a short song about finishing together.";
+    harness.row.sponsorMessageEncrypted =
+      `sealed:${Buffer.from(legacySongPrompt, "utf8").toString("base64url")}`;
+    await expect(readHostedGroupSponsorshipMomentForNotification({
+      customContentAuthorized: true,
+      offerCode: "usage_5_usd",
+      prisma: harness.prisma as never,
+      purchaseId: "purchase_quiet",
+    })).resolves.toMatchObject({
+      creativeRequest: {
+        format: "song",
+        prompt: legacySongPrompt,
+        styleRequest: null,
+      },
       publicAlias: aliasOnlyDraft.publicAlias,
       sponsorMessage: null,
     });

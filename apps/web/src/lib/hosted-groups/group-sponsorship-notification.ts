@@ -150,7 +150,7 @@ export async function materializeHostedGroupSponsorshipIfApplicable(input: {
         prisma: tx,
         purchaseId: current.id,
       });
-      const creativeRequest = resolveCreativeRequest(moment);
+      const creativeRequest = moment?.creativeRequest ?? null;
       if (!creativeRequest) {
         return null;
       }
@@ -458,25 +458,6 @@ function buildPrivateManagementUrl(
   return locator
     ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
     : null;
-}
-
-function resolveCreativeRequest(
-  moment: HostedGroupSponsorshipMomentProjection | null,
-): HostedGroupSponsorshipCreativeRequest | null {
-  if (!moment) {
-    return null;
-  }
-  if (moment.creativeRequest) {
-    return moment.creativeRequest;
-  }
-  if (!moment.legacyAutomaticSong) {
-    return null;
-  }
-  return {
-    format: "song",
-    prompt: moment.sponsorMessage,
-    styleRequest: null,
-  };
 }
 
 function buildInstructions(input: {
