@@ -3765,8 +3765,8 @@ async function executeGroupTool(input: {
       action: 'share_contact_card',
       contactCardImageUrl: prepared.request.groupChatIconUrl,
       // Trusted-host request identity, so a retried or replayed turn collapses
-      // to one card while a genuinely new request inside the throttle window
-      // still sends. Deliberately not the tool call id: a retry re-emits the
+      // to one card while a genuinely new accepted request has its own send
+      // identity. Deliberately not the tool call id: a retry re-emits the
       // call with a new id but keeps the same accepted input.
       contactCardShareKey,
     }

@@ -1095,8 +1095,8 @@ const HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE =
 
 /**
  * Narrow reader for the provider's exact same-key/different-payload conflict.
- * Bounded and shape-specific on purpose: a generic 409 or wrapped phrase must
- * not be mistaken for a proven duplicate.
+ * It rejects bodies above 500 code units and requires the exact JSON shape, so
+ * a generic 409 or wrapped phrase cannot be mistaken for a proven duplicate.
  */
 async function isHostedLinqIdempotencyKeyReuseConflict(
   response: Response,
