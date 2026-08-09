@@ -488,34 +488,34 @@ async function buildAssistantSnapshotCoverage(input: {
   ] = await Promise.all([
     collectAssistantSnapshotBloodTestCoverage(input),
     collectAssistantSnapshotDeviceMeasurementCoverage(input),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.goalsDirectory,
-        goalFrontmatterSchema,
-      ),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.conditionsDirectory,
-        conditionFrontmatterSchema,
-      ),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.allergiesDirectory,
-        allergyFrontmatterSchema,
-      ),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.regimensDirectory,
-        regimenFrontmatterSchema,
-      ),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.habitatDirectory,
-        habitatFrontmatterSchema,
-        (record, relativePath) =>
-          isExpectedHabitatAspectRelativePath(record.aspect, relativePath),
-      ),
-    ])
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.goalsDirectory,
+      goalFrontmatterSchema,
+    ),
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.conditionsDirectory,
+      conditionFrontmatterSchema,
+    ),
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.allergiesDirectory,
+      allergyFrontmatterSchema,
+    ),
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.regimensDirectory,
+      regimenFrontmatterSchema,
+    ),
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.habitatDirectory,
+      habitatFrontmatterSchema,
+      (record, relativePath) =>
+        isExpectedHabitatAspectRelativePath(record.aspect, relativePath),
+    ),
+  ])
   const goals = goalRead.records
   const conditions = conditionRead.records
   const allergies = allergyRead.records
