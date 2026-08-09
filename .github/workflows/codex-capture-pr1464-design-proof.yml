@@ -1,0 +1,108 @@
+name: Capture PR 1464 design proof
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-capture-pr1464-design-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/non-expiring-starter-usage
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies and Chromium
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Capture Starter usage design states
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir apps/web dev:local-env -- --hostname 127.0.0.1 --port 3210 > /tmp/pr1464-web.log 2>&1 &
+          web_pid=$!
+          trap 'kill "$web_pid" 2>/dev/null || true; cat /tmp/pr1464-web.log' EXIT
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:3210/api/internal/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3210/api/internal/health >/dev/null
+
+          cat > apps/web/capture-pr1464-design-proof.mjs <<'SCRIPT'
+          import { chromium } from "playwright";
+
+          const browser = await chromium.launch({ headless: true });
+          const url = "http://127.0.0.1:3210/design?tab=sections#personal-usage-credit-owner";
+          for (const capture of [
+            {
+              deviceScaleFactor: 1,
+              path: "/tmp/pr1464-starter-desktop.png",
+              viewport: { height: 1000, width: 1440 },
+            },
+            {
+              deviceScaleFactor: 2,
+              path: "/tmp/pr1464-starter-mobile.png",
+              viewport: { height: 820, width: 390 },
+            },
+          ]) {
+            const page = await browser.newPage({
+              deviceScaleFactor: capture.deviceScaleFactor,
+              viewport: capture.viewport,
+            });
+            await page.route("**/*", async (route) => {
+              const requestUrl = new URL(route.request().url());
+              if (requestUrl.hostname === "127.0.0.1") {
+                await route.continue();
+              } else {
+                await route.abort();
+              }
+            });
+            await page.goto(url, { waitUntil: "load" });
+            const state = page.locator('[data-design-state="starter-exhausted"]');
+            await state.scrollIntoViewIfNeeded();
+            await state.screenshot({ path: capture.path });
+            await page.close();
+          }
+          await browser.close();
+          SCRIPT
+
+          pnpm --dir apps/web exec node capture-pr1464-design-proof.mjs
+          rm apps/web/capture-pr1464-design-proof.mjs
+
+      - name: Upload verified design screenshots
+        env:
+          CLOUDFLARE_IMAGES_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_IMAGES_ACCOUNT_ID }}
+          CLOUDFLARE_IMAGES_API_KEY: ${{ secrets.CLOUDFLARE_IMAGES_API_KEY }}
+        run: |
+          pnpm design-proof:upload -- \
+            /tmp/pr1464-starter-desktop.png \
+            /tmp/pr1464-starter-mobile.png | tee /tmp/pr1464-design-urls.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr1464-design-proof
+          path: |
+            /tmp/pr1464-starter-desktop.png
+            /tmp/pr1464-starter-mobile.png
+            /tmp/pr1464-design-urls.txt
+            /tmp/pr1464-web.log
+          retention-days: 1
