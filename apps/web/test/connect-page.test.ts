@@ -4093,12 +4093,17 @@ test("ConnectSourcesGrid disconnects a connected source after confirmation", asy
 
 test("ConnectSourcesGrid disconnects one reconnect-required Junction source without hiding siblings", async () => {
   const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
+    async (input: RequestInfo | URL, _init?: RequestInit) => {
       void _init;
+      if (String(input).includes("/disconnect")) {
+        return Response.json({
+          sourceProviderSlug: "oura",
+          status: "disconnected",
+        });
+      }
+
       return Response.json({
-        sourceProviderSlug: "oura",
-        status: "disconnected",
+        authorizationUrl: "https://oura.example.test/oauth/start",
       });
     },
   );
@@ -4113,6 +4118,7 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
       sources: [
         {
           connected: true,
+          connectProvider: "junction",
           connectTarget: "oura",
           description:
             "Sleep, readiness, activity, heart rate, and temperature trends.",
@@ -4127,6 +4133,7 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
           },
           name: "Oura",
           requiresReconnect: true,
+          requiresVitalDisclosure: false,
         },
         {
           connected: true,
@@ -4146,13 +4153,34 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
     }),
   );
 
+  const reconnectButton = rendered.container.querySelector(
+    "button[aria-label='Reconnect Oura']",
+  );
+  assert.ok(reconnectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    reconnectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  assert.match(rendered.container.textContent ?? "", /We use Vital/u);
+  assert.equal(fetch.mock.calls.length, 0);
+  const closeButton = rendered.container.querySelector(
+    "button[aria-label='Close']",
+  );
+  assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    closeButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
   const disconnectButton = rendered.container.querySelector(
     "button[aria-label='Disconnect Oura']",
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
-  assert.ok(
-    rendered.container.querySelector("button[aria-label='Reconnect Oura']"),
-  );
 
   await act(async () => {
     disconnectButton.dispatchEvent(
@@ -4187,6 +4215,36 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
   assert.ok(
     rendered.container.querySelector("button[aria-label='Disconnect Whoop']"),
   );
+  const connectButton = rendered.container.querySelector(
+    "button[aria-label='Connect Oura']",
+  );
+  assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    connectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 2);
+    assert.equal(
+      rendered.assign.mock.calls[0]?.[0],
+      "https://oura.example.test/oauth/start",
+    );
+  });
+  assert.doesNotMatch(rendered.container.textContent ?? "", /We use Vital/u);
+  assert.equal(fetch.mock.calls[1]?.[0], "/api/connect-sources/oura/start");
+  assert.deepEqual(fetch.mock.calls[1]?.[1], {
+    body: JSON.stringify({ connectTarget: "oura" }),
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+    keepalive: false,
+  });
 
   await rendered.cleanup();
 });
@@ -5390,6 +5448,81 @@ test("resolveConfiguredConnectSources marks only Vital-backed actions", async ()
     ),
     { fitbit: true, whoop: false },
   );
+});
+
+test("Vital disclosure follows reconnect and fresh providers across local disconnects", async () => {
+  vi.stubEnv("OURA_CLIENT_ID", "oura-client-id");
+  vi.stubEnv("OURA_CLIENT_SECRET", "oura-client-secret");
+  vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
+  vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv(
+    "JUNCTION_CLIENT_USER_ID_SECRET",
+    "junction-client-user-id-secret",
+  );
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "oura,whoop_v2");
+  vi.stubEnv("JUNCTION_REGION", "us");
+
+  const { resolveConfiguredConnectSources } = await import(
+    "../app/(dashboard)/connect/connect-page-content"
+  );
+  const { requiresVitalConnectionPreflight } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const { markLocallyDisconnectedSources } = await import(
+    "../app/(dashboard)/connect/connect-page-helpers"
+  );
+  const logo = {
+    className: "size-11 object-contain",
+    height: 44,
+    src: "/logo.png",
+    width: 44,
+  };
+  const resolved = resolveConfiguredConnectSources(
+    [
+      { id: "oura", name: "Oura", description: "Sleep.", logo },
+      { id: "whoop", name: "Whoop", description: "Recovery.", logo },
+    ],
+    {
+      reconnectProviderBySourceId: new Map([
+        ["oura", "junction"],
+        ["whoop", "whoop"],
+      ]),
+      reconnectSourceIds: new Set(["oura", "whoop"]),
+      reconnectTargetBySourceId: new Map([
+        ["oura", "oura"],
+        ["whoop", "whoop"],
+      ]),
+    },
+  );
+  const oura = resolved.find((source) => source.id === "oura");
+  const whoop = resolved.find((source) => source.id === "whoop");
+  assert.ok(oura);
+  assert.ok(whoop);
+
+  assert.equal(oura.connectProvider, "junction");
+  assert.equal(oura.requiresVitalDisclosure, undefined);
+  assert.equal(requiresVitalConnectionPreflight(oura), true);
+  assert.equal(whoop.connectProvider, "whoop");
+  assert.equal(whoop.requiresVitalDisclosure, true);
+  assert.equal(requiresVitalConnectionPreflight(whoop), false);
+
+  const locallyDisconnected = markLocallyDisconnectedSources(
+    resolved,
+    new Set(),
+    new Set(["oura", "whoop"]),
+  );
+  const disconnectedOura = locallyDisconnected.find(
+    (source) => source.id === "oura",
+  );
+  const disconnectedWhoop = locallyDisconnected.find(
+    (source) => source.id === "whoop",
+  );
+  assert.ok(disconnectedOura);
+  assert.ok(disconnectedWhoop);
+  assert.equal(requiresVitalConnectionPreflight(disconnectedOura), false);
+  assert.equal(requiresVitalConnectionPreflight(disconnectedWhoop), true);
 });
 
 test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", async () => {

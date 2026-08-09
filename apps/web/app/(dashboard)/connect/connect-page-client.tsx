@@ -648,6 +648,10 @@ export function requiresVitalConnectionPreflight(
     return connectIntentProvider === "junction";
   }
 
+  if (source.requiresReconnect) {
+    return source.connectProvider === "junction";
+  }
+
   return source.requiresVitalDisclosure === true;
 }
 

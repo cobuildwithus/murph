@@ -705,7 +705,7 @@ export function resolveConfiguredConnectSources(
         : undefined;
       const requiresVitalDisclosure =
         connectionAvailable &&
-        (reconnectProvider ?? connectConfig?.provider) === "junction";
+        connectConfig?.provider === "junction";
 
       return {
         ...source,
