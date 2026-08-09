@@ -1,6 +1,6 @@
 # non-expiring-starter-usage
 
-Status: active — current-main merge published; exact-head CI pending
+Status: active — exact-head CI rerunning after fixture type cleanup
 Created: 2026-08-07
 Updated: 2026-08-09
 
@@ -123,6 +123,10 @@ Updated: 2026-08-09
   for incomplete legacy projections, delayed-event replay, untouched Starter
   account retirement during phone transfer, and idempotent cutover replay after
   later Starter usage lowers the grant projection.
+- A fresh exact-head Web typecheck isolated four test-fixture typing defects;
+  commit `308dd70bdc12e2163fafb8f8d99440cdd33c71d5` fixes them without changing
+  runtime behavior, and the full suite is rerunning from this human-authored
+  audit checkpoint.
 - Full pnpm-backed tests, generated Prisma checks, browser design proof,
   ReviewGPT, and exact-head CI must pass on the published PR head before this
   plan is marked complete.
