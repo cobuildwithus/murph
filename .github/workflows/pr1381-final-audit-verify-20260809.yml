@@ -38,26 +38,54 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Typecheck assistant engine
-        run: pnpm --dir packages/assistant-engine typecheck
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --dir packages/assistant-engine typecheck 2>&1 | tee /tmp/pr1381-typecheck.log
       - name: Run focused Codex protocol and runtime tests
-        run: >-
-          pnpm --dir packages/assistant-engine exec vitest run
-          --config vitest.config.ts
-          --no-coverage
-          test/app-server-protocol.test.ts
-          test/assistant-codex-runtime.test.ts
-          test/codex-runtime-helpers.test.ts
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/app-server-protocol.test.ts \
+            test/assistant-codex-runtime.test.ts \
+            test/codex-runtime-helpers.test.ts \
+            2>&1 | tee /tmp/pr1381-focused.log
       - name: Run complete assistant engine suite
-        run: pnpm --dir packages/assistant-engine test
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --dir packages/assistant-engine test 2>&1 | tee /tmp/pr1381-full.log
       - name: Run affected hosted runtime fixture
-        run: >-
-          pnpm --dir packages/assistant-runtime exec vitest run
-          --config vitest.config.ts
-          --no-coverage
-          test/hosted-runtime-workspace-entrypoint.test.ts
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --dir packages/assistant-runtime exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/hosted-runtime-workspace-entrypoint.test.ts \
+            2>&1 | tee /tmp/pr1381-runtime.log
       - name: Run affected CLI fixture
-        run: >-
-          pnpm --dir packages/cli exec vitest run
-          --config vitest.config.ts
-          --no-coverage
-          test/assistant-codex.test.ts
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --dir packages/cli exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/assistant-codex.test.ts \
+            2>&1 | tee /tmp/pr1381-cli.log
+      - name: Upload final audit logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1381-final-audit-logs
+          path: |
+            /tmp/pr1381-typecheck.log
+            /tmp/pr1381-focused.log
+            /tmp/pr1381-full.log
+            /tmp/pr1381-runtime.log
+            /tmp/pr1381-cli.log
+          if-no-files-found: ignore
+          retention-days: 1
