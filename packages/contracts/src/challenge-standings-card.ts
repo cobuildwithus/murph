@@ -33,7 +33,7 @@ function singleLineText(maxLength: number) {
       message: "Expected text without surrounding whitespace.",
     })
     .regex(
-      /^[^\u0000-\u001F\u007F\u2028\u2029\r\n]+$/u,
+      /^[^\u0000-\u001F\u007F\u0085\u2028\u2029\uFEFF\r\n]+$/u,
       "Expected one printable line of text.",
     );
 }

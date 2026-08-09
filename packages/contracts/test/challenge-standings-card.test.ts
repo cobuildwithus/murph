@@ -197,7 +197,12 @@ describe("challenge standings response-card contract", () => {
       ),
     }).success).toBe(false);
 
-    for (const title of [" Weird Health Week", "Weird\nHealth Week"]) {
+    for (const title of [
+      " Weird Health Week",
+      "Weird\nHealth Week",
+      "Weird\u0085Health Week",
+      "Weird\uFEFFHealth Week",
+    ]) {
       expect(challengeStandingsResponseCardV1Schema.safeParse({
         ...INDIVIDUAL_CARD,
         title,

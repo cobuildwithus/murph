@@ -333,6 +333,8 @@ function renderChallengeStandingsResponseCardText(
       ? 'Waiting for shared data.'
       : points >= card.objective.targetPoints
         ? 'Goal reached.'
+        : card.coverage === 'partial'
+          ? 'More progress may be pending.'
         : `${formatChallengePoints(
             card.objective.targetPoints - points,
           )} points to go.`

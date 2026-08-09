@@ -162,7 +162,7 @@ describe('challenge standings response cards', () => {
         "Move Atlanta Together — Updated after Friday's check-in",
         '',
         '640+ / 1,000 points',
-        '360 points to go.',
+        'More progress may be pending.',
         'Coverage: 1 complete, 1 partial, 1 unscored (3 total).',
         'Verified lower-bound progress.',
       ].join('\n'),
