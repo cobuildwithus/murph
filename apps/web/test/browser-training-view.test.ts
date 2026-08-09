@@ -92,20 +92,20 @@ test("Training derives the live workout, recent history and exercise progress fr
                   order: 1,
                   sets: [
                     {
-                      completedAt: "2026-08-09T17:10:00.000Z",
                       order: 1,
                       reps: 8,
+                      type: "normal",
                       weight: 155,
                       weightUnit: "lb",
                     },
-                    { order: 2, reps: 8, weight: 155, weightUnit: "lb" },
+                    { order: 2, type: "normal" },
                   ],
                   sourceExerciseId: "EX001",
                 },
               ],
               routineName: "Push day",
+              sourceApp: "murph-live",
               startedAt: "2026-08-09T17:00:00.000Z",
-              state: "in_progress",
             },
           },
           "2026-08-09T17:00:00.000Z",
@@ -135,6 +135,49 @@ test("Training derives the live workout, recent history and exercise progress fr
   assert.equal(bench.lastSet?.weight, 155);
   assert.equal(bench.bestSet?.weight, 155);
   assert.equal(view.weeks.reduce((sum, week) => sum + week.count, 0), 2);
+});
+
+test("Training treats any live set result field as logged while placeholders stay planned", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T18:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "live-set-completion",
+    vault: createVaultReadModel({
+      entities: [
+        createWorkoutEntity(
+          "workout_active_notes",
+          {
+            activityType: "strength-training",
+            workout: {
+              exercises: [
+                {
+                  name: "Plank",
+                  order: 1,
+                  sets: [
+                    { note: "Hard brace", order: 1, type: "normal" },
+                    { durationSeconds: 60, order: 2, type: "normal" },
+                    { order: 3, type: "normal" },
+                  ],
+                },
+              ],
+              sourceApp: "murph-live",
+              startedAt: "2026-08-09T17:00:00.000Z",
+            },
+          },
+          "2026-08-09T17:00:00.000Z",
+        ),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const view = selectBrowserVaultTraining(createBrowserVaultQueryClient(replica));
+
+  assert.equal(view.activeSession?.completedSetCount, 2);
+  assert.deepEqual(
+    view.activeSession?.exercises[0]?.sets.map((set) => set.completed),
+    [true, true, false],
+  );
 });
 
 test("Training keeps legacy strength summaries visible while old records migrate", async () => {

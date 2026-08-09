@@ -126,7 +126,12 @@ function parseTrainingSession(entity: BrowserVaultEntity): TrainingSessionView[]
       ?? attributes.status
       ?? attributes.sessionStatus,
   );
-  const state = explicitState ?? "completed";
+  const inferredLiveState = readString(workout?.sourceApp) === "murph-live"
+    && readString(workout?.startedAt) !== null
+    && readString(workout?.endedAt) === null
+      ? "in_progress"
+      : null;
+  const state = explicitState ?? inferredLiveState ?? "completed";
   const exercises = parseWorkoutExercises({
     active: state === "in_progress",
     sessionId: entity.id,
@@ -312,7 +317,19 @@ function readSetCompleted(
     return true;
   }
 
-  return !activeSession;
+  return activeSession ? hasLoggedTrainingSet(set) : true;
+}
+
+function hasLoggedTrainingSet(set: Record<string, unknown>): boolean {
+  return readString(set.note) !== null
+    || readNumber(set.reps) !== null
+    || readNumber(set.weight) !== null
+    || readNumber(set.durationSeconds) !== null
+    || readNumber(set.distanceMeters) !== null
+    || readNumber(set.rpe) !== null
+    || readNumber(set.bodyweightKg) !== null
+    || readNumber(set.assistanceKg) !== null
+    || readNumber(set.addedWeightKg) !== null;
 }
 
 function readSessionState(value: unknown): TrainingSessionView["state"] | null {
