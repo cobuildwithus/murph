@@ -85,6 +85,7 @@ export function SignupReferralFlowStudy() {
   return (
     <div
       className="flex flex-col gap-10"
+      data-design-contract="origin-only-referral-claim"
       data-design-section="signup-referral-flow"
       id="signup-referral-flow"
     >
