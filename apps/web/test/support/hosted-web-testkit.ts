@@ -586,6 +586,15 @@ interface HostedRuntimeSignalModule {
     signalAccepted: true;
     workflowId: string;
   }>;
+  signalHostedRetentionRuntimeRecheck(input: {
+    client?: HostedRuntimeTemporalSignalClient | null;
+    environment?: NodeJS.ProcessEnv;
+    prisma?: HostedTestPrismaClient;
+    userId: string;
+  }): Promise<{
+    signalAccepted: true;
+    workflowId: string;
+  }>;
   signalHostedRuntimeWakeRuntime(input: {
     client?: HostedRuntimeTemporalSignalClient | null;
     environment?: NodeJS.ProcessEnv;
@@ -1790,6 +1799,24 @@ export async function signalHostedRuntimeRecheckRuntimeForTest(input: {
   return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
     const signalModule = await loadHostedRuntimeSignalModule();
     return await signalModule.signalHostedRuntimeRecheckRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      prisma: deps.prisma,
+      userId: input.userId,
+    });
+  });
+}
+
+export async function signalHostedRetentionRuntimeRecheckForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+}): Promise<{
+  signalAccepted: true;
+  workflowId: string;
+}> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const signalModule = await loadHostedRuntimeSignalModule();
+    return await signalModule.signalHostedRetentionRuntimeRecheck({
       client: deps.temporalSignalClient,
       environment: deps.environment,
       prisma: deps.prisma,

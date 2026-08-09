@@ -15,7 +15,7 @@ import {
   seedHostedWorkspaceInboxMediaRetentionWakeForTest,
   signalHostedMailboxAppendRuntimeForTest,
   signalHostedManualRunRuntimeForTest,
-  signalHostedRuntimeRecheckRuntimeForTest,
+  signalHostedRetentionRuntimeRecheckForTest,
   updateHostedMemberBillingStatusForTest,
 } from "#hosted-web-testing";
 
@@ -145,12 +145,14 @@ describe("hosted local Temporal orchestration e2e", () => {
       wakeAt: new Date(Date.now() - 60_000),
     });
 
-    const signal = await signalHostedRuntimeRecheckRuntimeForTest({
+    const retentionSignalStartedAt = new Date();
+    const signal = await signalHostedRetentionRuntimeRecheckForTest({
       environment: activeScenario.runtimeEnv,
       userId: pausedRetentionUserId,
     });
     const workflowState = await waitForWorkflowExecutionState({
       env: activeScenario.runtimeEnv,
+      executionNotBefore: retentionSignalStartedAt,
       workflowId: signal.workflowId,
     });
     expect(workflowState.lastExecutionErrorCode).toBeNull();
@@ -170,6 +172,7 @@ describe("hosted local Temporal orchestration e2e", () => {
 
 async function waitForWorkflowExecutionState(input: {
   env: NodeJS.ProcessEnv;
+  executionNotBefore?: Date;
   workflowId: string;
 }): Promise<ObservedHostedRuntimeWorkflowState> {
   const deadline = Date.now() + 180_000;
@@ -185,7 +188,10 @@ async function waitForWorkflowExecutionState(input: {
           workflowId: input.workflowId,
         }),
       );
-      if (latestState.lastExecutionKind !== null) {
+      if (
+        latestState.lastExecutionKind !== null
+        && isExecutionAtOrAfter(latestState.lastExecutionAt, input.executionNotBefore)
+      ) {
         return latestState;
       }
     } catch (error) {
@@ -204,6 +210,22 @@ async function waitForWorkflowExecutionState(input: {
       .filter((line): line is string => Boolean(line))
       .join("\n"),
   );
+}
+
+function isExecutionAtOrAfter(
+  lastExecutionAt: string | null,
+  executionNotBefore: Date | undefined,
+): boolean {
+  if (!executionNotBefore) {
+    return true;
+  }
+  if (!lastExecutionAt) {
+    return false;
+  }
+
+  const executionAtMs = Date.parse(lastExecutionAt);
+  return Number.isFinite(executionAtMs)
+    && executionAtMs >= executionNotBefore.getTime();
 }
 
 interface ObservedHostedRuntimeWorkflowState {

@@ -112,3 +112,9 @@ Updated: 2026-08-09
   supported scripts, runner-bundle validation failed on the unrelated existing
   entrypoint byte budget (9,934,039 bytes versus 9,920,209). No scenario test
   executed, and this change does not alter the runner bundle.
+- Final ReviewGPT round 2 passed the production correction and authorization
+  contract. Its non-qualifying body check exposed two E2E proof errors, which
+  were corrected: the scenario now uses the retention-specific signal that
+  bypasses active-member admission and waits only for an execution timestamp at
+  or after that signal. The production signal-owner suite passed all 30 tests,
+  and Cloudflare typecheck passed again.
