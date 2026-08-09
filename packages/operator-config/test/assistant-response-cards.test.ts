@@ -53,95 +53,67 @@ function decodeAppCardUrl(url: string): unknown {
 }
 
 describe('assistant response cards', () => {
-  it('derives the model-facing JSON schema from the runtime contract', () => {
+  it('authors only current cards while the runtime still accepts nutrition V1', () => {
     expect(assistantResponseCardJsonSchema).not.toHaveProperty('$schema')
     expect(assistantResponseCardJsonSchema).toMatchObject({
-      description: expect.stringContaining('compact_table'),
+      description: expect.stringContaining('daily_nutrition V2'),
       anyOf: [
         {
-          anyOf: [
-            {
-              additionalProperties: false,
+          additionalProperties: false,
+          properties: {
+            goals: {
               properties: {
-                goals: {
-                  properties: {
-                    calories: {
-                      anyOf: [
-                        {
-                          properties: {
-                            status: {
-                              enum: [
-                                'far_under_target',
-                                'under_target',
-                                'on_target',
-                                'over_target',
-                                'far_over_target',
-                                'unavailable',
-                              ],
-                            },
-                            target: { type: 'number' },
-                          },
+                calories: {
+                  anyOf: [
+                    {
+                      properties: {
+                        status: {
+                          enum: [
+                            'far_under_target',
+                            'under_target',
+                            'on_target',
+                            'over_target',
+                            'far_over_target',
+                            'unavailable',
+                          ],
                         },
-                        { type: 'null' },
-                      ],
+                        target: { type: 'number' },
+                      },
                     },
-                  },
+                    { type: 'null' },
+                  ],
                 },
-                kind: { const: 'daily_nutrition' },
-                totals: {
-                  properties: {
-                    fiberGrams: {
-                      anyOf: [
-                        {
-                          properties: {
-                            total: { type: 'number' },
-                          },
-                        },
-                        {
-                          properties: {
-                            mealCount: { const: 0 },
-                            total: { type: 'null' },
-                          },
-                        },
-                      ],
-                    },
-                  },
-                },
-                version: { const: 2 },
               },
             },
-            {
-              additionalProperties: false,
+            kind: { const: 'daily_nutrition' },
+            totals: {
               properties: {
-                kind: { const: 'daily_nutrition' },
-                totals: {
-                  properties: {
-                    calories: {
+                fiberGrams: {
+                  anyOf: [
+                    {
                       properties: {
                         total: { type: 'number' },
                       },
                     },
-                    proteinGrams: {
-                      anyOf: [
-                        {
-                          additionalProperties: false,
-                          properties: {
-                            total: { type: 'number' },
-                          },
-                        },
-                        {
-                          additionalProperties: false,
-                          properties: {
-                            mealCount: { const: 0 },
-                            total: { type: 'null' },
-                          },
-                        },
-                      ],
+                    {
+                      properties: {
+                        mealCount: { const: 0 },
+                        total: { type: 'null' },
+                      },
                     },
-                  },
+                  ],
                 },
               },
             },
+            version: { const: 2 },
+          },
+          required: [
+            'kind',
+            'version',
+            'localDate',
+            'mealCount',
+            'totals',
+            'goals',
           ],
         },
         {
@@ -171,9 +143,22 @@ describe('assistant response cards', () => {
             },
             version: { const: 1 },
           },
+          required: [
+            'kind',
+            'version',
+            'title',
+            'subtitle',
+            'rowHeader',
+            'columns',
+            'rows',
+            'footer',
+            'tracking',
+          ],
         },
       ],
     })
+    expect(assistantResponseCardJsonSchema).not.toHaveProperty('$defs')
+    expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
   })
 
   it('rejects malformed, unknown, and implausible daily nutrition values', () => {
@@ -451,7 +436,7 @@ describe('assistant response cards', () => {
     )
     const completeCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD)
     const goalCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD_V2)
-    expect(LINQ_IMESSAGE_APP_CARD_ORIGIN).toBe('https://murph.ai')
+    expect(LINQ_IMESSAGE_APP_CARD_ORIGIN).toBe('https://www.withmurph.ai')
     expect(completeCardUrl.startsWith(
       `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`,
     )).toBe(true)

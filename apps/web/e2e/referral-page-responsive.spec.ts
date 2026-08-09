@@ -1,7 +1,46 @@
 import { expect, test } from "@playwright/test";
 
 const WIDTHS = [320, 375, 390, 768, 1280] as const;
+const REFERRAL_STUDY_WIDTHS = [390, 1440] as const;
 const OVERFLOW_TOLERANCE_PX = 1;
+const REFERRAL_STUDIES = [
+  {
+    dayLabels: [
+      { count: 2, label: "10 days of Murph" },
+      { count: 1, label: "14 days of Murph" },
+    ],
+    description: "Share your link or start a group with Murph.",
+    rewardCount: 3,
+    selector: '[data-design-section="homepage-referral-program"]',
+    slug: "mixed",
+    titles: [
+      "Invite someone to Murph",
+      "Bring someone new to Murph",
+      "Start an active group",
+    ],
+  },
+  {
+    dayLabels: [
+      { count: 1, label: "10 days of Murph" },
+      { count: 1, label: "14 days of Murph" },
+    ],
+    description: "Start a fresh group with Murph.",
+    rewardCount: 2,
+    selector:
+      '[data-design-section="homepage-referral-program-group-only"]',
+    slug: "group-only",
+    titles: ["Bring someone new to Murph", "Start an active group"],
+  },
+  {
+    dayLabels: [{ count: 1, label: "10 days of Murph" }],
+    description: "Share your personal link with someone new.",
+    rewardCount: 1,
+    selector:
+      '[data-design-section="homepage-referral-program-signup-only"]',
+    slug: "signup-only",
+    titles: ["Invite someone to Murph"],
+  },
+] as const;
 
 function isLoopbackUrl(rawUrl: string): boolean {
   try {
@@ -76,4 +115,91 @@ test("referral page stays contained and actionable at every marketing breakpoint
       page.getByText("$3.50 of cost-weighted usage credit", { exact: true }),
     ).toBeVisible();
   }
+});
+
+test.describe("homepage referral design proof", () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test("every homepage referral state stays concise and complete", async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(180_000);
+
+    await page.route("**/*", (route) => {
+      if (isLoopbackUrl(route.request().url())) {
+        route.continue();
+      } else {
+        route.abort();
+      }
+    });
+    await page.addInitScript(() => {
+      const style = document.createElement("style");
+      style.textContent =
+        "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";
+      (document.head ?? document.documentElement).appendChild(style);
+    });
+
+    for (const width of REFERRAL_STUDY_WIDTHS) {
+      await page.setViewportSize({ width, height: 1000 });
+      const response = await page.goto("/design?tab=sections", {
+        waitUntil: "load",
+      });
+      expect(
+        response?.status(),
+        `/design should respond 200 at ${width}px`,
+      ).toBe(200);
+      await page.evaluate(async () => {
+        await document.fonts?.ready;
+        await new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        );
+      });
+
+      for (const expected of REFERRAL_STUDIES) {
+        const study = page.locator(expected.selector);
+        await expect(study).toBeVisible();
+        await expect(study.locator("article")).toHaveCount(
+          expected.rewardCount,
+        );
+        await expect(
+          study.getByText(expected.description, { exact: true }),
+        ).toBeVisible();
+        await expect(
+          study.getByRole("link", { name: "See ways to earn" }),
+        ).toBeVisible();
+        for (const title of expected.titles) {
+          await expect(study.getByText(title, { exact: true })).toBeVisible();
+        }
+        for (const dayLabel of expected.dayLabels) {
+          await expect(
+            study.getByText(dayLabel.label, { exact: true }),
+          ).toHaveCount(dayLabel.count);
+        }
+        await expect(study.getByText(/If eligible/)).toHaveCount(0);
+        await expect(study.getByText(/≈|\$[0-9]/)).toHaveCount(0);
+
+        const overflowPx = await study.evaluate((element) =>
+          element.scrollWidth - element.clientWidth
+        );
+        expect(
+          overflowPx,
+          `${expected.slug} referral study should not overflow at ${width}px`,
+        ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+
+        const screenshotPath = testInfo.outputPath(
+          `homepage-referral-${expected.slug}-${width}.png`,
+        );
+        await study.locator("section > div").first().screenshot({
+          path: screenshotPath,
+        });
+        await testInfo.attach(
+          `homepage-referral-${expected.slug}-${width}`,
+          {
+            contentType: "image/png",
+            path: screenshotPath,
+          },
+        );
+      }
+    }
+  });
 });

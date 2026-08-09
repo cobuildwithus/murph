@@ -23,6 +23,12 @@ a share action. Gate-derived availability is program-level, not a promise that
 an individual member has enough rolling capacity for the next reward. Public
 signup-link copy therefore states that a completed signup can earn credit only
 after the later settlement eligibility and rolling-limit checks pass.
+On the compact homepage referral section, each enabled path leads with a
+plain typical-use day label (10 days for the $2 rewards and 14 days for the
+$3.50 reward) without repeating the underlying dollar-denominated credit. These
+day labels are presentation estimates, not accounting units; the homepage says
+that actual capacity varies, while `/refer` retains the full qualification and
+credit detail.
 
 The stable referral link remains available to an eligible signed-in member when
 either reward gate is disabled, but a disabled signup reward is not marketed or
@@ -102,8 +108,10 @@ retryable.
 
 A public `GET /r/<token>` only validates the token and renders a small landing
 page. Link previews, crawlers, and scanners therefore cannot allocate onboarding
-state. The route is `noindex`, `nofollow`, and `no-referrer` so stable tokens do
-not enter search indexes or downstream referrer headers.
+state. The route is `noindex`, `nofollow`, and `strict-origin`: referrer headers
+carry only the first-party origin, never the stable-token path, while the native
+same-origin claim form retains the canonical `Origin` required by its mutation
+guard.
 
 The available landing has one action: `Join Murph`, above a single closing line
 stating that Murph credits whoever shared the link and that the referrer cannot

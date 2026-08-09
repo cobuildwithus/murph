@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-07-30
+Last verified: 2026-08-07
 
 ## Decision
 
@@ -198,59 +198,90 @@ automatic sponsor and the single-sponsor billing invariant.
 
 Every explicit one-time group contribution and monthly activation purchase has
 one purchase-linked sponsorship-moment row. Automatic $5 refills do not create
-another moment, song, group notice, or running bit. The moment is not a
-financial status or balance. It freezes an HMAC-bound request configuration
-and, only for a current owner or active participant, may encrypt an optional
-public alias, group note, and temporary running-bit request using the hosted
-member secure-box owner.
+another moment, creative response, group notice, or running bit. The moment is
+not a financial status or balance. It freezes an HMAC-bound request
+configuration and, only for a current owner or active participant, may encrypt
+an optional public alias, optional creative request, and temporary running-bit
+request using the hosted member secure-box owner.
+
+A creative request is absent by default, so funding alone is quiet in the room.
+The bounded formats are `message`, `poem`, and `song`. Every request may include
+an optional premise; a song may additionally include one genre or style
+reference. Named songs, shows, soundtracks, artists, and genres are interpreted
+only as broad traits such as mood, tempo, instrumentation, and structure. They
+never authorize copied melody, lyrics, catchphrases, vocal identity, or a
+signature arrangement. The encrypted creative envelope is versioned and exists
+only for an explicit request. A null creative-request column means quiet for
+both current and pre-feature rows. A pre-feature encrypted generic note is
+normalized only into a plain-message request; it can never be reinterpreted as
+song consent. Pre-feature rows without that note never produce a creative
+response.
 
 A valid funding locator remains sufficient to contribute anonymously. It is
 not sufficient to publish content into the room. Web checks current
 participant authority when the purchase is created and again after verified
-payment. Losing that authority suppresses the authored content without
-changing the grant.
+payment. Losing that authority suppresses the new authored creative request
+without changing the grant. A public alias is retained only when an opted-in
+response or active running-bit request can actually use it; both the client
+builder and server canonicalizer discard an alias-only quiet request, so quiet
+funding does not store an unused public identity. No expired private copy is
+read or exposed.
 
 Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:
 
 1. activates a requested bit for 24 hours on a `$10` one-time contribution or
    72 hours on a `$20` one-time contribution;
-2. resolves the exact current non-direct group destination, with no personal
-   fallback; and
-3. appends one purchase-deduplicated creative notification to the existing
+2. stops without creating a public notification when no creative response was
+   explicitly requested;
+3. otherwise resolves the exact current non-direct group destination, with no
+   personal fallback; and
+4. appends one purchase-deduplicated creative notification to the existing
    mailbox.
 
-A monthly activation is the actual `$5` purchase socially acknowledged in the
-room. Its private monthly maximum never changes the public acknowledgment or
-creates a running bit.
+Permanent schema validation failure in a decrypted optional creative envelope
+projects as no creative request at this notification boundary. Activation,
+including an otherwise valid running bit, commits and Stripe receipt completion
+continues through the independent near-cap owner. Creator recovery stays strict,
+and secure-box, decryption, database, and other operational failures continue to
+propagate for ordinary retry rather than being mislabeled as quiet content.
 
-The creative turn is isolated, projects only `generate_song`, applies the
-output-only native-capability deny set, and runs as a fresh ephemeral thread on
-the resident App Server. The application-owned song tool retains the existing
-provider and authority-free public transports needed for generation and its
-validated signed upload; neither becomes native Codex browsing. The turn uses
-the ordinary delivery path. Its prompt tells the model to call that tool exactly once for one
-roughly 15-second original sponsor song. The song transforms one vivid, recent,
-non-sensitive detail, exchange, or room dynamic from the current group
-conversation into a surprising room-specific hook when one is available. A
-present sponsor message is the preferred creative seed when it blends naturally
-with the room. When neither source offers a safe, usable premise, the song
-becomes a gentle group celebration without inventing personal facts or referring
-to sensitive history.
+A monthly activation is the actual `$5` purchase eligible for the optional
+social response. Its private monthly maximum never changes the public
+acknowledgment or creates a running bit.
+
+The creative turn is isolated and runs as a fresh ephemeral thread on the
+resident App Server. Message and poem formats use an output-only turn profile,
+so they have no tools rather than relying on prompt compliance alone. Song
+format projects only `generate_song`, which is used exactly once. A song is
+exactly 15 seconds with at most four short lyric lines. The requested format
+cannot be changed by participant-authored prompt text. The response transforms
+one vivid, recent, non-sensitive detail, exchange, or room dynamic from the
+current group conversation into a room-specific hook when one is available.
+The optional premise is the preferred creative seed when it blends naturally
+with the room.
+When neither source offers a safe, usable premise, the response becomes a
+gentle group celebration in the requested format without inventing personal
+facts or referring to sensitive history.
+
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
-song gentle and non-comedic. A creative provider failure terminally settles
-this optional notification instead of asking the model to make another song.
-Once a delivery intent commits, the ordinary outbox retains its retry and
-deduplication behavior. There is no reservation, attempt counter, post-hoc
-media-attempt accounting, or media-specific retry state. The reconciler wakes newly paid usage work before
-attempting this optional social effect, and notification failure never rolls
-back an already committed credit grant.
+response gentle and non-comedic. A creative provider failure terminally settles
+this optional notification instead of asking the model to try another song. A
+selected song without exactly one generated voice-memo attachment fails before
+receipt, transcript persistence, or delivery and is never replaced by a
+text-only response. Once a delivery intent commits, the ordinary outbox retains
+its retry and deduplication behavior. There is no reservation, attempt counter,
+post-hoc media-attempt accounting, or media-specific retry state. The reconciler
+wakes newly paid usage work before attempting this optional social effect, and
+notification failure never rolls back an already committed credit grant.
 
 The running bit remains a Web-owned expiring product fact, not durable group
 memory. Mailbox fetch projects only the newest active bit to fresh,
-route-authorized, non-direct Linq or Telegram conversation input. The runtime
-rechecks expiry before prompt construction and quotes the alias and requested
-bit as untrusted participant-authored data. It is optional social color only:
+route-authorized, non-direct Linq or Telegram conversation input. The running-bit
+reader decrypts only the alias and bit, so an unavailable or malformed creative
+envelope cannot suppress an otherwise valid active bit. The runtime rechecks
+expiry before prompt construction and quotes the alias and requested bit as
+untrusted participant-authored data. It is optional social color only:
 facts, health and safety guidance, privacy, permissions, routing, tools,
 challenge scoring, access, and response quality are unchanged. Failure to read
 the optional bit projects no bit and never blocks ordinary mailbox work.
@@ -1203,14 +1234,15 @@ and call the same idempotent reconciler by purchase ID.
    sponsorship producer; older Web does not read or write the additive table.
 3. Deploy the Cloudflare/runner bundle first. It parses the optional
    low-capacity and group-running-bit mailbox fields, recognizes the isolated
-   `creative-response` notification profile, and advertises `read_usage`.
-   Verify the exact runner fingerprint converges before Web can produce either
-   new sponsorship contract. Existing Web sends neither sponsorship field
-   during this compatibility window.
-4. Apply the additive capped-sponsorship authorization migration after the
-   tolerant runtime reader is live. Confirm both the migration and compatible
-   Web have converged before enabling monthly authorization creation or
-   automatic refill admission.
+   `creative-response` and `creative-response-text` notification profiles, and
+   advertises `read_usage`. Verify the exact runner fingerprint converges before
+   Web can produce either new sponsorship contract. Existing Web sends neither
+   sponsorship field during this compatibility window.
+4. Apply the additive capped-sponsorship authorization migration and
+   `20260807210000_add_group_sponsorship_creative_request` after the tolerant
+   runtime reader is live. Confirm both migrations and compatible Web have
+   converged before enabling monthly authorization creation, automatic refill
+   admission, or optional creative-request creation.
 5. Deploy Web next. It contains the group sponsorship producer, target-aware
    saved-card/Checkout flow, webhook-owned grant and moment materialization,
    bounded automatic-refill sweep, private management and notices, optional
@@ -1253,6 +1285,14 @@ The first monthly authorization is the old-Web rollback floor because preceding
 Web cannot activate or safely manage it. Recover from that point with a forward
 fix on the compatible schema, Web, and runtime rather than restoring the older
 producer.
+
+The optional-creative Web producer is also an old-Web rollback floor.
+Pre-feature Web does not understand the creative envelope and unconditionally
+materializes a song for every fulfilled group contribution, including a quiet
+one. Disable new sponsorship intake before rollback and keep the compatible Web
+reader and reconciler deployed. Rolling below that floor requires proof that no
+group contribution can still be materialized or retried; otherwise
+forward-fix.
 
 ## Verification
 

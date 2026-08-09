@@ -22,6 +22,7 @@ import { getExperiment, type VaultReadModel } from "./read-model.ts";
 import {
   buildExperimentAdherenceCalendar,
   countAdherenceConfidenceSessions,
+  countCalendarAdherenceSessions,
   countCompletedAdherenceSessions,
   eventKindIsCandidateForEvidence,
   experimentAdherenceTargetPlansDate,
@@ -331,9 +332,6 @@ export function summarizeExperimentProgress(
 ): ExperimentProgressSummary {
   const context = buildExperimentSummaryContext(vault, slug, options);
   const signals = buildMetricResults(context);
-  const completedSessionEventIds = context.events
-    .filter(isCompletedSessionEvent)
-    .map((event) => event.entityId);
   const primaryOutcome = resolveExperimentPrimaryOutcome(context.frontmatter.analysisPlan);
   const primarySignal =
     primaryOutcome?.kind === "metric"
@@ -353,10 +351,7 @@ export function summarizeExperimentProgress(
     : hasPrimarySignal
       ? primarySignal.interventionDayCount
       : countDatesWithWearableData(context.interventionDates, context.summariesByDate);
-  const adherence = {
-    ...buildAdherenceSummary(context),
-    sessionEventIds: completedSessionEventIds,
-  };
+  const adherence = buildAdherenceSummary(context);
   const dataCoverage = buildCoverageSummary({
     asOf: context.asOf,
     baselineDaysAvailable,
@@ -840,19 +835,29 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
   const progressObservations = progressTarget
     ? buildAdherenceObservations(context, [progressTarget])
     : [];
-  const progressCounts = progressTarget && !progressTarget.calendar
-    ? countCompletedAdherenceSessions({
-        asOfDate: context.asOf,
-        observations: progressObservations,
-        target: progressTarget,
-        windows: buildWindowSummary(context.frontmatter),
-      })
-    : null;
   const progressCells = progressTarget?.calendar
     ? rollupCells ?? adherenceCalendar?.cells ?? []
     : [];
+  const occurrenceCounts =
+    progressTarget?.calendar && progressTarget.evidence.kind === "linkedEventCount"
+      ? countCalendarAdherenceSessions({
+          asOf: context.asOf,
+          cells: progressCells,
+          observations: progressObservations,
+          target: progressTarget,
+        })
+      : null;
+  const progressCounts = occurrenceCounts ??
+    (progressTarget && !progressTarget.calendar
+      ? countCompletedAdherenceSessions({
+          asOfDate: context.asOf,
+          observations: progressObservations,
+          target: progressTarget,
+          windows: buildWindowSummary(context.frontmatter),
+        })
+      : null);
   const confidenceCounts = !hasAmbiguousTargets && progressTarget?.calendar
-    ? countAdherenceConfidenceSessions({
+    ? occurrenceCounts ?? countAdherenceConfidenceSessions({
         cells: progressCells,
         observations: progressObservations,
       })
@@ -861,10 +866,25 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
         confirmedSessions: 0,
         assumedSessions: 0,
       };
+
+  const countedLoggedEvidenceIds = occurrenceCounts
+    ? new Set(occurrenceCounts.loggedEvidenceIds)
+    : null;
+  const sessionEventIds = context.events
+    .filter(isCompletedSessionEvent)
+    .filter((event) =>
+      countedLoggedEvidenceIds === null ||
+      countedLoggedEvidenceIds.has(event.entityId)
+    )
+    .map((event) => event.entityId);
+
   let completedSessions = 0;
   let partialSessions = 0;
   if (!hasAmbiguousTargets) {
-    if (progressTarget?.calendar) {
+    if (occurrenceCounts) {
+      completedSessions = occurrenceCounts.completedSessions;
+      partialSessions = occurrenceCounts.partialSessions;
+    } else if (progressTarget?.calendar) {
       completedSessions = progressCells.filter(
         (cell) => cell.status === "satisfied" || cell.status === "assumed",
       ).length;
@@ -874,16 +894,20 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
       partialSessions = progressCounts?.partialSessions ?? 0;
     }
   }
+
   const loggedSessions = completedSessions + partialSessions;
   const expectedSessionsByNow = hasAmbiguousTargets
     ? null
-    : progressTarget?.calendar && adherenceCalendar
-    ? (rollupCells ?? adherenceCalendar.cells).filter((cell) => cell.status !== "scheduled").length
-    : computeExpectedSessionsByNow(
-        context.frontmatter,
-        context.asOf,
-        targetSessions,
-      );
+    : occurrenceCounts
+      ? occurrenceCounts.expectedSessionsByNow
+      : progressTarget?.calendar && adherenceCalendar
+        ? (rollupCells ?? adherenceCalendar.cells)
+            .filter((cell) => cell.status !== "scheduled").length
+        : computeExpectedSessionsByNow(
+            context.frontmatter,
+            context.asOf,
+            targetSessions,
+          );
   const evidence = buildProgressAdherenceEvidence(progressTarget);
 
   let status: ExperimentAdherenceStatus = "unknown";
@@ -912,6 +936,7 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     ...(evidence ? { evidence } : {}),
     expectedSessionsByNow,
     loggedSessions,
+    sessionEventIds,
     ...(partialSessions > 0 ? { partialSessions } : {}),
     minimumUsefulSessions,
     status,
@@ -924,7 +949,6 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     summary.confirmedSessions = confidenceCounts.confirmedSessions;
   }
   if (confidenceCounts.assumedSessions > 0) {
-    // Calendar-less targets have no per-day plan to assume; derived count-style events can still report as assumed.
     summary.assumedSessions = confidenceCounts.assumedSessions;
   }
 

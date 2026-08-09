@@ -530,12 +530,29 @@ supported provider credential.
   hours, while a fully stale trace is deleted.
 - `apps/cloudflare/test/database-health-{metrics,monitor,worker}.test.ts`
   covers the independent PlanetScale/Linq database-health plane. The tests
-  prove strict metric normalization and required-series failure, positive
-  direct-port counter deltas with reset/new-series suppression, SQLite sample
-  persistence and 30-day pruning, concrete connection thresholds, two-failure
-  collection hysteresis, failed-scrape incident preservation, recovery reset,
-  global 30-minute wall-time provider-attempt pacing across incident recovery,
-  current actual-check-time and rotated evidence-bearing recurrence copy,
+  prove strict per-family metric normalization, explicit unknowns for missing
+  required series, continued evaluation of available signals, positive
+  direct-port counter deltas with reset/new-series suppression across complete
+  and partial samples, SQLite sample persistence and 30-day pruning, concrete
+  connection thresholds, two-failure collection hysteresis, one acknowledged
+  page per unresolved telemetry-notification window, recovered threshold
+  coalescing before acknowledgment, truthful partial-then-unavailable,
+  unavailable-then-partial, and different-family partial-window summaries with
+  bounded observed evidence, failed-scrape incident preservation,
+  telemetry obligation retention behind older pending and direct-error-only
+  pages across restart and recovery, current-pressure priority at the first
+  eligible provider slot with historical observation time, exact combined
+  pressure, telemetry, and direct-error retention when concrete evidence appears
+  at or after the unadmitted threshold across recovery and restart,
+  rollback-compatible additive SQLite alert-state migration and legacy-ack
+  normalization, recovery reset and rearming, post-ack monitoring suppression
+  inside concrete-pressure
+  recurrence, stale pressure retry isolation from a later rearmed obligation,
+  global one-hour wall-time provider-attempt pacing across incident recovery,
+  current actual-check-time and full reachability of the one-hundred-opening
+  deterministic observation-scoped recurrence bank, neutral-opening coverage
+  across condition families, and delayed post-recovery delivery through the
+  scheduled Worker and real SQLite Durable Object boundary,
   no stale fenced gauge page after recovery, exact body/idempotency reuse after
   an ambiguous Linq send, transactional rollback before direct
   counter-baseline advancement, one-sample direct errors admitted inside the

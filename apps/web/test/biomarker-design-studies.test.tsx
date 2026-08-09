@@ -123,7 +123,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Group sponsorship and mobile one-time contribution",
+    "Group sponsorship with optional creative response",
   );
   expect(sectionsMarkup).toContain(
     "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
@@ -131,8 +131,8 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain(
     "Reusable signup referral link and recipient claim states",
   );
-  expect(sectionsMarkup).toContain(
-    'data-design-section="signup-referral-flow"',
+  expect(sectionsMarkup).toMatch(
+    /<[^>]*(?=[^>]*\bdata-design-contract="origin-only-referral-claim")(?=[^>]*\bdata-design-section="signup-referral-flow")[^>]*>/,
   );
   expect(sectionsMarkup).toContain("Settings · Messaging");
   expect(sectionsMarkup).toContain("Recipient landing states");

@@ -1,7 +1,12 @@
 import { Buffer } from 'node:buffer'
 
 import {
+  IMESSAGE_APP_CARD_URL_MAX_LENGTH,
+  IMESSAGE_APP_CARD_URL_PREFIX,
+  MURPH_PRODUCT_ORIGIN,
   assistantResponseCardSchema,
+  compactTableResponseCardV1Schema,
+  dailyNutritionResponseCardV2Schema,
   type AssistantResponseCard,
   type CompactTableResponseCardV1,
   type DailyNutritionResponseCard,
@@ -42,10 +47,7 @@ const NUTRITION_CARD_GOAL_STATUS_LABELS = {
 
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
-export const LINQ_IMESSAGE_APP_CARD_ORIGIN = 'https://murph.ai'
-const APP_CARD_URL_PREFIX =
-  `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`
-const LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048
+export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
 
 export type AppCardEnvelopeV1 = {
   schemaVersion: 1
@@ -220,8 +222,8 @@ function encodeAppCardEnvelope(
 ): string {
   const encoded = Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')
-  const url = `${APP_CARD_URL_PREFIX}${encoded}`
-  if (url.length >= LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
+  const url = `${IMESSAGE_APP_CARD_URL_PREFIX}${encoded}`
+  if (url.length >= IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
     throw new TypeError('The encoded app card exceeds the inline size limit.')
   }
   return url
@@ -378,13 +380,19 @@ function isDailyNutritionResponseCardV2(
 }
 
 function createAssistantResponseCardJsonSchema() {
+  // Retained nutrition V1 cards remain valid at the runtime boundary. New tool
+  // calls author only the current nutrition version or a compact table.
+  const authoringSchema = z.union([
+    dailyNutritionResponseCardV2Schema,
+    compactTableResponseCardV1Schema,
+  ])
   const {
     $schema: _dialect,
     ...portableSchema
-  } = z.toJSONSchema(assistantResponseCardSchema)
+  } = z.toJSONSchema(authoringSchema)
   return {
     ...portableSchema,
     description:
-      'One closed Murph response card: daily_nutrition for a canonical daily meal summary, or compact_table for a bounded one-off table or a refreshed snapshot backed by one canonical workout event.',
+      'Current card authoring contract: daily_nutrition V2 or compact_table V1.',
   }
 }

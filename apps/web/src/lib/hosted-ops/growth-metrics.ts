@@ -220,6 +220,8 @@ export interface HostedGrowthCurrentMetrics {
   edgePaidIndividuals: number;
   edgeMrrUsdCents: number;
   familyMrrUsdCents: number;
+  maxPaidIndividuals: number;
+  maxMrrUsdCents: number;
   mrrUsdCents: number;
   payingCustomers: number;
   payingFamilyGroups: number;
@@ -352,7 +354,9 @@ export function calculateHostedGrowthCurrentMetrics(
   let edgePaidIndividuals = 0;
   let pulseMrrUsdCents = 0;
   let edgeMrrUsdCents = 0;
+  let maxMrrUsdCents = 0;
   let pulsePaidIndividuals = 0;
+  let maxPaidIndividuals = 0;
   let unpricedPaidMembers = 0;
 
   for (const member of input.payingIndividuals) {
@@ -373,6 +377,9 @@ export function calculateHostedGrowthCurrentMetrics(
     if (planCode === "launch_edge_monthly") {
       edgePaidIndividuals += 1;
       edgeMrrUsdCents += amountUsdCents;
+    } else if (planCode === "launch_max_monthly") {
+      maxPaidIndividuals += 1;
+      maxMrrUsdCents += amountUsdCents;
     } else {
       pulsePaidIndividuals += 1;
       pulseMrrUsdCents += amountUsdCents;
@@ -415,7 +422,10 @@ export function calculateHostedGrowthCurrentMetrics(
     edgePaidIndividuals,
     edgeMrrUsdCents,
     familyMrrUsdCents,
-    mrrUsdCents: pulseMrrUsdCents + edgeMrrUsdCents + familyMrrUsdCents,
+    maxPaidIndividuals,
+    maxMrrUsdCents,
+    mrrUsdCents:
+      pulseMrrUsdCents + edgeMrrUsdCents + maxMrrUsdCents + familyMrrUsdCents,
     payingCustomers: payingIndividuals + payingFamilyGroups,
     payingFamilyGroups,
     payingFamilySeats,
