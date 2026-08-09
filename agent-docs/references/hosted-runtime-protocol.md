@@ -963,23 +963,21 @@ handlers may additionally fire one best-effort direct
 `ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
 message payload). Linq first proves the committed known-checkpoint owner and
 canonical live active access; Assistant Ask first completes its normal
-server-bound append checks. Immediately after that Linq access proof, Web may
-start the existing `runtime/shell-prewarm` request while it awaits the Temporal
-`signalWithStart`. The route passes through the per-member UserRunner consent
-mutation lock and rereads Web-owned health-data admission before issuing only
-the deterministic platform start command. It does not read runtime state,
-create a fence, wait for readiness, or invoke work. Access or health-data
-admission failure starts no shell hint or direct wake; a Temporal failure may
-leave a consented idle shell but cannot start runtime work. Only after Temporal
-accepts the durable signal does Web start the direct ensure.
-Linq instant start follows the same authority split: enrollment returns the
+server-bound append checks. Web always awaits the applicable Temporal
+`signalWithStart`; only after Temporal accepts that durable signal does Web
+start the direct ensure. An access failure or Temporal acceptance failure starts
+no direct wake. Linq instant start follows the same rule: enrollment returns the
 newly committed activation as an explicit per-request wake continuation instead
 of signaling it first. Once the instant-start planner has committed the member
 row, Web may fire one best-effort `runtime/shell-prewarm` request while trial
-enrollment runs. That endpoint maps the member id directly to the deterministic
-container name and issues only the platform start command. It does not resolve
-a `UserRunner`, read access or workspace state, select a mailbox owner, create a
-fence, wait for readiness, or invoke work. The active-member replan durably
+enrollment runs. That endpoint resolves the member's `UserRunner`, enters the
+same per-user consent-mutation barrier used by authoritative ensures and
+withdrawal, re-reads live Web-owned admission, and only then issues the
+deterministic platform start command while retaining the barrier. It does not
+select a mailbox owner, create a fence, wait for health readiness, or invoke
+workspace work. Holding the barrier through `Container.start()` ensures a
+withdrawal cannot finish before a late shell appears; a denied admission starts
+nothing. The active-member replan durably
 appends the original conversation item and Web awaits that conversation-mailbox
 Temporal signal; only then may the ordinary Linq direct ensure start and own
 readiness plus all runtime authority. The shell hint does not read the persisted

@@ -6,7 +6,7 @@ import {
   recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressAssistantInputStaged,
   recordHostedIngressAssistantMilestone,
-  recordHostedIngressOrchestrationTiming,
+  recordHostedIngressDirectEnsureTiming,
   recordHostedIngressProviderStarted,
   recordHostedIngressRuntimeMilestone,
   recordHostedIngressTemporalSignalAccepted,
@@ -973,30 +973,12 @@ describe("hosted runtime latency dashboard store", () => {
     expect(dashboard.stageLatencyMs.stagedToProviderStartP50).toBe(1_000);
   });
 
-  it("persists prewarm and direct-ensure web-clock timing before runtime staging", async () => {
+  it("persists direct ensure web-clock timing before runtime staging", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
     });
 
-    await expect(recordHostedIngressOrchestrationTiming({
-      expectedUserId: "member_latency_1",
-      mailboxItemId: "mailbox_latency_1",
-      phaseBreakdown: {
-        schemaVersion: 1,
-        orchestration: {
-          shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_005,
-          shellPrewarmAcceptedAtEpochMs: 1_777_000_000_011,
-        },
-      },
-      prisma,
-      source: "linq",
-    })).resolves.toEqual({
-      matchedCount: 1,
-      recorded: true,
-      unmatchedCount: 0,
-    });
-
-    await expect(recordHostedIngressOrchestrationTiming({
+    await expect(recordHostedIngressDirectEnsureTiming({
       expectedUserId: "member_latency_1",
       mailboxItemId: "mailbox_latency_1",
       phaseBreakdown: {
@@ -1021,8 +1003,6 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
       schemaVersion: 1,
       orchestration: {
-        shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_005,
-        shellPrewarmAcceptedAtEpochMs: 1_777_000_000_011,
         tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -1055,8 +1035,6 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
       schemaVersion: 1,
       orchestration: {
-        shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_005,
-        shellPrewarmAcceptedAtEpochMs: 1_777_000_000_011,
         tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -1084,7 +1062,7 @@ describe("hosted runtime latency dashboard store", () => {
       source: "linq",
     });
 
-    await expect(recordHostedIngressOrchestrationTiming({
+    await expect(recordHostedIngressDirectEnsureTiming({
       expectedUserId: "member_latency_1",
       mailboxItemId: "mailbox_latency_1",
       phaseBreakdown: {

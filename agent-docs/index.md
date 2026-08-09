@@ -1,11 +1,18 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Purpose
 
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
+
+Hosted cold-start ownership keeps established-member startup on the ordinary
+post-Temporal direct ensure so container boot can overlap fenced invocation
+preparation. The separate first-contact shell hint is serialized by the
+per-user health-data consent barrier. This contract is jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
+`agent-docs/references/hosted-runtime-protocol.md`.
 
 Static SSH worker archive readiness and executor-owned, resource-qualified
 verification scheduling are jointly specified by `ARCHITECTURE.md`,

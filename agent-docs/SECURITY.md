@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Non-Negotiable Rules
 
@@ -17,12 +17,12 @@ Last verified: 2026-08-07
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. A shell-prewarm hint must use that same per-user barrier and
-  re-read the grant before touching the deterministic container, so a delayed
-  hint cannot recreate a shell after withdrawal completes. Cleanup failure must
-  never restore authority. Keep Settings,
-  export, and deletion available without waking the paused runtime; only
-  renewed consent may restore processing.
+  before granting. An instant-start shell-prewarm hint uses that same per-user
+  barrier and live admission read, and holds the barrier through the platform
+  start, so withdrawal cannot finish before a late shell appears. Cleanup
+  failure must never restore authority. Keep Settings, export, and deletion
+  available without waking the paused runtime; only renewed consent may restore
+  processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
 - Do not add third-party advertising pixels, retargeting SDKs, behavioral ad attribution, customer-list matching, tag-manager destinations, or analytics destinations that receive health data or health-context metadata; use `agent-docs/compliance/health-data-tracking-and-ads-rule.md` for any telemetry or marketing-tool review.
 - Hosted Web must keep the global `Referrer-Policy` at `strict-origin` or

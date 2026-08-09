@@ -1,4 +1,4 @@
-# Reduce hosted cold-start provider latency toward two seconds
+# Investigate hosted cold-start savings without losing existing overlap
 
 Status: active
 Created: 2026-08-09
@@ -6,99 +6,98 @@ Updated: 2026-08-09
 
 ## Goal
 
-- Remove at least 1 second from the established-member hosted cold path between
-  accepted inbound and upstream provider start if production scheduling realizes
-  the reordered overlap, while pursuing the preferred 2-second target without
-  weakening durable ingress, consent, single-turn authority, or reply delivery.
+- Find a behavior-preserving one-to-two-second reduction in established-member
+  accepted-to-provider latency, or reject the candidate if production evidence
+  and code-path proof do not support that claim.
+- Preserve durable ingress, health-data consent, one fenced runtime owner,
+  authenticated workspace restore, replay safety, and reply delivery.
 
 ## Success criteria
 
-- The existing platform start command moves across both the Temporal handoff and
-  the UserRunner preparation interval on the observed production critical path,
-  with a post-deploy cold trace required to establish whether the realized saving
-  reaches 1 second.
-- Production timing evidence is decomposed far enough to prove that the changed
-  work is on the measured critical path; speculative work with no demonstrated
-  latency benefit is not shipped.
-- The solution adds no keepalive service, second state owner, durable queue, or
-  provider/thread authority before the existing admitted turn.
-- Focused tests and typechecks pass, required GitHub Actions pass on the exact PR
-  head, and both required ReviewGPT stages return no unresolved findings.
+- Every proposed saving is demonstrated on the accepted-to-provider critical
+  path rather than inferred from an earlier intermediate timestamp.
+- The established-member path retains Temporal acceptance before the direct
+  ensure and the existing overlap between container boot and fenced invocation
+  preparation.
+- The separate first-contact instant-start shell hint cannot race a health-data
+  consent withdrawal.
+- Focused tests and typechecks, exact-head CI, and the required ReviewGPT gates
+  complete with no unresolved finding.
 
 ## Scope
 
-- In scope: established-member direct wake, container readiness, hosted workspace
-  restore, mailbox-to-assistant handoff, Codex process preparation, provider plan
-  construction, and focused latency instrumentation or benchmark coverage.
-- Out of scope: changing model behavior, reducing safety or consent checks,
-  weakening durable ingress, extending warm leases, or adding speculative
-  infrastructure without measured proof.
+- Established-member direct wake, Cloudflare container boot, authenticated
+  workspace restore, mailbox import, Codex process initialization, provider
+  planning, and delivery handoff.
+- Focused latency instrumentation and production-safe aggregate evidence needed
+  to accept or reject a candidate.
 
 ## Constraints
 
-- Technical constraints: preserve Temporal acceptance before authoritative direct
-  ensure, one warm app-server process per runtime, process-only speculative prep,
-  crash-safe mailbox recovery, and the hosted workspace continuity contract.
-- Product/process constraints: prefer deletion, reordering, and overlap over new
-  state; keep private production evidence out of repository artifacts; follow the
-  high-risk Cloudflare/runtime PR lane and deployment-skew review.
-
-## Risks and mitigations
-
-1. Risk: moving work earlier grants provider or turn authority before admission.
-   Mitigation: permit only idempotent process/shell preparation before the current
-   admission boundary, and prove cancellation and ownership behavior in tests.
-2. Risk: removing or deferring filesystem work breaks crash recovery or context.
-   Mitigation: trace each read to its invariant and retain the smallest owning
-   evidence path, with regression tests for replay and cross-session behavior.
-3. Risk: a local benchmark overstates savings that are dominated by the platform.
-   Mitigation: separate platform, restore, runtime, and provider-start stages and
-   compare like-for-like runs; use production aggregates only as private evidence.
-4. Risk: Cloudflare and web deployments temporarily disagree on a control route.
-   Mitigation: prefer compatibility-preserving changes and document any required
-   tandem order plus a post-deploy binding check.
+- Add no keepalive service, warm pool, second snapshot representation, mailbox
+  cursor owner, speculative provider authority, or unauthenticated extraction.
+- Keep private production evidence out of repository artifacts.
+- Prefer deletion when a proposed overlap duplicates or serializes existing
+  orchestration.
 
 ## Tasks
 
-1. Decompose the observed cold trace against current timing fields and code owners.
-2. Ask ReviewGPT for an independent deletion/overlap proposal against the exact
-   candidate files and reconcile it with repository invariants.
-3. Benchmark the strongest candidates, rejecting changes that cannot plausibly
-   contribute to the 2-second goal.
-4. Implement the smallest proven change with focused regression and latency proof.
-5. Run scoped verification, inspect the privacy-safe diff, commit, push, open the
-   PR, and complete the preliminary specialist plus final ReviewGPT/CI gates.
+1. Decompose the supplied production trace and recent cold cohort against the
+   exact code owners.
+2. Ask ReviewGPT to challenge the strongest overlap and deletion candidates.
+3. Run a production-shaped cold scenario that exposes boot, fenced preparation,
+   restore, mailbox, and provider boundaries.
+4. Delete any candidate that cannot prove net critical-path savings; retain only
+   independently required correctness remediation.
+5. Complete scoped verification, exact-head review and CI, then document the
+   measured outcome without claiming unproved savings.
 
 ## Decisions
 
-- The existing Codex app-server speculative preinitialization already won on the
-  observed cold trace: spawn readiness cost about 1 ms. Do not add another app
-  server or broaden its authority; investigate the remaining turn-start work.
-- Mailbox decode-to-stage measured only tens of milliseconds on the observed
-  trace, so moving the existing post-stage preparation callback alone cannot meet
-  the goal.
-- ReviewGPT identified the existing owner-neutral shell-prewarm RPC as the only
-  safe scheduling seam and rejected speculative restore and provider shortcuts.
-  A Cloudflare-local composition exposed only the route-to-UserRunner interval,
-  measured at a few hundred milliseconds locally, so it was deleted rather than
-  kept as a redundant second prewarm owner.
-- Established Linq ingress now reuses the existing shell-prewarm request at the
-  earliest already-proved access boundary, before the Temporal network hop. The
-  durable signal and post-accept direct ensure remain authoritative; access
-  denial starts no container, and a Temporal failure can leave only an idle shell.
-- Three synthetic cold-start cohorts showed substantial host-level variance, so
-  their raw end-to-end medians do not prove a realized saving. The added benchmark
-  spans preserve the measurement gate, and the candidate must be judged by a
-  comparable post-deploy cold trace rather than a normalized or cherry-picked
-  local result.
+- Codex process spawn readiness was about 1 ms in the supplied trace. The
+  existing process preinitializer already owns that seam; a second App Server is
+  neither useful nor maintainable.
+- The candidate established-member shell prewarm led direct ensure by only tens
+  of milliseconds, but the consent-safe implementation held the UserRunner
+  mutation barrier through the multi-second platform start. Authoritative direct
+  ensure then waited behind it, losing the existing overlap between boot and
+  `prepareWithFence`. The local 14 ms later readiness observation measured work
+  already serialized ahead of preparation, not a net saving.
+- ReviewGPT independently classified that candidate as a likely latency
+  regression and required deletion of the established-member invocation,
+  callback, and timing plumbing. The ordinary established path therefore stays
+  mailbox append, Temporal acceptance, authoritative direct ensure, one fence,
+  and parallel boot plus invocation preparation.
+- The pre-existing first-contact instant-start hint remains because enrollment
+  gives it a separate, materially longer lead. Its route now resolves the
+  `UserRunner`, re-reads live admission under the consent-mutation barrier, and
+  holds that barrier through platform start so consent withdrawal cannot race a
+  late shell.
+- The current evidence does not support an honest two-second patch. Container
+  scheduling/Node startup and authenticated restore are the only buckets large
+  enough; the inspected shortcuts either move work later, discard overlap, or
+  weaken integrity. Receipt and outbox scans enforce distinct replay and
+  delivery invariants, and the existing mailbox prefetch already depends on the
+  restored canonical cursor.
+
+## Evidence
+
+- Supplied cold trace: accepted-to-provider about 9.3 seconds; container
+  schedule/boot about 3.2 seconds; authenticated restore about 2.65 seconds.
+- Exact provider breakdown: App Server spawn readiness about 1 ms, exposed
+  initialization about 451 ms, thread start about 109 ms, receipt/outbox scans
+  about 298 ms combined.
+- Recent aligned cold traces confirm that boot and restore remain the only
+  repeatable second-scale phases; individual post-import phases are measured in
+  hundreds of milliseconds and protect separate invariants.
+- Cloudflare currently restarts a sleeping Container with a fresh disk. Native
+  lower-level snapshots remain forthcoming, so sleep/resume cannot remove the
+  encrypted R2 restore today.
 
 ## Verification
 
-- Commands to run: focused package tests and typechecks selected from the final
-  diff, the hosted cold-start benchmark or deterministic critical-path proof,
-  repository diff/privacy inspection, exact-head GitHub Actions, preliminary
-  completion-specialists ReviewGPT, and final full-patch ReviewGPT.
-- Expected outcomes: the platform start command is structurally issued before
-  Temporal instead of after UserRunner preparation, the post-deploy trace reports
-  the realized saving, no behavioral regression or identifier leakage is present,
-  checks are green, and no review finding remains unresolved.
+- Run focused Cloudflare owner, route, consent-race, and instant-start tests;
+  affected typechecks; privacy/diff guards; exact-head CI; and final ReviewGPT.
+- Confirm the final diff contains no established-member prewarm callback or
+  timing requirement, retains optional historical latency parsing, and keeps
+  the first-contact call site plus both consent-withdrawal orderings.

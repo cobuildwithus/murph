@@ -12,22 +12,14 @@ export type HostedDirectRuntimeWakeSource =
   | "assistant-ask-request"
   | "linq";
 
-export interface HostedRuntimeShellPrewarmTiming {
-  shellPrewarmAcceptedAtEpochMs: number;
-  shellPrewarmRequestStartedAtEpochMs: number;
-}
-
 /**
  * Issues a consent-serialized container start hint and always settles. This
- * does not resolve processing ownership, read workspace state, create a fence,
- * or wait for readiness; the ordinary post-Temporal ensure remains
- * authoritative for all of those steps.
+ * does not create a write fence, resolve processing ownership, or invoke
+ * workspace work; the ordinary post-Temporal ensure remains authoritative for
+ * all of those steps.
  */
 export function startHostedRuntimeShellPrewarmBestEffort(input: {
-  onTiming?: (
-    timing: HostedRuntimeShellPrewarmTiming,
-  ) => Promise<void> | void;
-  source: "linq-established" | "linq-instant-start";
+  source: "linq-instant-start";
   userId: string;
 }): Promise<void> {
   const wakeSource = input.source;
@@ -46,29 +38,13 @@ export function startHostedRuntimeShellPrewarmBestEffort(input: {
   }
 
   try {
-    const shellPrewarmRequestStartedAtEpochMs = Date.now();
     return client
       .prewarmRuntimeShell(input.userId)
-      .then(async (result) => {
-        const timing = {
-          shellPrewarmAcceptedAtEpochMs: Date.now(),
-          shellPrewarmRequestStartedAtEpochMs,
-        };
+      .then((result) => {
         console.info("Hosted runtime shell prewarm accepted.", {
           accepted: result.accepted,
           source: wakeSource,
         });
-        if (!input.onTiming) {
-          return;
-        }
-        try {
-          await input.onTiming(timing);
-        } catch (error) {
-          console.warn("Hosted runtime shell prewarm timing callback failed.", {
-            errorName: describeHostedExecutionSafeLogErrorCode(error),
-            source: wakeSource,
-          });
-        }
       })
       .catch((error: unknown) => {
         console.warn("Hosted runtime shell prewarm failed.", {

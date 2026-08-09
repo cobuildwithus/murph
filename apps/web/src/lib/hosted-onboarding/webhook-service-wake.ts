@@ -7,17 +7,13 @@ import type {
   CloudflareHostedControlRuntimeEnsureProcessingTiming,
 } from "@murphai/cloudflare-hosted-control/client";
 
-import {
-  startHostedDirectRuntimeWakeBestEffort,
-  startHostedRuntimeShellPrewarmBestEffort,
-  type HostedRuntimeShellPrewarmTiming,
-} from "../hosted-execution/direct-runtime-wake";
+import { startHostedDirectRuntimeWakeBestEffort } from "../hosted-execution/direct-runtime-wake";
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
   recordHostedIngressAcceptedFromMailboxItem,
-  recordHostedIngressOrchestrationTiming,
+  recordHostedIngressDirectEnsureTiming,
   recordHostedIngressTemporalSignalAccepted,
 } from "../hosted-runtime-latency/store";
 import {
@@ -104,27 +100,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
         expectedUserId: userId,
         ...(knownCheckpoint ? { knownCheckpoint } : {}),
         mailboxItemId,
-        ...(directEnsureEligible ? {
-          onActiveAccessConfirmed: (activeUserId: string) => {
-            const prewarm = startHostedRuntimeShellPrewarmBestEffort({
-              onTiming: async (timing) => {
-                await recordHostedShellPrewarmTimingBestEffort({
-                  mailboxItemId,
-                  source: "linq",
-                  timing,
-                  userId: activeUserId,
-                });
-              },
-              source: "linq-established",
-              userId: activeUserId,
-            });
-            if (input.scheduleAfterResponse) {
-              input.scheduleAfterResponse(() => prewarm);
-            } else {
-              void prewarm;
-            }
-          },
-        } : {}),
       }),
       signal: input.signal,
     });
@@ -214,7 +189,7 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   };
 
   try {
-    await recordHostedIngressOrchestrationTiming({
+    await recordHostedIngressDirectEnsureTiming({
       expectedUserId: timingRecord.userId,
       mailboxItemId: timingRecord.mailboxItemId,
       phaseBreakdown,
@@ -222,30 +197,6 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
     });
   } catch (error) {
     console.warn("Hosted direct ensure wake timing record failed.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: timingRecord.source,
-    });
-  }
-}
-
-async function recordHostedShellPrewarmTimingBestEffort(timingRecord: {
-  mailboxItemId: string;
-  source: "linq";
-  timing: HostedRuntimeShellPrewarmTiming;
-  userId: string;
-}): Promise<void> {
-  try {
-    await recordHostedIngressOrchestrationTiming({
-      expectedUserId: timingRecord.userId,
-      mailboxItemId: timingRecord.mailboxItemId,
-      phaseBreakdown: {
-        schemaVersion: 1,
-        orchestration: timingRecord.timing,
-      },
-      source: timingRecord.source,
-    });
-  } catch (error) {
-    console.warn("Hosted shell prewarm timing record failed.", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       source: timingRecord.source,
     });

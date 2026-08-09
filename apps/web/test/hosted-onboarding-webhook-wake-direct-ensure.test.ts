@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   prewarmRuntimeShell: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   recordHostedIngressAcceptedFromMailboxItem: vi.fn(async () => undefined),
-  recordHostedIngressOrchestrationTiming: vi.fn(async () => undefined),
+  recordHostedIngressDirectEnsureTiming: vi.fn(async () => undefined),
   recordHostedIngressTemporalSignalAccepted: vi.fn(async () => undefined),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
@@ -28,8 +28,8 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
   recordHostedIngressAcceptedFromMailboxItem:
     mocks.recordHostedIngressAcceptedFromMailboxItem,
-  recordHostedIngressOrchestrationTiming:
-    mocks.recordHostedIngressOrchestrationTiming,
+  recordHostedIngressDirectEnsureTiming:
+    mocks.recordHostedIngressDirectEnsureTiming,
   recordHostedIngressTemporalSignalAccepted:
     mocks.recordHostedIngressTemporalSignalAccepted,
 }));
@@ -100,14 +100,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       signalAccepted: true;
       workflowId: string;
     }) => void;
-    mocks.prewarmRuntimeShell.mockImplementationOnce(async () => {
-      wakeOrder.push("prewarm");
-      return { accepted: true };
-    });
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce((input: {
-      onActiveAccessConfirmed?: (userId: string) => void;
-    }) => {
-      input.onActiveAccessConfirmed?.("member_123");
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(() => {
       wakeOrder.push("temporal");
       return new Promise((resolve) => {
         resolveTemporalSignal = resolve;
@@ -150,10 +143,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     await vi.waitFor(() => {
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     });
-    expect(mocks.readHostedExecutionControlClientIfConfigured).toHaveBeenCalledTimes(1);
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith("member_123");
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
-    expect(afterResponseTasks).toHaveLength(1);
+    expect(afterResponseTasks).toHaveLength(0);
     expect(handoffSettled).toBe(false);
 
     resolveTemporalSignal({
@@ -168,7 +160,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
 
     expect(handoffSettled).toBe(true);
-    expect(wakeOrder).toEqual(["prewarm", "temporal", "direct"]);
+    expect(wakeOrder).toEqual(["temporal", "direct"]);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledWith({
       onTiming: expect.any(Function),
@@ -184,22 +176,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         userId: "member_123",
       },
       mailboxItemId: "mailbox_123",
-      onActiveAccessConfirmed: expect.any(Function),
     });
     await Promise.all(afterResponseTasks.map((task) => task()));
-    expect(mocks.recordHostedIngressOrchestrationTiming).toHaveBeenCalledWith({
-      expectedUserId: "member_123",
-      mailboxItemId: "mailbox_123",
-      phaseBreakdown: {
-        schemaVersion: 1,
-        orchestration: {
-          shellPrewarmAcceptedAtEpochMs: expect.any(Number),
-          shellPrewarmRequestStartedAtEpochMs: expect.any(Number),
-        },
-      },
-      source: "linq",
-    });
-    expect(mocks.recordHostedIngressOrchestrationTiming).toHaveBeenCalledWith({
+    expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
       phaseBreakdown: {
@@ -253,7 +232,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         source: "linq",
       },
     );
-    expect(mocks.recordHostedIngressOrchestrationTiming).toHaveBeenCalledWith({
+    expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
       phaseBreakdown: {
@@ -346,7 +325,6 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       signalAccepted: true,
     });
 
-    expect(mocks.prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   });
@@ -362,23 +340,6 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
 
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-  });
-
-  it("leaves only the access-validated shell hint when Temporal later fails", async () => {
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce((input: {
-      onActiveAccessConfirmed?: (userId: string) => void;
-    }) => {
-      input.onActiveAccessConfirmed?.("member_123");
-      return Promise.reject(new Error("temporal down after access"));
-    });
-
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      response,
-      wakeHandoff: buildWakeHandoff(),
-    })).rejects.toThrow("temporal down after access");
-
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith("member_123");
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 
   it("starts no direct wake when participant-aware signaling denies access", async () => {
@@ -534,19 +495,13 @@ describe("startHostedRuntimeShellPrewarmBestEffort", () => {
   });
 
   it("issues only the shell-prewarm command for the instant-start member", async () => {
-    const onTiming = vi.fn();
     await expect(startHostedRuntimeShellPrewarmBestEffort({
-      onTiming,
       source: "linq-instant-start",
       userId: "member_123",
     })).resolves.toBeUndefined();
 
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith("member_123");
-    expect(onTiming).toHaveBeenCalledWith({
-      shellPrewarmAcceptedAtEpochMs: expect.any(Number),
-      shellPrewarmRequestStartedAtEpochMs: expect.any(Number),
-    });
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 

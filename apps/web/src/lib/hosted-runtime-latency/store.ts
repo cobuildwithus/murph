@@ -246,7 +246,7 @@ export async function recordHostedIngressTemporalSignalAccepted(input: {
   return { matchedCount: 1, recorded: true, unmatchedCount: 0 };
 }
 
-export async function recordHostedIngressOrchestrationTiming(input: {
+export async function recordHostedIngressDirectEnsureTiming(input: {
   expectedUserId?: string | null;
   mailboxItemId: string;
   phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown;
