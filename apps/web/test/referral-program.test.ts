@@ -1,21 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatApproximateReferralUsageDays,
+  formatHostedPublicReferralRewardValue,
   getAvailableHostedPublicReferralRewards,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
-import {
-  computeHostedUsageReferralRewardDays,
-} from "@/src/lib/hosted-growth/referral-reward-days";
 import { HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY } from "@/src/lib/hosted-growth/signup-referral-policy";
 import {
   buildHostedUsageReferralRewardLabel,
   getHostedUsageReferralPolicyDisplay,
+  HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
   HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS,
   HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_MESSAGES,
   HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_MESSAGES,
   HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_SPEAKERS,
+  HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
 } from "@/src/lib/hosted-growth/usage-referral";
 
 function readReward(id: (typeof HOSTED_PUBLIC_REFERRAL_REWARDS)[number]["id"]) {
@@ -77,29 +76,25 @@ describe("public referral program projection", () => {
 
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
-      policyCode: "new_person_activation_v1",
-    })).toContain(
-      `about ${
-        computeHostedUsageReferralRewardDays(
-          newPersonGroup.approximateMessageCount,
-        )
-      } days’ worth of extra usage`,
-    );
+      rewardUsdMicros: newPersonGroup.rewardUsdMicros,
+    })).toBe("$2.00 of cost-weighted usage credit for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
-      policyCode: "active_group_v1",
-    })).toContain(
-      `about ${
-        computeHostedUsageReferralRewardDays(
-          activeGroup.approximateMessageCount,
-        )
-      } days’ worth of extra usage`,
+      rewardUsdMicros: activeGroup.rewardUsdMicros,
+    })).toBe("$3.50 of cost-weighted usage credit for your Murph");
+    expect(signup.rewardUsdMicros).toBe(
+      HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
-    expect(signup.approximateMessageCount).toBe(
-      newPersonGroup.approximateMessageCount,
+    expect(newPersonGroup.rewardUsdMicros).toBe(
+      HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
-    expect(formatApproximateReferralUsageDays(100)).toBe(
-      "About 10 days’ worth of usage",
+    expect(activeGroup.rewardUsdMicros).toBe(
+      HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+    );
+    expect(formatHostedPublicReferralRewardValue(
+      HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+    )).toBe(
+      "$2.00 of cost-weighted usage credit",
     );
   });
 

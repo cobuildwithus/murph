@@ -2,8 +2,14 @@ import {
   HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY,
   isHostedSignupReferralRewardEnabled,
 } from "./signup-referral-policy";
-import { computeHostedUsageReferralRewardDays } from "./referral-reward-days";
 import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
+
+const HOSTED_PUBLIC_REFERRAL_USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  currency: "USD",
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+  style: "currency",
+});
 
 export type HostedPublicReferralRewardId =
   | "active-group"
@@ -11,41 +17,41 @@ export type HostedPublicReferralRewardId =
   | "signup-link";
 
 export interface HostedPublicReferralReward {
-  approximateMessageCount: number;
   availabilityLabel: string;
   description: string;
   id: HostedPublicReferralRewardId;
+  rewardUsdMicros: bigint;
   title: string;
 }
 
 /**
  * Public referral-program projection. Runtime accounting remains authoritative;
- * the focused contract test keeps these approximate message labels and mission
+ * the focused contract test keeps these exact reward values and mission
  * thresholds aligned with the durable referral policy.
  */
 export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
   {
-    approximateMessageCount: 100,
     availabilityLabel: "Personal referral link",
     description:
       "Share your stable link. When a genuinely new member completes Murph setup through it, the reward is added automatically.",
     id: "signup-link",
+    rewardUsdMicros: 2_000_000n,
     title: HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY.title,
   },
   {
-    approximateMessageCount: 100,
     availabilityLabel: "Fresh iMessage group",
     description:
       "Tell Murph first, then make a fresh group with someone new. It completes after they set up their own Murph and join the conversation.",
     id: "new-person-group",
+    rewardUsdMicros: 2_000_000n,
     title: "Bring someone new to Murph",
   },
   {
-    approximateMessageCount: 140,
     availabilityLabel: "Supported group chats",
     description:
       "Tell Murph first, then make the fresh group genuinely active: 15 human messages, including 8 from at least 2 other people, across at least 10 minutes.",
     id: "active-group",
+    rewardUsdMicros: 3_500_000n,
     title: "Start an active group",
   },
 ] as const satisfies readonly HostedPublicReferralReward[];
@@ -63,10 +69,12 @@ export function getAvailableHostedPublicReferralRewards(
   );
 }
 
-export function formatApproximateReferralUsageDays(
-  approximateMessageCount: number,
+export function formatHostedPublicReferralRewardValue(
+  rewardUsdMicros: bigint,
 ): string {
-  return `About ${
-    computeHostedUsageReferralRewardDays(approximateMessageCount)
-  } days’ worth of usage`;
+  const cents = (rewardUsdMicros + 5_000n) / 10_000n;
+  const value = HOSTED_PUBLIC_REFERRAL_USD_FORMATTER.format(
+    Number(cents) / 100,
+  );
+  return `${value} of cost-weighted usage credit`;
 }

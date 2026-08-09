@@ -1,9 +1,6 @@
 import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
-
-import { computeHostedUsageReferralRewardDays } from "./referral-reward-days";
-import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "@murphai/hosted-execution";
@@ -56,6 +53,7 @@ import {
 } from "../hosted-routing/assistant-notification-destination";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
+import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
 
 export const HOSTED_USAGE_REFERRAL_POLICY_VERSION =
   "hosted-usage-referral-2026-07-v1";

@@ -21,11 +21,12 @@ test("ReferralSection presents every available referral path on the homepage", (
   assert.match(markup, /Share your personal link or start a qualifying group mission/);
   assert.match(markup, /Invite someone to Murph/);
   assert.match(markup, /Start an active group/);
-  assert.match(markup, /About 10 days’ worth of usage/);
-  assert.match(markup, /About 14 days’ worth of usage/);
+  assert.match(markup, /\$2\.00 of cost-weighted usage credit/);
+  assert.match(markup, /\$3\.50 of cost-weighted usage credit/);
   assert.match(markup, /href="\/refer"/);
   assert.match(markup, /See the referral program/);
   assert.match(markup, /Qualifying rewards are applied automatically to the Murph they/);
+  assert.match(markup, /Dollar labels state exact cost-weighted usage credit/);
 });
 
 test("ReferralSection keeps disabled referral paths out of its copy and rewards", () => {

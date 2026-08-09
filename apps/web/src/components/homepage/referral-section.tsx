@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2, Link2, UsersRound } from "lucide-react";
 
 import {
-  formatApproximateReferralUsageDays,
+  formatHostedPublicReferralRewardValue,
   type HostedPublicReferralReward,
 } from "@/src/lib/hosted-growth/referral-program";
 
@@ -85,8 +85,8 @@ export function ReferralSection({
                       Earn
                     </p>
                     <p className="text-sm font-semibold text-[#f5f0e8] sm:mt-1">
-                      {formatApproximateReferralUsageDays(
-                        reward.approximateMessageCount,
+                      {formatHostedPublicReferralRewardValue(
+                        reward.rewardUsdMicros,
                       )}
                     </p>
                   </div>
@@ -100,7 +100,8 @@ export function ReferralSection({
               />
               <p>
                 Qualifying rewards are applied automatically to the Murph they
-                were earned for. Day estimates assume about 10 messages a day.
+                were earned for. Dollar labels state exact cost-weighted usage
+                credit; actual message capacity varies.
               </p>
             </div>
           </div>

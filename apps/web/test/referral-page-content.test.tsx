@@ -54,8 +54,8 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /Real introductions, rewarded automatically\./);
   assert.match(markup, /Opening a link or creating a group alone is never enough\./);
   assert.match(markup, /Ways to earn right now\./);
-  assert.match(markup, /About 10 days’ worth of usage/);
-  assert.match(markup, /About 14 days’ worth of usage/);
+  assert.match(markup, /\$2\.00 of cost-weighted usage credit/);
+  assert.match(markup, /\$3\.50 of cost-weighted usage credit/);
   assert.match(markup, /15 human messages/);
   assert.match(markup, /8 from at least 2 other people/);
   assert.match(markup, /at least 10 minutes/);
@@ -130,5 +130,5 @@ test("ReferralPageContent shows one unavailability state when every reward path 
   assert.doesNotMatch(markup, /does not earn usage/);
   assert.doesNotMatch(markup, /Referral action/);
   assert.doesNotMatch(markup, /Ways to earn right now\./);
-  assert.doesNotMatch(markup, /days’ worth of usage/);
+  assert.doesNotMatch(markup, /cost-weighted usage credit/);
 });

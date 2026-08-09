@@ -13,7 +13,7 @@ import {
 } from "@/src/components/homepage/murph-headshot-avatar";
 import { ReferralShareAction } from "@/src/components/referrals/referral-share-action";
 import {
-  formatApproximateReferralUsageDays,
+  formatHostedPublicReferralRewardValue,
   type HostedPublicReferralReward,
   type HostedPublicReferralRewardId,
 } from "@/src/lib/hosted-growth/referral-program";
@@ -98,7 +98,7 @@ function buildFaqs(input: {
   const faqs = [
     {
       answer:
-        `Each option above shows its current usage estimate, measured against one person sending about 10 messages a day. ${ownerDescription}`,
+        `Each option above shows its fixed cost-weighted usage credit. Actual message capacity varies with the model, tools, media, task complexity, and response length. ${ownerDescription}`,
       question: "How much usage do I earn?",
     },
     {
@@ -227,9 +227,9 @@ export function ReferralPageContent({
               <ArrowDown aria-hidden="true" className="size-4" />
             </a>
             <p className="mt-6 max-w-[56ch] text-xs leading-[1.7] text-[#f5f0e8]/55">
-              Rewards are usage, not cash. Day estimates assume about 10
-              messages a day and vary with the model, tools, media, and task
-              complexity.
+              Rewards are usage, not cash. Dollar labels state exact
+              cost-weighted usage credit; message capacity varies with the
+              model, tools, media, and task complexity.
             </p>
           </div>
 
@@ -330,8 +330,8 @@ export function ReferralPageContent({
                       index === 0 ? "text-[#d4b87a]" : "text-[#736a58]"
                     }`}
                   >
-                    {formatApproximateReferralUsageDays(
-                      reward.approximateMessageCount,
+                    {formatHostedPublicReferralRewardValue(
+                      reward.rewardUsdMicros,
                     )}
                   </p>
                   <h3 className="mt-3 text-balance font-serif text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.04em]">
@@ -516,11 +516,11 @@ function ReferralHeroArtifact({
   reward: HostedPublicReferralReward;
 }) {
   const rewardMessage = reward.id === "signup-link"
-    ? `Your referral came through. ${formatApproximateReferralUsageDays(
-      reward.approximateMessageCount,
+    ? `Your referral came through. ${formatHostedPublicReferralRewardValue(
+      reward.rewardUsdMicros,
     )} is already added to your Murph.`
-    : `Your group mission is complete. ${formatApproximateReferralUsageDays(
-      reward.approximateMessageCount,
+    : `Your group mission is complete. ${formatHostedPublicReferralRewardValue(
+      reward.rewardUsdMicros,
     )} is already added to the Murph it was accepted for.`;
   const privacyMessage = reward.id === "signup-link"
     ? "No claim needed. Who joined and what they share privately with Murph stays private."
