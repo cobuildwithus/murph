@@ -234,6 +234,28 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Private training dashboard">
+        <div
+          id="private-training-dashboard"
+          data-design-section="private-training-dashboard"
+        >
+          <picture>
+            <source
+              media="(max-width: 640px)"
+              srcSet="/design-proof/training-dashboard-mobile.svg"
+            />
+            <img
+              alt="Murph Training dashboard with an active workout, training consistency, recent sets, and exercise progress"
+              className="w-full rounded-2xl border border-border/70 shadow-sm"
+              loading="lazy"
+              src="/design-proof/training-dashboard-desktop.svg"
+            />
+          </picture>
+        </div>
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Homepage experiment flow">
         <HowItWorksSection />
       </StudySection>
