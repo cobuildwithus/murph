@@ -1,0 +1,24 @@
+name: Agent mailbox transaction census
+
+on:
+  push:
+    branches:
+      - agent/mailbox-prepared-append
+    paths:
+      - .github/workflows/agent-mailbox-census.yml
+
+permissions:
+  contents: read
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Print production mailbox transaction call sites
+        shell: bash
+        run: |
+          set -euo pipefail
+          git grep -n -C 18 -E 'appendHosted(MailboxEnvelope|MailboxEnvelopeWithSourceMessage|MailboxEnvelopeWithIdentity|MealPhotoMailboxEnvelope|EnvironmentVoiceMailboxEnvelope|MailboxItem)Tx' -- apps/web/src apps/web/app || true
