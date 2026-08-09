@@ -398,7 +398,7 @@ export class DatabaseHealthMonitor {
         (
           isPromotingDeferredDirectError
           || (
-            !isNewIncident
+            alertState.alertSequence > 0
             && !attemptFenceOpen
             && hasDirectConnectionError
           )

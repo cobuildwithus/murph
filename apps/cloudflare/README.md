@@ -210,8 +210,9 @@ lose it; recovery and another gap before acknowledgment coalesce into that same
 notification while the first threshold's bounded evidence and observation time
 remain authoritative. The obligation does not occupy a closed provider fence.
 At the same time, until an incident admits its first page, concrete evidence
-that appears on the threshold or a later sample persists in one combined
-immutable body. The exact pressure and truthful telemetry facts therefore share
+that appears on the threshold or a later sample, including a direct-error delta,
+persists in one combined immutable body. The exact pressure and truthful
+telemetry facts therefore share
 the next eligible attempt and one acknowledgment cycle. For
 acknowledged-incident recurrence, the next eligible sample
 supplies any still-current unsafe evidence while historical telemetry keeps its

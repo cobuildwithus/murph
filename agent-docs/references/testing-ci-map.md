@@ -539,8 +539,8 @@ supported provider credential.
   telemetry obligation retention behind older pending and direct-error-only
   pages across restart and recovery, current-pressure priority at the first
   eligible provider slot with historical observation time, exact combined
-  pressure and telemetry retention when pressure appears at or after the
-  unadmitted threshold across recovery and restart,
+  pressure, telemetry, and direct-error retention when concrete evidence appears
+  at or after the unadmitted threshold across recovery and restart,
   rollback-compatible additive SQLite alert-state migration and legacy-ack
   normalization, recovery reset and rearming, post-ack monitoring suppression
   inside concrete-pressure

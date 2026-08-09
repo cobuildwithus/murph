@@ -1060,8 +1060,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   notification instead of creating a backlog; the first threshold's bounded
   evidence and observation time remain authoritative. An owed telemetry page
   alone does not occupy a closed provider fence. Before an incident admits its
-  first page, concrete evidence that appears on the threshold or a later sample
-  persists in one combined immutable body, so the exact pressure and truthful
+  first page, concrete evidence—including a direct-error delta—that appears on
+  the threshold or a later sample persists in one combined immutable body, so
+  the exact pressure and truthful
   telemetry facts share the next eligible attempt and one acknowledgment cycle.
   An acknowledged-incident recurrence waits for the eligible sample, which
   includes any still-current unsafe evidence and labels

@@ -134,4 +134,11 @@ Updated: 2026-08-09
   zero alert sequence instead: pressure appearing before the first page creates
   the same combined immutable body. A focused delayed-pressure, recovery,
   restart, both-recipient, acknowledgment, and no-second-attempt regression
-  covers the path. Final ReviewGPT round 7 remains pending.
+  covers the path. Final ReviewGPT round 7 found the neighboring direct-error
+  priority branch still used `incidentOpen` and could strip pressure plus
+  telemetry from that first page when a direct-error delta appeared on the later
+  sample. The accepted correction applies the same zero-sequence admission fact
+  there while preserving direct-only promotion behind an older admitted page.
+  A focused three-condition, recovery, restart, both-recipient,
+  acknowledgment, and no-second-attempt regression covers the path. Final
+  ReviewGPT round 8 remains pending.

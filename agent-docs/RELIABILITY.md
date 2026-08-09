@@ -225,8 +225,9 @@ Last verified: 2026-08-07
   while the attempt fence is closed; once the fence opens, a still-unsafe
   current gauge admits the recurrence. An unadmitted monitoring obligation does
   not occupy a closed provider fence. Until an incident admits its first page,
-  concrete evidence that appears on the threshold or a later sample persists in
-  one combined immutable body with exact identity, concrete check time, and
+  concrete evidence, including a direct-error delta, that appears on the
+  threshold or a later sample persists in one combined immutable body with
+  exact identity, concrete check time, and
   condition-local telemetry time; both facts share the first eligible attempt
   and one acknowledgment cycle. For an acknowledged-incident
   recurrence, the first eligible sample supplies any still-current concrete
