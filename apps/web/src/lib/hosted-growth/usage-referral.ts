@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { computeHostedUsageReferralRewardDays } from "./referral-reward-days";
+import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "@murphai/hosted-execution";
@@ -58,8 +59,6 @@ import { getPrisma } from "../prisma";
 
 export const HOSTED_USAGE_REFERRAL_POLICY_VERSION =
   "hosted-usage-referral-2026-07-v1";
-export const HOSTED_USAGE_REFERRALS_ENABLED_ENV =
-  "HOSTED_USAGE_REFERRALS_ENABLED";
 export const HOSTED_USAGE_REFERRAL_INTENT_TTL_MS =
   7 * 24 * 60 * 60 * 1_000;
 export const HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS =
@@ -227,12 +226,6 @@ export interface HostedUsageReferralObservationResult {
 
 export interface HostedUsageReferralBindResult {
   referralIds: string[];
-}
-
-export function isHostedUsageReferralEnabled(
-  source: Readonly<Record<string, string | undefined>> = process.env,
-): boolean {
-  return source[HOSTED_USAGE_REFERRALS_ENABLED_ENV] === "1";
 }
 
 export function qualifiesHostedActiveGroupReferral(input: {

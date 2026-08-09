@@ -28,12 +28,22 @@ vi.mock(
 );
 
 import { ReferralPageContent } from "@/src/components/referrals/referral-page-content";
+import {
+  HOSTED_PUBLIC_REFERRAL_REWARDS,
+} from "@/src/lib/hosted-growth/referral-program";
+
+function selectRewards(
+  ids: readonly (typeof HOSTED_PUBLIC_REFERRAL_REWARDS)[number]["id"][],
+) {
+  return HOSTED_PUBLIC_REFERRAL_REWARDS.filter(({ id }) => ids.includes(id));
+}
 
 test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   const markup = renderToStaticMarkup(
     createElement(ReferralPageContent, {
       authenticated: true,
       identityKey: "member_referrer",
+      rewards: HOSTED_PUBLIC_REFERRAL_REWARDS,
     }),
   );
 
@@ -42,8 +52,8 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /data-authenticated="true"/);
   assert.match(markup, /data-identity-key="member_referrer"/);
   assert.match(markup, /Real introductions, rewarded automatically\./);
-  assert.match(markup, /Opening a link alone is never enough\./);
-  assert.match(markup, /Three ways to earn\./);
+  assert.match(markup, /Opening a link or creating a group alone is never enough\./);
+  assert.match(markup, /Ways to earn right now\./);
   assert.match(markup, /About 10 days’ worth of usage/);
   assert.match(markup, /About 14 days’ worth of usage/);
   assert.match(markup, /15 human messages/);
@@ -60,4 +70,54 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
     (markup.match(/data-identity-key="member_referrer"/g) ?? []).length,
     2,
   );
+});
+
+test("ReferralPageContent advertises only signup rewards when group missions are disabled", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ReferralPageContent, {
+      authenticated: false,
+      identityKey: null,
+      rewards: selectRewards(["signup-link"]),
+    }),
+  );
+
+  assert.match(markup, /Share your personal link\./);
+  assert.match(markup, /Invite someone to Murph/);
+  assert.doesNotMatch(markup, /Start an active group/);
+  assert.doesNotMatch(markup, /Bring someone new to Murph/);
+  assert.equal((markup.match(/Referral action/g) ?? []).length, 2);
+});
+
+test("ReferralPageContent advertises only group missions when signup rewards are disabled", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ReferralPageContent, {
+      authenticated: true,
+      identityKey: "member_referrer",
+      rewards: selectRewards(["new-person-group", "active-group"]),
+    }),
+  );
+
+  assert.match(markup, /Start a qualifying group mission\./);
+  assert.match(markup, /Bring someone new to Murph/);
+  assert.match(markup, /Start an active group/);
+  assert.match(markup, /See available missions/);
+  assert.doesNotMatch(markup, /Referral action/);
+  assert.doesNotMatch(markup, /Invite someone to Murph/);
+  assert.doesNotMatch(markup, /The link is only a code\./);
+});
+
+test("ReferralPageContent shows one unavailability state when every reward path is disabled", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ReferralPageContent, {
+      authenticated: true,
+      identityKey: "member_referrer",
+      rewards: [],
+    }),
+  );
+
+  assert.match(markup, /Referral rewards are temporarily unavailable\./);
+  assert.match(markup, /sharing it while rewards are paused does not earn usage/);
+  assert.doesNotMatch(markup, /Referral action/);
+  assert.doesNotMatch(markup, /Ways to earn right now\./);
+  assert.doesNotMatch(markup, /days’ worth of usage/);
 });

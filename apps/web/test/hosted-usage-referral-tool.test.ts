@@ -42,8 +42,10 @@ vi.mock("@/src/lib/hosted-execution/usage-status", async (importOriginal) => {
 
 import {
   handleHostedUsageReferralGroupTool,
-  isHostedUsageReferralEnabled,
 } from "@/src/lib/hosted-growth/usage-referral";
+import {
+  isHostedUsageReferralEnabled,
+} from "@/src/lib/hosted-growth/usage-referral-policy";
 
 type ReferralState = {
   armedAt: Date;

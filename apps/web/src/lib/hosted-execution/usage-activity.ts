@@ -14,8 +14,10 @@ import {
   buildHostedUsageReferralOutstandingWhere,
   buildHostedUsageReferralRewardLabel,
   getHostedUsageReferralPolicyDisplay,
-  isHostedUsageReferralEnabled,
 } from "../hosted-growth/usage-referral";
+import {
+  isHostedUsageReferralEnabled,
+} from "../hosted-growth/usage-referral-policy";
 import { getPrisma } from "../prisma";
 import type {
   HostedAiUsageActivitySnapshot,

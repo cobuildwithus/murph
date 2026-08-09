@@ -15,8 +15,15 @@ Two rollout gates control their respective mutations:
 - `HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED=1` enables rewards for attributed
   signup-link activations.
 
+Public referral marketing derives from those same gates at server render. The
+homepage section and footer link appear only when at least one earning path is
+enabled, and `/refer` lists only the enabled paths. When both gates are off,
+`/refer` shows one temporary-unavailability state without reward quantities or
+a share action.
+
 The stable referral link remains available to an eligible signed-in member when
-either reward gate is disabled. The paths share one rolling cap at their first
+either reward gate is disabled, but a disabled signup reward is not marketed as
+an earning path. The paths share one rolling cap at their first
 durable accounting commitment: conversational missions reserve capacity when
 armed, while an attributed activation claims capacity only when recovery
 atomically creates its receipt and grant under the same referrer lock.

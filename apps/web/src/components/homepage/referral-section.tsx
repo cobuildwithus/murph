@@ -3,14 +3,29 @@ import { ArrowRight, CheckCircle2, Link2, UsersRound } from "lucide-react";
 
 import {
   formatApproximateReferralUsageDays,
-  HOSTED_PUBLIC_REFERRAL_REWARDS,
+  type HostedPublicReferralReward,
 } from "@/src/lib/hosted-growth/referral-program";
 
-const FEATURED_REWARDS = HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
-  ({ id }) => id === "signup-link" || id === "active-group",
-);
+export function ReferralSection({
+  rewards,
+}: {
+  rewards: readonly HostedPublicReferralReward[];
+}) {
+  if (rewards.length === 0) {
+    return null;
+  }
 
-export function ReferralSection() {
+  const featuredRewards = rewards.filter(
+    ({ id }) => id === "signup-link" || id === "active-group",
+  );
+  const signupAvailable = rewards.some(({ id }) => id === "signup-link");
+  const groupAvailable = rewards.some(({ id }) => id !== "signup-link");
+  const description = signupAvailable && groupAvailable
+    ? "Share your personal link or start a qualifying group mission. Murph applies earned usage automatically when someone really gets started or a fresh group becomes genuinely active."
+    : signupAvailable
+    ? "Share your personal link. Murph applies earned usage automatically when someone genuinely new completes their own setup through it."
+    : "Start a qualifying group mission. Murph applies earned usage automatically when a fresh group reaches the mission’s real-participation requirements.";
+
   return (
     <section className="bg-[#f5f0e8] px-4 py-10 sm:px-8 sm:py-16 lg:px-16 lg:py-20">
       <div className="relative mx-auto max-w-[1200px] overflow-hidden rounded-[2rem] bg-[#1d271b] px-6 py-10 sm:px-10 sm:py-14 lg:px-14 lg:py-16">
@@ -32,9 +47,7 @@ export function ReferralSection() {
               Bring your people. Earn more Murph time.
             </h2>
             <p className="mt-5 max-w-[58ch] text-[0.9375rem] leading-[1.75] text-[#f5f0e8]/72 sm:text-base">
-              Share your personal link or start a qualifying group mission.
-              Murph applies earned usage automatically when someone really gets
-              started or a fresh group becomes genuinely active.
+              {description}
             </p>
             <Link
               className="group mt-7 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#f5f0e8] px-5 py-3.5 text-[0.9375rem] font-semibold text-[#2d3436] transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]"
@@ -49,7 +62,7 @@ export function ReferralSection() {
           </div>
 
           <div className="grid gap-3">
-            {FEATURED_REWARDS.map((reward) => {
+            {featuredRewards.map((reward) => {
               const Icon = reward.id === "signup-link" ? Link2 : UsersRound;
               return (
                 <article

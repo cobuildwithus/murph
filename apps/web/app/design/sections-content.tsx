@@ -15,9 +15,13 @@ import { ReferralSection } from "@/src/components/homepage/referral-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TogetherSection } from "@/src/components/homepage/together-section";
+import { ReferralPageContent } from "@/src/components/referrals/referral-page-content";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
+import {
+  HOSTED_PUBLIC_REFERRAL_REWARDS,
+} from "@/src/lib/hosted-growth/referral-program";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
@@ -234,7 +238,23 @@ export function SectionsContent() {
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
-          <ReferralSection />
+          <ReferralSection rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Referral rewards unavailable">
+        <div
+          data-design-section="referral-rewards-unavailable"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated={false}
+            identityKey={null}
+            rewards={[]}
+          />
         </div>
       </StudySection>
 
@@ -246,7 +266,10 @@ export function SectionsContent() {
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
-          <SiteFooter id="design-site-footer-preview" />
+          <SiteFooter
+            id="design-site-footer-preview"
+            referralsAvailable
+          />
         </div>
       </StudySection>
 
