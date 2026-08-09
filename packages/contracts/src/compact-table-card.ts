@@ -89,7 +89,7 @@ function encodedAppCardUrlLength(envelope: unknown): number {
   const base64PaddingLength = (3 - (payloadByteLength % 3)) % 3;
   const encodedLength =
     4 * Math.ceil(payloadByteLength / 3) - base64PaddingLength;
-  return COMPACT_TABLE_APP_CARD_URL_PREFIX.length + encodedLength;
+  return IMESSAGE_APP_CARD_URL_PREFIX.length + encodedLength;
 }
 
 export const compactTableResponseCardV1Schema = z
@@ -191,7 +191,7 @@ export const compactTableResponseCardV1Schema = z
 
     if (
       encodedAppCardUrlLength(envelope) >=
-      COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH
+      IMESSAGE_APP_CARD_URL_MAX_LENGTH
     ) {
       context.addIssue({
         code: "custom",

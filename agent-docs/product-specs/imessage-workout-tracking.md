@@ -60,7 +60,7 @@ The native app composes explicit one-based commands such as:
 - `Correct workout exercise 2 set 1: `
 - `Finish this tracked workout.`
 
-The assistant resolves the command against the latest tracked workout in the same private conversation, re-reads canonical state, preserves unrelated fields, applies the existing guarded workout mutation, re-reads again, and only then sends a refreshed immutable card.
+The assistant resolves the command only when one tracked workout is unambiguous in the same private conversation. It may prefer the latest verified snapshot only when no second session is plausible; the inserted text itself is never identity or write authority. The assistant then re-reads canonical state, preserves unrelated fields, applies the existing guarded workout mutation, re-reads again, and only then sends a refreshed immutable card.
 
 ## Rollout
 

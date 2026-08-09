@@ -6,8 +6,12 @@ import {
   MURPH_PRODUCT_ORIGIN,
   assistantResponseCardSchema,
   buildWorkoutSessionAppCardEnvelopeV4,
+  compactTableCardV1Bounds,
   compactTableResponseCardV1Schema,
-  dailyNutritionResponseCardV2Schema,
+  nutritionCardGoalStatusValues,
+  workoutSessionCardStateValues,
+  workoutSessionCardV1Bounds,
+  workoutSessionSetStatusValues,
   type AssistantResponseCard,
   type CompactTableResponseCardV1,
   type DailyNutritionResponseCard,
@@ -18,7 +22,6 @@ import {
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
 } from '@murphai/contracts'
-import * as z from '@murphai/contracts/zod-runtime'
 
 const NUTRITION_CARD_MONTHS = [
   'Jan',
@@ -257,8 +260,8 @@ export function encodeCompactTableAppCardUrl(
 export function encodeWorkoutSessionAppCardUrl(
   card: CompactTableResponseCardV1,
 ): string {
-  const parsed = assistantResponseCardSchema.parse(card)
-  if (parsed.kind !== 'compact_table' || parsed.workout === undefined) {
+  const parsed = compactTableResponseCardV1Schema.parse(card)
+  if (parsed.workout === undefined) {
     throw new TypeError(
       'Expected a compact table with workout session detail.',
     )
@@ -516,20 +519,243 @@ function isDailyNutritionResponseCardV2(
   return 'version' in card && card.version === 2
 }
 
-function createAssistantResponseCardJsonSchema() {
-  // Retained nutrition V1 cards remain valid at the runtime boundary. New tool
-  // calls author only the current nutrition version or a current native card.
-  const authoringSchema = z.union([
-    dailyNutritionResponseCardV2Schema,
-    compactTableResponseCardV1Schema,
-  ])
-  const {
-    $schema: _dialect,
-    ...portableSchema
-  } = z.toJSONSchema(authoringSchema)
+function responseCardTextSchema(maxLength: number) {
   return {
-    ...portableSchema,
+    type: 'string',
+    maxLength,
+  } as const
+}
+
+function responseCardNullableTextSchema(maxLength: number) {
+  return {
+    anyOf: [
+      responseCardTextSchema(maxLength),
+      { type: 'null' },
+    ],
+  } as const
+}
+
+function createAssistantResponseCardJsonSchema() {
+  // Runtime Zod schemas remain authoritative. This deliberately compact
+  // authoring schema keeps the dynamic-tool prompt bounded and exposes only
+  // current card versions without duplicating every refinement.
+  const requiredMetric = {
+    type: 'object',
+    properties: {
+      total: { type: 'number' },
+      mealCount: { type: 'number' },
+    },
+    required: ['total', 'mealCount'],
+  } as const
+  const optionalMetric = {
+    anyOf: [
+      requiredMetric,
+      {
+        type: 'object',
+        properties: {
+          total: { type: 'null' },
+          mealCount: { const: 0 },
+        },
+        required: ['total', 'mealCount'],
+      },
+    ],
+  } as const
+  const goal = {
+    anyOf: [
+      {
+        type: 'object',
+        properties: {
+          target: { type: 'number' },
+          status: { enum: nutritionCardGoalStatusValues },
+        },
+        required: ['target', 'status'],
+      },
+      { type: 'null' },
+    ],
+  } as const
+  const workoutSet = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      status: { enum: workoutSessionSetStatusValues },
+      target: responseCardNullableTextSchema(
+        workoutSessionCardV1Bounds.setValue,
+      ),
+      actual: responseCardNullableTextSchema(
+        workoutSessionCardV1Bounds.setValue,
+      ),
+    },
+    required: ['status', 'target', 'actual'],
+  } as const
+  const workoutExercise = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      name: responseCardTextSchema(
+        workoutSessionCardV1Bounds.exerciseName,
+      ),
+      sets: {
+        type: 'array',
+        minItems: 1,
+        maxItems: workoutSessionCardV1Bounds.setsPerExercise,
+        items: workoutSet,
+      },
+    },
+    required: ['name', 'sets'],
+  } as const
+  const workout = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      version: { const: 1 },
+      state: { enum: workoutSessionCardStateValues },
+      exercises: {
+        type: 'array',
+        minItems: 1,
+        maxItems: workoutSessionCardV1Bounds.exercises,
+        items: workoutExercise,
+      },
+    },
+    required: ['version', 'state', 'exercises'],
+  } as const
+  const row = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      label: responseCardTextSchema(
+        compactTableCardV1Bounds.rowLabel,
+      ),
+      values: {
+        type: 'array',
+        minItems: 1,
+        maxItems: compactTableCardV1Bounds.columns,
+        items: responseCardTextSchema(
+          compactTableCardV1Bounds.cellValue,
+        ),
+      },
+    },
+    required: ['label', 'values'],
+  } as const
+  const tracking = {
+    anyOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'workout' },
+          entityId: { type: 'string' },
+          snapshotAt: { type: 'string' },
+        },
+        required: ['kind', 'entityId', 'snapshotAt'],
+      },
+      { type: 'null' },
+    ],
+  } as const
+  const nutrition = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      kind: { const: 'daily_nutrition' },
+      version: { const: 2 },
+      localDate: { type: 'string' },
+      mealCount: { type: 'number' },
+      totals: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          calories: requiredMetric,
+          proteinGrams: optionalMetric,
+          carbsGrams: optionalMetric,
+          fatGrams: optionalMetric,
+          fiberGrams: optionalMetric,
+        },
+        required: [
+          'calories',
+          'proteinGrams',
+          'carbsGrams',
+          'fatGrams',
+          'fiberGrams',
+        ],
+      },
+      goals: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          calories: goal,
+          proteinGrams: goal,
+          carbsGrams: goal,
+          fatGrams: goal,
+          fiberGrams: goal,
+        },
+        required: [
+          'calories',
+          'proteinGrams',
+          'carbsGrams',
+          'fatGrams',
+          'fiberGrams',
+        ],
+      },
+    },
+    required: [
+      'kind',
+      'version',
+      'localDate',
+      'mealCount',
+      'totals',
+      'goals',
+    ],
+  } as const
+  const compactTable = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      kind: { const: 'compact_table' },
+      version: { const: 1 },
+      title: responseCardTextSchema(
+        compactTableCardV1Bounds.title,
+      ),
+      subtitle: responseCardNullableTextSchema(
+        compactTableCardV1Bounds.subtitle,
+      ),
+      rowHeader: responseCardTextSchema(
+        compactTableCardV1Bounds.rowHeader,
+      ),
+      columns: {
+        type: 'array',
+        minItems: 1,
+        maxItems: compactTableCardV1Bounds.columns,
+        items: responseCardTextSchema(
+          compactTableCardV1Bounds.columnHeader,
+        ),
+      },
+      rows: {
+        type: 'array',
+        minItems: 1,
+        maxItems: compactTableCardV1Bounds.rows,
+        items: row,
+      },
+      footer: responseCardNullableTextSchema(
+        compactTableCardV1Bounds.footer,
+      ),
+      tracking,
+      workout,
+    },
+    required: [
+      'kind',
+      'version',
+      'title',
+      'subtitle',
+      'rowHeader',
+      'columns',
+      'rows',
+      'footer',
+      'tracking',
+    ],
+  } as const
+
+  return {
     description:
-      'Current card authoring contract: daily_nutrition V2 or compact_table V1.',
-  }
+      'Author daily_nutrition V2 or compact_table V1; workout detail is optional.',
+    anyOf: [nutrition, compactTable],
+  } as const
 }

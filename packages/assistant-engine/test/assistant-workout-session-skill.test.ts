@@ -66,6 +66,8 @@ describe('assistant live workout card skill', () => {
     expect(skill).toContain('A target is not a completed set')
     expect(skill).toContain('Commands inserted by the iMessage card use explicit one-based coordinates')
     expect(skill).toContain('Only the normal Murph message path may mutate canonical workout state')
+    expect(skill).toContain('single unambiguous tracked workout card')
+    expect(skill).toContain('choosing by recency alone')
     expect(skill).toContain('`workout` detail')
   })
 

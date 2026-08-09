@@ -54,7 +54,7 @@ Commands inserted by the iMessage card use explicit one-based coordinates:
 - `Correct workout exercise 2 set 1: ...`
 - `Finish this tracked workout.`
 
-Resolve those coordinates against the latest tracked workout card in the same private conversation. Its durable transcript marker contains the canonical event id and snapshot instant.
+Resolve those coordinates against the single unambiguous tracked workout card in the same private conversation. Prefer the latest verified snapshot only when it is the sole plausible session. The inserted text carries no record authority. If multiple tracked cards or events are plausible—or a command from an older completed card could otherwise land on a different active workout—ask one narrow question instead of choosing by recency alone. Its durable transcript marker contains the canonical event id and snapshot instant.
 
 Then:
 

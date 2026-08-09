@@ -2,6 +2,8 @@ import { Buffer } from 'node:buffer'
 import { describe, expect, it } from 'vitest'
 
 import {
+  LINQ_IMESSAGE_APP_CARD_ORIGIN,
+  assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
   buildLinqIMessageAppLayout,
   encodeCompactTableAppCardUrl,
@@ -76,7 +78,7 @@ const ACTIVE_WORKOUT_CARD = {
   },
 } satisfies AssistantResponseCard
 
-const APP_CARD_URL_PREFIX = 'https://murph.ai/#murph-card='
+const APP_CARD_URL_PREFIX = `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`
 
 function decodeAppCardUrl(url: string): unknown {
   expect(url.startsWith(APP_CARD_URL_PREFIX)).toBe(true)
@@ -178,4 +180,119 @@ describe('workout session response cards', () => {
       /workout session detail/u,
     )
   })
+
+  it('keeps the model-facing schema bounded and exposes workout detail', () => {
+    expect(JSON.stringify(assistantResponseCardJsonSchema).length)
+      .toBeLessThanOrEqual(5_000)
+    expect(assistantResponseCardJsonSchema).toMatchObject({
+      anyOf: [
+        {},
+        {
+          properties: {
+            workout: {
+              properties: {
+                state: { enum: ['active', 'completed'] },
+                exercises: {
+                  items: {
+                    properties: {
+                      sets: {
+                        items: {
+                          properties: {
+                            status: {
+                              enum: ['pending', 'completed', 'skipped'],
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    })
+  })
+
+  it('renders a completed workout and both skipped-set variants', () => {
+    const completedCard = {
+      ...ACTIVE_WORKOUT_CARD,
+      subtitle: null,
+      footer: null,
+      rows: [
+        { label: 'Bench press', values: ['2/3'] },
+        { label: 'Incline dumbbell press', values: ['1/3'] },
+      ],
+      workout: {
+        version: 1,
+        state: 'completed',
+        exercises: [
+          {
+            name: 'Bench press',
+            sets: [
+              {
+                status: 'completed',
+                target: '185 lb × 8',
+                actual: '185 lb × 8',
+              },
+              {
+                status: 'completed',
+                target: '185 lb × 8',
+                actual: '185 lb × 7',
+              },
+              {
+                status: 'skipped',
+                target: '185 lb × 6–8',
+                actual: null,
+              },
+            ],
+          },
+          {
+            name: 'Incline dumbbell press',
+            sets: [
+              {
+                status: 'completed',
+                target: '55 lb × 10',
+                actual: '55 lb × 10',
+              },
+              {
+                status: 'skipped',
+                target: '55 lb × 8–10',
+                actual: null,
+              },
+              {
+                status: 'skipped',
+                target: null,
+                actual: null,
+              },
+            ],
+          },
+        ],
+      },
+    } satisfies AssistantResponseCard
+
+    const visible = renderAssistantResponseCardText(completedCard)
+    expect(visible).toContain(
+      'Push day\nCompleted workout · 3/6 sets complete',
+    )
+    expect(visible).toContain(
+      'set 3: skipped (target 185 lb × 6–8)',
+    )
+    expect(visible).toContain(
+      'Incline dumbbell press: set 1: 55 lb × 10 · set 2: skipped (target 55 lb × 8–10) · set 3: skipped',
+    )
+    expect(buildLinqIMessageAppLayout(completedCard)).toEqual({
+      caption: 'Push day',
+      subcaption: '3/6 sets · COMPLETE',
+      trailing_caption: 'OPEN',
+    })
+    expect(decodeAppCardUrl(
+      encodeWorkoutSessionAppCardUrl(completedCard),
+    )).toMatchObject({
+      schemaVersion: 4,
+      card: { s: 'c', u: null, f: null },
+    })
+  })
+
 })
