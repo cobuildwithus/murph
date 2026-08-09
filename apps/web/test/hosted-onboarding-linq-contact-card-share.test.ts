@@ -41,6 +41,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
       && typeof error === "object"
       && (error as { details?: { phase?: string } }).details?.phase === "prepare",
     ),
+  isHostedLinqIdempotencyKeyReuseFailure: (error: unknown) =>
+    Boolean(
+      error
+      && typeof error === "object"
+      && (error as { details?: { idempotencyKeyReuseConflict?: boolean } })
+        .details?.idempotencyKeyReuseConflict === true,
+    ),
   sendHostedLinqAttachmentMessage: shareSendMocks.sendHostedLinqAttachmentMessage,
   shareHostedLinqContactCard: shareSendMocks.shareHostedLinqContactCard,
 }));
@@ -593,6 +600,52 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
         idempotencyKey: `group-contact-card:chat_123:${now.getTime()}`,
       }));
     expect(prisma.rows).toHaveLength(1);
+  });
+
+  it("reads a replay's provider key conflict as already sent, and nothing else", async () => {
+    const prisma = createContactCardSharePrismaStub();
+    const imageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    shareSendMocks.fetchMurphHostedLinqContactCardVcfPhoto.mockResolvedValue({
+      base64: "aGVsbG8=",
+      type: "JPEG",
+    });
+    const share = (shareKey?: string) =>
+      shareMurphHostedLinqContactCardVcfToChat({
+        chatId: "chat_123",
+        idempotencyKeyPrefix: "personalized-contact-card",
+        imageUrl,
+        memberId: "member_123",
+        prisma: prisma.client as never,
+        ...(shareKey ? { shareKey } : {}),
+      });
+
+    // A replay re-creates the attachment, so the provider sees the same key
+    // with a different body. That is proof the card already landed.
+    const conflict = Object.assign(new Error("conflict"), {
+      details: { idempotencyKeyReuseConflict: true, status: 409 },
+    });
+    shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(conflict);
+    await expect(share("input_first")).resolves.toEqual({ status: "already_shared" });
+
+    // Without a per-request key the conflict proves nothing about intent.
+    shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(conflict);
+    await expect(share()).resolves.toEqual({
+      status: "failed",
+      reason: "send_failed",
+      error: conflict,
+    });
+
+    // An ordinary provider failure stays a failure even with a request key.
+    const otherFailure = Object.assign(new Error("boom"), {
+      details: { status: 409 },
+    });
+    shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(otherFailure);
+    await expect(share("input_first")).resolves.toEqual({
+      status: "failed",
+      reason: "send_failed",
+      error: otherFailure,
+    });
   });
 
   it("refuses a personalized card when the current Murph line is stale or ambiguous", async () => {

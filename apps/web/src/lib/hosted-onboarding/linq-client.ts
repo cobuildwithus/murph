@@ -837,10 +837,19 @@ export async function sendHostedLinqAttachmentMessage(input: {
     timeoutMessage: "Linq attachment send timed out.",
   });
   if (!sendResponse.ok) {
+    // A replay of one accepted request re-creates its attachment, so the body
+    // under a reused idempotency key legitimately differs and the provider
+    // answers with a key-reuse conflict. Classify only that exact response so
+    // a caller with a stable per-request key can read it as "already sent";
+    // every other 409 and error stays an ordinary failure.
+    const idempotencyConflict = idempotencyKey !== null
+      && sendResponse.status === 409
+      && await isHostedLinqIdempotencyKeyReuseConflict(sendResponse);
     throw buildHostedLinqRequestFailedError({
       operation: "attachment send",
       retryable: isRetryableHostedLinqStatus(sendResponse.status),
       status: sendResponse.status,
+      ...(idempotencyConflict ? { idempotencyKeyReuseConflict: true } : {}),
     });
   }
 
@@ -987,6 +996,7 @@ async function fetchHostedLinqJsonApiOrThrow(input: {
 }
 
 function buildHostedLinqRequestFailedError(input: {
+  idempotencyKeyReuseConflict?: boolean;
   operation: string;
   providerErrorDiagnostics?: {
     providerErrorCode?: number;
@@ -999,12 +1009,45 @@ function buildHostedLinqRequestFailedError(input: {
     details: {
       failureStage: "http",
       status: input.status,
+      ...(input.idempotencyKeyReuseConflict
+        ? { idempotencyKeyReuseConflict: true }
+        : {}),
       ...input.providerErrorDiagnostics,
     },
     message: `Linq ${input.operation} failed with HTTP ${input.status}.`,
     httpStatus: 502,
     retryable: input.retryable,
   });
+}
+
+const HOSTED_LINQ_IDEMPOTENCY_CONFLICT_PATTERN =
+  /conflicting[\s_-]*linq[\s_-]*idempotency[\s_-]*key[\s_-]*reuse/iu;
+
+/**
+ * Narrow reader for the provider's exact same-key/different-payload conflict.
+ * Bounded and shape-specific on purpose: a generic 409 must not be mistaken
+ * for a proven duplicate.
+ */
+async function isHostedLinqIdempotencyKeyReuseConflict(
+  response: Response,
+): Promise<boolean> {
+  let body: string;
+  try {
+    body = (await response.clone().text()).slice(0, 500);
+  } catch {
+    return false;
+  }
+  return HOSTED_LINQ_IDEMPOTENCY_CONFLICT_PATTERN.test(body);
+}
+
+/**
+ * True only when the provider rejected a reused idempotency key whose payload
+ * differed. A caller whose key identifies one accepted request may treat this
+ * as proof that request already reached the chat.
+ */
+export function isHostedLinqIdempotencyKeyReuseFailure(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && error.details?.idempotencyKeyReuseConflict === true;
 }
 
 function readHostedLinqProviderErrorDiagnostics(payload: unknown): {

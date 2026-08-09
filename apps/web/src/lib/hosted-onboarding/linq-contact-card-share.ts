@@ -4,6 +4,7 @@ import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandida
 import {
   getHostedLinqChatHandles,
   isHostedLinqAttachmentSendPrepareFailure,
+  isHostedLinqIdempotencyKeyReuseFailure,
   sendHostedLinqAttachmentMessage,
   shareHostedLinqContactCard,
 } from "./linq-client";
@@ -512,6 +513,13 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
       ...(input.signal ? { signal: input.signal } : {}),
     });
   } catch (error) {
+    // A replay of this exact accepted request: the provider proved the key was
+    // already accepted with a different attachment body, so the card is
+    // already in the chat. Only the per-request key can claim this; a
+    // canonical share's key is time-derived and proves nothing about intent.
+    if (input.shareKey && isHostedLinqIdempotencyKeyReuseFailure(error)) {
+      return { status: "already_shared" };
+    }
     if (reservation && isHostedLinqAttachmentSendPrepareFailure(error)) {
       // Nothing reached the chat; free the throttle reservation so a later
       // retry is not locked out. Ambiguous message-send failures keep it.
