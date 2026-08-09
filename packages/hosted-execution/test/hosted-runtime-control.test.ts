@@ -99,7 +99,7 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime control contracts", () => {
-  it("parses health-data runtime admission and rejects inconsistent decisions", () => {
+  it("parses fail-closed health-data admission and rejects revoked processing", () => {
     expect(parseHostedRuntimeHealthDataAdmissionResponse({
       consentState: "missing",
       processingAllowed: true,
@@ -107,6 +107,15 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       consentState: "missing",
       processingAllowed: true,
+      userId: "member_123",
+    });
+    expect(parseHostedRuntimeHealthDataAdmissionResponse({
+      consentState: "missing",
+      processingAllowed: false,
+      userId: "member_123",
+    })).toEqual({
+      consentState: "missing",
+      processingAllowed: false,
       userId: "member_123",
     });
     expect(parseHostedRuntimeHealthDataAdmissionResponse({
@@ -122,7 +131,7 @@ describe("hosted runtime control contracts", () => {
       consentState: "revoked",
       processingAllowed: true,
       userId: "member_123",
-    })).toThrow(/processingAllowed did not match consentState/u);
+    })).toThrow(/cannot allow processing after consent revocation/u);
     expect(() => parseHostedRuntimeHealthDataAdmissionResponse({
       consentState: "unknown",
       processingAllowed: true,

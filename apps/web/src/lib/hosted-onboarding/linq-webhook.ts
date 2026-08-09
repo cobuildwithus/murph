@@ -2,12 +2,14 @@ import {
   type LinqMessageEditedEvent,
   type LinqMessageReceivedEvent,
   type LinqParticipantChangedEvent,
+  type LinqTypingIndicatorStartedEvent,
   type LinqWebhookEvent,
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   parseLinqMessageEditedEvent,
   parseLinqMessageReceivedEvent,
   parseLinqParticipantChangedEvent,
+  parseLinqTypingIndicatorStartedEvent,
   parseLinqWebhookEvent,
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
@@ -27,6 +29,7 @@ export type HostedLinqWebhookEvent = LinqWebhookEvent;
 export type HostedLinqMessageEditedEvent = LinqMessageEditedEvent;
 export type HostedLinqMessageReceivedEvent = LinqMessageReceivedEvent;
 export type HostedLinqParticipantChangedEvent = LinqParticipantChangedEvent;
+export type HostedLinqTypingIndicatorStartedEvent = LinqTypingIndicatorStartedEvent;
 
 export function parseHostedLinqWebhookEvent(rawBody: string): HostedLinqWebhookEvent {
   try {
@@ -88,6 +91,23 @@ export function requireHostedLinqParticipantChangedEvent(
 ): HostedLinqParticipantChangedEvent {
   try {
     return parseLinqParticipantChangedEvent(event);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw hostedOnboardingError({
+        code: "LINQ_PAYLOAD_INVALID",
+        message: error.message,
+        httpStatus: 400,
+      });
+    }
+    throw error;
+  }
+}
+
+export function requireHostedLinqTypingIndicatorStartedEvent(
+  event: HostedLinqWebhookEvent,
+): HostedLinqTypingIndicatorStartedEvent {
+  try {
+    return parseLinqTypingIndicatorStartedEvent(event);
   } catch (error) {
     if (error instanceof TypeError) {
       throw hostedOnboardingError({

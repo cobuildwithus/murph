@@ -13,6 +13,7 @@ import {
   parseLinqMessageEditedEvent,
   parseLinqMessageReceivedEvent,
   parseLinqParticipantChangedEvent,
+  parseLinqTypingIndicatorStartedEvent,
   parseLinqWebhookEvent,
   readLinqRecipientLineHandle,
   readLinqWebhookHeader,
@@ -21,6 +22,39 @@ import {
   summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
 } from "../src/linq-webhook.ts";
+
+test("parseLinqTypingIndicatorStartedEvent keeps only the direct chat target", () => {
+  const event = parseLinqTypingIndicatorStartedEvent(parseLinqWebhookEvent(JSON.stringify({
+    api_version: "v3",
+    created_at: "2026-08-09T12:00:00.000Z",
+    data: {
+      chat_id: "  chat_typing_123  ",
+      ignored_provider_field: "ignored",
+    },
+    event_id: "evt_typing_123",
+    event_type: "chat.typing_indicator.started",
+  })));
+
+  assert.deepEqual(event.data, {
+    chat_id: "chat_typing_123",
+  });
+  assert.equal(event.created_at, "2026-08-09T12:00:00.000Z");
+});
+
+test("parseLinqTypingIndicatorStartedEvent rejects a missing chat target", () => {
+  const event = parseLinqWebhookEvent(JSON.stringify({
+    api_version: "v3",
+    created_at: "2026-08-09T12:00:00.000Z",
+    data: {},
+    event_id: "evt_typing_invalid",
+    event_type: "chat.typing_indicator.started",
+  }));
+
+  assert.throws(
+    () => parseLinqTypingIndicatorStartedEvent(event),
+    /chat_id is required/u,
+  );
+});
 
 test("verifyAndParseLinqWebhookRequest validates the Linq signature envelope", () => {
   const payload = JSON.stringify(buildV2026MessageReceivedWebhook({

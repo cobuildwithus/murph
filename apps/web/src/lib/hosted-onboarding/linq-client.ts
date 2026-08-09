@@ -757,9 +757,17 @@ export async function sendHostedLinqAttachmentMessage(input: {
   contentType: string;
   fileName: string;
   idempotencyKey?: string | null;
+  /**
+   * Optional tighter deadline for the prepare phase only. Everything it bounds
+   * provably precedes the message POST, so expiring under it can never leave an
+   * ambiguous send. The final POST and its reconciliation deliberately keep the
+   * caller signal: cutting an irreversible send short is worse than waiting.
+   */
+  prepareSignal?: AbortSignal;
   signal?: AbortSignal;
 }): Promise<HostedLinqSendResult> {
   const chatId = normalizeRequiredString(input.chatId, "chat id");
+  const prepareSignal = input.prepareSignal ?? input.signal;
   // Everything before the final message POST is tagged phase "prepare":
   // failures here provably never created a chat message, so callers may undo
   // side effects such as share reservations. The message POST itself stays
@@ -774,7 +782,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
       method: "POST",
       operation: "attachment create",
       path: "attachments",
-      signal: input.signal,
+      signal: prepareSignal,
       timeoutMessage: "Linq attachment create timed out.",
     });
     if (!createResponse.ok) {
@@ -804,7 +812,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
       body: new Uint8Array(input.bytes).buffer,
       headers: parseHostedLinqAttachmentUploadHeaders(created?.required_headers),
       method: "PUT",
-      signal: input.signal ? AbortSignal.any([input.signal, uploadTimeout]) : uploadTimeout,
+      signal: prepareSignal ? AbortSignal.any([prepareSignal, uploadTimeout]) : uploadTimeout,
     });
     if (!uploadResponse.ok) {
       throw buildHostedLinqRequestFailedError({
@@ -828,23 +836,102 @@ export async function sendHostedLinqAttachmentMessage(input: {
   if (idempotencyKey) {
     message.idempotency_key = idempotencyKey;
   }
-  const sendResponse = await fetchHostedLinqApiOrThrow({
-    body: JSON.stringify({ message } satisfies MessageSendParams),
+  // Captured once so a reconciliation attempt can resubmit the byte-identical
+  // body: same attachment, same key, same URL is what lets the provider answer
+  // with the original message instead of accepting a second one.
+  const sendBody = JSON.stringify({ message } satisfies MessageSendParams);
+  const sendPath = `chats/${encodeURIComponent(chatId)}/messages`;
+  const submitSend = async () => await fetchHostedLinqApiOrThrow({
+    body: sendBody,
     method: "POST",
     operation: "attachment send",
-    path: `chats/${encodeURIComponent(chatId)}/messages`,
+    path: sendPath,
     signal: input.signal,
     timeoutMessage: "Linq attachment send timed out.",
   });
+
+  let sendResponse: Response;
+  try {
+    sendResponse = await submitSend();
+  } catch (error) {
+    // A timeout or transport loss says nothing about acceptance: the request
+    // may already have created the message. Only a keyed send can safely ask
+    // the provider again.
+    if (idempotencyKey === null) {
+      throw error;
+    }
+    return await reconcileHostedLinqAttachmentSend({ cause: error, submitSend });
+  }
   if (!sendResponse.ok) {
-    throw buildHostedLinqRequestFailedError({
+    // A replay of one accepted request re-creates its attachment, so the body
+    // under a reused idempotency key legitimately differs and the provider
+    // answers with a key-reuse conflict. Classify only that exact response so
+    // a caller with a stable per-request key can read it as "already sent";
+    // every other 409 and error stays an ordinary failure.
+    const idempotencyConflict = idempotencyKey !== null
+      && sendResponse.status === 409
+      && await isHostedLinqIdempotencyKeyReuseConflict(sendResponse);
+    const retryable = isRetryableHostedLinqStatus(sendResponse.status);
+    const failure = buildHostedLinqRequestFailedError({
       operation: "attachment send",
-      retryable: isRetryableHostedLinqStatus(sendResponse.status),
+      retryable,
       status: sendResponse.status,
+      ...(idempotencyConflict ? { idempotencyKeyReuseConflict: true } : {}),
     });
+    // A retryable response can arrive after the provider already accepted the
+    // message and lost the acknowledgement, so it does not prove the card is
+    // absent. A definitive rejection does, and stays an ordinary failure.
+    if (idempotencyKey !== null && !idempotencyConflict && retryable) {
+      return await reconcileHostedLinqAttachmentSend({ cause: failure, submitSend });
+    }
+    throw failure;
   }
 
-  const payload = await readHostedLinqOptionalJsonResponse<MessageSendResponse>(sendResponse);
+  return await readHostedLinqAttachmentSendResult(sendResponse);
+}
+
+/**
+ * Establish the provider result for one already-submitted final message whose
+ * response was ambiguous. The provider owns exactly-once for the idempotency
+ * key, so resubmitting the byte-identical body is the only way to learn what
+ * happened: an accepted request replays its original message identity, and a
+ * body that differs under that key is rejected outright. Exactly one extra
+ * attempt, inside the original call, with no durable record.
+ *
+ * When it still cannot resolve, the failure carries `acknowledgementUnconfirmed`
+ * so the caller can report uncertainty rather than claim the send failed.
+ */
+async function reconcileHostedLinqAttachmentSend(input: {
+  cause: unknown;
+  submitSend: () => Promise<Response>;
+}): Promise<HostedLinqSendResult> {
+  let response: Response;
+  try {
+    response = await input.submitSend();
+  } catch {
+    throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
+  }
+  if (response.ok) {
+    return await readHostedLinqAttachmentSendResult(response);
+  }
+  if (
+    response.status === 409
+    && await isHostedLinqIdempotencyKeyReuseConflict(response)
+  ) {
+    throw buildHostedLinqRequestFailedError({
+      idempotencyKeyReuseConflict: true,
+      operation: "attachment send",
+      retryable: false,
+      status: response.status,
+    });
+  }
+  throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
+}
+
+async function readHostedLinqAttachmentSendResult(
+  response: Response,
+): Promise<HostedLinqSendResult> {
+  const payload = await readHostedLinqOptionalJsonResponse<MessageSendResponse>(response);
   return {
     chatId: normalizeNullableString(payload?.chat_id),
     messageId: normalizeNullableString(payload?.message?.id),
@@ -875,7 +962,16 @@ async function withHostedLinqAttachmentPreparePhase<T>(run: () => Promise<T>): P
         retryable: error.retryable,
       });
     }
-    throw error;
+    // An abort or transport error here is still provably before the message
+    // POST, so callers may treat it as "nothing reached the chat" too.
+    throw hostedOnboardingError({
+      cause: error,
+      code: "LINQ_SEND_FAILED",
+      details: { phase: HOSTED_LINQ_ATTACHMENT_SEND_PHASE_PREPARE },
+      httpStatus: 502,
+      message: "Linq attachment preparation failed.",
+      retryable: false,
+    });
   }
 }
 
@@ -987,6 +1083,7 @@ async function fetchHostedLinqJsonApiOrThrow(input: {
 }
 
 function buildHostedLinqRequestFailedError(input: {
+  idempotencyKeyReuseConflict?: boolean;
   operation: string;
   providerErrorDiagnostics?: {
     providerErrorCode?: number;
@@ -999,12 +1096,86 @@ function buildHostedLinqRequestFailedError(input: {
     details: {
       failureStage: "http",
       status: input.status,
+      ...(input.idempotencyKeyReuseConflict
+        ? { idempotencyKeyReuseConflict: true }
+        : {}),
       ...input.providerErrorDiagnostics,
     },
     message: `Linq ${input.operation} failed with HTTP ${input.status}.`,
     httpStatus: 502,
     retryable: input.retryable,
   });
+}
+
+const HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE =
+  "Conflicting Linq idempotency-key reuse.";
+
+/**
+ * Narrow reader for the provider's exact same-key/different-payload conflict.
+ * It rejects bodies above 500 code units and requires the exact JSON shape, so
+ * a generic 409 or wrapped phrase cannot be mistaken for a proven duplicate.
+ */
+async function isHostedLinqIdempotencyKeyReuseConflict(
+  response: Response,
+): Promise<boolean> {
+  let body: string;
+  try {
+    body = await response.clone().text();
+  } catch {
+    return false;
+  }
+  if (body.length > 500) {
+    return false;
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return false;
+  }
+  const keys = Object.keys(payload);
+  return keys.length === 1
+    && keys[0] === "error"
+    && Reflect.get(payload, "error")
+      === HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE;
+}
+
+/**
+ * True only when the provider rejected a reused idempotency key whose payload
+ * differed. A caller whose key identifies one accepted request may treat this
+ * as proof that request already reached the chat.
+ */
+export function isHostedLinqIdempotencyKeyReuseFailure(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && error.details?.idempotencyKeyReuseConflict === true;
+}
+
+function buildHostedLinqUnconfirmedAcknowledgementError(cause: unknown) {
+  return hostedOnboardingError({
+    cause,
+    code: "LINQ_SEND_FAILED",
+    details: { acknowledgementUnconfirmed: true },
+    // Not retryable: another blind attempt cannot resolve this and the send is
+    // irreversible, so the decision belongs to the member, not to a retry loop.
+    httpStatus: 502,
+    message: "Linq attachment send acknowledgement is unconfirmed.",
+    retryable: false,
+  });
+}
+
+/**
+ * True only when a keyed attachment send failed ambiguously and reconciling the
+ * identical body under the same key still could not establish the result. The
+ * message may or may not be in the chat; a caller must say so rather than
+ * report a failed send.
+ */
+export function isHostedLinqUnconfirmedAcknowledgementFailure(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && error.details?.acknowledgementUnconfirmed === true;
 }
 
 function readHostedLinqProviderErrorDiagnostics(payload: unknown): {

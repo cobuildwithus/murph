@@ -1689,6 +1689,47 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
   });
 
+  it("acknowledges shell registration before exact-target destruction supersedes it", async () => {
+    const startEntered = createDeferred<void>();
+    const startAborted = createDeferred<void>();
+    const start = vi.fn(async (
+      _startOptions: unknown,
+      waitOptions?: { signal?: AbortSignal },
+    ) => {
+      const signal = waitOptions?.signal;
+      if (!signal) {
+        throw new Error("Expected shell prewarm to carry an abort signal.");
+      }
+      startEntered.resolve();
+      await new Promise<void>((_resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => {
+          startAborted.resolve(undefined);
+          reject(signal.reason);
+        }, { once: true });
+      });
+    });
+    const { container, destroy } = createContainerDouble({
+      initialStatus: "running",
+      start,
+    });
+
+    await expect(container.beginShellPrewarm({
+      timeoutMs: 20_000,
+      userId: "member_123",
+    })).resolves.toEqual({ accepted: true });
+    await startEntered.promise;
+    const destruction = container.destroyInstance();
+
+    await startAborted.promise;
+    await expect(destruction).resolves.toBeUndefined();
+    expect(start).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
   it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 

@@ -144,6 +144,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
@@ -1490,11 +1491,11 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
-  if (action === "read_chat_participants" || action === "share_contact_card") {
+  if (action === "read_chat_participants") {
     assertAllowedObjectKeys(
       record,
       new Set(["action", "linqThread"]),
-      `Hosted runtime group tool ${action} request`,
+      "Hosted runtime group tool read_chat_participants request",
     );
     if (record.linqThread === undefined || record.linqThread === null) {
       return { action };
@@ -1503,8 +1504,71 @@ export function parseHostedRuntimeGroupToolRequest(
       action,
       linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
         record.linqThread,
-        `Hosted runtime group tool ${action} request linqThread`,
+        "Hosted runtime group tool read_chat_participants request linqThread",
       ),
+    };
+  }
+  if (action === "share_contact_card") {
+    const label = "Hosted runtime group tool share_contact_card request";
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "action",
+        "contactCardImageUrl",
+        "contactCardShareKey",
+        "directLinqChatId",
+        "linqThread",
+      ]),
+      label,
+    );
+    const hasOwn = (key: string): boolean =>
+      Object.prototype.hasOwnProperty.call(record, key);
+    const hasContactCardImageUrl = hasOwn("contactCardImageUrl");
+    const hasContactCardShareKey = hasOwn("contactCardShareKey");
+    const hasDirectLinqChatId = hasOwn("directLinqChatId");
+    const hasLinqThread = hasOwn("linqThread");
+    const personalizedFieldCount = Number(hasContactCardImageUrl)
+      + Number(hasContactCardShareKey)
+      + Number(hasDirectLinqChatId);
+
+    if (personalizedFieldCount === 0) {
+      if (!hasLinqThread || record.linqThread === null) {
+        return { action };
+      }
+      return {
+        action,
+        linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+          record.linqThread,
+          `${label} linqThread`,
+        ),
+      };
+    }
+
+    if (personalizedFieldCount !== 3 || hasLinqThread) {
+      throw new TypeError(
+        `${label} must be either canonical with optional linqThread, or personalized with contactCardImageUrl, contactCardShareKey, and directLinqChatId only.`,
+      );
+    }
+
+    return {
+      action,
+      contactCardImageUrl: parseHostedRuntimeGroupChatIconUrl(
+        record.contactCardImageUrl,
+        options.privateMediaDeliveryOrigin,
+        `${label} contactCardImageUrl`,
+      ),
+      contactCardShareKey: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} contactCardShareKey`,
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+        value: record.contactCardShareKey,
+      }),
+      directLinqChatId: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} directLinqChatId`,
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+        value: record.directLinqChatId,
+      }),
     };
   }
   if (action === "revoke_own_email_share") {
@@ -1574,31 +1638,29 @@ function parseHostedRuntimeGroupUpdateDisplayNameRequest(
 function parseHostedRuntimeGroupChatIconUrl(
   value: unknown,
   privateMediaDeliveryOrigin?: string | null,
+  label = "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
 ): string {
-  const iconUrl = requireString(
-    value,
-    "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
-  ).trim();
+  const iconUrl = requireString(value, label).trim();
   if (
     iconUrl.length === 0 ||
     iconUrl.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
   ) {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   let parsed: URL;
   try {
     parsed = new URL(iconUrl);
   } catch {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
+    throw new TypeError(`${label} must be HTTPS.`);
   }
   if (!isHostedRuntimePrivateImageDeliveryUrl(
     parsed,
     privateMediaDeliveryOrigin ?? undefined,
   )) {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   return parsed.toString();
 }
@@ -3407,7 +3469,7 @@ export function parseHostedRuntimeGroupToolResponse(
   if (action === "share_contact_card") {
     const result = requireObject(record.result, "Hosted runtime group tool share_contact_card response result");
     const status = requireString(result.status, "Hosted runtime group tool share_contact_card response status");
-    if (status === "sent" || status === "already_shared") {
+    if (status === "sent" || status === "already_shared" || status === "unconfirmed") {
       assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool share_contact_card response result");
       return { action, result: { status } };
     }
@@ -6692,9 +6754,9 @@ export function parseHostedRuntimeHealthDataAdmissionResponse(
     record.processingAllowed,
     "Hosted runtime health-data admission response processingAllowed",
   );
-  if (processingAllowed !== (consentState !== "revoked")) {
+  if (processingAllowed && consentState === "revoked") {
     throw new TypeError(
-      "Hosted runtime health-data admission response processingAllowed did not match consentState.",
+      "Hosted runtime health-data admission response cannot allow processing after consent revocation.",
     );
   }
 

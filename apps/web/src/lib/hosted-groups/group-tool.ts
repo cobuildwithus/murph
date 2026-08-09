@@ -76,6 +76,9 @@ import {
   resolveHostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import {
+  assertHostedLinqRecentInboundEngagementForRuntime,
+} from "../hosted-onboarding/linq-egress-engagement";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
 import { issueHostedSignupReferralLink } from "../hosted-growth/signup-referral";
@@ -347,7 +350,26 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (input.request.action === "share_contact_card") {
+    if (input.request.contactCardImageUrl !== undefined) {
+      if (!input.request.directLinqChatId) {
+        return {
+          action: "share_contact_card",
+          result: {
+            status: "unavailable",
+            unavailableReason: "direct_attachment_route_unavailable",
+          },
+        };
+      }
+      return handleHostedRuntimeGroupShareContactCard({
+        kind: "personalized",
+        contactCardImageUrl: input.request.contactCardImageUrl,
+        contactCardShareKey: input.request.contactCardShareKey,
+        directLinqChatId: input.request.directLinqChatId,
+        memberId: input.memberId,
+      });
+    }
     return handleHostedRuntimeGroupShareContactCard({
+      kind: "canonical",
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -1740,6 +1762,33 @@ type HostedRuntimeGroupLinqThreadAuthorization =
   | { chatId: string }
   | { unavailableReason: string };
 
+/**
+ * Authorize a personalized contact card against the direct/home Linq owner.
+ * `hostedMemberRouting` is the sole owner of a direct chat, and the same chat
+ * is forbidden from existing in the group thread-route store, so the group
+ * assertion can never admit one. This reuses the existing runtime egress
+ * assertion rather than introducing a second direct-route owner.
+ */
+async function authorizeHostedRuntimeDirectLinqChat(input: {
+  chatId: string;
+  memberId: string;
+}): Promise<HostedRuntimeGroupLinqThreadAuthorization> {
+  try {
+    const assertion = await assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true,
+      memberId: input.memberId,
+      prisma: getPrisma(),
+      target: input.chatId,
+    });
+    if (assertion.threadIsDirect !== true) {
+      return { unavailableReason: "linq_thread_unauthorized" };
+    }
+  } catch {
+    return { unavailableReason: "linq_thread_unauthorized" };
+  }
+  return { chatId: input.chatId };
+}
+
 async function authorizeHostedRuntimeGroupLinqThread(input: {
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
@@ -2217,39 +2266,84 @@ function logHostedThreadContainerParticipantReconcileCapped(input: {
   });
 }
 
-async function handleHostedRuntimeGroupShareContactCard(input: {
-  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
-  memberId: string;
-}): Promise<HostedRuntimeGroupToolResponse> {
+type HostedRuntimeGroupShareContactCardInput =
+  | {
+      kind: "canonical";
+      linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+      memberId: string;
+    }
+  | {
+      kind: "personalized";
+      contactCardImageUrl: string;
+      contactCardShareKey: string;
+      directLinqChatId: string;
+      memberId: string;
+    };
+
+async function handleHostedRuntimeGroupShareContactCard(
+  input: HostedRuntimeGroupShareContactCardInput,
+): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "share_contact_card",
     result: { status: "unavailable", unavailableReason },
   });
 
-  const authorized = await authorizeHostedRuntimeGroupLinqThread(input);
+  const authorized = input.kind === "personalized"
+    ? await authorizeHostedRuntimeDirectLinqChat({
+      chatId: input.directLinqChatId,
+      memberId: input.memberId,
+    })
+    : await authorizeHostedRuntimeGroupLinqThread({
+      linqThread: input.linqThread,
+      memberId: input.memberId,
+    });
   if ("unavailableReason" in authorized) {
     return unavailable(authorized.unavailableReason);
   }
 
   const prisma = getPrisma();
-  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
-    memberId: input.memberId,
-    prisma,
-  });
-  if (ownerAccess.status !== "ok") {
-    return unavailable(ownerAccess.unavailableReason);
+  let outcome: Awaited<ReturnType<typeof shareMurphHostedLinqContactCardVcfToChat>>;
+  if (input.kind === "personalized") {
+    const contactCardImageUrl = normalizeHostedGroupChatIconUrl(
+      input.contactCardImageUrl,
+    );
+    if (!contactCardImageUrl) {
+      return unavailable("contact_card_image_url_unavailable");
+    }
+    outcome = await shareMurphHostedLinqContactCardVcfToChat({
+      chatId: authorized.chatId,
+      idempotencyKeyPrefix: "personalized-contact-card",
+      imageUrl: contactCardImageUrl,
+      memberId: input.memberId,
+      prisma,
+      shareKey: input.contactCardShareKey,
+    });
+  } else {
+    const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+      memberId: input.memberId,
+      prisma,
+    });
+    if (ownerAccess.status !== "ok") {
+      return unavailable(ownerAccess.unavailableReason);
+    }
+    outcome = await shareMurphHostedLinqContactCardVcfToChat({
+      chatId: authorized.chatId,
+      idempotencyKeyPrefix: "group-contact-card",
+      memberId: input.memberId,
+      prisma,
+    });
   }
 
-  const outcome = await shareMurphHostedLinqContactCardVcfToChat({
-    chatId: authorized.chatId,
-    idempotencyKeyPrefix: "group-contact-card",
-    memberId: input.memberId,
-    prisma,
-  });
   if (outcome.status === "already_shared") {
     return {
       action: "share_contact_card",
       result: { status: "already_shared" },
+    };
+  }
+  if (outcome.status === "unconfirmed") {
+    return {
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
     };
   }
   if (outcome.status !== "sent") {

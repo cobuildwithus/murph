@@ -21,8 +21,13 @@ enabled, and `/refer` lists only the enabled paths. When both gates are off,
 `/refer` shows one temporary-unavailability state without reward quantities or
 a share action. Gate-derived availability is program-level, not a promise that
 an individual member has enough rolling capacity for the next reward. Public
-signup-link copy therefore states that a completed signup can earn credit only
+signup-link copy therefore states that a completed signup can earn more usage only
 after the later settlement eligibility and rolling-limit checks pass.
+On the compact homepage referral section, each enabled path leads with a
+typical-use estimate (about 10 or 14 more days of Murph usage). These day labels
+are presentation estimates, not accounting units; the homepage says that actual
+capacity varies, while `/refer` retains the full qualification detail without
+exposing internal ledger units.
 
 The stable referral link remains available to an eligible signed-in member when
 either reward gate is disabled, but a disabled signup reward is not marketed or

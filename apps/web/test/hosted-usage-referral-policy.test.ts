@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   computeHostedReferralRewardUsageDays,
+  formatHostedReferralRewardUsageDays,
 } from "@/src/lib/hosted-growth/referral-reward-days";
 import {
   HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
@@ -122,6 +123,42 @@ describe("hosted usage referral policy", () => {
         rewardUsdMicros,
       }),
     ]).toEqual([12, 12, 12]);
+  });
+
+  it("keeps the current anchors, outside scaling, grammar, and basis checks explicit", () => {
+    const conversationalBasis = {
+      policyCode: "active_group_v1" as const,
+      policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+    };
+
+    expect(computeHostedReferralRewardUsageDays({
+      ...conversationalBasis,
+      rewardUsdMicros: 2_000_000n,
+    })).toBe(10);
+    expect(computeHostedReferralRewardUsageDays({
+      ...conversationalBasis,
+      rewardUsdMicros: 3_500_000n,
+    })).toBe(14);
+    expect(formatHostedReferralRewardUsageDays({
+      ...conversationalBasis,
+      rewardUsdMicros: 200_000n,
+      sentenceCase: true,
+    })).toBe("About 1 more day of Murph usage");
+    expect(formatHostedReferralRewardUsageDays({
+      ...conversationalBasis,
+      rewardUsdMicros: 7_000_000n,
+    })).toBe("about 28 more days of Murph usage");
+
+    expect(() => computeHostedReferralRewardUsageDays({
+      policyCode: "active_group_v1",
+      policyVersion: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
+      rewardUsdMicros: 3_500_000n,
+    })).toThrow("Unsupported referral reward usage-day basis.");
+    expect(() => computeHostedReferralRewardUsageDays({
+      ...conversationalBasis,
+      policyVersion: "unsupported-version",
+      rewardUsdMicros: 3_500_000n,
+    })).toThrow("Unsupported referral reward usage-day basis.");
   });
 
   it("shares display copy and outstanding semantics with read-only projections", () => {
