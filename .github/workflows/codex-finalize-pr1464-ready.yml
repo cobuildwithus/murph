@@ -1,0 +1,160 @@
+name: Finalize PR 1464 merge readiness
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-finalize-pr1464-ready.yml
+
+permissions:
+  actions: write
+  checks: read
+  contents: write
+  pull-requests: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: "1464"
+      TARGET_HOST_RUN_ID: "31335260291"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/starter-usage-export-final
+          fetch-depth: 0
+
+      - name: Verify exact-head merge readiness and mark ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_dir="agent-docs/debug/pr1464-final-readiness"
+          mkdir -p "$report_dir"
+
+          wait_for_run() {
+            local run_id="$1"
+            for _ in $(seq 1 240); do
+              local status conclusion
+              status="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq .status)"
+              conclusion="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq '.conclusion // ""')"
+              if [[ "$status" == "completed" ]]; then
+                printf '%s\n' "$conclusion"
+                return 0
+              fi
+              sleep 5
+            done
+            return 1
+          }
+
+          host_status="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_HOST_RUN_ID}" --jq .status)"
+          if [[ "$host_status" != "completed" ]]; then
+            wait_for_run "$TARGET_HOST_RUN_ID" >/dev/null
+          fi
+          host_conclusion="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_HOST_RUN_ID}" --jq '.conclusion // ""')"
+          if [[ "$host_conclusion" != "success" ]]; then
+            gh run rerun "$TARGET_HOST_RUN_ID" --repo "$GITHUB_REPOSITORY" --failed
+            host_conclusion="$(wait_for_run "$TARGET_HOST_RUN_ID")"
+          fi
+          test "$host_conclusion" = "success"
+
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > "$report_dir/pr.json"
+          head_sha="$(jq -r .head.sha "$report_dir/pr.json")"
+          base_ref="$(jq -r .base.ref "$report_dir/pr.json")"
+          test "$(jq -r .merged "$report_dir/pr.json")" = "false"
+          test "$base_ref" = "main"
+
+          gh api "repos/${GITHUB_REPOSITORY}/compare/${base_ref}...${head_sha}" > "$report_dir/compare.json"
+          test "$(jq -r .behind_by "$report_dir/compare.json")" = "0"
+
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${head_sha}&per_page=100" > "$report_dir/action-runs-pages.json"
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("agent-docs/debug/pr1464-final-readiness")
+          raw = json.loads((root / "action-runs-pages.json").read_text())
+          pages = raw if isinstance(raw, list) else [raw]
+          runs = []
+          for page in pages:
+              runs.extend(page.get("workflow_runs", []))
+
+          required = [
+              "Repo Hygiene",
+              "Frontend Design Proof",
+              "Hosted Stripe Billing",
+              "Web Viewport Overflow",
+              "Cloudflare Runner Permission Sandbox",
+              "Murph Host Support",
+          ]
+          latest = {}
+          for run in runs:
+              if run.get("head_sha") != os.environ.get("HEAD_SHA", run.get("head_sha")):
+                  continue
+              name = run.get("name")
+              previous = latest.get(name)
+              if previous is None or run.get("created_at", "") > previous.get("created_at", ""):
+                  latest[name] = run
+
+          failures = []
+          lines = []
+          for name in required:
+              run = latest.get(name)
+              if run is None:
+                  failures.append(f"missing {name}")
+                  continue
+              status = run.get("status")
+              conclusion = run.get("conclusion")
+              lines.append(f"{name}: {status}/{conclusion} {run.get('html_url')}")
+              if status != "completed" or conclusion != "success":
+                  failures.append(f"{name}: {status}/{conclusion}")
+
+          (root / "workflows.txt").write_text("\n".join(lines) + "\n")
+          if failures:
+              raise SystemExit("; ".join(failures))
+          PY
+
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          gh api graphql \
+            -f owner="$owner" \
+            -f repo="$repo" \
+            -F number="$PR_NUMBER" \
+            -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){isDraft reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}' \
+            > "$report_dir/review.json"
+          unresolved="$(jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' "$report_dir/review.json")"
+          test "$unresolved" = "0"
+          review_decision="$(jq -r '.data.repository.pullRequest.reviewDecision // ""' "$report_dir/review.json")"
+          test "$review_decision" != "CHANGES_REQUESTED"
+
+          if [[ "$(jq -r .data.repository.pullRequest.isDraft "$report_dir/review.json")" == "true" ]]; then
+            gh pr ready "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+          fi
+
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json number,url,isDraft,mergeable,mergeStateStatus,headRefOid,statusCheckRollup \
+            > "$report_dir/final-pr.json"
+          test "$(jq -r .isDraft "$report_dir/final-pr.json")" = "false"
+          test "$(jq -r .mergeable "$report_dir/final-pr.json")" = "MERGEABLE"
+
+          jq -n \
+            --arg head_sha "$head_sha" \
+            --arg host_conclusion "$host_conclusion" \
+            --arg review_decision "$review_decision" \
+            --argjson unresolved "$unresolved" \
+            '{head_sha:$head_sha,host_support:$host_conclusion,review_decision:$review_decision,unresolved_threads:$unresolved,ready:true,merged:false}' \
+            > "$report_dir/summary.json"
+
+      - name: Publish readiness receipt on helper branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add agent-docs/debug/pr1464-final-readiness
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: record PR 1464 merge-readiness receipt"
+            git push origin HEAD:refs/heads/codex/starter-usage-export-final
+          fi
