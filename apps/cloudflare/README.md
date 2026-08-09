@@ -223,7 +223,8 @@ queryable but cannot repeat telemetry copy inside concrete-pressure pages unless
 a later rearmed threshold creates a new obligation. When a direct-error delta
 takes admission priority after an earlier page, any currently owed telemetry
 travels in that same immutable body while replayable gauges remain excluded;
-the direct error keeps its original check time and telemetry keeps its own
+pure deferred evidence keeps its stored check time, an aggregate containing a
+new current delta uses the latest included check, and telemetry keeps its own
 condition-local observation time. Concrete unsafe conditions retain their
 30-minute recurrence. The object writes Linq provider-attempt
 admission before egress, never attempts more than once per 30 minutes across all

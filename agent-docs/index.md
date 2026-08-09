@@ -18,7 +18,8 @@ evidence, continued evaluation of available database signals, and one-shot
 telemetry-only operator paging with unresolved-window coalescing, current-pressure
 priority including direct errors in one combined pre-first-page incident,
 post-ack recurrence suppression, durable owed-page preservation inside
-non-replayable direct-error admission, and rollback-compatible additive state are
+non-replayable direct-error admission with truthful aggregate timing, and
+rollback-compatible additive state are
 jointly specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, `agent-docs/references/testing-ci-map.md`, and
 `apps/cloudflare/README.md`.

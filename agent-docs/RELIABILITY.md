@@ -216,10 +216,12 @@ Last verified: 2026-08-07
   closed attempt fence, that pending body contains the non-replayable direct
   error plus any durable telemetry obligation already available at admission;
   co-occurring replayable gauges remain in the persisted sample but cannot
-  become stale pending claims. The direct error keeps its original check time,
-  while historical telemetry carries its separate observation time. That exact
-  combined page owns the next eligible attempt and acknowledgment clears the
-  represented telemetry obligation, avoiding a second notification lifecycle.
+  become stale pending claims. Pure deferred evidence keeps its stored check
+  time; when a current direct-error delta joins the promoted count, the page uses
+  the latest included check. Historical telemetry carries its separate
+  observation time. That exact combined page owns the next eligible attempt and
+  acknowledgment clears the represented telemetry obligation, avoiding a
+  second notification lifecycle.
   A replayable condition still unsafe at that boundary remains eligible for the
   following paced recurrence. The same one-slot ordering applies in reverse: a
   later direct-error obligation waits behind an older page but cannot be consumed

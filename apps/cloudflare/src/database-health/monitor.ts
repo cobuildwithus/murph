@@ -423,6 +423,7 @@ export class DatabaseHealthMonitor {
           (condition) =>
             condition.kind === "direct_migration_admission_failures",
         )
+        && currentDirectError === undefined
         && alertState.deferredDirectErrorCheckedAtMs !== null
           ? alertState.deferredDirectErrorCheckedAtMs
           : admittedConditions.length === 1

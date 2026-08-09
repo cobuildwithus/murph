@@ -149,4 +149,11 @@ Updated: 2026-08-09
   from promoted deferred direct evidence even when telemetry is also present.
   Focused inside-fence and deferred-promotion regressions prove exact identity,
   restart, recovery, both recipients, condition-local times, obligation cleanup,
-  and no second telemetry page. ReviewGPT round 9 remains pending.
+  and no second telemetry page. Final ReviewGPT round 9 found that the broadened
+  deferred-time predicate could date an aggregate containing both old deferred
+  errors and a new current delta to only the older sample. The accepted local
+  correction restores the current-delta distinction: pure deferred promotion
+  uses the stored time, while a mixed aggregate uses the latest included check
+  and telemetry retains its separate observation time. Focused telemetry-bearing
+  and direct-only regressions cover both timestamp branches. ReviewGPT round 10
+  remains pending.

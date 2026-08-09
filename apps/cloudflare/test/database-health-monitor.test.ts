@@ -2317,6 +2317,8 @@ describe("database health monitor", () => {
     expect(directErrorPage.message.parts[0]?.value)
       .toContain("2 direct migration connection errors");
     expect(directErrorPage.message.parts[0]?.value)
+      .toContain("Checked 00:20 UTC");
+    expect(directErrorPage.message.parts[0]?.value)
       .not.toContain("PgBouncer wait");
     expect(
       harness.monitor.readRecentSamples(10)
@@ -2325,6 +2327,83 @@ describe("database health monitor", () => {
     expect(harness.monitor.readAlertState()).toMatchObject({
       deferredDirectErrorCount: 0,
       incidentOpen: false,
+      pendingAlertMessage: null,
+    });
+  });
+
+  it("dates mixed current and deferred direct evidence to the current check", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+      directErrors: 5,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 5,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "healthy" });
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 9,
+      directErrors: 5,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 9,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 4),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCheckedAtMs: FIVE_MINUTES_MS * 4,
+      deferredDirectErrorCount: 2,
+    });
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 7),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 9,
+    });
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 14),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.primaryLinqRequests).toHaveLength(3);
+    const aggregatePage = await readLinqRequestBody(
+      harness.primaryLinqRequests[2],
+    );
+    expect(aggregatePage.message.parts[0]?.value)
+      .toContain("4 direct migration connection errors");
+    expect(aggregatePage.message.parts[0]?.value)
+      .toContain("Checked 01:10 UTC");
+    expect(aggregatePage.message.parts[0]?.value)
+      .not.toContain("Checked 00:20 UTC");
+    expect(aggregatePage.message.parts[0]?.value)
+      .not.toContain("PgBouncer wait");
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCheckedAtMs: null,
+      deferredDirectErrorCount: 0,
       pendingAlertMessage: null,
     });
   });
@@ -2413,7 +2492,7 @@ describe("database health monitor", () => {
     metricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
       clientWaitSeconds: 12,
-      directErrors: 7,
+      directErrors: 9,
     });
     harness.restartMonitor();
     await expect(
@@ -2426,11 +2505,13 @@ describe("database health monitor", () => {
       monitoringAlertObligation: expect.objectContaining({ failures: 2 }),
       pendingAlertIncludesMonitoring: true,
       pendingAlertMessage: expect.stringContaining(
-        "2 direct migration connection errors",
+        "4 direct migration connection errors",
       ),
     });
     expect(harness.monitor.readAlertState().pendingAlertMessage)
-      .toContain("Checked 00:30 UTC");
+      .toContain("Checked 01:10 UTC");
+    expect(harness.monitor.readAlertState().pendingAlertMessage)
+      .not.toContain("Checked 00:30 UTC");
     expect(harness.monitor.readAlertState().pendingAlertMessage)
       .toContain(
         "Database monitor telemetry was incomplete for 2 checks "
@@ -2442,7 +2523,7 @@ describe("database health monitor", () => {
 
     metricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
-      directErrors: 7,
+      directErrors: 9,
     });
     harness.restartMonitor();
     await expect(
@@ -2455,9 +2536,11 @@ describe("database health monitor", () => {
     expect(harness.primaryLinqRequests).toHaveLength(3);
     const directErrorPage = await readLinqRequestBody(harness.primaryLinqRequests[2]);
     expect(directErrorPage.message.parts[0]?.value)
-      .toContain("2 direct migration connection errors");
+      .toContain("4 direct migration connection errors");
     expect(directErrorPage.message.parts[0]?.value)
-      .toContain("Checked 00:30 UTC");
+      .toContain("Checked 01:10 UTC");
+    expect(directErrorPage.message.parts[0]?.value)
+      .not.toContain("Checked 00:30 UTC");
     expect(directErrorPage.message.parts[0]?.value)
       .toContain(
         "Database monitor telemetry was incomplete for 2 checks "
@@ -2477,7 +2560,7 @@ describe("database health monitor", () => {
     expect(
       harness.monitor.readRecentSamples(20)
         .filter((sample) => sample.directConnectionErrorDelta === 2),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(harness.monitor.readAlertState()).toMatchObject({
       deferredDirectErrorCheckedAtMs: null,
       deferredDirectErrorCount: 0,
