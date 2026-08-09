@@ -18,6 +18,8 @@ jobs:
           fetch-depth: 0
       - name: Rebuild exact PR on audited main
         run: |
+          git config user.name "PR 1381 final audit"
+          git config user.email "pr1381-audit@users.noreply.github.com"
           git fetch --no-tags origin +refs/heads/agent/codex-exact-app-server-protocol:refs/remotes/origin/agent/codex-exact-app-server-protocol
           git cherry-pick \
             28395092b56325e0a8955408e7aaee6df752dbbe \
