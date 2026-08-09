@@ -20,11 +20,14 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberStripeBillingLookupState: vi.fn(),
+  readHostedLegacyTrialConsumedUsageUsdMicrosTx: vi.fn(),
   reconcileHostedAiUsageGateForBillingModeChangeTx: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   stripeRefundsList: vi.fn(),
   suspendHostedMemberForBillingReversalTx: vi.fn(),
+  clearHostedMemberLegacyTrialBillingUnderLockTx: vi.fn(),
   clearHostedMemberStripeCheckoutAttemptForSessionTx: vi.fn(),
+  ensureHostedStarterUsageGrantTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
@@ -77,6 +80,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
     ...actual,
     acceptHostedMemberStripeCheckoutCompletionTx:
       mocks.acceptHostedMemberStripeCheckoutCompletionTx,
+    clearHostedMemberLegacyTrialBillingUnderLockTx:
+      mocks.clearHostedMemberLegacyTrialBillingUnderLockTx,
     clearHostedMemberStripeCheckoutAttemptForSessionTx:
       mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
     readHostedMemberStripeBillingLookupState:
@@ -127,6 +132,20 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
       mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
     upsertHostedMemberStripeCheckoutEmailIfFreshTx:
       mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/starter-usage-grant", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/starter-usage-grant")
+  >("@/src/lib/hosted-onboarding/starter-usage-grant");
+
+  return {
+    ...actual,
+    ensureHostedStarterUsageGrantTx:
+      mocks.ensureHostedStarterUsageGrantTx,
+    readHostedLegacyTrialConsumedUsageUsdMicrosTx:
+      mocks.readHostedLegacyTrialConsumedUsageUsdMicrosTx,
   };
 });
 
@@ -184,6 +203,14 @@ describe("hosted onboarding stripe billing events", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(member.core);
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
     mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue(null);
+    mocks.readHostedLegacyTrialConsumedUsageUsdMicrosTx.mockResolvedValue(0n);
+    mocks.ensureHostedStarterUsageGrantTx.mockResolvedValue({
+      balanceUsdMicros: 4_500_000n,
+      effectiveAt: new Date("2026-04-12T00:00:00.000Z"),
+      entryId: "huce_starter",
+      granted: true,
+      ledgerVersion: 1n,
+    });
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValue({
       billingRef: {},
@@ -1407,6 +1434,187 @@ describe("hosted onboarding stripe billing events", () => {
     );
   });
 
+  it("converts a canonical legacy trial_will_end event to Starter without resetting recorded usage", async () => {
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+      "price_pulse_base",
+    );
+    const trialStartedAt = new Date("2025-04-12T00:00:00.000Z");
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialStartedAt: trialStartedAt,
+        memberId: "member_123",
+        pulseTrialRedeemedAt: trialStartedAt,
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+    mocks.readHostedLegacyTrialConsumedUsageUsdMicrosTx.mockResolvedValueOnce(
+      1_250_000n,
+    );
+    mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValueOnce({
+      activated: false,
+      hostedExecutionEventId: null,
+      priorBillingStatus: HostedBillingStatus.active,
+    });
+
+    await expect(applyStripeSubscriptionUpdated(
+      makeExactLegacyPulseTrialSubscription({ status: "trialing" }),
+      {
+        eventCreatedAt: new Date("2026-04-18T00:00:00.000Z"),
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        sourceEventId: "evt_exact_trial_will_end",
+        sourceType: "stripe.customer.subscription.trial_will_end",
+      },
+      {} as never,
+    )).resolves.toMatchObject({
+      activatedMemberId: null,
+      cleanupPulseTrialStripeSubscriptionId: "sub_123",
+      runtimeRecheckMemberIds: ["member_123"],
+      subscriptionCancellationEmail: null,
+    });
+
+    expect(
+      mocks.readHostedLegacyTrialConsumedUsageUsdMicrosTx,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      trialStartedAt,
+      tx: {},
+    });
+    expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledWith({
+      effectiveAt: trialStartedAt,
+      initialConsumedUsdMicros: 1_250_000n,
+      memberId: "member_123",
+      source: "legacy_trial_migration",
+      tx: {},
+    });
+    expect(
+      mocks.clearHostedMemberLegacyTrialBillingUnderLockTx,
+    ).toHaveBeenCalledWith({ memberId: "member_123", tx: {} });
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("ignores an unknown trial_will_end subscription without mutating billing", async () => {
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+      "price_pulse_base",
+    );
+
+    await expect(
+      applyStripeSubscriptionUpdated(
+        makeStripeSubscription({
+          items: ["price_pulse_base"],
+          metadata: {
+            checkoutOffer: "pulse_trial_7d",
+            memberId: "member_123",
+            trialPolicyVersion: "unknown-policy",
+          },
+          status: "trialing",
+        }),
+        {
+          eventCreatedAt: new Date("2026-04-18T00:00:00.000Z"),
+          occurredAt: "2026-04-18T00:00:00.000Z",
+          sourceEventId: "evt_unknown_trial_will_end",
+          sourceType: "stripe.customer.subscription.trial_will_end",
+        },
+        {} as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      activatedMembers: [],
+      hostedExecutionEventId: null,
+      runtimeRecheckMemberIds: [],
+      subscriptionCancellationEmail: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.prepareHostedMemberStripeBillingWrite).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps an exact active legacy trial identity non-paid until invoice confirmation", async () => {
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+      "price_pulse_base",
+    );
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await applyStripeSubscriptionUpdated(
+      makeExactLegacyPulseTrialSubscription({ status: "active" }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_exact_trial_active",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPhase: "trial",
+        currentCheckoutOffer: "pulse_trial_7d",
+        stripeSubscriptionId: "sub_123",
+      }),
+    );
+  });
+
+  it("lets an invoice-proven legacy subscription cancellation clear paid access", async () => {
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+      "price_pulse_base",
+    );
+    const paidMember = makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    });
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(paidMember);
+    mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValueOnce({
+      canonicalBillingStatus: HostedBillingStatus.canceled,
+      member: paidMember,
+    });
+
+    await applyStripeSubscriptionUpdated(
+      makeExactLegacyPulseTrialSubscription({ status: "canceled" }),
+      {
+        eventCreatedAt: new Date("2026-05-19T00:00:00.000Z"),
+        occurredAt: "2026-05-19T00:00:00.000Z",
+        sourceEventId: "evt_exact_trial_canceled_after_paid",
+        sourceType: "stripe.customer.subscription.deleted",
+      },
+      {} as never,
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canonicalBillingStatus: HostedBillingStatus.canceled,
+        currentBillingPhase: null,
+        currentCheckoutOffer: "pulse_trial_7d",
+        stripeSubscriptionId: "sub_123",
+      }),
+    );
+  });
+
   it("uses the reset trial-start metadata override on Pulse Trial subscription updates", async () => {
     mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
       billingRef: {
@@ -2611,6 +2819,43 @@ function makeStripeDispute(overrides?: Partial<{
     payment_intent: overrides?.paymentIntent ?? "pi_123",
     status: overrides?.status ?? "under_review",
   } as Stripe.Dispute;
+}
+
+function makeExactLegacyPulseTrialSubscription(input?: {
+  status?: Stripe.Subscription.Status;
+}): Stripe.Subscription {
+  return {
+    customer: "cus_123",
+    current_period_end: 1_745_020_800,
+    current_period_start: 1_744_416_000,
+    id: "sub_123",
+    items: {
+      data: [{
+        id: "si_pulse_123",
+        price: {
+          id: "price_pulse_base",
+          recurring: {
+            interval: "month",
+            interval_count: 1,
+            usage_type: "licensed",
+          },
+        },
+        quantity: 1,
+      }],
+      has_more: false,
+    },
+    metadata: {
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      trialDurationDays: "10",
+      trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      trialUsageLimitUsdMicros: "4500000",
+    },
+    status: input?.status ?? "trialing",
+    trial_end: 1_745_020_800,
+    trial_start: 1_744_416_000,
+  } as Stripe.Subscription;
 }
 
 function makeStripeSubscription(

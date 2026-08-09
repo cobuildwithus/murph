@@ -158,13 +158,7 @@ describe("user-facing message variants", () => {
     }
   });
 
-  it("asks the room to fund the group only from the delivery-time action copy", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_funding")) {
-      expect(text).toMatch(GROUP_FUNDING_ANYONE_PHRASE);
-      expect(text).toMatch(/https:\/\/www\.withmurph\.ai\/groups\/fund\/test-code$/u);
-      expect(text).not.toMatch(/trial|upgrade|Edge|Pulse|\$|paid|owner|admin/iu);
-    }
-  });
+
 
   it("keeps resetting Family allowance copy neutral about purchases", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {

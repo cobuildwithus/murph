@@ -298,7 +298,7 @@ function buildHostedBillingPlanQuoteLabel(input: {
   return `${verb} (${price}/month)`;
 }
 
-function buildHostedBillingPlanQuoteStaleError() {
+export function buildHostedBillingPlanQuoteStaleError() {
   return hostedOnboardingError({
     code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
     httpStatus: 409,

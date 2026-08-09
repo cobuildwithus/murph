@@ -508,7 +508,7 @@ for (const width of [768, 1280] as const) {
       study.locator('[data-design-state="exhausted-without-credit"] [inert]'),
     ).toHaveCount(1);
     await expect(
-      study.locator('[data-design-state="trial-conversion"] [inert]'),
+      study.locator('[data-design-state="starter-exhausted"] [inert]'),
     ).toHaveCount(1);
     await expect(activeState.locator("[inert]")).toHaveCount(1);
     await expect(activeState.getByText("Reward pending", { exact: true })).toBeVisible();
@@ -569,12 +569,14 @@ for (const width of [768, 1280] as const) {
     await page.keyboard.press("Enter");
     await expect(referralDetails).not.toHaveAttribute("open", "");
 
-    const trialConversion = study.locator(
-      '[data-design-state="trial-conversion"]',
+    const starterExhausted = study.locator(
+      '[data-design-state="starter-exhausted"]',
     );
-    await expect(trialConversion.getByText("Free trial", { exact: true })).toBeVisible();
     await expect(
-      trialConversion.locator("button").filter({ hasText: "Start Pulse plan" }),
+      starterExhausted.getByText("Starter usage exhausted", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      starterExhausted.locator("button").filter({ hasText: "Choose Pulse" }),
     ).toBeVisible();
 
     const layout = await page.evaluate(() => {

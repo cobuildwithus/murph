@@ -3492,20 +3492,67 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
-  it("accepts subscription trial_will_end without mutating entitlement state", async () => {
+  it("reconciles trial_will_end through the canonical subscription owner", async () => {
     const prisma = createStripeEventPrismaHarness();
-    const event = makeSubscriptionEvent("customer.subscription.trial_will_end");
+    const metadata = {
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      trialDurationDays: "10",
+      trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      trialUsageLimitUsdMicros: "4500000",
+    };
+    const event = makeSubscriptionEvent(
+      "customer.subscription.trial_will_end",
+      { metadata },
+    );
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata,
+      status: "trialing",
+    });
+    const preparedCryptoDomainRoots = new Map([
+      ["runtime", { domain: "runtime" }],
+    ]);
     mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(
+      canonicalSubscription,
+    );
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
+      preparedCryptoDomainRoots,
+    );
 
     await recordHostedStripeEvent({
       event,
       prisma: prisma.client,
     });
 
-    await expect(reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }))
-      .resolves.toMatchObject({ eventId: event.id, status: "completed" });
-    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
-    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalled();
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma: prisma.client,
+      userId: "member_123",
+    });
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
+      canonicalSubscription,
+      expect.objectContaining({
+        sourceEventId: event.id,
+        sourceType: "stripe.customer.subscription.trial_will_end",
+      }),
+      prisma.client,
+      expect.any(Map),
+      preparedCryptoDomainRoots,
+    );
   });
 
   it("resolves refund customer context from the live Stripe event", async () => {

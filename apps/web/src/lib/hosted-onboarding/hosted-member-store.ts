@@ -402,6 +402,7 @@ export async function readHostedMemberBillingSnapshot(input: {
 export interface HostedMemberPulseTrialBillingDecisionSnapshot {
   core: HostedMemberCoreState;
   currentBillingPhase: string | null;
+  currentTrialStartedAt: Date | null;
   pulseTrialRedeemedAt: Date | null;
   stripeSubscriptionLookupKey: string | null;
 }
@@ -424,6 +425,7 @@ export async function readHostedMemberPulseTrialBillingDecisionSnapshot(input: {
       billingRef: {
         select: {
           currentBillingPhase: true,
+          currentTrialStartedAt: true,
           pulseTrialRedeemedAt: true,
           stripeSubscriptionLookupKey: true,
         },
@@ -438,6 +440,8 @@ export async function readHostedMemberPulseTrialBillingDecisionSnapshot(input: {
     core: projectHostedMemberCoreState(memberRecord),
     currentBillingPhase:
       memberRecord.billingRef?.currentBillingPhase ?? null,
+    currentTrialStartedAt:
+      memberRecord.billingRef?.currentTrialStartedAt ?? null,
     pulseTrialRedeemedAt:
       memberRecord.billingRef?.pulseTrialRedeemedAt ?? null,
     stripeSubscriptionLookupKey:

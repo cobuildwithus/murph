@@ -113,7 +113,9 @@ export const POST = withJsonError(async (request: Request) => {
         transfer: phoneTransfer,
       }), HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS);
     traceHostedPhoneSync("source-classified", {
-      sourceKind: retirement.autoTrialBilling ? "auto-trial" : "not-started",
+      sourceKind: retirement.autoTrialBilling
+        ? "legacy-auto-trial"
+        : "non-billing-scaffold",
     });
     const deletion =
       await deleteHostedPrivyPhoneTransferSourceAccountData({

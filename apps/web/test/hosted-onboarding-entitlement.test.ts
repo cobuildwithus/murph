@@ -5,6 +5,8 @@ import {
   assertHostedMemberOwnActiveAccessAllowed,
   hasHostedMemberGeneralAccess,
   hasHostedMemberOwnActiveAccess,
+  hasHostedMemberOwnPaidBilling,
+  hasHostedPaidBillingRefEvidence,
 } from "@/src/lib/hosted-onboarding/entitlement";
 import {
   hasActiveHostedMemberAccess,
@@ -639,3 +641,75 @@ function buildRuntimeAiAccessPrisma(
     },
   };
 }
+
+
+describe("hosted paid-billing evidence", () => {
+  it("accepts an explicit paid phase", () => {
+    expect(hasHostedPaidBillingRefEvidence({
+      currentBillingPhase: "paid",
+      currentCheckoutOffer: "pulse_trial_7d",
+      stripeSubscriptionLookupKey: "subscription-key",
+    })).toBe(true);
+  });
+
+  it("keeps rolling-deploy paid subscriptions with no projected phase", () => {
+    expect(hasHostedPaidBillingRefEvidence({
+      currentBillingPhase: null,
+      currentCheckoutOffer: "standard",
+      stripeSubscriptionLookupKey: "subscription-key",
+    })).toBe(true);
+  });
+
+  it("keeps pre-offer paid subscriptions with a bound provider identity", () => {
+    expect(hasHostedPaidBillingRefEvidence({
+      currentBillingPhase: null,
+      currentCheckoutOffer: null,
+      stripeSubscriptionLookupKey: "subscription-key",
+    })).toBe(true);
+  });
+
+  it("fails closed for an unrecognized checkout offer", () => {
+    expect(hasHostedPaidBillingRefEvidence({
+      currentBillingPhase: null,
+      currentCheckoutOffer: "unexpected-offer",
+      stripeSubscriptionLookupKey: "subscription-key",
+    })).toBe(false);
+  });
+
+  it("never mistakes a retired trial identity for paid billing", () => {
+    expect(hasHostedPaidBillingRefEvidence({
+      currentBillingPhase: null,
+      currentCheckoutOffer: "pulse_trial_7d",
+      stripeSubscriptionLookupKey: "legacy-trial-key",
+    })).toBe(false);
+    expect(hasHostedPaidBillingRefEvidence({
+      currentBillingPhase: "trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      stripeSubscriptionLookupKey: "legacy-trial-key",
+    })).toBe(false);
+  });
+
+  it("requires active unsuspended product access for paid management", () => {
+    const billingRef = {
+      currentBillingPhase: "paid",
+      currentCheckoutOffer: "standard",
+      stripeSubscriptionLookupKey: "subscription-key",
+    };
+
+    expect(hasHostedMemberOwnPaidBilling({
+      billingRef,
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    })).toBe(true);
+    expect(hasHostedMemberOwnPaidBilling({
+      billingRef,
+      billingStatus: HostedBillingStatus.paused,
+      suspendedAt: null,
+    })).toBe(false);
+    expect(hasHostedMemberOwnPaidBilling({
+      billingRef,
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: new Date("2026-08-09T00:00:00.000Z"),
+    })).toBe(false);
+  });
+});

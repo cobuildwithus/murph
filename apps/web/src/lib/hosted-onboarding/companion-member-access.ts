@@ -24,7 +24,7 @@ import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
  * Native companion admission reuses the hosted Web lifecycle rather than
  * creating a second signup or entitlement owner. The first authenticated
  * request may create the canonical member and invite, but consent is checked
- * before trial activation or Junction authority is issued.
+ * before Starter enrollment or Junction authority is issued.
  */
 export async function requireHostedCompanionMemberIdFromRequest(input: {
   prisma?: PrismaClient;
@@ -103,8 +103,8 @@ export async function ensureHostedCompanionMemberId(input: {
     return completion.memberId;
   }
 
-  // Only the untouched hosted acquisition state may enter automatic trial
-  // enrollment here. Incomplete and lapsed billing retain their existing Web
+  // Only the untouched hosted acquisition state may enter Starter enrollment
+  // here. Incomplete and lapsed billing retain their existing Web
   // recovery owners instead of being reinterpreted as a native signup.
   if (completion.member.billingStatus === HostedBillingStatus.not_started) {
     await ensureHostedStarterUsageEnrollment({

@@ -538,7 +538,6 @@ export class HostedStripeBillingSandbox {
         billingPlanCode: input.plan === "edge"
           ? "launch_edge_monthly"
           : "launch_monthly",
-        checkoutOffer: "standard",
         memberId: input.memberId,
       }),
       ...this.metadata(input.scenario),

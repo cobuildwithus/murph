@@ -9,16 +9,16 @@ import {
 } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
-  appendHostedUsageCreditGrantTx,
-} from "../hosted-execution/usage-credit-grant";
-import {
   lockHostedUsageCreditBeneficiaryTx,
 } from "../hosted-execution/usage-credit-ledger";
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { HOSTED_APP_HOME_PATH } from "./app-routes";
 import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
-import { isHostedMemberSuspended } from "./entitlement";
+import {
+  hasHostedPaidBillingRefEvidence,
+  isHostedMemberSuspended,
+} from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import {
@@ -34,12 +34,13 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "./shared";
 import {
-  HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
   buildHostedStarterUsageSemanticSourceKey,
-  buildHostedStarterUsageSourceReferenceLookupKey,
-  parseHostedStarterUsageSourceReferenceLookupKey,
   type HostedStarterUsageSource,
 } from "./starter-usage";
+import {
+  ensureHostedStarterUsageGrantTx,
+  readHostedStarterUsageGrantTx,
+} from "./starter-usage-grant";
 
 export type HostedStarterUsageEnrollmentStatus =
   | "already_active"
@@ -233,6 +234,7 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
           billingRef: {
             select: {
               currentBillingPhase: true,
+              currentCheckoutOffer: true,
               stripeSubscriptionLookupKey: true,
             },
           },
@@ -248,35 +250,13 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
         });
       }
 
-      const existingGrant = await tx.hostedUsageCreditEntry.findUnique({
-        where: { semanticSourceKey },
-        select: {
-          amountUsdMicros: true,
-          beneficiaryMemberId: true,
-          effectiveAt: true,
-          grant: {
-            select: { remainingUsdMicros: true },
-          },
-          id: true,
-          kind: true,
-          parentGrantEntryId: true,
-          purchaseId: true,
-          referralId: true,
-          sourceReferenceLookupKey: true,
-        },
+      const existingGrant = await readHostedStarterUsageGrantTx({
+        memberId: invite.member.id,
+        tx,
       });
-      if (existingGrant) {
-        assertHostedStarterUsageGrantInvariant({
-          entry: existingGrant,
-          memberId: invite.member.id,
-        });
-      }
-      const hasPaidSubscription =
-        member.billingRef?.currentBillingPhase === "paid"
-        || (
-          member.billingRef?.currentBillingPhase == null
-          && Boolean(member.billingRef?.stripeSubscriptionLookupKey)
-        );
+      const hasPaidSubscription = hasHostedPaidBillingRefEvidence(
+        member.billingRef,
+      );
 
       if (
         !existingGrant
@@ -301,17 +281,13 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
           })
         : null;
 
-      if (!existingGrant && !hasPaidSubscription) {
-        await appendHostedUsageCreditGrantTx({
+      if (!hasPaidSubscription) {
+        await ensureHostedStarterUsageGrantTx({
           effectiveAt: now,
-          grantUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+          existingGrant,
           lockedBeneficiary,
-          semanticSourceKey,
-          source: {
-            kind: "starter",
-            sourceReferenceLookupKey:
-              buildHostedStarterUsageSourceReferenceLookupKey(policy.source),
-          },
+          memberId: invite.member.id,
+          source: policy.source,
           tx,
         });
       }
@@ -342,7 +318,6 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
       }
 
       const status: HostedStarterUsageEnrollmentStatus = hasPaidSubscription
-        || (member.billingStatus === HostedBillingStatus.active && !existingGrant)
         ? "already_active"
         : existingGrant
           ? "already_enrolled"
@@ -385,40 +360,6 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     deferredActivationWake,
     result: outcome.result,
   };
-}
-
-function assertHostedStarterUsageGrantInvariant(input: {
-  entry: {
-    amountUsdMicros: bigint;
-    beneficiaryMemberId: string;
-    grant: { remainingUsdMicros: bigint } | null;
-    kind: string;
-    parentGrantEntryId: string | null;
-    purchaseId: string | null;
-    referralId: string | null;
-    sourceReferenceLookupKey: string | null;
-  };
-  memberId: string;
-}): void {
-  const source = parseHostedStarterUsageSourceReferenceLookupKey(
-    input.entry.sourceReferenceLookupKey,
-  );
-  const remainingUsdMicros = input.entry.grant?.remainingUsdMicros ?? -1n;
-  const amountIsValid =
-    input.entry.amountUsdMicros === HOSTED_STARTER_USAGE_GRANT_USD_MICROS;
-  if (
-    !amountIsValid
-    || input.entry.beneficiaryMemberId !== input.memberId
-    || input.entry.kind !== "starter_grant"
-    || input.entry.parentGrantEntryId !== null
-    || input.entry.purchaseId !== null
-    || input.entry.referralId !== null
-    || source === null
-    || remainingUsdMicros < 0n
-    || remainingUsdMicros > input.entry.amountUsdMicros
-  ) {
-    throw new TypeError("Hosted starter-usage grant invariant failed.");
-  }
 }
 
 async function requireHostedLinqInstantStartAdmissionTx(input: {

@@ -1,6 +1,6 @@
 # Non-expiring starter usage
 
-Last verified: 2026-08-08
+Last verified: 2026-08-09
 Status: Implemented current-state contract
 
 ## Product contract
@@ -83,6 +83,15 @@ provider objects, but historical trial fields and offer metadata are read-only
 legacy evidence. They must never restore a time-based entitlement, create a new
 trial, extend one, or suppress starter capacity.
 
+During the bounded compatibility window, an exact legacy trial object in a
+non-paid provider state is converted through the same Starter grant owner used
+by signup and migration. The conversion reads the historical trial usage
+period, appends the canonical full grant plus the deterministic debit when
+needed, and clears the obsolete local Stripe identity. Provider states that may
+represent paid service (`active`, `past_due`, or `unpaid`) fail closed and stay
+on the ordinary invoice-backed reconciliation path. `invoice.paid` remains the
+only source that may turn legacy trial evidence into paid access.
+
 ## Existing-member migration
 
 The migration converts each eligible legacy trial account into the same
@@ -120,12 +129,29 @@ required to drain already-created provider objects.
 
 ## Deployment and rollback
 
-Deploy the additive ledger-kind/check-constraint migration and the starter
-backfill before the new Web application. New code can then create starter grants
-and stop reading trial deadlines. No Cloudflare tandem deploy is required: the
-runtime consumes the existing Web-owned access-and-usage decision.
+Use this rollout order:
 
-During the compatibility window, old Web code must not create new trial objects.
+1. deploy the additive ledger-kind/check-constraint migration and Starter
+   backfill;
+2. deploy the new Web code, then wait until every old Web deployment that could
+   create a Stripe trial is drained;
+3. let delayed Stripe events and the runtime compatibility owner convert exact
+   post-migration legacy objects through the canonical Starter grant path;
+4. run `pnpm --dir apps/web stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>`
+   in dry-run mode and review the aggregate candidate and provider-status
+   counts;
+5. apply only with the exact observed count using `--apply
+   --expected-candidates=<count>`; any potentially paid provider state aborts
+   the entire preflight before mutation;
+6. rerun the dry-run until it reports zero candidates; and
+7. after the delayed-event horizon has passed, remove the legacy offer fields,
+   wire actions, cleanup owner, and operator command together.
+
+No Cloudflare tandem deploy is required: the runtime consumes the existing
+Web-owned access-and-usage decision. The operator command requires an explicit
+Stripe mode and verifies that it matches the configured credential, defaults to
+dry-run, prevalidates every candidate before applying, and is safe to rerun.
+
 After deploy, verify:
 
 - a fresh web, companion, and direct-iMessage member receives exactly one grant;
@@ -136,6 +162,11 @@ After deploy, verify:
 - starter exhaustion produces the starter recovery copy;
 - paid checkout still activates only from accepted Stripe paid evidence; and
 - delayed legacy trial events cannot recreate or extend free access.
+
+Compatibility is removable only when all three conditions hold: old trial
+creators are gone, the operator dry-run reports zero, and the maximum delayed
+Stripe event horizon has elapsed. Analytics-only cohort names and immutable
+historical records are not runtime compatibility and may remain.
 
 Rollback Web before reverting schema assumptions. The additive ledger kind and
 historical entries may remain; reverting the migration would destroy accounting

@@ -10405,7 +10405,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
   });
 
-  it("replies with the trial-conversion notice when a paused member texts their bound home chat", async () => {
+  it("replies with the billing-inactive notice when a paused legacy member texts their bound home chat", async () => {
     const fixture = await buildPausedHostedMemberHomeRouteFixture();
     const scheduledTasks: Array<() => Promise<void>> = [];
     const prisma = asPrismaTransactionClient({
@@ -10452,7 +10452,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "sent-trial-conversion-notice",
+      reason: "sent-billing-inactive-notice",
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -10538,7 +10538,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   // HOSTED_LINQ_HOME_ROUTE_CHANGED that can never succeed, which silently drops
   // the message on every provider retry.
   it.each([
-    [HostedBillingStatus.paused, "sent-trial-conversion-notice"],
+    [HostedBillingStatus.paused, "sent-billing-inactive-notice"],
     [HostedBillingStatus.past_due, "sent-billing-inactive-notice"],
     [HostedBillingStatus.canceled, "sent-billing-inactive-notice"],
     [HostedBillingStatus.unpaid, "sent-billing-inactive-notice"],

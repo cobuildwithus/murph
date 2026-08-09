@@ -2188,8 +2188,8 @@ function countPeriodMetadataUpdateCalls(tx: { $executeRaw: ReturnType<typeof vi.
 }
 
 describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
-  const periodStart = new Date("2026-07-01T00:00:00.000Z");
-  const periodEnd = new Date("2026-08-01T00:00:00.000Z");
+  const periodStart = new Date(0);
+  const periodEnd = new Date("2099-12-31T23:59:59.999Z");
   const now = new Date("2026-07-09T12:00:00.000Z");
 
   it("creates a missing structural period for starter usage", async () => {
@@ -2562,8 +2562,8 @@ describe("resolveHostedAiUsageGate", () => {
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
       limitUsdMicros: 0n,
-      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
-      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      periodEnd: new Date("2099-12-31T23:59:59.999Z"),
+      periodStart: new Date(0),
       spentUsdMicros: 2_000_000n,
       trialEndsAt: new Date("2026-04-02T12:00:00.000Z"),
       trialStartedAt: new Date("2026-03-19T12:00:00.000Z"),
@@ -2580,8 +2580,8 @@ describe("resolveHostedAiUsageGate", () => {
       allowanceSource: "direct_starter",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 0n,
-      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
-      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      periodEnd: new Date("2099-12-31T23:59:59.999Z"),
+      periodStart: new Date(0),
       remainingUsdMicros: 2_500_000n,
       usageCreditBalanceUsdMicros: 2_500_000n,
       usageCreditLedgerVersion: 2n,
@@ -2593,8 +2593,8 @@ describe("resolveHostedAiUsageGate", () => {
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
       limitUsdMicros: 0n,
-      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
-      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      periodEnd: new Date("2099-12-31T23:59:59.999Z"),
+      periodStart: new Date(0),
       spentUsdMicros: 4_500_000n,
       trialEndsAt: new Date("2026-04-02T12:00:00.000Z"),
       trialStartedAt: new Date("2026-03-19T12:00:00.000Z"),
@@ -3970,8 +3970,8 @@ describe("readHostedAiUsageGate", () => {
       _max: { occurredAt: null },
       _sum: { allowanceCostUsdMicros: 0n },
     }));
-    const periodStart = new Date("2026-04-01T00:00:00.000Z");
-    const periodEnd = new Date("2026-05-01T00:00:00.000Z");
+    const periodStart = new Date(0);
+    const periodEnd = new Date("2099-12-31T23:59:59.999Z");
     const prisma = createGatePrisma({
       aggregate,
       findUniquePeriod: {
@@ -3985,6 +3985,7 @@ describe("readHostedAiUsageGate", () => {
       periodEnd,
       periodStart,
       spentUsdMicros: 0n,
+      stripeSubscriptionLookupKey: null,
       usageCreditBalanceUsdMicros: 2_800_000n,
       usageCreditLedgerVersion: 2n,
     });
@@ -4325,6 +4326,7 @@ function createAllowanceTx(input: {
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   spentUsdMicros?: bigint;
+  stripeSubscriptionLookupKey?: string | null;
   threadContainerLimitUsdMicros?: bigint | null;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
@@ -4457,6 +4459,10 @@ function createAllowanceTx(input: {
           currentCheckoutOffer: input.checkoutOffer ?? null,
           currentPeriodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
           currentPeriodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+          stripeSubscriptionLookupKey:
+            input.stripeSubscriptionLookupKey === undefined
+              ? "subscription-lookup"
+              : input.stripeSubscriptionLookupKey,
           currentTrialEndsAt: input.trialEndsAt ?? null,
           currentTrialStartedAt: input.trialStartedAt ?? null,
           pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
@@ -4538,6 +4544,7 @@ function createGatePrisma(input: {
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
   spentUsdMicros: bigint;
+  stripeSubscriptionLookupKey?: string | null;
   threadContainerLimitUsdMicros?: bigint | null;
   threadContainerOwnerBillingStatus?: HostedBillingStatus;
   threadContainerOwnerFamilySponsored?: boolean;
@@ -4698,6 +4705,10 @@ function createGatePrisma(input: {
           currentCheckoutOffer: input.checkoutOffer ?? null,
           currentPeriodEnd: periodEnd,
           currentPeriodStart: periodStart,
+          stripeSubscriptionLookupKey:
+            input.stripeSubscriptionLookupKey === undefined
+              ? "subscription-lookup"
+              : input.stripeSubscriptionLookupKey,
           currentTrialEndsAt: input.trialEndsAt ?? null,
           currentTrialStartedAt: input.trialStartedAt ?? null,
           pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,

@@ -61,4 +61,32 @@ describe("non-expiring starter usage migration", () => {
       'billing_ref."current_billing_phase" IS DISTINCT FROM \'paid\'',
     );
   });
+
+  it("fails closed on malformed historical usage instead of overgranting capacity", () => {
+    expect(migrationSql).toContain(
+      'COALESCE(period."limit_usd_micros" < 0, FALSE)',
+    );
+    expect(migrationSql).toContain(
+      'COALESCE(period."spent_usd_micros" < 0, FALSE)',
+    );
+    expect(migrationSql).toContain(
+      'Cannot migrate Starter usage while a legacy trial usage period is malformed.',
+    );
+  });
+
+  it("reconciles only the usage period active at the Starter effective time", () => {
+    expect(migrationSql).toContain(
+      'period."period_start" <= migration."effective_at"',
+    );
+    expect(migrationSql).toContain(
+      'period."period_end" > migration."effective_at"',
+    );
+  });
+
+  it("serializes only eligible member rows instead of locking whole tables", () => {
+    expect(migrationSql).not.toMatch(/LOCK\s+TABLE/iu);
+    expect(migrationSql).toContain(
+      'ORDER BY member."id"\nFOR UPDATE OF member, billing_ref',
+    );
+  });
 });

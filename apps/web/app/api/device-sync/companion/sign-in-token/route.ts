@@ -15,7 +15,7 @@ import { getPrisma } from "@/src/lib/prisma";
 // verified through the existing server-side Privy verification path; there is
 // no cookie fallback, so this route carries no browser ambient authority (and
 // therefore no CSRF surface). New identities enter the same hosted member,
-// consent, trial, and activation owners as Web before Junction authority is
+// consent, Starter enrollment, and activation owners as Web before Junction authority is
 // issued. The token is returned exactly once and must never be logged or
 // persisted; do not add logging of the session result to this route.
 export const POST = withJsonError(async (request: Request) => {

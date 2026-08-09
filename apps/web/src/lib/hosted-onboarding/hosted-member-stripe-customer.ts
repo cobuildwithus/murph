@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
@@ -8,8 +9,8 @@ import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
-import { createHostedPulseTrialStripeCustomer } from "./pulse-trial-customer";
 import { requireHostedStripeApiMode } from "./runtime";
+import { withHostedStripeFailureLog } from "./stripe-error-log";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -52,7 +53,7 @@ export async function ensureHostedMemberStripeCustomer(input: {
       prisma: tx,
     });
     const candidateStripeCustomerId = current?.stripeCustomerId
-      ?? await createHostedPulseTrialStripeCustomer({
+      ?? await createHostedMemberStripeCustomer({
         memberId: input.memberId,
         requestOptions: {
           maxNetworkRetries: 0,
@@ -77,6 +78,46 @@ export async function ensureHostedMemberStripeCustomer(input: {
     }
     return billingRef.stripeCustomerId;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+
+type HostedMemberStripeCustomerRequestOptions = Pick<
+  Stripe.RequestOptions,
+  "maxNetworkRetries" | "timeout"
+>;
+
+/**
+ * Creates the reusable member-scoped Stripe Customer. The legacy idempotency
+ * key and request metadata are intentionally preserved so a rolling-deploy
+ * retry cannot create a second Customer after an earlier provider success.
+ * They no longer imply or create a trial.
+ */
+async function createHostedMemberStripeCustomer(input: {
+  memberId: string;
+  requestOptions?: HostedMemberStripeCustomerRequestOptions;
+  stripe: Stripe;
+}): Promise<string> {
+  const requestOptions: Stripe.RequestOptions = {
+    idempotencyKey: `hosted-auto-pulse-trial-customer:${input.memberId}`,
+  };
+  if (input.requestOptions?.maxNetworkRetries !== undefined) {
+    requestOptions.maxNetworkRetries = input.requestOptions.maxNetworkRetries;
+  }
+  if (input.requestOptions?.timeout !== undefined) {
+    requestOptions.timeout = input.requestOptions.timeout;
+  }
+
+  const customer = await withHostedStripeFailureLog(
+    "customers.create.member",
+    () => input.stripe.customers.create({
+      metadata: {
+        memberId: input.memberId,
+        source: "hosted.auto_pulse_trial",
+      },
+    }, requestOptions),
+  );
+
+  return customer.id;
 }
 
 function buildHostedUsageCreditPayerNotEligibleError() {

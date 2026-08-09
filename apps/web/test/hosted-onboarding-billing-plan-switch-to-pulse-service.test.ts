@@ -869,27 +869,6 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
   });
 
-  test("does not reinterpret a stale trial-end choice as a paid downgrade", async () => {
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-      currentBillingPhase: "paid",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
-
-    await expect(scheduleHostedBillingPlanSwitch({
-      memberId: "member_123",
-      requiredSourceBillingPhase: "trial",
-      targetPlanCode: "launch_group_monthly",
-    })).rejects.toMatchObject({
-      code: "HOSTED_BILLING_PLAN_SWITCH_SOURCE_CHANGED",
-      httpStatus: 409,
-    });
-
-    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
-  });
 });
 
 describe("hosted Pulse switch schedule pending-field helpers", () => {

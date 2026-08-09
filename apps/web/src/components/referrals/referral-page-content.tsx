@@ -133,7 +133,7 @@ function buildFaqs(input: {
   }
   faqs.push({
     answer:
-      "Yes. Rolling limits and eligibility checks prevent abuse, and available rewards can change. Murph shows the options available right now. Rewards add usage capacity but do not extend a trial end date.",
+      "Yes. Rolling limits and eligibility checks prevent abuse, and available rewards can change. Murph shows the options available right now. Rewards add usage capacity but do not change your subscription renewal date.",
     question: "Are there limits?",
   });
 

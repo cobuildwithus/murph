@@ -1,3 +1,5 @@
+import { HostedBillingStatus } from "@prisma/client";
+
 export const HOSTED_STARTER_USAGE_GRANT_USD_MICROS = 4_500_000n;
 export const HOSTED_STARTER_USAGE_POLICY_VERSION =
   "starter-usage-2026-08-07-v1" as const;
@@ -11,6 +13,40 @@ export const HOSTED_STARTER_USAGE_SOURCES = [
 
 export type HostedStarterUsageSource =
   (typeof HOSTED_STARTER_USAGE_SOURCES)[number];
+
+export function canGrantHostedStarterUsageForLegacyTrial(input: {
+  billingStatus: HostedBillingStatus;
+  suspendedAt: Date | null;
+}): boolean {
+  if (input.suspendedAt) {
+    return false;
+  }
+  return input.billingStatus === HostedBillingStatus.not_started
+    || input.billingStatus === HostedBillingStatus.incomplete
+    || input.billingStatus === HostedBillingStatus.active
+    || input.billingStatus === HostedBillingStatus.paused;
+}
+
+const HOSTED_STARTER_USAGE_PERIOD_START_MS = 0;
+const HOSTED_STARTER_USAGE_PERIOD_END_MS = Date.parse(
+  "2099-12-31T23:59:59.999Z",
+);
+
+/**
+ * Stable persistence window for non-expiring Starter capacity. This is an
+ * internal storage/retry sentinel, not an entitlement deadline: access remains
+ * governed only by the credit ledger and can be extended by changing this
+ * projection without mutating grant history.
+ */
+export function buildHostedStarterUsageLifetimePeriod(): {
+  periodEnd: Date;
+  periodStart: Date;
+} {
+  return {
+    periodEnd: new Date(HOSTED_STARTER_USAGE_PERIOD_END_MS),
+    periodStart: new Date(HOSTED_STARTER_USAGE_PERIOD_START_MS),
+  };
+}
 
 const HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX =
   "hosted-starter-usage";

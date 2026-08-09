@@ -81,18 +81,11 @@ COMMIT;
 -- starter grant. Historical trial consumption is represented by a deterministic
 -- debit against that grant, while the mutable projections retain only the
 -- unused amount. Explicitly canceled/unpaid accounts and paid conversions are
--- not reactivated. The table locks serialize this one-time projection with
--- ordinary ledger writers while keeping reads available.
+-- not reactivated. Eligible member rows are locked in a deterministic order,
+-- matching the ordinary ledger writer's beneficiary-row lock without taking a
+-- table-wide lock that could stall unrelated members.
 BEGIN;
 SET LOCAL lock_timeout = '10s';
-
-LOCK TABLE
-  "hosted_member",
-  "hosted_member_billing_ref",
-  "hosted_ai_usage_period",
-  "hosted_usage_credit_entry",
-  "hosted_usage_credit_grant"
-IN SHARE ROW EXCLUSIVE MODE;
 
 CREATE TEMP TABLE "hosted_starter_usage_migration" ON COMMIT DROP AS
 SELECT
@@ -136,7 +129,10 @@ SELECT
   'hosted-starter-usage:' || member."id"
     || ':starter-usage-2026-08-07-v1' AS "grant_semantic_source_key",
   'starter-usage-migration:' || member."id"
-    || ':starter-usage-2026-08-07-v1' AS "debit_source_usage_id"
+    || ':starter-usage-2026-08-07-v1' AS "debit_source_usage_id",
+  COALESCE(period."limit_usd_micros" < 0, FALSE)
+    OR COALESCE(period."spent_usd_micros" < 0, FALSE)
+    AS "usage_period_malformed"
 FROM "hosted_member" AS member
 INNER JOIN "hosted_member_billing_ref" AS billing_ref
   ON billing_ref."member_id" = member."id"
@@ -157,7 +153,22 @@ WHERE member."suspended_at" IS NULL
     WHERE existing."semantic_source_key" =
       'hosted-starter-usage:' || member."id"
         || ':starter-usage-2026-08-07-v1'
-  );
+  )
+ORDER BY member."id"
+FOR UPDATE OF member, billing_ref;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM "hosted_starter_usage_migration"
+    WHERE "usage_period_malformed"
+  ) THEN
+    RAISE EXCEPTION
+      'Cannot migrate Starter usage while a legacy trial usage period is malformed.';
+  END IF;
+END
+$$;
 
 INSERT INTO "hosted_usage_credit_entry" (
   "id",
@@ -257,6 +268,8 @@ SET
   "updated_at" = CURRENT_TIMESTAMP
 FROM "hosted_starter_usage_migration" AS migration
 WHERE period."member_id" = migration."member_id"
+  AND period."period_start" <= migration."effective_at"
+  AND period."period_end" > migration."effective_at"
   AND migration."existing_balance_usd_micros"
     + migration."remaining_usd_micros" > 0;
 

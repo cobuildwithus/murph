@@ -1,6 +1,6 @@
 ---
 name: hosted-low-usage
-description: Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, Core, paid plan, Family-sponsored Murph, or hosted group conversation going.
+description: Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep Starter, Core, a paid plan, Family-sponsored Murph, or a hosted group conversation going.
 ---
 
 # Hosted low usage
@@ -26,8 +26,9 @@ top-up. Do not divide or extrapolate from remaining percentage, dollars,
 cost-weighted credit, forecasts, model choice, or prior turns.
 
 Usage cost varies by model, task, tools, media, and response length. Answer with
-only the authoritative fields allowed below: remaining percentage, reset or
-trial-end date, or days forecast. A product-owned approximate message label for
+only the authoritative fields allowed below: remaining percentage, an
+applicable monthly reset date, or days forecast. Starter usage has no expiry
+date. A product-owned approximate message label for
 a specific top-up is scoped only to that offer; never reuse it to estimate the
 current balance. Never say or imply "you have X messages left," give a range of
 messages left, or claim that each message uses a fixed percentage.
@@ -96,7 +97,7 @@ change happened.
   check, not a watcher. Use its access kind, plan, period end, and
   `recommendedAction` to choose the scenario; reserve percentages and forecast
   for an explicit numerical usage follow-up. Treat `availablePlans` as the
-  trial browsing list, not a complete paid-plan catalog. When browsing or
+  available-plan browsing list, not a complete paid-plan catalog. When browsing or
   recommending, mention only plans present there. When a paid member names an
   exact target, call `murph.plan_usage` with that target and discuss it only
   when the read returns a matching signed quote. Core is the member-facing name
@@ -475,7 +476,7 @@ less AI usage." Never switch it automatically.
   Never send it in the first assistant-initiated heads-up. The deterministic
   Web-owned exhaustion notice may include its own current first-party recovery
   link; do not repeat that link in model-composed copy unless someone asks.
-- Billing and trial details belong only in the member's private Murph thread.
+- Billing and plan details belong only in the member's private Murph thread.
   Never disclose them in a group or fall back to a group route.
 - Sell continuity with confidence and charm. Match the room's energy: a quiet
   chat gets a light nudge and a rowdy one can get the full bit. Describe the

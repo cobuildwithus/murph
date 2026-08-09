@@ -8,7 +8,6 @@ import { parseHostedRuntimeSubscriptionToolRequest } from "@murphai/hosted-execu
 import {
   assertHostedBillingPlanSelectable,
   hasConfirmedHostedGroupMembership,
-  resolveHostedTrialContinuationOffer,
   resolveVisibleHostedBillingPlanCodes,
 } from "@/src/lib/hosted-onboarding/billing-plan-eligibility";
 import {
@@ -83,7 +82,7 @@ describe("hosted Core plan policy", () => {
       stripeSubscriptionId: "sub_trial",
       suspendedAt: null,
       targetPlanCode: "launch_group_monthly",
-    })).toBe(true);
+    })).toBe(false);
   });
 
   it("shows Core only for eligible, current, or scheduled members", () => {
@@ -111,23 +110,6 @@ describe("hosted Core plan policy", () => {
       hasConfirmedGroupMembership: false,
       scheduledPlanCode: "launch_group_monthly",
     })[0]).toBe("launch_group_monthly");
-  });
-
-  it("recommends Core only when configured and eligible", () => {
-    expect(resolveHostedTrialContinuationOffer({
-      groupPlanConfigured: true,
-      hasConfirmedGroupMembership: true,
-    })).toEqual({
-      availablePlanCodes: ["launch_group_monthly", "launch_monthly"],
-      recommendedPlanCode: "launch_group_monthly",
-    });
-    expect(resolveHostedTrialContinuationOffer({
-      groupPlanConfigured: true,
-      hasConfirmedGroupMembership: false,
-    })).toEqual({
-      availablePlanCodes: ["launch_monthly"],
-      recommendedPlanCode: "launch_monthly",
-    });
   });
 
   it("uses confirmed canonical membership as the authorization source", async () => {

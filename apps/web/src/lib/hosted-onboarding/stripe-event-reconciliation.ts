@@ -88,6 +88,9 @@ import {
 } from "./stripe-error-log";
 import { scheduleHostedStripeReconciliationFailureAlert } from "./stripe-alert-email";
 import { HostedStripeCheckoutLoserCleanupPendingError } from "./stripe-checkout-loser-cleanup";
+import {
+  isHostedLegacyPulseTrialRetirableStatus,
+} from "./pulse-trial-subscription-cleanup";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -422,16 +425,18 @@ async function processHostedStripeEventRecord(
     case "customer.subscription.deleted":
     case "customer.subscription.paused":
     case "customer.subscription.resumed":
+    case "customer.subscription.trial_will_end":
       return mapHostedStripeSubscriptionUpdateOutcome(
         await applyStripeSubscriptionUpdated(
           requireHostedStripeCanonicalSubscription(processingContext, event.type),
           dispatchContext,
           prisma,
           processingContext.preparedFamilyCryptoDomainRoots,
+          processingContext.preparedCryptoDomainRoots.size > 0
+            ? processingContext.preparedCryptoDomainRoots
+            : undefined,
         ),
       );
-    case "customer.subscription.trial_will_end":
-      return buildEmptyHostedStripeEventProcessingResult();
     case "subscription_schedule.updated":
       await refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx({
         schedule: payload as Stripe.SubscriptionSchedule,
@@ -738,16 +743,13 @@ function isHostedStripeSubscriptionBillingEvent(type: string): boolean {
     || type === "customer.subscription.updated"
     || type === "customer.subscription.deleted"
     || type === "customer.subscription.paused"
-    || type === "customer.subscription.resumed";
+    || type === "customer.subscription.resumed"
+    || type === "customer.subscription.trial_will_end";
 }
 
 async function resolveHostedStripeEventCanonicalSubscription(
   event: Stripe.Event,
 ): Promise<Stripe.Subscription | null> {
-  if (event.type === "customer.subscription.trial_will_end") {
-    return null;
-  }
-
   if (event.type.startsWith("customer.subscription.")) {
     const subscription = event.data.object as Stripe.Subscription;
     return withHostedStripeFailureLog(
@@ -1363,16 +1365,25 @@ async function processHostedStripeEventWithVerifiedMemberLockCore(
 
 function hostedStripeEventMayActivateDirectMember(
   stripeEvent: Stripe.Event,
+  canonicalSubscription: Stripe.Subscription | null,
 ): boolean {
   if (stripeEvent.type === "invoice.paid") {
     return true;
   }
-  if (stripeEvent.type !== "checkout.session.completed") {
-    return false;
+  if (stripeEvent.type === "checkout.session.completed") {
+    const session = stripeEvent.data.object as Stripe.Checkout.Session;
+    return parseHostedBillingCheckoutOffer(session.metadata?.checkoutOffer)
+      === HOSTED_PULSE_TRIAL_OFFER;
   }
-  const session = stripeEvent.data.object as Stripe.Checkout.Session;
-  return parseHostedBillingCheckoutOffer(session.metadata?.checkoutOffer)
-    === HOSTED_PULSE_TRIAL_OFFER;
+  if (stripeEvent.type.startsWith("customer.subscription.")) {
+    const subscription = canonicalSubscription
+      ?? (stripeEvent.data.object as Stripe.Subscription);
+    return parseHostedBillingCheckoutOffer(
+      subscription.metadata?.checkoutOffer,
+    ) === HOSTED_PULSE_TRIAL_OFFER
+      && isHostedLegacyPulseTrialRetirableStatus(subscription.status);
+  }
+  return false;
 }
 
 function hostedStripeEventNeedsPreflightProcessingContext(
@@ -1395,7 +1406,10 @@ async function prepareHostedStripeEventCryptoDomainRoots(input: {
 }): Promise<PreparedHostedCryptoDomainRootCandidates> {
   if (
     input.canonicalSubscription?.metadata.kind === HOSTED_FAMILY_STRIPE_METADATA_KIND
-    || !hostedStripeEventMayActivateDirectMember(input.stripeEvent)
+    || !hostedStripeEventMayActivateDirectMember(
+      input.stripeEvent,
+      input.canonicalSubscription,
+    )
   ) {
     return new Map();
   }

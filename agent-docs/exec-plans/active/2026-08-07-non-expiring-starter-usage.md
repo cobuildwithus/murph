@@ -2,7 +2,7 @@
 
 Status: active — draft PR candidate ready; exact-head CI and review pending
 Created: 2026-08-07
-Updated: 2026-08-08
+Updated: 2026-08-09
 
 ## Goal
 
@@ -68,7 +68,9 @@ Updated: 2026-08-08
    exact exhausted, partial, untouched, expired, and already-paid cases.
 4. Risk: older deployed code or delayed Stripe events could expect trial fields.
    Mitigation: retain only the minimum legacy read compatibility for one rollout
-   window, ignore it for entitlement, and document the contract-drop condition.
+   window, route exact non-paid legacy objects through the canonical Starter
+   grant owner, fail closed on potentially paid provider states, and document
+   the contract-drop condition.
 5. Risk: broad deletion could remove unrelated research uses of “trial.”
    Mitigation: scope changes to hosted billing/onboarding/usage surfaces and use
    path-focused searches plus tests.
@@ -99,6 +101,11 @@ Updated: 2026-08-08
   window only if old webhooks still require them; runtime entitlement must not
   consult them.
 - Historical completed trial plans remain untouched as immutable snapshots.
+- A compatibility object is removable only after old trial creators are drained,
+  the explicit-mode operator dry-run reports zero candidates, and the delayed
+  Stripe event horizon has passed.
+- Internal analytics cohort names may remain historical; they do not authorize
+  access or create a second product state.
 
 ## Verification
 
@@ -112,3 +119,17 @@ Updated: 2026-08-08
   ReviewGPT, and exact-head CI remain pending on the draft PR because this
   checkout has no installed workspace dependencies and cannot reach the
   package registry.
+
+## Rollout checklist
+
+1. Apply the additive Starter ledger migrations and backfill.
+2. Deploy Web and drain every old deployment capable of creating a trial.
+3. Confirm delayed events convert only exact non-paid legacy objects and that
+   `invoice.paid` remains the sole paid authority.
+4. Run `stripe:retire-legacy-pulse-trials` in dry-run mode with explicit test/live
+   selection; inspect aggregate status counts.
+5. Apply with the exact dry-run candidate count. A potentially paid candidate
+   aborts preflight before any mutation.
+6. Rerun dry-run to zero, then wait through the delayed-event horizon before
+   deleting the remaining compatibility fields, wire actions, cleanup owner,
+   command, and tests together.

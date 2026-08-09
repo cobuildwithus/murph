@@ -24,6 +24,7 @@ import {
   type HostedBillingPlanSwitchResult,
 } from "../hosted-onboarding/billing-plan-switch-to-pulse-service";
 import {
+  buildHostedBillingPlanQuoteStaleError,
   buildHostedBillingPlanQuoteState,
   verifyHostedBillingPlanQuote,
   type HostedBillingPlanQuoteTiming,
@@ -252,14 +253,19 @@ function projectQuotedPlanChangeResult(input: {
   }
 }
 
-async function startHostedPlanCheckoutFromConversation(input: {
-  action: Extract<
-    HostedRuntimeSubscriptionAction,
-    "change_plan" | "continue_pulse" | "start_pulse_now"
-  >;
-  memberId: string;
-  targetPlanCode: HostedRuntimeDirectBillingPlanCode;
-}): Promise<HostedRuntimeSubscriptionToolResponse> {
+async function startHostedPlanCheckoutFromConversation(
+  input:
+    | {
+      action: "change_plan";
+      memberId: string;
+      targetPlanCode: HostedRuntimeDirectBillingPlanCode;
+    }
+    | {
+      action: "continue_pulse" | "start_pulse_now";
+      memberId: string;
+      targetPlanCode: "launch_monthly";
+    },
+): Promise<HostedRuntimeSubscriptionToolResponse> {
   const prisma = getPrisma();
   const member = await readHostedMemberCoreState({
     memberId: input.memberId,
@@ -282,7 +288,33 @@ async function startHostedPlanCheckoutFromConversation(input: {
     },
     prisma,
   });
-  const plan = projectHostedSubscriptionPlan(input.targetPlanCode);
+
+  if (input.action === "change_plan") {
+    const plan = projectHostedSubscriptionPlan(input.targetPlanCode);
+    if (checkout.alreadyActive) {
+      return {
+        action: input.action,
+        plan,
+        status: "no_action_required",
+      };
+    }
+    if (!checkout.url) {
+      throw new TypeError(
+        "Hosted billing checkout did not return a payment URL.",
+      );
+    }
+    return {
+      action: input.action,
+      paymentUrl: checkout.url,
+      plan,
+      status: "payment_required",
+    };
+  }
+
+  // These two action names are a rolling-deploy compatibility seam for an
+  // older runner schema. Both now mean ordinary Pulse checkout; they do not
+  // create, extend, or continue a timed trial.
+  const plan = projectHostedSubscriptionPlan("launch_monthly");
   if (checkout.alreadyActive) {
     return {
       action: input.action,
@@ -291,7 +323,9 @@ async function startHostedPlanCheckoutFromConversation(input: {
     };
   }
   if (!checkout.url) {
-    throw new TypeError("Hosted billing checkout did not return a payment URL.");
+    throw new TypeError(
+      "Hosted billing checkout did not return a payment URL.",
+    );
   }
   return {
     action: input.action,

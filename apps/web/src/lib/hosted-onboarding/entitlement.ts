@@ -1,5 +1,6 @@
 import { HostedBillingStatus } from "@prisma/client";
 
+import { HOSTED_STANDARD_CHECKOUT_OFFER } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 
 /**
@@ -12,11 +13,14 @@ export type HostedOwnAccessInput = {
   suspendedAt?: Date | null;
 };
 
+export type HostedPaidBillingRefEvidenceInput = {
+  currentBillingPhase?: unknown;
+  currentCheckoutOffer?: unknown;
+  stripeSubscriptionLookupKey?: string | null;
+};
+
 export type HostedOwnPaidBillingInput = HostedOwnAccessInput & {
-  billingRef?: {
-    currentBillingPhase?: unknown;
-    stripeSubscriptionLookupKey?: string | null;
-  } | null;
+  billingRef?: HostedPaidBillingRefEvidenceInput | null;
 };
 
 export function hasHostedMemberOwnActiveAccess(
@@ -29,22 +33,34 @@ export function hasHostedMemberOwnActiveAccess(
 /**
  * Paid-only predicate for plan management and subscription recovery. New
  * starter members intentionally have active product access without a Stripe
- * subscription. A bound legacy subscription with no phase remains paid for
- * rolling compatibility; an explicit non-paid phase never does.
+ * subscription. A bound rolling-deploy subscription with no phase remains
+ * paid only when it is not explicitly the retired Pulse-trial offer. An
+ * explicit non-paid phase never does.
  */
+export function hasHostedPaidBillingRefEvidence(
+  billingRef: HostedPaidBillingRefEvidenceInput | null | undefined,
+): boolean {
+  if (billingRef?.currentBillingPhase === "paid") {
+    return true;
+  }
+  const checkoutOffer = billingRef?.currentCheckoutOffer;
+  return (
+    (billingRef?.currentBillingPhase === null
+      || billingRef?.currentBillingPhase === undefined)
+    && Boolean(billingRef?.stripeSubscriptionLookupKey)
+    && (
+      checkoutOffer === null
+      || checkoutOffer === undefined
+      || checkoutOffer === HOSTED_STANDARD_CHECKOUT_OFFER
+    )
+  );
+}
+
 export function hasHostedMemberOwnPaidBilling(
   input: HostedOwnPaidBillingInput,
 ): boolean {
-  if (!hasHostedMemberOwnActiveAccess(input)) {
-    return false;
-  }
-
-  const phase = input.billingRef?.currentBillingPhase;
-  if (phase === "paid") {
-    return true;
-  }
-  return (phase === null || phase === undefined)
-    && Boolean(input.billingRef?.stripeSubscriptionLookupKey);
+  return hasHostedMemberOwnActiveAccess(input)
+    && hasHostedPaidBillingRefEvidence(input.billingRef);
 }
 
 /**

@@ -161,6 +161,7 @@ describe("hosted onboarding stripe billing lookup", () => {
       ...core,
       billingRef: {
         currentBillingPhase: null,
+        currentTrialStartedAt: new Date("2025-04-10T00:00:00.000Z"),
         pulseTrialRedeemedAt: new Date("2025-04-11T00:00:00.000Z"),
         stripeSubscriptionLookupKey: "subscription-lookup",
       },
@@ -176,6 +177,7 @@ describe("hosted onboarding stripe billing lookup", () => {
     ).resolves.toEqual({
       core,
       currentBillingPhase: null,
+      currentTrialStartedAt: new Date("2025-04-10T00:00:00.000Z"),
       pulseTrialRedeemedAt: new Date("2025-04-11T00:00:00.000Z"),
       stripeSubscriptionLookupKey: "subscription-lookup",
     });
@@ -193,6 +195,7 @@ describe("hosted onboarding stripe billing lookup", () => {
         billingRef: {
           select: {
             currentBillingPhase: true,
+            currentTrialStartedAt: true,
             pulseTrialRedeemedAt: true,
             stripeSubscriptionLookupKey: true,
           },

@@ -344,6 +344,7 @@ export interface HostedInviteBillingCheckoutSnapshot {
     id: string;
     billingRef: {
       currentBillingPhase: string | null;
+      currentCheckoutOffer: string | null;
       stripeSubscriptionLookupKey: string | null;
     } | null;
     identity: {
@@ -374,6 +375,7 @@ export async function requireHostedInviteForBillingCheckout(
           billingRef: {
             select: {
               currentBillingPhase: true,
+              currentCheckoutOffer: true,
               stripeSubscriptionLookupKey: true,
             },
           },

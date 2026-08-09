@@ -706,10 +706,11 @@ describe("hosted orchestration reconciliation facts", () => {
 
   it("retries the current capacity-epoch Linq usage-limit notice from the denied gate", async () => {
     const deniedDecision = buildUsageLimitExceededGateDecision();
-    mocks.projectHostedAiUsageLimitNoticeForDelivery.mockImplementation(
-      async (input: { message: string }) =>
-        `${input.message}\n\nAdd usage: ` +
-        "https://www.withmurph.ai/settings?addUsage=true#subscription",
+    const linkedNotice =
+      `${deniedDecision.userNotice.message}\n\nAdd usage: ` +
+      "https://www.withmurph.ai/settings?addUsage=true#subscription";
+    mocks.projectHostedAiUsageLimitNoticeForDelivery.mockResolvedValue(
+      linkedNotice,
     );
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   bindHostedMemberStripeCustomerIdIfMissingTx: vi.fn(),
-  createHostedPulseTrialStripeCustomer: vi.fn(),
+  createStripeCustomer: vi.fn(),
   getPrisma: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
@@ -17,9 +17,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/pulse-trial-customer", () => ({
-  createHostedPulseTrialStripeCustomer:
-    mocks.createHostedPulseTrialStripeCustomer,
+vi.mock("@/src/lib/hosted-onboarding/stripe-error-log", () => ({
+  withHostedStripeFailureLog: vi.fn(async (
+    _operation: string,
+    run: () => Promise<unknown>,
+  ) => run()),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -40,8 +42,10 @@ import { ensureHostedMemberStripeCustomer } from "@/src/lib/hosted-onboarding/ho
 describe("ensureHostedMemberStripeCustomer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedStripeApiMode.mockReturnValue({ stripe: "stripe-client" });
-    mocks.createHostedPulseTrialStripeCustomer.mockResolvedValue("cus_candidate");
+    mocks.requireHostedStripeApiMode.mockReturnValue({
+      stripe: { customers: { create: mocks.createStripeCustomer } },
+    });
+    mocks.createStripeCustomer.mockResolvedValue({ id: "cus_candidate" });
   });
 
   it("reuses an existing member customer without provider or transaction work", async () => {
@@ -55,7 +59,7 @@ describe("ensureHostedMemberStripeCustomer", () => {
       prisma: prisma as never,
     })).resolves.toBe("cus_existing");
 
-    expect(mocks.createHostedPulseTrialStripeCustomer).not.toHaveBeenCalled();
+    expect(mocks.createStripeCustomer).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -73,14 +77,19 @@ describe("ensureHostedMemberStripeCustomer", () => {
       prisma: prisma as never,
     })).resolves.toBe("cus_candidate");
 
-    expect(mocks.createHostedPulseTrialStripeCustomer).toHaveBeenCalledWith({
-      memberId: "member_payer",
-      requestOptions: {
+    expect(mocks.createStripeCustomer).toHaveBeenCalledWith(
+      {
+        metadata: {
+          memberId: "member_payer",
+          source: "hosted.auto_pulse_trial",
+        },
+      },
+      {
+        idempotencyKey: "hosted-auto-pulse-trial-customer:member_payer",
         maxNetworkRetries: 0,
         timeout: 5_000,
       },
-      stripe: "stripe-client",
-    });
+    );
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(
       prisma.tx,
       "member_payer",

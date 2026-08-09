@@ -36,10 +36,15 @@ import {
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
   isHostedBillingPlanImmediateUpgrade,
   parseHostedBillingPlanCode,
-  parseHostedBillingPhase,
   parseHostedPlanCode,
   type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
+import {
+  hasHostedPaidBillingRefEvidence,
+} from "../hosted-onboarding/entitlement";
+import {
+  buildHostedStarterUsageLifetimePeriod,
+} from "../hosted-onboarding/starter-usage";
 import {
   HOSTED_FAMILY_BILLING_PLAN_CODE,
   readHostedFamilyAccessForMember,
@@ -55,7 +60,6 @@ import {
 } from "../hosted-groups/group-sponsorship-authorization";
 import {
   classifyHostedGroupUsageCapacity,
-  type HostedGroupUsageCapacityState,
 } from "../hosted-groups/group-usage-capacity";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
@@ -260,7 +264,7 @@ type HostedAiUsageAllowancePeriodResolution =
   | ({
     kind: "period";
     allowanceSource: HostedAiUsageAllowanceSourceKind;
-    source: "billing" | "calendar";
+    source: "billing" | "calendar" | "starter";
   } & Omit<
     HostedAiUsageAllowancePeriod,
     | "blockedAt"
@@ -286,6 +290,7 @@ interface HostedAiUsageAllowanceBillingRef {
   allowanceSource?: "family_sponsored_plan" | null;
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
+  currentCheckoutOffer?: string | null;
   currentPeriodEnd: Date | null;
   currentPeriodStart: Date | null;
   stripeSubscriptionLookupKey?: string | null;
@@ -403,12 +408,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
 function isHostedAiUsagePaidBillingRef(
   billingRef: HostedAiUsageAllowanceBillingRef | null,
 ): boolean {
-  const phase = parseHostedBillingPhase(billingRef?.currentBillingPhase);
-  return phase === "paid"
-    || (
-      phase === null
-      && Boolean(billingRef?.stripeSubscriptionLookupKey)
-    );
+  return hasHostedPaidBillingRefEvidence(billingRef);
 }
 
 interface HostedAiUsageAllowanceThreadContainerRef {
@@ -953,6 +953,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
         select: {
           currentBillingPhase: true,
           currentBillingPlanCode: true,
+          currentCheckoutOffer: true,
           currentPeriodEnd: true,
           currentPeriodStart: true,
           stripeSubscriptionLookupKey: true,
@@ -1267,6 +1268,7 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
           select: {
             currentBillingPhase: true,
             currentBillingPlanCode: true,
+            currentCheckoutOffer: true,
             currentPeriodEnd: true,
             currentPeriodStart: true,
             stripeSubscriptionLookupKey: true,
@@ -1404,6 +1406,7 @@ export async function readHostedAiUsageGate(input: {
           select: {
             currentBillingPhase: true,
             currentBillingPlanCode: true,
+            currentCheckoutOffer: true,
             currentPeriodEnd: true,
             currentPeriodStart: true,
             stripeSubscriptionLookupKey: true,
@@ -1720,6 +1723,7 @@ export async function reconcileHostedAiUsageAllowancePeriodForMemberTx(input: {
         select: {
           currentBillingPhase: true,
           currentBillingPlanCode: true,
+          currentCheckoutOffer: true,
           currentPeriodEnd: true,
           currentPeriodStart: true,
           stripeSubscriptionLookupKey: true,
@@ -2364,7 +2368,7 @@ function resolveHostedAiUsageAllowancePeriod(input: {
   const familySponsored =
     input.billingRef?.allowanceSource === "family_sponsored_plan";
   if (!familySponsored && !isHostedAiUsagePaidBillingRef(input.billingRef)) {
-    const period = buildUtcCalendarMonthPeriod(input.at);
+    const period = buildHostedStarterUsageLifetimePeriod();
     return {
       allowanceSource: "direct_starter",
       billingPlanCode,
@@ -2372,7 +2376,7 @@ function resolveHostedAiUsageAllowancePeriod(input: {
       limitUsdMicros: 0n,
       periodEnd: period.periodEnd,
       periodStart: period.periodStart,
-      source: "calendar",
+      source: "starter",
     };
   }
 

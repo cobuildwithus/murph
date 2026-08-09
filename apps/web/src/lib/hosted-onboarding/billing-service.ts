@@ -324,6 +324,7 @@ async function prepareHostedBillingCheckoutAttempt(input: {
       billingRef: {
         select: {
           currentBillingPhase: true,
+          currentCheckoutOffer: true,
           stripeSubscriptionLookupKey: true,
         },
       },
@@ -688,6 +689,7 @@ async function revalidateHostedBillingCheckoutAttemptTx(input: {
       billingRef: {
         select: {
           currentBillingPhase: true,
+          currentCheckoutOffer: true,
           stripeSubscriptionLookupKey: true,
         },
       },
