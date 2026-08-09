@@ -23,6 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Refreshed after sponsorship creative invariants advanced main.
           git fetch origin \
             main \
             agent/non-expiring-starter-usage \
