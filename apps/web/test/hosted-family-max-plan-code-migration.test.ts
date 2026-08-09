@@ -11,7 +11,14 @@ const migrationSql = readFileSync(
 );
 
 describe("hosted Family Max plan-code migration", () => {
-  it("broadens only the three Family assignment constraints", () => {
+  it("owns the complete non-null three-tier assignment contract", () => {
+    expect(migrationSql.match(/"plan_code" IS NULL/gu)).toHaveLength(2);
+    expect(
+      migrationSql.match(/"plan_code" NOT IN \('pulse', 'edge', 'max'\)/gu),
+    ).toHaveLength(2);
+    expect(
+      migrationSql.match(/ALTER COLUMN "plan_code" SET NOT NULL/gu),
+    ).toHaveLength(2);
     expect(migrationSql.match(/CHECK \("plan_code" IN \('pulse', 'edge', 'max'\)\)/gu))
       .toHaveLength(3);
     expect(migrationSql.match(/VALIDATE CONSTRAINT/gu)).toHaveLength(3);
@@ -25,6 +32,7 @@ describe("hosted Family Max plan-code migration", () => {
     expect(migrationSql).toContain(
       '"hosted_account_group_plan_capacity_plan_code_check"',
     );
+    expect(migrationSql).toContain("USING ERRCODE = 'check_violation'");
     expect(migrationSql).not.toMatch(/\b(?:UPDATE|DELETE|INSERT)\b/iu);
   });
 });

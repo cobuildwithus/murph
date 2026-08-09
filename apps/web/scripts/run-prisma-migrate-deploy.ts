@@ -129,11 +129,16 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   ],
   [
     "20260809160000_add_hosted_family_max_plan_code",
-    // Each replacement only widens the existing Pulse/Edge vocabulary with
-    // Max. Old writers remain valid before, during, and after the transaction,
-    // and a failed application build can safely leave the relaxed checks in
-    // place.
-    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+    // Membership and invite assignments are already required by the Prisma
+    // schema and every supported writer. Reasserting that contract here
+    // replaces the superseded postdeploy migration, while each check only
+    // widens the existing Pulse/Edge vocabulary with Max. Old writers remain
+    // valid before, during, and after the transaction.
+    new Set([
+      "ADD CONSTRAINT CHECK",
+      "ALTER COLUMN SET NOT NULL",
+      "DROP CONSTRAINT",
+    ]),
   ],
 ]);
 

@@ -1,6 +1,6 @@
 # Family Max seat
 
-Status: active — implementation and local proof complete; exact-head review pending
+Status: active — ReviewGPT round 2 correction locally proved; exact-head gates pending
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -75,8 +75,9 @@ Updated: 2026-08-09
    billing catalog.
 2. Extend environment/config, capacity math, Stripe item projection, member
    transitions, assistant projections, allowance/model eligibility, and MRR.
-3. Add a forward-only migration for the three existing Family plan-code check
-   constraints and focused migration/store/service coverage.
+3. Add a forward-only migration that owns the complete Family assignment
+   contract: fail-closed preflight, non-null membership/invite assignments, and
+   the three Pulse/Edge/Max plan-code checks, with focused migration coverage.
 4. Replace the binary member-plan dialog with a catalog-driven target picker,
    update the real component's design-catalog states, and capture desktop and
    mobile proof.
@@ -96,9 +97,16 @@ Updated: 2026-08-09
   tier, not another execution mode.
 - Existing member-plan swaps keep Stripe `create_prorations`, so the prorated
   upgrade charge or downgrade credit appears on the next invoice.
-- The migration broadens only the current membership, invite, and capacity
-  plan-code constraints. It does not add a speculative pending-plan constraint
-  or rewrite historical migrations.
+- The migration is the single owner of the current Family assignment contract:
+  it rejects null or unsupported membership/invite assignments, makes those
+  columns non-null, and installs exact Pulse/Edge/Max checks for membership,
+  invite, and capacity rows. It does not add a speculative pending-plan
+  constraint or rewrite historical migrations.
+- ReviewGPT round 2 exposed review-induced purpose drift in the round-1
+  supersession fix: the historical migration also owned assignment nullability,
+  while the replacement initially owned only vocabulary. The retrospective is
+  recorded on the PR before correction. The replacement now preserves the
+  whole invariant, so the historical two-tier migration can remain superseded.
 
 ## Verification
 
@@ -152,17 +160,30 @@ Updated: 2026-08-09
   correction marks that exact historical ID superseded and extends the existing
   omission proof; 52 focused migration/guard tests, Web typecheck, focused
   ESLint, and `git diff --check` pass after the correction.
-- Round 1 also identified a deployment-note discrepancy. Neither old Web plus
-  new runner nor new Web plus an old warm runner is fully compatible with a Max
-  action, so the corrected plan requires a tandem runner/Web rollout after the
-  database constraint migration instead of claiming a one-way compatible
-  order. Current aggregate exposure remains two sponsored members and zero
-  pending transitions, so no compatibility state machine is justified.
+- Round 1 also identified a deployment-note discrepancy. The durable Family
+  contract is authoritative: configure all three price ids, deploy and verify
+  the Max-aware hosted-execution parser and runner first, then run Web predeploy
+  and deploy Web. Do not attach Max items while old Web can receive Family
+  subscription events. No compatibility state machine is justified.
 - Exact-head CI produced 12 green checks. The release-app/summary failures are
   a base-commit design-title assertion mismatch, and the viewport failure is a
   base-commit PR-specific screenshot spec that requires an unset output
   directory; the Family Max diff touches neither owner. Frontend design proof
   remains blocked by the missing required screenshot artifacts.
-- Pending: push the reviewed correction, run final ReviewGPT round 2 and the
-  new CI head, capture/retry the preliminary pass when a browser target exists,
-  configure the test Stripe sandbox price, then close the plan.
+- Final ReviewGPT round 2 returned `RETROSPECTIVE_REQUIRED`: superseding the
+  historical two-tier contract migration removed its separate non-null
+  assignment guarantee on fresh databases. The PR retrospective affirms one
+  complete Prisma migration owner and requires fresh, upgraded, and contract-
+  runner proof of non-null assignment columns plus exact three-tier checks.
+- The round-2 correction passed 61 focused migration/guard tests, Web
+  typecheck, focused ESLint with one unchanged warning, and `git diff --check`.
+  A disposable database replayed all 170 Prisma migrations and then ran the
+  empty-ledger contract runner (14 applied, with the superseded historical
+  migration absent). A second disposable database applied the historical
+  Pulse/Edge contract first and recorded it in the ledger before applying the
+  replacement. Both paths ended with membership, invite, and capacity
+  `plan_code` columns non-null and all three validated exact Pulse/Edge/Max
+  checks. Both test databases were removed after inspection.
+- Pending: push that correction, capture/retry the preliminary
+  specialist pass with desktop/mobile proof, configure the test Stripe sandbox
+  price, then run the next exact-head final ReviewGPT round and CI to green.

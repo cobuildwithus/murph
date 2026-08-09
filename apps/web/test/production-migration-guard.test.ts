@@ -489,7 +489,7 @@ describe("hosted web production migration guard", () => {
     }
   });
 
-  test("limits the Family Max plan-code relaxation to its proved DDL", async () => {
+  test("limits the complete Family Max plan-code contract to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
     );
@@ -501,6 +501,7 @@ describe("hosted web production migration guard", () => {
         migrationId,
         [
           'ALTER TABLE "hosted_account_group_membership"',
+          '  ALTER COLUMN "plan_code" SET NOT NULL,',
           '  DROP CONSTRAINT "hosted_account_group_membership_plan_code_check",',
           '  ADD CONSTRAINT "hosted_account_group_membership_plan_code_check"',
           '    CHECK ("plan_code" IN (\'pulse\', \'edge\', \'max\')) NOT VALID;',
