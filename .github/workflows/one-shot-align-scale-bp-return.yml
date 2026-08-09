@@ -1,0 +1,64 @@
+name: Align scale and BP snapshot return fields
+
+on:
+  push:
+    branches:
+      - codex/junction-scale-bp-vault-awareness
+    paths:
+      - .github/workflows/one-shot-align-scale-bp-return.yml
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    if: contains(github.event.head_commit.message, '[align-scale-bp-return]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/junction-scale-bp-vault-awareness
+
+      - name: Align the coverage return fields
+        shell: python
+        run: |
+          from pathlib import Path
+
+          target = Path(
+              'packages/assistant-engine/src/assistant/context-snapshot.ts',
+          )
+          text = target.read_text()
+          old = """    bodyMeasurementsLine: renderAssistantSnapshotBodyMeasurementsLine(
+            deviceMeasurementCoverage.latestBodyMeasurementDate,
+          ),
+          bloodPressureMeasurementsLine:
+            renderAssistantSnapshotBloodPressureMeasurementsLine(
+              deviceMeasurementCoverage.latestBloodPressureMeasurementDate,
+            ),
+          conditionCount: conditions.length,
+          """.replace('\n          ', '\n')
+          new = """    bodyMeasurementsLine: renderAssistantSnapshotBodyMeasurementsLine(
+              deviceMeasurementCoverage.latestBodyMeasurementDate,
+            ),
+            bloodPressureMeasurementsLine:
+              renderAssistantSnapshotBloodPressureMeasurementsLine(
+                deviceMeasurementCoverage.latestBloodPressureMeasurementDate,
+              ),
+            conditionCount: conditions.length,
+          """.replace('\n          ', '\n')
+          if text.count(old) != 1:
+              raise RuntimeError(
+                  f'expected one misaligned return block, found {text.count(old)}',
+              )
+          target.write_text(text.replace(old, new, 1))
+          Path('.github/workflows/one-shot-align-scale-bp-return.yml').unlink()
+
+      - name: Commit aligned source
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: align context snapshot return fields"
+          git push origin HEAD:codex/junction-scale-bp-vault-awareness
