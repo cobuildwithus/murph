@@ -5,67 +5,171 @@ import { Cli } from 'incur'
 import { afterEach } from 'vitest'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 
-import { registerVaultCommands } from '../src/commands/vaumšœÉÂš[\ÜÈ™YÚ\İ\•ÛÜšÛİ]ÛÛ[X[™ÈHœ›ÛH	Ë‹‹ÜÜ˜ËØÛÛ[X[™ËİÛÜšÛİ]šœÉÂš[\ÜÈ[˜İ\‘\œ›ÜœšYÙHHœ›ÛH	Ë‹‹ÜÜ˜ËÚ[˜İ\‹Y\œ›Ü‹XœšYÙKšœÉÂš[\ÜÂˆÜ™X]U[\˜][ÛÛ^ˆ™\]Z\™Q]Kˆ[’[”›ØÙ\ÜÒœÛÛÛKŸHœ›ÛH	Ë‹ØÛK]\İZ[\œËšœÉÂš[\ÜÈØØ[\˜[[ÛU\İ\È\İHœ›ÛH	Ë‹ÛØØ[\\˜[[]\İšœÉÂ‚˜ÛÛœİÛX[\]Îˆİš[™Ö×HH×B‚˜Y\‘XXÚ
-\Ş[˜È
+import { registerVaultCommands } from '../src/commands/vault.js'
+import { registerWorkoutCommands } from '../src/commands/workout.js'
+import { incurErrorBridge } from '../src/incur-error-bridge.js'
+import {
+  createTempVaultContext,
+  requireData,
+  runInProcessJsonCli,
+} from './cli-test-helpers.js'
+import { localParallelCliTest as test } from './local-parallel-test.js'
 
-HOˆÂˆ]ØZ]›ÛZ\ÙK˜[
-ˆÛX[\]ËœÜXÙJ
-K›X\
+const cleanupPaths: string[] = []
 
-\™Ù]
-HO‚ˆ›J\™Ù]È™Xİ\œÚ]™NˆYK›Ü˜ÙNˆYHJKˆ
-Kˆ
-BŸJB‚™[˜İ[ÛˆÜ™X]UÛÜšÛİ]ÛJ
-HÂˆÛÛœİÛHHÛK˜Ü™X]J	İ˜][XÛIËÂˆ\ØÜš\[Ûˆ	Û]™HÛÜšÛİ]\İÛIËˆ™\œÚ[Ûˆ	ÌŒŒ]\İ	ËˆJBˆÛK\ÙJ[˜İ\‘\œ›ÜœšYÙJBˆÛÛœİÙ\šXÙ\ÈHÜ™X]R[YÜ˜]Y˜][Ù\šXÙ\Ê
-Bˆ™YÚ\İ\•˜][ÛÛ[X[™ÊÛKÙ\šXÙ\ÊBˆ™YÚ\İ\•ÛÜšÛİ]ÛÛ[X[™ÊÛKÙ\šXÙ\ÊBˆ™]\›ˆÛBŸB‚˜\Ş[˜È[˜İ[Ûˆ[•ÛÜšÛİ]ÛO]OŠÛNˆÛKÛK\™ÜÎˆİš[™Ö×JHÂˆ™]\›ˆ[’[”›ØÙ\ÜÒœÛÛÛO]OŠÛK\™ÜËÈ[ˆ›ØÙ\ÜË™[ˆJBŸB‚š[\™˜XÙHÛÜšÛİ]Y™\İ[Âˆ]™[Yˆİš[™ÂˆÛÜšÛİ]ˆÂˆÛİ\˜ÙP\Îˆİš[™Âˆİ\Y]Îˆİš[™Âˆ[™Y]Îˆİš[™Âˆ›İ][™RYÎˆİš[™Âˆ›İ][™S˜[YOÎˆİš[™Âˆ^\˜Ú\Ù\Îˆ\œ˜^OÂˆ˜[YNˆİš[™ÂˆÛİ\˜ÙQ^\˜Ú\ÙRYÎˆİš[™ÂˆÜ™\ˆ[X™\‚ˆÙ]Îˆ\œ˜^O™XÛÜ™İš[™Ë[šÛ›İÛ‚ˆO‚ˆH[ŸB‚š[\™˜XÙHÛÜšÛİ]ÚİÔ™\İ[Âˆ[]NˆÂˆYˆİš[™Âˆ]NˆÂˆ\˜][Û“Z[]\ÏÎˆ[X™\‚ˆÛÜšÛİ]ÎˆÂˆÛİ\˜ÙP\Îˆİš[™Âˆİ\Y]Îˆİš[™Âˆ[™Y]Îˆİš[™Âˆ^\˜Ú\Ù\Îˆ\œ˜^OÂˆ˜[YNˆİš[™ÂˆÛİ\˜ÙQ^\˜Ú\ÙRYÎˆİš[™ÂˆÜ™\ˆ[X™\‚ˆÙ]Îˆ\œ˜^O™XÛÜ™İš[™Ë[šÛ›İÛ‚ˆO‚ˆBˆBˆBŸB‚\İ
-	Û]™HÛÜšÛİ]ÛÛ[X[™Èİ\]]]K™]KÛX\‹[™š[š\ÚÛ™HØ[›ÛšXØ[ÛÜšÛİ]	Ë\Ş[˜È
+afterEach(async () => {
+  await Promise.all(
+    cleanupPaths.splice(0).map((target) =>
+      rm(target, { recursive: true, force: true }),
+    ),
+  )
+})
 
-HOˆÂˆÛÛœİÈ\™[›Ûİ˜][›ÛİHH]ØZ]Ü™X]U[\˜][ÛÛ^
-ˆ	Û]\œ[]™K]ÛÜšÛİ]IËˆ
-BˆÛX[\]Ëœ\Ú
-\™[›Ûİ
-BˆÛÛœİÛHHÜ™X]UÛÜšÛİ]ÛJ
-B‚ˆÛÛœİ[š]X[^™YH]ØZ][•ÛÜšÛİ]ÛOÈÜ™X]Yˆ›ÛÛX[ˆOŠÛKÂˆ	Ú[š]	Ëˆ	ËK]˜][	Ëˆ˜][›Ûİˆ	ËK][Y^›Û™IËˆ	Ğ[Y\šXØKÓ™]×Ö[ÜšÉËˆJBˆ\ÜÙ\™\]X[
-™\]Z\™Q]J[š]X[^™Y™[™[ÜJK˜Ü™X]YYJB‚ˆÛÛœİØ]™Y›İ][™HH]ØZ][•ÛÜšÛİ]ÛOÈÛYÎˆİš[™ÈOŠÛKÂˆ	İÛÜšÛİ]	Ëˆ	Ù›Ü›X]	Ëˆ	ÜØ]™IËˆ	Ô\Ú^IËˆ	ËK]˜][	Ëˆ˜][›Ûİˆ	ËK]\IËˆ	Üİ™[™İ]˜Z[š[™ÉËˆ	ËKY\˜][Û‰Ëˆ	ÍIËˆ	ËKY^\˜Ú\ÙIËˆ	ÛÜ™\LNÛ˜[YOP™[˜Ú™\ÜÎÜÛİ\˜ÙQ^\˜Ú\ÙRYQVLŒÎÛ[ÙO]ÙZYÚÜ™\Îİ[š]İ™\œšYO[‰Ëˆ	ËK\Ù]][\]IËˆ	Ù^\˜Ú\ÙOLNÛÜ™\LNİ\O]Ø\›]\İ\™Ù]™\ÏLLİ\™Ù]ÙZYÚNMNİ\™Ù]ÙZYÚ[š][‰Ëˆ	ËK\Ù]][\]IËˆ	Ù^\˜Ú\ÙOLNÛÜ™\Lİ\™Ù]™\ÏNİ\™Ù]ÙZYÚLLÍNİ\™Ù]ÙZYÚ[š][‰ËˆJBˆ\ÜÙ\™\]X[
-™\]Z\™Q]JØ]™Y›İ][™K™[™[ÜJKœÛYË	Ü\ÚY^IÊB‚ˆÛÛœİİ\YH]ØZ][•ÛÜšÛİ]ÛOÛÜšÛİ]Y™\İ[ŠÛKÂˆ	İÛÜšÛİ]	Ëˆ	Üİ\	Ëˆ	ËK\›İ][™IËˆ	Ü\ÚY^IËˆ	ËK\İ\YX]	Ëˆ	ÌŒ‹LLUNŒŒŒ‰Ëˆ	ËK]˜][	Ëˆ˜][›ÛİˆJBˆÛÛœİİ\Y]HH™\]Z\™Q]Jİ\Y™[™[ÜJBˆÛÛœİÛÜšÛİ]YHİ\Y]K™]™[Yˆ\ÜÙ\™\]X[
-İ\Y]KÛÜšÛİ]ËœÛİ\˜ÙP\	Û]\œ[]™IÊBˆ\ÜÙ\™\]X[
-İ\Y]KÛÜšÛİ]Ëœ›İ][™S˜[YK	Ô\Ú^IÊBˆ\ÜÙ\™Y\\]X[
-İ\Y]KÛÜšÛİ]Ë™^\˜Ú\Ù\ËÂˆÂˆ˜[YNˆ	Ğ™[˜Ú™\ÜÉËˆÛİ\˜ÙQ^\˜Ú\ÙRYˆ	ÑVLŒÉËˆÜ™\ˆKˆ[ÙNˆ	İÙZYÚÜ™\ÉËˆ[š]İ™\œšYNˆ	Û‰ËˆÙ]ÎˆÂˆÈÜ™\ˆK\Nˆ	İØ\›]\	ÈKˆÈÜ™\ˆˆKˆKˆKˆJB‚ˆÛÛœİ\XØ]Tİ\H]ØZ][•ÛÜšÛİ]ÛJÛKÂˆ	İÛÜšÛİ]	Ëˆ	Üİ\	Ëˆ	Ğ[›İ\ˆÛÜšÛİ]	Ëˆ	ËK]˜][	Ëˆ˜][›ÛİˆJBˆ\ÜÙ\™\]X[
-\XØ]Tİ\™[™[ÜK›ÚË˜[ÙJBˆYˆ
-\XØ]Tİ\™[™[ÜK›ÚÊHÂˆ›İÈ™]È\œ›ÜŠ	Ñ^XİYHÙXÛÛ™]™HÛÜšÛİ]È™H™Z™XİY‰ÊBˆBˆ\ÜÙ\™\]X[
-\XØ]Tİ\™[™[ÜK™\œ›Ü‹˜ÛÙK	ØÛÛ[X[™Ù˜Z[Y	ÊB‚ˆÛÛœİXİ]™HH™\]Z\™Q]Jˆ
-ˆ]ØZ][•ÛÜšÛİ]ÛOÛÜšÛİ]ÚİÔ™\İ[ŠÛKÂˆ	İÛÜšÛİ]	Ëˆ	ØXİ]™IËˆ	ËK]˜][	Ëˆ˜][›ÛİˆJBˆ
-K™[™[ÜKˆ
-Bˆ\ÜÙ\™\]X[
-Xİ]™K™[]KšYÛÜšÛİ]Y
-B‚ˆÛÛœİÙÙÙY\™ÜÈHÂˆ	İÛÜšÛİ]	Ëˆ	ÜÙ]	Ëˆ	ÛÙÉËˆ	Ğ™[˜Ú™\ÜÉËˆ	ËK]ÛÜšÛİ]ZY	ËˆÛÜšÛİ]Yˆ	ËK\Ù][Ü™\‰Ëˆ	Ì‰Ëˆ	ËK\™\ÉËˆ	Î	Ëˆ	ËK]ÙZYÚ	Ëˆ	ÌLÍIËˆ	ËK]ÙZYÚ][š]	Ëˆ	Û‰Ëˆ	ËK\œIËˆ	ÍÉËˆ	ËK[›İIËˆ	Ùš[˜[™\ÜİY	Ëˆ	ËK]˜][	Ëˆ˜][›ÛİˆBˆÛÛœİÙÙÙYH™\]Z\™Q]Jˆ
-]ØZ][•ÛÜšÛİ]ÛOÛÜšÛİ]ÚİÔ™\İ[ŠÛKÙÙÙY\™ÜÊJK™[™[ÜKˆ
-Bˆ\ÜÙ\™Y\\]X[
-ÙÙÙY™[]K™]KÛÜšÛİ]Ë™^\˜Ú\Ù\ÖÌOËœÙ]ÖÌWKÂˆÜ™\ˆ‹ˆ›İNˆ	Ùš[˜[™\ÜİY	Ëˆ™\ÎˆˆÙZYÚˆLÍKˆÙZYÚ[š]ˆ	Û‰ËˆœNˆËˆJB‚ˆÛÛœİ™]šYYH™\]Z\™Q]Jˆ
-]ØZ][•ÛÜšÛİ]ÛOÛÜšÛİ]ÚİÔ™\İ[ŠÛKÙÙÙY\™ÜÊJK™[™[ÜKˆ
-Bˆ\ÜÙ\™\]X[
-ˆ™]šYY™[]K™]KÛÜšÛİ]Ë™^\˜Ú\Ù\ÖÌOËœÙ]Ë›[™İˆ‹ˆ
-B‚ˆÛÛœİYY^\˜Ú\ÙHH™\]Z\™Q]Jˆ
-ˆ]ØZ][•ÛÜšÛİ]ÛOÛÜšÛİ]ÚİÔ™\İ[ŠÛKÂˆ	İÛÜšÛİ]	Ëˆ	Ù^\˜Ú\ÙIËˆ	ØY	Ëˆ	ĞØX›H›IËˆ	ËK]ÛÜšÛİ]ZY	ËˆÛÜšÛİ]Yˆ	ËK[Ü™\‰Ëˆ	Ì‰Ëˆ	ËK\Ù]ÉËˆ	Ì‰Ëˆ	ËK]˜][	Ëˆ˜][›ÛİˆJBˆ
-K™[™[ÜKˆ
-Bˆ\ÜÙ\™Y\\]X[
-ˆYY^\˜Ú\ÙK™[]K™]KÛÜšÛİ]Ë™^\˜Ú\Ù\ÖÌWKˆÂˆ˜[YNˆ	ĞØX›H›IËˆÜ™\ˆ‹ˆÙ]ÎˆŞÈÜ™\ˆHKÈÜ™\ˆˆWKˆKˆ
-B‚ˆÛÛœİÛX\™YH™\]Z\™Q]Jˆ
-ˆ]ØZ][•ÛÜšÛİ]ÛOÛÜšÛİ]ÚİÔ™\İ[ŠÛKÂˆ	İÛÜšÛİ]	Ëˆ	ÜÙ]	Ëˆ	ØÛX\‰Ëˆ	Ğ™[˜Ú™\ÜÉËˆ	ËK]ÛÜšÛİ]ZY	ËˆÛÜšÛİ]Yˆ	ËK\Ù][Ü™\‰Ëˆ	Ì‰Ëˆ	ËK]˜][	Ëˆ˜][›ÛİˆJBˆ
-K™[™[ÜKˆ
-Bˆ\ÜÙ\™Y\\]X[
-ÛX\™Y™[]K™]KÛÜšÛİ]Ë™^\˜Ú\Ù\ÖÌOËœÙ]ÖÌWKÂˆÜ™\ˆ‹ˆJB‚ˆÛÛœİš[š\ÚYH™\]Z\™Q]Jˆ
-ˆ]ØZ][•ÛÜšÛİ]ÛOÛÜšÛİ]ÚİÔ™\İ[ŠÛKÂˆ	İÛÜšÛİ]	Ëˆ	Ùš[š\Ú	Ëˆ	ËK]ÛÜšÛİ]ZY	ËˆÛÜšÛİ]Yˆ	ËKY[™YX]	Ëˆ	ÌŒ‹LLUNNŒŒ‰Ëˆ	ËK]˜][	Ëˆ˜][›ÛİˆJBˆ
-K™[™[ÜKˆ
-Bˆ\ÜÙ\™\]X[
-ˆš[š\ÚY™[]K™]KÛÜšÛİ]Ë™[™Y]ˆ	ÌŒ‹LLUNNŒŒ‰Ëˆ
-Bˆ\ÜÙ\™\]X[
-š[š\ÚY™[]K™]K™\˜][Û“Z[]\ËJB‚ˆÛÛœİš[š\Ú™]HH™\]Z\™Q]Jˆ
-ˆ]ØZ][•ÛÜšÛİ]ÛOÛÜšÛİ]ÚİÔ™\İ[ŠÛKÂˆ	İÛÜšÛİ]	Ëˆ	Ùš[š\Ú	Ëˆ	ËK]ÛÜšÛİ]ZY	ËˆÛÜšÛİ]Yˆ	ËKY[™YX]	Ëˆ	ÌŒ‹LLUNNŒŒ‰Ëˆ	ËK]˜][	Ëˆ˜][›ÛİˆJBˆ
-K™[™[ÜKˆ
-Bˆ\ÜÙ\™\]X[
-š[š\Ú™]K™[]KšYÛÜšÛİ]Y
-B‚ˆÛÛœİ›ĞXİ]™HH]ØZ][•ÛÜšÛİ]ÛJÛKÂˆ	İÛÜšÛİ]	Ëˆ	ØXİ]™IËˆ	ËK]˜][	Ëˆ˜][›ÛİˆJBˆ\ÜÙ\™\]X[
-›ĞXİ]™K™[™[ÜK›ÚË˜[ÙJBˆYˆ
-›ĞXİ]™K™[™[ÜK›ÚÊHÂˆ›İÈ™]È\œ›ÜŠ	Ñ^XİY›ÈXİ]™HÛÜšÛİ]Y\ˆš[š\Ú[™Ë‰ÊBˆBˆ\ÜÙ\™\]X[
-›ĞXİ]™K™[™[ÜK™\œ›Ü‹˜ÛÙK	Û›İÙ›İ[™	ÊBŸJB
+function createWorkoutCli() {
+  const cli = Cli.create('vault-cli', {
+    description: 'live workout test cli',
+    version: '0.0.0-test',
+  })
+  cli.use(incurErrorBridge)
+  const services = createIntegratedVaultServices()
+  registerVaultCommands(cli, services)
+  registerWorkoutCommands(cli, services)
+  return cli
+}
+
+async function run<T>(cli: Cli.Cli, args: string[]) {
+  return runInProcessJsonCli<T>(cli, args, { env: process.env })
+}
+
+interface WorkoutResult {
+  eventId: string
+  workout: {
+    sourceApp?: string
+    endedAt?: string
+    exercises: Array<{
+      name: string
+      sourceExerciseId?: string
+      order: number
+      sets: Array<Record<string, unknown>>
+    }>
+  } | null
+}
+
+interface ShowResult {
+  entity: {
+    id: string
+    data: {
+      durationMinutes?: number
+      workout: NonNullable<WorkoutResult['workout']>
+    }
+  }
+}
+
+test('live workout commands keep one canonical session and target one set', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  const initialized = await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'America/New_York',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+
+  const saved = await run<{ slug: string }>(cli, [
+    'workout', 'format', 'save', 'Push Day',
+    '--vault', vaultRoot,
+    '--type', 'strength-training',
+    '--duration', '45',
+    '--exercise',
+    'order=1;name=Bench press;sourceExerciseId=EX123;mode=weight_reps;unitOverride=lb',
+    '--set-template',
+    'exercise=1;order=1;type=warmup;targetReps=10;targetWeight=95;targetWeightUnit=lb',
+    '--set-template',
+    'exercise=1;order=2;targetReps=8;targetWeight=135;targetWeightUnit=lb',
+  ])
+  assert.equal(requireData(saved.envelope).slug, 'push-day')
+
+  const started = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start',
+    '--routine', 'push-day',
+    '--started-at', '2026-08-09T18:00:00.000Z',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(started.workout?.sourceApp, 'murph-live')
+  assert.deepEqual(started.workout?.exercises[0]?.sets, [
+    { order: 1, type: 'warmup' },
+    { order: 2 },
+  ])
+  const workoutId = started.eventId
+
+  const duplicateStart = await run(cli, [
+    'workout', 'start', 'Another workout', '--vault', vaultRoot,
+  ])
+  assert.equal(duplicateStart.envelope.ok, false)
+
+  const logArgs = [
+    'workout', 'set', 'log', 'Bench press',
+    '--workout-id', workoutId,
+    '--set-order', '2',
+    '--reps', '8',
+    '--weight', '135',
+    '--weight-unit', 'lb',
+    '--rpe', '7',
+    '--note', 'final rep spotted',
+    '--vault', vaultRoot,
+  ]
+  const logged = requireData((await run<ShowResult>(cli, logArgs)).envelope)
+  assert.deepEqual(logged.entity.data.workout.exercises[0]?.sets[1], {
+    order: 2,
+    note: 'final rep spotted',
+    reps: 8,
+    weight: 135,
+    weightUnit: 'lb',
+    rpe: 7,
+  })
+
+  const retried = requireData((await run<ShowResult>(cli, logArgs)).envelope)
+  assert.equal(retried.entity.data.workout.exercises[0]?.sets.length, 2)
+
+  const added = requireData((await run<ShowResult>(cli, [
+    'workout', 'exercise', 'add', 'Cable fly',
+    '--workout-id', workoutId,
+    '--order', '2',
+    '--sets', '2',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(added.entity.data.workout.exercises[1], {
+    name: 'Cable fly',
+    order: 2,
+    sets: [{ order: 1 }, { order: 2 }],
+  })
+
+  const cleared = requireData((await run<ShowResult>(cli, [
+    'workout', 'set', 'clear', 'Bench press',
+    '--workout-id', workoutId,
+    '--set-order', '2',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(cleared.entity.data.workout.exercises[0]?.sets[1], {
+    order: 2,
+  })
+
+  const finished = requireData((await run<ShowResult>(cli, [
+    'workout', 'finish',
+    '--workout-id', workoutId,
+    '--ended-at', '2026-08-09T18:45:00.000Z',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(
+    finished.entity.data.workout.endedAt,
+    '2026-08-09T18:45:00.000Z',
+  )
+  assert.equal(finished.entity.data.durationMinutes, 45)
+
+  const noActive = await run(cli, [
+    'workout', 'active', '--vault', vaultRoot,
+  ])
+  assert.equal(noActive.envelope.ok, false)
+})
