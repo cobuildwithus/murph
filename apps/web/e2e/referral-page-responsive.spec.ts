@@ -69,7 +69,7 @@ test("referral page stays contained and actionable at every marketing breakpoint
     ).toBeGreaterThanOrEqual(44);
     await expect(
       page.getByRole("heading", {
-        name: "Ways to earn right now.",
+        name: "Choose a referral path.",
       }),
     ).toBeVisible();
     await expect(

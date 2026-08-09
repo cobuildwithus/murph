@@ -74,7 +74,7 @@ function buildHowItWorks(input: {
     },
     {
       description:
-        "Murph applies the usage reward automatically. The durable receipt appears in Settings history. When an authorized Murph chat is available, Murph also sends a short confirmation.",
+        "After qualification and rolling-limit checks pass, Murph applies the usage reward automatically. The durable receipt appears in Settings history. When an authorized Murph chat is available, Murph also sends a short confirmation.",
       title: "Usage is added",
     },
   ];
@@ -165,19 +165,19 @@ export function ReferralPageContent({
       : SIGNUP_PRIVACY_TRUST_POINT,
   ];
   const heroDescription = signupAvailable && groupAvailable
-    ? "Share your personal link or start a qualifying group mission. When a new member finishes setup or a fresh group gets genuinely active, Murph adds the usage reward automatically."
+    ? "Explore your personal link or a group mission. Murph applies a reward automatically only after that path’s eligibility, rolling-limit, and completion checks pass."
     : signupAvailable
-    ? "Share your personal link. When a genuinely new member finishes their own Murph setup through it, Murph adds the usage reward automatically."
-    : "Start a qualifying group mission. When a fresh group reaches the mission requirements, Murph adds the usage reward automatically.";
+    ? "Share your personal link. If a genuinely new member completes setup through it and the referral passes eligibility and rolling-limit checks then, Murph adds the usage reward automatically."
+    : "Explore a qualifying group mission. Murph adds the usage reward automatically after the mission is accepted and its participation requirements are met.";
   const qualificationLead = signupAvailable && groupAvailable
     ? "Opening a link or creating a group alone is never enough."
     : signupAvailable
     ? "Opening a link alone is never enough."
     : "Creating a group alone is never enough.";
   const ownerDescription = signupAvailable && groupAvailable
-    ? "Link rewards go to your personal Murph. Mission rewards go to the personal or group Murph the mission was accepted for, once Murph confirms the mission."
+    ? "Eligible link rewards go to your personal Murph. Mission rewards go to the personal or group Murph the mission was accepted for, once Murph confirms the mission."
     : signupAvailable
-    ? "Link rewards go to your personal Murph after a genuinely new member completes setup through your attributed invite."
+    ? "Link rewards go to your personal Murph when a genuinely new signup passes the eligibility and rolling-limit checks at completion."
     : "Mission rewards go to the personal or group Murph the mission was accepted for, once Murph confirms the mission.";
   const artifactReward = signupAvailable
     ? rewards.find(({ id }) => id === "signup-link")!
@@ -247,10 +247,10 @@ export function ReferralPageContent({
               How it works
             </p>
             <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4.5vw,3.7rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#2d3436]">
-              Real introductions, rewarded automatically.
+              Real introductions. Clear rules.
             </h2>
             <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.75] text-[#3a322a]">
-              Murph rewards real introductions and active participation.{" "}
+              Each path has its own eligibility and participation checks.{" "}
               {qualificationLead}
             </p>
           </div>
@@ -284,7 +284,7 @@ export function ReferralPageContent({
                 Ways to earn
               </p>
               <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4.5vw,3.7rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#2d3436]">
-                Ways to earn right now.
+                Choose a referral path.
               </h2>
             </div>
             <p className="max-w-[40ch] text-sm leading-[1.7] text-[#5a5045] lg:text-right">
@@ -435,7 +435,8 @@ export function ReferralPageContent({
               <span className="block">Bring someone with you.</span>
             </h2>
             <p className="mt-3 max-w-[46ch] text-[0.9375rem] leading-[1.7] text-[#f5f0e8]/70">
-              Murph handles attribution, rewards, and privacy automatically.
+              Murph handles attribution and privacy. Qualifying rewards are
+              applied automatically.
             </p>
           </div>
           {signupAvailable

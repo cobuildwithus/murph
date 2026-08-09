@@ -21,10 +21,10 @@ export function ReferralSection({
   const signupAvailable = rewards.some(({ id }) => id === "signup-link");
   const groupAvailable = rewards.some(({ id }) => id !== "signup-link");
   const description = signupAvailable && groupAvailable
-    ? "Share your personal link or start a qualifying group mission. Murph applies earned usage automatically when someone really gets started or a fresh group becomes genuinely active."
+    ? "Explore your personal link or a group mission. Eligibility, rolling-limit, and completion checks determine whether Murph applies usage automatically."
     : signupAvailable
-    ? "Share your personal link. Murph applies earned usage automatically when someone genuinely new completes their own setup through it."
-    : "Start a qualifying group mission. Murph applies earned usage automatically when a fresh group reaches the mission’s real-participation requirements.";
+    ? "Share your personal link. A genuinely new signup can earn usage if eligibility and rolling-limit checks pass when setup completes."
+    : "Explore a group mission. Murph applies usage automatically after the mission is accepted and reaches its real-participation requirements.";
 
   return (
     <section className="bg-[#f5f0e8] px-4 py-10 sm:px-8 sm:py-16 lg:px-16 lg:py-20">
@@ -82,7 +82,7 @@ export function ReferralSection({
                   </div>
                   <div className="col-span-2 flex items-baseline justify-between gap-3 border-t border-white/10 pt-3 sm:col-span-1 sm:block sm:border-0 sm:pt-0 sm:text-right">
                     <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#d4b87a]">
-                      Earn
+                      If eligible
                     </p>
                     <p className="text-sm font-semibold text-[#f5f0e8] sm:mt-1">
                       {formatHostedPublicReferralRewardValue(

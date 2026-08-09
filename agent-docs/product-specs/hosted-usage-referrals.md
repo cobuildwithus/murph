@@ -19,7 +19,10 @@ Public referral marketing derives from those same gates at server render. The
 homepage section and footer link appear only when at least one earning path is
 enabled, and `/refer` lists only the enabled paths. When both gates are off,
 `/refer` shows one temporary-unavailability state without reward quantities or
-a share action.
+a share action. Gate-derived availability is program-level, not a promise that
+an individual member has enough rolling capacity for the next reward. Public
+signup-link copy therefore states that eligibility and rolling-limit checks run
+when setup completes.
 
 The stable referral link remains available to an eligible signed-in member when
 either reward gate is disabled, but a disabled signup reward is not marketed or
@@ -46,14 +49,14 @@ active at the same time.
 A shareable signup link is different. Murph creates it only when the member
 explicitly asks for a signup, invite, referral, or shareable link. Sharing or
 opening the link is not a completed referral and does not guarantee a reward.
-Murph may explain in one short sentence that a qualifying reward is applied
-automatically after the recipient completes their own Murph setup. Murph never
-chooses or contacts the recipient and never promises an amount the tool did not
-return.
+Murph may explain in one short sentence that eligibility and rolling-limit
+checks run when the recipient completes their own setup and that a qualifying
+reward is then applied automatically. Murph never chooses or contacts the
+recipient and never promises an amount the tool did not return.
 
 | Path | Qualification | Public reward label |
 | --- | --- | --- |
-| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member. | $2.00 of cost-weighted usage credit |
+| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member, and the referral passes settlement eligibility and rolling-cap checks. | $2.00 of cost-weighted usage credit |
 | `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | $2.00 of cost-weighted usage credit |
 | `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 of cost-weighted usage credit |
 

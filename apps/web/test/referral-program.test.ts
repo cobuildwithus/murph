@@ -85,6 +85,12 @@ describe("public referral program projection", () => {
     expect(signup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
+    expect(signup.description).toContain(
+      "passes eligibility and rolling-limit checks",
+    );
+    expect(signup.description).not.toContain(
+      "the reward is added automatically",
+    );
     expect(newPersonGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );

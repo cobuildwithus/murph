@@ -18,7 +18,7 @@ test("ReferPage metadata describes the public referral program", () => {
   );
   assert.equal(
     metadata.description,
-    "Share Murph with friends and earn more AI usage when a new member completes setup or a qualifying fresh group becomes active.",
+    "Explore Murph referral options. Qualifying link and group rewards add usage after eligibility, rolling-limit, and completion checks pass.",
   );
   assert.equal(metadata.alternates?.canonical, "/refer");
   assert.deepEqual(metadata.openGraph?.images, [
@@ -46,13 +46,16 @@ test("ReferPage metadata does not promise disabled reward paths", () => {
     HOSTED_PUBLIC_REFERRAL_REWARDS.filter(({ id }) => id === "signup-link"),
   );
   assert.match(String(signupMetadata.description), /referral link/);
+  assert.match(String(signupMetadata.description), /rolling-limit checks pass/);
   assert.doesNotMatch(String(signupMetadata.description), /group/);
+  assert.doesNotMatch(String(signupMetadata.description), /earn more AI usage when/);
 
   const groupMetadata = buildReferralPageMetadata(
     HOSTED_PUBLIC_REFERRAL_REWARDS.filter(({ id }) => id !== "signup-link"),
   );
-  assert.match(String(groupMetadata.description), /qualifying fresh group/);
+  assert.match(String(groupMetadata.description), /fresh-group mission/);
   assert.doesNotMatch(String(groupMetadata.description), /referral link/);
+  assert.doesNotMatch(String(groupMetadata.description), /earn more AI usage when/);
 
   const unavailableMetadata = buildReferralPageMetadata([]);
   assert.equal(

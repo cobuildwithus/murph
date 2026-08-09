@@ -33,7 +33,7 @@ export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
   {
     availabilityLabel: "Personal referral link",
     description:
-      "Share your stable link. When a genuinely new member completes Murph setup through it, the reward is added automatically.",
+      "Share your stable link. If a genuinely new member completes setup and the referral passes eligibility and rolling-limit checks then, Murph applies the fixed usage credit automatically.",
     id: "signup-link",
     rewardUsdMicros: 2_000_000n,
     title: HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY.title,
