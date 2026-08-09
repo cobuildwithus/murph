@@ -35,6 +35,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/pitch",
   "/records",
   "/records/connect",
+  "/refer",
   "/search",
   "/security",
   "/settings",

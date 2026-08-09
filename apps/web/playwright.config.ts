@@ -41,7 +41,9 @@ export default defineConfig({
     url: `${baseURL}/api/internal/health`,
     env: {
       ...createHostedWebSmokeEnvironment(process.env),
-      NEXT_DIST_DIR_SUFFIX: "overflow",
+      HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED: "1",
+      HOSTED_USAGE_REFERRALS_ENABLED: "1",
+      NEXT_DIST_DIR_SUFFIX: process.env.NEXT_DIST_DIR_SUFFIX ?? "overflow",
       NEXT_TELEMETRY_DISABLED: "1",
     },
     reuseExistingServer: !process.env.CI,
