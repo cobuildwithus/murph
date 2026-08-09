@@ -1030,7 +1030,7 @@ export function ValidationSlide() {
           },
           {
             value: "+80% paying customers",
-            note: "In 30 days, with zero paid acquisition. 26% of mature trials convert to paid.",
+            note: "In 30 days, with zero paid acquisition.",
           },
           {
             value: "8 msgs / day / active user",
