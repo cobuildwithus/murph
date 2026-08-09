@@ -51,6 +51,8 @@ interface ProviderDouble {
   arm(control: ProviderControl): void;
   baseUrl: string;
   close(): Promise<void>;
+  /** Sockets the provider still has open, counted server-side. */
+  openConnectionCount(): number;
   observedSendBodies: string[];
 }
 
@@ -72,6 +74,7 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
     return control;
   };
 
+  const openConnections = new Set<import("node:net").Socket>();
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) {
@@ -174,6 +177,12 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
     response.end();
   });
 
+  server.on("connection", (socket) => {
+    openConnections.add(socket);
+    socket.on("close", () => {
+      openConnections.delete(socket);
+    });
+  });
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
@@ -189,6 +198,7 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
       armed = control;
     },
     baseUrl,
+    openConnectionCount: () => openConnections.size,
     async close() {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => {
@@ -383,6 +393,37 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(provider.observedSendBodies).toHaveLength(2);
   });
 
+  const expectProviderConnectionsClosed = async () => {
+    // Production code has to end these, not the teardown below: a bound that
+    // returns while its reader and socket stay alive is not a bound at all.
+    await vi.waitFor(() => {
+      expect(provider.openConnectionCount()).toBe(0);
+    }, { interval: 25, timeout: 5_000 });
+  };
+
+  it("ends the provider connection when a stalled body hits its deadline", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 2 });
+    const startedAt = Date.now();
+
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        sendDeadlineAt: startedAt + 3_000,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(true);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+    await expectProviderConnectionsClosed();
+  });
+
   it("bounds a stalled attachment-create body and never reaches the send", async () => {
     provider.arm({ kind: "attachment_create_stalled_body", responses: 1 });
     const startedAt = Date.now();
@@ -409,6 +450,7 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(Date.now() - startedAt).toBeLessThan(5_000);
     expect(provider.observedSendBodies).toEqual([]);
     expect(provider.acceptedMessageIds).toEqual([]);
+    await expectProviderConnectionsClosed();
   });
 
   it("keeps both send attempts inside one caller deadline", async () => {

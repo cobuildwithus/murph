@@ -1025,36 +1025,51 @@ function readHostedLinqAttachmentSendResult(
 }
 
 /**
- * Read a response body within whatever is left of its attempt's budget.
- * `fetchLinqApi` stops its own timer once headers arrive, so without this a
- * stalled body would outlive the deadline the caller was told it had. A body
- * that does not finish in time reads as absent, never as a different answer.
+ * Read a response body within whatever is left of its attempt's budget, and
+ * terminate it when that runs out. `fetchLinqApi` stops its own timer once
+ * headers arrive, so without this a stalled body would outlive the deadline the
+ * caller was told it had.
+ *
+ * The read owns the stream reader rather than calling `response.text()`: that
+ * helper locks the body, so cancelling through `response.body` afterwards
+ * throws and leaves the read and its connection alive. Holding the reader means
+ * the cancel below actually ends both. A body that does not finish in time
+ * reads as absent, never as a different answer.
  */
 async function readHostedLinqBoundedResponseText(
   response: Response,
   timeoutMs: number,
 ): Promise<string | null> {
+  const body = response.body;
+  if (!body) {
+    return "";
+  }
   if (!(timeoutMs > 0)) {
-    await response.body?.cancel().catch(() => undefined);
+    await body.cancel().catch(() => undefined);
     return null;
   }
-  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel().catch(() => undefined);
+  }, timeoutMs);
+  let text = "";
   try {
-    return await Promise.race([
-      response.text(),
-      new Promise<null>((resolve) => {
-        timer = setTimeout(() => {
-          void response.body?.cancel().catch(() => undefined);
-          resolve(null);
-        }, timeoutMs);
-      }),
-    ]);
+    while (true) {
+      const next = await reader.read();
+      if (next.done) {
+        return timedOut ? null : text + decoder.decode();
+      }
+      text += decoder.decode(next.value, { stream: true });
+    }
   } catch {
     return null;
   } finally {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
+    clearTimeout(timer);
+    reader.releaseLock();
   }
 }
 
