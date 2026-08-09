@@ -56,6 +56,11 @@ The live ownership split is:
   signature, and unwraps only its `cloudflare-automation-secret` recipient. The
   signed full envelopes are disclosed to preserve signature verification over
   the web-authored body; Cloudflare still has no GCP KMS decrypt authority.
+  Current and historical root callbacks require that signed, user-bound
+  authority plus a provisioned workspace; they do not repeat active-member
+  entitlement checks because the mode-aware runtime owner already confines an
+  inactive member to `inbox_media_retention`, and cleanup still needs those
+  workspace roots.
   During active mailbox import, the runner container calls a Worker-owned
   mailbox-payload decode route over the invocation outbound proxy. That route
   requires the runtime write fence, decrypts the mailbox payload with the

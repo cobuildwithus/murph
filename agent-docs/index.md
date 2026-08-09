@@ -90,6 +90,12 @@ uses only the canonical ENAM binding. The contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `apps/cloudflare/README.md`.
 
+Signed hosted runtime crypto callbacks require callback-bound user authority
+and a provisioned workspace without duplicating active-member entitlement;
+mode-aware orchestration confines inactive members to retention-only work. The
+contract is specified by `agent-docs/references/hosted-runtime-protocol.md` and
+`agent-docs/references/hosted-temporal-orchestration.md`.
+
 Metadata-only Stripe failure email ownership for terminal checkout and
 subscription actions, current-attempt/provider-effect
 identity, paid Family capacity/member-transition identity, safe request
