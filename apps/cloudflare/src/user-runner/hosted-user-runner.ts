@@ -142,10 +142,22 @@ export class HostedUserRunner {
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
     });
     this.runtimeInvocation = runtimeInvocation;
+    this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
+      bucket,
+      runnerStoreCache: this.runnerStoreCache,
+      state,
+      stateStore: this.stateStore,
+      assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
+        this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
+      },
+      readHostedWorkspaceFromWeb: async (userId) => await this.readHostedWorkspaceFromWeb(userId),
+    });
     const runtimeProcessing = new RuntimeProcessingController({
       env,
       invocationService: runtimeInvocation,
       runnerContainerNamespace,
+      readCheckpointHandoffStartedAt: async (input) =>
+        await this.workspaceSnapshotSessions.readCurrentOwnerStartedAt(input),
       runnerRuntimeEnvSource,
       runtimeRetryAnalytics,
       stateStore: this.stateStore,
@@ -158,16 +170,6 @@ export class HostedUserRunner {
       state,
       stateStore: this.stateStore,
     };
-    this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
-      bucket,
-      runnerStoreCache: this.runnerStoreCache,
-      state,
-      stateStore: this.stateStore,
-      assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
-        this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
-      },
-      readHostedWorkspaceFromWeb: async (userId) => await this.readHostedWorkspaceFromWeb(userId),
-    });
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {

@@ -68,6 +68,9 @@ interface HostedWorkerDeploymentSettings {
   versionTag: string;
 }
 
+const DEFAULT_CONTAINER_ROLLOUT_BY_CONTEXT: Readonly<Record<string, ContainerRolloutMode>> = {
+  production: "immediate",
+};
 const DEFAULT_CONTAINER_ROLLOUT_MODE: ContainerRolloutMode = "gradual";
 
 export async function runHostedWorkerDeployment(input: {
@@ -185,7 +188,7 @@ function resolveHostedWorkerDeploymentSettings(
   return {
     containerRolloutMode: readContainerRolloutMode(
       env.HOSTED_EXECUTION_CONTAINER_ROLLOUT,
-      DEFAULT_CONTAINER_ROLLOUT_MODE,
+      DEFAULT_CONTAINER_ROLLOUT_BY_CONTEXT[deployContext] ?? DEFAULT_CONTAINER_ROLLOUT_MODE,
     ),
     deploymentMessage: deploymentMessageOverride ?? `${deployContext} direct deploy ${versionTag}`,
     includeSecrets,

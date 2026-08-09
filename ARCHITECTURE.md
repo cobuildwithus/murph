@@ -2350,11 +2350,12 @@ children retry instead of being replaced, and alarm cleanup
 failures are rethrown so the platform can retry instead of permanently deleting
 the alarm. New v2 foreground leases restore from durable workspace snapshots and
 legacy refs also cold-restore from durable bundles instead of trusting dirty
-warm local runtime markers across leases. Ordinary production deploys therefore
-use gradual container rollout with the configured active grace so the runtime's
-last-chance `idle_shutdown` snapshot can finish; immediate rollout remains an
-explicit compatibility hard cut because it can discard the only dirty local
-copy before publication. Encrypted hosted snapshots also carry
+warm local runtime markers across leases. Before an inactive fence is replaced,
+the `UserRunner` preserves it only when the durable current snapshot-upload
+session belongs to that exact attempt and lease generation and began less than
+15 seconds ago. That one-second retry loop gives an in-flight shutdown snapshot
+a bounded handoff window without delaying ordinary replacement or allowing a
+stale upload session to wedge startup. Encrypted hosted snapshots also carry
 the exact query SQLite cache triplet so a fresh one-vCPU runner can reuse the
 last projection; canonical vault files remain authoritative, source-manifest
 validation rebuilds stale caches, and every other projection remains excluded.

@@ -185,11 +185,12 @@ The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
 runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint.
-Ordinary production deploys use the configured gradual container rollout so
-that last-chance checkpoint receives the active grace period. An immediate
-container rollout is a documented compatibility hard cut, not the default: it
-may terminate the only dirty local copy before snapshot publication and force a
-replacement runtime to reconstruct work from durable mailbox evidence.
+When replacement observes an inactive runtime fence, the `UserRunner` checks
+the durable current snapshot-upload session before clearing that fence. An
+exact attempt-and-generation match created less than 15 seconds earlier gets a
+one-second retry; absent, mismatched, or older sessions do not delay
+replacement. This bridges the normal shutdown publication race without turning
+the much longer orphan-cleanup lifetime into startup liveness.
 Plain-text Linq plus
 attachment-free Telegram and WhatsApp input does not initialize or import inbox
 projection. Linq input with link parts retains the existing projection path.

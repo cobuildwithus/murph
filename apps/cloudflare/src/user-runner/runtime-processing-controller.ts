@@ -70,6 +70,11 @@ import type {
 const RUNTIME_SHELL_PREWARM_TIMEOUT_MS = 20_000;
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
+// Snapshot sessions remain as orphan-cleanup evidence for much longer than
+// they are useful as liveness evidence. Preserve only the brief handoff window
+// in which a normal shutdown checkpoint can still publish, and recheck quickly
+// so deploy replacement does not inherit the generic startup-fence delay.
+const RUNTIME_CHECKPOINT_HANDOFF_GRACE_MS = 15_000;
 
 export type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   commandTimeoutMs?: number;
@@ -153,6 +158,11 @@ export class RuntimeProcessingController {
       env: HostedExecutionEnvironment;
       invocationService: RuntimeInvocationService;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
+      readCheckpointHandoffStartedAt?: (input: {
+        attemptId: string;
+        leaseGeneration: string;
+        userId: string;
+      }) => Promise<string | null>;
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
       runtimeRetryAnalytics?: WorkerAnalyticsEngineDatasetLike | null;
       stateStore: RunnerStateStore;
@@ -532,6 +542,13 @@ export class RuntimeProcessingController {
     ) {
       return this.createRetryLater({
         reason: "starting_fence_preserved",
+        userId: input.input.userId,
+      });
+    }
+
+    if (await this.hasFreshCheckpointHandoff(activeFence, record.userId)) {
+      return this.createRetryLater({
+        reason: "checkpoint_handoff_pending",
         userId: input.input.userId,
       });
     }
@@ -1239,6 +1256,30 @@ export class RuntimeProcessingController {
       return false;
     }
     return Date.now() - startedAtMs < RUNTIME_PROCESSING_STARTUP_GRACE_MS;
+  }
+
+  private async hasFreshCheckpointHandoff(
+    fence: NonNullable<RunnerStateRecord["writeFence"]>,
+    userId: string,
+  ): Promise<boolean> {
+    const readStartedAt = this.input.readCheckpointHandoffStartedAt;
+    if (!readStartedAt) {
+      return false;
+    }
+    const startedAt = await readStartedAt({
+      attemptId: fence.attemptId,
+      leaseGeneration: String(fence.generation),
+      userId,
+    });
+    if (startedAt === null) {
+      return false;
+    }
+    const startedAtMs = Date.parse(startedAt);
+    if (!Number.isFinite(startedAtMs)) {
+      return false;
+    }
+    const ageMs = Date.now() - startedAtMs;
+    return ageMs >= 0 && ageMs < RUNTIME_CHECKPOINT_HANDOFF_GRACE_MS;
   }
 }
 

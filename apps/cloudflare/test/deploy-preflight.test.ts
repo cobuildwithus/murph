@@ -20,6 +20,8 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 
 const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
   "HOSTED_ASSISTANT_MODEL must be one of gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
+const HOSTED_STATE_ISOLATION_ROLLOUT_ERROR =
+  "production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is the audience-key and selector-scope runner bundle.";
 
 function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
   return {
@@ -46,7 +48,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID:
       "metrics-token-id-test",
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
-    HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
+    HOSTED_EXECUTION_CONTAINER_ROLLOUT: "immediate",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
@@ -944,6 +946,26 @@ describe("deploy preflight helpers", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_EXECUTION_CONTAINER_ROLLOUT: "immediate",
+        }),
+        { deployWorker: true },
+      ),
+    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
           HOSTED_ASSISTANT_REASONING_EFFORT: undefined,
         }),
         { deployWorker: true },
@@ -972,6 +994,49 @@ describe("deploy preflight helpers", () => {
       HOSTED_ASSISTANT_MODEL_PRICING_ERROR,
       "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
     ]));
+  });
+
+  it("requires immediate production container rollout while state-isolation keys migrate", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_EXECUTION_CONTAINER_ROLLOUT: undefined,
+        }),
+        { deployWorker: true },
+      ),
+    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv(),
+        { deployWorker: true },
+      ),
+    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          CF_PUBLIC_BASE_URL: "http://localhost:8787",
+          HOSTED_CRYPTO_ENV: "development",
+          HOSTED_DATABASE_ALERT_ENABLED: undefined,
+          HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
+          HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
+          HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+          HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+          HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
+        }),
+        { deployWorker: true },
+      ),
+    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
   });
 
   it("rejects deploy timeout settings that cannot contain the web-control request", () => {

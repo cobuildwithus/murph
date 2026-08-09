@@ -67,6 +67,11 @@ export interface WorkspaceSnapshotSessionService {
     snapshotId: string;
     userId: string;
   }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  readCurrentOwnerStartedAt(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<string | null>;
   rememberReplacedSnapshotRef(input: {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
@@ -445,6 +450,29 @@ export function createWorkspaceSnapshotSessionService(input: {
         return null;
       }
       return session;
+    },
+
+    async readCurrentOwnerStartedAt(readInput) {
+      await input.stateStore.bindUser(readInput.userId);
+      const value = await input.state.storage.get<unknown>(
+        workspaceSnapshotUploadSessionCurrentStorageKey(),
+      );
+      if (value === undefined) {
+        return null;
+      }
+      const session = parseHostedWorkspaceSnapshotUploadSession(value);
+      if (session.userId !== readInput.userId) {
+        throw new Error(
+          "Hosted workspace snapshot upload session is outside the bound user namespace.",
+        );
+      }
+      if (
+        session.attemptId !== readInput.attemptId
+        || session.leaseGeneration !== readInput.leaseGeneration
+      ) {
+        return null;
+      }
+      return session.createdAt;
     },
 
     async delete(deleteInput) {
