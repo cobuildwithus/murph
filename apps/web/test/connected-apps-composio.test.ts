@@ -209,7 +209,7 @@ describe("Composio connected-app client", () => {
     ]);
   });
 
-  it("fails direct execution when Composio reports an unsuccessful envelope", async () => {
+  it("keeps the sanitized provider reason when direct execution is unsuccessful", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         data: null,
@@ -228,7 +228,7 @@ describe("Composio connected-app client", () => {
 
     expect(error).toBeInstanceOf(ComposioConnectedAppsRequestError);
     expect(error).toMatchObject({ retryable: false });
-    expect(String(error)).not.toContain("permission denied");
+    expect(String(error)).toContain("Provider error: permission denied");
     expect(String(error)).not.toContain("secret-test-key");
   });
 
@@ -333,10 +333,13 @@ describe("Composio connected-app client", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("never includes provider response bodies or API keys in errors", async () => {
+  it("keeps only the sanitized provider error message from failed HTTP responses", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       new Response(JSON.stringify({
-        error: "provider payload with user@example.com",
+        error: {
+          message:
+            "Provider rejected member@example.test with token=provider-secret.",
+        },
         token: "provider-secret",
       }), { status: 500 })
     );
@@ -348,7 +351,10 @@ describe("Composio connected-app client", () => {
     }).catch((value) => value);
 
     expect(error).toBeInstanceOf(ComposioConnectedAppsRequestError);
-    expect(String(error)).not.toContain("user@example.com");
+    expect(String(error)).toContain(
+      "Provider error: Provider rejected <redacted-email> with token=<redacted-secret>",
+    );
+    expect(String(error)).not.toContain("member@example.test");
     expect(String(error)).not.toContain("provider-secret");
     expect(String(error)).not.toContain("secret-test-key");
   });

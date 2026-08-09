@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getHostedConnectedAppsWritePolicy } from "@/src/lib/connected-apps/config";
 import { executeHostedConnectedAppsRequest } from "@/src/lib/connected-apps/service";
+import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { logHostedOnboardingRouteFailure } from "@/src/lib/hosted-onboarding/http";
 
 describe("connected-app email sends", () => {
   beforeEach(() => {
@@ -373,14 +375,15 @@ describe("connected-app email sends", () => {
       if (parsed.pathname === "/api/v3.1/tools/execute/GMAIL_SEND_EMAIL") {
         return jsonResponse({
           data: null,
-          error: "provider outcome unknown",
+          error:
+            "Gmail rejected member@example.test with token=provider-secret.",
           successful: false,
         });
       }
       throw new Error(`Unexpected Composio request: ${parsed.pathname}`);
     });
 
-    await expect(executeHostedConnectedAppsRequest({
+    const error = await executeHostedConnectedAppsRequest({
       fetchImpl,
       memberId: "hbm_member",
       prisma: {} as never,
@@ -397,14 +400,40 @@ describe("connected-app email sends", () => {
         },
         operation: "execute",
       },
-    })).rejects.toMatchObject({
+    }).catch((value) => value);
+
+    expect(error).toBeInstanceOf(HostedOnboardingError);
+    if (!(error instanceof HostedOnboardingError)) {
+      throw error;
+    }
+    expect(error).toMatchObject({
       code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      cause: {
+        message:
+          "Composio direct tool execution did not succeed. Provider error: Gmail rejected <redacted-email> with token=<redacted-secret>",
+      },
       details: {
         operationName: "GMAIL_SEND_EMAIL",
         type: "composio_direct_execute_unsuccessful",
       },
       retryable: false,
     });
+    expect(error.details).not.toHaveProperty("providerErrorMessage");
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    logHostedOnboardingRouteFailure({
+      error,
+      operationName: "POST /api/internal/connected-apps",
+      requestMethod: "POST",
+    });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted onboarding route failed.",
+      expect.objectContaining({
+        errorCauseMessage:
+          "Composio direct tool execution did not succeed. Provider error: Gmail rejected <redacted-email> with token=<redacted-secret>",
+      }),
+    );
+    errorSpy.mockRestore();
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });

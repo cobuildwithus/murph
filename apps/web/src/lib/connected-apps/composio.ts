@@ -1,5 +1,6 @@
 import "server-only";
 
+import { sanitizeJsonLogString } from "../http";
 import {
   HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
   type HostedConnectedAppsConfig,
@@ -278,7 +279,10 @@ function readSuccessfulDirectExecutePayload(payload: unknown): unknown {
   const record = asRecord(payload);
   if (record?.successful !== true) {
     throw new ComposioConnectedAppsRequestError(
-      "Composio direct tool execution did not succeed.",
+      withComposioProviderReason(
+        "Composio direct tool execution did not succeed.",
+        payload,
+      ),
       null,
       {
         retryable: false,
@@ -347,8 +351,12 @@ async function requestJson(input: {
   }
 
   if (!response.ok) {
+    const payload = await readBoundedJsonResponse(response).catch(() => null);
     throw new ComposioConnectedAppsRequestError(
-      `Composio request failed with status ${response.status}.`,
+      withComposioProviderReason(
+        `Composio request failed with status ${response.status}.`,
+        payload,
+      ),
       response.status,
       { type: "composio_http_error" },
     );
@@ -459,6 +467,17 @@ function readString(
 ): string | null {
   const value = record?.[field];
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function withComposioProviderReason(message: string, payload: unknown): string {
+  const record = asRecord(payload);
+  const error = record?.error;
+  const providerReason = sanitizeJsonLogString(
+    typeof error === "string"
+      ? error
+      : readString(asRecord(error), "message"),
+  );
+  return providerReason ? `${message} Provider error: ${providerReason}` : message;
 }
 
 function readNullableString(
