@@ -224,6 +224,27 @@ describe("hosted runtime Temporal signaling", () => {
     expect(callOrder).toEqual(["access-confirmed", "temporal"]);
   });
 
+  it("does not start an access-confirmed hint after the caller aborts", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const onActiveAccessConfirmed = vi.fn();
+
+    await signalHostedMailboxAppendRuntime({
+      abortSignal: controller.signal,
+      client: buildClient(),
+      expectedUserId: "member_123",
+      knownCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+        userId: "member_123",
+      },
+      mailboxItemId: "mailbox_123",
+      onActiveAccessConfirmed,
+    });
+
+    expect(onActiveAccessConfirmed).not.toHaveBeenCalled();
+  });
+
   it("signals planner lane facts for participant-authorized thread containers", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "canceled",

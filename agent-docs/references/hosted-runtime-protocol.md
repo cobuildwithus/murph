@@ -964,12 +964,14 @@ handlers may additionally fire one best-effort direct
 message payload). Linq first proves the committed known-checkpoint owner and
 canonical live active access; Assistant Ask first completes its normal
 server-bound append checks. Immediately after that Linq access proof, Web may
-start the existing owner-neutral `runtime/shell-prewarm` request while it awaits
-the Temporal `signalWithStart`. The shell hint issues only the deterministic
-platform start command; it does not read runtime state, create a fence, wait for
-readiness, or invoke work. An access failure starts no shell hint or direct wake;
-a Temporal failure may leave an idle shell but cannot start runtime work. Only
-after Temporal accepts the durable signal does Web start the direct ensure.
+start the existing `runtime/shell-prewarm` request while it awaits the Temporal
+`signalWithStart`. The route passes through the per-member UserRunner consent
+mutation lock and rereads Web-owned health-data admission before issuing only
+the deterministic platform start command. It does not read runtime state,
+create a fence, wait for readiness, or invoke work. Access or health-data
+admission failure starts no shell hint or direct wake; a Temporal failure may
+leave a consented idle shell but cannot start runtime work. Only after Temporal
+accepts the durable signal does Web start the direct ensure.
 Linq instant start follows the same authority split: enrollment returns the
 newly committed activation as an explicit per-request wake continuation instead
 of signaling it first. Once the instant-start planner has committed the member

@@ -1507,8 +1507,10 @@ describe("hosted runtime control contracts", () => {
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
         directEnsureOrchestrationAttemptId:
           "web-ingress-123e4567-e89b-42d3-a456-426614174000",
-        runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
-        runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
+        shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_014,
+        shellPrewarmAcceptedAtEpochMs: 1_777_000_000_015,
+        runtimeControlAuthStartedAtEpochMs: 1_777_000_000_016,
+        runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_017,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         runtimeInvocationOrchestrationAttemptId:
           "web-ingress-123e4567-e89b-42d3-a456-426614174000",

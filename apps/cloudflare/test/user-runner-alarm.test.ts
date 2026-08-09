@@ -152,6 +152,81 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
+  it("does not address the runner container when shell prewarm observes revoked consent", async () => {
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "revoked",
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
+  });
+
+  it("serializes consent withdrawal behind an admitted shell prewarm", async () => {
+    let consentState: "granted" | "revoked" = "granted";
+    const prewarmStarted = createDeferred<void>();
+    const releasePrewarm = createDeferred<void>();
+    const events: string[] = [];
+    const prewarmShell = vi.fn(async () => {
+      events.push("prewarm");
+      prewarmStarted.resolve(undefined);
+      await releasePrewarm.promise;
+      return { action: "start_issued" as const, kind: "started" as const };
+    });
+    const destroyInstance = vi.fn(async () => {
+      events.push("destroy");
+    });
+    const { runner } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: () => consentState,
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await prewarmStarted.promise;
+    consentState = "revoked";
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
+    let withdrawalSettled = false;
+    void withdrawal.finally(() => {
+      withdrawalSettled = true;
+    });
+    await Promise.resolve();
+    expect(withdrawalSettled).toBe(false);
+
+    releasePrewarm.resolve(undefined);
+    await expect(prewarm).resolves.toBeUndefined();
+    await expect(withdrawal).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+    expect(events).toEqual(["prewarm", "destroy"]);
+  });
+
+  it("does not recreate a shell after completed consent withdrawal", async () => {
+    const prewarmShell = vi.fn();
+    const destroyInstance = vi.fn(async () => undefined);
+    const { runner } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: () => "revoked",
+    });
+
+    await expect(
+      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
+    ).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+    });
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(prewarmShell).not.toHaveBeenCalled();
+  });
+
   it("captures existing control-plane boundaries without writing retry analytics for an accepted start", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -5867,6 +5942,7 @@ function createRunnerHarness(input: {
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   platformAiUsageAllowed?: boolean | (() => boolean);
+  prewarmShell?: HostedExecutionContainerStubLike["prewarmShell"];
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
@@ -5924,6 +6000,24 @@ function createRunnerHarness(input: {
         }
       : {}),
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
+    ...(input.prewarmShell
+      ? {
+          prewarmShell: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["prewarmShell"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              prewarmInput,
+            ) {
+              expect(this).toBe(stub);
+              return await input.prewarmShell?.call(this, prewarmInput) ?? {
+                action: "start_issued",
+                kind: "started",
+              };
+            },
+          ),
+        }
+      : {}),
     ...(input.ensureProcessing
       ? {
           ensureProcessing: createDirectOnlyRpcMethod<

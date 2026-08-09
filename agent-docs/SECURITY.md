@@ -17,7 +17,10 @@ Last verified: 2026-08-07
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. Cleanup failure must never restore authority. Keep Settings,
+  before granting. A shell-prewarm hint must use that same per-user barrier and
+  re-read the grant before touching the deterministic container, so a delayed
+  hint cannot recreate a shell after withdrawal completes. Cleanup failure must
+  never restore authority. Keep Settings,
   export, and deletion available without waking the paused runtime; only
   renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.

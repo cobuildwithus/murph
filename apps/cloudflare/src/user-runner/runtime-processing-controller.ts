@@ -67,6 +67,7 @@ import type {
   RunnerStateRecord,
 } from "./types.js";
 
+const RUNTIME_SHELL_PREWARM_TIMEOUT_MS = 20_000;
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
 
@@ -165,6 +166,26 @@ export class RuntimeProcessingController {
     return createRuntimeProcessingRetryLaterResponse({
       ...input,
       analytics: this.input.runtimeRetryAnalytics ?? null,
+    });
+  }
+
+  async prewarmShellForUser(userId: string): Promise<void> {
+    const namespace = this.input.runnerContainerNamespace;
+    if (!namespace) {
+      throw new Error("Runner container namespace is unavailable.");
+    }
+    const container = namespace.getByName(
+      resolveHostedExecutionRunnerContainerName({
+        source: this.input.runnerRuntimeEnvSource,
+        userId,
+      }),
+    );
+    if (!container.prewarmShell) {
+      throw new Error("Runner container shell-prewarm RPC is unavailable.");
+    }
+    await container.prewarmShell({
+      timeoutMs: RUNTIME_SHELL_PREWARM_TIMEOUT_MS,
+      userId,
     });
   }
 

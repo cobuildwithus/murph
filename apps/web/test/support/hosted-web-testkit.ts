@@ -233,6 +233,7 @@ interface HostedIngressLatencyForTestPrismaClient {
       runtimeAttemptId: string | null;
       runtimePhaseStartedAt: Date | null;
       source: string;
+      temporalSignalAcceptedAt: Date | null;
       workspaceRestoreDoneAt: Date | null;
     }>;
     update(args: unknown): Promise<{
@@ -756,6 +757,7 @@ export interface HostedIngressLatencyTraceForTest {
   runnerJobAcceptedAt: string | null;
   runtimeAttemptId: string | null;
   runtimePhaseStartedAt: string | null;
+  temporalSignalAcceptedAt: string | null;
   workspaceRestoreDoneAt: string | null;
 }
 
@@ -1718,6 +1720,8 @@ export async function readHostedIngressLatencyTraceForTest(input: {
       runnerJobAcceptedAt: parsed.runnerJobAcceptedAt ?? null,
       runtimeAttemptId: parsed.runtimeAttemptId ?? null,
       runtimePhaseStartedAt: parsed.runtimePhaseStartedAt ?? null,
+      temporalSignalAcceptedAt:
+        row.temporalSignalAcceptedAt?.toISOString() ?? null,
       workspaceRestoreDoneAt: parsed.workspaceRestoreDoneAt ?? null,
     };
   });

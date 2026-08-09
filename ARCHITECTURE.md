@@ -1998,11 +1998,14 @@ committed known-checkpoint Linq message, Web first verifies the checkpoint owner
 and canonical participant-aware live access as part of the unconditional
 Temporal pointer signal. At that access-confirmed seam, established-member Linq
 ingress may start the existing best-effort `runtime/shell-prewarm` request while
-the Temporal network call is in flight. The hint maps the member directly to the
-deterministic container name and issues only the platform start command; it
+the Temporal network call is in flight. The route resolves the existing
+per-member UserRunner, serializes behind its health-data consent mutation lock,
+and rereads the Web-owned admission before it maps the member to the
+deterministic container and issues only the platform start command. The hint
 cannot resolve runtime ownership, read a workspace, create a fence, or invoke
-mailbox work. Access denial or expiry starts neither the hint nor a direct wake.
-A later Temporal failure may leave only an idle shell, never authoritative work.
+mailbox work. Access or health-data admission denial starts neither the hint nor
+a direct wake. A later Temporal failure may leave only a consented idle shell,
+never authoritative work.
 Assistant Ask request and completion handlers likewise append their encrypted
 mailbox item before signaling Temporal. Only after Temporal accepts the
 applicable durable signal does Web start one best-effort direct

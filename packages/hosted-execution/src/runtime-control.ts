@@ -2068,6 +2068,8 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     directEnsureRequestStartedAtEpochMs?: number;
     directEnsureResponseReceivedAtEpochMs?: number;
     directEnsureOrchestrationAttemptId?: string;
+    shellPrewarmRequestStartedAtEpochMs?: number;
+    shellPrewarmAcceptedAtEpochMs?: number;
     runtimeControlAuthStartedAtEpochMs?: number;
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
@@ -2245,6 +2247,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "directEnsureRequestStartedAtEpochMs",
     "directEnsureResponseReceivedAtEpochMs",
     "directEnsureOrchestrationAttemptId",
+    "shellPrewarmRequestStartedAtEpochMs",
+    "shellPrewarmAcceptedAtEpochMs",
     "runtimeControlAuthStartedAtEpochMs",
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",

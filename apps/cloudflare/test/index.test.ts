@@ -2932,28 +2932,12 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
-    it("issues shell startup through only the deterministic named container", async () => {
-      const prewarmShell = vi.fn(async () => ({
-        action: "start_issued" as const,
-        kind: "started" as const,
-      }));
-      const containerStub: HostedExecutionContainerStubLike = {
-        destroyInstance: vi.fn(async () => undefined),
-        invoke: vi.fn(async () => {
-          throw new Error("Shell prewarm must not invoke runtime work.");
-        }),
-        prewarmShell,
-        smokeHealth: vi.fn(async () => ({
-          ok: true,
-          runnerBundle: null,
-          service: "runner",
-          status: 200,
-        })),
-      };
-      const runnerContainerGetByName = vi.fn(() => containerStub);
-      const userRunnerGetByName = vi.fn(() => createUserRunnerStub());
+    it("routes shell startup through the consent-owning user runner", async () => {
+      const prewarmRuntimeShellForUser = vi.fn(async () => undefined);
+      const stub = createUserRunnerStub({ prewarmRuntimeShellForUser });
+      const runnerContainerGetByName = vi.fn();
+      const userRunnerGetByName = vi.fn(() => stub);
       const env = createWorkerEnv(createUserRunnerStub(), {
-        CF_VERSION_METADATA: { id: "version-123" },
         RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
         USER_RUNNER: { getByName: userRunnerGetByName },
       });
@@ -2972,15 +2956,10 @@ describe("cloudflare worker routes", () => {
 
       expect(response.status).toBe(202);
       await expect(response.json()).resolves.toEqual({ accepted: true });
-      expect(runnerContainerGetByName).toHaveBeenCalledWith(
-        "test-user--v-version-123",
-      );
-      expect(prewarmShell).toHaveBeenCalledWith({
-        timeoutMs: 20_000,
-        userId: "test-user",
-      });
-      expect(userRunnerGetByName).not.toHaveBeenCalled();
-      expect(containerStub.invoke).not.toHaveBeenCalled();
+      expect(userRunnerGetByName).toHaveBeenCalledWith("test-user");
+      expect(stub.bindUser).toHaveBeenCalledWith("test-user");
+      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith("test-user");
+      expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
 
     it("rejects nonempty shell-prewarm bodies without resolving a runtime owner", async () => {
@@ -4230,6 +4209,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
     })),
+    prewarmRuntimeShellForUser: vi.fn(async () => undefined),
     publishHostedPrivateMedia: vi.fn(async () => ({
       ok: false as const,
       reason: "not-configured" as const,

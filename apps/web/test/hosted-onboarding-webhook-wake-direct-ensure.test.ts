@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   prewarmRuntimeShell: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   recordHostedIngressAcceptedFromMailboxItem: vi.fn(async () => undefined),
-  recordHostedIngressDirectEnsureTiming: vi.fn(async () => undefined),
+  recordHostedIngressOrchestrationTiming: vi.fn(async () => undefined),
   recordHostedIngressTemporalSignalAccepted: vi.fn(async () => undefined),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
@@ -28,8 +28,8 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
   recordHostedIngressAcceptedFromMailboxItem:
     mocks.recordHostedIngressAcceptedFromMailboxItem,
-  recordHostedIngressDirectEnsureTiming:
-    mocks.recordHostedIngressDirectEnsureTiming,
+  recordHostedIngressOrchestrationTiming:
+    mocks.recordHostedIngressOrchestrationTiming,
   recordHostedIngressTemporalSignalAccepted:
     mocks.recordHostedIngressTemporalSignalAccepted,
 }));
@@ -187,7 +187,19 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       onActiveAccessConfirmed: expect.any(Function),
     });
     await Promise.all(afterResponseTasks.map((task) => task()));
-    expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
+    expect(mocks.recordHostedIngressOrchestrationTiming).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_123",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        orchestration: {
+          shellPrewarmAcceptedAtEpochMs: expect.any(Number),
+          shellPrewarmRequestStartedAtEpochMs: expect.any(Number),
+        },
+      },
+      source: "linq",
+    });
+    expect(mocks.recordHostedIngressOrchestrationTiming).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
       phaseBreakdown: {
@@ -241,7 +253,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         source: "linq",
       },
     );
-    expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
+    expect(mocks.recordHostedIngressOrchestrationTiming).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
       phaseBreakdown: {
@@ -522,13 +534,19 @@ describe("startHostedRuntimeShellPrewarmBestEffort", () => {
   });
 
   it("issues only the shell-prewarm command for the instant-start member", async () => {
+    const onTiming = vi.fn();
     await expect(startHostedRuntimeShellPrewarmBestEffort({
+      onTiming,
       source: "linq-instant-start",
       userId: "member_123",
     })).resolves.toBeUndefined();
 
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith("member_123");
+    expect(onTiming).toHaveBeenCalledWith({
+      shellPrewarmAcceptedAtEpochMs: expect.any(Number),
+      shellPrewarmRequestStartedAtEpochMs: expect.any(Number),
+    });
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 

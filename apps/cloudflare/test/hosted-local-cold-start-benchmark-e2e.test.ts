@@ -90,6 +90,7 @@ const execFileAsync = promisify(execFile);
 
 interface ColdStartSample {
   acceptedToDirectEnsureRequestMs?: number;
+  acceptedToShellPrewarmRequestMs?: number;
   acceptedToProviderMs?: number;
   acceptedToRunnerAcceptedMs?: number;
   assistantAutoReplyBootstrapMs?: number;
@@ -134,6 +135,7 @@ interface ColdStartSample {
   receiptScanLockWaitMs?: number;
   runnerAcceptedToRestoreDoneMs?: number;
   runtimeInvocationPreparationMs?: number;
+  shellPrewarmAcceptedToFreshStartMs?: number;
   sizeGuardMs?: number;
   stagedToProviderMs?: number;
   systemMailboxMaintenanceMs?: number;
@@ -503,6 +505,27 @@ async function runColdStartTrial(
     orchestration?.freshStartRequestedAtEpochMs,
     "freshStartRequestedAtEpochMs",
   );
+  const shellPrewarmRequestStartedAtEpochMs = requireTiming(
+    orchestration?.shellPrewarmRequestStartedAtEpochMs,
+    "shellPrewarmRequestStartedAtEpochMs",
+  );
+  const shellPrewarmAcceptedAtEpochMs = requireTiming(
+    orchestration?.shellPrewarmAcceptedAtEpochMs,
+    "shellPrewarmAcceptedAtEpochMs",
+  );
+  const temporalSignalAcceptedAtEpochMs = requireIsoEpochMs(
+    trace.temporalSignalAcceptedAt,
+    "temporalSignalAcceptedAt",
+  );
+  expect(shellPrewarmRequestStartedAtEpochMs).toBeLessThanOrEqual(
+    temporalSignalAcceptedAtEpochMs,
+  );
+  expect(shellPrewarmAcceptedAtEpochMs).toBeGreaterThanOrEqual(
+    shellPrewarmRequestStartedAtEpochMs,
+  );
+  expect(shellPrewarmAcceptedAtEpochMs).toBeLessThanOrEqual(
+    freshStartRequestedAtEpochMs,
+  );
 
   return {
     ...baseSample,
@@ -512,6 +535,10 @@ async function runColdStartTrial(
     acceptedToDirectEnsureRequestMs: elapsedEpochMs(
       acceptedAtEpochMs,
       directEnsureRequestStartedAtEpochMs,
+    ),
+    acceptedToShellPrewarmRequestMs: elapsedEpochMs(
+      acceptedAtEpochMs,
+      shellPrewarmRequestStartedAtEpochMs,
     ),
     acceptedToProviderMs: elapsedIso(trace.acceptedAt, requireIso(trace.providerStartAt)),
     acceptedToRunnerAcceptedMs: elapsedIso(
@@ -664,6 +691,10 @@ async function runColdStartTrial(
     runtimeInvocationPreparationMs: requireTiming(
       phaseBreakdown.orchestration?.runtimeInvocationPreparationElapsedMs,
       "runtimeInvocationPreparationElapsedMs",
+    ),
+    shellPrewarmAcceptedToFreshStartMs: elapsedEpochMs(
+      shellPrewarmAcceptedAtEpochMs,
+      freshStartRequestedAtEpochMs,
     ),
     sizeGuardMs: requireTiming(restore.sizeGuardMs, "sizeGuardMs"),
     stagedToProviderMs: elapsedIso(
@@ -901,9 +932,12 @@ async function waitForMeasuredLatencyTrace(input: {
         trace.providerStartAt
         && trace.runnerJobAcceptedAt
         && trace.runtimeAttemptId
+        && trace.temporalSignalAcceptedAt
         && trace.workspaceRestoreDoneAt
         && trace.phaseBreakdown
         && typeof orchestration?.directEnsureRequestStartedAtEpochMs === "number"
+        && typeof orchestration?.shellPrewarmRequestStartedAtEpochMs === "number"
+        && typeof orchestration?.shellPrewarmAcceptedAtEpochMs === "number"
         && typeof orchestration?.cloudflareRouteReceivedAtEpochMs === "number"
         && typeof orchestration?.freshStartRequestedAtEpochMs === "number"
         && typeof orchestration?.freshStartContainerReadyAtEpochMs === "number"
@@ -1111,6 +1145,7 @@ function buildSamplePercentileRecord(
 ): Record<string, number> {
   const fields = [
     "acceptedToDirectEnsureRequestMs",
+    "acceptedToShellPrewarmRequestMs",
     "acceptedToProviderMs",
     "acceptedToRunnerAcceptedMs",
     "assistantAutoReplyBootstrapMs",
@@ -1153,6 +1188,7 @@ function buildSamplePercentileRecord(
     "receiptScanLockWaitMs",
     "runnerAcceptedToRestoreDoneMs",
     "runtimeInvocationPreparationMs",
+    "shellPrewarmAcceptedToFreshStartMs",
     "sizeGuardMs",
     "stagedToProviderMs",
     "systemMailboxMaintenanceMs",

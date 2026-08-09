@@ -283,6 +283,17 @@ export class HostedUserRunner {
     });
   }
 
+  async prewarmRuntimeShellForUser(userId: string): Promise<void> {
+    await this.withRuntimeConsentMutationLock(async () => {
+      const admission =
+        await this.readHostedRuntimeHealthDataAdmissionFromWeb(userId);
+      if (!admission.processingAllowed) {
+        return;
+      }
+      await this.runtimeProcessing.prewarmShellForUser(userId);
+    });
+  }
+
   async reconcileRuntimeHealthDataConsentForUser(
     userId: string,
   ): Promise<HostedRuntimeHealthDataConsentReconcileResult> {

@@ -155,7 +155,9 @@ export async function signalHostedMailboxAppendRuntime(
       message: "Hosted runtime user is not active.",
       prisma: input.prisma ?? getPrisma(),
     });
-    input.onActiveAccessConfirmed?.(mailboxItem.userId);
+    if (!input.abortSignal?.aborted) {
+      input.onActiveAccessConfirmed?.(mailboxItem.userId);
+    }
   }
 
   return signalHostedUserRuntimeWorkflow({
