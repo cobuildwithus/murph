@@ -25,13 +25,12 @@ jobs:
           tar \
             --exclude=.git \
             --exclude=node_modules \
-            --exclude=murph-source.tgz \
-            -czf murph-source.tgz .
+            -czf /tmp/murph-source.tgz .
 
       - name: Upload source tree
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pr1446-postmerge-source
-          path: murph-source.tgz
+          path: /tmp/murph-source.tgz
           if-no-files-found: error
           retention-days: 1
