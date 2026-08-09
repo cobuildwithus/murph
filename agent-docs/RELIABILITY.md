@@ -224,9 +224,10 @@ Last verified: 2026-08-07
   An acknowledged incident's replayable gauge does not admit stale evidence
   while the attempt fence is closed; once the fence opens, a still-unsafe
   current gauge admits the recurrence. An unadmitted monitoring obligation does
-  not occupy a closed provider fence. A newly opened incident still persists its
-  current concrete evidence alone, with exact identity and check time, while the
-  telemetry obligation remains owed behind it. For an acknowledged-incident
+  not occupy a closed provider fence. A newly opened incident with concrete
+  evidence persists one combined immutable body with exact identity, concrete
+  check time, and condition-local telemetry time; both facts share the first
+  eligible attempt and one acknowledgment cycle. For an acknowledged-incident
   recurrence, the first eligible sample supplies any still-current concrete
   evidence and historical telemetry carries its own observation time. An
   acknowledged telemetry-only notification is one-shot while collection remains

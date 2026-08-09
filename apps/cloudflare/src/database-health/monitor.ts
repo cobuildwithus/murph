@@ -394,12 +394,6 @@ export class DatabaseHealthMonitor {
           input.checkedAtMs - alertState.lastAlertAttemptedAtMs
           >= DATABASE_HEALTH_ALERT_INTERVAL_MS
         );
-      const isRetainingNewIncidentPressure =
-        isNewIncident
-        && monitoringAlertObligation !== null
-        && !attemptFenceOpen
-        && !hasDirectConnectionError
-        && currentReplayableConditions.length > 0;
       const admittedConditions =
         (
           isPromotingDeferredDirectError
@@ -413,14 +407,15 @@ export class DatabaseHealthMonitor {
             (condition) =>
               condition.kind === "direct_migration_admission_failures",
           )
-          : isRetainingNewIncidentPressure
-            ? currentReplayableConditions
-            : conditionsWithDeferredDirectErrors;
+          : conditionsWithDeferredDirectErrors;
       const shouldHoldMonitoringForFence =
         monitoringAlertObligation !== null
         && !attemptFenceOpen
         && !hasDirectConnectionError
-        && !isRetainingNewIncidentPressure;
+        && (
+          !isNewIncident
+          || currentReplayableConditions.length === 0
+        );
       const admittedCheckedAtMs =
         admittedConditions.length === 1
         && admittedConditions[0]?.kind

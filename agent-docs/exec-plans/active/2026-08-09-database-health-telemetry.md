@@ -93,8 +93,8 @@ Updated: 2026-08-09
   passed `git apply --check`; its full-outage-copy and malformed-label scenarios
   were incorporated and executed.
 - Final ReviewGPT round 1 independently found the same owed-page loss. No
-  additional finding was reported. Round 2 remains pending on the corrected
-  pushed head.
+  additional finding was reported. Later rounds reviewed each correction on a
+  new exact pushed head.
 - Parent rollout review replaced the schema-version bump with idempotent
   additive columns at the existing version, preserving compatibility with the
   previously deployed Worker during overlap or rollback.
@@ -118,10 +118,14 @@ Updated: 2026-08-09
   rearmed missing-family obligation across restart, exact old-body retry without
   clearing it, and delivery of the second page to both recipients.
 - Final ReviewGPT round 4 found that the closed-fence hold also suppressed a newly
-  opened incident's current concrete pressure. The narrowed admission persists
-  that new-incident pressure alone with exact identity and check time, leaves the
-  telemetry obligation owed behind it, and keeps telemetry-only plus
-  acknowledged-incident recurrence on the fresh eligible-sample path. A focused
-  close/reopen, mixed-threshold, recovery, restart, both-recipient pressure, and
-  later telemetry regression covers the correction. Final ReviewGPT round 5
-  remains pending.
+  opened incident's current concrete pressure. The correction retained that
+  pressure in an exact pending body while keeping telemetry-only plus
+  acknowledged-incident recurrence on the fresh eligible-sample path. Final
+  ReviewGPT round 5 confirmed the pressure-loss fix but found that the
+  intermediate pressure-only body created a second avoidable page and 30-minute
+  telemetry delay. The accepted net-deletion correction now retains one combined
+  body with exact identity and truthful telemetry evidence across recovery and
+  restart, clears the obligation after both recipients acknowledge it, and
+  produces no second provider attempt. The focused close/reopen, mixed-threshold,
+  recovery, restart, and both-recipient regression covers the correction. Final
+  ReviewGPT round 6 remains pending.

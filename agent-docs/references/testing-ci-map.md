@@ -538,9 +538,9 @@ supported provider credential.
   coalescing before acknowledgment, failed-scrape incident preservation,
   telemetry obligation retention behind older pending and direct-error-only
   pages across restart and recovery, current-pressure priority at the first
-  eligible provider slot with historical observation time, exact new-incident
-  pressure retention ahead of telemetry across recovery and restart, rollback-compatible
-  additive SQLite alert-state migration and legacy-ack normalization, recovery
+  eligible provider slot with historical observation time, exact combined
+  new-incident pressure and telemetry retention across recovery and restart,
+  rollback-compatible additive SQLite alert-state migration and legacy-ack normalization, recovery
   reset and rearming, post-ack monitoring suppression inside concrete-pressure
   recurrence, stale pressure retry isolation from a later rearmed obligation,
   global 30-minute wall-time provider-attempt pacing across incident recovery,

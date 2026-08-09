@@ -1312,7 +1312,7 @@ describe("database health monitor", () => {
     ]);
   });
 
-  it("retains new-incident pressure ahead of owed telemetry", async () => {
+  it("retains one mixed new-incident page across the fence and recovery", async () => {
     let clientWaitSeconds = 8;
     let omitMaxConnections = false;
     const harness = createMonitorHarness({
@@ -1356,10 +1356,12 @@ describe("database health monitor", () => {
         checkedAtMs: FIVE_MINUTES_MS * 4,
         failures: 2,
       },
-      pendingAlertIncludesMonitoring: false,
+      pendingAlertIncludesMonitoring: true,
     });
     expect(pressurePending.pendingAlertMessage).toBe(
-      "Database health is outside the safe range. PgBouncer wait 8s. "
+      "Database health is outside the safe range. PgBouncer wait 8s; "
+      + "Database monitor telemetry was incomplete for 2 checks "
+      + "(missing PlanetScale metric: Postgres max connections). "
       + "Checked 00:20 UTC.",
     );
     expect(pressurePending.pendingAlertIdempotencyKey).not.toBeNull();
@@ -1380,16 +1382,17 @@ describe("database health monitor", () => {
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({ outcome: "alert_sent", sampleStatus: "ok" });
     expect(harness.monitor.readAlertState()).toMatchObject({
-      monitoringAlertObligation: expect.objectContaining({ failures: 2 }),
+      incidentOpen: false,
+      monitoringAlertObligation: null,
       pendingAlertIdempotencyKey: null,
       pendingAlertMessage: null,
     });
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + THIRTY_MINUTES_MS),
-    ).resolves.toMatchObject({ outcome: "alert_deferred", sampleStatus: "ok" });
+    ).resolves.toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS * 2),
-    ).resolves.toMatchObject({ outcome: "alert_sent", sampleStatus: "ok" });
+    ).resolves.toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
     expect(harness.monitor.readAlertState()).toMatchObject({
       incidentOpen: false,
       monitoringAlertObligation: null,
@@ -1412,17 +1415,8 @@ describe("database health monitor", () => {
       pressurePending.pendingAlertIdempotencyKey,
       `${pressurePending.pendingAlertIdempotencyKey}-recipient-2`,
     ]);
-    const telemetryAttempts = allBodies.filter(
-      (body) =>
-        body.message.parts[0]?.value
-        === "Database monitor telemetry was incomplete for 2 checks "
-          + "(missing PlanetScale metric: Postgres max connections). "
-          + "Checked 00:20 UTC.",
-    );
-    expect(telemetryAttempts.map((body) => body.to[0]).sort()).toEqual([
-      "+12025550123",
-      "+12025550124",
-    ]);
+    expect(harness.primaryLinqRequests).toHaveLength(2);
+    expect(harness.allLinqRequests).toHaveLength(4);
   });
 
   it("keeps a stale pressure retry from clearing rearmed telemetry", async () => {
