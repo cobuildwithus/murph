@@ -155,3 +155,75 @@ it("preserves the configured control timeout for required group-tool actions", a
   expect(timeoutMsValues.length).toBeGreaterThan(0);
   expect(timeoutMsValues.every((timeoutMs) => timeoutMs === 45_000)).toBe(true);
 });
+
+const PERSONALIZED_CONTACT_CARD_IMAGE_URL =
+  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+
+function createContactCardGroupToolPort(fetchImpl: typeof fetch) {
+  return createHostedRuntimeGroupToolPort({
+    boundUserId: "member_contact_card_transport",
+    fetchImpl,
+    timeoutMs: 30_000,
+    transport: { mode: "proxy" },
+  });
+}
+
+it("reports a personalized contact card as unconfirmed when no answer comes back", async () => {
+  // Web finishes an irreversible card send even after this hop gives up on
+  // it, so the card may be in the conversation. The turn has to be able to say
+  // that rather than report a generic tool failure.
+  const fetchImpl = vi.fn(async () => {
+    throw new TypeError("fetch failed");
+  });
+  const groupToolPort = createContactCardGroupToolPort(fetchImpl as typeof fetch);
+
+  await expect(groupToolPort.request({
+    action: "share_contact_card",
+    contactCardImageUrl: PERSONALIZED_CONTACT_CARD_IMAGE_URL,
+    contactCardShareKey: `ain_${"c".repeat(32)}`,
+    directLinqChatId: "chat_direct_1",
+  })).resolves.toEqual({
+    action: "share_contact_card",
+    result: { status: "unconfirmed" },
+  });
+});
+
+it("keeps an answered personalized contact card a failure", async () => {
+  // Web answered. A real answer, even an error one, is not the ambiguity the
+  // unconfirmed state exists for.
+  const fetchImpl = vi.fn(async () => new Response(
+    JSON.stringify({ error: "internal error" }),
+    { headers: { "content-type": "application/json" }, status: 500 },
+  ));
+  const groupToolPort = createContactCardGroupToolPort(fetchImpl as typeof fetch);
+
+  await expect(groupToolPort.request({
+    action: "share_contact_card",
+    contactCardImageUrl: PERSONALIZED_CONTACT_CARD_IMAGE_URL,
+    contactCardShareKey: `ain_${"c".repeat(32)}`,
+    directLinqChatId: "chat_direct_1",
+  })).rejects.toThrow();
+});
+
+it("leaves every other group-tool transport failure unchanged", async () => {
+  const fetchImpl = vi.fn(async () => {
+    throw new TypeError("fetch failed");
+  });
+  const groupToolPort = createContactCardGroupToolPort(fetchImpl as typeof fetch);
+
+  // A canonical card carries no per-request identity, so it has no single
+  // member request to report as unresolved.
+  await expect(groupToolPort.request({
+    action: "share_contact_card",
+    linqThread: {
+      authority: {
+        channel: "linq",
+        containerMemberId: "member_container",
+        threadId: "thread_group_1",
+      },
+      chatId: "chat_group_1",
+    },
+  })).rejects.toThrow();
+
+  await expect(groupToolPort.request({ action: "read_current" })).rejects.toThrow();
+});
