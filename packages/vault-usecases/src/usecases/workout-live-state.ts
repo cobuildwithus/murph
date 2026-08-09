@@ -19,7 +19,6 @@ import {
   type LogLiveWorkoutSetInput,
   elapsedDurationMinutes,
   isActiveLiveWorkout,
-  summarizeCompletedStrengthExercises,
 } from './workout-live-model.js'
 
 const EXERCISES_PATCH_PREFIX = 'workout.exercises='
@@ -91,16 +90,8 @@ export async function updateLiveWorkoutExercises(
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
 ) {
-  const nextWorkout = workoutSessionSchema.parse({ ...workout, exercises })
-  const strengthExercises = summarizeCompletedStrengthExercises(nextWorkout)
+  workoutSessionSchema.parse({ ...workout, exercises })
   const set = [`${EXERCISES_PATCH_PREFIX}${JSON.stringify(exercises)}`]
-  const clear: string[] = []
-
-  if (strengthExercises) {
-    set.push(`strengthExercises=${JSON.stringify(strengthExercises)}`)
-  } else {
-    clear.push('strengthExercises')
-  }
   if (workout.startedAt) {
     set.push(
       `durationMinutes=${elapsedDurationMinutes(
@@ -114,7 +105,6 @@ export async function updateLiveWorkoutExercises(
     vault: shown.vault,
     lookup: shown.entity.id,
     set,
-    clear: clear.length > 0 ? clear : undefined,
   })
   return showWorkoutRecord(shown.vault, shown.entity.id)
 }

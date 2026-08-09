@@ -6,10 +6,7 @@ import {
   workoutSessionSchema,
 } from '@murphai/contracts'
 
-import {
-  deriveDurationMinutesFromTimestamps,
-  summarizeWorkoutSessionExercises,
-} from './workout-model.js'
+import { deriveDurationMinutesFromTimestamps } from './workout-model.js'
 
 export const LIVE_WORKOUT_SOURCE_APP = 'murph-live' as const
 export const ACTIVE_WORKOUT_SCAN_LIMIT = 200
@@ -137,23 +134,4 @@ export function buildLiveWorkoutSessionFromTemplate(input: {
 
 export function elapsedDurationMinutes(startedAt: string, endedAt: string): number {
   return deriveDurationMinutesFromTimestamps(startedAt, endedAt) ?? 1
-}
-
-export function summarizeCompletedStrengthExercises(workout: WorkoutSession) {
-  const completedExercises = workout.exercises.flatMap((exercise) => {
-    const completedSets = exercise.sets.filter(
-      (set) => typeof set.reps === 'number' && set.reps > 0,
-    )
-    return completedSets.length > 0 ? [{ ...exercise, sets: completedSets }] : []
-  })
-  if (completedExercises.length === 0) {
-    return undefined
-  }
-
-  return summarizeWorkoutSessionExercises(
-    workoutSessionSchema.parse({
-      ...workout,
-      exercises: completedExercises,
-    }),
-  )
 }
