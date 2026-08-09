@@ -1,6 +1,6 @@
 # Typing prewarm observability
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -68,3 +68,4 @@ Updated: 2026-08-09
   the next authoritative readiness call, and may be absent after eviction.
 - Do not add a telemetry table, queue, analytics binding, callback, or polling
   request.
+Completed: 2026-08-09
