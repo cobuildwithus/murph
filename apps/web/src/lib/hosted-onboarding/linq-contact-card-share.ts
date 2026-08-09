@@ -77,7 +77,7 @@ const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 90 * 1000;
 // so expiring under it always means nothing was sent. It is sized to leave the
 // send and its one reconciliation their full budgets inside that hop, and it is
 // far above the sub-second times these reads actually take.
-const HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS = 8 * 1000;
+export const HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS = 8 * 1000;
 
 type HostedLinqContactCardShareSkipReason =
   | "missing_chat_id"
@@ -406,6 +406,12 @@ type MurphHostedLinqContactCardVcfShareInput = {
   idempotencyKeyPrefix: string;
   memberId: string;
   now?: Date;
+  /**
+   * Absolute pre-send deadline owned by the caller, so it also covers the work
+   * that happens before this function is entered. A personalized send that is
+   * not given one falls back to its own window.
+   */
+  preSendSignal?: AbortSignal;
   prisma: PrismaClient;
   signal?: AbortSignal;
 } & (
@@ -436,13 +442,12 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
       shareKey: input.shareKey,
     };
   }
-  const preSendSignal = personalized
-    ? (input.signal
-      ? AbortSignal.any([
-        input.signal,
-        AbortSignal.timeout(HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS),
-      ])
-      : AbortSignal.timeout(HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS))
+  const preSendDeadline = personalized
+    ? input.preSendSignal
+      ?? AbortSignal.timeout(HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS)
+    : null;
+  const preSendSignal = preSendDeadline
+    ? (input.signal ? AbortSignal.any([input.signal, preSendDeadline]) : preSendDeadline)
     : input.signal;
   const preSendSignalOption = preSendSignal ? { signal: preSendSignal } : {};
 
@@ -512,6 +517,11 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
       prisma: input.prisma,
     }),
   ]);
+  // The backup-number read consumes no signal, so the deadline is checked here
+  // rather than assumed. Nothing has reached the chat yet.
+  if (personalized && preSendDeadline?.aborted) {
+    return { status: "skipped", reason: "provider_unavailable" };
+  }
   if (personalized && !photo) {
     return { status: "skipped", reason: "photo_unavailable" };
   }
