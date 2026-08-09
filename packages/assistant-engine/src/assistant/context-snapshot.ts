@@ -27,6 +27,7 @@ import {
   walkVaultFilesInterruptible,
   type HostedCanonicalWriteReceipt,
 } from '@murphai/core'
+import { listMetricPointsBatch } from '@murphai/query'
 import {
   readVersionedJsonStateFile,
   writeAssistantStateVersionedJson,
@@ -41,7 +42,7 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA =
   'murph.assistant-context-snapshot'
-export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 5
+export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 6
 export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
 
 const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
@@ -115,6 +116,20 @@ const MAX_ASSISTANT_CONTEXT_SUPPLEMENT_INGREDIENTS = 3
 const MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES = 64 * 1024
 const MAX_ASSISTANT_CONTEXT_PROMPT_FIELD_LENGTH = 120
 const MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR = 200
+const ASSISTANT_CONTEXT_DEVICE_METRIC_FILTERS = [
+  { metricKey: 'body-fat-percentage', limit: 1 },
+  { metricKey: 'body-weight', limit: 1 },
+  { metricKey: 'diastolic-blood-pressure', limit: 1 },
+  { metricKey: 'systolic-blood-pressure', limit: 1 },
+] as const
+const ASSISTANT_CONTEXT_BODY_METRIC_KEYS = new Set([
+  'body-fat-percentage',
+  'body-weight',
+])
+const ASSISTANT_CONTEXT_BLOOD_PRESSURE_METRIC_KEYS = new Set([
+  'diastolic-blood-pressure',
+  'systolic-blood-pressure',
+])
 
 export function resolveAssistantContextSnapshotPath(vaultRoot: string): string {
   return path.join(
@@ -392,6 +407,8 @@ async function buildAssistantContextSnapshotPrompt(input: {
   ]
   const navigationEvidenceLines = [
     coverage.bloodTestsLine,
+    coverage.bodyMeasurementsLine,
+    coverage.bloodPressureMeasurementsLine,
     coverage.healthContextLine,
     ...safetyLines,
     coverage.activeGoalsLine,
@@ -448,6 +465,8 @@ async function buildAssistantSnapshotCoverage(input: {
   allergyCount: number
   bloodTestsPresent: boolean
   bloodTestsLine: string | null
+  bodyMeasurementsLine: string | null
+  bloodPressureMeasurementsLine: string | null
   conditionCount: number
   goalCount: number
   habitatLine: string | null
@@ -458,9 +477,17 @@ async function buildAssistantSnapshotCoverage(input: {
   safetyComplete: boolean
   supplementCount: number
 }> {
-  const [bloodTestCoverage, goalRead, conditionRead, allergyRead, regimenRead, habitatRead] =
-    await Promise.all([
-      collectAssistantSnapshotBloodTestCoverage(input),
+  const [
+  bloodTestCoverage,
+  deviceMeasurementCoverage,
+  goalRead,
+  conditionRead,
+  allergyRead,
+  regimenRead,
+  habitatRead,
+] = await Promise.all([
+  collectAssistantSnapshotBloodTestCoverage(input),
+  collectAssistantSnapshotDeviceMeasurementCoverage(input),
       listAssistantSnapshotFrontmatterRecords(
         input,
         VAULT_LAYOUT.goalsDirectory,
@@ -627,7 +654,14 @@ async function buildAssistantSnapshotCoverage(input: {
         ? `- Blood test records are present (latest ${bloodTestCoverage.latestBloodTestDate}). For a named biomarker, read it once with \`vault-cli blood-test list --text "<biomarker>" --limit 1 --format json\`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.`
         : '- Blood test records are present. For a named biomarker, read it once with `vault-cli blood-test list --text "<biomarker>" --limit 1 --format json`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.'
       : null,
-    conditionCount: conditions.length,
+    bodyMeasurementsLine: renderAssistantSnapshotBodyMeasurementsLine(
+    deviceMeasurementCoverage.latestBodyMeasurementDate,
+  ),
+  bloodPressureMeasurementsLine:
+    renderAssistantSnapshotBloodPressureMeasurementsLine(
+      deviceMeasurementCoverage.latestBloodPressureMeasurementDate,
+    ),
+  conditionCount: conditions.length,
     goalCount: goals.length,
     habitatLine: renderHabitatLine(habitatRead.records, input.currentDate),
     habitatRecordCount: habitatRead.records.length,
@@ -697,6 +731,65 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
   }
 
   return { complete: !truncated && !parseFailed, records }
+}
+
+function renderAssistantSnapshotBodyMeasurementsLine(
+  latestDate: string | null,
+): string | null {
+  if (!latestDate) {
+    return null
+  }
+
+  return `- Body/scale measurement history is present (latest ${latestDate}). Start with \`vault-cli wearables body list --limit 30 --format json\`; if a reading was saved as a canonical measurement event, use \`vault-cli measurement list --from ${latestDate} --limit 100 --format json\` and widen the date range when needed. Never substitute raw Junction artifacts for canonical history; missing canonical data is an ingestion problem.`
+}
+
+function renderAssistantSnapshotBloodPressureMeasurementsLine(
+  latestDate: string | null,
+): string | null {
+  if (!latestDate) {
+    return null
+  }
+
+  return `- Blood-pressure measurement history is present (latest ${latestDate}). Read canonical events with \`vault-cli measurement list --from ${latestDate} --limit 100 --format json\`; inspect \`systolic-blood-pressure\` and \`diastolic-blood-pressure\` entries, treating values as paired only when they come from the same event, and widen the date range when needed. Never substitute raw Junction artifacts for canonical history; missing canonical data is an ingestion problem.`
+}
+
+async function collectAssistantSnapshotDeviceMeasurementCoverage(input: {
+  shouldYield: (() => boolean) | null
+  signal: AbortSignal | null
+  vaultRoot: string
+}): Promise<{
+  latestBloodPressureMeasurementDate: string | null
+  latestBodyMeasurementDate: string | null
+}> {
+  assertAssistantContextSnapshotCanContinue(input)
+  const points = await listMetricPointsBatch(
+    input.vaultRoot,
+    ASSISTANT_CONTEXT_DEVICE_METRIC_FILTERS,
+  )
+  assertAssistantContextSnapshotCanContinue(input)
+
+  return {
+    latestBloodPressureMeasurementDate: latestAssistantSnapshotMetricDate(
+      points,
+      ASSISTANT_CONTEXT_BLOOD_PRESSURE_METRIC_KEYS,
+    ),
+    latestBodyMeasurementDate: latestAssistantSnapshotMetricDate(
+      points,
+      ASSISTANT_CONTEXT_BODY_METRIC_KEYS,
+    ),
+  }
+}
+
+function latestAssistantSnapshotMetricDate(
+  points: Awaited<ReturnType<typeof listMetricPointsBatch>>,
+  metricKeys: ReadonlySet<string>,
+): string | null {
+  return points
+    .filter((point) => metricKeys.has(point.metricKey))
+    .map((point) => point.effectiveDate)
+    .filter(isStrictIsoDate)
+    .sort((left, right) => right.localeCompare(left))[0]
+    ?? null
 }
 
 async function collectAssistantSnapshotBloodTestCoverage(input: {
