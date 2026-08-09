@@ -72,32 +72,38 @@ member-facing biomarker.
   below/above regions with very light sienna. Keep the label and dashed rules as
   non-color cues, and do not imply that older labs used the same range.
 - When that latest comparable result has no usable numeric source range, an
-  exact-unit authored Health Commons range may appear only as a named published
-  adult comparator when the imported result has an explicitly eligible coarse
-  specimen kind and the source covers the full adult population. Label it
-  `Published adult comparator`, retain its exact source, and state that it is not
-  the reporting lab's range. Keep its boundary rules neutral and dashed-only;
-  do not reuse the sage/sienna lab-range bands or let it imply source status.
-  Keep the imported source flag authoritative and fail closed when the specimen
-  is missing or when age, sex, pregnancy, fasting, treatment, or risk context is
-  required. A qualified source range stays exact in the ledger and is not
-  replaced by a comparator.
-- The reviewed comparator catalog remains deliberately small: named Mayo Clinic
-  Laboratories adult serum intervals are authored for chloride, LDH, phosphate,
-  total protein, sodium, potassium, bicarbonate / total carbon dioxide, and total
-  bilirubin. They provide published context, never an inferred range for the
-  reporting laboratory. The generated biomarker index projects display fields
-  and eligible specimen kinds; primary source metadata remains with the authored
-  Commons guidance.
+  exact-unit reviewed Health Commons comparator may appear only when the
+  imported result has an explicitly eligible coarse specimen kind. Label it
+  `Published adult comparator`, retain its exact source label, and state that it
+  is not the reporting lab's range. Keep its boundary rules neutral and
+  dashed-only; do not reuse the sage/sienna lab-range bands or let it imply
+  source status. Keep the imported source flag authoritative. A qualified
+  source range stays exact in the ledger and blocks every published comparator.
+- Health Commons owns two authored comparator inputs at one package boundary:
+  page-specific `referenceGuidance.fallbackRanges` and the reviewed common
+  catalog in `packages/health-commons/src/biomarker-fallback-ranges.ts`. The
+  result route asks that owner for both and keeps page-authored entries first;
+  `apps/web` does not own numeric values or maintain an independent range table.
+- The reviewed catalog covers 30 canonical biomarker identities through 33
+  exact-unit comparator records: 8 page-authored serum intervals plus 25 common
+  catalog records across 22 additional identities. The expansion includes
+  albumin; anion gap; generic and CKD-EPI eGFR; total, LDL, calculated LDL,
+  non-HDL, triglyceride, ApoB, lipoprotein(a), and hs-CRP context; ferritin and
+  vitamin D decision context; total iron-binding capacity and iron saturation;
+  zinc; methylmalonic acid; rheumatoid factor; and thyroid antibodies.
+- A published clinical or desirable-value boundary remains neutral context, not
+  a manufactured reporting-lab interval or an individualized treatment goal.
+  Formula-specific results retain their exact identities. Vitamin D, TIBC, and
+  iron saturation carry explicit exact-unit alternatives instead of relying on
+  frontend conversion. Unitless or mismatched results continue to fail closed.
 - The 2026-08-09 audit reviewed all 115 canonical saved-lab identities rather
-  than treating every missing interval as unfinished work. Generic calculated
-  lipids, historical MDRD eGFR variants, BUN/creatinine ratio, anion gap, random
-  urine albumin without creatinine, POC troponin I, immature granulocytes,
-  reproductive hormones, and proprietary OmegaCheck outputs remain without
-  published fallback ranges because their useful limits depend on a named
-  formula, assay, analyzer, specimen, sex, reproductive stage, collection
-  context, or reporting laboratory. Decision thresholds such as ApoB or LDL-C
-  risk cutoffs also remain guidance, not display ranges.
+  than treating every missing interval as unfinished work. POC troponin I,
+  BUN/creatinine ratio, historical race-based MDRD outputs, random urine albumin
+  without creatinine, immature granulocytes, reproductive hormones, proprietary
+  OmegaCheck outputs, and demographic or collection-sensitive measurements
+  remain without portable comparators when the current resolver cannot prove
+  assay, analyzer, specimen, sex, age, pregnancy, fasting, timing, or risk
+  applicability.
 - Let the graph follow the latest-reading block without a redundant visible
   chart title or a single-result instruction. The accessible chart name still
   identifies the biomarker and reference context.
@@ -181,9 +187,10 @@ precision:
 2. `POC Troponin I` does not identify an instrument or assay generation, so its
    exact 99th-percentile upper reference limit comes from the assay
    documentation and reporting source.
-3. Calculated lipids, BUN/creatinine ratio, anion gap, and named eGFR methods
-   retain their formula or method identity; they do not inherit a similarly
-   named measured analyte's interval.
+3. Calculated LDL, NIH LDL, anion gap, and eGFR comparators stay bound to their
+   exact calculation identity and are labeled as published context; they never
+   become another analyte's lab range. BUN/creatinine ratio and historical
+   race-based MDRD outputs remain omitted.
 4. Random urine albumin concentration, reproductive hormones, immature
    granulocytes, and proprietary fatty-acid panels need collection, demographic,
    analyzer, or assay context that the portable comparator gate intentionally
@@ -207,8 +214,13 @@ interchangeable assays, or shared reference guidance.
 - `packages/contracts` owns the shared browser-replica generation. The expanded
   alias interpretation advances it to generation 2 so generation-1 sidecars are
   served as stale and refresh through the existing runtime path.
+- `packages/health-commons` owns every reviewed public comparator, its exact
+  unit, eligible specimen kinds, source metadata, applicability caveat, and
+  display-only projection. Page content and the common typed catalog are sibling
+  authoring surfaces under that owner; neither can alter a private result flag.
 - `apps/web` owns device-first ordering and the disclosure/notebook presentation;
-  it must not maintain a second classification list.
+  it merges owner-provided comparator projections only and must not maintain a
+  second classification or numeric-range list.
 
 ## Verification
 
@@ -225,6 +237,7 @@ interchangeable assays, or shared reference guidance.
   ledger structure, and Commons summary fallback.
 - Health Commons coverage tests resolve every requested lab and device identity,
   enforce the deliberate aliases and non-equivalences, validate one-sentence
-  summaries and source locators, lock the guidance-classification counts, pin all
-  eight authored comparators, and preserve context-dependent omissions for the
-  unportable calculated, assay-specific, demographic, and proprietary cases.
+  summaries and source locators, lock the guidance-classification counts, pin the
+  8 page-authored comparators plus all 22 common-catalog entities and 25 exact-unit
+  records, and preserve context-dependent omissions for unportable assay,
+  demographic, collection, and proprietary cases.

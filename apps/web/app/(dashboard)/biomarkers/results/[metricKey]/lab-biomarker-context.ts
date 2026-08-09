@@ -1,4 +1,7 @@
 import {
+  resolveReviewedBiomarkerFallbackRanges,
+} from "@murphai/health-commons/biomarker-fallback-ranges";
+import {
   resolveHealthCommonsBiomarkerEntityKey,
 } from "@murphai/health-commons/biomarker-entity-mappings";
 import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons/runtime";
@@ -24,13 +27,23 @@ export function resolveLabBiomarkerContext(metricKey: string): {
       || candidate.routeId === normalizedMetricKey
       || candidate.aliases.includes(normalizedMetricKey)
   );
+  if (entry) {
+    entityKeys.add(entry.key);
+  }
+
+  const reviewedFallbackRanges = [...entityKeys].flatMap((entityKey) =>
+    resolveReviewedBiomarkerFallbackRanges(entityKey)
+  );
 
   return {
     displayName: definition?.displayName
       ?? entry?.shortName
       ?? entry?.title
       ?? normalizedMetricKey.replaceAll("-", " "),
-    fallbackRanges: entry?.fallbackRanges ?? [],
+    fallbackRanges: [
+      ...(entry?.fallbackRanges ?? []),
+      ...reviewedFallbackRanges,
+    ],
     summary: entry?.summary ?? null,
   };
 }
