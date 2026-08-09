@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-31
+Last verified: 2026-08-09
 
 ## Decision
 
@@ -1190,9 +1190,20 @@ Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and
 Temporal signals only coalesce pending work.
 
-Linq typing events are verified and ignored; they must not plan onboarding,
-bind routes, append mailbox rows, signal Temporal, call Cloudflare, send read
-receipts, or add reconciliation work.
+Linq typing-start events are verified and parsed before any hint. Web returns
+the ordinary ignored acknowledgement before a post-response task uses only the
+private home-chat blind index to resolve an established direct member, then
+checks active access and complete crypto roots before calling the existing
+best-effort Cloudflare shell-prewarm route. Missing, ambiguous, inactive, or
+ineligible routes stop there. The Cloudflare runner independently repeats live
+admission under the consent-mutation barrier before starting its coalesced
+container lifecycle. The optional owner drops repeated hints, or any hint that
+arrives while authoritative ensure, withdrawal, or deletion owns the barrier,
+before they can queue on its FIFO; at most one admitted hint can precede later
+authoritative processing. Typing must not plan onboarding, bind routes, append
+mailbox rows, signal Temporal, start runtime processing, send read receipts, or
+add reconciliation work; it is optional latency data and never durable wake
+authority.
 
 Mailbox processing must not wait behind Cloudflare container lifecycle
 locks.

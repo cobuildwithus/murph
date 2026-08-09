@@ -505,6 +505,17 @@ describe("startHostedRuntimeShellPrewarmBestEffort", () => {
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 
+  it("issues only the shell-prewarm command for a typing-start hint", async () => {
+    await expect(startHostedRuntimeShellPrewarmBestEffort({
+      source: "linq-typing-started",
+      userId: "member_123",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
+    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith("member_123");
+    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+  });
+
   it("settles when client setup or the best-effort request fails", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.readHostedExecutionControlClientIfConfigured.mockImplementationOnce(() => {

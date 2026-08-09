@@ -643,6 +643,7 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /connect-src [^;]*wss:\/\/\*\.onkernel\.com:8443/);
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
+  assert.match(csp, /connect-src [^;]*https:\/\/status\.withmurph\.ai/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.doesNotMatch(csp, /'unsafe-eval'/);
 });

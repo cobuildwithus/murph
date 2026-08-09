@@ -30,6 +30,13 @@ export interface LinqMessageEditedEvent extends LinqWebhookEvent {
   data: LinqMessageEditedData;
 }
 
+export interface LinqTypingIndicatorStartedEvent extends LinqWebhookEvent {
+  event_type: "chat.typing_indicator.started";
+  data: {
+    chat_id: string;
+  };
+}
+
 export interface LinqParticipantAddedEvent extends LinqWebhookEvent {
   event_type: "participant.added";
   data: LinqParticipantAddedData;
@@ -448,6 +455,43 @@ export function parseLinqMessageEditedEvent(
         data.sender_handle,
         "Linq message.edited sender_handle",
       ),
+    },
+  };
+}
+
+export function parseLinqTypingIndicatorStartedEvent(
+  event: LinqWebhookEvent,
+): LinqTypingIndicatorStartedEvent {
+  if (event.event_type !== "chat.typing_indicator.started") {
+    throw new TypeError(
+      "Linq webhook event does not contain a supported chat.typing_indicator.started payload.",
+    );
+  }
+
+  const data = toLinqObjectRecord(
+    event.data,
+    "Linq chat.typing_indicator.started data",
+  );
+  const chatId = typeof data.chat_id === "string"
+    ? data.chat_id.trim()
+    : "";
+  if (!chatId) {
+    throw new TypeError(
+      "Linq chat.typing_indicator.started chat_id is required.",
+    );
+  }
+
+  return {
+    ...event,
+    created_at: normalizeRequiredTimestamp(
+      event.created_at,
+      "Linq webhook created_at",
+    ),
+    event_type: "chat.typing_indicator.started",
+    trace_id: normalizeNullableString(event.trace_id ?? null),
+    partner_id: normalizeNullableString(event.partner_id ?? null),
+    data: {
+      chat_id: chatId,
     },
   };
 }

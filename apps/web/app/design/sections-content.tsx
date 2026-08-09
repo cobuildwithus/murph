@@ -273,6 +273,38 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Homepage referral program · group rewards">
+        <div
+          data-design-section="homepage-referral-program-group-only"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralSection
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage referral program · signup reward">
+        <div
+          data-design-section="homepage-referral-program-signup-only"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralSection
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id === "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Referral rewards unavailable">
         <div
           data-design-section="referral-rewards-unavailable"
@@ -289,7 +321,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage footer">
+      <StudySection title="Homepage footer with vitals and split link columns">
         <div
           data-design-section="homepage-footer"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
@@ -386,7 +418,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery, sponsored billing, and usage limits">
+      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and usage limits">
         <GroupMemberPlanStudy />
       </StudySection>
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatHostedPublicReferralRewardAmount,
+  formatHostedPublicReferralRewardDays,
   formatHostedPublicReferralRewardValue,
   getAvailableHostedPublicReferralRewards,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
@@ -105,6 +107,15 @@ describe("public referral program projection", () => {
     )).toBe(
       "$2.00 of cost-weighted usage credit",
     );
+    expect(formatHostedPublicReferralRewardAmount(
+      HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+    )).toBe("$3.50");
+    expect(formatHostedPublicReferralRewardDays(
+      signup.estimatedUsageDays,
+    )).toBe("≈10 days of Murph");
+    expect(formatHostedPublicReferralRewardDays(
+      activeGroup.estimatedUsageDays,
+    )).toBe("≈14 days of Murph");
   });
 
   it("keeps the active-group public requirements exact", () => {

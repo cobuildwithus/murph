@@ -213,6 +213,73 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("drops repeated shell hints instead of queuing them ahead of authoritative processing", async () => {
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const releaseFirstAdmission = createDeferred<"granted">();
+    const authoritativeAdmissionStarted = createDeferred<void>();
+    const releaseAuthoritativeAdmission = createDeferred<"granted">();
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return releaseFirstAdmission.promise;
+        }
+        expect(timeoutMs).toBe(30_000);
+        authoritativeAdmissionStarted.resolve(undefined);
+        return releaseAuthoritativeAdmission.promise;
+      },
+    });
+
+    const firstPrewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    let settledDuplicateCount = 0;
+    const duplicatePrewarms = Array.from({ length: 4 }, () =>
+      runner.prewarmRuntimeShellForUser(TEST_USER_ID).finally(() => {
+        settledDuplicateCount += 1;
+      })
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(settledDuplicateCount).toBe(4);
+    expect(admissionReads).toBe(1);
+
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-repeated-hints",
+      userId: TEST_USER_ID,
+    });
+    releaseFirstAdmission.resolve("granted");
+    await expect(firstPrewarm).resolves.toBeUndefined();
+    await authoritativeAdmissionStarted.promise;
+
+    expect(admissionReads).toBe(2);
+    expect(prewarmShell).toHaveBeenCalledOnce();
+    await expect(Promise.all(duplicatePrewarms)).resolves.toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+
+    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
+      .resolves.toBeUndefined();
+    expect(admissionReads).toBe(2);
+    expect(prewarmShell).toHaveBeenCalledOnce();
+
+    releaseAuthoritativeAdmission.resolve("granted");
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+  });
+
   it("releases consent withdrawal after the bounded shell hint admission budget", async () => {
     vi.useFakeTimers();
     let admissionReads = 0;
@@ -5383,7 +5450,7 @@ describe("HostedUserRunner execution coordination", () => {
     expect(currentDestroyInstance).not.toHaveBeenCalled();
   });
 
-  it("does not recreate runner state when shell prewarm was queued behind account deletion", async () => {
+  it("drops shell prewarm while account deletion owns the consent lock", async () => {
     const destroyStarted = createDeferred<void>();
     const releaseDestroy = createDeferred<void>();
     const destroyInstance = vi.fn(async () => {
@@ -5402,16 +5469,11 @@ describe("HostedUserRunner execution coordination", () => {
 
     const deletion = runner.deleteHostedUserData(TEST_USER_ID);
     await destroyStarted.promise;
-    let prewarmSettled = false;
-    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID).finally(() => {
-      prewarmSettled = true;
-    });
-    await Promise.resolve();
-    expect(prewarmSettled).toBe(false);
+    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
+      .resolves.toBeUndefined();
 
     releaseDestroy.resolve(undefined);
     await expect(deletion).resolves.toMatchObject({ ok: true });
-    await expect(prewarm).resolves.toBeUndefined();
 
     expect(prewarmShell).not.toHaveBeenCalled();
     expect(runnerContainerNames).toHaveLength(1);
