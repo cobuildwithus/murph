@@ -1,7 +1,9 @@
 import {
   HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY,
+  isHostedSignupReferralRewardEnabled,
 } from "./signup-referral-policy";
 import { computeHostedUsageReferralRewardDays } from "./referral-reward-days";
+import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
 
 export type HostedPublicReferralRewardId =
   | "active-group"
@@ -47,6 +49,19 @@ export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
     title: "Start an active group",
   },
 ] as const satisfies readonly HostedPublicReferralReward[];
+
+export function getAvailableHostedPublicReferralRewards(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): readonly HostedPublicReferralReward[] {
+  const signupRewardsEnabled = isHostedSignupReferralRewardEnabled(source);
+  const groupRewardsEnabled = isHostedUsageReferralEnabled(source);
+
+  return HOSTED_PUBLIC_REFERRAL_REWARDS.filter((reward) =>
+    reward.id === "signup-link"
+      ? signupRewardsEnabled
+      : groupRewardsEnabled
+  );
+}
 
 export function formatApproximateReferralUsageDays(
   approximateMessageCount: number,

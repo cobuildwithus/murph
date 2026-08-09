@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatApproximateReferralUsageDays,
+  getAvailableHostedPublicReferralRewards,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
 import {
@@ -26,6 +27,41 @@ function readReward(id: (typeof HOSTED_PUBLIC_REFERRAL_REWARDS)[number]["id"]) {
 }
 
 describe("public referral program projection", () => {
+  it.each([
+    {
+      expectedIds: [],
+      groupEnabled: false,
+      signupEnabled: false,
+    },
+    {
+      expectedIds: ["signup-link"],
+      groupEnabled: false,
+      signupEnabled: true,
+    },
+    {
+      expectedIds: ["new-person-group", "active-group"],
+      groupEnabled: true,
+      signupEnabled: false,
+    },
+    {
+      expectedIds: ["signup-link", "new-person-group", "active-group"],
+      groupEnabled: true,
+      signupEnabled: true,
+    },
+  ])(
+    "projects only rewards enabled by the signup=$signupEnabled group=$groupEnabled gates",
+    ({ expectedIds, groupEnabled, signupEnabled }) => {
+      const source = {
+        HOSTED_SIGNUP_REFERRAL_REWARDS_ENABLED: signupEnabled ? "1" : "0",
+        HOSTED_USAGE_REFERRALS_ENABLED: groupEnabled ? "1" : "0",
+      };
+
+      expect(
+        getAvailableHostedPublicReferralRewards(source).map(({ id }) => id),
+      ).toEqual(expectedIds);
+    },
+  );
+
   it("keeps public reward labels aligned with runtime policy", () => {
     const signup = readReward("signup-link");
     const newPersonGroup = readReward("new-person-group");

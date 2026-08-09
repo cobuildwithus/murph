@@ -36,6 +36,9 @@ vi.mock("@/src/lib/hosted-growth/signup-referral-policy", () => ({
 vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
   buildHostedUsageReferralOutstandingWhere: mocks.buildOutstandingWhere,
   getHostedUsageReferralPolicyDisplay: mocks.policyDisplay,
+}));
+
+vi.mock("@/src/lib/hosted-growth/usage-referral-policy", () => ({
   isHostedUsageReferralEnabled: mocks.isReferralEnabled,
 }));
 

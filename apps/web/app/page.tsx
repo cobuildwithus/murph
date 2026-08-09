@@ -38,6 +38,9 @@ import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landi
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import {
+  getAvailableHostedPublicReferralRewards,
+} from "@/src/lib/hosted-growth/referral-program";
+import {
   createMurphPageMetadata,
   MURPH_DEFAULT_METADATA_DESCRIPTION,
   MURPH_DEFAULT_METADATA_TITLE,
@@ -108,6 +111,7 @@ export default async function HomePage() {
   const country = headerList.get("x-vercel-ip-country") ?? "";
   const messengerChannel = resolveHeroMessengerChannel(country);
   const murphHeadshotSrc = pickRandomMurphHeadshotSrc();
+  const referralRewards = getAvailableHostedPublicReferralRewards();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
   const signupCta: HomepageSignupCta = authenticated
@@ -163,7 +167,9 @@ export default async function HomePage() {
         />
         <SecurityTeaserSection />
         <FaqSection veniceAvailable={isHostedVeniceAssistantEnabled()} />
-        <ReferralSection />
+        {referralRewards.length > 0
+          ? <ReferralSection rewards={referralRewards} />
+          : null}
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
         <LocalRunSection installCommandUrl={installCommandUrl} />
       </main>
