@@ -1586,6 +1586,82 @@ describe("RunnerContainer", () => {
     expect(getState).not.toHaveBeenCalled();
   });
 
+  it("acknowledges repeated shell hints before startup and reports one causal observation", async () => {
+    const releaseStart = createDeferred<void>();
+    const start = vi.fn(async () => {
+      await releaseStart.promise;
+    });
+    const { container, containerFetch, getState } = createContainerDouble({
+      initialStatus: "running",
+      start,
+    });
+
+    await expect(container.beginShellPrewarm({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({ accepted: true });
+    await expect(container.beginShellPrewarm({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({ accepted: true });
+
+    expect(start).toHaveBeenCalledOnce();
+    expect(getState).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted runner shell prewarm operation completed.",
+      }),
+    );
+
+    container.onStart();
+    releaseStart.resolve(undefined);
+    await vi.waitFor(() =>
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            shellPrewarmColdStartObserved: true,
+            shellPrewarmHintCountAtCompletion: 2,
+            shellPrewarmOutcome: "start_issued",
+          }),
+          message: "Hosted runner shell prewarm operation completed.",
+        }),
+      )
+    );
+
+    const readiness = await container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    });
+    expect(readiness).toMatchObject({
+      action: "already_warm",
+      kind: "ready",
+      shellPrewarmObservation: {
+        coldStartObservedCount: 1,
+        failedCount: 0,
+        firstHintAtEpochMs: expect.any(Number),
+        hintCount: 2,
+        lastFinishedAtEpochMs: expect.any(Number),
+        lastHintAtEpochMs: expect.any(Number),
+        lastOperationElapsedMs: expect.any(Number),
+        startIssuedCount: 1,
+        supersededCount: 0,
+      },
+    });
+    expect(JSON.stringify(readiness.shellPrewarmObservation))
+      .not.toContain("member_123");
+
+    const completionInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .filter((input) =>
+        input.message === "Hosted runner shell prewarm operation completed."
+      );
+    expect(completionInputs).toHaveLength(1);
+    expect(JSON.stringify(
+      completionInputs.map((input) => buildHostedExecutionStructuredLogRecord(input)),
+    )).not.toContain("member_123");
+  });
+
   it("reuses a completed shell prewarm through ordinary health readiness", async () => {
     const { container, start, startAndWaitForPorts } = createContainerDouble();
 
@@ -1617,16 +1693,33 @@ describe("RunnerContainer", () => {
       start,
     });
 
-    await expect(container.prewarmShell({
+    await expect(container.beginShellPrewarm({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).rejects.toThrow("platform start wait failed after command issue");
+    })).resolves.toEqual({ accepted: true });
+    await vi.waitFor(() =>
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            shellPrewarmOutcome: "failed",
+          }),
+          message: "Hosted runner shell prewarm failed after acceptance.",
+        }),
+      )
+    );
     await expect(container.ensureReadyForProcessing({
       timeoutMs: 7_500,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "started",
       kind: "ready",
+      shellPrewarmObservation: {
+        coldStartObservedCount: 0,
+        failedCount: 1,
+        hintCount: 1,
+        startIssuedCount: 0,
+        supersededCount: 0,
+      },
     });
 
     expect(start).toHaveBeenCalledOnce();
@@ -1687,6 +1780,61 @@ describe("RunnerContainer", () => {
     });
     expect(start).toHaveBeenCalledOnce();
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+  });
+
+  it("attributes a superseded accepted hint to the authoritative readiness trace", async () => {
+    const startEntered = createDeferred<void>();
+    const start = vi.fn(async (
+      _startOptions: unknown,
+      waitOptions?: { signal?: AbortSignal },
+    ) => {
+      const signal = waitOptions?.signal;
+      if (!signal) {
+        throw new Error("Expected shell prewarm to carry an abort signal.");
+      }
+      startEntered.resolve(undefined);
+      await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    });
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      start,
+    });
+
+    await expect(container.beginShellPrewarm({
+      timeoutMs: 20_000,
+      userId: "member_123",
+    })).resolves.toEqual({ accepted: true });
+    await startEntered.promise;
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 8_000,
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "ready",
+      shellPrewarmObservation: {
+        coldStartObservedCount: 0,
+        failedCount: 0,
+        hintCount: 1,
+        startIssuedCount: 0,
+        supersededCount: 1,
+      },
+    });
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    await vi.waitFor(() =>
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            shellPrewarmColdStartObserved: false,
+            shellPrewarmOutcome: "superseded",
+          }),
+        }),
+      )
+    );
   });
 
   it("acknowledges shell registration before exact-target destruction supersedes it", async () => {

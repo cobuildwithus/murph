@@ -2120,6 +2120,15 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
+    shellPrewarmFirstHintAtEpochMs?: number;
+    shellPrewarmLastHintAtEpochMs?: number;
+    shellPrewarmLastFinishedAtEpochMs?: number;
+    shellPrewarmLastOperationElapsedMs?: number;
+    shellPrewarmHintCount?: number;
+    shellPrewarmStartIssuedCount?: number;
+    shellPrewarmSupersededCount?: number;
+    shellPrewarmFailedCount?: number;
+    shellPrewarmColdStartObservedCount?: number;
     workspaceReadElapsedMs?: number;
     runtimeStoreEnsureElapsedMs?: number;
     runtimeInvocationPreparationElapsedMs?: number;
@@ -2297,6 +2306,15 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",
+    "shellPrewarmFirstHintAtEpochMs",
+    "shellPrewarmLastHintAtEpochMs",
+    "shellPrewarmLastFinishedAtEpochMs",
+    "shellPrewarmLastOperationElapsedMs",
+    "shellPrewarmHintCount",
+    "shellPrewarmStartIssuedCount",
+    "shellPrewarmSupersededCount",
+    "shellPrewarmFailedCount",
+    "shellPrewarmColdStartObservedCount",
     "workspaceReadElapsedMs",
     "runtimeStoreEnsureElapsedMs",
     "runtimeInvocationPreparationElapsedMs",

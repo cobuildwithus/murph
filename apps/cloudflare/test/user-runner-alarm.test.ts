@@ -163,6 +163,14 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(prewarmShell).not.toHaveBeenCalled();
     expect(runnerContainerNames).toEqual([]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+      }),
+    );
   });
 
   it("abandons a slow shell hint admission before authoritative processing begins", async () => {
@@ -206,6 +214,14 @@ describe("HostedUserRunner execution coordination", () => {
     expect(prewarmShell).not.toHaveBeenCalled();
     expect(runnerContainerNames).toEqual([]);
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
+        },
+        level: "warn",
+      }),
+    );
 
     releaseAuthoritativeAdmission.resolve("granted");
     await expect(ensure).resolves.toMatchObject({
@@ -262,6 +278,17 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(admissionReads).toBe(2);
     expect(prewarmShell).toHaveBeenCalledOnce();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "scheduled",
+        },
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls.filter(
+      ([entry]) =>
+        entry.details?.shellPrewarmAdmissionOutcome === "skipped_consent_busy",
+    )).toHaveLength(4);
     await expect(Promise.all(duplicatePrewarms)).resolves.toEqual([
       undefined,
       undefined,
@@ -495,6 +522,13 @@ describe("HostedUserRunner execution coordination", () => {
     expect(prewarmShell).toHaveBeenCalledOnce();
     expect(readActiveRunnerContainerNameForTest(sql)).toBe(
       priorRunnerContainerName,
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_runtime_busy",
+        },
+      }),
     );
   });
 
@@ -1663,7 +1697,20 @@ describe("HostedUserRunner execution coordination", () => {
     let preparationStartedAtEpochMs: number | null = null;
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
-    >(async () => ({ kind: "ready" }));
+    >(async () => ({
+      kind: "ready",
+      shellPrewarmObservation: {
+        coldStartObservedCount: 1,
+        failedCount: 0,
+        firstHintAtEpochMs: 1_777_000_000_010,
+        hintCount: 2,
+        lastFinishedAtEpochMs: 1_777_000_000_030,
+        lastHintAtEpochMs: 1_777_000_000_020,
+        lastOperationElapsedMs: 20,
+        startIssuedCount: 1,
+        supersededCount: 0,
+      },
+    }));
     const { invoke, runner } = createRunnerHarness({
       ensureReadyForProcessing,
       onCryptoContextRead: () => {
@@ -1738,6 +1785,15 @@ describe("HostedUserRunner execution coordination", () => {
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
       runtimeStoreEnsureElapsedMs: 250,
+      shellPrewarmColdStartObservedCount: 1,
+      shellPrewarmFailedCount: 0,
+      shellPrewarmFirstHintAtEpochMs: 1_777_000_000_010,
+      shellPrewarmHintCount: 2,
+      shellPrewarmLastFinishedAtEpochMs: 1_777_000_000_030,
+      shellPrewarmLastHintAtEpochMs: 1_777_000_000_020,
+      shellPrewarmLastOperationElapsedMs: 20,
+      shellPrewarmStartIssuedCount: 1,
+      shellPrewarmSupersededCount: 0,
       workspaceReadElapsedMs: 1_000,
     });
     expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)

@@ -7,6 +7,87 @@
 -- Prisma DateTime columns are stored as UTC-naive TIMESTAMP(3) values.
 -- This aggregate report intentionally compares them with a UTC-naive cutoff
 -- and never returns member, mailbox, trace, or attempt identifiers.
+\echo 'Typing shell-prewarm cohorts (milliseconds)'
+WITH ranked_attempts AS (
+  SELECT
+    trace.accepted_at,
+    trace.runner_job_accepted_at,
+    trace.provider_start_at,
+    delivery.accepted_at AS reply_accepted_at,
+    trace.phase_breakdown_json #> '{orchestration}' AS orchestration,
+    row_number() OVER (
+      PARTITION BY trace.runtime_attempt_id
+      ORDER BY trace.accepted_at, trace.created_at
+    ) AS attempt_row
+  FROM hosted_ingress_latency_trace AS trace
+  LEFT JOIN hosted_linq_delivery AS delivery
+    ON delivery.id = trace.linq_delivery_id
+  WHERE trace.accepted_at >=
+      (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - make_interval(hours => :window_hours)
+    AND trace.source = 'linq'
+    AND trace.runtime_attempt_id IS NOT NULL
+    AND trace.phase_breakdown_json #> '{orchestration,freshStartRequestedAtEpochMs}' IS NOT NULL
+), attempt_samples AS (
+  SELECT
+    accepted_at,
+    runner_job_accepted_at,
+    provider_start_at,
+    reply_accepted_at,
+    orchestration,
+    CASE
+      WHEN (orchestration ->> 'shellPrewarmFailedCount')::numeric > 0
+        THEN 'prewarm_failed'
+      WHEN (orchestration ->> 'shellPrewarmSupersededCount')::numeric > 0
+        THEN 'prewarm_superseded'
+      WHEN (orchestration ->> 'shellPrewarmColdStartObservedCount')::numeric > 0
+        THEN 'prewarm_cold_start_observed'
+      WHEN (orchestration ->> 'shellPrewarmStartIssuedCount')::numeric > 0
+        THEN 'prewarm_start_issued_warm'
+      WHEN orchestration -> 'shellPrewarmHintCount' IS NOT NULL
+        THEN 'prewarm_observed_no_start'
+      ELSE 'no_observed_prewarm'
+    END AS cohort
+  FROM ranked_attempts
+  WHERE attempt_row = 1
+), metric_samples AS (
+  SELECT
+    cohort,
+    metric.name,
+    metric.duration_ms
+  FROM attempt_samples
+  CROSS JOIN LATERAL (
+    VALUES
+      (
+        'Last typing hint -> ingress accepted',
+        EXTRACT(EPOCH FROM (accepted_at - TIMESTAMP '1970-01-01')) * 1000
+          - (orchestration ->> 'shellPrewarmLastHintAtEpochMs')::double precision
+      ),
+      (
+        'Ingress accepted -> runner job',
+        EXTRACT(EPOCH FROM (runner_job_accepted_at - accepted_at)) * 1000
+      ),
+      (
+        'Ingress accepted -> provider start',
+        EXTRACT(EPOCH FROM (provider_start_at - accepted_at)) * 1000
+      ),
+      (
+        'Ingress accepted -> reply accepted',
+        EXTRACT(EPOCH FROM (reply_accepted_at - accepted_at)) * 1000
+      )
+  ) AS metric(name, duration_ms)
+  WHERE metric.duration_ms >= 0
+)
+SELECT
+  cohort,
+  name AS metric,
+  count(*) AS samples,
+  round(percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms)::numeric, 1) AS p50_ms,
+  round(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)::numeric, 1) AS p95_ms,
+  round(max(duration_ms)::numeric, 1) AS max_ms
+FROM metric_samples
+GROUP BY cohort, name
+ORDER BY cohort, name;
+
 \echo 'Causal direct cold start: accepted to runner job (seconds)'
 WITH direct_rows AS (
   SELECT

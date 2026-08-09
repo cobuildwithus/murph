@@ -17,6 +17,7 @@ import type {
 import {
   destroyHostedExecutionContainer,
   type HostedExecutionContainerNamespaceLike,
+  type RunnerContainerShellPrewarmObservation,
 } from "../runner-container.js";
 import {
   readHostedRunnerContainerIdentity,
@@ -94,6 +95,7 @@ type FreshRuntimeStartPreparation =
       prepared: PreparedRuntimeInvocation;
       preparedAtEpochMs: number;
       runtimePreparationWaitAfterContainerReadyMs: number;
+      shellPrewarmOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
     }
   | {
       kind: "retry";
@@ -119,6 +121,29 @@ function withRuntimeProcessingOrchestration(
       ...(input.orchestration ?? {}),
       ...orchestration,
     },
+  };
+}
+
+function toShellPrewarmOrchestrationDiagnostics(
+  observation: RunnerContainerShellPrewarmObservation | undefined,
+): RuntimeProcessingOrchestrationDiagnostics | null {
+  if (!observation) {
+    return null;
+  }
+  return {
+    shellPrewarmColdStartObservedCount: observation.coldStartObservedCount,
+    shellPrewarmFailedCount: observation.failedCount,
+    shellPrewarmFirstHintAtEpochMs: observation.firstHintAtEpochMs,
+    shellPrewarmHintCount: observation.hintCount,
+    ...(observation.lastFinishedAtEpochMs === undefined ? {} : {
+      shellPrewarmLastFinishedAtEpochMs: observation.lastFinishedAtEpochMs,
+    }),
+    shellPrewarmLastHintAtEpochMs: observation.lastHintAtEpochMs,
+    ...(observation.lastOperationElapsedMs === undefined ? {} : {
+      shellPrewarmLastOperationElapsedMs: observation.lastOperationElapsedMs,
+    }),
+    shellPrewarmStartIssuedCount: observation.startIssuedCount,
+    shellPrewarmSupersededCount: observation.supersededCount,
   };
 }
 
@@ -188,10 +213,28 @@ export class RuntimeProcessingController {
         userId,
       });
     if (!reserved) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_runtime_busy",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+        phase: "scheduled",
+        userId,
+      });
       return;
     }
     await container.beginShellPrewarm({
       timeoutMs: RUNTIME_SHELL_PREWARM_TIMEOUT_MS,
+      userId,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        shellPrewarmAdmissionOutcome: "scheduled",
+      },
+      message: "Hosted runner shell prewarm admission decided.",
+      phase: "scheduled",
       userId,
     });
   }
@@ -889,6 +932,7 @@ export class RuntimeProcessingController {
         freshStartContainerReadyAtEpochMs: preparation.containerReadyAtEpochMs,
       }),
       freshStartInvocationPreparedAtEpochMs: preparation.preparedAtEpochMs,
+      ...(preparation.shellPrewarmOrchestration ?? {}),
     });
     const preparationOrchestration =
       preparation.prepared.input.orchestration ?? {};
@@ -1074,6 +1118,9 @@ export class RuntimeProcessingController {
       prepared: preparation.prepared,
       preparedAtEpochMs: preparation.preparedAtEpochMs,
       runtimePreparationWaitAfterContainerReadyMs,
+      shellPrewarmOrchestration: toShellPrewarmOrchestrationDiagnostics(
+        startupConfirmed.shellPrewarmObservation,
+      ),
     };
   }
 
@@ -1106,7 +1153,10 @@ export class RuntimeProcessingController {
     runnerContainerName: string;
     token: RunnerWriteFenceToken;
   }): Promise<
-    | { confirmed: true }
+    | {
+        confirmed: true;
+        shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
+      }
     | {
         confirmed: false;
         response: HostedRuntimeEnsureProcessingResponse;
@@ -1136,7 +1186,7 @@ export class RuntimeProcessingController {
 
     try {
       let timeoutMs = RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS;
-      await runRuntimeProcessingCommandStep({
+      const readinessResult = await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
         operation: async () => {
           timeoutMs = readRuntimeProcessingCommandStepTimeoutMs({
@@ -1161,7 +1211,12 @@ export class RuntimeProcessingController {
         phase: "runtime.starting",
         userId: input.input.userId,
       });
-      return { confirmed: true };
+      return {
+        confirmed: true,
+        ...(readinessResult.shellPrewarmObservation === undefined ? {} : {
+          shellPrewarmObservation: readinessResult.shellPrewarmObservation,
+        }),
+      };
     } catch (error) {
       return await this.clearWriteFenceAfterStartupConfirmationFailure({
         error,

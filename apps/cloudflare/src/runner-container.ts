@@ -203,6 +203,19 @@ export interface RunnerContainerEnsureReadyForProcessingInput {
 export interface RunnerContainerEnsureReadyForProcessingResult {
   action?: "already_warm" | "started";
   kind: "ready";
+  shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
+}
+
+export interface RunnerContainerShellPrewarmObservation {
+  coldStartObservedCount: number;
+  failedCount: number;
+  firstHintAtEpochMs: number;
+  hintCount: number;
+  lastFinishedAtEpochMs?: number;
+  lastHintAtEpochMs: number;
+  lastOperationElapsedMs?: number;
+  startIssuedCount: number;
+  supersededCount: number;
 }
 
 export type RunnerContainerPrewarmShellResult =
@@ -265,6 +278,14 @@ type RunnerContainerNameSource = HostedRunnerContainerIdentitySource;
 
 interface RunnerContainerLogContext {
   userId: string;
+}
+
+interface RunnerContainerShellPrewarmOperation {
+  abortController: AbortController;
+  coldStartAlreadyObserved: boolean;
+  observed: boolean;
+  result: Promise<RunnerContainerPrewarmShellResult>;
+  startedAtMs: number;
 }
 
 interface RunnerContainerReadinessProof {
@@ -502,10 +523,8 @@ export class RunnerContainer extends Container {
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
-  private shellPrewarmOperation: {
-    abortController: AbortController;
-    result: Promise<RunnerContainerPrewarmShellResult>;
-  } | null = null;
+  private shellPrewarmObservation: RunnerContainerShellPrewarmObservation | null = null;
+  private shellPrewarmOperation: RunnerContainerShellPrewarmOperation | null = null;
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
   private warmShellInvalidatedByUnsettledDestroy = false;
@@ -650,6 +669,7 @@ export class RunnerContainer extends Container {
 
   async destroyInstance(): Promise<void> {
     this.noteContainerInteraction();
+    this.shellPrewarmObservation = null;
     this.supersedeShellPrewarm();
     const operationsAtDestroy = [...this.workspaceInvocationOperations];
     for (const operation of operationsAtDestroy) {
@@ -742,6 +762,8 @@ export class RunnerContainer extends Container {
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
     this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    const shellPrewarmObservation = this.shellPrewarmObservation;
+    this.shellPrewarmObservation = null;
     const supersededShellPrewarm = this.supersedeShellPrewarm();
     return await this.withLifecycleLock(async () => {
       const logContext: RunnerContainerLogContext = {
@@ -754,7 +776,13 @@ export class RunnerContainer extends Container {
           AbortSignal.timeout(input.timeoutMs),
           { completeSupersededShellPrewarm: supersededShellPrewarm },
         );
-        return { action, kind: "ready" };
+        return {
+          action,
+          kind: "ready",
+          ...(shellPrewarmObservation === null
+            ? {}
+            : { shellPrewarmObservation: { ...shellPrewarmObservation } }),
+        };
       } finally {
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
@@ -771,18 +799,14 @@ export class RunnerContainer extends Container {
   async beginShellPrewarm(
     payload: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerBeginShellPrewarmResult> {
+    this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    const operation = this.prewarmShell(input);
-    void operation.catch((error: unknown) => {
-      emitHostedExecutionStructuredLog({
-        component: "runner.container",
-        details: buildHostedExecutionSafeErrorDiagnostics(error),
-        error,
-        level: "warn",
-        message: "Hosted runner shell prewarm failed after acceptance.",
-        phase: "failed",
-        userId: input.userId,
-      });
+    const observation = this.recordShellPrewarmHint();
+    const operation = this.getOrBeginShellPrewarm(input);
+    this.observeShellPrewarmOperation({
+      observation,
+      operation,
+      userId: input.userId,
     });
     return { accepted: true };
   }
@@ -792,12 +816,20 @@ export class RunnerContainer extends Container {
   ): Promise<RunnerContainerPrewarmShellResult> {
     this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    return await this.getOrBeginShellPrewarm(input).result;
+  }
+
+  private getOrBeginShellPrewarm(
+    input: RunnerContainerEnsureReadyForProcessingInput,
+  ): RunnerContainerShellPrewarmOperation {
     const existing = this.shellPrewarmOperation;
     if (existing) {
-      return await existing.result;
+      return existing;
     }
 
     const abortController = new AbortController();
+    const startedAtMs = Date.now();
+    const coldStartAlreadyObserved = this.containerStartedAtMs !== null;
     let retainForAuthoritativeReadiness = false;
     const result = this.withLifecycleLock(
       async (): Promise<RunnerContainerPrewarmShellResult> => {
@@ -840,21 +872,23 @@ export class RunnerContainer extends Container {
         blockPointerlessWake: false,
       },
     );
-    const operation = {
+    const operation: RunnerContainerShellPrewarmOperation = {
       abortController,
+      coldStartAlreadyObserved,
+      observed: false,
       result,
+      startedAtMs,
     };
     this.shellPrewarmOperation = operation;
-    try {
-      return await result;
-    } finally {
+    void result.finally(() => {
       if (
         this.shellPrewarmOperation === operation
         && !retainForAuthoritativeReadiness
       ) {
         this.shellPrewarmOperation = null;
       }
-    }
+    }).catch(() => undefined);
+    return operation;
   }
 
   async abortWorkspaceInvocation(input: {
@@ -1618,6 +1652,7 @@ export class RunnerContainer extends Container {
     });
     this.containerStartedAtMs = null;
     this.containerStartObservedBy = null;
+    this.shellPrewarmObservation = null;
     this.lastActivityExpiryAtMs = null;
     this.lastActivityObservedAtMs = null;
     this.lastActivityObservedStage = null;
@@ -2738,6 +2773,113 @@ export class RunnerContainer extends Container {
       );
     }
     return true;
+  }
+
+  private recordShellPrewarmHint(): RunnerContainerShellPrewarmObservation {
+    const hintedAtMs = Date.now();
+    const existing = this.shellPrewarmObservation;
+    if (existing) {
+      existing.hintCount = Math.min(Number.MAX_SAFE_INTEGER, existing.hintCount + 1);
+      existing.lastHintAtEpochMs = hintedAtMs;
+      return existing;
+    }
+
+    const observation: RunnerContainerShellPrewarmObservation = {
+      coldStartObservedCount: 0,
+      failedCount: 0,
+      firstHintAtEpochMs: hintedAtMs,
+      hintCount: 1,
+      lastHintAtEpochMs: hintedAtMs,
+      startIssuedCount: 0,
+      supersededCount: 0,
+    };
+    this.shellPrewarmObservation = observation;
+    return observation;
+  }
+
+  private observeShellPrewarmOperation(input: {
+    observation: RunnerContainerShellPrewarmObservation;
+    operation: RunnerContainerShellPrewarmOperation;
+    userId: string;
+  }): void {
+    if (input.operation.observed) {
+      return;
+    }
+    input.operation.observed = true;
+    void input.operation.result.then(
+      (result) => {
+        const finishedAtMs = Date.now();
+        const coldStartObserved = result.action === "start_issued"
+          && !input.operation.coldStartAlreadyObserved
+          && this.containerStartedAtMs !== null;
+        if (result.action === "start_issued") {
+          input.observation.startIssuedCount = Math.min(
+            Number.MAX_SAFE_INTEGER,
+            input.observation.startIssuedCount + 1,
+          );
+        } else {
+          input.observation.supersededCount = Math.min(
+            Number.MAX_SAFE_INTEGER,
+            input.observation.supersededCount + 1,
+          );
+        }
+        if (coldStartObserved) {
+          input.observation.coldStartObservedCount = Math.min(
+            Number.MAX_SAFE_INTEGER,
+            input.observation.coldStartObservedCount + 1,
+          );
+        }
+        input.observation.lastFinishedAtEpochMs = finishedAtMs;
+        const elapsedMs = Math.max(
+          0,
+          finishedAtMs - input.operation.startedAtMs,
+        );
+        input.observation.lastOperationElapsedMs = elapsedMs;
+        queueMicrotask(() => {
+          emitHostedExecutionStructuredLog({
+            component: "runner.container",
+            details: {
+              shellPrewarmColdStartObserved: coldStartObserved,
+              shellPrewarmElapsedMs: elapsedMs,
+              shellPrewarmHintCountAtCompletion: input.observation.hintCount,
+              shellPrewarmOutcome: result.action,
+            },
+            message: "Hosted runner shell prewarm operation completed.",
+            phase: "container.starting",
+            userId: input.userId,
+          });
+        });
+      },
+      (error: unknown) => {
+        const finishedAtMs = Date.now();
+        input.observation.failedCount = Math.min(
+          Number.MAX_SAFE_INTEGER,
+          input.observation.failedCount + 1,
+        );
+        input.observation.lastFinishedAtEpochMs = finishedAtMs;
+        const elapsedMs = Math.max(
+          0,
+          finishedAtMs - input.operation.startedAtMs,
+        );
+        input.observation.lastOperationElapsedMs = elapsedMs;
+        queueMicrotask(() => {
+          emitHostedExecutionStructuredLog({
+            component: "runner.container",
+            details: {
+              ...buildHostedExecutionSafeErrorDiagnostics(error),
+              shellPrewarmElapsedMs: elapsedMs,
+              shellPrewarmHintCountAtCompletion: input.observation.hintCount,
+              shellPrewarmOutcome: "failed",
+            },
+            error,
+            level: "warn",
+            message: "Hosted runner shell prewarm failed after acceptance.",
+            phase: "failed",
+            userId: input.userId,
+          });
+        });
+      },
+    );
   }
 
   private recordRecentReadinessProof(userId: string): void {
