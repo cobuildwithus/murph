@@ -5,6 +5,7 @@ import {
   assertBrowserMutationOrigin,
   createHostedUserAssertionSignature,
   encodeHostedUserAssertion,
+  HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS,
   requireAuthenticatedHostedUser,
   type HostedBrowserAssertionNonceStore,
   type HostedUserAssertionClaims,
@@ -100,6 +101,91 @@ describe("requireAuthenticatedHostedUser", () => {
       "AUTH_ASSERTION_STALE",
       401,
     );
+  });
+
+  it("rejects an exact replay at the last admissible millisecond", async () => {
+    const nonceStore = createNonceStore();
+    const exp = toEpochSeconds("2026-03-25T12:03:00.000Z");
+    const request = createSignedRequest({
+      url: "https://control.example.test/api/device-sync/agents/pair",
+      method: "POST",
+      origin: "https://operator.example.test",
+      nonce: "nonce-boundary-replay-123456",
+      iat: exp - 5 * 60,
+      exp,
+    });
+
+    expect(HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS).toBe(61);
+
+    await expect(
+      requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+        nonceStore,
+        now: new Date(exp * 1000 - 1),
+      }),
+    ).resolves.toMatchObject({
+      id: "user-123",
+    });
+
+    await expectDeviceSyncError(
+      () =>
+        requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+          nonceStore,
+          now: new Date(hostedUserAssertionFirstInvalidAtMs(exp) - 1),
+        }),
+      "AUTH_ASSERTION_REPLAYED",
+      401,
+    );
+  });
+
+  it("accepts a never-consumed assertion at the last admissible millisecond", async () => {
+    const observedExpiresAt: string[] = [];
+    const exp = toEpochSeconds("2026-03-25T12:03:00.000Z");
+    const request = createSignedRequest({
+      url: "https://control.example.test/api/device-sync/agents/pair",
+      method: "POST",
+      origin: "https://operator.example.test",
+      nonce: "nonce-boundary-fresh-123456",
+      iat: exp - 5 * 60,
+      exp,
+    });
+
+    await expect(
+      requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+        nonceStore: createNonceStore(({ expiresAt }) => observedExpiresAt.push(expiresAt)),
+        now: new Date(hostedUserAssertionFirstInvalidAtMs(exp) - 1),
+      }),
+    ).resolves.toMatchObject({
+      id: "user-123",
+    });
+
+    expect(observedExpiresAt).toEqual([new Date(hostedUserAssertionFirstInvalidAtMs(exp)).toISOString()]);
+  });
+
+  it("rejects an assertion at its first invalid instant before consuming the nonce", async () => {
+    let consumeCalls = 0;
+    const exp = toEpochSeconds("2026-03-25T12:03:00.000Z");
+    const request = createSignedRequest({
+      url: "https://control.example.test/api/device-sync/agents/pair",
+      method: "POST",
+      origin: "https://operator.example.test",
+      nonce: "nonce-boundary-stale-123456",
+      iat: exp - 5 * 60,
+      exp,
+    });
+
+    await expectDeviceSyncError(
+      () =>
+        requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+          nonceStore: createNonceStore(() => {
+            consumeCalls += 1;
+          }),
+          now: new Date(hostedUserAssertionFirstInvalidAtMs(exp)),
+        }),
+      "AUTH_ASSERTION_STALE",
+      401,
+    );
+
+    expect(consumeCalls).toBe(0);
   });
 
   it("rejects assertions whose signed path does not match the request path", async () => {
@@ -330,11 +416,21 @@ function createRequestWithAssertion(input: {
   });
 }
 
-function createNonceStore(): HostedBrowserAssertionNonceStore {
+type BrowserAssertionNonceInput = Parameters<
+  HostedBrowserAssertionNonceStore["consumeBrowserAssertionNonce"]
+>[0];
+
+function createNonceStore(
+  onConsume?: (input: BrowserAssertionNonceInput) => void,
+): HostedBrowserAssertionNonceStore {
   const consumed = new Set<string>();
 
   return {
-    async consumeBrowserAssertionNonce({ nonceHash }) {
+    async consumeBrowserAssertionNonce(input) {
+      onConsume?.(input);
+
+      const { nonceHash } = input;
+
       if (consumed.has(nonceHash)) {
         return false;
       }
@@ -347,6 +443,10 @@ function createNonceStore(): HostedBrowserAssertionNonceStore {
 
 function toEpochSeconds(value: string): number {
   return Math.floor(Date.parse(value) / 1000);
+}
+
+function hostedUserAssertionFirstInvalidAtMs(expSeconds: number): number {
+  return (expSeconds + HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS) * 1000;
 }
 
 async function expectDeviceSyncError(

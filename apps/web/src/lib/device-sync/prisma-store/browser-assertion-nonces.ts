@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
+import { HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS } from "../auth";
 import { isUniqueViolation } from "./prisma-errors";
 
 export class PrismaHostedBrowserAssertionNonceStore {
@@ -18,10 +19,14 @@ export class PrismaHostedBrowserAssertionNonceStore {
     expiresAt: string;
   }): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
+      const cleanupCutoff = new Date(
+        new Date(input.now).getTime() - HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS * 1000,
+      );
+
       await tx.deviceBrowserAssertionNonce.deleteMany({
         where: {
           expiresAt: {
-            lte: new Date(input.now),
+            lte: cleanupCutoff,
           },
         },
       });

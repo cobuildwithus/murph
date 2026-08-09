@@ -267,7 +267,16 @@ These are read/manage wearable routes for the hosted settings page. Ordinary rea
 
 - `POST /api/device-sync/agents/pair`
 
-These are browser-initiated but lower-level than the settings surface. They must use short-lived signed assertions with replay protection.
+These are browser-initiated but lower-level than the settings surface. They
+must use short-lived signed assertions with the existing HMAC, member,
+audience, method, path, and origin bindings plus single-use nonce replay
+protection. The shared browser-assertion policy makes an integer-second `exp`
+first invalid exactly at `(exp + 61) * 1000`; every earlier millisecond remains
+admissible. New nonce rows persist that first-invalid instant. For
+mixed-version rollout, foreground cleanup deletes only rows whose stored
+`expiresAt <= now - 61 seconds`, retaining legacy raw-`exp` rows through the
+full accepted window and intentionally retaining new-format rows for one extra
+61-second interval.
 
 ### Hosted companion routes
 

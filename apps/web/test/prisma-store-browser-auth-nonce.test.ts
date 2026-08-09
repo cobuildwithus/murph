@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS } from "@/src/lib/device-sync/auth";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 type MutableBrowserAssertionNonce = {
@@ -131,6 +132,38 @@ describe("PrismaDeviceSyncControlPlaneStore browser assertion nonces", () => {
     });
     expect(nonces.get("nonce-hash-expired")?.expiresAt.toISOString()).toBe("2026-03-25T12:05:00.000Z");
   });
+
+  it("retains a legacy raw-exp nonce through the last admissible millisecond", async () => {
+    const exp = toEpochSeconds("2026-03-25T12:03:00.000Z");
+    const nonceHash = "nonce-hash-legacy-boundary";
+    const legacyExpiresAt = new Date(exp * 1000);
+    const firstInvalidAt = new Date(
+      (exp + HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS) * 1000,
+    );
+    const { nonces, store } = createStore([
+      {
+        nonceHash,
+        userId: "user-123",
+        method: "POST",
+        path: "/api/device-sync/agents/pair",
+        createdAt: new Date("2026-03-25T11:58:00.000Z"),
+        expiresAt: legacyExpiresAt,
+      },
+    ]);
+
+    await expect(
+      store.consumeBrowserAssertionNonce({
+        nonceHash,
+        userId: "user-123",
+        method: "POST",
+        path: "/api/device-sync/agents/pair",
+        now: new Date(firstInvalidAt.getTime() - 1).toISOString(),
+        expiresAt: firstInvalidAt.toISOString(),
+      }),
+    ).resolves.toBe(false);
+
+    expect(nonces.get(nonceHash)?.expiresAt.toISOString()).toBe(legacyExpiresAt.toISOString());
+  });
 });
 
 function matchesExpiryWhere(
@@ -180,4 +213,8 @@ function cloneNonce(record: MutableBrowserAssertionNonce): MutableBrowserAsserti
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function toEpochSeconds(value: string): number {
+  return Math.floor(Date.parse(value) / 1000);
 }

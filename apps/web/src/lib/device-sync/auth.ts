@@ -8,6 +8,8 @@ import { isRecord, normalizeNullableString, sha256Hex, toIsoTimestamp } from "./
 const HOSTED_USER_ASSERTION_SIGNATURE_CONTEXT = "hbds-user-assertion.v1:";
 const HOSTED_USER_ASSERTION_MAX_TTL_SECONDS = 5 * 60;
 const HOSTED_USER_ASSERTION_CLOCK_SKEW_SECONDS = 60;
+export const HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS =
+  HOSTED_USER_ASSERTION_CLOCK_SKEW_SECONDS + 1;
 const HOSTED_USER_ASSERTION_NONCE_MIN_LENGTH = 16;
 
 export interface AuthenticatedHostedUser {
@@ -162,7 +164,7 @@ async function readSignedHostedUser(
     method: claims.method,
     path: claims.path,
     now: nowIso,
-    expiresAt: new Date(claims.exp * 1000).toISOString(),
+    expiresAt: new Date(hostedUserAssertionFirstInvalidAtMs(claims.exp)).toISOString(),
   });
 
   if (!consumed) {
@@ -259,7 +261,7 @@ function validateHostedUserAssertionClaims(
     });
   }
 
-  if (claims.exp < nowSeconds - HOSTED_USER_ASSERTION_CLOCK_SKEW_SECONDS) {
+  if (now.getTime() >= hostedUserAssertionFirstInvalidAtMs(claims.exp)) {
     throw deviceSyncError({
       code: "AUTH_ASSERTION_STALE",
       message: "Hosted device-sync user assertion expired.",
@@ -288,6 +290,10 @@ function validateHostedUserAssertionClaims(
   if (claims.origin !== requestOriginHeader) {
     throw invalidHostedUserHeaders("Hosted device-sync user assertion origin binding is invalid.");
   }
+}
+
+function hostedUserAssertionFirstInvalidAtMs(expSeconds: number): number {
+  return (expSeconds + HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS) * 1000;
 }
 
 function secureEqual(expectedValue: string, providedValue: string): boolean {
