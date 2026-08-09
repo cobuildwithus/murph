@@ -1,0 +1,61 @@
+name: Generate live workout foundation
+
+on:
+  push:
+    branches:
+      - agent/live-workout-cli-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  generate-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Register live workout commands
+        run: node scripts/apply-live-workout-foundation.mjs
+
+      - name: Regenerate CLI artifacts
+        run: pnpm --dir packages/cli gen:config-schema
+
+      - name: Verify focused implementation
+        run: |
+          pnpm --dir packages/vault-usecases typecheck
+          pnpm --dir packages/cli typecheck
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage \
+            packages/cli/test/workout-live-command.test.ts
+          pnpm --dir packages/vault-usecases exec vitest run --config vitest.config.ts --no-coverage \
+            test/workout-live.test.ts
+          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage \
+            test/assistant-tracked-table-skill.test.ts
+
+      - name: Remove one-shot generation helpers
+        run: |
+          rm scripts/apply-live-workout-foundation.mjs
+          rm .github/workflows/live-workout-foundation-generate.yml
+
+      - name: Commit generated foundation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -m 'Add live workout CLI foundation'
+          git push origin HEAD:${{ github.ref_name }}

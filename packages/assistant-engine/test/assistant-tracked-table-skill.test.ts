@@ -47,6 +47,7 @@ describe('assistant tracked workout table skill', () => {
     expect(matches).toHaveLength(1)
     expect(matches[0]?.triggerHint).toContain('workout table')
     expect(matches[0]?.triggerHint).toContain('structured tracker')
+    expect(matches[0]?.triggerHint).toContain('live workout log')
     expect(matches[0]?.triggerHint).toContain('updated/refreshed table')
   })
 
@@ -61,6 +62,29 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(strengthSkill).toContain('put a workout log in a table')
     expect(strengthSkill).toContain('instead of Markdown table syntax')
+  })
+
+  it('uses targeted canonical commands for live workout mutations', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+
+    expect(skill).toContain('vault-cli workout start')
+    expect(skill).toContain('vault-cli workout active')
+    expect(skill).toContain('vault-cli workout exercise add')
+    expect(skill).toContain('vault-cli workout set log')
+    expect(skill).toContain('vault-cli workout set clear')
+    expect(skill).toContain('vault-cli workout finish')
+    expect(skill).toContain(
+      'Do not reconstruct and replace the complete nested exercise/set array',
+    )
+    expect(skill).toContain('pass `--workout-id`')
+    expect(skill).toContain('pass `--set-order`')
+    expect(skill).toContain('correct the same set rather than append a duplicate')
+    expect(skill).toContain('Saved target values remain in the workout format')
+    expect(skill).toContain('Finish only when the member explicitly says they are done')
+    expect(skill).toContain('Never infer weight, repetitions, effort, assistance')
   })
 
   it('keeps set annotations canonical and preserves a fourth set', async () => {
