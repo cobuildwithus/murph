@@ -774,8 +774,35 @@ Hosted managed crypto:
 - `HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME`
 - `HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION`
 - `HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
+- `HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON` for additional `verify_only` or
+  `disabled` authority public keys
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
+- `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON` for additional
+  `disabled` Cloudflare automation public keys during standby preload
+- The production build runs `hosted-crypto:env-check` before Next.js. It parses
+  every configured standby ring through the shared runtime-state acceptance
+  contract, rejects active entries, private material in the public ring, and
+  any private keyring configured in Web runtime, and reports field-only errors
+  without echoing key material. Public-ring entries and JWKs use closed schemas,
+  so a sibling `privateJwk` or another ignored field cannot ride into Vercel;
+  a duplicate-aware scan runs before `JSON.parse`, and every ring also rejects
+  duplicate raw members or identifiers that collide after trimming. Before
+  changing a provider, load the three proposed payloads from their approved secret
+  stores into the process environment together with the current active IDs and
+  the operator-only `HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION` and
+  `HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID`, then run
+  `pnpm --dir apps/web hosted-crypto:env-check -- --require-complete-preload`;
+  complete mode rejects active-ID collisions, requires the intended
+  `verify_only` / `disabled` / `decrypt_only` entries, imports the exact
+  authority PEM as a P-256 ECDSA verification key, and wraps then unwraps an
+  ephemeral challenge through the exact Cloudflare public/private pair. Do not
+  add the two operator-only identifiers to Vercel runtime.
+- Record the current ready Vercel production deployment before preload. Deploy
+  Web first and prove that its active hosted crypto context still reads the
+  current ingress/runtime envelopes before changing the Worker. A failed Web
+  proof rolls back to that recorded deployment; a successful build alone is
+  not runtime proof.
 - production Vercel OIDC / GCP Workload Identity Federation:
   `HOSTED_CRYPTO_GCP_PROJECT_NUMBER`,
   `HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL`,
