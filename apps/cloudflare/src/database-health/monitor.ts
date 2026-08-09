@@ -21,7 +21,7 @@ import {
 
 const PLANETSCALE_API_ORIGIN = "https://api.planetscale.com";
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
-const DATABASE_HEALTH_ALERT_INTERVAL_MS = 30 * 60 * 1_000;
+const DATABASE_HEALTH_ALERT_INTERVAL_MS = 60 * 60 * 1_000;
 const DATABASE_HEALTH_RUN_LEASE_MS = 2 * 60 * 1_000;
 const DATABASE_HEALTH_SAMPLE_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const DATABASE_HEALTH_FETCH_TIMEOUT_MS = 10_000;
@@ -44,6 +44,100 @@ const DATABASE_ALERT_OPENINGS = [
   "Murph's database monitor found a live issue.",
   "Database connection health is degraded.",
   "The database is still reporting an unsafe condition.",
+  "A live database condition needs operator attention.",
+  "One or more database safeguards are currently breached.",
+  "Production data access is showing a concrete pressure signal.",
+  "The database monitor has confirmed an active fault.",
+  "Current database metrics require investigation.",
+  "A production database threshold has been crossed.",
+  "The data layer is reporting an active capacity concern.",
+  "Database traffic is encountering unhealthy conditions.",
+  "A live connection-pool issue requires attention.",
+  "Production database capacity is in an unsafe state.",
+  "The monitor confirmed current database contention.",
+  "Database availability has entered a degraded state.",
+  "A concrete database risk is active now.",
+  "The production connection path is unhealthy.",
+  "Database demand has exceeded a safe operating threshold.",
+  "A current database condition needs triage.",
+  "The database has an active resource-pressure condition.",
+  "Production query capacity is showing strain.",
+  "A database safety check is failing now.",
+  "The monitor detected current pressure in the data path.",
+  "Database connections are operating outside normal bounds.",
+  "An active database threshold breach needs review.",
+  "The production data path is reporting degraded health.",
+  "Database headroom is below the safe operating range.",
+  "The connection layer has entered an unhealthy state.",
+  "Current database load needs operator review.",
+  "The database monitor confirmed a production risk.",
+  "A live data-layer capacity issue needs attention.",
+  "Database resource use has crossed a safety limit.",
+  "Production connection capacity is currently constrained.",
+  "The database is reporting an active service-risk condition.",
+  "A current connection-pool signal needs investigation.",
+  "Database operating margins are below the safe range.",
+  "The production datastore is showing active pressure.",
+  "A database protection threshold is currently failing.",
+  "The monitor found a concrete database-health problem.",
+  "Current database utilization is unsafe.",
+  "Production database headroom needs attention.",
+  "The data layer has crossed an operational threshold.",
+  "A live database-capacity concern is unresolved.",
+  "Database pressure remains above a safe limit.",
+  "The production connection layer needs investigation.",
+  "An unhealthy database metric is active.",
+  "The monitor confirmed an unsafe database condition.",
+  "Database service capacity has entered a risk state.",
+  "Production data access is under measurable strain.",
+  "A live database-health threshold requires triage.",
+  "Current connection demand is outside safe bounds.",
+  "The database has less capacity headroom than required.",
+  "A production database safeguard has tripped.",
+  "The data path is showing a current operational fault.",
+  "Database connection pressure needs attention.",
+  "A concrete database degradation signal is active.",
+  "Production database resources are in an unhealthy range.",
+  "The database monitor found active connection strain.",
+  "Current data-layer health is below the operating threshold.",
+  "A database capacity limit has been breached.",
+  "The production datastore requires an operator check.",
+  "Database pressure has reached an unsafe level.",
+  "A live database resource signal needs review.",
+  "The connection path is reporting a current fault.",
+  "Production database conditions are degraded.",
+  "A database operating threshold needs operator review.",
+  "The monitor has confirmed active database strain.",
+  "Current connection capacity is below a safe margin.",
+  "The data layer is operating in a degraded range.",
+  "A production database signal requires attention.",
+  "Database demand is currently stressing the connection path.",
+  "A live data-capacity issue remains unresolved.",
+  "The database is outside its healthy operating envelope.",
+  "Production connection headroom is currently low.",
+  "A database metric has crossed into the alert range.",
+  "The monitor found a current database capacity problem.",
+  "Database service health is materially degraded.",
+  "A live production data-path issue needs triage.",
+  "Current database pressure is above the configured limit.",
+  "The connection layer is reporting an active risk.",
+  "Production database utilization needs review.",
+  "A database health guard is currently failing.",
+  "The monitor detected a live database capacity breach.",
+  "Database operating conditions need attention.",
+  "Production data access is in a degraded state.",
+  "A current database signal has entered the unsafe range.",
+  "The database connection path is under active strain.",
+  "A production datastore threshold is breached.",
+  "Live database capacity is below the required margin.",
+  "The data layer is reporting current connection pressure.",
+  "A database service safeguard needs review.",
+  "Production database headroom is in the alert range.",
+  "An active database-health fault remains unresolved.",
+  "Current data capacity is outside the safe envelope.",
+  "The monitor found a production database threshold breach.",
+  "Database connection demand has entered the alert range.",
+  "A live data-layer pressure condition needs attention.",
 ] as const;
 
 const DATABASE_METRIC_ALERT_LABELS: Readonly<
@@ -1002,12 +1096,12 @@ function buildDatabaseAlertMessage(input: {
       .join("; ");
     return `${evidence}. Window ended ${checkedAt} UTC.`;
   }
-  const openingIndex =
-    (
-      input.incidentSequence
-      + input.alertSequence
-      - 2
-    ) % DATABASE_ALERT_OPENINGS.length;
+  // Both steps are coprime to the 100-item bank, so one incident traverses
+  // every reviewed opening before repeating while retries remain reproducible.
+  const openingIndex = normalizeModulo(
+    input.incidentSequence * 37 + input.alertSequence * 17,
+    DATABASE_ALERT_OPENINGS.length,
+  );
   const opening =
     DATABASE_ALERT_OPENINGS[openingIndex]
     ?? DATABASE_ALERT_OPENINGS[0];
@@ -1019,6 +1113,10 @@ function buildDatabaseAlertMessage(input: {
     )
   ).join("; ");
   return `${opening} ${evidence}. Checked ${checkedAt} UTC.`;
+}
+
+function normalizeModulo(value: number, modulus: number): number {
+  return ((value % modulus) + modulus) % modulus;
 }
 
 function resolveLinqDirectChatIdentity(
