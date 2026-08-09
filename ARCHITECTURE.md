@@ -2325,16 +2325,19 @@ owner of execution and commit authority rather than mailbox-work truth. Exact
 accepted wakes may coalesce under Cloudflare's active owner; durable mailbox lag
 remains recovery truth but duplicate execution is prevented by the write fence;
 accepted processing returns an owner recheck instead of a short
-durable-lag polling loop; a recent startup fence keeps its startup grace across
-same-version, prior-version, and legacy container targets because a no-child
-probe can race cross-Durable-Object operation registration; after that grace,
-exact inactive proof allows replacement, and concurrent replacement callers
-converge on the current fence record instead of entering a timed race state;
-wake-unconfirmed active children retry instead of being replaced, and alarm cleanup
+durable-lag polling loop; a same-version startup fence keeps its startup grace,
+while an exact prior-version container that reports no active child is replaced
+immediately by identity; concurrent replacement callers converge on the current
+fence record instead of entering a timed race state; wake-unconfirmed active
+children retry instead of being replaced, and alarm cleanup
 failures are rethrown so the platform can retry instead of permanently deleting
 the alarm. New v2 foreground leases restore from durable workspace snapshots and
 legacy refs also cold-restore from durable bundles instead of trusting dirty
-warm local runtime markers across leases. Encrypted hosted snapshots also carry
+warm local runtime markers across leases. Ordinary production deploys therefore
+use gradual container rollout with the configured active grace so the runtime's
+last-chance `idle_shutdown` snapshot can finish; immediate rollout remains an
+explicit compatibility hard cut because it can discard the only dirty local
+copy before publication. Encrypted hosted snapshots also carry
 the exact query SQLite cache triplet so a fresh one-vCPU runner can reuse the
 last projection; canonical vault files remain authoritative, source-manifest
 validation rebuilds stale caches, and every other projection remains excluded.

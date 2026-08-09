@@ -773,7 +773,7 @@ Core execution tuning:
   `CF_WEB_CONTROL_TIMEOUT_MS` by at least 5 seconds
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
-- `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
+- `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. Deploy helpers default to `gradual` in every environment so active production runners receive the configured shutdown grace. Use `immediate` only when the matching rollout section requires a hard cut and the deployment owner accepts the risk of interrupting dirty runtime checkpoints.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `1200000`) and controls the post-completion warm lease minted only by observed conversation activity. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An inactive old child without the watermark is cleanup-eligible; active old-child work remains protected by its independent active-work count. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
@@ -908,12 +908,11 @@ exact upstream mappings are active, complete the all-tier direct/tool/compact
 proof above, then deploy Web so new immutable usage rows select the Venice rate
 table. Historical immutable usage rows are not repriced.
 
-Vault-share selector-scope production deploys must also use
-`container_rollout=immediate` until the distance/count selector-scope runner
-bundle has fully rolled out and the rollback window to a bundle without exact
-scope support has closed. The destination mailbox importer does not negotiate
-projection-scope capability, so a gradual rollout could leave a warm old runner
-importing a selector-scoped delivery wake it cannot preserve.
+The vault-share selector-scope hard cut is complete: its runner bundle has long
+since replaced every warm predecessor, and the rollback window to a bundle
+without exact scope support is closed. Do not retain a global immediate-rollout
+default after a compatibility migration converges; any future hard cut must be
+scoped and documented by its own rollout section.
 
 Opt-in runtime integrations:
 
@@ -1282,9 +1281,9 @@ That command:
 - renders the deploy config and worker secrets payload
 - assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`); runner-specific CLI and Health Commons tarballs keep the deployed `murph` / `vault-cli`, compact protocol artifacts, and compact biomarker desired-direction projection without the public npm package's nested bundled workspace payload or web-only Health Commons artifacts
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
-- deploys the Worker directly with Wrangler; production deploys currently default to immediate container rollout for the vault-share selector-scope migration, while non-production deploys default to gradual and build only the small app image layer from the prepared runner bundle
+- deploys the Worker directly with Wrangler; deploys default to gradual container rollout and build only the small app image layer from the prepared runner bundle
 
-The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
+The default gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. This grace lets an active runtime finish its runtime-owned `idle_shutdown` checkpoint before replacement. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers before a dirty checkpoint is durable, so reserve it for an explicit compatibility hard cut and run the section's convergence proof.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 The accepted group-message participant rollout is Web-first. Deploy the Web

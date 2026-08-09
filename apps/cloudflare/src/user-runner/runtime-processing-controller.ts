@@ -456,6 +456,11 @@ export class RuntimeProcessingController {
         activeFence,
         commandBudget: input.commandBudget,
         input: inputAfterActiveWake,
+        preserveStartingFence:
+          this.shouldPreserveStartingFenceAfterDirectNoChild({
+            activeFence,
+            record,
+          }),
         record,
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
@@ -715,6 +720,13 @@ export class RuntimeProcessingController {
       runnerContainerName: input.activeFence.runnerContainerName,
       runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
     });
+  }
+
+  private shouldPreserveStartingFenceAfterDirectNoChild(input: {
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    record: RunnerStateRecord;
+  }): boolean {
+    return this.readActiveRuntimeFenceTargetWasPriorVersion(input) !== true;
   }
 
   private readActiveRuntimeFenceTargetWasPriorVersion(input: {

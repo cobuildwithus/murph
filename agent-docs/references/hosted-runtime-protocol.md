@@ -185,6 +185,11 @@ The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
 runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint.
+Ordinary production deploys use the configured gradual container rollout so
+that last-chance checkpoint receives the active grace period. An immediate
+container rollout is a documented compatibility hard cut, not the default: it
+may terminate the only dirty local copy before snapshot publication and force a
+replacement runtime to reconstruct work from durable mailbox evidence.
 Plain-text Linq plus
 attachment-free Telegram and WhatsApp input does not initialize or import inbox
 projection. Linq input with link parts retains the existing projection path.
@@ -1641,15 +1646,11 @@ background invocations begin their pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
 Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
-recent runtime fence whose child is missing remains protected by the startup
-grace window for same-version, prior-version, and legacy container targets. An
-identity-aware no-child response is point-in-time evidence from the target
-container, but it can arrive while an already-fenced caller is between its last
-UserRunner fence confirmation and cross-Durable-Object operation registration;
-it therefore cannot bypass startup grace without permitting two generations to
-execute. After startup grace, exact no-child evidence lets UserRunner
-compare-and-swap replace the fence. Concurrent replacement callers converge on
-the authoritative current fence record returned by the same compare-and-swap.
+same-version runtime fence whose child is missing remains protected by the
+startup grace window. When an identity-aware direct wake proves that the exact
+stored prior-version container has no active child, UserRunner immediately
+compare-and-swap replaces that fence. Concurrent replacement callers converge
+on the authoritative current fence record returned by the same compare-and-swap.
 A wake-unconfirmed active child is not replaced; the caller retries until the
 child finishes, becomes wakeable, or is no longer active.
 A failed transport call to an accepted invocation does not prove the invocation
