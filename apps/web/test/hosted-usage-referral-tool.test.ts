@@ -303,7 +303,7 @@ describe("hosted usage referral tool", () => {
           activeMissions: [{
             policyCode: "active_group_v1",
             rewardLabel:
-              "about 11 more days of Murph usage for your Murph",
+              "about 12 more days of Murph usage for your Murph",
           }],
           availablePolicies: [{
             code: "new_person_activation_v1",

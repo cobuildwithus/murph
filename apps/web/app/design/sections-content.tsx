@@ -281,8 +281,8 @@ export function SectionsContent() {
           inert
         >
           <ReferralPageContent
-            authenticated
-            identityKey="referral-design-preview"
+            authenticated={false}
+            identityKey={null}
             rewards={HOSTED_PUBLIC_REFERRAL_REWARDS}
           />
         </div>

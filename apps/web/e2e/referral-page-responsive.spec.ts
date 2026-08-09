@@ -77,3 +77,37 @@ test("referral page stays contained and actionable at every marketing breakpoint
     ).toBeVisible();
   }
 });
+
+test("referral design study hydrates without reading a member referral link", async ({
+  page,
+}) => {
+  const referralLinkRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/settings/signup-referral-link") {
+      referralLinkRequests.push(request.url());
+    }
+  });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto(
+    "/design?tab=sections#referral-rewards-page",
+    { waitUntil: "networkidle" },
+  );
+  expect(response?.status()).toBe(200);
+
+  const study = page.locator("#referral-rewards-page");
+  await expect(study).toBeVisible();
+  await expect(
+    study.getByText("About 10 more days of Murph usage", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    study.getByRole("button", { name: /Join Murph to start referring/ }).first(),
+  ).toBeVisible();
+  expect(referralLinkRequests).toEqual([]);
+});

@@ -2,6 +2,12 @@ import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  computeHostedReferralRewardUsageDays,
+} from "@/src/lib/hosted-growth/referral-reward-days";
+import {
+  HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
+} from "@/src/lib/hosted-growth/signup-referral-policy";
+import {
   buildHostedUsageReferralOutstandingWhere,
   buildHostedUsageReferralRewardLabel,
   HOSTED_USAGE_REFERRAL_POLICY_VERSION,
@@ -87,13 +93,35 @@ describe("hosted usage referral policy", () => {
       policyCode: "new_person_activation_v1",
       policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
       rewardUsdMicros: 2_750_000n,
-    })).toBe("about 14 more days of Murph usage for your Murph");
+    })).toBe("about 12 more days of Murph usage for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "group",
       policyCode: "active_group_v1",
       policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
       rewardUsdMicros: 2_750_000n,
-    })).toBe("about 11 more days of Murph usage for this room");
+    })).toBe("about 12 more days of Murph usage for this room");
+  });
+
+  it("gives equal granted capacity one usage-day estimate across referral paths", () => {
+    const rewardUsdMicros = 2_750_000n;
+
+    expect([
+      computeHostedReferralRewardUsageDays({
+        policyCode: "new_person_activation_v1",
+        policyVersion: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
+        rewardUsdMicros,
+      }),
+      computeHostedReferralRewardUsageDays({
+        policyCode: "new_person_activation_v1",
+        policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+        rewardUsdMicros,
+      }),
+      computeHostedReferralRewardUsageDays({
+        policyCode: "active_group_v1",
+        policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+        rewardUsdMicros,
+      }),
+    ]).toEqual([12, 12, 12]);
   });
 
   it("shares display copy and outstanding semantics with read-only projections", () => {

@@ -324,7 +324,7 @@ describe("readHostedAiUsageActivity", () => {
         id: "hur_signup_link",
         requirementsLabel:
           "A new member completed Murph setup through your referral link.",
-        rewardLabel: "About 14 more days of Murph usage",
+        rewardLabel: "About 12 more days of Murph usage",
         title: "Invite someone to Murph",
       }),
     ]);

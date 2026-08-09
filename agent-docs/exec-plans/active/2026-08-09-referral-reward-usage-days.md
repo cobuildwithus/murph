@@ -40,8 +40,10 @@ Updated: 2026-08-09
 1. Risk: "days" could be mistaken for extending calendar access.
    Mitigation: say "days of Murph usage" and explicitly separate capacity from
    trial or subscription duration.
-2. Risk: current policy values could rewrite historical receipt labels.
-   Mitigation: scale the persisted grant against its persisted policy basis.
+2. Risk: current policy values could rewrite historical receipt labels or equal
+   grants could appear unequal across referral paths.
+   Mitigation: let the persisted policy version select one shared, versioned
+   amount-to-days generation, then derive solely from the persisted grant.
 
 ## Tasks
 

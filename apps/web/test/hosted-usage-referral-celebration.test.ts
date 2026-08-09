@@ -150,10 +150,10 @@ describe("hosted usage referral celebration", () => {
     const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
       ?.envelope;
     expect(envelope?.notification.instructions).toContain(
-      "about 11 more days of Murph usage for this room",
+      "about 12 more days of Murph usage for this room",
     );
     expect(envelope?.notification.instructions).toContain(
-      'Final message: include "about 11 more days of Murph usage for this room" exactly',
+      'Final message: include "about 12 more days of Murph usage for this room" exactly',
     );
     expect(envelope?.notification.instructions).not.toContain(
       "about 14 more days of Murph usage",

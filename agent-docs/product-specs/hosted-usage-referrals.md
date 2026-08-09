@@ -62,10 +62,12 @@ an amount the tool did not return.
 
 The day labels estimate typical Murph usage rather than calendar access. The
 ledger continues to store exact cost-weighted usage value in USD micros. The
-current signup and new-person baselines map their fixed grant to 10 days; the
-active-group baseline maps its fixed grant to 14 days. Historical receipts
-scale their persisted grant against their persisted policy-version baseline and
-round to the nearest day, so current offer changes cannot rewrite their label.
+current display generation anchors the signup/new-person fixed grant at 10 days
+and the active-group fixed grant at 14 days. Grants between those anchors
+interpolate; grants outside them scale from the nearest anchor. Persisted policy
+versions select the display generation, and equal granted capacity within that
+generation always yields the same rounded day estimate regardless of referral
+path, so current offer changes cannot rewrite a historical receipt's label.
 Actual capacity varies by model, tools, media, task complexity, and response
 length. A reward never extends a trial end date or subscription period.
 
