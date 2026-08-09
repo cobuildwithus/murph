@@ -11,22 +11,13 @@ import {
   type AssistantResponseMedia,
   type AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  generateElevenLabsVoiceMemoAudio,
-  resolveElevenLabsApiKey,
-  resolveElevenLabsModelId,
-  resolveElevenLabsVoiceId,
-} from '@murphai/operator-config/elevenlabs-runtime'
-import {
-  resolveLinqApiToken,
-  uploadLinqAttachment,
-} from '@murphai/operator-config/linq-runtime'
-import {
-  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
-} from '@murphai/hosted-execution/runtime-control'
 import { describeVaultCliFailure } from '@murphai/operator-config/vault-cli-errors'
 
 import { normalizeNullableString } from '../assistant/shared.js'
+
+export {
+  createVoiceMemoToolRuntimeFromEnv,
+} from './managed-voice-memo-runtime.js'
 
 export interface GenerateVoiceMemoToolArgs {
   text: string
@@ -72,8 +63,6 @@ export type VoiceMemoToolRuntime =
       }>
       kind: 'linq'
     }
-
-const MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 
 export async function executeGenerateVoiceMemoTool(input: {
   abortSignal?: AbortSignal | null
@@ -227,13 +216,11 @@ async function executeGeneratedVoiceMemo(input: {
     if (isAbortError(error)) {
       throw error
     }
-    if (
-      error instanceof VoiceMemoToolConfigurationError ||
-      error instanceof VoiceMemoToolGenerationError
-    ) {
+    const runtimeFailure = readVoiceMemoRuntimeFailure(error)
+    if (runtimeFailure) {
       return {
         rpcSuccess: false,
-        rpcText: error.rpcText,
+        rpcText: runtimeFailure,
       }
     }
     return {
@@ -299,133 +286,9 @@ function unavailableVoiceMemoResult(
   }
 }
 
-export function createVoiceMemoToolRuntimeFromEnv(input: {
-  env: NodeJS.ProcessEnv
-  fetchImpl: typeof fetch
-  preferredVoiceId?: string | null
-  publicFetchImpl?: typeof fetch | null
-  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
-}): VoiceMemoToolRuntime | null {
-  const deliveryChannel = resolveVoiceMemoDeliveryChannel(
-    input.voiceMemoDeliveryChannel,
-  )
-  if (!deliveryChannel) {
-    return null
-  }
-
-  const apiKey = resolveElevenLabsApiKey(input.env)
-  const defaultVoiceId = resolveElevenLabsVoiceId(input.env)
-  const elevenLabs: VoiceMemoElevenLabsRuntimeConfig = {
-    apiKeyAvailable: apiKey !== null,
-    defaultVoiceId,
-    modelId: normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
-      resolveElevenLabsModelId(input.env),
-    ),
-    voiceId:
-      normalizeNullableString(input.preferredVoiceId) ??
-      defaultVoiceId,
-  }
-
-  if (deliveryChannel === 'telegram') {
-    return {
-      elevenLabs,
-      kind: 'telegram',
-    }
-  }
-
-  const fetchImplementation = createStringFetchAdapter(input.fetchImpl)
-  const uploadFetchImplementation = createStringFetchAdapter(
-    input.publicFetchImpl ?? input.fetchImpl,
-  )
-
-  return {
-    elevenLabs,
-    kind: 'linq',
-    generateAndUpload: async (request) => {
-      const { label } = describeVoiceMemoGeneration(request.generation)
-      if (!apiKey) {
-        throw new VoiceMemoToolConfigurationError(
-          `ELEVENLABS_API_KEY is required for ${label} generation`,
-        )
-      }
-      const linqApiToken = resolveLinqApiToken(input.env)
-      if (!linqApiToken) {
-        throw new VoiceMemoToolConfigurationError(
-          `LINQ_API_TOKEN is required for ${label} attachment upload`,
-        )
-      }
-
-      let audio: Awaited<ReturnType<typeof generateElevenLabsVoiceMemoAudio>>
-      try {
-        audio = await generateElevenLabsVoiceMemoAudio({
-          apiKey,
-          fetchImplementation,
-          generation: request.generation,
-          signal: request.signal ?? undefined,
-        })
-      } catch (error) {
-        if (isAbortError(error)) {
-          throw error
-        }
-        throw new VoiceMemoToolGenerationError(
-          appendFailureDetail(
-            `${label} generation failed`,
-            warnVoiceMemoFailure(`${label} generation`, error),
-          ),
-          { cause: error },
-        )
-      }
-
-      if (
-        audio.bytes.byteLength === 0 ||
-        audio.bytes.byteLength > MAX_VOICE_MEMO_BYTES
-      ) {
-        throw new VoiceMemoToolGenerationError(
-          `${label} generation returned invalid audio data`,
-        )
-      }
-
-      const linqFilename = `${request.filenameBase}.${audio.filenameExtension}`
-      const upload = await uploadLinqAttachment(
-        {
-          bytes: audio.bytes,
-          contentType: audio.contentType,
-          filename: linqFilename,
-        },
-        {
-          env: input.env,
-          fetchImplementation,
-          publicFetchImplementation: uploadFetchImplementation,
-          signal: request.signal ?? undefined,
-        },
-      )
-
-      return {
-        attachmentId: upload.attachmentId,
-        filename: linqFilename,
-      }
-    },
-  }
-}
-
-class VoiceMemoToolConfigurationError extends Error {
-  constructor(readonly rpcText: string) {
-    super(rpcText)
-  }
-}
-
-class VoiceMemoToolGenerationError extends Error {
-  constructor(readonly rpcText: string, options?: ErrorOptions) {
-    super(rpcText, options)
-  }
-}
-
 /**
- * Logs a provider failure and returns its secret-safe summary for the rpc text.
- *
- * Both call sites used to collapse every failure into one fixed sentence and
- * log nothing, so an operator reading the transcript afterwards could not tell
- * a quota rejection from a timeout, and no log held the answer either.
+ * Logs an unexpected delivery-adapter failure and returns its secret-safe
+ * summary for the model-visible RPC result.
  */
 function warnVoiceMemoFailure(operation: string, error: unknown): string | null {
   const failure = describeVaultCliFailure(error)
@@ -440,26 +303,18 @@ function appendFailureDetail(rpcText: string, failure: string | null): string {
   return failure === null ? rpcText : `${rpcText}: ${failure}`
 }
 
-function resolveVoiceMemoDeliveryChannel(
-  channel: VoiceMemoDeliveryChannel | null | undefined,
-): VoiceMemoDeliveryChannel | null {
-  if (channel === 'linq' || channel === 'telegram') {
-    return channel
+function readVoiceMemoRuntimeFailure(error: unknown): string | null {
+  if (!error || typeof error !== 'object') {
+    return null
   }
-  return null
-}
-
-function createStringFetchAdapter(fetchImpl: typeof fetch) {
-  return async (
-    input: string,
-    init: {
-      body?: string | Blob
-      headers?: Record<string, string>
-      method: string
-      redirect?: RequestRedirect
-      signal?: AbortSignal
-    },
-  ) => fetchImpl(input, init)
+  try {
+    const rpcText = Reflect.get(error, 'rpcText')
+    return typeof rpcText === 'string' && rpcText.trim().length > 0
+      ? rpcText
+      : null
+  } catch {
+    return null
+  }
 }
 
 function isAbortError(error: unknown): boolean {
