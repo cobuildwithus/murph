@@ -41,17 +41,20 @@ export function VitalConnectionDialog({
 
   return (
     <Dialog open={Boolean(source)} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-5 p-6 sm:max-w-md md:p-7">
+      <DialogContent
+        className="gap-5 p-6 sm:max-w-md md:p-7"
+        finalFocus={true}
+      >
         <DialogHeader className="items-center gap-4 pt-2 text-center">
           {source ? (
             <div aria-hidden="true" className="flex items-center gap-3">
-              <span className="flex size-16 items-center justify-center rounded-2xl bg-background ring-1 ring-border">
+              <span className="flex h-16 min-w-16 max-w-28 items-center justify-center rounded-2xl bg-background px-3 ring-1 ring-border">
                 <Image
                   src={source.logo.src}
                   alt=""
                   width={source.logo.width}
                   height={source.logo.height}
-                  className="size-10 object-contain"
+                  className="h-auto max-h-10 w-auto max-w-24 object-contain"
                 />
               </span>
               <span className="flex items-center gap-1.5">
@@ -83,7 +86,7 @@ export function VitalConnectionDialog({
               >
                 Vital
               </a>{" "}
-              to connect your wearable to Murph.
+              to connect this health source to Murph.
             </DialogDescription>
           </div>
         </DialogHeader>
@@ -117,7 +120,7 @@ export function VitalConnectionDialog({
         <Button
           type="button"
           size="xl"
-          className="w-full"
+          className="h-auto min-h-14 w-full whitespace-normal py-3 text-center leading-tight"
           onClick={onContinue}
         >
           Continue to {sourceName}

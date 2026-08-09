@@ -48,7 +48,7 @@ vi.mock("@/src/components/ui/dialog", () => {
     DialogContent: ({
       children,
       className,
-      showCloseButton,
+      showCloseButton = true,
     }: HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) =>
       createElement(
         "div",
@@ -3233,13 +3233,14 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
             width: 96,
           },
           name: "Whoop",
+          requiresVitalDisclosure: true,
         },
       ],
     }),
     {
       location: {
-        hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
-        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=whoop`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=whoop`,
       },
     },
   );
@@ -3263,6 +3264,178 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
     method: "POST",
     keepalive: false,
   });
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /Connect Whoop to Murph/u,
+  );
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid explains Vital before redeeming an initial device connect intent", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  let resolveAuthorizationResponse:
+    | ((response: Response) => void)
+    | null = null;
+  const fetch = vi.fn(
+    (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Promise<Response>((resolve) => {
+        resolveAuthorizationResponse = resolve;
+      });
+    },
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          connectTarget: "fitbit",
+          description: "Sleep, activity, heart rate, and daily readiness.",
+          id: "fitbit",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/fitbit.svg",
+            width: 44,
+          },
+          name: "Fitbit",
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
+      },
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Connect Fitbit to Murph/u,
+    );
+  });
+  assert.equal(fetch.mock.calls.length, 0);
+  assert.equal(rendered.assign.mock.calls.length, 0);
+
+  const continueButton = [
+    ...rendered.container.querySelectorAll("button"),
+  ].find((button) => button.textContent === "Continue to Fitbit");
+  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    continueButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Connecting Fitbit/u);
+  });
+  assert.equal(rendered.assign.mock.calls.length, 0);
+  assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
+  assert.deepEqual(fetch.mock.calls[0]?.[1], {
+    body: undefined,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      accept: "application/json",
+    },
+    method: "POST",
+    keepalive: false,
+  });
+
+  assert.ok(resolveAuthorizationResponse);
+  await act(async () => {
+    resolveAuthorizationResponse?.(
+      Response.json({
+        authorizationUrl: "https://junction.example.test/link/fitbit",
+      }),
+    );
+  });
+  await vi.waitFor(() => {
+    assert.equal(
+      rendered.assign.mock.calls[0]?.[0],
+      "https://junction.example.test/link/fitbit",
+    );
+  });
+  assert.equal(fetch.mock.calls.length, 1);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid clears signed-intent progress when Vital redemption fails", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async () =>
+    Response.json(
+      {
+        error: {
+          code: "HOSTED_DEVICE_CONNECT_INTENT_MISSING",
+          message:
+            "This connection link could not be found. Ask Murph for a new one.",
+          retryable: false,
+        },
+      },
+      { status: 410 },
+    ),
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          description: "Sleep, activity, heart rate, and daily readiness.",
+          id: "fitbit",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/fitbit.svg",
+            width: 44,
+          },
+          name: "Fitbit",
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
+      },
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Connect Fitbit to Murph/u);
+  });
+  const continueButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Continue to Fitbit");
+  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    continueButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Connection link unavailable/u,
+    );
+  });
+  assert.equal(fetch.mock.calls.length, 1);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Fitbit/u);
+  assert.equal(rendered.assign.mock.calls.length, 0);
 
   await rendered.cleanup();
 });
@@ -5220,7 +5393,7 @@ test("resolveConfiguredConnectSources marks only Vital-backed actions", async ()
 });
 
 test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", async () => {
-  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+  const fetch = vi.fn(async () =>
     Response.json({
       authorizationUrl: "https://junction.example.test/link/fitbit",
     }),
@@ -5267,7 +5440,7 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
   );
   assert.match(
     rendered.container.textContent ?? "",
-    /We use Vital to connect your wearable to Murph\./u,
+    /We use Vital to connect this health source to Murph\./u,
   );
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
@@ -5297,8 +5470,72 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
   await rendered.cleanup();
 });
 
+test("ConnectSourcesGrid dismisses a Vital handoff without starting a connection", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          connectTarget: "fitbit",
+          description: "Sleep, activity, heart rate, and daily readiness.",
+          id: "fitbit",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/fitbit.svg",
+            width: 44,
+          },
+          name: "Fitbit",
+          requiresVitalDisclosure: true,
+        },
+      ],
+    }),
+  );
+
+  const connectButton = rendered.container.querySelector(
+    "button[aria-label='Connect Fitbit']",
+  );
+  assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    connectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Connect Fitbit to Murph/u,
+  );
+  const closeButton = rendered.container.querySelector(
+    'button[aria-label="Close"]',
+  );
+  assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    closeButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  assert.equal(fetch.mock.calls.length, 0);
+  assert.equal(rendered.assign.mock.calls.length, 0);
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /Connect Fitbit to Murph/u,
+  );
+  assert.ok(
+    rendered.container.querySelector("button[aria-label='Connect Fitbit']"),
+  );
+
+  await rendered.cleanup();
+});
+
 test("ConnectSourcesGrid keeps a direct integration one-click", async () => {
-  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+  const fetch = vi.fn(async () =>
     Response.json({
       authorizationUrl: "https://whoop.example.test/oauth",
     }),

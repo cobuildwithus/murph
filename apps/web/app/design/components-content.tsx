@@ -1882,6 +1882,41 @@ export function ComponentsContent() {
               >
                 Preview Garmin handoff
               </Button>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setVitalConnectionDialogSource({
+                    id: "runkeeper",
+                    logo: {
+                      className:
+                        "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+                      height: 20,
+                      src: "/brand-logos/connect/runkeeper.svg",
+                      width: 132,
+                    },
+                    name: "Runkeeper",
+                  })
+                }
+              >
+                Preview wide logo
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setVitalConnectionDialogSource({
+                    id: "dexcom-g6-and-older",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/dexcom-g6-and-older.png",
+                      width: 44,
+                    },
+                    name: "Dexcom (G6 and older)",
+                  })
+                }
+              >
+                Preview long label
+              </Button>
             </div>
           </div>
           <VitalConnectionDialog

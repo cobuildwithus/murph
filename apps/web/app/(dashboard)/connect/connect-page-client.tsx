@@ -211,7 +211,10 @@ export function ConnectSourcesGrid({
       displaySources,
       authenticated,
     );
-    return source && !requiresVitalConnectionPreflight(source)
+    return source && !requiresVitalConnectionPreflight(
+      source,
+      activeConnectIntent?.connectProvider,
+    )
       ? source.name
       : null;
   });
@@ -270,6 +273,9 @@ export function ConnectSourcesGrid({
 
       setVitalConnectionRequest(null);
       setPendingSourceId(source.id);
+      if (options.intentClaim) {
+        setConnectIntentRedirectName(source.name);
+      }
 
       try {
         const authorizationUrl = await requestConnectionAuthorizationUrl(
@@ -282,6 +288,10 @@ export function ConnectSourcesGrid({
         );
         window.location.assign(authorizationUrl);
       } catch (error) {
+        if (options.intentClaim) {
+          setConnectIntentRedirectName(null);
+        }
+
         if (
           options.intentClaim &&
           isHostedDeviceConnectIntentUnavailableError(error)
@@ -335,7 +345,10 @@ export function ConnectSourcesGrid({
     }
 
     let cancelled = false;
-    if (requiresVitalConnectionPreflight(source)) {
+    if (requiresVitalConnectionPreflight(
+      source,
+      activeConnectIntent.connectProvider,
+    )) {
       void Promise.resolve().then(() => {
         if (cancelled || initialConnectIntentAttemptedRef.current) {
           return;
@@ -629,7 +642,12 @@ export function ConnectSourcesGrid({
 
 export function requiresVitalConnectionPreflight(
   source: ConnectSource,
+  connectIntentProvider?: string | null,
 ): boolean {
+  if (connectIntentProvider) {
+    return connectIntentProvider === "junction";
+  }
+
   return source.requiresVitalDisclosure === true;
 }
 

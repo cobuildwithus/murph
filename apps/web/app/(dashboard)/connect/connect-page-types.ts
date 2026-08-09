@@ -48,6 +48,9 @@ export type ConnectCallbackInput = {
 
 export type InitialDeviceConnectIntent = {
   claim: string;
+  // Presentation hint copied from the server-issued link. Claim redemption
+  // remains the provider and effect authority.
+  connectProvider?: string | null;
   connectSource: string | null;
 } | null;
 
