@@ -508,6 +508,13 @@ describe("prisma module", () => {
       scenario: "unrelated 08P01 protocol violation",
     },
     {
+      code: "08P01",
+      expectedCategory: null,
+      message: `${PGBOUNCER_MAX_CLIENT_CONN_MESSAGE}; private-password`,
+      nested: false,
+      scenario: "same SQLSTATE with a non-exact message",
+    },
+    {
       code: "XX000",
       expectedCategory: null,
       message: PGBOUNCER_MAX_CLIENT_CONN_MESSAGE,
