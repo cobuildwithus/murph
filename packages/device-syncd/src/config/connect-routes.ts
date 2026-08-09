@@ -275,6 +275,51 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
     ],
   },
   {
+    connectSourceId: "wyze-scale",
+    label: "Wyze Scale",
+    routes: [
+      unavailableRoute(
+        "Wyze Scale data syncs through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
+    connectSourceId: "eufy-life",
+    label: "Eufy Smart Scale / eufyLife",
+    routes: [
+      unavailableRoute(
+        "Eufy Smart Scale and eufyLife data sync through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
+    connectSourceId: "vesync-etekcity",
+    label: "VeSync / Etekcity",
+    routes: [
+      unavailableRoute(
+        "VeSync and Etekcity scale data syncs through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
+    connectSourceId: "ad-heart-track",
+    label: "A&D Heart Track",
+    routes: [
+      unavailableRoute(
+        "A&D Heart Track data syncs through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
+    connectSourceId: "microlife-connected-health",
+    label: "Microlife Connected Health+",
+    routes: [
+      unavailableRoute(
+        "Microlife Connected Health+ data syncs through Apple Health in the Murph iOS app.",
+      ),
+    ],
+  },
+  {
     connectSourceId: "health-connect",
     label: "Health Connect",
     routes: [unavailableRoute("Health Connect is a mobile/local device flow, not hosted Junction Link.")],

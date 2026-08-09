@@ -1457,6 +1457,15 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'Mobvoi/TicWatch: turn on Google Fit sharing in Mobvoi Health',
     )
+    expect(prompt).toContain(
+      'Samsung Health: turn on Health Connect sharing for the wanted categories',
+    )
+    expect(prompt).toContain(
+      'Wyze Scale, Eufy/eufyLife, and VeSync/Etekcity',
+    )
+    expect(prompt).toContain(
+      'A&D Heart Track and Microlife Connected Health+',
+    )
     expect(prompt).toContain('Starting Murph: if asked how to begin')
     expect(prompt).toContain(MURPH_PRODUCT_ORIGIN)
     expect(prompt).toContain('accounts are created at')

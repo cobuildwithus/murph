@@ -173,7 +173,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />34 of 34 sources</);
+  assert.match(markup, />41 of 41 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
@@ -250,6 +250,48 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       description:
         "TicWatch sleep, activity, heart rate, and workouts through Android Health Connect.",
       name: "Mobvoi / TicWatch",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description:
+        "Android health apps, smart scales, blood pressure monitors, and supported records through Health Connect.",
+      name: "Health Connect",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description:
+        "Samsung Health activity, sleep, weight, body composition, and blood pressure through Health Connect.",
+      name: "Samsung Health",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description:
+        "Wyze Scale weight and body-composition trends through Apple Health.",
+      name: "Wyze Scale",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description:
+        "Eufy Smart Scale and eufyLife weight and body-composition trends through Apple Health.",
+      name: "Eufy Smart Scale / eufyLife",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description:
+        "Etekcity and VeSync smart-scale weight and body-composition trends through Apple Health.",
+      name: "VeSync / Etekcity",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description:
+        "A&D Heart Track blood pressure, pulse, and supported weight data through Apple Health.",
+      name: "A&D Heart Track",
+    },
+    {
+      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      description:
+        "Microlife Connected Health+ blood pressure and pulse readings through Apple Health.",
+      name: "Microlife Connected Health+",
     },
     {
       assetPath: "/brand-logos/connect/whoop.svg",
@@ -409,14 +451,14 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 34);
+  assert.equal(sources.length, 41);
   assert.equal(
     markup.match(/data-connection-state="idle"/gu)?.length,
     sources.length - 6,
   );
   assert.equal(
     markup.match(/>Not available<\/button>/gu)?.length,
-    sources.length - 8,
+    sources.length - 15,
   );
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
@@ -435,6 +477,25 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     markup,
     /In Mobvoi Health, turn on Google Fit sharing, then allow those categories in Health Connect before opening Murph on Android\./,
   );
+  for (const relayName of [
+    "Health Connect",
+    "Samsung Health",
+    "Mobvoi / TicWatch",
+    "Wyze Scale",
+    "Eufy Smart Scale / eufyLife",
+    "VeSync / Etekcity",
+    "A&D Heart Track",
+    "Microlife Connected Health+",
+  ]) {
+    assert.match(
+      markup,
+      new RegExp(
+        `aria-label="Download app for ${escapeRegExp(relayName)}"`,
+        "u",
+      ),
+    );
+  }
+  assert.equal(markup.match(/>Download app<\/a>/gu)?.length, 9);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
@@ -458,8 +519,8 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.equal(markup.match(/>Set up sync<\/button>/gu)?.length, 6);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
-  assert.doesNotMatch(markup, />Health Connect</u);
-  assert.doesNotMatch(markup, />Samsung Health</u);
+  assert.match(markup, />Health Connect</u);
+  assert.match(markup, />Samsung Health</u);
   assert.doesNotMatch(markup, />Freestyle Libre BLE</u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Contour BLE</u);
@@ -469,6 +530,14 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, /Whoop V2/u);
   assert.ok(
     sourceHeadingIndex(markup, "Apple Health") <
+      sourceHeadingIndex(markup, "Health Connect"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Health Connect") <
+      sourceHeadingIndex(markup, "Samsung Health"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Samsung Health") <
       sourceHeadingIndex(markup, "Garmin"),
   );
   assert.ok(
@@ -510,7 +579,28 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       sourceHeadingIndex(markup, "Withings"),
   );
   assert.ok(
-    sourceHeadingIndex(markup, "Withings") < sourceHeadingIndex(markup, "Oura"),
+    sourceHeadingIndex(markup, "Withings") <
+      sourceHeadingIndex(markup, "Wyze Scale"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Wyze Scale") <
+      sourceHeadingIndex(markup, "Eufy Smart Scale / eufyLife"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Eufy Smart Scale / eufyLife") <
+      sourceHeadingIndex(markup, "VeSync / Etekcity"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "VeSync / Etekcity") <
+      sourceHeadingIndex(markup, "A&D Heart Track"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "A&D Heart Track") <
+      sourceHeadingIndex(markup, "Microlife Connected Health+"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Microlife Connected Health+") <
+      sourceHeadingIndex(markup, "Oura"),
   );
   assert.ok(
     sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"),
@@ -1460,6 +1550,14 @@ test("ConnectPage marks iOS Apple Health Junction SDK source connected from host
   assert.equal(markup.match(/data-connection-state="connected"/gu)?.length, 1);
   assert.ok(
     sourceHeadingIndex(markup, "Apple Health") <
+      sourceHeadingIndex(markup, "Health Connect"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Health Connect") <
+      sourceHeadingIndex(markup, "Samsung Health"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Samsung Health") <
       sourceHeadingIndex(markup, "Garmin"),
   );
 });

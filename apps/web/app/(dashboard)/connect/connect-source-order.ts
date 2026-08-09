@@ -8,6 +8,7 @@ type OrderedConnectSource = {
 
 const CONNECT_SOURCE_POPULARITY_ORDER = [
   "apple-health",
+  "health-connect",
   "samsung-health",
   "garmin",
   "fitbit",
@@ -21,6 +22,11 @@ const CONNECT_SOURCE_POPULARITY_ORDER = [
   "suunto",
   "huawei-health",
   "withings",
+  "wyze-scale",
+  "eufy-life",
+  "vesync-etekcity",
+  "ad-heart-track",
+  "microlife-connected-health",
   "oura",
   "whoop",
   "dexcom",

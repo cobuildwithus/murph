@@ -1429,6 +1429,9 @@ function buildAssistantHealthRelayGuidanceText(): string {
 - Huawei Health: Apple Health sharing varies by device, region, and app version. Guide the user only through options they can see; never promise unsupported categories.
 - Android Health Connect works through the Murph Android app. Canonical Google Play listing: ${MURPH_ANDROID_PLAY_STORE_URL}.
 - Mobvoi/TicWatch: turn on Google Fit sharing in Mobvoi Health, enable Google Fit's Health Connect sync for the wanted categories, then open Murph on Android and connect Health Connect.
+- Samsung Health: turn on Health Connect sharing for the wanted categories, then open Murph on Android and connect Health Connect.
+- Wyze Scale, Eufy/eufyLife, and VeSync/Etekcity: enable Apple Health sharing in the vendor app, then open Murph on iPhone and connect Apple Health.
+- A&D Heart Track and Microlife Connected Health+: enable Apple Health sharing in the vendor app, then open Murph on iPhone and connect Apple Health.
 - Apple Health and Health Connect relay paths have no direct cloud access or guaranteed history backfill. Murph receives only categories and history written into the relay.
 - For any relay setup named above, use one brief \`murph.generate_voice_memo\` when available; keep text minimal and put the matching app-store URL last.`;
 }

@@ -28,6 +28,10 @@ import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { ConnectSourcesGrid } from "./connect-page-client";
+import {
+  HEALTH_DATA_RELAY_SOURCE_IDS,
+  HEALTH_DATA_RELAY_SOURCE_UI,
+} from "./health-data-relay-sources";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 import type {
   ConnectCallbackInput,
@@ -78,17 +82,15 @@ type ConnectSourceDisconnectScope = NonNullable<
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
-const MURPH_ANDROID_PLAY_STORE_URL =
-  "https://play.google.com/store/apps/details?id=ai.withmurph.app";
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>([
   "apple-health",
   "coros",
   "huawei-health",
-  "mobvoi-health",
   "ringconn",
   "suunto",
   "xiaomi-mi-fitness",
   "zepp",
+  ...HEALTH_DATA_RELAY_SOURCE_IDS,
 ]);
 
 function appleHealthRelaySourceUi(input: {
@@ -155,21 +157,7 @@ const CONNECT_SOURCE_UI = {
     name: "Huawei Health",
     setupGuideId: "huawei-health-apple-health",
   }),
-  "mobvoi-health": {
-    description:
-      "TicWatch sleep, activity, heart rate, and workouts through Android Health Connect.",
-    logo: logoAsset(
-      "wearable-relay.svg",
-      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-      64,
-      40,
-    ),
-    name: "Mobvoi / TicWatch",
-    unavailableActionLabel: "Download app",
-    unavailableActionUrl: MURPH_ANDROID_PLAY_STORE_URL,
-    unavailableMessage:
-      "In Mobvoi Health, turn on Google Fit sharing, then allow those categories in Health Connect before opening Murph on Android.",
-  },
+  ...HEALTH_DATA_RELAY_SOURCE_UI,
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
     logo: logoAsset(
@@ -214,11 +202,6 @@ const CONNECT_SOURCE_UI = {
       20,
     ),
     name: "Runkeeper",
-  },
-  "samsung-health": {
-    description: "Phone and watch activity, sleep, and heart rate.",
-    logo: logoAsset("samsung-health.png"),
-    name: "Samsung Health",
   },
   "tandem-source": {
     description: "Insulin pump and CGM therapy records.",
