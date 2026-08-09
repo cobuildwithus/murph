@@ -36,5 +36,18 @@ verification and review gates pass.
 5. Commit and push, complete ReviewGPT and exact-head CI, merge the PR, and
    retire the task worktree.
 
+## Review Finding Disposition
+
+- Final ReviewGPT round 2 correctly observed that incident.io's public summary
+  does not expose an independent uptime signal. The requested change back to
+  "No reported issues" is rejected for this task because the current user
+  explicitly chose "Murph is online" after the earlier source-accuracy
+  correction. The implementation keeps the source state named
+  `no_reported_issues`, applies the positive presentation only after a
+  successful empty public summary, links it to the public status page, and
+  keeps failed or malformed reads neutral. Adding a separate health authority
+  merely to justify this product copy would exceed scope and violate the
+  simplicity constraint.
+
 Status: in_progress
 Updated: 2026-08-09
