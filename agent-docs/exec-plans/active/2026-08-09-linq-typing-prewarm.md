@@ -1,0 +1,104 @@
+# Linq typing-start container prewarm
+
+Status: active
+Created: 2026-08-09
+Updated: 2026-08-09
+
+## Goal
+
+- Use an authenticated Linq typing-start webhook as a best-effort signal to
+  begin warming the already-owned hosted user container before the member's
+  eventual message is durably accepted, reducing avoidable cold-start latency
+  without treating typing as work, turn authority, or a member-facing effect.
+
+## Success criteria
+
+- The exact supported Linq typing-start event shape is verified against current
+  provider documentation, repository fixtures, and the authenticated webhook
+  boundary.
+- Eligible typing signals resolve only an already-authorized hosted private
+  runtime and invoke the existing container/shell prewarm owner.
+- Unknown, group, disabled, unauthenticated, duplicated, or failed signals stay
+  best-effort: they create no durable conversational work, no assistant turn,
+  no outbound message, and do not delay webhook acknowledgement.
+- Focused tests prove admission, rejection, idempotent/coalesced lifecycle
+  behavior, and failure isolation at the narrowest truthful boundaries.
+- Required specialist and final ReviewGPT gates, exact-head CI, and parent final
+  review complete with no unresolved accepted finding.
+
+## Scope
+
+- In scope: Linq webhook parsing/routing, existing hosted execution prewarm
+  boundary reuse, focused Web/Cloudflare tests, and durable owner docs where
+  the external signal or deploy contract changes.
+- Out of scope: persisting typing activity, starting an assistant turn, changing
+  message acceptance/delivery, adding a queue or scheduler, group-runtime
+  speculation, or weakening hosted access and route authorization.
+
+## Constraints
+
+- Preserve the foreground reply critical path and existing accepted-message
+  authority; typing is an optional latency hint only.
+- Reuse the existing container lifecycle owner and its coalescing/failure
+  semantics instead of adding a second warm-state owner.
+- Authenticate the provider webhook before any prewarm attempt and minimize
+  private data in logs, tests, ReviewGPT packets, and PR artifacts.
+- Preserve unrelated edits in the primary checkout and all other worktrees.
+
+## Risks and mitigations
+
+1. Risk: a spoofed or stale signal spends hosted resources or crosses member
+   boundaries.
+   Mitigation: stay behind the existing webhook authentication and derive the
+   target through the canonical Linq route/member owner; never accept a runtime
+   id from provider payload text.
+2. Risk: repeated typing events cause launch amplification.
+   Mitigation: call the existing idempotent/coalesced prewarm owner and add
+   focused repeated-event proof instead of introducing durable dedupe state.
+3. Risk: waiting for prewarm makes webhook delivery less reliable.
+   Mitigation: use the existing bounded best-effort latency-hint pattern and
+   prove failures do not change webhook acknowledgement or message handling.
+4. Risk: Web, Worker, and warm runner versions disagree during rollout.
+   Mitigation: keep the new signal backward compatible and document expected
+   no-op behavior plus post-deploy telemetry proof across the skew window.
+
+## Tasks
+
+1. [completed] Trace provider event shape, webhook ingress, route/member
+   resolution, and current container prewarm lifecycle.
+2. [completed] Choose and document the smallest safe owner-boundary extension.
+3. [completed] Implement focused code and tests.
+4. [completed] Run focused verification, direct scenario proof, and candidate
+   diff review.
+5. [in progress] Commit, push, open the PR, then run preliminary specialist and
+   final ReviewGPT concurrently with exact-head CI.
+6. [pending] Resolve findings, close this plan with `scripts/finish-task`, and
+   push the final head.
+
+## Decisions
+
+- Linq documents `chat.typing_indicator.started` as a one-to-one-chat-only
+  event whose data contains `chat_id`; the shared parser now accepts only that
+  minimal shape after ordinary signature and freshness verification.
+- Typing resolves only the existing private home-chat blind index. It does not
+  use phone/email identity inference, pending-contact enrollment, or group
+  routing because the event has no participant or group authority.
+- The webhook response keeps the existing `typing-ignored` contract and
+  schedules lookup plus shell prewarm after acknowledgement. The established
+  Cloudflare prewarm owner repeats live admission, consent serialization,
+  exact stop-target binding, and lifecycle coalescing.
+- Duplicate typing events need no new receipt or dedupe state: they carry no
+  durable work and converge through the existing shell/container lifecycle.
+
+## Verification
+
+- `pnpm --filter @murphai/messaging-ingress test` — passed, 74 tests and one
+  skipped test.
+- Focused hosted Web Vitest run for Linq dispatch, prewarm target resolution,
+  and shell-only wake — passed, 197 tests.
+- `pnpm --filter @murphai/messaging-ingress typecheck` — passed.
+- Typing-only hosted Web dispatch rerun — passed, four tests and 167 unrelated
+  tests skipped.
+- `pnpm --filter @murphai/hosted-web typecheck:prepared` — passed after the
+  generated client/catalog preparation completed.
+- Exact-head CI and ReviewGPT — pending.

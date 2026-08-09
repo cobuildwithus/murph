@@ -1992,7 +1992,17 @@ window to a well-formed past-or-near-present range. The shared Exa
 research-scout request recipe, query shape, and structured-output schema live
 in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 
-Hosted Linq typing events are verified and ignored. The Temporal mailbox
+Hosted Linq typing-start events are verified and parsed strictly. For Linq's
+supported direct-chat signal, Web acknowledges before post-response work reads
+only the private home-chat blind index plus active access and crypto-root
+eligibility, then issues the existing best-effort runtime shell-prewarm hint.
+Unknown, ambiguous, inactive, or ineligible chats remain no-ops. Typing never
+plans onboarding, binds a route, appends mailbox work, starts processing,
+signals Temporal, sends a receipt, or adds reconciliation work. Cloudflare
+still rechecks live Web-owned admission under the per-user consent-mutation
+barrier before it starts a container, so Web's lookup grants no runtime
+authority. Repeated signals rely on the existing container lifecycle's
+coalescing instead of a second dedupe or warm-state owner. The Temporal mailbox
 signal remains the only durable wake authority for hosted runtime work. For a
 committed known-checkpoint Linq message, Web first verifies the checkpoint owner
 and canonical participant-aware live access as part of the unconditional
@@ -2006,8 +2016,9 @@ only to cut wake latency and may be dropped at any time with no correctness
 impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
-fence coalesces runners that overlap in the same invocation. There is no other
-established-member Web-to-Cloudflare prewarm or nudge path. The separate
+fence coalesces runners that overlap in the same invocation. The typing-start
+shell hint is the only established-member Web-to-Cloudflare prewarm before
+durable message acceptance. The separate
 first-contact instant-start shell hint obtains the named `UserRunner` stub
 without binding durable state, enters the same per-user consent-mutation barrier
 as authoritative ensures and withdrawal, and re-reads live Web-owned admission.

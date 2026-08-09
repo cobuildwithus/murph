@@ -7,6 +7,7 @@ import { getPrisma } from "../prisma";
 import {
   requireHostedLinqMessageEditedEvent,
   requireHostedLinqParticipantChangedEvent,
+  requireHostedLinqTypingIndicatorStartedEvent,
   requireHostedLinqMessageReceivedEvent,
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
@@ -31,6 +32,7 @@ import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+  resolveHostedLinqTypingPrewarmMemberId,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -218,6 +220,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (event.event_type === "chat.typing_indicator.started") {
+      scheduleHostedLinqTypingShellPrewarmBestEffort({
+        event: requireHostedLinqTypingIndicatorStartedEvent(event),
+        prisma: input.prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
       const response: HostedOnboardingLinqWebhookResponse = {
         ignored: true,
         ok: true,
@@ -876,6 +883,62 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+function scheduleHostedLinqTypingShellPrewarmBestEffort(input: {
+  event: ReturnType<typeof requireHostedLinqTypingIndicatorStartedEvent>;
+  prisma?: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): void {
+  const task = async (): Promise<void> => {
+    try {
+      const memberId = await resolveHostedLinqTypingPrewarmMemberId({
+        event: input.event,
+        prisma: input.prisma ?? getPrisma(),
+      });
+      if (!memberId) {
+        logHostedOnboardingDiagnostic(
+          "linq-typing-shell-prewarm",
+          { outcome: "target-not-found" },
+        );
+        return;
+      }
+
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        { outcome: "target-resolved" },
+      );
+      await startHostedRuntimeShellPrewarmBestEffort({
+        source: "linq-typing-started",
+        userId: memberId,
+      });
+    } catch (error) {
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "failed",
+        },
+      );
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    try {
+      input.scheduleAfterResponse(task);
+      return;
+    } catch (error) {
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "schedule-failed",
+        },
+      );
+    }
+  }
+
+  void task();
 }
 
 interface HostedLinqPlanningEventResolution {
