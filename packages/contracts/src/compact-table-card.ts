@@ -3,6 +3,10 @@ import * as z from "./zod-runtime.ts";
 import { ID_PREFIXES } from "./constants.ts";
 import { contractIdMaxLength, idPattern } from "./ids.ts";
 import { isStrictIsoDateTime } from "./time.ts";
+import {
+  buildWorkoutSessionAppCardEnvelopeV4,
+  workoutSessionDetailV1Schema,
+} from "./workout-session-card.ts";
 
 export const compactTableCardV1Bounds = {
   title: 60,
@@ -78,6 +82,16 @@ export const compactTableRowV1Schema = z
 
 export type CompactTableRowV1 = z.infer<typeof compactTableRowV1Schema>;
 
+function encodedAppCardUrlLength(envelope: unknown): number {
+  const payloadByteLength = new TextEncoder().encode(
+    JSON.stringify(envelope),
+  ).byteLength;
+  const base64PaddingLength = (3 - (payloadByteLength % 3)) % 3;
+  const encodedLength =
+    4 * Math.ceil(payloadByteLength / 3) - base64PaddingLength;
+  return COMPACT_TABLE_APP_CARD_URL_PREFIX.length + encodedLength;
+}
+
 export const compactTableResponseCardV1Schema = z
   .object({
     kind: z.literal("compact_table"),
@@ -95,6 +109,7 @@ export const compactTableResponseCardV1Schema = z
       .max(compactTableCardV1Bounds.rows),
     footer: singleLineText(compactTableCardV1Bounds.footer).nullable(),
     tracking: compactTableTrackingSourceV1Schema.nullable(),
+    workout: workoutSessionDetailV1Schema.optional(),
   })
   .strict()
   .superRefine((card, context) => {
@@ -109,23 +124,80 @@ export const compactTableResponseCardV1Schema = z
       }
     }
 
-    const { tracking: _tracking, ...presentationCard } = card;
-    const envelope = JSON.stringify({
-      schemaVersion: 3,
-      card: presentationCard,
-    });
-    const payloadByteLength = new TextEncoder().encode(envelope).byteLength;
-    const base64PaddingLength =
-      (3 - (payloadByteLength % 3)) % 3;
-    const encodedLength =
-      4 * Math.ceil(payloadByteLength / 3) - base64PaddingLength;
+    if (card.workout !== undefined) {
+      if (card.tracking === null) {
+        context.addIssue({
+          code: "custom",
+          message: "A workout presentation requires a canonical tracking source.",
+          path: ["tracking"],
+        });
+      }
+
+      if (card.rowHeader !== "Exercise" ||
+          card.columns.length !== 1 ||
+          card.columns[0] !== "Progress") {
+        context.addIssue({
+          code: "custom",
+          message:
+            "A workout presentation uses the canonical Exercise / Progress summary table.",
+          path: ["columns"],
+        });
+      }
+
+      if (card.rows.length !== card.workout.exercises.length) {
+        context.addIssue({
+          code: "custom",
+          message: "Workout summary rows must match the workout exercises.",
+          path: ["rows"],
+        });
+      } else {
+        for (const [index, exercise] of card.workout.exercises.entries()) {
+          const completed = exercise.sets.filter(
+            (set) => set.status === "completed",
+          ).length;
+          const row = card.rows[index];
+          if (row?.label !== exercise.name ||
+              row.values.length !== 1 ||
+              row.values[0] !== `${completed}/${exercise.sets.length}`) {
+            context.addIssue({
+              code: "custom",
+              message:
+                "Each workout summary row must mirror the exercise name and completed/total set count.",
+              path: ["rows", index],
+            });
+          }
+        }
+      }
+    }
+
+    const envelope = card.workout === undefined
+      ? (() => {
+          const {
+            tracking: _tracking,
+            workout: _workout,
+            ...presentationCard
+          } = card;
+          return {
+            schemaVersion: 3,
+            card: presentationCard,
+          };
+        })()
+      : buildWorkoutSessionAppCardEnvelopeV4({
+          title: card.title,
+          subtitle: card.subtitle,
+          footer: card.footer,
+          workout: card.workout,
+        });
+
     if (
-      COMPACT_TABLE_APP_CARD_URL_PREFIX.length + encodedLength >=
+      encodedAppCardUrlLength(envelope) >=
       COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH
     ) {
       context.addIssue({
         code: "custom",
-        message: "The compact table exceeds the inline Messages card limit.",
+        message: card.workout === undefined
+          ? "The compact table exceeds the inline Messages card limit."
+          : "The workout session exceeds the inline Messages card limit.",
         path: [],
       });
     }

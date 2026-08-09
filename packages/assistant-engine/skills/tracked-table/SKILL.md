@@ -1,65 +1,179 @@
 ---
 name: tracked-table
-description: Use when a private Murph member asks for a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Covers compact native table presentation and canonical workout-backed refreshes.
+description: Use when a private Murph member asks for a table, workout table, structured tracker, live workout log, native workout card, or an updated/refreshed card. Covers canonical workout-backed set logging, structured workout detail on compact tables, and generic compact tables.
 ---
 
-# Tracked table
+# Tracked tables and live workouts
 
 ## Goal
 
-Give the member a readable native table without making the message itself a second data store. For a tracked workout, update the canonical workout record first and then send a new immutable table snapshot.
+Give the member a complete strength-workout experience through ordinary messages and a readable native iMessage card without making the message or extension a second data store.
+
+Use:
+
+- a tracked `compact_table` with structured `workout` detail for one active or just-finished strength workout with exercises, targets, and set completion;
+- an ordinary `compact_table` for arbitrary tables, historical comparisons, or tracked data that is not one live workout.
 
 ## Core invariant
 
-The compact table is presentation, never authority. A tracked table may point to one canonical workout event, but it must not own or mutate workout state. The Messages extension remains read-only and network-free. “Update the table” means update the canonical record, verify it, and send a refreshed snapshot; never claim that an already-sent message changed in place.
+Cards are immutable presentation snapshots, never authority. The Messages extension is offline and unauthenticated. Its workout controls insert explicit commands into the current Messages composer; the member still sends the message. Only the normal Murph message path may mutate canonical workout state.
 
-## Presentation rules
+A prior bubble never changes in place. “Update the workout” means update canonical state, verify it, and send a new snapshot. The existing `compact_table` response-card kind remains the stable authoring surface; structured workout detail upgrades only its native presentation.
 
-- In a private direct conversation, use `murph.attach_response_card` with `kind="compact_table"` when the member explicitly asks for a table, or when their message is an unambiguous update to the single active tracked workout whose table was explicitly established earlier, and the card alone completely answers the request.
+## Canonical workout ownership
+
+Reuse the existing workout primitives:
+
+- A saved workout format owns the plan: ordered exercises, stable `sourceExerciseId` values, planned sets, and target values.
+- One canonical `activity_session` workout event owns what actually happened: `startedAt`, optional `endedAt`, ordered exercises, completed sets, notes, and the routine reference.
+- A live workout is an event with `workout.startedAt` and no `workout.endedAt`.
+- A finished workout has `workout.endedAt`.
+- The durable transcript may retain the exact tracked workout id for later turns, but the native card URL must not contain it.
+
+Do not create a parallel tracker document, mutable card record, memory row, or app-only workout state.
+
+## Starting a workout
+
+1. Resolve the requested workout format. If the member has no reusable plan, help them create one before starting when the intended exercises or targets are known.
+2. Ensure no second private live workout is plausible. Reuse the clearly active event or ask one narrow question rather than creating duplicates.
+3. Create one structured workout event through the existing workout command surface:
+   - copy exercise names, order, groups, mode, units, and `sourceExerciseId` from the format;
+   - set `routineId`, `routineName`, and `startedAt`;
+   - start every exercise with an empty actual `sets` array;
+   - use the format's expected duration only as the event's required planned duration, not as proof of elapsed time.
+4. Re-read the event and format before presenting the workout.
+
+Never use `workout format log` to start a live workout. That command records a completed workout from a format; a live session deliberately stores targets in the format and actual completed sets in the event.
+
+## Logging and correcting sets
+
+Commands inserted by the iMessage card use explicit one-based coordinates:
+
+- `Log workout exercise 2 set 1: ...`
+- `Complete workout exercise 2 set 1 at its shown target.`
+- `Correct workout exercise 2 set 1: ...`
+- `Finish this tracked workout.`
+
+Resolve those coordinates against the latest tracked workout card in the same private conversation. Its durable transcript marker contains the canonical event id and snapshot instant.
+
+Then:
+
+1. Run `vault-cli workout show <evt_id> --format json`.
+2. Read the referenced workout format when the command depends on a shown target.
+3. Reconcile against the latest canonical event. An old card never authorizes overwriting newer sets.
+4. Append or correct only the requested actual set while preserving every unrelated exercise, set, unit, note, source id, and field.
+5. Persist qualitative annotations such as spotted reps on that exact set's canonical `note`.
+6. Apply the complete intended replacement through `vault-cli workout edit` because nested workout arrays use replacement semantics.
+7. Re-read the event. Only the successful re-read proves the update.
+8. Send a refreshed immutable workout card from the verified event plus verified format.
+
+A repeated command for the same exercise and set coordinate should converge on that coordinate, not append a duplicate. If the coordinate is already complete and the member did not clearly request a correction, state what is saved and ask one narrow question.
+
+## Interpreting normal gym messages
+
+When one live workout is clear, understand concise follow-ups such as:
+
+- `bench 135 for 10`
+- `same weight, 8`
+- `set 3 was actually 9`
+- `last rep spotted`
+- `done with bench`
+- `finish the workout`
+
+Use immediate exercise/set context only when it is unambiguous. Never invent weight, repetitions, assistance, effort, completion, or target values.
+
+For a new actual set, append one set in canonical order. Targets remain in the format. A target is not a completed set until the member records it.
+
+## Finishing
+
+1. Re-read the event.
+2. Set `workout.endedAt` to the verified finish instant.
+3. Recompute elapsed duration from `startedAt` when possible and update the event duration.
+4. Do not fabricate missing sets. In the completed card, planned sets without corresponding actual sets are `skipped`.
+5. Re-read, then send the final workout card and a concise summary.
+
+## Building a structured workout card
+
+Use `murph.attach_response_card` with `kind="compact_table"` and structured `workout` detail in a private direct conversation when a verified live or just-finished workout is the primary answer.
+
+Build it from two canonical sources:
+
+- `target`: the matching planned set from the verified workout format;
+- `actual`: the matching completed set from the verified workout event.
+
+Set the compact summary to `rowHeader="Exercise"`, `columns=["Progress"]`, and one row per exercise whose value is `<completed>/<total>`. Then map each planned set in `workout.exercises` to:
+
+- `pending`: no corresponding actual set and the workout is still live;
+- `completed`: a corresponding actual set exists;
+- `skipped`: no corresponding actual set and the workout has ended.
+
+If the event contains additional actual sets beyond the format, include them as completed sets with `target=null`. Preserve canonical exercise and set order. Keep the card within its exercise, set, text, and encoded URL limits; use a compact table or readable text when the full workout cannot fit.
+
+The outer card remains `compact_table` V1. Set `workout` to:
+
+```json
+{
+  "version": 1,
+  "state": "active",
+  "exercises": [
+    {
+      "name": "Bench press",
+      "sets": [
+        {
+          "status": "pending",
+          "target": "185 lb × 6–8",
+          "actual": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+Use `state="completed"` only after replacing every remaining `pending` set with `skipped`. A completed set always carries `actual`; pending and skipped sets never do.
+
+Set `tracking` to:
+
+```json
+{
+  "kind": "workout",
+  "entityId": "<exact evt id>",
+  "snapshotAt": "<canonical verified UTC update instant>"
+}
+```
+
+The backend keeps tracking in durable transcript text and strips it from the native URL.
+
+## Card refresh behavior
+
+- Send one workout card when the workout starts.
+- After an accepted set log or correction, send the refreshed card as the response; do not also repeat the full workout in prose.
+- Do not send proactive cards without an existing authorized reminder or automation.
+- For a simple acknowledgement that does not materially change the workout, prefer concise text rather than another card.
+
+## Generic compact tables
+
+Use `murph.attach_response_card` with `kind="compact_table"` when the member explicitly asks for a table, or when a table alone completely answers a non-live-workout request.
+
 - Use one flexible row-label column plus one to four compact value columns, with at most eight rows.
 - Prefer short human labels. Do not add columns merely because the schema permits them.
-- Never emit Markdown-table syntax on a messaging route. If a native card is not appropriate or important explanation must accompany the answer, use a readable plain-text list instead.
+- Never emit Markdown-table syntax on a messaging route.
 - A compact table cannot be combined with response media or a second response card.
 - Keep `tracking` null for a one-off table that is not backed by canonical state.
+- For a tracked historical workout, re-read and verify the canonical event before building the table and retain the exact tracking marker in transcript context.
+- If any exercise has more than four sets, do not silently truncate it. Use a compact summary shape or a readable plain-text list.
 
-## Tracked workout flow
+## Historical tracked-workout compatibility
 
-1. Resolve the canonical workout event before writing. Reuse the exact `evt_<ULID>` reference from the latest tracked-table transcript when present. If it is absent or ambiguous, run a bounded `vault-cli workout list` and inspect the likely record with `vault-cli workout show`; never guess an id.
-2. For a new live workout, create one canonical workout record through the existing workout command surface. Do not create a parallel table document, tracker file, memory record, or database row.
-3. Before every mutation, run `vault-cli workout show <evt_id> --format json` and preserve all existing exercises and sets that the member did not ask to change.
-4. Apply the member's update with `vault-cli workout edit <evt_id>`. The typed workout edit surface replaces nested exercises and sets, so send the complete intended replacement rather than only the newest set. The command refuses a structured replacement that omits a saved exercise or set; re-read and preserve the complete structure. A deliberate full replacement still includes the complete desired structure. Use `--clear-workout` only when the member explicitly asked to remove all nested structured workout details while preserving the event, and use `vault-cli workout delete <evt_id>` only when they asked to remove the entire record.
-5. Persist every qualitative set annotation on that set's canonical `note`, for example `note=final rep spotted` or `note=final 2 reps spotted`. Never leave meaningful notation only in conversation text, an exercise-level summary, or the card snapshot.
-6. Re-run `vault-cli workout show <evt_id> --format json`. Treat only this successful re-read as proof of the new state.
-7. Build the compact table entirely from that verified record. Set `tracking` to `{ "kind": "workout", "entityId": "<exact evt id>", "snapshotAt": "<the canonical verified update instant, or the current canonical UTC ISO instant after the successful re-read>" }`.
-8. Attach and send the refreshed card. Do not repeat the table in prose or say the prior card was edited.
+For a compact-table workout that predates structured `workout` detail:
 
-## Update interpretation
+- Accept an update only for the single active tracked workout whose table was explicitly established earlier.
+- With no active tracked table, do not invent one from an update-like message. If two records are plausible, ask one narrow disambiguating question.
+- Before every mutation, re-read the canonical event and preserve all existing exercises and sets.
+- Persist every qualitative annotation on that set's canonical `note`, for example `note=final rep spotted` or `note=final 2 reps spotted`.
+- Never leave meaningful notation only in conversation text, an exercise summary, or a presentation snapshot.
+- A natural four-set table uses `Set 1` through `Set 4`. Do not collapse or discard the fourth set merely to fit a denser grid.
 
-- A message such as “the next set was 8 reps” or “finished set 3” is a request to update the referenced workout when the current conversation clearly owns one active tracked workout.
-- With no active tracked table, do not invent one from an update-like message. If two active or recent workouts are plausible, ask one narrow disambiguating question.
-- Preserve the member's units, exercise order, set order, and clarified notation. Do not infer weight, repetitions, effort, completion, assistance, or rest values that were not stated or already present in the canonical record.
-- Treat member-defined shorthand as ambiguous until the member explains it. Once defined as spotted repetitions, persist a plain set note such as `final rep spotted` or `final 2 reps spotted`; do not reinterpret it as assisted-load data.
-- “Real time” means a fresh verified snapshot after each accepted update. Recurring proactive pushes, timers, reminders, or background check-ins require their own existing authorization and owning workflow.
+## Fallback
 
-## Set-by-set workout tables
-
-When an exercise has one to four logged sets and the member asks for a table, use the natural set-by-set shape:
-
-- row header: `Exercise`
-- columns: `Set 1`, `Set 2`, `Set 3`, and `Set 4` as needed
-- one row per exercise, preserving the canonical exercise order
-- each cell: the concise load/reps value plus any verified set note, such as `45 × 6 (final rep spotted)`
-
-Preserve all available set columns and set notes. Do not collapse or discard the fourth set merely to fit a dense grid; the native reader has a stacked four-set presentation.
-
-If any exercise has more than four sets, do not silently truncate it. Use a compact summary shape such as `Exercise | Completed | Latest | Notes`, or a readable plain-text list when the full set history is the actual point of the answer.
-
-## Other useful workout shapes
-
-Choose only fields supported by the verified record and useful right now. Common alternatives are:
-
-- Exercise | Completed | Latest
-- Exercise | Sets × reps | Load | Effort
-- Exercise | Set | Reps | Weight
-
-For a live session, favor completed or current information over a dense copy of the entire planned routine. Use the footer only for one short status or safety note that applies to the whole table.
+Use readable text when explanation is necessary, the native card is not supported on the route, or the presentation would exceed its bounds. Never claim a write succeeded until the canonical re-read proves it.
