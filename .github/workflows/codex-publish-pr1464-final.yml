@@ -1,0 +1,90 @@
+name: Publish final PR 1464 candidate
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-publish-pr1464-final.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reconstruct and publish exact audited candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected_main="363505694d7c069b966dba40ede126d2b04280a6"
+          expected_old_head="0feeae892ec981a0515ae2474b51dfdff1dd646e"
+          expected_first_tree="13200ca299e254163fb58e12dc729301e4c3d6ad"
+          expected_second_tree="2c62faf4f21186ba5c514df6e94e9d4a3bfe58c2"
+          expected_final_tree="21e5c096c40604b2832b7c0851ccf92873b81cca"
+          implementation_commit="3a27da086599bf186120cf7061b978930553b2dd"
+          workflow_commit="0feeae892ec981a0515ae2474b51dfdff1dd646e"
+          helper_ref="origin/codex/starter-usage-export-final"
+          target_ref="refs/heads/agent/non-expiring-starter-usage"
+
+          git fetch origin \
+            main \
+            agent/non-expiring-starter-usage \
+            codex/starter-usage-export-final
+
+          test "$(git rev-parse origin/main)" = "$expected_main"
+          test "$(git rev-parse origin/agent/non-expiring-starter-usage)" = "$expected_old_head"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --detach "$expected_main"
+
+          mkdir -p /tmp/pr1464-payload
+          while IFS= read -r path; do
+            git show "$helper_ref:$path"
+          done < <(
+            git ls-tree -r --name-only "$helper_ref" -- \
+              '.github/pr1464-publish/payload-*' | sort
+          ) | base64 --decode | xz --decompress > /tmp/pr1464-payload.tar
+          tar -C /tmp/pr1464-payload -xf /tmp/pr1464-payload.tar
+          test -s /tmp/pr1464-payload/resolution.patch
+          test -s /tmp/pr1464-payload/harden.patch
+
+          set +e
+          git cherry-pick "$implementation_commit"
+          cherry_pick_status=$?
+          set -e
+          test "$cherry_pick_status" -ne 0
+
+          conflicts=(
+            'apps/web/app/design/group-usage-funding-study.tsx'
+            'apps/web/app/page.tsx'
+            'apps/web/test/hosted-onboarding-billing-plans.test.ts'
+          )
+          printf '%s\n' "${conflicts[@]}" | sort > /tmp/expected-conflicts
+          git diff --name-only --diff-filter=U | sort > /tmp/actual-conflicts
+          cmp /tmp/expected-conflicts /tmp/actual-conflicts
+
+          git checkout --ours -- "${conflicts[@]}"
+          git add -- "${conflicts[@]}"
+          git apply --index /tmp/pr1464-payload/resolution.patch
+          git cherry-pick --continue
+          test "$(git rev-parse 'HEAD^{tree}')" = "$expected_first_tree"
+
+          git cherry-pick "$workflow_commit"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$expected_second_tree"
+
+          git am /tmp/pr1464-payload/harden.patch
+          git diff --check "$expected_main"..HEAD
+          test "$(git rev-parse 'HEAD^{tree}')" = "$expected_final_tree"
+
+          git push origin "HEAD:$target_ref" \
+            --force-with-lease="$target_ref:$expected_old_head"
