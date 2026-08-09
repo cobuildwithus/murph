@@ -53,7 +53,7 @@ export function ImessageNutritionCardStudy() {
         <ScaledNutritionCard scale={0.72} />
       </div>
       <div className="sm:hidden">
-        <ScaledNutritionCard scale={0.245} />
+        <ScaledNutritionCard scale={0.285} />
       </div>
     </div>
   );

@@ -410,10 +410,9 @@ describe('assistant response cards', () => {
       },
     }
     expect(buildLinqIMessageAppLayout(card)).toEqual({
-      caption: 'Murph',
+      caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(card),
-      subcaption: 'Jul 28 · 3 meals · PARTIAL TOTALS',
-      trailing_caption: '1,490.25 cal',
+      subcaption: '1,490.25 cal · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
     })
   })
 
@@ -462,18 +461,18 @@ describe('assistant response cards', () => {
       card: COMPLETE_CARD_V2,
     })
     expect(completeLayout).toEqual({
-      caption: 'Murph',
+      caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD),
-      subcaption: 'Jul 28 · 3 meals',
-      trailing_caption: '1,490.25 cal',
+      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat',
     })
     expect(goalLayout).toEqual({
-      caption: 'Murph',
+      caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
-      subcaption: 'Jul 28 · 3 meals',
-      trailing_caption: '1,490.25 cal',
+      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · Goals: calories goal 2,100 cal, under target; protein goal 100g, on target; carbs goal unavailable; fat goal 40g, on target; fiber goal 30g, under target',
     })
-    expect(proteinGoalLayout.subcaption).toBe('Jul 28 · 3 meals')
+    expect(proteinGoalLayout.subcaption).toContain(
+      'protein goal 100g, on target',
+    )
     expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
       schemaVersion: 2,
       card: {
@@ -488,12 +487,11 @@ describe('assistant response cards', () => {
       },
     })
     expect(partialLayout).toEqual({
-      caption: 'Murph',
+      caption: 'Jul 28 · 4 meals',
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
-      subcaption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
-      trailing_caption: '1,490.25 cal',
+      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
     })
     expect(buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2).length)
       .toBeLessThan(2_048)

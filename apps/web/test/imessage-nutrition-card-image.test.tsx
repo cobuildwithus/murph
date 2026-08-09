@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 
-import type { DailyNutritionResponseCardV2 } from "@murphai/contracts";
+import type {
+  DailyNutritionResponseCardV1,
+  DailyNutritionResponseCardV2,
+} from "@murphai/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -63,6 +66,18 @@ const CARD: DailyNutritionResponseCardV2 = {
   },
 };
 
+const CARD_V1: DailyNutritionResponseCardV1 = {
+  kind: "daily_nutrition",
+  localDate: "2026-06-17",
+  mealCount: 2,
+  totals: {
+    calories: { total: 1_420, mealCount: 2 },
+    proteinGrams: { total: 98, mealCount: 2 },
+    carbsGrams: { total: 164, mealCount: 2 },
+    fatGrams: { total: 52, mealCount: 2 },
+  },
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -87,7 +102,7 @@ test("nutrition card image route renders the bounded V2 snapshot without caching
 
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 630);
+  assert.equal(init.height, 1_200);
   assert.deepEqual(
     init.fonts?.map((font) => [font.name, font.weight]),
     [["Fraunces", 600], ["DM Sans", 400]],
@@ -118,6 +133,37 @@ test("nutrition card image component renders totals, partial support, and goals"
   assert.match(serialized, /2,200/u);
   assert.match(serialized, /Under target/u);
   assert.match(serialized, /Status unavailable/u);
+  assert.match(serialized, /Goal unavailable/u);
+  assert.doesNotMatch(serialized, /No goal/u);
+});
+
+test("nutrition card image route and component retain truthful V1 compatibility", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const { NutritionCardImage } = await import(
+    "@/src/components/imessage/nutrition-card-image"
+  );
+  const payload = encodePayload({ schemaVersion: 1, card: CARD_V1 });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Type"), "image/png");
+  expect(mocks.imageResponse).toHaveBeenCalledTimes(1);
+
+  const serialized = renderToStaticMarkup(
+    <NutritionCardImage
+      card={CARD_V1}
+      logoDataUri="data:image/svg+xml;base64,PHN2Zy8+"
+    />,
+  );
+  assert.match(serialized, /Jun 17, 2026/u);
+  assert.match(serialized, /1,420/u);
+  assert.match(serialized, /98/u);
+  assert.match(serialized, /164/u);
+  assert.match(serialized, /52/u);
+  assert.doesNotMatch(serialized, /Fiber|No goal|Goal unavailable/u);
 });
 
 test("nutrition card image route rejects malformed, non-nutrition, and query-bearing URLs before asset reads", async () => {

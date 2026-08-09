@@ -8,7 +8,7 @@ import type {
 
 export const IMESSAGE_NUTRITION_CARD_IMAGE_SIZE = {
   width: 1200,
-  height: 630,
+  height: 1200,
 } as const;
 
 const NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
@@ -45,14 +45,13 @@ const COLOR = {
   border: "rgba(196,168,130,0.32)",
   card: "rgba(255,252,246,0.88)",
   foreground: "#2D3436",
-  muted: "#736A58",
+  muted: "#625D52",
   primary: "#5A6E32",
-  sand: "#D4C4A8",
   warning: "#8B5D3F",
 };
 
 type NutritionMetricPresentation = {
-  goal: NutritionCardGoalSnapshot | null;
+  goal: NutritionCardGoalSnapshot | null | undefined;
   label: string;
   metric: NutritionCardMetric;
   unit: string;
@@ -68,19 +67,19 @@ export function NutritionCardImage({
   const v2 = isNutritionCardV2(card) ? card : null;
   const metrics: NutritionMetricPresentation[] = [
     {
-      goal: v2?.goals.proteinGrams ?? null,
+      goal: v2 === null ? undefined : v2.goals.proteinGrams,
       label: "Protein",
       metric: card.totals.proteinGrams,
       unit: "g",
     },
     {
-      goal: v2?.goals.carbsGrams ?? null,
+      goal: v2 === null ? undefined : v2.goals.carbsGrams,
       label: "Carbs",
       metric: card.totals.carbsGrams,
       unit: "g",
     },
     {
-      goal: v2?.goals.fatGrams ?? null,
+      goal: v2 === null ? undefined : v2.goals.fatGrams,
       label: "Fat",
       metric: card.totals.fatGrams,
       unit: "g",
@@ -94,10 +93,13 @@ export function NutritionCardImage({
           unit: "g",
         }]),
   ];
+  const metricRows = v2 === null
+    ? [metrics]
+    : [metrics.slice(0, 2), metrics.slice(2)];
   const partial = [card.totals.calories, ...metrics.map(({ metric }) => metric)]
     .some((metric) => metric.total === null || metric.mealCount < card.mealCount);
   const calories = card.totals.calories.total;
-  const calorieGoal = v2?.goals.calories ?? null;
+  const calorieGoal = v2 === null ? undefined : v2.goals.calories;
   const mealLabel = card.mealCount === 1 ? "meal" : "meals";
 
   return (
@@ -110,7 +112,7 @@ export function NutritionCardImage({
         justifyContent: "space-between",
         backgroundColor: COLOR.background,
         color: COLOR.foreground,
-        padding: "48px 56px 42px",
+        padding: "58px 64px 52px",
         fontFamily: "DM Sans",
       }}
     >
@@ -123,11 +125,11 @@ export function NutritionCardImage({
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- Satori requires a raw image element */}
         <img src={logoDataUri} width={152} height={34} alt="" />
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
           <div
             style={{
               display: "flex",
-              fontSize: 20,
+              fontSize: 30,
               letterSpacing: "0.14em",
               color: COLOR.muted,
             }}
@@ -144,7 +146,7 @@ export function NutritionCardImage({
                 ? "rgba(139,93,63,0.12)"
                 : "rgba(90,110,50,0.12)",
               color: partial ? COLOR.warning : COLOR.primary,
-              fontSize: 17,
+              fontSize: 28,
               letterSpacing: "0.08em",
             }}
           >
@@ -159,7 +161,7 @@ export function NutritionCardImage({
           alignItems: "flex-end",
           justifyContent: "space-between",
           borderBottom: `1px solid ${COLOR.border}`,
-          paddingBottom: 28,
+          paddingBottom: 42,
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -168,14 +170,14 @@ export function NutritionCardImage({
               display: "flex",
               fontFamily: "Fraunces",
               fontWeight: 600,
-              fontSize: 58,
+              fontSize: 68,
               lineHeight: 1,
               letterSpacing: "-0.025em",
             }}
           >
             {formatDate(card.localDate)}
           </div>
-          <div style={{ display: "flex", fontSize: 23, color: COLOR.muted }}>
+          <div style={{ display: "flex", fontSize: 34, color: COLOR.muted }}>
             {card.mealCount} logged {mealLabel}
           </div>
         </div>
@@ -193,14 +195,14 @@ export function NutritionCardImage({
                 display: "flex",
                 fontFamily: "Fraunces",
                 fontWeight: 600,
-                fontSize: 92,
+                fontSize: 108,
                 lineHeight: 0.9,
                 letterSpacing: "-0.035em",
               }}
             >
               {calories === null ? "—" : formatNumber(calories)}
             </div>
-            <div style={{ display: "flex", fontSize: 26, color: COLOR.muted }}>
+            <div style={{ display: "flex", fontSize: 36, color: COLOR.muted }}>
               cal
             </div>
           </div>
@@ -208,13 +210,17 @@ export function NutritionCardImage({
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 16 }}>
-        {metrics.map((metric) => (
-          <MetricCard
-            key={metric.label}
-            cardMealCount={card.mealCount}
-            presentation={metric}
-          />
+      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        {metricRows.map((row, rowIndex) => (
+          <div key={rowIndex} style={{ display: "flex", gap: 22 }}>
+            {row.map((metric) => (
+              <MetricCard
+                key={metric.label}
+                cardMealCount={card.mealCount}
+                presentation={metric}
+              />
+            ))}
+          </div>
         ))}
       </div>
 
@@ -224,7 +230,7 @@ export function NutritionCardImage({
           alignItems: "center",
           justifyContent: "space-between",
           color: COLOR.muted,
-          fontSize: 18,
+          fontSize: 28,
         }}
       >
         <div style={{ display: "flex" }}>Private nutrition snapshot</div>
@@ -256,17 +262,17 @@ function MetricCard({
         flexBasis: 0,
         flexGrow: 1,
         minWidth: 0,
-        gap: 11,
+        gap: 16,
         border: `1px solid ${COLOR.border}`,
-        borderRadius: 18,
+        borderRadius: 24,
         backgroundColor: COLOR.card,
-        padding: "20px 22px",
+        padding: "28px 30px",
       }}
     >
       <div
         style={{
           display: "flex",
-          fontSize: 17,
+          fontSize: 28,
           letterSpacing: "0.12em",
           color: COLOR.muted,
         }}
@@ -279,7 +285,7 @@ function MetricCard({
             display: "flex",
             fontFamily: "Fraunces",
             fontWeight: 600,
-            fontSize: 48,
+            fontSize: 78,
             lineHeight: 1,
             letterSpacing: "-0.025em",
           }}
@@ -287,12 +293,12 @@ function MetricCard({
           {metric.total === null ? "—" : formatNumber(metric.total)}
         </div>
         {metric.total === null ? null : (
-          <div style={{ display: "flex", fontSize: 21, color: COLOR.muted }}>
+          <div style={{ display: "flex", fontSize: 34, color: COLOR.muted }}>
             {unit}
           </div>
         )}
       </div>
-      <div style={{ display: "flex", fontSize: 16, color: COLOR.muted }}>
+      <div style={{ display: "flex", fontSize: 38, color: COLOR.muted }}>
         {supportLabel}
       </div>
       <GoalLine goal={goal} unit={unit} />
@@ -304,14 +310,21 @@ function GoalLine({
   goal,
   unit,
 }: {
-  goal: NutritionCardGoalSnapshot | null;
+  goal: NutritionCardGoalSnapshot | null | undefined;
   unit: string;
 }) {
+  if (goal === undefined) {
+    return null;
+  }
   if (goal === null) {
-    return <div style={{ display: "flex", fontSize: 16, color: COLOR.sand }}>No goal</div>;
+    return (
+      <div style={{ display: "flex", fontSize: 40, color: COLOR.muted }}>
+        Goal unavailable
+      </div>
+    );
   }
   return (
-    <div style={{ display: "flex", fontSize: 16, color: COLOR.muted }}>
+    <div style={{ display: "flex", fontSize: 40, color: COLOR.muted }}>
       {formatNumber(goal.target)}{unit} goal · {STATUS_LABELS[goal.status]}
     </div>
   );
