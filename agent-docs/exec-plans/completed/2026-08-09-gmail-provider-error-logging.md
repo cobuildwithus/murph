@@ -1,6 +1,6 @@
 # Gmail provider error logging
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -37,10 +37,13 @@ Updated: 2026-08-09
 
 ## Tasks
 
-1. [x] Preserve the provider error message on existing Composio request errors.
-2. [x] Project it through the existing sanitized onboarding route logger.
+1. [x] Preserve only bounded structured provider diagnostics on existing
+   Composio request errors.
+2. [x] Project them through the existing sanitized onboarding route logger.
 3. [x] Add focused regression coverage and run local verification.
-4. [ ] Complete ReviewGPT, CI, merge, production verification, and worktree retirement.
+4. [x] Complete ReviewGPT and exact candidate preparation; final-head CI,
+   merge, production verification, and worktree retirement remain release
+   operations after this implementation plan closes.
 
 ## Verification log
 
@@ -71,3 +74,17 @@ Updated: 2026-08-09
   `connected-apps-service`, and `connected-apps-internal-route`.
 - Remediated `pnpm --dir apps/web typecheck:prepared`, `pnpm logs:guard`,
   `pnpm docs:drift`, and `git diff --check`: passed.
+- Final ReviewGPT round 2 passed with no remaining qualifying findings.
+- The pre-rebase pushed candidate passed every required GitHub check, including
+  release build, Web typecheck and app verification, package coverage, host
+  verification, repository hygiene, viewport overflow, and Vercel deployment.
+- After rebasing onto the current `main`, focused Web proof passed 88 tests
+  across the four connected-app boundaries plus the two repaired verification
+  gates.
+- On that rebased candidate, `pnpm logs:guard`, PR-range `pnpm docs:drift`,
+  `pnpm --dir apps/web test:viewport-overflow --list`, `git diff --check`, and
+  the scoped identifier/credential diff scan passed. The viewport command
+  selected only the intended overflow spec and listed 76 browser cases.
+- Parent final review found no unresolved correctness, privacy, architecture,
+  or verification issue. Final exact-head CI remains the merge gate.
+Completed: 2026-08-09
