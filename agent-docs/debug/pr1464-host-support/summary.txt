@@ -1,0 +1,203 @@
+run=31335260291
+status=completed
+conclusion=failure
+head_sha=47019397f5c26ecffceded0f40281242848c4223
+url=https://github.com/cobuildwithus/murph/actions/runs/31335260291
+
+jobs:
+- 93299999465 Release app verification (ubuntu): completed/failure
+  - step 8 Run app verification: completed/failure
+- 93299999481 Release fixture coverage (ubuntu): completed/success
+- 93299999482 CLI host matrix (macos-latest): completed/success
+- 93299999484 Release build/typecheck (ubuntu): completed/success
+- 93299999486 Release package coverage (cli): completed/success
+- 93299999493 Release package coverage (platform): completed/success
+- 93299999496 CLI host matrix (ubuntu-24.04): completed/success
+- 93299999499 Release package coverage (assistant): completed/failure
+  - step 9 Run package coverage shard: completed/failure
+- 93301269099 Release checks (ubuntu): completed/failure
+  - step 2 Check release shards: completed/failure
+
+failed log:
+ckage coverage shard	2026-08-09T20:59:07.8637315Z   ...utomations.ts |   90.52 |    87.26 |      98 |    90.5 | ...1752,1972,2020 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8637969Z   ...-selection.ts |   94.91 |    88.46 |     100 |   94.91 | 108,154,281       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8638435Z   ...l-behavior.ts |   95.23 |    95.23 |     100 |   95.23 | 36                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8638904Z   ...ter-outbox.ts |   93.65 |    84.78 |      95 |   93.54 | 84,91,94,248      
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8639364Z   ...ation-turn.ts |   89.42 |    86.39 |   87.93 |   89.69 | ...1683,1731,1760 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8639830Z   ...automation.ts |    87.5 |    77.77 |     100 |    87.5 | 74,78             
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8640294Z   ...automation.ts |   82.85 |       76 |     100 |   82.85 | ...12,132,140,159 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8640919Z   ...automation.ts |   89.88 |    84.28 |     100 |   89.77 | ...05,302,326,408 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8641377Z   ...ding-state.ts |   98.18 |    85.18 |     100 |   98.18 | 156               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8641832Z   ...-authority.ts |     100 |    83.33 |     100 |     100 | 28                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8642291Z   outbox.ts        |    87.9 |    82.45 |   95.38 |   87.88 | ...2482,2547,2550 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8642742Z   ...na-prompts.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8643205Z   ...-constants.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8643659Z   ...t-attempts.ts |     100 |    92.85 |     100 |     100 | 64                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8644127Z   ...er-catalog.ts |   95.91 |    78.57 |     100 |   95.83 | 192,197           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8644582Z   ...iagnostics.ts |   87.09 |    88.09 |     100 |   87.09 | 13-16,68,88       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8645043Z   ...r-progress.ts |   93.54 |    86.84 |     100 |   93.54 | 79,101            
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8645501Z   ...tical-path.ts |   93.33 |    92.85 |     100 |   93.33 | 69                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8645959Z   ...der-traces.ts |       0 |        0 |       0 |       0 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8646431Z   quarantine.ts    |    92.4 |       90 |   92.85 |    92.4 | ...83,197-198,226 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8646888Z   receipts.ts      |       0 |        0 |       0 |       0 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8647334Z   redaction.ts     |   96.36 |    89.61 |   97.05 |   96.29 | 92-93,267-268     
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8647794Z   ...aintenance.ts |   86.77 |    77.47 |   93.33 |   86.66 | ...58,368,374,394 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8648406Z   reply-bubbles.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8648869Z   ...ry-context.ts |   88.88 |       75 |     100 |   88.88 | 156               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8649327Z   ...onse-media.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8649778Z   ...ntact-kind.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8650237Z   ...get-policy.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8650967Z   ...me-budgets.ts |   96.31 |    88.88 |     100 |   96.31 | ...53,466,478,521 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8651454Z   runtime-cache.ts |   94.23 |     87.5 |   91.66 |   94.11 | 43,74,94          
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8651915Z   ...ime-events.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8652375Z   ...me-residue.ts |   85.36 |    80.37 |   93.84 |   85.38 | ...1266,1338,1372 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8652828Z   ...te-service.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8653409Z   ...write-lock.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8654015Z   ...-contracts.ts |       0 |        0 |       0 |       0 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8654475Z   ...ice-result.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8654929Z   ...urn-routes.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8655400Z   service-usage.ts |   88.23 |    90.12 |     100 |   88.23 | 123,182,203,209   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8656071Z   service.ts       |      80 |      100 |      80 |      80 | 84                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8656516Z   ...resolution.ts |   96.25 |     92.1 |     100 |   96.25 | 237,290,306       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8656967Z   shared.ts        |    97.5 |    96.07 |     100 |   97.43 | 236,250           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8657413Z   state-ids.ts     |     100 |    91.66 |     100 |     100 | 55                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8657886Z   state-secrets.ts |   82.22 |    88.88 |   78.57 |   82.22 | 104,146-161       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8658352Z   ...write-lock.ts |   94.28 |     90.9 |    87.5 |   95.52 | 64,203,206        
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8658797Z   state.ts         |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8659229Z   status.ts        |   97.95 |    90.62 |    92.3 |   97.95 | 174               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8659662Z   store.ts         |   93.64 |    89.83 |   92.15 |    93.6 | ...82,418,466-468 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8660109Z   ...ion-digest.ts |      90 |    81.38 |     100 |      90 | ...55-361,377,390 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8660731Z   ...ript-audit.ts |    96.1 |    93.67 |     100 |    96.1 | 108,169,190       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8661218Z   ...-finalizer.ts |   90.72 |    86.31 |   93.33 |   91.66 | ...63,245,369,438 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8661688Z   turn-input.ts    |     100 |    86.66 |     100 |     100 | 111-122           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8662151Z   turn-lock.ts     |   97.01 |     92.3 |   93.33 |   98.46 | 85                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8662607Z   turn-plan.ts     |   96.15 |    97.61 |     100 |   96.15 | 133               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8663074Z   turn-progress.ts |    98.8 |    89.28 |     100 |    98.8 | 341               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8663525Z   turns.ts         |   92.98 |    85.54 |   92.59 |   92.98 | ...94,421,431,442 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8663972Z   ...ttribution.ts |   97.95 |       86 |     100 |   97.95 | 181               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8664435Z   ...-file-send.ts |      83 |    75.88 |   95.34 |      83 | ...1026,1035-1038 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8664896Z   ...t-overview.ts |   96.29 |    91.93 |     100 |   96.25 | 160,178,269       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8665355Z   ...o-delivery.ts |    87.5 |       80 |     100 |    87.5 | 32                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8665825Z  ...ssistant-codex |   89.51 |    82.62 |   98.19 |   89.41 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8666306Z   ...iagnostics.ts |   88.08 |    78.35 |     100 |   88.08 | ...5,923,970,1035 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8666939Z   ...r-requests.ts |   96.55 |    86.84 |   92.85 |   96.55 | 94                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8667411Z   ...server-rpc.ts |   90.56 |       80 |   93.02 |    90.5 | ...88,398,435,474 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8667927Z   ask-grok-tool.ts |   92.98 |    87.17 |     100 |   92.98 | 143-146,176       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8668396Z   config.ts        |   90.42 |    79.72 |     100 |   90.42 | ...33-234,240,249 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8668854Z   ...ol-catalog.ts |     100 |    87.09 |     100 |     100 | 1175-1186         
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8669334Z   dynamic-tools.ts |   86.09 |    80.02 |   97.48 |      86 | ...5911,5959,6044 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8669801Z   failures.ts      |     100 |    96.08 |     100 |     100 | ...32-445,614-618 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8670260Z   ...image-tool.ts |   89.58 |    88.59 |     100 |   89.43 | ...18,484,642,680 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8671089Z   ...-memo-tool.ts |   92.78 |    89.53 |     100 |   92.78 | ...75,228,347,368 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8671672Z   ...e-resolver.ts |   96.29 |    96.38 |     100 |   96.25 | 76,138,167        
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8683828Z   images.ts        |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8684863Z   ...generation.ts |   94.39 |    82.24 |     100 |   93.93 | ...88,398,459,469 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8685846Z  .../dynamic-tools |   94.53 |    88.96 |   97.84 |    94.5 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8686398Z   ask-grok.ts      |     100 |       50 |     100 |     100 | 61-64             
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8687102Z   ...tant-style.ts |   96.87 |    97.05 |     100 |   96.87 | 171,223           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8688083Z   automation.ts    |   94.82 |    90.16 |     100 |   94.82 | 210,364,401       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8689004Z   ...al-records.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8689968Z   ...ected-apps.ts |   91.66 |    84.33 |    92.3 |   91.66 | ...54,233,264,288 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8690767Z   device.ts        |   81.81 |    66.66 |      80 |   81.81 | 93,101,110,146    
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8691503Z   ...ol-wrapper.ts |     100 |    91.66 |     100 |     100 | 90                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8692021Z   generate-song.ts |     100 |    85.71 |     100 |     100 | 113-114           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8692502Z   ...voice-memo.ts |     100 |     87.5 |     100 |     100 | 98                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8692978Z   ...room-model.ts |   96.29 |    96.42 |     100 |   96.29 | 118               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8693422Z   labs.ts          |   94.73 |    92.85 |     100 |   94.73 | 108               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8693876Z   ...ault-files.ts |   93.33 |    83.67 |     100 |   93.24 | ...80,287,294,307 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8694341Z   phone-calls.ts   |   97.67 |    93.93 |     100 |   97.61 | 85                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8694806Z   ...ical-notes.ts |   95.83 |    96.42 |     100 |   95.83 | 169               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8695275Z  ...ant/automation |      92 |    84.74 |   96.04 |      92 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8695895Z   artifacts.ts     |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8696822Z   ...eply-retry.ts |    90.9 |    90.62 |     100 |    90.9 | ...73,103,171,179 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8697777Z   evidence.ts      |   80.47 |    76.04 |   89.74 |   80.83 | ...05-609,622,630 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8698687Z   ...ervability.ts |    93.1 |    84.74 |   95.83 |    93.1 | ...87,280,284,369 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8699587Z   grouping.ts      |   97.05 |    97.82 |    87.5 |   97.05 | 176               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8700819Z   input-summary.ts |     100 |    86.66 |     100 |     100 | 33,46,52,85       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8701386Z   ...provenance.ts |   83.33 |    66.66 |     100 |   83.33 | 54,74,83,89       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8701861Z   ...tion-scope.ts |       0 |        0 |       0 |       0 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8702321Z   ...pt-builder.ts |   92.73 |     84.5 |     100 |   92.59 | ...1164,1168,1176 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8703003Z   ...r-watchdog.ts |   92.92 |    83.75 |    91.3 |   93.75 | ...12,193-195,282 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8703446Z   reply.ts         |    93.3 |    85.75 |   97.76 |   93.17 | ...4910,5041,5140 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8703879Z   run-loop.ts      |   88.35 |    82.73 |    85.1 |   88.35 | ...,979,1038,1124 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8704330Z   runtime-lock.ts  |     100 |    88.88 |     100 |     100 | 40,120-123        
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8704779Z   scanner.ts       |   92.92 |    78.65 |     100 |   92.72 | ...35,380,385,425 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8705214Z   shared.ts        |   93.57 |    85.45 |   94.59 |   94.23 | ...72,281-282,312 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8705981Z   ...t-override.ts |     100 |    88.88 |     100 |     100 | 88,138-140,146    
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8706737Z   turn-envelope.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8707231Z  ...stant/channels |   85.92 |    76.65 |   94.31 |   85.85 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8707708Z   descriptors.ts   |   85.71 |    71.67 |   96.22 |   85.71 | ...1416,1431,1435 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8708163Z   helpers.ts       |   93.63 |    88.14 |     100 |   93.63 | ...86,492,502,527 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8708607Z   registry.ts      |     100 |     91.3 |     100 |     100 | 57,64             
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8709055Z   runtime.ts       |    84.4 |    76.28 |   90.58 |   84.27 | ...2503,2508,2513 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8709482Z   types.ts         |       0 |        0 |       0 |       0 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8710146Z  ...ant/codex-turn |   96.26 |    94.75 |     100 |   96.26 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8710952Z   ...ervability.ts |   83.33 |     62.5 |     100 |   83.33 | 34-35             
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8711463Z   planning.ts      |   96.94 |    95.44 |     100 |   96.94 | ...1313,1338,1358 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8711939Z  ...assistant/cron |   92.65 |       87 |   96.55 |   92.55 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8712402Z   authoring.ts     |      90 |     83.6 |     100 |   89.91 | ...50,571,581,596 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8712857Z   ...nical-jobs.ts |    92.8 |    89.24 |     100 |    92.8 | ...52,665,669,675 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8713310Z   ...nciliation.ts |   84.73 |    69.67 |   85.71 |   84.61 | ...47-377,534,589 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8713760Z   execution.ts     |   93.26 |    88.92 |   98.34 |   93.24 | ...3308,3346,3361 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8714218Z   finalization.ts  |   92.85 |    91.66 |     100 |   92.85 | 11                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8714671Z   locking.ts       |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8715112Z   mutations.ts     |   95.71 |    86.56 |     100 |   95.71 | 120,132,303       
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8715560Z   ...n-delivery.ts |   91.66 |    95.83 |     100 |    90.9 | 19                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8716055Z   presets.ts       |   96.42 |    89.28 |     100 |   96.07 | 448,461           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8716511Z   runtime-state.ts |   98.11 |    90.62 |   94.44 |   97.95 | 91                
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8716982Z   schedule.ts      |   95.58 |    87.09 |     100 |    95.5 | ...85,314,342,520 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8717435Z   scheduled-log.ts |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8717874Z   store.ts         |   88.54 |    84.41 |   86.11 |   88.18 | ...44,356,422,438 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8718304Z   targets.ts       |   93.33 |    88.73 |     100 |   93.33 | 68,178,300        
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8718760Z  ...sistant/outbox |   92.72 |    86.14 |   96.07 |   92.79 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8719232Z   ...-authority.ts |   86.11 |    78.78 |     100 |   86.11 | 60,81,135-138     
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8719698Z   ...atch-state.ts |   90.69 |    84.84 |   92.53 |    90.9 | ...1508,1592-1617 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8720143Z   intents.ts       |     100 |    92.85 |     100 |     100 | 142,177           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8720730Z   ordering.ts      |   78.33 |    69.62 |   88.88 |   78.33 | ...62,171-174,192 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8721360Z   ...ipt-repair.ts |   97.29 |     90.9 |     100 |   97.29 | 200               
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8722206Z   retry-policy.ts  |   98.62 |     94.7 |     100 |    98.6 | 299,302           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8723128Z   store.ts         |   98.24 |    92.18 |     100 |   98.21 | 170,255           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8724030Z   summary.ts       |     100 |    88.88 |     100 |     100 | 12-23             
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8724956Z  ...tant/providers |   85.97 |    81.77 |   90.27 |   85.94 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8725895Z   catalog.ts       |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8726763Z   codex-cli.ts     |    77.3 |    76.94 |   88.13 |    77.3 | ...1371,1386-1454 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8727616Z   helpers.ts       |    91.7 |    85.86 |   91.46 |   91.77 | ...1567,1623,1805 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8728477Z   types.ts         |     100 |      100 |     100 |     100 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8729398Z  ...ssistant/store |   92.48 |    86.56 |   91.42 |   92.87 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8730318Z   paths.ts         |   95.94 |    95.71 |   86.66 |   97.26 | 71,226            
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8731516Z   persistence.ts   |   91.69 |    83.33 |   92.72 |   91.87 | ...86,920,944,989 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8732436Z   types.ts         |       0 |        0 |       0 |       0 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8733332Z  src/knowledge     |   96.73 |    85.35 |   96.47 |   96.95 |                   
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8734198Z   documents.ts     |     100 |    93.33 |     100 |     100 | 137,183           
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8735400Z   service.ts       |   96.23 |    84.21 |   95.45 |   96.47 | ...1110,1212,1297 
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:07.8735969Z -------------------|---------|----------|---------|---------|-------------------
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:08.4194617Z  ELIFECYCLE  Command failed with exit code 1.
+Release package coverage (assistant)	Run package coverage shard	2026-08-09T20:59:08.4408440Z ##[error]Process completed with exit code 1.
+Release checks (ubuntu)	Check release shards	﻿2026-08-09T21:02:14.2021300Z ##[group]Run if [[ "success" != "success" ]]; then
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2022034Z ^[[36;1mif [[ "success" != "success" ]]; then^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2022864Z ^[[36;1m  echo "Release build/typecheck shard failed or did not complete."^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2023541Z ^[[36;1m  exit 1^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2024011Z ^[[36;1mfi^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2024550Z ^[[36;1mif [[ "failure" != "success" ]]; then^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2025416Z ^[[36;1m  echo "Release package coverage shard failed or did not complete."^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2026135Z ^[[36;1m  exit 1^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2026551Z ^[[36;1mfi^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2027008Z ^[[36;1mif [[ "failure" != "success" ]]; then^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2027703Z ^[[36;1m  echo "Release app verification shard failed or did not complete."^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2028380Z ^[[36;1m  exit 1^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2028842Z ^[[36;1mfi^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2029295Z ^[[36;1mif [[ "success" != "success" ]]; then^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2029949Z ^[[36;1m  echo "Release fixture coverage shard failed or did not complete."^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2030782Z ^[[36;1m  exit 1^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.2031198Z ^[[36;1mfi^[[0m
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3097564Z shell: /usr/bin/bash -e {0}
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3098645Z env:
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3099601Z   DATABASE_URL: ***127.0.0.1:1/murph_test
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3100387Z   HOSTED_DEVICE_ROUTING_INDEX_KEY: 1.01010101010101E+62
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3101453Z   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3102716Z   HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3103794Z   NEXT_PUBLIC_PRIVY_APP_ID: cmiqoinf300t0ld0d19y076mp
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3104862Z   PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3105657Z ##[endgroup]
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3336379Z Release package coverage shard failed or did not complete.
+Release checks (ubuntu)	Check release shards	2026-08-09T21:02:14.3355551Z ##[error]Process completed with exit code 1.
