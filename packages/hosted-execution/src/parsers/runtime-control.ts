@@ -3463,7 +3463,7 @@ export function parseHostedRuntimeGroupToolResponse(
   if (action === "share_contact_card") {
     const result = requireObject(record.result, "Hosted runtime group tool share_contact_card response result");
     const status = requireString(result.status, "Hosted runtime group tool share_contact_card response status");
-    if (status === "sent" || status === "already_shared") {
+    if (status === "sent" || status === "already_shared" || status === "unconfirmed") {
       assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool share_contact_card response result");
       return { action, result: { status } };
     }

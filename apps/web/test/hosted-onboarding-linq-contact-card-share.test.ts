@@ -48,6 +48,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
       && (error as { details?: { idempotencyKeyReuseConflict?: boolean } })
         .details?.idempotencyKeyReuseConflict === true,
     ),
+  isHostedLinqUnconfirmedAcknowledgementFailure: (error: unknown) =>
+    Boolean(
+      error
+      && typeof error === "object"
+      && (error as { details?: { acknowledgementUnconfirmed?: boolean } })
+        .details?.acknowledgementUnconfirmed === true,
+    ),
   sendHostedLinqAttachmentMessage: shareSendMocks.sendHostedLinqAttachmentMessage,
   shareHostedLinqContactCard: shareSendMocks.shareHostedLinqContactCard,
 }));
@@ -646,6 +653,45 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
       reason: "send_failed",
       error: otherFailure,
     });
+  });
+
+  it("reports an unresolved acknowledgement as unconfirmed, and only per request", async () => {
+    const prisma = createContactCardSharePrismaStub();
+    const imageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    shareSendMocks.fetchMurphHostedLinqContactCardVcfPhoto.mockResolvedValue({
+      base64: "aGVsbG8=",
+      type: "JPEG",
+    });
+    const share = (shareKey?: string) =>
+      shareMurphHostedLinqContactCardVcfToChat({
+        chatId: "chat_123",
+        idempotencyKeyPrefix: "personalized-contact-card",
+        imageUrl,
+        memberId: "member_123",
+        prisma: prisma.client as never,
+        ...(shareKey ? { shareKey } : {}),
+      });
+
+    // The send owner reconciled the identical body under this key and still
+    // could not learn whether the provider accepted it.
+    const unconfirmed = Object.assign(new Error("acknowledgement unconfirmed"), {
+      details: { acknowledgementUnconfirmed: true },
+    });
+    shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(unconfirmed);
+    await expect(share("input_first")).resolves.toEqual({ status: "unconfirmed" });
+
+    // A canonical share has no per-request identity to report, so it keeps the
+    // existing failure contract that shipped runners already understand.
+    shareSendMocks.sendHostedLinqAttachmentMessage.mockRejectedValueOnce(unconfirmed);
+    await expect(share()).resolves.toEqual({
+      status: "failed",
+      reason: "send_failed",
+      error: unconfirmed,
+    });
+
+    // Nothing was proven undelivered, so no reservation is freed.
+    expect(prisma.rows[0]?.lastContactCardShareAttemptedAt).not.toBeNull();
   });
 
   it("refuses a personalized card when the current Murph line is stale or ambiguous", async () => {

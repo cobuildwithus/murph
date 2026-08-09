@@ -4784,6 +4784,32 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
+  it("reports an unconfirmed personalized send as unconfirmed, not as a failure", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
+      status: "unconfirmed",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        contactCardShareKey: "input_first",
+        directLinqChatId: "chat_direct_1",
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
+    });
+  });
+
   it("maps a line_unresolved skip to structured unavailability", async () => {
     mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
       status: "skipped",

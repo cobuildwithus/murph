@@ -5,6 +5,7 @@ import {
   getHostedLinqChatHandles,
   isHostedLinqAttachmentSendPrepareFailure,
   isHostedLinqIdempotencyKeyReuseFailure,
+  isHostedLinqUnconfirmedAcknowledgementFailure,
   sendHostedLinqAttachmentMessage,
   shareHostedLinqContactCard,
 } from "./linq-client";
@@ -285,6 +286,10 @@ export type MurphHostedLinqContactCardVcfShareOutcome =
         | "photo_unavailable"
         | "provider_unavailable";
     }
+  // The provider may have accepted this card and the send owner could not
+  // establish which. Only a per-request send can report it, because only that
+  // key identifies the one request the member is waiting on.
+  | { status: "unconfirmed" }
   | { status: "failed"; reason: "send_failed"; error: unknown };
 
 export type MurphHostedLinqNativeContactCardShareOutcome =
@@ -519,6 +524,13 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
     // canonical share's key is time-derived and proves nothing about intent.
     if (input.shareKey && isHostedLinqIdempotencyKeyReuseFailure(error)) {
       return { status: "already_shared" };
+    }
+    // The send owner already reconciled the identical body under this request's
+    // key and still could not learn the provider's answer. Saying "failed"
+    // would contradict a card that may be sitting in the conversation, so this
+    // request ends explicitly unresolved instead.
+    if (input.shareKey && isHostedLinqUnconfirmedAcknowledgementFailure(error)) {
+      return { status: "unconfirmed" };
     }
     if (reservation && isHostedLinqAttachmentSendPrepareFailure(error)) {
       // Nothing reached the chat; free the throttle reservation so a later

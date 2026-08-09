@@ -3601,6 +3601,71 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
+  it("returns an unconfirmed contact-card send to the model instead of a failed tool call", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-contact-card-unconfirmed-"));
+    try {
+      await initializeVault({ vaultRoot });
+      const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+      const groupRequest = vi.fn<GroupToolRequest>(async (hostRequest) => {
+        if (hostRequest.action !== "share_contact_card") {
+          throw new Error(`Unexpected group request: ${hostRequest.action}`);
+        }
+        return {
+          action: "share_contact_card",
+          result: { status: "unconfirmed" },
+        };
+      });
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse({
+          data: [{ b64_json: Buffer.from(jpegBytes).toString("base64") }],
+          usage: { input_tokens: 4, output_tokens: 6, total_tokens: 10 },
+        }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "share_contact_card",
+        avatarPrompt: "A friendly square portrait of Murph",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: { OPENAI_API_KEY: "openai-test-key" },
+        fetchImpl,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_contact_card_unconfirmed",
+            conversationScope: "direct",
+            inboundMailboxItemIds: ["mailbox_contact_card_unconfirmed"],
+            originSessionId: "session_contact_card_unconfirmed",
+            recipientKey: "recipient_contact_card_unconfirmed",
+          }),
+          groupRequest,
+          privateImageUrlPublish: vi.fn<
+            AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+          >(async () => ({
+            expiresAt: "2033-05-18T03:33:20.000Z",
+            url: SIGNED_PRIVATE_JPEG_URL,
+          })),
+        }),
+        nextUsageOrdinal: () => 9,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      // The card may be in the conversation. The model must be able to say so,
+      // which it cannot do from a failed tool call carrying no status.
+      expect(result.rpcResult.success).toBe(true);
+      expect(readGroupToolPayload(result)).toMatchObject({
+        action: "share_contact_card",
+        result: { status: "unconfirmed" },
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("keeps contact-card and group-avatar generated captures in separate retry scopes", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-avatar-scope-"));
     try {

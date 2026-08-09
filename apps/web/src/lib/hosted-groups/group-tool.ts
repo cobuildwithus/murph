@@ -2313,6 +2313,15 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
       result: { status: "already_shared" },
     };
   }
+  // Only the personalized path can reach this: it is the one send whose key
+  // identifies a single member request, so it is the one that can honestly
+  // report that the card may already have arrived.
+  if (outcome.status === "unconfirmed") {
+    return {
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
+    };
+  }
   if (outcome.status !== "sent") {
     return unavailable(outcome.reason);
   }

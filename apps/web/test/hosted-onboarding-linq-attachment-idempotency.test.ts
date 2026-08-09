@@ -1,81 +1,319 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
 
-process.env.LINQ_API_BASE_URL = "https://linq.test";
-process.env.LINQ_API_TOKEN = "linq-test-token";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const linqRuntimeConfig = vi.hoisted(() => ({
+  apiBaseUrl: "http://127.0.0.1:0",
+  apiToken: "linq-test-token",
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedOnboardingLinqConfig: () => linqRuntimeConfig,
+}));
 
 const {
   isHostedLinqIdempotencyKeyReuseFailure,
+  isHostedLinqUnconfirmedAcknowledgementFailure,
   sendHostedLinqAttachmentMessage,
 } = await import("@/src/lib/hosted-onboarding/linq-client");
 
-// Byte-identical to the local Linq stub's same-key/different-payload response
-// (apps/cloudflare/test/helpers/hosted-local-linq-support.ts). If the stub's
-// wording changes, this classification must be revisited rather than silently
-// degrade to "ordinary failure".
+// The provider double below speaks the same wire contract as the repository's
+// production-faithful local Linq support
+// (apps/cloudflare/test/helpers/hosted-local-linq-support.ts): one accepted
+// message per idempotency key, a byte-identical resubmission under that key
+// replays the original message identity, a different body under it conflicts,
+// and the post-accept controls record the acceptance before failing. If that
+// support's contract changes, this one must be revisited rather than silently
+// diverge.
 const PROVIDER_IDEMPOTENCY_CONFLICT_BODY = JSON.stringify({
   error: "Conflicting Linq idempotency-key reuse.",
 });
 
-function jsonResponse(status: number, body: string): Response {
-  return new Response(body, {
-    headers: { "content-type": "application/json" },
-    status,
-  });
+type ProviderControl =
+  | { kind: "post_accept_lost_acknowledgment"; responses: number }
+  | { kind: "post_accept_transport_loss"; responses: number }
+  | { kind: "post_accept_timeout"; responses: number }
+  | { kind: "pre_accept_definitive"; responses: number }
+  | { kind: "pre_accept_unrelated_conflict"; responses: number };
+
+interface AcceptedMessage {
+  body: string;
+  messageId: string;
+  url: string;
 }
 
-describe("sendHostedLinqAttachmentMessage idempotency-key conflicts", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
+interface ProviderDouble {
+  acceptedMessageIds: string[];
+  arm(control: ProviderControl): void;
+  baseUrl: string;
+  close(): Promise<void>;
+  observedSendBodies: string[];
+}
 
-  const sendWithFinalResponse = async (finalResponse: Response) => {
-    // The attachment is re-created on every attempt, so a replay under a
-    // reused key necessarily carries a different body. That is exactly the
-    // situation the provider answers with a key-reuse conflict.
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/attachments")) {
-        return jsonResponse(200, JSON.stringify({
-          attachment_id: `attachment_${fetchImpl.mock.calls.length}`,
-          upload_url: "https://linq.test/upload",
-        }));
-      }
-      if (url === "https://linq.test/upload") {
-        return new Response(null, { status: 200 });
-      }
-      return finalResponse;
-    });
-    vi.stubGlobal("fetch", fetchImpl);
+async function startLinqProviderDouble(): Promise<ProviderDouble> {
+  const acceptedByIdempotencyKey = new Map<string, AcceptedMessage>();
+  const acceptedMessageIds: string[] = [];
+  const observedSendBodies: string[] = [];
+  let armed: ProviderControl | null = null;
+  let nextAttachmentSequence = 0;
+  let nextMessageSequence = 0;
+  let baseUrl = "";
 
-    return await sendHostedLinqAttachmentMessage({
-      bytes: new Uint8Array([1, 2, 3]),
-      chatId: "chat_direct_1",
-      contentType: "text/vcard",
-      fileName: "murph.vcf",
-      idempotencyKey: "personalized-contact-card:chat_direct_1:input_first",
-    }).then(() => null).catch((error: unknown) => error);
+  const consumeArmed = (): ProviderControl | null => {
+    if (!armed) {
+      return null;
+    }
+    const control = armed;
+    armed = control.responses <= 1 ? null : { ...control, responses: control.responses - 1 };
+    return control;
   };
 
-  it("classifies the provider's exact same-key conflict", async () => {
-    const error = await sendWithFinalResponse(
-      jsonResponse(409, PROVIDER_IDEMPOTENCY_CONFLICT_BODY),
-    );
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) {
+      chunks.push(chunk as Buffer);
+    }
+    const body = Buffer.concat(chunks).toString("utf8");
+    const url = request.url ?? "/";
 
-    expect(error).toBeInstanceOf(Error);
-    expect(isHostedLinqIdempotencyKeyReuseFailure(error)).toBe(true);
+    if (request.method === "POST" && url === "/attachments") {
+      const attachmentId = `attachment_${++nextAttachmentSequence}`;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        attachment_id: attachmentId,
+        required_headers: { "content-type": "text/vcard" },
+        upload_url: `${baseUrl}/uploads/${attachmentId}`,
+      }));
+      return;
+    }
+
+    if (request.method === "PUT" && url.startsWith("/uploads/")) {
+      response.writeHead(200);
+      response.end();
+      return;
+    }
+
+    if (request.method === "POST" && /^\/chats\/[^/]+\/messages$/u.test(url)) {
+      observedSendBodies.push(body);
+      const control = consumeArmed();
+      if (control?.kind === "pre_accept_definitive") {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "Synthetic definitive Linq send failure." }));
+        return;
+      }
+      if (control?.kind === "pre_accept_unrelated_conflict") {
+        response.writeHead(409, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "Chat is locked." }));
+        return;
+      }
+
+      const idempotencyKey = readIdempotencyKey(body);
+      const replay = idempotencyKey ? acceptedByIdempotencyKey.get(idempotencyKey) ?? null : null;
+      if (replay && (replay.body !== body || replay.url !== url)) {
+        response.writeHead(409, { "content-type": "application/json" });
+        response.end(PROVIDER_IDEMPOTENCY_CONFLICT_BODY);
+        return;
+      }
+
+      const accepted = replay ?? (() => {
+        const messageId = `linq_msg_${++nextMessageSequence}`;
+        acceptedMessageIds.push(messageId);
+        return { body, messageId, url };
+      })();
+      if (idempotencyKey && !replay) {
+        acceptedByIdempotencyKey.set(idempotencyKey, accepted);
+      }
+
+      // Every control below runs after the message was accepted, so the card is
+      // in the chat no matter what the caller observes.
+      if (control?.kind === "post_accept_lost_acknowledgment") {
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "Synthetic retryable Linq send failure." }));
+        return;
+      }
+      if (control?.kind === "post_accept_transport_loss") {
+        request.socket.destroy();
+        return;
+      }
+      if (control?.kind === "post_accept_timeout") {
+        // Never answered: the caller's own request timeout must fire.
+        return;
+      }
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        chat_id: url.split("/")[2],
+        message: { id: accepted.messageId },
+      }));
+      return;
+    }
+
+    response.writeHead(404);
+    response.end();
   });
 
-  it("leaves an unrelated conflict and other errors unclassified", async () => {
-    const unrelatedConflict = await sendWithFinalResponse(
-      jsonResponse(409, JSON.stringify({ error: "Chat is locked." })),
-    );
-    expect(unrelatedConflict).toBeInstanceOf(Error);
-    expect(isHostedLinqIdempotencyKeyReuseFailure(unrelatedConflict)).toBe(false);
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected a loopback TCP server address.");
+  }
+  baseUrl = `http://127.0.0.1:${address.port}`;
 
-    const serverError = await sendWithFinalResponse(
-      jsonResponse(500, JSON.stringify({ error: "boom" })),
-    );
-    expect(serverError).toBeInstanceOf(Error);
-    expect(isHostedLinqIdempotencyKeyReuseFailure(serverError)).toBe(false);
+  return {
+    acceptedMessageIds,
+    arm(control) {
+      armed = control;
+    },
+    baseUrl,
+    async close() {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    },
+    observedSendBodies,
+  };
+}
+
+function readIdempotencyKey(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { message?: { idempotency_key?: unknown } };
+    const key = parsed?.message?.idempotency_key;
+    return typeof key === "string" && key.trim() ? key.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+const REQUEST_KEY = "personalized-contact-card:chat_direct_1:input_first";
+
+describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
+  let provider: ProviderDouble;
+
+  beforeEach(async () => {
+    provider = await startLinqProviderDouble();
+    linqRuntimeConfig.apiBaseUrl = provider.baseUrl;
+  });
+
+  afterEach(async () => {
+    await provider.close();
+  });
+
+  const send = async (
+    idempotencyKey: string | null = REQUEST_KEY,
+  ): Promise<{ error: unknown; result: unknown }> => {
+    try {
+      return {
+        error: null,
+        result: await sendHostedLinqAttachmentMessage({
+          bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+          chatId: "chat_direct_1",
+          contentType: "text/vcard",
+          fileName: "murph.vcf",
+          idempotencyKey,
+        }),
+      };
+    } catch (error) {
+      return { error, result: null };
+    }
+  };
+
+  it("recovers the accepted message when the acknowledgement is lost", async () => {
+    provider.arm({ kind: "post_accept_lost_acknowledgment", responses: 1 });
+
+    const { error, result } = await send();
+
+    expect(error).toBeNull();
+    expect(result).toEqual({ chatId: "chat_direct_1", messageId: "linq_msg_1" });
+    // Two submissions, one card: the reconciliation carried the identical body
+    // under the same key, so the provider replayed rather than accepted again.
+    expect(provider.observedSendBodies).toHaveLength(2);
+    expect(provider.observedSendBodies[0]).toBe(provider.observedSendBodies[1]);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+  });
+
+  it("recovers the accepted message when the connection is lost after acceptance", async () => {
+    provider.arm({ kind: "post_accept_transport_loss", responses: 1 });
+
+    const { error, result } = await send();
+
+    expect(error).toBeNull();
+    expect(result).toEqual({ chatId: "chat_direct_1", messageId: "linq_msg_1" });
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+  });
+
+  it("recovers the accepted message when the send times out", async () => {
+    provider.arm({ kind: "post_accept_timeout", responses: 1 });
+
+    const { error, result } = await send();
+
+    expect(error).toBeNull();
+    expect(result).toEqual({ chatId: "chat_direct_1", messageId: "linq_msg_1" });
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+  });
+
+  it("reports an unconfirmed acknowledgement when reconciliation cannot resolve it", async () => {
+    provider.arm({ kind: "post_accept_lost_acknowledgment", responses: 2 });
+
+    const { error } = await send();
+
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(true);
+    expect(isHostedLinqIdempotencyKeyReuseFailure(error)).toBe(false);
+    // Still exactly one card in the chat; the caller simply cannot prove it.
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+    expect(provider.observedSendBodies).toHaveLength(2);
+  });
+
+  it("classifies a later request that reuses the key with a new attachment", async () => {
+    const first = await send();
+    expect(first.error).toBeNull();
+
+    // A replay re-creates the attachment, so the body under the reused key
+    // genuinely differs. That is the provider's key-reuse conflict.
+    const replay = await send();
+
+    expect(isHostedLinqIdempotencyKeyReuseFailure(replay.error)).toBe(true);
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(replay.error)).toBe(false);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+  });
+
+  it("leaves a definitive pre-acceptance rejection an ordinary failure", async () => {
+    provider.arm({ kind: "pre_accept_definitive", responses: 1 });
+
+    const { error } = await send();
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
+    expect(isHostedLinqIdempotencyKeyReuseFailure(error)).toBe(false);
+    // A rejected request must not be resubmitted: nothing was accepted.
+    expect(provider.observedSendBodies).toHaveLength(1);
+    expect(provider.acceptedMessageIds).toEqual([]);
+  });
+
+  it("leaves an unrelated conflict an ordinary failure", async () => {
+    provider.arm({ kind: "pre_accept_unrelated_conflict", responses: 1 });
+
+    const { error } = await send();
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isHostedLinqIdempotencyKeyReuseFailure(error)).toBe(false);
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
+    expect(provider.observedSendBodies).toHaveLength(1);
+    expect(provider.acceptedMessageIds).toEqual([]);
+  });
+
+  it("never resubmits an unkeyed send", async () => {
+    provider.arm({ kind: "post_accept_lost_acknowledgment", responses: 1 });
+
+    const { error } = await send(null);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
+    // Without a key a second submission would accept a second message, so the
+    // ambiguous failure is returned as-is.
+    expect(provider.observedSendBodies).toHaveLength(1);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
   });
 });

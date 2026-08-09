@@ -931,7 +931,7 @@ export const MURPH_GROUP_TOOL = {
         minLength: 1,
         maxLength: 4000,
         description:
-          'Optional only for action="share_contact_card" after an explicit request in a personal iMessage conversation. Generates a square Murph contact photo and sends a saveable vCard to that current conversation; omit it to share the canonical group card.',
+          'Optional only for action="share_contact_card" after an explicit request in a personal iMessage conversation. Generates a square Murph contact photo and sends a saveable vCard to that current conversation; omit it to share the canonical group card. status="unconfirmed" means the card may already have arrived: say so, ask the member to look, and only make another one if they say it is not there.',
       },
       avatarSource: {
         type: 'string',

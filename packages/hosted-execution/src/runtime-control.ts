@@ -1679,6 +1679,9 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "sent" }
         | { status: "already_shared" }
+        // Personalized cards only: the provider may have accepted this exact
+        // request and the send owner could not establish which.
+        | { status: "unconfirmed" }
         | { status: "unavailable"; unavailableReason: string };
     }
   | {
