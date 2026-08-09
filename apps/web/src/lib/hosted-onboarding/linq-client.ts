@@ -841,14 +841,26 @@ export async function sendHostedLinqAttachmentMessage(input: {
   // with the original message instead of accepting a second one.
   const sendBody = JSON.stringify({ message } satisfies MessageSendParams);
   const sendPath = `chats/${encodeURIComponent(chatId)}/messages`;
-  const submitSend = async () => await fetchHostedLinqApiOrThrow({
-    body: sendBody,
-    method: "POST",
-    operation: "attachment send",
-    path: sendPath,
-    signal: input.signal,
-    timeoutMessage: "Linq attachment send timed out.",
-  });
+  // fetchLinqApi's timer stops when headers arrive, so an attempt's deadline is
+  // tracked here and the body read below is charged against what is left of it.
+  // Otherwise a stalled body outlives the budget the caller was promised.
+  let attemptDeadlineAt = 0;
+  const submitSend = async () => {
+    attemptDeadlineAt = Date.now() + LINQ_API_DEFAULT_TIMEOUT_MS;
+    return await fetchHostedLinqApiOrThrow({
+      body: sendBody,
+      method: "POST",
+      operation: "attachment send",
+      path: sendPath,
+      signal: input.signal,
+      timeoutMessage: "Linq attachment send timed out.",
+    });
+  };
+  const readRemainingBody = async (response: Response) =>
+    await readHostedLinqBoundedResponseText(
+      response,
+      attemptDeadlineAt - Date.now(),
+    );
 
   let sendResponse: Response;
   try {
@@ -860,7 +872,11 @@ export async function sendHostedLinqAttachmentMessage(input: {
     if (idempotencyKey === null) {
       throw error;
     }
-    return await reconcileHostedLinqAttachmentSend({ cause: error, submitSend });
+    return await reconcileHostedLinqAttachmentSend({
+      cause: error,
+      readRemainingBody,
+      submitSend,
+    });
   }
   if (!sendResponse.ok) {
     // A replay of one accepted request re-creates its attachment, so the body
@@ -868,26 +884,39 @@ export async function sendHostedLinqAttachmentMessage(input: {
     // answers with a key-reuse conflict. Classify only that exact response so
     // a caller with a stable per-request key can read it as "already sent";
     // every other 409 and error stays an ordinary failure.
-    const idempotencyConflict = idempotencyKey !== null
-      && sendResponse.status === 409
-      && await isHostedLinqIdempotencyKeyReuseConflict(sendResponse);
+    const conflict = idempotencyKey !== null && sendResponse.status === 409
+      ? await readHostedLinqIdempotencyKeyReuseConflict(
+        await readRemainingBody(sendResponse),
+      )
+      : "not_conflict";
     const retryable = isRetryableHostedLinqStatus(sendResponse.status);
     const failure = buildHostedLinqRequestFailedError({
       operation: "attachment send",
       retryable,
       status: sendResponse.status,
-      ...(idempotencyConflict ? { idempotencyKeyReuseConflict: true } : {}),
+      ...(conflict === "conflict" ? { idempotencyKeyReuseConflict: true } : {}),
     });
     // A retryable response can arrive after the provider already accepted the
     // message and lost the acknowledgement, so it does not prove the card is
-    // absent. A definitive rejection does, and stays an ordinary failure.
-    if (idempotencyKey !== null && !idempotencyConflict && retryable) {
-      return await reconcileHostedLinqAttachmentSend({ cause: failure, submitSend });
+    // absent. A definitive rejection does, and stays an ordinary failure. An
+    // answer we could not finish reading is not an answer either.
+    if (
+      idempotencyKey !== null
+      && conflict !== "conflict"
+      && (retryable || conflict === "unreadable")
+    ) {
+      return await reconcileHostedLinqAttachmentSend({
+        cause: failure,
+        readRemainingBody,
+        submitSend,
+      });
     }
     throw failure;
   }
 
-  return await readHostedLinqAttachmentSendResult(sendResponse);
+  // The 200 already proves acceptance, so a body we cannot finish reading only
+  // costs the message identity, which no caller of this send depends on.
+  return readHostedLinqAttachmentSendResult(await readRemainingBody(sendResponse));
 }
 
 /**
@@ -903,6 +932,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
  */
 async function reconcileHostedLinqAttachmentSend(input: {
   cause: unknown;
+  readRemainingBody: (response: Response) => Promise<string | null>;
   submitSend: () => Promise<Response>;
 }): Promise<HostedLinqSendResult> {
   let response: Response;
@@ -912,11 +942,15 @@ async function reconcileHostedLinqAttachmentSend(input: {
     throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
   }
   if (response.ok) {
-    return await readHostedLinqAttachmentSendResult(response);
+    return readHostedLinqAttachmentSendResult(
+      await input.readRemainingBody(response),
+    );
   }
   if (
     response.status === 409
-    && await isHostedLinqIdempotencyKeyReuseConflict(response)
+    && await readHostedLinqIdempotencyKeyReuseConflict(
+      await input.readRemainingBody(response),
+    ) === "conflict"
   ) {
     throw buildHostedLinqRequestFailedError({
       idempotencyKeyReuseConflict: true,
@@ -928,14 +962,55 @@ async function reconcileHostedLinqAttachmentSend(input: {
   throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
 }
 
-async function readHostedLinqAttachmentSendResult(
-  response: Response,
-): Promise<HostedLinqSendResult> {
-  const payload = await readHostedLinqOptionalJsonResponse<MessageSendResponse>(response);
+function readHostedLinqAttachmentSendResult(
+  body: string | null,
+): HostedLinqSendResult {
+  let payload: MessageSendResponse | null = null;
+  if (body?.trim()) {
+    try {
+      payload = JSON.parse(body) as MessageSendResponse;
+    } catch {
+      payload = null;
+    }
+  }
   return {
     chatId: normalizeNullableString(payload?.chat_id),
     messageId: normalizeNullableString(payload?.message?.id),
   };
+}
+
+/**
+ * Read a response body within whatever is left of its attempt's budget.
+ * `fetchLinqApi` stops its own timer once headers arrive, so without this a
+ * stalled body would outlive the deadline the caller was told it had. A body
+ * that does not finish in time reads as absent, never as a different answer.
+ */
+async function readHostedLinqBoundedResponseText(
+  response: Response,
+  timeoutMs: number,
+): Promise<string | null> {
+  if (!(timeoutMs > 0)) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      response.text(),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          void response.body?.cancel().catch(() => undefined);
+          resolve(null);
+        }, timeoutMs);
+      }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 export const HOSTED_LINQ_ATTACHMENT_SEND_PHASE_PREPARE = "prepare";
@@ -1113,17 +1188,24 @@ const HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE =
 /**
  * Narrow reader for the provider's exact same-key/different-payload conflict.
  * It rejects bodies above 500 code units and requires the exact JSON shape, so
- * a generic 409 or wrapped phrase cannot be mistaken for a proven duplicate.
+ * a generic 409 or wrapped phrase cannot be mistaken for a proven duplicate. A
+ * body that could not be read is its own outcome rather than "not a conflict",
+ * so a keyed caller reads an unread answer as uncertainty, not as failure.
  */
-async function isHostedLinqIdempotencyKeyReuseConflict(
-  response: Response,
-): Promise<boolean> {
-  let body: string;
-  try {
-    body = await response.clone().text();
-  } catch {
-    return false;
+async function readHostedLinqIdempotencyKeyReuseConflict(
+  body: string | null,
+): Promise<"conflict" | "not_conflict" | "unreadable"> {
+  if (body === null) {
+    return "unreadable";
   }
+  return await readHostedLinqIdempotencyKeyReuseConflictBody(body)
+    ? "conflict"
+    : "not_conflict";
+}
+
+async function readHostedLinqIdempotencyKeyReuseConflictBody(
+  body: string,
+): Promise<boolean> {
   if (body.length > 500) {
     return false;
   }

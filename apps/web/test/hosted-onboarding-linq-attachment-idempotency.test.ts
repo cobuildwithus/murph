@@ -35,7 +35,9 @@ type ProviderControl =
   | { kind: "post_accept_transport_loss"; responses: number }
   | { kind: "post_accept_timeout"; responses: number }
   | { kind: "pre_accept_definitive"; responses: number }
-  | { kind: "pre_accept_unrelated_conflict"; responses: number };
+  | { kind: "pre_accept_unrelated_conflict"; responses: number }
+  | { kind: "post_accept_stalled_body"; responses: number }
+  | { kind: "conflict_stalled_body"; responses: number };
 
 interface AcceptedMessage {
   body: string;
@@ -102,6 +104,12 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
         response.end(JSON.stringify({ error: "Synthetic definitive Linq send failure." }));
         return;
       }
+      if (control?.kind === "conflict_stalled_body") {
+        // Headers say 409, then the body never arrives.
+        response.writeHead(409, { "content-type": "application/json" });
+        response.write("{");
+        return;
+      }
       if (control?.kind === "pre_accept_unrelated_conflict") {
         response.writeHead(409, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: "Proxy wrapped: Conflicting Linq idempotency-key reuse." }));
@@ -134,6 +142,12 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
       }
       if (control?.kind === "post_accept_transport_loss") {
         request.socket.destroy();
+        return;
+      }
+      if (control?.kind === "post_accept_stalled_body") {
+        // Accepted, headers returned inside the budget, body never finishes.
+        response.writeHead(200, { "content-type": "application/json" });
+        response.write("{");
         return;
       }
       if (control?.kind === "post_accept_timeout") {
@@ -303,6 +317,34 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
     expect(provider.observedSendBodies).toHaveLength(1);
     expect(provider.acceptedMessageIds).toEqual([]);
+  });
+
+  it("still reports a card sent when its accepted response body stalls", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 1 });
+
+    const { error, result } = await send();
+
+    // The 200 already proved acceptance; only the message identity is lost, and
+    // no caller of this send depends on it. Crucially the read is bounded, so
+    // the attempt cannot outlive the budget its caller was promised.
+    expect(error).toBeNull();
+    expect(result).toEqual({ chatId: null, messageId: null });
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+    expect(provider.observedSendBodies).toHaveLength(1);
+  });
+
+  it("treats a conflict whose body never arrives as unresolved, not as failed", async () => {
+    provider.arm({ kind: "conflict_stalled_body", responses: 1 });
+
+    const { error, result } = await send();
+
+    // An answer we could not finish reading is not an answer. The reconcile
+    // resubmits the identical body under the same key, which the provider
+    // accepts once, so the member gets exactly one card and a truthful result.
+    expect(error).toBeNull();
+    expect(result).toEqual({ chatId: "chat_direct_1", messageId: "linq_msg_1" });
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+    expect(provider.observedSendBodies).toHaveLength(2);
   });
 
   it("treats a prepare-deadline expiry as provably unsent", async () => {

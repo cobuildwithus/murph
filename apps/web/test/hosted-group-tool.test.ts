@@ -153,6 +153,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
+  HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS: 8_000,
   releaseHostedLinqContactCardShareAttempt: mocks.releaseHostedLinqContactCardShareAttempt,
   reserveHostedLinqContactCardShareAttempt: mocks.reserveHostedLinqContactCardShareAttempt,
   shareMurphHostedLinqContactCardVcfToChat: mocks.shareMurphHostedLinqContactCardVcfToChat,
@@ -4814,6 +4815,41 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: { status: "already_shared" },
     });
   });
+
+  it("charges slow direct authorization against the pre-send deadline", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    // Authorization consumes no abort signal, so a slow one used to leave the
+    // whole send window intact and let this invocation run on after the caller
+    // had already stopped waiting. It is now charged against the deadline.
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockImplementation(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 8_050));
+        return { targetOverride: null, threadIsDirect: true };
+      },
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        contactCardShareKey: "input_first",
+        directLinqChatId: "chat_direct_1",
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "contact_card_presend_deadline_exceeded",
+      },
+    });
+
+    // Refused before any provider work, so this is an ordinary unavailable
+    // rather than uncertainty, and no card can arrive later.
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  }, 20_000);
 
   it("reports an unconfirmed personalized send as unconfirmed, not as a failure", async () => {
     const contactCardImageUrl =
