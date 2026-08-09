@@ -7,6 +7,17 @@ import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { listMetricPointsBatch } from '@murphai/query'
 import { expect, test } from 'vitest'
 
+function isCanonicalMeasurementValue(
+  value: unknown,
+): value is Record<'metric' | 'unit' | 'value', unknown> {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && 'metric' in value
+    && 'unit' in value
+    && 'value' in value
+}
+
 test('Junction scale and blood-pressure readings survive as canonical vault metrics', async () => {
   const parentRoot = await mkdtemp(
     path.join(tmpdir(), 'junction-scale-blood-pressure-'),
@@ -64,12 +75,14 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
       record.kind === 'measurement'
       && Array.isArray(record.measurements)
       && record.measurements.some((measurement) =>
-        measurement.metric === 'systolic-blood-pressure'
+        isCanonicalMeasurementValue(measurement)
+        && measurement.metric === 'systolic-blood-pressure'
         && measurement.value === 121
         && measurement.unit === 'mmHg'
       )
       && record.measurements.some((measurement) =>
-        measurement.metric === 'diastolic-blood-pressure'
+        isCanonicalMeasurementValue(measurement)
+        && measurement.metric === 'diastolic-blood-pressure'
         && measurement.value === 79
         && measurement.unit === 'mmHg'
       )
