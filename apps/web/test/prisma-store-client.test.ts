@@ -91,6 +91,8 @@ vi.mock("pg", () => ({
 }));
 
 const ORIGINAL_ENV = { ...process.env };
+const PGBOUNCER_MAX_CLIENT_CONN_MESSAGE =
+  "no more connections allowed (max_client_conn)";
 
 function resetPrismaGlobal(): void {
   const globalState = globalThis as typeof globalThis & {
@@ -385,6 +387,21 @@ describe("prisma module", () => {
       message: "Connection terminated due to connection timeout; private-password",
       nested: true,
     },
+    {
+      category: "connection_limit",
+      message: "remaining connection slots are reserved for roles with the SUPERUSER attribute; private-password",
+      nested: false,
+    },
+    {
+      category: "connection_limit",
+      message: "too many connections for role \"private-user\"; private-password",
+      nested: true,
+    },
+    {
+      category: "connection_limit",
+      message: "sorry, too many clients already; private-password",
+      nested: false,
+    },
   ])("classifies $category driver messages without logging them", async ({
     category,
     message,
@@ -422,6 +439,140 @@ describe("prisma module", () => {
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain("private-password");
     expect(JSON.stringify(warn.mock.calls)).not.toContain(message);
+  });
+
+  it.each([
+    { nested: false },
+    { nested: true },
+  ])("classifies SQLSTATE 53300 codes without logging them (nested: $nested)", async ({
+    nested,
+  }) => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const extension = mocks.extensions[0];
+    if (!extension) {
+      throw new Error("Expected the Prisma query extension to be captured.");
+    }
+    // The message avoids every fallback phrasing so only the code classifies.
+    const driverFailure = Object.assign(
+      new Error("connection rejected; private-password"),
+      { code: "53300" },
+    );
+    const operationFailure = nested
+      ? Object.assign(new Error("adapter failure"), { cause: driverFailure })
+      : driverFailure;
+
+    await expect(extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query: async () => Promise.reject(operationFailure),
+    })).rejects.toBe(operationFailure);
+
+    expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", {
+      category: "connection_limit",
+      idleConnections: 0,
+      totalConnections: 0,
+      waitingRequests: 0,
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("private-password");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("53300");
+  });
+
+  it.each([
+    {
+      code: "08P01",
+      expectedCategory: "connection_limit",
+      message: PGBOUNCER_MAX_CLIENT_CONN_MESSAGE,
+      nested: false,
+      scenario: "top-level DriverAdapterError",
+    },
+    {
+      code: "08P01",
+      expectedCategory: "connection_limit",
+      message: PGBOUNCER_MAX_CLIENT_CONN_MESSAGE,
+      nested: true,
+      scenario: "nested DriverAdapterError",
+    },
+    {
+      code: "08P01",
+      expectedCategory: null,
+      message: "invalid frontend message type; private-password",
+      nested: false,
+      scenario: "unrelated 08P01 protocol violation",
+    },
+    {
+      code: "08P01",
+      expectedCategory: null,
+      message: `${PGBOUNCER_MAX_CLIENT_CONN_MESSAGE}; private-password`,
+      nested: false,
+      scenario: "same SQLSTATE with a non-exact message",
+    },
+    {
+      code: "XX000",
+      expectedCategory: null,
+      message: PGBOUNCER_MAX_CLIENT_CONN_MESSAGE,
+      nested: false,
+      scenario: "matching message with a different SQLSTATE",
+    },
+  ])("handles the PgBouncer max-client classifier for $scenario", async ({
+    code,
+    expectedCategory,
+    message,
+    nested,
+  }) => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const extension = mocks.extensions[0];
+    if (!extension) {
+      throw new Error("Expected the Prisma query extension to be captured.");
+    }
+    const driverFailure = Object.assign(new Error(message), {
+      cause: {
+        detail: "private-password",
+        kind: "postgres",
+        originalCode: code,
+        originalMessage: message,
+      },
+      name: "DriverAdapterError",
+    });
+    const operationFailure = nested
+      ? Object.assign(new Error("adapter failure"), { cause: driverFailure })
+      : driverFailure;
+
+    await expect(extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query: async () => Promise.reject(operationFailure),
+    })).rejects.toBe(operationFailure);
+
+    if (expectedCategory === null) {
+      expect(warn).not.toHaveBeenCalled();
+    } else {
+      expect(warn).toHaveBeenCalledWith("Hosted web database pool failure.", {
+        category: expectedCategory,
+        idleConnections: 0,
+        totalConnections: 0,
+        waitingRequests: 0,
+      });
+    }
+    const serializedLogs = JSON.stringify(warn.mock.calls);
+    expect(serializedLogs).not.toContain(message);
+    expect(serializedLogs).not.toContain(code);
+    expect(serializedLogs).not.toContain("private-password");
   });
 
   it("classifies recognized operation failures without logging unknown errors", async () => {
