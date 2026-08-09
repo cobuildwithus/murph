@@ -1,0 +1,37 @@
+name: PR 1381 patched workspace export 2026-08-09
+
+on:
+  push:
+    branches:
+      - agent/pr1381-final-audit-verify-20260809
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebuild patched workspace
+        run: |
+          cp .github/pr1381-audit-fixes.patch.gz.b64 /tmp/pr1381-audit-fixes.patch.gz.b64
+          git config user.name "PR 1381 final audit"
+          git config user.email "pr1381-audit@users.noreply.github.com"
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/agent/codex-exact-app-server-protocol:refs/remotes/origin/agent/codex-exact-app-server-protocol
+          git checkout --detach refs/remotes/origin/agent/codex-exact-app-server-protocol
+          git merge --no-commit --no-ff e0a40645663e4479e3a58dcbe21f790d3c737c87
+          base64 --decode /tmp/pr1381-audit-fixes.patch.gz.b64 | gunzip > /tmp/pr1381-audit-fixes.patch
+          git apply /tmp/pr1381-audit-fixes.patch
+          git diff --check
+          tar --exclude=.git --exclude=node_modules -czf /tmp/murph-pr1381-patched-workspace.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murph-pr1381-patched-workspace
+          path: /tmp/murph-pr1381-patched-workspace.tgz
+          if-no-files-found: error
+          retention-days: 1
