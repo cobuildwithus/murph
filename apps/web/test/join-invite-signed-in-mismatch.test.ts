@@ -69,6 +69,24 @@ test("JoinInvitePageView makes a signed-in account mismatch an exclusive recover
   expect(mocks.statusRefreshRendered).toBe(false);
 });
 
+test("JoinInvitePageView keeps terminal invite states ahead of account recovery", () => {
+  const model = createMismatchModel();
+  model.status = {
+    ...model.status,
+    stage: "expired",
+  };
+
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, { model }),
+  );
+
+  assert.doesNotMatch(markup, /You’re already signed in/);
+  assert.match(markup, /data-normal-invite-stage/);
+  assert.match(markup, /data-status-refresh/);
+  expect(mocks.stageRendered).toBe(true);
+  expect(mocks.statusRefreshRendered).toBe(true);
+});
+
 function createMismatchModel(): JoinInvitePageModel {
   return {
     awaitingInviteSessionResolution: false,

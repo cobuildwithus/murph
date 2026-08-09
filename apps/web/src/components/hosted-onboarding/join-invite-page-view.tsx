@@ -20,7 +20,8 @@ import {
 } from "./join-invite-stage-server";
 
 export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
-  const signedInWithDifferentAccount = model.status.session.authenticated
+  const signedInWithDifferentAccount = model.status.stage === "verify"
+    && model.status.session.authenticated
     && !model.status.session.matchesInvite;
 
   if (signedInWithDifferentAccount) {

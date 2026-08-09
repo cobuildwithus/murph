@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { buttonVariants } from "@/src/components/ui/button";
 import { PageHeader } from "@/src/components/ui/page-header";
+import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 
 import { JoinInviteEyebrow } from "./join-invite-eyebrow";
 import { JoinInviteCenteredShell } from "./join-invite-shell";
@@ -23,7 +24,7 @@ export function JoinInviteSignedInMismatchView({
         />
 
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-          <Link className={buttonVariants({ size: "lg" })} href="/home">
+          <Link className={buttonVariants({ size: "lg" })} href={HOSTED_APP_HOME_PATH}>
             Go to Murph home
           </Link>
           {signOutAction}
