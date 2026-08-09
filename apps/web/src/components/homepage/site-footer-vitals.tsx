@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import { formatMessageVolume } from "@/src/lib/message-volume";
 import {
   resolveStatusPageAvailability,
   STATUS_PAGE_SUMMARY_ENDPOINT,
@@ -10,7 +9,7 @@ import {
   type StatusPageAvailability,
 } from "@/src/lib/status-page";
 
-import { useMessageVolumeTotal } from "./message-volume-line";
+import { MessageVolumeCount } from "./message-volume-line";
 
 const AVAILABILITY_PRESENTATION: Record<
   StatusPageAvailability,
@@ -23,7 +22,7 @@ const AVAILABILITY_PRESENTATION: Record<
   },
   no_reported_issues: {
     dotClassName: "bg-[#2c7a3f]",
-    label: "No reported issues",
+    label: "Murph is online",
     textClassName: "text-[#2c7a3f]",
   },
   issues: {
@@ -57,7 +56,6 @@ function useStatusPageAvailability(): StatusPageAvailability {
 }
 
 export function SiteFooterVitals() {
-  const total = useMessageVolumeTotal();
   const availability = useStatusPageAvailability();
   const presentation = AVAILABILITY_PRESENTATION[availability];
 
@@ -65,7 +63,7 @@ export function SiteFooterVitals() {
     <div className="flex flex-col items-start gap-5">
       <div>
         <p className="font-serif text-[2rem] font-semibold leading-none tracking-[-0.02em] text-[#2d3436]">
-          {formatMessageVolume(total)}
+          <MessageVolumeCount />
         </p>
         <p className="mt-2 text-[0.875rem] text-[#736a58]">
           messages and counting

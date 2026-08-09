@@ -1,4 +1,5 @@
 import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { SiteFooterVitals } from "@/src/components/homepage/site-footer-vitals";
@@ -41,7 +42,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("shows No reported issues when the public summary lists nothing", async () => {
+it("renders counter and status fallbacks without starting client loads during first paint", () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const markup = renderToStaticMarkup(createElement(SiteFooterVitals));
+
+  expect(markup).toContain("5,000+");
+  expect(markup).toContain("Status");
+  expect(markup).not.toContain("Murph is online");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("shows Murph is online when the public summary lists nothing", async () => {
   const fetchMock = stubFetch(() =>
     Promise.resolve(
       Response.json({
@@ -50,7 +63,7 @@ it("shows No reported issues when the public summary lists nothing", async () =>
     ),
   );
   const { cleanup, container } = await renderVitals();
-  expect(container.textContent).toContain("No reported issues");
+  expect(container.textContent).toContain("Murph is online");
   expect(container.textContent).toContain("12,300+");
   const urls = requestedUrls(fetchMock);
   expect(urls.filter((url) => url === MESSAGE_VOLUME_ENDPOINT)).toHaveLength(1);
@@ -80,7 +93,7 @@ it("falls back to the neutral Status link on a malformed payload", async () => {
   stubFetch(() => Promise.resolve(Response.json({ summary: {} })));
   const { cleanup, container } = await renderVitals();
   expect(container.textContent).toContain("Status");
-  expect(container.textContent).not.toContain("No reported issues");
+  expect(container.textContent).not.toContain("Murph is online");
   expect(container.textContent).not.toContain("having issues");
   await cleanup();
 });
@@ -89,7 +102,7 @@ it("falls back to the neutral Status link when the fetch fails", async () => {
   stubFetch(() => Promise.reject(new Error("network down")));
   const { cleanup, container } = await renderVitals();
   expect(container.textContent).toContain("Status");
-  expect(container.textContent).not.toContain("No reported issues");
+  expect(container.textContent).not.toContain("Murph is online");
   expect(container.textContent).not.toContain("having issues");
   await cleanup();
 });

@@ -31,8 +31,16 @@ export function useMessageVolumeTotal(): number {
   return total;
 }
 
-export function MessageVolumeLine() {
+export function MessageVolumeCount() {
   const total = useMessageVolumeTotal();
 
-  return <>{formatMessageVolume(total)} messages and counting</>;
+  return <>{formatMessageVolume(total)}</>;
+}
+
+export function MessageVolumeLine() {
+  return (
+    <>
+      <MessageVolumeCount /> messages and counting
+    </>
+  );
 }
