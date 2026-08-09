@@ -23,6 +23,12 @@ a share action. Gate-derived availability is program-level, not a promise that
 an individual member has enough rolling capacity for the next reward. Public
 signup-link copy therefore states that a completed signup can earn credit only
 after the later settlement eligibility and rolling-limit checks pass.
+On the compact homepage referral section, each enabled path leads with a
+typical-use estimate (about 10 days for the $2 rewards and about 14 days for the
+$3.50 reward) and keeps the exact dollar-denominated cost-weighted credit beside
+it. These day labels are presentation estimates, not accounting units; the
+homepage says that actual capacity varies, while `/refer` retains the full
+qualification and credit detail.
 
 The stable referral link remains available to an eligible signed-in member when
 either reward gate is disabled, but a disabled signup reward is not marketed or
