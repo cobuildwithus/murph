@@ -18,26 +18,29 @@ import {
   type HostedPublicReferralRewardId,
 } from "@/src/lib/hosted-growth/referral-program";
 
-const TRUST_POINTS = [
-  {
-    audience: "signup",
-    description:
-      "Your stable link contains no phone number, email address, health data, or recipient identity. It attributes the introduction to you, nothing more.",
-    title: "The link is only a code.",
-  },
-  {
-    audience: "all",
-    description:
-      "When a referral qualifies you get a short confirmation, never anyone’s identity or anything they told Murph.",
-    title: "Rewards never name anyone.",
-  },
-  {
-    audience: "all",
-    description:
-      "The person you invite gets their own private relationship with Murph from the first message. Their conversations are never visible to you.",
-    title: "Their Murph starts private.",
-  },
-] as const;
+const LINK_PRIVACY_TRUST_POINT = {
+  description:
+    "Your stable link contains no phone number, email address, health data, or recipient identity. It attributes the introduction to you, nothing more.",
+  title: "The link is only a code.",
+} as const;
+
+const REWARD_PRIVACY_TRUST_POINT = {
+  description:
+    "When a referral qualifies you get a short confirmation, never anyone’s identity or anything they told Murph.",
+  title: "Rewards never name anyone.",
+} as const;
+
+const SIGNUP_PRIVACY_TRUST_POINT = {
+  description:
+    "The person you invite gets their own private relationship with Murph from the first message. Their private conversations and health data are never visible to you.",
+  title: "Their Murph starts private.",
+} as const;
+
+const GROUP_PRIVACY_TRUST_POINT = {
+  description:
+    "Private chats and health data stay private. Messages someone chooses to post in a shared group remain visible to that group.",
+  title: "Private stays private.",
+} as const;
 
 const REWARD_ICONS: Record<HostedPublicReferralRewardId, typeof Link2> = {
   "active-group": MessageCircleMore,
@@ -154,9 +157,13 @@ export function ReferralPageContent({
   const groupAvailable = rewards.some(({ id }) => id !== "signup-link");
   const howItWorks = buildHowItWorks({ groupAvailable, signupAvailable });
   const faqs = buildFaqs({ groupAvailable, rewards, signupAvailable });
-  const trustPoints = signupAvailable
-    ? TRUST_POINTS
-    : TRUST_POINTS.filter(({ audience }) => audience === "all");
+  const trustPoints = [
+    ...(signupAvailable ? [LINK_PRIVACY_TRUST_POINT] : []),
+    REWARD_PRIVACY_TRUST_POINT,
+    groupAvailable
+      ? GROUP_PRIVACY_TRUST_POINT
+      : SIGNUP_PRIVACY_TRUST_POINT,
+  ];
   const heroDescription = signupAvailable && groupAvailable
     ? "Share your personal link or start a qualifying group mission. When a new member finishes setup or a fresh group gets genuinely active, Murph adds the usage reward automatically."
     : signupAvailable
@@ -476,9 +483,9 @@ function ReferralUnavailableContent() {
             </h1>
             <p className="mt-6 max-w-[58ch] text-pretty text-[1rem] leading-[1.75] text-[#f5f0e8]/75 sm:text-[1.0625rem]">
               There are no referral rewards available right now. If you’re
-              already a member, your stable link remains in Settings, but
-              sharing it while rewards are paused does not earn usage. Check
-              back here for current options.
+              already a member, your stable link remains in Settings. Rewards
+              are paused, so no usage reward is currently promised. Check back
+              here for current options.
             </p>
             <Link
               className="mt-8 inline-flex min-h-12 items-center justify-center rounded-xl bg-[#f5f0e8] px-5 py-3.5 text-[0.9375rem] font-semibold text-[#2d3436] transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]"
@@ -515,6 +522,9 @@ function ReferralHeroArtifact({
     : `Your group mission is complete. ${formatApproximateReferralUsageDays(
       reward.approximateMessageCount,
     )} is already added to the Murph it was accepted for.`;
+  const privacyMessage = reward.id === "signup-link"
+    ? "No claim needed. Who joined and what they share privately with Murph stays private."
+    : "No claim needed. Private chats and health data stay private. Shared-group messages remain visible to that group.";
 
   return (
     <div aria-hidden="true" className="relative mx-auto w-full max-w-[470px]">
@@ -542,7 +552,7 @@ function ReferralHeroArtifact({
         </div>
 
         <div className="mt-2.5 w-fit max-w-[88%] rounded-2xl rounded-tl-[6px] bg-white px-4 py-3.5 text-[0.9375rem] leading-[1.55] text-[#2d3436] ring-1 ring-[#c4a882]/15">
-          No claim needed. Who joined and what they share stays private.
+          {privacyMessage}
         </div>
       </div>
     </div>

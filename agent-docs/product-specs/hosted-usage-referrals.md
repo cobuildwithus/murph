@@ -22,11 +22,14 @@ enabled, and `/refer` lists only the enabled paths. When both gates are off,
 a share action.
 
 The stable referral link remains available to an eligible signed-in member when
-either reward gate is disabled, but a disabled signup reward is not marketed as
-an earning path. The paths share one rolling cap at their first
-durable accounting commitment: conversational missions reserve capacity when
-armed, while an attributed activation claims capacity only when recovery
-atomically creates its receipt and grant under the same referrer lock.
+either reward gate is disabled, but a disabled signup reward is not marketed or
+currently promised as an earning path. If the gate is re-enabled, bounded
+recovery may still settle an attributed activation from the preceding 30 days
+under the ordinary eligibility and capacity checks. The paths share one rolling
+cap at their first durable accounting commitment: conversational missions
+reserve capacity when armed, while an attributed activation claims capacity
+only when recovery atomically creates its receipt and grant under the same
+referrer lock.
 
 ## Product behavior
 

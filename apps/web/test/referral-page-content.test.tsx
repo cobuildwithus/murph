@@ -61,6 +61,9 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /at least 10 minutes/);
   assert.match(markup, /Your referral never exposes their health\./);
   assert.match(markup, /contains no phone number, email address, health data, or recipient identity/);
+  assert.match(markup, /Private chats and health data stay private/);
+  assert.match(markup, /Messages someone chooses to post in a shared group remain visible to that group/);
+  assert.doesNotMatch(markup, /Their conversations are never visible to you/);
   assert.match(markup, /Can I see who used my link\?/);
   assert.match(markup, /does not reveal who it was/);
   assert.match(markup, /Rewards are usage, not cash\./);
@@ -83,6 +86,9 @@ test("ReferralPageContent advertises only signup rewards when group missions are
 
   assert.match(markup, /Share your personal link\./);
   assert.match(markup, /Invite someone to Murph/);
+  assert.match(markup, /Their private conversations and health data are never visible to you/);
+  assert.match(markup, /what they share privately with Murph stays private/);
+  assert.doesNotMatch(markup, /Shared-group messages remain visible/);
   assert.doesNotMatch(markup, /Start an active group/);
   assert.doesNotMatch(markup, /Bring someone new to Murph/);
   assert.equal((markup.match(/Referral action/g) ?? []).length, 2);
@@ -104,6 +110,10 @@ test("ReferralPageContent advertises only group missions when signup rewards are
   assert.doesNotMatch(markup, /Referral action/);
   assert.doesNotMatch(markup, /Invite someone to Murph/);
   assert.doesNotMatch(markup, /The link is only a code\./);
+  assert.match(markup, /Private chats and health data stay private/);
+  assert.match(markup, /Messages someone chooses to post in a shared group remain visible to that group/);
+  assert.match(markup, /Shared-group messages remain visible to that group/);
+  assert.doesNotMatch(markup, /Their conversations are never visible to you/);
 });
 
 test("ReferralPageContent shows one unavailability state when every reward path is disabled", () => {
@@ -116,7 +126,8 @@ test("ReferralPageContent shows one unavailability state when every reward path 
   );
 
   assert.match(markup, /Referral rewards are temporarily unavailable\./);
-  assert.match(markup, /sharing it while rewards are paused does not earn usage/);
+  assert.match(markup, /no usage reward is currently promised/);
+  assert.doesNotMatch(markup, /does not earn usage/);
   assert.doesNotMatch(markup, /Referral action/);
   assert.doesNotMatch(markup, /Ways to earn right now\./);
   assert.doesNotMatch(markup, /days’ worth of usage/);
