@@ -886,9 +886,10 @@ Last verified: 2026-08-09
 - Cloudflare may exact-replay one Assistant Ask control request within the
   original request deadline after a replay-safe transport ambiguity or HTTP
   `5xx`. This applies only to group `ask`, `ask_member`, `ask_current_sender`,
-  and the dedicated `prepare` / `complete` control requests, whose stable
-  identities make identical replay idempotent. Caller cancellation, exhausted
-  deadlines, authority failures, and other `4xx` responses do not replay.
+  `message_current_sender`, and the dedicated `prepare` / `complete` control
+  requests, whose stable identities make identical replay idempotent. Caller
+  cancellation, exhausted deadlines, authority failures, and other `4xx`
+  responses do not replay.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct
@@ -904,13 +905,19 @@ Last verified: 2026-08-09
   runtime and preview buckets to be ENAM Standard. Runtime code has no fallback
   bucket, migration phase, or storage-specific admission gate; ordinary retry
   and mailbox durability remain the failure boundary.
-- One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
-  deterministic request identity, ten-minute expiry, isolated reviewed
-  personal read, completion append, and exact-origin group delivery. Exact
-  replay reopens and revalidates the stored group input; changed identity,
-  question, permission, target, route, or expiry becomes unavailable rather
-  than creating replacement work. It adds no scheduler, callback wait, status
-  row, grant row, retry owner, or delivery ledger.
+- One-time current-sender Assistant Ask has two target-bound completion adapters
+  over the same mailbox lifecycle, deterministic request identity, ten-minute
+  expiry, isolated reviewed personal read, and completion identity.
+  `ask_current_sender` retains exact-origin group delivery.
+  `message_current_sender` creates one deterministic
+  `assistant.notification.requested` for the same personal member: queue-only,
+  exact-text, idempotent, same source channel, current `direct-member` route
+  only, and no external group-route authority. The personal runtime's existing
+  notification consumer creates the delivery intent. Exact replay reopens and
+  revalidates the stored group input; changed identity, question, permission,
+  target, route, or expiry becomes unavailable, and route drift cannot redirect
+  existing work. Neither path adds a scheduler, callback wait, status or grant
+  row, retry owner, delivery ledger, or second generation.
 - The same dirty-runtime prefix admits only two server-identified,
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and

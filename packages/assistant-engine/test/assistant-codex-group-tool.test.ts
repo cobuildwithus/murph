@@ -250,7 +250,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
       .toContain("result is incomplete");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("read_shared partial is incomplete");
+      .toContain('read_shared status="partial" is incomplete');
 
     const scheduledGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,
