@@ -24,6 +24,7 @@ import {
 import {
   addUtcDays,
   buildHostedGrowthMessageSeries,
+  buildHostedGrowthMonthlyRevenueSeries,
   buildHostedGrowthTrialStartAttribution,
   buildTrialCohortRows,
   calculateHostedGrowthCurrentMetrics,
@@ -78,6 +79,9 @@ const mocks = vi.hoisted(() => ({
   },
   hostedMemberBillingRef: {
     count: vi.fn(),
+    findMany: vi.fn(),
+  },
+  hostedUsageCreditPurchase: {
     findMany: vi.fn(),
   },
   requireActiveHostedAppSession: vi.fn(),
@@ -135,6 +139,7 @@ const prisma = {
   hostedMemberRouting: mocks.hostedMemberRouting,
   hostedMember: mocks.hostedMember,
   hostedMemberBillingRef: mocks.hostedMemberBillingRef,
+  hostedUsageCreditPurchase: mocks.hostedUsageCreditPurchase,
 };
 
 const zeroStatusCounts = {
@@ -175,6 +180,8 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValue({
       trackedFulfilledUsageTopUps: 0,
     });
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValue([]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValue([]);
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValue({
       _count: {
         inboundMessagesPriorDay: 0,
@@ -1877,6 +1884,379 @@ describe("hosted ops growth metrics", () => {
     expect(selected?.mrrUsdCents).toBe(1_000);
   });
 
+  it("splits monthly subscriptions from the month's latest snapshot and buckets purchases by paid month", () => {
+    const series = buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: 6,
+      purchases: [
+        {
+          cashAmountMinor: 1_500,
+          isGroupSponsorship: true,
+          paidAt: new Date("2026-07-31T23:59:59.999Z"),
+        },
+        {
+          cashAmountMinor: 7_500,
+          isGroupSponsorship: false,
+          paidAt: new Date("2026-07-04T10:00:00.000Z"),
+        },
+        {
+          cashAmountMinor: 2_000,
+          isGroupSponsorship: true,
+          paidAt: new Date("2026-08-01T00:00:00.000Z"),
+        },
+        {
+          cashAmountMinor: 3_000,
+          isGroupSponsorship: false,
+          paidAt: new Date("2026-08-05T15:00:00.000Z"),
+        },
+      ],
+      snapshots: [
+        {
+          familyMrrUsdCents: null,
+          individualMrrUsdCents: null,
+          mrrUsdCents: 17_100,
+          snapshotDate: new Date("2026-07-31T00:00:00.000Z"),
+        },
+        {
+          familyMrrUsdCents: 6_100,
+          individualMrrUsdCents: 14_400,
+          mrrUsdCents: 20_500,
+          snapshotDate: new Date("2026-08-07T00:00:00.000Z"),
+        },
+        {
+          familyMrrUsdCents: 5_000,
+          individualMrrUsdCents: 13_000,
+          mrrUsdCents: 18_000,
+          snapshotDate: new Date("2026-08-03T00:00:00.000Z"),
+        },
+      ],
+      windowEnd: new Date("2026-08-07T12:00:00.000Z"),
+    });
+
+    expect(series).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 1_500,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-07",
+        monthToDate: false,
+        subscriptionsUnsplitUsdCents: 17_100,
+        totalUsdCents: 26_100,
+        usageTopUpsUsdCents: 7_500,
+      },
+      {
+        familySubscriptionsUsdCents: 6_100,
+        groupSponsorshipUsdCents: 2_000,
+        individualSubscriptionsUsdCents: 14_400,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: 25_500,
+        usageTopUpsUsdCents: 3_000,
+      },
+    ]);
+  });
+
+  it("falls back to the unsplit subscription value when a recorded split does not sum to the MRR total", () => {
+    const series = buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: 1,
+      purchases: [],
+      snapshots: [
+        {
+          familyMrrUsdCents: 6_100,
+          individualMrrUsdCents: 14_400,
+          mrrUsdCents: 21_700,
+          snapshotDate: new Date("2026-08-07T00:00:00.000Z"),
+        },
+      ],
+      windowEnd: new Date("2026-08-07T12:00:00.000Z"),
+    });
+
+    expect(series).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: 21_700,
+        totalUsdCents: 21_700,
+        usageTopUpsUsdCents: 0,
+      },
+    ]);
+  });
+
+  it("withholds the total for months without a subscription snapshot", () => {
+    const series = buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: 3,
+      purchases: [
+        {
+          cashAmountMinor: 1_000,
+          isGroupSponsorship: false,
+          paidAt: new Date("2026-06-10T00:00:00.000Z"),
+        },
+      ],
+      snapshots: [],
+      windowEnd: new Date("2026-08-07T12:00:00.000Z"),
+    });
+
+    expect(series).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-06",
+        monthToDate: false,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: null,
+        usageTopUpsUsdCents: 1_000,
+      },
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-07",
+        monthToDate: false,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: null,
+        usageTopUpsUsdCents: 0,
+      },
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: null,
+        usageTopUpsUsdCents: 0,
+      },
+    ]);
+  });
+
+  it("renders only the window-end month when no revenue evidence exists", () => {
+    const series = buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: 6,
+      purchases: [],
+      snapshots: [],
+      windowEnd: new Date("2026-08-07T12:00:00.000Z"),
+    });
+
+    expect(series).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: null,
+        usageTopUpsUsdCents: 0,
+      },
+    ]);
+  });
+
+  it("builds the dashboard monthly revenue series from fulfilled live purchases", async () => {
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
+      snapshotRow("2026-07-31", 17_100),
+      {
+        ...snapshotRow("2026-08-07", 20_500),
+        familyMrrUsdCents: 6_100,
+        individualMrrUsdCents: 14_400,
+      },
+    ]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
+      {
+        cashAmountMinor: 1_500,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipMoment: { purchaseId: "purchase_group_gift" },
+        paidAt: new Date("2026-07-27T09:00:00.000Z"),
+      },
+      {
+        cashAmountMinor: 7_500,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipMoment: null,
+        paidAt: new Date("2026-07-04T10:00:00.000Z"),
+      },
+      {
+        cashAmountMinor: 2_000,
+        groupSponsorshipAuthorizationId: "auth_recurring",
+        groupSponsorshipMoment: null,
+        paidAt: new Date("2026-08-01T00:00:00.000Z"),
+      },
+      {
+        cashAmountMinor: 3_000,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipMoment: null,
+        paidAt: new Date("2026-08-05T15:00:00.000Z"),
+      },
+      {
+        cashAmountMinor: 9_900,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipMoment: null,
+        paidAt: null,
+      },
+    ]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.monthlyRevenueSeries).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 1_500,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-07",
+        monthToDate: false,
+        subscriptionsUnsplitUsdCents: 17_100,
+        totalUsdCents: 26_100,
+        usageTopUpsUsdCents: 7_500,
+      },
+      {
+        familySubscriptionsUsdCents: 6_100,
+        groupSponsorshipUsdCents: 2_000,
+        individualSubscriptionsUsdCents: 14_400,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: 25_500,
+        usageTopUpsUsdCents: 3_000,
+      },
+    ]);
+    expect(mocks.hostedUsageCreditPurchase.findMany.mock.calls[0]?.[0]).toEqual({
+      select: {
+        cashAmountMinor: true,
+        groupSponsorshipAuthorizationId: true,
+        groupSponsorshipMoment: {
+          select: {
+            purchaseId: true,
+          },
+        },
+        paidAt: true,
+      },
+      where: {
+        paidAt: {
+          gte: new Date("2026-03-01T00:00:00.000Z"),
+          lte: now,
+        },
+        status: "fulfilled",
+        stripeLiveMode: true,
+      },
+    });
+    expect(mocks.hostedGrowthDailySnapshot.findMany).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.hostedGrowthDailySnapshot.findMany.mock.calls[0]?.[0],
+    ).toMatchObject({
+      where: {
+        snapshotDate: {
+          gte: new Date("2026-03-01T00:00:00.000Z"),
+          lte: new Date("2026-08-07T00:00:00.000Z"),
+        },
+      },
+    });
+  });
+
+  it("moves a one-time group gift to usage top-ups when payer deletion removes its sponsorship moment", async () => {
+    // Payer-only account deletion retains the fulfilled cross-owner purchase
+    // but cascades away its HostedGroupSponsorshipMoment, so the same cash is
+    // classified as a plain top-up on the next read. The card copy discloses
+    // this; the total must not change.
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    const giftRow = {
+      cashAmountMinor: 2_000,
+      groupSponsorshipAuthorizationId: null,
+      paidAt: new Date("2026-08-03T09:00:00.000Z"),
+    };
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
+      snapshotRow("2026-08-07", 2_900),
+    ]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
+      {
+        ...giftRow,
+        groupSponsorshipMoment: { purchaseId: "purchase_group_gift" },
+      },
+    ]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const beforeDeletion = await readHostedGrowthDashboard(now);
+
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
+      snapshotRow("2026-08-07", 2_900),
+    ]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
+      {
+        ...giftRow,
+        groupSponsorshipMoment: null,
+      },
+    ]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const afterDeletion = await readHostedGrowthDashboard(now);
+
+    const beforePoint = beforeDeletion.monthlyRevenueSeries.at(-1);
+    const afterPoint = afterDeletion.monthlyRevenueSeries.at(-1);
+    expect(beforePoint).toMatchObject({
+      groupSponsorshipUsdCents: 2_000,
+      usageTopUpsUsdCents: 0,
+    });
+    expect(afterPoint).toMatchObject({
+      groupSponsorshipUsdCents: 0,
+      usageTopUpsUsdCents: 2_000,
+    });
+    expect(afterPoint?.totalUsdCents).toEqual(beforePoint?.totalUsdCents);
+  });
+
+  it("records the subscription split in the daily snapshot", async () => {
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    mocks.hostedAccountGroup.findMany.mockResolvedValueOnce([
+      {
+        billingRef: {
+          billedSeatCount: 2,
+          currentBillingPhase: "paid",
+        },
+        id: "group_family",
+        memberships: [
+          { memberId: "member_family_owner" },
+          { memberId: "member_family_seat" },
+        ],
+        planCapacities: [{ billedQuantity: 2, planCode: "pulse" }],
+      },
+    ]);
+    queueCurrentMetricMocks();
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-08-07", 4_200),
+    );
+
+    await captureHostedGrowthDailySnapshot(now);
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      familyMrrUsdCents: 1_400,
+      individualMrrUsdCents: 2_800,
+      mrrUsdCents: 4_200,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      familyMrrUsdCents: 1_400,
+      individualMrrUsdCents: 2_800,
+      mrrUsdCents: 4_200,
+    });
+  });
+
   it("upserts one daily snapshot per UTC date", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     queueCurrentMetricMocks();
@@ -2637,7 +3017,9 @@ function snapshotRow(date: string, mrrUsdCents: number) {
     activeUsersTrailing7Days: null,
     capturedAt: new Date(`${date}T00:05:00.000Z`),
     coveredMembers: 3,
+    familyMrrUsdCents: null,
     inboundMessagesPriorDay: 0,
+    individualMrrUsdCents: null,
     mrrUsdCents,
     outboundMessagesPriorDay: 0,
     payingCustomers: 3,

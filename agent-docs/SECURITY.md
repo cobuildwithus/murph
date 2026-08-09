@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Non-Negotiable Rules
 
@@ -17,7 +17,26 @@ Last verified: 2026-08-07
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. Cleanup failure must never restore authority. Keep Settings,
+  before granting. An instant-start or authenticated established-direct-chat
+  typing shell-prewarm hint uses that same per-user barrier and live admission
+  read. The typing producer resolves only the private home-chat blind index and
+  performs an advisory active-access/root check after acknowledging the webhook;
+  it receives no member id from Linq and grants no runtime authority. The shared
+  HTTP route obtains the named runner stub without binding durable state.
+  Because this hint is optional, it is admitted only when the barrier is idle;
+  repeated hints and hints arriving during authoritative ensure, withdrawal, or
+  deletion return without joining the FIFO. The
+  optional read abandons after a fixed 250 ms
+  deadline so it cannot hold authoritative processing, withdrawal, or deletion
+  behind the ordinary Web-control timeout; only allowed admission reserves and
+  binds its exact versioned container in the existing user-control stop-target
+  field, then waits for the container to register the hint before releasing the
+  barrier. Withdrawal and account deletion consume that exact target, while
+  container destruction supersedes a pending platform wait before stopping it.
+  Web admission also requires an
+  extant, non-suspended member, so a hint queued behind account deletion cannot
+  treat the deleted consent row as a compatible legacy grant and recreate
+  runner state. Cleanup failure must never restore authority. Keep Settings,
   export, and deletion available without waking the paused runtime; only
   renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
@@ -229,6 +248,7 @@ Last verified: 2026-08-07
   cascades the encrypted intent.
 - Account deletion must establish durable external-cleanup ownership before canonical member removal. The foreign-key-free retry receipt stores only KMS-encrypted runtime/vendor identifiers with receipt- and environment-bound authenticated data, remains pending for missing configuration, provider timeout, partial failure, or a legacy Cloudflare response without explicit `deleteAllCompleted` evidence, and is deleted only after Cloudflare, Stripe-customer, and Privy cleanup converge. Privy new-member resolution must first resolve any existing identity, then reject a pending deletion receipt, then require a bounded live-provider read; after binding, app-session issuance must lock and re-check the member so a missing or suspended deletion target cannot receive a session. Immediate and retention attempts have explicit target deadlines; the retention batch uses bounded concurrency so a stuck provider cannot become an unbounded response-path or sweep owner. Logs and the deleted member row are not retry owners.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
+- The public footer status read is a browser-to-incident.io technical-data boundary. Keep it on the fixed HTTPS status origin and fixed public summary path with no request body or query; retain the global `strict-origin` referrer policy and the exact-origin `connect-src` entry. Do not add account, page-path, query, fragment, prompt, health, message, cookie, or credential data to the request, and do not treat an empty public incident list as direct uptime proof. Keep incident.io and the technical metadata it receives disclosed in the public subprocessor register.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
 - External provider request params, nested params, and per-request options must
   use installed official SDK types and must not contain object spread syntax or
@@ -454,6 +474,45 @@ Last verified: 2026-08-07
   redirects, or client-safe connection projections. Runtime requests require a
   callback signature bound to the member plus Cloudflare's active attempt,
   lease-generation, and workspace-version fence.
+- Hosted domain-root key rotation must be reader-first. Keep the required
+  single-key authority and Cloudflare automation variables as the active
+  generation while optional keyrings add only `verify_only`, `decrypt_only`,
+  or `disabled` compatibility entries. Authority private signing material must
+  remain non-exportable in GCP KMS; an exportable Cloudflare private JWK may
+  exist only in approved secret stores and secret provider inputs. The sole
+  plaintext-file exception is the ignored
+  `apps/cloudflare/.deploy/worker-secrets.json` payload rendered for Wrangler:
+  its parent must be mode `0700`, the file mode `0600`, and the file may be
+  consumed only through Wrangler's `--secrets-file`. Protected production
+  deploys run on an ephemeral worker whose disposal owns cleanup; any direct or
+  local deploy must remove that exact generated file after success or failure.
+  The file is never a source of truth. Private JWK values must never enter CLI
+  argument values, logs, tracked or review artifacts, or any other plaintext
+  file. Web build and Worker deploy preflight must share one runtime-state
+  acceptance contract for optional standby rings. Before provider mutation,
+  complete-preload validation must require all three authority/public/private
+  payloads, reject required-active-ID collisions, require the intended
+  `verify_only` / `disabled` / `decrypt_only` statuses under explicit proposed
+  IDs, reject duplicate normalized IDs, and match the Cloudflare public/private
+  P-256 coordinates by key id. Web public entries and public JWKs must use
+  closed raw schemas so sibling private material or another ignored field cannot
+  enter Vercel. All three ring strings must reject duplicate JSON object members
+  before the first ordinary parse, so discarded earlier members cannot remain
+  in provider-bound text. Before provider mutation, the complete-only command
+  must import the exact proposed authority PEM as a P-256 ECDSA verification
+  key and prove the exact Cloudflare public/private JWKs by wrapping and
+  unwrapping an ephemeral challenge;
+  errors may name fields but must never reproduce values. Proposed IDs are
+  non-secret one-shot operator validation metadata, not provider runtime
+  configuration. Record the current
+  ready Web deployment, deploy Web first, and prove the unchanged active Web
+  crypto context before changing the Worker; a build success is not runtime
+  proof. A standby preload must not mutate envelope key references. Activation,
+  re-signing, rewrapping, and retirement require an explicit production
+  mutation owner, a reader-complete compatibility window that retains the
+  current Cloudflare private key, and aggregate proof of zero old active or
+  `decrypt_only` references before old
+  material is disabled or removed.
 - Clinical provider egress is allowlist-derived, never caller-URL-derived. The
   committed directory and SMART discovery pin HTTPS origins; FHIR continuation
   URLs must retain the exact origin and resource-family path, redirects are

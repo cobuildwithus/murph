@@ -564,7 +564,9 @@ supported provider credential.
   preview/non-main builds skip through the wrapper guard. The generic
   `pnpm --dir apps/web build` script is non-mutating and does not run production
   migrations. The guarded predeploy migration entrypoint uses
-  `DIRECT_DATABASE_URL` when present, requires it in Vercel production, rejects
+  `DIRECT_DATABASE_URL` when present, requires it in Vercel production,
+  preflights the app-session signing key plus configured HTTPS public origin by
+  constructing and parsing the signed group-funding recovery URL, rejects
   known pooled Postgres ports such as `6432` and `6543`, blocks destructive or
   incompatible Prisma migration SQL outside the frozen hosted web migration
   history set ending at `20260707170000_drop_stale_linq_recency_columns`,
@@ -771,13 +773,13 @@ keep the one-second presentation-only deadline and late-result rejection.
 
 When real source code, CI, or deployment automation is added, update this file and `agent-docs/operations/verification-and-runtime.md` in the same change.
 
-## Hosted Stripe Billing Pull-Request Lanes
+## Hosted Stripe Billing Lanes
 
 `.github/workflows/hosted-stripe-billing.yml` separates proof from authority:
 
-- `Hermetic hosted billing proof` runs on every pull request, including forks. It exercises the paid-Pulse resume owner test, live-config partition and listener-child credential tests, browser/cleanup pure support tests, and workflow guard mutations without a Stripe secret or network call to Stripe. This is the required check when dedicated sandbox infrastructure is absent.
-- `Live hosted-local Stripe browser matrix` can run only for a same-repository PR head (or an explicit manual dispatch), excludes dependency-bot heads, uses the protected `hosted-stripe-billing-sandbox` GitHub Environment, and is serialized with `cancel-in-progress: false`. Fork code is classified before a secret-bearing job is eligible; this workflow must never be converted to `pull_request_target`.
-- Every trusted same-repository head enters the live job and fails closed if the protected Environment contract is absent or malformed. Fork and dependency-bot heads run only the hermetic job. The always-present `Required hosted Stripe billing boundary` result requires hermetic success plus live success whenever the trust classifier admits the live job. The dedicated secret, sandbox account, four price IDs, public Privy app id, and active default Portal configuration with plan updates enabled, Trial upgrades ending immediately, and immediate invoicing stay outside the repository. The browser remains the authoritative proof that Stripe exposes both dedicated individual products.
+- `Hermetic hosted billing proof` runs on every pull request, including forks, and again on every push to `main`. It exercises the paid-Pulse resume owner test, live-config partition and listener-child credential tests, browser/cleanup pure support tests, and workflow guard mutations without a Stripe secret or network call to Stripe. This is the entire required proof on pull requests.
+- `Live hosted-local Stripe browser matrix` runs only on pushes to `main` (`github.event_name == 'push'`), never on pull request events, so pull request code can never reach the secret-bearing job regardless of head origin. It uses the protected `hosted-stripe-billing-sandbox` GitHub Environment and is serialized on the shared sandbox with `cancel-in-progress: false`; the single sandbox and its account-wide `stripe listen` event stream cannot host concurrent runs. This workflow must never be converted to `pull_request_target` or `workflow_dispatch`. When merges outpace the serialized 60-minute lane, older pending `main` runs are evicted by newer ones; the newest merged state is always the next to be proven.
+- Every push to `main` enters the live job and fails closed if the protected Environment contract is absent or malformed. The always-present `Required hosted Stripe billing boundary` result requires hermetic success on both events, live success on `main` pushes, and a skipped live job on pull requests. The dedicated secret, sandbox account, four price IDs, public Privy app id, and active default Portal configuration with plan updates enabled, Trial upgrades ending immediately, and immediate invoicing stay outside the repository. The browser remains the authoritative proof that Stripe exposes both dedicated individual products.
 - Failure upload is limited to `apps/web/playwright-report/hosted-stripe-billing/redacted.json`, containing only the opaque run id and step/surface/status records. Checkout/Portal URLs, object IDs, provider payloads, browser screenshots, traces, and full reports are not artifacts. Cleanup is always attempted and independently recoverable with the same opaque run id.
 
 Existing paid Pulse/Edge to Family is a supported direct subscription update,

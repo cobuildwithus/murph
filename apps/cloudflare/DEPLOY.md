@@ -38,6 +38,19 @@ of an existing Durable Object row: after write authority is cleared,
 is confirmed destroyed. Withdrawal and account deletion both consume this
 pending-stop pointer before acknowledging their respective cleanup boundary.
 
+The first-contact shell hint now writes that same exact target before the
+container acknowledges registration of its platform-start operation. Deploy
+this Worker with `container_rollout=immediate`: an older Worker can have started
+a versioned shell without recording its name, so a gradual container drain
+cannot prove withdrawal or deletion will find every old hint. Deploy Web first,
+then deploy this Worker immediately. The response shape is unchanged, but Web
+can now deny an absent or suspended member while reporting a non-revoked
+consent state. An older Worker rejects that combination and fails closed; the
+new Worker accepts both legacy and fail-closed responses. Do not deploy the new
+Worker before Web because the old Web admission owner cannot deny a hint queued
+behind account deletion. After the first shell-hint target is reserved, this
+Worker is part of the existing hard rollback floor described below.
+
 After the first such pending-stop row is written, this Worker is a hard
 Cloudflare rollback floor. An older Worker treats the absent active attempt as
 no exact target, derives a container name from its own version, and can erase
@@ -421,19 +434,19 @@ read-side tolerance is only the first deployment step.
 
 1. Deploy the Cloudflare Worker and runner bundle first with
    `container_rollout=immediate`. Require managed-container smoke to report the
-   new bundle fingerprint and drain older warm runners. During this phase, old
-   Web may still emit
-   `{capacityState,fundingUrl,periodEnd,remainingPercent?}`; the new runtime
-   validates that exact shape, derives only whether funding is needed, maps it
-   to `not_sponsored`, and discards the period and percentage.
+   new bundle fingerprint and drain older warm runners. The compatible runtime
+   accepts the current `{fundingNeeded,fundingUrl}` response, strips the
+   immediately preceding optional `sponsorshipStatus` field, and still accepts
+   the older `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response.
+   It derives only whether funding is needed from that oldest shape and
+   discards period, percentage, and funding-setup fields.
 2. Apply the additive capped-sponsorship migration, then deploy the compatible
    Web release. Confirm both the migration and new Web have converged before
    enabling monthly authorization creation or automatic refill admission. Web
-   must emit only `{fundingNeeded,fundingUrl,sponsorshipStatus}` before the
-   feature is enabled.
-3. Smoke one unsponsored and one sponsored group read. The runtime and assistant
-   may learn only `not_sponsored` or `sponsored`; quantitative fields must not
-   reappear.
+   now emits only `{fundingNeeded,fundingUrl}`.
+3. Smoke group reads with and without an active automatic sponsor. The runtime
+   and assistant may learn only funding urgency and the first-party capability;
+   funding setup and quantitative fields must not reappear.
 
 The first monthly authorization is the old-Web rollback floor. The preceding
 Web reconciliation code cannot activate that authorization, so after the first
@@ -452,14 +465,24 @@ to runtime or assistant policy.
 
 The current projection separates urgency from capability: `fundingNeeded`
 controls assistant-initiated depletion messaging, while a non-null `fundingUrl`
-may be used after an explicit funding request at any capacity. For that behavior,
-deploy the Cloudflare runner bundle first, then Web. Old Web leaves a healthy
-group's URL null, so the first step is inert; old runners may ignore a healthy
-URL from new Web, so the opposite skew is incomplete but safe. After both
-deployments, smoke an explicit funding request in a healthy unsponsored group
-and confirm Murph returns the first-party link without claiming the room needs
-funding. Open the link and confirm both monthly sponsorship and one-time
-contribution are available.
+may be used after an explicit funding request at any capacity. Deploy the
+Cloudflare runner bundle first, then Web: the new runtime safely strips the old
+producer's sponsorship field, while an old runtime rejects the new reduced
+shape. After both deployments, smoke a low room with automatic refill headroom
+or a pending refill and confirm Murph does not start a funding thread. Include
+an already-bound current-period payment on a paused authorization. Then
+smoke a low room with no automatic recovery and confirm Murph gives the ordinary
+link-free warning without payment-setup, payer, cap, amount, balance, or refill
+detail. Exhaust a room in each funding setup and confirm both receive the same
+deterministic neutral pause contract plus the first-party link, with no
+immediate-restoration promise or payer pressure. Opening the link must still
+preserve the single-automatic-sponsor invariant and show the payment options
+appropriate to the authenticated payer. Also smoke an explicit funding request
+in a healthy room and confirm Murph returns the first-party link without
+claiming the room needs funding. Finally, make mandatory-link projection fail
+before a denied-gate attempt, confirm no Linq or Telegram claim/provider send is
+made with linkless copy, restore the projection, and confirm the same capacity
+epoch sends the validated linked notice.
 
 ## Thread Usage Crossing Notice Rollout
 
@@ -668,6 +691,13 @@ Set these in the selected GitHub environment as secrets:
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
+The protected GitHub Environment may also hold the optional
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` secret. Deploy
+automation forwards it to the Worker secret store without exposing it to the
+runner. Its entries are compatibility material only; the required
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK` remains the active private
+key.
+
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
 The optional read-only Labs port uses that existing signed callback and adds no
 Cloudflare secret or provider credential. `JUNCTION_API_KEY` for Labs remains in
@@ -786,8 +816,89 @@ Hosted crypto authority metadata:
 
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION`
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
+- `HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON` for additional `verify_only` or
+  `disabled` public verification keys
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
 - `HOSTED_CRYPTO_ENV`
+
+### Hosted crypto standby-key preload
+
+Treat a hosted authority or Cloudflare automation key change as a reader-first
+compatibility rollout. The protected GitHub Environment is the Cloudflare
+deploy source of truth: store
+`HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON` as an environment variable and
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` as an environment
+secret. Vercel Production must receive the same authority verify keyring plus
+`HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON`. Updating Vercel
+configuration is incomplete until the Web app is redeployed; updating the
+GitHub Environment is incomplete until the protected Cloudflare workflow
+renders, syncs, deploys, and proves the live Worker bindings.
+
+For a non-active preload, create a new non-exportable version on the existing
+GCP KMS asymmetric signing key and add its public key as `verify_only` on both
+Web and Worker. Generate the P-256 Cloudflare recipient keypair with an
+operating-system cryptographic random source, retain the private JWK only in an
+approved local secret store during transfer, add its public entry to Web as
+`disabled`, and add its private entry to Cloudflare as `decrypt_only`. Keep all
+required single-key variables unchanged, deploy Web first, then deploy
+Cloudflare, and confirm production envelope key-reference aggregates are
+unchanged. Provider inspection and logs must show names, scopes, statuses, and
+counts only—not keyring JSON, PEM bodies, JWKs, or production rows.
+
+Web build and Worker deploy preflight must use the same runtime-state standby
+acceptance contract before either provider can promote code. It rejects
+malformed or active optional entries, rejects private material in Web's public
+ring or a private keyring in Web runtime, and permits Cloudflare entries only
+for `cloudflare-automation-secret`. Both provider gates also reject an optional
+entry that collides with the required active authority or Cloudflare key ID,
+because runtime overlay would otherwise replace it. Before either provider
+gate accepts a ring, identifiers must also remain unique after the same trimming
+used by runtime constructors. Web public entries and their JWKs use closed raw
+schemas, and a duplicate-aware scan runs before the first `JSON.parse` for all
+three rings. Duplicate raw members, sibling private material, and undeclared
+fields fail before Vercel.
+Before any provider mutation, load all three proposed payloads from approved
+secret stores into the process environment together with the current active
+IDs and the operator-only
+`HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION` and
+`HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID`. Run the Web
+`hosted-crypto:env-check` script with `--require-complete-preload`; complete
+mode requires the intended `verify_only` / `disabled` / `decrypt_only` entries
+to survive under distinct proposed IDs, imports the exact proposed authority
+PEM as a P-256 ECDSA verification key, and wraps then unwraps an ephemeral
+challenge through the exact proposed Cloudflare public/private JWKs. The two
+proposed ID inputs are non-secret one-shot validation metadata; do not add them
+to a provider runtime.
+Validation errors identify only the configuration field. Do not put values in
+arguments or bypass either gate.
+
+Record the current ready Vercel production deployment before preload. Deploy
+Web first, then prove the unchanged active Web crypto-context path against
+current envelopes before changing the Worker. A successful build alone is not
+proof; restore the recorded Web deployment if that live check fails. After the
+protected Cloudflare deploy, require Worker preflight, managed-container smoke,
+and unchanged privacy-safe envelope-reference aggregates. The current active
+Vercel deployment and unchanged active single-key bindings remain the rollback
+floor throughout standby preload.
+
+The Cloudflare private keyring's canonical deploy hop renders the ignored
+`apps/cloudflare/.deploy/worker-secrets.json` payload under a mode-`0700`
+directory with mode `0600`, then supplies that file only as Wrangler's
+`--secrets-file`. The protected production workflow runs on an ephemeral
+worker, so worker disposal removes the payload. A direct or local deploy must
+remove that exact generated file after both success and failure. It is an
+ephemeral transport, not a source of truth; the approved local secret store and
+protected GitHub Environment secret remain the owners. Never place private JWK
+values in CLI argument values, logs, tracked or review artifacts, or any other
+plaintext file.
+
+Standby preload is not authority activation or envelope rotation. Do not change
+an active key id/version, re-sign or rewrap domain-root envelopes, disable a
+current key, or remove compatibility entries until a separately reviewed
+production mutation owner exists. That later operation must deploy all readers
+first, preserve the current Cloudflare private key for the entire compatibility
+window, migrate in bounded batches, prove healthy reads, and prove zero active
+or `decrypt_only` envelope references before retirement.
 
 Hosted assistant config:
 

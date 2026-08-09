@@ -1012,7 +1012,6 @@ export interface HostedRuntimeGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
-  sponsorshipStatus: "not_sponsored" | "sponsored";
 }
 
 export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
@@ -1254,6 +1253,7 @@ export const HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS = 200
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS = 256;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS = 500;
 export const HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS = 48;
+export const HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS = 200;
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
@@ -1446,7 +1446,25 @@ export type HostedRuntimeGroupToolRequest =
       groupChatIconUrl: string;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
-  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "share_contact_card";
+      contactCardImageUrl?: never;
+      contactCardShareKey?: never;
+      directLinqChatId?: never;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
+  | {
+      action: "share_contact_card";
+      contactCardImageUrl: string;
+      contactCardShareKey: string;
+      /**
+       * Trusted-host chat id for a personalized card in a direct conversation.
+       * The trusted turn-context wrapper injects it before transport; Web then
+       * revalidates that exact direct chat against the member's route owner.
+       */
+      directLinqChatId?: string;
+      linqThread?: never;
+    }
   | {
       action: "revoke_own_email_share";
       participant?: HostedExecutionAcceptedGroupMessageParticipant | null;
@@ -1667,6 +1685,9 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "sent" }
         | { status: "already_shared" }
+        // Personalized cards only: the provider may have accepted this exact
+        // request and the send owner could not establish which.
+        | { status: "unconfirmed" }
         | { status: "unavailable"; unavailableReason: string };
     }
   | {

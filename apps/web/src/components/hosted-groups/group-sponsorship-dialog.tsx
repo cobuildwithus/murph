@@ -14,6 +14,7 @@ import {
   type HostedUsageTopUpOffer,
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { Button } from "@/src/components/ui/button";
+import { Checkbox } from "@/src/components/ui/checkbox";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
   Collapsible,
@@ -31,6 +32,15 @@ import {
 import { Input } from "@/src/components/ui/input";
 import { RadioGroup } from "@/src/components/ui/radio-group";
 import { Textarea } from "@/src/components/ui/textarea";
+import {
+  buildHostedGroupSponsorshipDraftInput,
+  HOSTED_GROUP_SPONSORSHIP_CREATIVE_PROMPT_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_CREATIVE_STYLE_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS,
+  HOSTED_GROUP_SPONSORSHIP_RUNNING_BIT_MAX_CODE_POINTS,
+  type HostedGroupSponsorshipCreativeFormat,
+  type HostedGroupSponsorshipDraft,
+} from "@/src/lib/hosted-groups/group-sponsorship-contract";
 import { cn } from "@/src/lib/utils";
 
 type GroupSponsorshipDialogProps = Omit<
@@ -45,11 +55,7 @@ type GroupSponsorshipDialogProps = Omit<
   offers: readonly GroupSponsorshipOffer[];
 };
 
-type FrozenGroupSponsorship = {
-  publicAlias: string | null;
-  runningBitRequest: string | null;
-  sponsorMessage: string | null;
-};
+type FrozenGroupSponsorship = HostedGroupSponsorshipDraft;
 
 type GroupSponsorshipOffer = HostedUsageTopUpOffer & {
   runningBitDurationLabel: string | null;
@@ -69,14 +75,27 @@ function GroupSponsorshipDialog({
   offers,
   ...props
 }: GroupSponsorshipDialogProps) {
+  const fieldId = useId();
+  const frozenCreativeRequest = frozenSponsorship?.creativeRequest ?? null;
   const [publicAlias, setPublicAlias] = useState(
     frozenSponsorship?.publicAlias ?? "",
   );
   const [runningBitRequest, setRunningBitRequest] = useState(
     frozenSponsorship?.runningBitRequest ?? "",
   );
-  const [sponsorMessage, setSponsorMessage] = useState(
-    frozenSponsorship?.sponsorMessage ?? "",
+  const [creativeEnabled, setCreativeEnabled] = useState(
+    frozenCreativeRequest !== null || frozenSponsorship?.sponsorMessage != null,
+  );
+  const [creativeFormat, setCreativeFormat] =
+    useState<HostedGroupSponsorshipCreativeFormat>(
+      frozenCreativeRequest?.format
+        ?? "message",
+    );
+  const [creativePrompt, setCreativePrompt] = useState(
+    frozenCreativeRequest?.prompt ?? frozenSponsorship?.sponsorMessage ?? "",
+  );
+  const [creativeStyleRequest, setCreativeStyleRequest] = useState(
+    frozenCreativeRequest?.styleRequest ?? "",
   );
   const [selectedMonthlyCapMinor, setSelectedMonthlyCapMinor] = useState(
     monthlyCapMinor ?? monthlyCapOptions[0]?.monthlyCapMinor ?? 500,
@@ -117,17 +136,19 @@ function GroupSponsorshipDialog({
         return customizationAllowed
           ? {
               ...base,
-              sponsorship: {
+              sponsorship: buildHostedGroupSponsorshipDraftInput({
+                creativeEnabled,
+                creativeFormat,
+                creativePrompt,
+                creativeStyleRequest,
                 publicAlias,
-                sponsorMessage,
-                ...(readRunningBitDurationLabel({
+                runningBitAvailable: Boolean(readRunningBitDurationLabel({
                   mode,
                   offerCode,
                   offers,
-                })
-                  ? { runningBitRequest }
-                  : {}),
-              },
+                })),
+                runningBitRequest,
+              }),
             }
           : base;
       }}
@@ -146,6 +167,11 @@ function GroupSponsorshipDialog({
           offerCode: selectedOffer?.offerCode ?? null,
           offers,
         });
+        const publicAliasUsed =
+          creativeEnabled ||
+          Boolean(
+            runningBitDurationLabel && runningBitRequest.trim().length > 0,
+          );
         return (
           <div
             className="space-y-4 max-md:flex max-md:flex-1 max-md:flex-col max-md:space-y-0"
@@ -179,7 +205,7 @@ function GroupSponsorshipDialog({
                     <ChoiceCard
                       key={option.monthlyCapMinor}
                       className="[&>[data-slot=field]]:gap-2 [&>[data-slot=field]]:p-4 [&_[data-slot=field-content]]:gap-1"
-                      id={`group-sponsorship-cap-${option.monthlyCapMinor}`}
+                      id={`${fieldId}-cap-${option.monthlyCapMinor}`}
                       value={String(option.monthlyCapMinor)}
                       disabled={disabled || recoveringFrozenPurchase}
                       title={
@@ -198,7 +224,7 @@ function GroupSponsorshipDialog({
               </FieldSet>
             ) : null}
             {customizationAllowed ? (
-              <Collapsible defaultOpen className="max-md:mt-4">
+              <Collapsible className="max-md:mt-4">
                 <CollapsibleTrigger
                   render={
                     <Button
@@ -209,7 +235,7 @@ function GroupSponsorshipDialog({
                     />
                   }
                 >
-                  Add a note
+                  Personalize (optional)
                   <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
                 </CollapsibleTrigger>
                 <CollapsibleContent
@@ -219,52 +245,132 @@ function GroupSponsorshipDialog({
                   )}
                 >
                   <FieldGroup className="pt-4">
-                    <Field data-disabled={disabled || undefined}>
-                      <FieldLabel htmlFor="group-sponsor-alias">
-                        Credit me as
-                      </FieldLabel>
-                      <Input
-                        id="group-sponsor-alias"
-                        className="focus-visible:ring-0"
-                        value={publicAlias}
-                        onChange={(event) => setPublicAlias(event.target.value)}
-                        maxLength={80}
-                        disabled={disabled}
-                        placeholder="The Group Historian"
-                      />
-                      <FieldDescription>
-                        Optional. Murph never guesses your public name.
-                      </FieldDescription>
-                    </Field>
-                    <Field data-disabled={disabled || undefined}>
-                      <FieldLabel htmlFor="group-sponsor-message">
-                        Note to Murph or the group
-                      </FieldLabel>
-                      <Textarea
-                        id="group-sponsor-message"
-                        className="focus-visible:ring-0"
-                        value={sponsorMessage}
-                        onChange={(event) =>
-                          setSponsorMessage(event.target.value)
-                        }
-                        maxLength={280}
-                        disabled={disabled}
-                        placeholder="For whatever adventure comes next."
-                      />
-                    </Field>
+                    <div className="overflow-hidden rounded-xl border border-border bg-card">
+                      <div className="flex items-start gap-3 p-4">
+                        <Checkbox
+                          checked={creativeEnabled}
+                          className="mt-0.5 size-5"
+                          disabled={disabled}
+                          id={`${fieldId}-creative-enabled`}
+                          onCheckedChange={setCreativeEnabled}
+                        />
+                        <label
+                          className="min-w-0 cursor-pointer"
+                          htmlFor={`${fieldId}-creative-enabled`}
+                        >
+                          <span className="block text-sm font-medium text-foreground">
+                            Send something to the group
+                          </span>
+                          <span className="mt-1 block text-sm leading-5 text-muted-foreground">
+                            Choose a message, poem, or 15-second song. Otherwise
+                            the sponsorship stays quiet in the chat.
+                          </span>
+                        </label>
+                      </div>
+
+                      {creativeEnabled ? (
+                        <div className="space-y-4 border-t border-border p-4">
+                          <FieldSet disabled={disabled}>
+                            <FieldLegend>Format</FieldLegend>
+                            <RadioGroup
+                              className="grid gap-2 sm:grid-cols-3"
+                              value={creativeFormat}
+                              onValueChange={(value) => {
+                                if (isCreativeFormat(value)) {
+                                  setCreativeFormat(value);
+                                }
+                              }}
+                            >
+                              <ChoiceCard
+                                description="A short note for the room."
+                                disabled={disabled}
+                                id={`${fieldId}-creative-message`}
+                                title="Message"
+                                value="message"
+                              />
+                              <ChoiceCard
+                                description="A few original lines."
+                                disabled={disabled}
+                                id={`${fieldId}-creative-poem`}
+                                title="Poem"
+                                value="poem"
+                              />
+                              <ChoiceCard
+                                description="A 15-second group theme."
+                                disabled={disabled}
+                                id={`${fieldId}-creative-song`}
+                                title="Song"
+                                value="song"
+                              />
+                            </RadioGroup>
+                          </FieldSet>
+
+                          <Field data-disabled={disabled || undefined}>
+                            <FieldLabel htmlFor={`${fieldId}-creative-prompt`}>
+                              What should it be about?
+                            </FieldLabel>
+                            <Textarea
+                              id={`${fieldId}-creative-prompt`}
+                              className="focus-visible:ring-0"
+                              value={creativePrompt}
+                              onChange={(event) =>
+                                setCreativePrompt(event.target.value)
+                              }
+                              maxLength={
+                                HOSTED_GROUP_SPONSORSHIP_CREATIVE_PROMPT_MAX_CODE_POINTS
+                              }
+                              disabled={disabled}
+                              placeholder="Make it this group’s theme and use our latest running joke."
+                            />
+                            <FieldDescription>
+                              Optional. Murph also uses safe, recent group context.
+                            </FieldDescription>
+                          </Field>
+
+                          {creativeFormat === "song" ? (
+                            <Field data-disabled={disabled || undefined}>
+                              <FieldLabel htmlFor={`${fieldId}-creative-style`}>
+                                Genre or style reference
+                              </FieldLabel>
+                              <Input
+                                id={`${fieldId}-creative-style`}
+                                className="focus-visible:ring-0"
+                                value={creativeStyleRequest}
+                                onChange={(event) =>
+                                  setCreativeStyleRequest(event.target.value)
+                                }
+                                maxLength={
+                                  HOSTED_GROUP_SPONSORSHIP_CREATIVE_STYLE_MAX_CODE_POINTS
+                                }
+                                disabled={disabled}
+                                placeholder="Warm ensemble-sitcom theme with a bright acoustic intro"
+                              />
+                              <FieldDescription>
+                                Named references become broad traits like mood,
+                                tempo, and instrumentation—not a copied melody,
+                                lyric, or signature arrangement.
+                              </FieldDescription>
+                            </Field>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+
                     {runningBitDurationLabel ? (
                       <Field data-disabled={disabled || undefined}>
-                        <FieldLabel htmlFor="group-sponsor-bit">
+                        <FieldLabel htmlFor={`${fieldId}-running-bit`}>
                           Temporary running bit
                         </FieldLabel>
                         <Textarea
-                          id="group-sponsor-bit"
+                          id={`${fieldId}-running-bit`}
                           className="focus-visible:ring-0"
                           value={runningBitRequest}
                           onChange={(event) =>
                             setRunningBitRequest(event.target.value)
                           }
-                          maxLength={240}
+                          maxLength={
+                            HOSTED_GROUP_SPONSORSHIP_RUNNING_BIT_MAX_CODE_POINTS
+                          }
                           disabled={disabled}
                           placeholder="Treat me like Murph’s exhausted CFO."
                         />
@@ -272,6 +378,29 @@ function GroupSponsorshipDialog({
                           Lasts for {runningBitDurationLabel}. Murph may remix or
                           ignore it. Serious, private, and health conversations
                           always take priority.
+                        </FieldDescription>
+                      </Field>
+                    ) : null}
+
+                    {publicAliasUsed ? (
+                      <Field data-disabled={disabled || undefined}>
+                        <FieldLabel htmlFor={`${fieldId}-alias`}>
+                          Credit it as
+                        </FieldLabel>
+                        <Input
+                          id={`${fieldId}-alias`}
+                          className="focus-visible:ring-0"
+                          value={publicAlias}
+                          onChange={(event) => setPublicAlias(event.target.value)}
+                          maxLength={
+                            HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS
+                          }
+                          disabled={disabled}
+                          placeholder="The Group Historian"
+                        />
+                        <FieldDescription>
+                          Used only with the creative response or temporary
+                          running bit. Murph never guesses your public name.
                         </FieldDescription>
                       </Field>
                     ) : null}
@@ -284,6 +413,12 @@ function GroupSponsorshipDialog({
       }}
     />
   );
+}
+
+function isCreativeFormat(
+  value: string,
+): value is HostedGroupSponsorshipCreativeFormat {
+  return value === "message" || value === "poem" || value === "song";
 }
 
 const CAP_DIAL_SIZE = 280;
@@ -559,9 +694,16 @@ function FrozenSponsorshipDetails({
 }: {
   sponsorship: FrozenGroupSponsorship | null;
 }) {
+  const creativeRequest = sponsorship?.creativeRequest ?? null;
   const details = sponsorship
     ? [
         ["Sponsor name", sponsorship.publicAlias],
+        [
+          "Creative response",
+          creativeRequest ? describeCreativeFormat(creativeRequest.format) : null,
+        ],
+        ["Creative prompt", creativeRequest?.prompt ?? null],
+        ["Genre or style", creativeRequest?.styleRequest ?? null],
         ["Note", sponsorship.sponsorMessage],
         ["Running bit", sponsorship.runningBitRequest],
       ].filter((entry): entry is [string, string] => entry[1] !== null)
@@ -576,7 +718,7 @@ function FrozenSponsorshipDetails({
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
         {details.length > 0
           ? "Cancel this payment before changing them."
-          : "No sponsor name, note, or running bit is attached. Cancel this payment before adding any."}
+          : "No sponsor name, creative response, or running bit is attached. Cancel this payment before adding any."}
       </p>
       {details.length > 0 ? (
         <dl className="mt-3 space-y-2">
@@ -594,6 +736,19 @@ function FrozenSponsorshipDetails({
       ) : null}
     </div>
   );
+}
+
+function describeCreativeFormat(
+  format: HostedGroupSponsorshipCreativeFormat,
+): string {
+  switch (format) {
+    case "message":
+      return "Message";
+    case "poem":
+      return "Poem";
+    case "song":
+      return "Song";
+  }
 }
 
 export { GroupSponsorshipDialog };

@@ -215,6 +215,10 @@ export type RunnerContainerPrewarmShellResult =
       kind: "superseded";
     };
 
+export interface RunnerContainerBeginShellPrewarmResult {
+  accepted: true;
+}
+
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -235,6 +239,9 @@ export interface HostedExecutionContainerStubLike {
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
+  beginShellPrewarm?(
+    input: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerBeginShellPrewarmResult>;
   prewarmShell?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerPrewarmShellResult>;
@@ -643,6 +650,7 @@ export class RunnerContainer extends Container {
 
   async destroyInstance(): Promise<void> {
     this.noteContainerInteraction();
+    this.supersedeShellPrewarm();
     const operationsAtDestroy = [...this.workspaceInvocationOperations];
     for (const operation of operationsAtDestroy) {
       if (!operation.abortController.signal.aborted) {
@@ -734,8 +742,7 @@ export class RunnerContainer extends Container {
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
     this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    const supersededShellPrewarm =
-      this.supersedeShellPrewarmForAuthoritativeReadiness();
+    const supersededShellPrewarm = this.supersedeShellPrewarm();
     return await this.withLifecycleLock(async () => {
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
@@ -761,6 +768,25 @@ export class RunnerContainer extends Container {
    * owner later performs port and health readiness before invoking workspace
    * work; this hint never reads a workspace or creates a runtime fence.
    */
+  async beginShellPrewarm(
+    payload: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerBeginShellPrewarmResult> {
+    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    const operation = this.prewarmShell(input);
+    void operation.catch((error: unknown) => {
+      emitHostedExecutionStructuredLog({
+        component: "runner.container",
+        details: buildHostedExecutionSafeErrorDiagnostics(error),
+        error,
+        level: "warn",
+        message: "Hosted runner shell prewarm failed after acceptance.",
+        phase: "failed",
+        userId: input.userId,
+      });
+    });
+    return { accepted: true };
+  }
+
   async prewarmShell(
     payload: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerPrewarmShellResult> {
@@ -2700,7 +2726,7 @@ export class RunnerContainer extends Container {
     return next;
   }
 
-  private supersedeShellPrewarmForAuthoritativeReadiness(): boolean {
+  private supersedeShellPrewarm(): boolean {
     const operation = this.shellPrewarmOperation;
     if (!operation) {
       return false;

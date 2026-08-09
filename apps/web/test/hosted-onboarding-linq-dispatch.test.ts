@@ -155,6 +155,8 @@ const mocks = vi.hoisted(() => {
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId: vi.fn(async () => null),
+    resolveHostedLinqTypingPrewarmMemberId:
+      vi.fn(async (): Promise<string | null> => null),
   };
 
   return state;
@@ -203,6 +205,8 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
       mocks.planHostedLinqMessageEditedWebhook,
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+    resolveHostedLinqTypingPrewarmMemberId:
+      mocks.resolveHostedLinqTypingPrewarmMemberId,
   };
 });
 
@@ -701,9 +705,20 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
-  it("accepts Linq typing events without signaling runtime work", async () => {
+  it("acknowledges Linq typing before resolving the best-effort shell prewarm", async () => {
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
+    mocks.resolveHostedLinqTypingPrewarmMemberId.mockResolvedValueOnce("member_typing");
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      ensureRuntimeProcessing: vi.fn(),
+      prewarmRuntimeShell,
+    });
     const response = await handleHostedOnboardingLinqWebhook({
+      prisma: asPrismaTransactionClient({}),
       rawBody: buildTypingWebhookBody(),
+      scheduleAfterResponse: (task) => {
+        afterResponseTasks.push(task);
+      },
       signature: null,
       timestamp: null,
     });
@@ -715,6 +730,109 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
+    expect(afterResponseTasks).toHaveLength(1);
+
+    await Promise.all(afterResponseTasks.map((task) => task()));
+
+    expect(mocks.resolveHostedLinqTypingPrewarmMemberId).toHaveBeenCalledWith({
+      event: expect.objectContaining({
+        data: {
+          chat_id: "chat_typing_123",
+        },
+        event_type: "chat.typing_indicator.started",
+      }),
+      prisma: expect.any(Object),
+    });
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith("member_typing");
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("keeps unresolved Linq typing hints best-effort and process-free", async () => {
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      ensureRuntimeProcessing: vi.fn(),
+      prewarmRuntimeShell,
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma: asPrismaTransactionClient({}),
+      rawBody: buildTypingWebhookBody(),
+      scheduleAfterResponse: (task) => {
+        afterResponseTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      reason: "typing-ignored",
+    });
+
+    await Promise.all(afterResponseTasks.map((task) => task()));
+
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("settles Linq typing lookup failures after acknowledgement", async () => {
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
+    mocks.resolveHostedLinqTypingPrewarmMemberId.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
+        httpStatus: 500,
+        message: "Hosted Linq prewarm lookup matched multiple members.",
+        retryable: true,
+      }),
+    );
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      ensureRuntimeProcessing: vi.fn(),
+      prewarmRuntimeShell,
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma: asPrismaTransactionClient({}),
+      rawBody: buildTypingWebhookBody(),
+      scheduleAfterResponse: (task) => {
+        afterResponseTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      reason: "typing-ignored",
+    });
+
+    await expect(Promise.all(afterResponseTasks.map((task) => task())))
+      .resolves.toEqual([undefined]);
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed Linq typing events before scheduling a hint", async () => {
+    const scheduleAfterResponse = vi.fn();
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma: asPrismaTransactionClient({}),
+      rawBody: JSON.stringify({
+        api_version: "v3",
+        created_at: "2026-03-26T12:00:00.000Z",
+        data: {},
+        event_id: "evt_typing_invalid",
+        event_type: "chat.typing_indicator.started",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "LINQ_PAYLOAD_INVALID",
+      httpStatus: 400,
+    });
+
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedLinqTypingPrewarmMemberId).not.toHaveBeenCalled();
   });
 
   it("routes message edits through the narrow correction planner without a read receipt", async () => {
@@ -13123,14 +13241,12 @@ function requireParsedHostedLinqProviderEvent(event: HostedLinqWebhookEvent) {
 
 function buildTypingWebhookBody(input: {
   eventId?: string;
-  service?: string;
 } = {}): string {
   return JSON.stringify({
     api_version: "v3",
     created_at: "2026-03-26T12:00:00.000Z",
     data: {
       chat_id: "chat_typing_123",
-      service: input.service ?? "iMessage",
     },
     event_id: input.eventId ?? "evt_typing_123",
     event_type: "chat.typing_indicator.started",

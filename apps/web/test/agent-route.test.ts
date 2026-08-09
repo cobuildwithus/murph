@@ -1,6 +1,7 @@
 import {
   deviceSyncError,
 } from "@murphai/device-syncd/errors";
+import { Prisma } from "@prisma/client";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createBearerRequest, createJsonPostRequest, createRouteContext } from "./route-test-helpers";
@@ -376,6 +377,55 @@ describe("hosted device-sync agent and webhook routes", () => {
       orphaned: true,
       provider: "junction",
     });
+  });
+
+  it("returns a retryable 503 when webhook admission loses its bounded member-row lock wait", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The production adapter-pg shape raised when the webhook admission
+    // transaction's bounded lock_timeout gives up waiting on the member row.
+    mocks.handleWebhook.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError(
+        "Raw query failed. Code: `55P03`.",
+        {
+          clientVersion: "7.8.0",
+          code: "P2010",
+          meta: {
+            driverAdapterError: {
+              cause: {
+                kind: "postgres",
+                message: "canceling statement due to lock timeout",
+                originalCode: "55P03",
+                severity: "ERROR",
+              },
+              name: "DriverAdapterError",
+            },
+          },
+        },
+      ),
+    );
+
+    const response = await webhookRoute.POST(
+      new Request("https://example.test/api/device-sync/webhooks/junction", {
+        method: "POST",
+      }),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    // A 500 would break the provider redelivery contract; the claimed webhook
+    // trace is released by the ingress on failure so the retry reprocesses.
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "STORE_CONTENTION",
+        message: "The device-sync store timed out under contention. Retry later.",
+        retryable: true,
+      },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("short-circuits hosted webhook POSTs when provider preflight returns a response", async () => {
