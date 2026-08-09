@@ -392,6 +392,55 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('linq-msg-murph-target')
   })
 
+  it('fails closed when multiple Murph deliveries claim the same provider message id', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-duplicate-provider-target-first',
+        message: 'First conflicting Murph message.',
+        providerMessageId: 'linq-msg-duplicate-murph-target',
+        sentAt: '2026-08-07T21:08:00.000Z',
+        sessionId: 'session-automation-first',
+        target: 'thread-1',
+      }),
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-duplicate-provider-target-second',
+        message: 'Second conflicting Murph message.',
+        providerMessageId: 'linq-msg-duplicate-murph-target',
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation-second',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_67676767676767676767676767676767',
+      messageId: 'linq-msg-reply-to-duplicate-murph-target',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-duplicate-murph-target',
+      text: 'Replying to the ambiguous Murph target.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'cannot be attested as Murph-authored or linked to an earlier accepted input',
+    )
+    expect(prompt).not.toContain('First conflicting Murph message.')
+    expect(prompt).not.toContain('Second conflicting Murph message.')
+    expect(prompt).not.toContain('linq-msg-duplicate-murph-target')
+  })
+
   it.each([
     {
       authorized: false,
@@ -458,6 +507,12 @@ describe('assistant auto-reply event-first path', () => {
         intentId: 'intent-attested-media-target',
         media: [{ filename: 'memo-1.m4a', kind: 'voice_memo' }],
         message: '',
+        providerMessageEffects: [
+          {
+            message: null,
+            providerMessageId: 'linq-msg-murph-media-target',
+          },
+        ],
         providerMessageId: 'linq-msg-murph-media-target',
         sentAt: '2026-08-07T21:09:00.000Z',
         sessionId: 'session-automation',
@@ -490,6 +545,54 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('Native reply context:')
     expect(prompt).not.toContain('linq-msg-murph-media-target')
     expect(prompt).not.toContain('memo-1.m4a')
+  })
+
+  it('quotes the visible transcript when a media-only voice delivery fell back to text', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-attested-voice-fallback-target',
+        media: [{ filename: 'memo-fallback.m4a', kind: 'voice_memo' }],
+        message: '',
+        providerMessageEffects: [
+          {
+            message: 'Visible fallback transcript.',
+            providerMessageId: 'linq-msg-murph-fallback-target',
+          },
+        ],
+        providerMessageId: 'linq-msg-murph-fallback-target',
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_13131313131313131313131313131313',
+      messageId: 'linq-msg-reply-to-fallback',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-murph-fallback-target',
+      text: 'That makes sense.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'The sender explicitly replied to this exact prior assistant message:',
+    )
+    expect(prompt).toContain('Visible fallback transcript.')
+    expect(prompt).not.toContain('prior assistant media delivery')
+    expect(prompt).not.toContain('linq-msg-murph-fallback-target')
+    expect(prompt).not.toContain('memo-fallback.m4a')
   })
 
   it('preserves the explicit-reply boundary for private provider placeholders', async () => {
@@ -3331,6 +3434,10 @@ function createOutboxMessage(input: {
   intentId: string
   media?: readonly { filename: string; kind: string }[]
   message: string
+  providerMessageEffects?: readonly {
+    message: string | null
+    providerMessageId: string
+  }[]
   providerMessageId?: string | null
   providerMessageIds?: string[]
   providerThreadId?: string | null
@@ -3358,6 +3465,9 @@ function createOutboxMessage(input: {
             idempotencyKey: null,
             messageLength: input.message.length,
             providerMessageId: input.providerMessageId ?? null,
+            ...(input.providerMessageEffects
+              ? { providerMessageEffects: input.providerMessageEffects }
+              : {}),
             ...(input.providerMessageIds
               ? { providerMessageIds: input.providerMessageIds }
               : {}),

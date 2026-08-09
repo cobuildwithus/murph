@@ -4556,9 +4556,10 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
   const exactDeliveries = replyToMessageIds.map((replyToMessageId) =>
     replyToMessageId === null
       ? null
-      : matchingDeliveries.find((delivery) =>
-          delivery.providerMessageIds.includes(replyToMessageId),
-        ) ?? null,
+      : resolveAssistantAutoReplyExactOutboxDelivery(
+          matchingDeliveries,
+          replyToMessageId,
+        ),
   )
   const crossSessionDelivery = exactDeliveries.reduce<
     AssistantAutoReplyMatchingOutboxDelivery | null
@@ -4782,6 +4783,10 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 interface AssistantAutoReplyMatchingOutboxDelivery {
   intentId: string
   message: string | null
+  providerMessageEffects: Array<{
+    message: string | null
+    providerMessageId: string
+  }>
   providerMessageIds: string[]
   sentAtMs: number
   sessionId: string
@@ -4843,6 +4848,11 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     return [{
       intentId: intent.intentId,
       message: message ?? null,
+      providerMessageEffects:
+        delivery.providerMessageEffects?.map((effect) => ({
+          message: effect.message,
+          providerMessageId: effect.providerMessageId,
+        })) ?? [],
       providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
         delivery,
       ),
@@ -4850,6 +4860,33 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       sessionId: intent.sessionId,
     }]
   })
+}
+
+function resolveAssistantAutoReplyExactOutboxDelivery(
+  deliveries: readonly AssistantAutoReplyMatchingOutboxDelivery[],
+  providerMessageId: string,
+): AssistantAutoReplyMatchingOutboxDelivery | null {
+  const matchingDeliveries = deliveries.filter((delivery) =>
+    delivery.providerMessageIds.includes(providerMessageId),
+  )
+  if (matchingDeliveries.length !== 1) {
+    return null
+  }
+
+  const delivery = matchingDeliveries[0]!
+  if (delivery.providerMessageEffects.length === 0) {
+    return delivery
+  }
+
+  const matchingEffects = delivery.providerMessageEffects.filter((effect) =>
+    effect.providerMessageId === providerMessageId,
+  )
+  return matchingEffects.length === 1
+    ? {
+        ...delivery,
+        message: matchingEffects[0]!.message,
+      }
+    : null
 }
 
 async function resolveAssistantAutoReplyExistingSession(input: {

@@ -13,6 +13,7 @@ import {
   type AssistantChannelDeliveryTargetKind,
   type AssistantDeliverySource,
   type AssistantMessageReaction,
+  type AssistantProviderMessageEffect,
   type AssistantResponseMedia,
   type AssistantResponseMediaKind,
   type AssistantVaultImageResponseMedia,
@@ -338,6 +339,7 @@ export interface AssistantChannelAdapterSpec {
   }) => Promise<
     | {
         providerMessageId?: string | null
+        providerMessageEffects?: AssistantProviderMessageEffect[] | null
         providerMessageIds?: string[] | null
         providerThreadId?: string | null
         target?: string | null

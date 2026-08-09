@@ -14,6 +14,7 @@ import {
 import {
   type AssistantBindingDelivery,
   type AssistantDeliverySource,
+  type AssistantProviderMessageEffect,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -29,6 +30,7 @@ import {
   readDeliveredCleanupTargetAliases,
   readDeliveredIdempotencyKey,
   readDeliveredProviderMessageId,
+  readDeliveredProviderMessageEffects,
   readDeliveredProviderMessageIds,
   readDeliveredProviderThreadId,
   readDeliveredTarget,
@@ -682,6 +684,7 @@ async function sendLinqVoiceMemoDelivery(input: {
   threadIsDirect: boolean | null
 }): Promise<{
   providerMessageId?: string | null
+  providerMessageEffects?: AssistantProviderMessageEffect[] | null
   providerMessageIds?: string[] | null
   providerThreadId?: string | null
   target?: string | null
@@ -711,6 +714,7 @@ async function sendLinqVoiceMemoDelivery(input: {
   const attachmentId = voiceMemo.transport.attachmentId
 
   const providerMessageIds: string[] = []
+  const providerMessageEffects: AssistantProviderMessageEffect[] = []
   const text = messageTextOrNull(input.message)
   const fallbackText = messageTextOrNull(voiceMemo.transcript ?? '')
   if (input.nativeReplyRequested === true && !text) {
@@ -796,10 +800,12 @@ async function sendLinqVoiceMemoDelivery(input: {
       }
       deliveredText = recovered
     }
-    const textMessageId = readDeliveredProviderMessageId(deliveredText)
-    if (textMessageId) {
-      providerMessageIds.push(textMessageId)
-    }
+    appendDeliveredProviderMessageIds(providerMessageIds, deliveredText)
+    appendDeliveredProviderMessageEffects(
+      providerMessageEffects,
+      deliveredText,
+      text,
+    )
   }
 
   const deliveredTextTarget =
@@ -856,11 +862,18 @@ async function sendLinqVoiceMemoDelivery(input: {
           targetKind: voiceMemoTargetKind,
         })
         appendDeliveredProviderMessageIds(providerMessageIds, deliveredFallback)
+        appendDeliveredProviderMessageEffects(
+          providerMessageEffects,
+          deliveredFallback,
+          fallbackText,
+        )
         return {
           target: readDeliveredTarget(deliveredFallback) ?? voiceMemoTarget,
           targetKind:
             readDeliveredTargetKind(deliveredFallback) ?? voiceMemoTargetKind,
           providerMessageId: readDeliveredProviderMessageId(deliveredFallback),
+          providerMessageEffects:
+            providerMessageEffects.length > 0 ? providerMessageEffects : null,
           providerMessageIds: providerMessageIds.length > 0 ? providerMessageIds : null,
           providerThreadId:
             readDeliveredProviderThreadId(deliveredFallback) ??
@@ -894,15 +907,20 @@ async function sendLinqVoiceMemoDelivery(input: {
       targetKind: voiceMemoTargetKind,
     })
   }
+  appendDeliveredProviderMessageIds(providerMessageIds, deliveredVoiceMemo)
+  appendDeliveredProviderMessageEffects(
+    providerMessageEffects,
+    deliveredVoiceMemo,
+    null,
+  )
   const voiceMessageId = readDeliveredProviderMessageId(deliveredVoiceMemo)
-  if (voiceMessageId) {
-    providerMessageIds.push(voiceMessageId)
-  }
 
   return {
     target: readDeliveredTarget(deliveredVoiceMemo) ?? voiceMemoTarget,
     targetKind: readDeliveredTargetKind(deliveredVoiceMemo) ?? voiceMemoTargetKind,
     providerMessageId: voiceMessageId,
+    providerMessageEffects:
+      providerMessageEffects.length > 0 ? providerMessageEffects : null,
     providerMessageIds: providerMessageIds.length > 0 ? providerMessageIds : null,
     providerThreadId:
       readDeliveredProviderThreadId(deliveredVoiceMemo) ?? voiceMemoTarget,
@@ -1083,6 +1101,34 @@ function appendDeliveredProviderMessageIds(
   const providerMessageId = readDeliveredProviderMessageId(delivered)
   if (providerMessageId) {
     output.push(providerMessageId)
+  }
+}
+
+function appendDeliveredProviderMessageEffects(
+  output: AssistantProviderMessageEffect[],
+  delivered:
+    | {
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerMessageEffects?: AssistantProviderMessageEffect[] | null
+      }
+    | void,
+  message: string | null,
+): void {
+  const deliveredEffects = readDeliveredProviderMessageEffects(delivered)
+  if (deliveredEffects) {
+    output.push(...deliveredEffects)
+    return
+  }
+
+  const providerMessageIds =
+    readDeliveredProviderMessageIds(delivered) ??
+    [readDeliveredProviderMessageId(delivered)].filter(
+      (providerMessageId): providerMessageId is string =>
+        providerMessageId !== null,
+    )
+  for (const providerMessageId of providerMessageIds) {
+    output.push({ message, providerMessageId })
   }
 }
 
