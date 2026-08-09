@@ -246,11 +246,22 @@ takes admission priority after an earlier page, any currently owed telemetry
 travels in that same immutable body while replayable gauges remain excluded;
 pure deferred evidence keeps its stored check time, an aggregate containing a
 new current delta uses the latest included check, and telemetry keeps its own
-condition-local observation time. Concrete unsafe conditions retain their
-30-minute recurrence. The object writes Linq provider-attempt
-admission before egress, never attempts more than once per 30 minutes across all
-incidents, and reuses the exact body plus idempotency key after an ambiguous
-send. The alert-state and sample-evidence columns are added idempotently without advancing the
+condition-local observation time. Concrete unsafe conditions retain an hourly
+recurrence. The object writes Linq provider-attempt admission before egress,
+never attempts more than once per hour across all incidents, and reuses the
+exact body plus idempotency key after an ambiguous send. Concrete-pressure
+bodies select deterministically by persisted incident and alert identity from
+one hundred reviewed, observation-scoped openings. Those openings say only
+that the recorded check met alert criteria; condition-specific and current-
+state claims come from evidence that proves them. Retries therefore keep a
+truthful body after recovery, while consecutive pages avoid broadcast-shaped
+repetition without padding or filler. Telemetry-
+only pages remain evidence-led and one-shot for each unresolved monitoring
+window. The one-hundred-entry size is a bounded operator deliverability
+requirement, not a guarantee about carrier or platform filtering: at the hourly
+cap, one incident traverses one hundred reviewed leads before repeating one.
+The bank stays literal reviewed data rather than generated prose or another
+runtime dependency. The alert-state and sample-evidence columns are added idempotently without advancing the
 schema version, so the previously deployed Worker can ignore them during a
 rollback. If that Worker acknowledges a telemetry pending body, current code
 recognizes its cleared key/body plus retained marker and prevents duplicate

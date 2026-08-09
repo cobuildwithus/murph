@@ -21,7 +21,7 @@ import {
 
 const PLANETSCALE_API_ORIGIN = "https://api.planetscale.com";
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
-const DATABASE_HEALTH_ALERT_INTERVAL_MS = 30 * 60 * 1_000;
+const DATABASE_HEALTH_ALERT_INTERVAL_MS = 60 * 60 * 1_000;
 const DATABASE_HEALTH_RUN_LEASE_MS = 2 * 60 * 1_000;
 const DATABASE_HEALTH_SAMPLE_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const DATABASE_HEALTH_FETCH_TIMEOUT_MS = 10_000;
@@ -38,12 +38,106 @@ const PLANETSCALE_SCRAPE_URL_LENGTH_LIMIT = 8_192;
 const MONITORING_FAILURE_ALERT_COUNT = 2;
 
 const DATABASE_ALERT_OPENINGS = [
-  "Murph database needs a look.",
-  "Database health is outside the safe range.",
-  "The production database is under pressure.",
-  "Murph's database monitor found a live issue.",
-  "Database connection health is degraded.",
-  "The database is still reporting an unsafe condition.",
+  "The database monitor recorded an alerting observation.",
+  "A database health check met the paging criteria.",
+  "The monitor captured database evidence outside safe bounds.",
+  "A recorded database check satisfied an alert rule.",
+  "The database health sample below warranted operator review.",
+  "The monitor logged an unsafe database observation.",
+  "A database check produced evidence that required attention.",
+  "The recorded database sample triggered the health monitor.",
+  "The monitor observed a database condition outside its safe range.",
+  "A database safety check produced an alert.",
+  "The included database observation met incident criteria.",
+  "The monitor recorded database evidence for operator review.",
+  "A database health sample was flagged by a configured rule.",
+  "The check below produced alert-level database evidence.",
+  "The monitor captured a database exception at check time.",
+  "A recorded database observation fell outside normal bounds.",
+  "The database check below warranted investigation.",
+  "The monitor logged a database health exception.",
+  "An observed database condition met the alert rule.",
+  "The recorded check produced a database-health page.",
+  "The monitor captured evidence that crossed a database guardrail.",
+  "A database observation triggered operator paging.",
+  "The included health check found an out-of-range database condition.",
+  "The monitor recorded a database signal that warranted review.",
+  "A database check met the configured alerting rule.",
+  "The observation below triggered a database-health incident.",
+  "The monitor logged database evidence outside the operating range.",
+  "A recorded database condition crossed its safety rule.",
+  "The database health check below was flagged for follow-up.",
+  "The monitor captured an alert-worthy database observation.",
+  "A database sample warranted operator attention.",
+  "The recorded check found a database-health exception.",
+  "The monitor logged an observation that activated a database alert.",
+  "A database condition observed at check time crossed a guardrail.",
+  "The included database sample met paging policy.",
+  "The monitor recorded an out-of-bounds database check.",
+  "A database health observation generated an operator page.",
+  "The check below matched a database alert condition.",
+  "The monitor captured a database-health rule violation.",
+  "A recorded database signal qualified for incident review.",
+  "The database observation below was flagged by the monitor.",
+  "The monitor logged alert-level evidence from a database check.",
+  "A database health rule was crossed in the recorded sample.",
+  "The included check produced an actionable database observation.",
+  "The monitor recorded a database condition that met alert criteria.",
+  "A database observation was outside the configured safety bounds.",
+  "The recorded health sample activated database paging.",
+  "The monitor captured a database check that warranted review.",
+  "A database alert rule matched the observation below.",
+  "The included database evidence crossed an operating guardrail.",
+  "The monitor logged an alert-triggering database sample.",
+  "A database-health condition was observed at the recorded check.",
+  "The recorded database check satisfied the paging rule.",
+  "The monitor captured evidence for a database incident.",
+  "A database sample was flagged outside its normal range.",
+  "The included observation met database paging criteria.",
+  "The monitor recorded an exception in the database health check.",
+  "A database condition at check time triggered the alert path.",
+  "The recorded sample produced an evidence-backed database page.",
+  "The monitor logged a database observation for operator triage.",
+  "A database-health guardrail was crossed in the included check.",
+  "The observation below matched an unsafe database rule.",
+  "The monitor captured an alert event from the database check.",
+  "A recorded database sample met the monitor's alert criteria.",
+  "The included health evidence triggered database paging.",
+  "The monitor logged a database condition beyond a configured bound.",
+  "A database check was flagged by the health monitor.",
+  "The recorded observation crossed a database alert boundary.",
+  "The monitor captured an out-of-range database sample.",
+  "A database-health exception was recorded at check time.",
+  "The included check met the database incident rule.",
+  "The monitor logged evidence for an operator database review.",
+  "A recorded database condition activated the paging path.",
+  "The database sample below crossed a configured guardrail.",
+  "The monitor captured an observation that met alert policy.",
+  "A database health check was recorded outside safe bounds.",
+  "The included database condition triggered an incident page.",
+  "The monitor logged a database sample that required review.",
+  "A database observation matched the configured alert rule.",
+  "The recorded check crossed a database safety boundary.",
+  "The monitor captured alerting evidence from the database.",
+  "A database health sample was flagged for operator attention.",
+  "The included observation produced a database alert.",
+  "The monitor logged a database exception against its guardrails.",
+  "A recorded database condition warranted investigation.",
+  "The database check below matched paging criteria.",
+  "The monitor captured an unsafe observation at check time.",
+  "A database-health rule flagged the recorded sample.",
+  "The included evidence satisfied a database paging rule.",
+  "The monitor logged a condition outside database safety bounds.",
+  "A database observation at check time triggered paging.",
+  "The recorded health check produced a database incident signal.",
+  "The monitor captured a database sample beyond its alert boundary.",
+  "A database condition in the included check warranted review.",
+  "The recorded observation matched a database-health exception.",
+  "The monitor logged an alert-triggering database check.",
+  "A database health sample activated the paging rule.",
+  "The included database evidence was flagged by the monitor.",
+  "The monitor captured a database observation for operator review.",
+  "A recorded database check met the incident criteria.",
 ] as const;
 
 const DATABASE_METRIC_ALERT_LABELS: Readonly<
@@ -1002,12 +1096,12 @@ function buildDatabaseAlertMessage(input: {
       .join("; ");
     return `${evidence}. Window ended ${checkedAt} UTC.`;
   }
-  const openingIndex =
-    (
-      input.incidentSequence
-      + input.alertSequence
-      - 2
-    ) % DATABASE_ALERT_OPENINGS.length;
+  // Both steps are coprime to the 100-item bank, so one incident traverses
+  // every reviewed opening before repeating while retries remain reproducible.
+  const openingIndex = normalizeModulo(
+    input.incidentSequence * 37 + input.alertSequence * 17,
+    DATABASE_ALERT_OPENINGS.length,
+  );
   const opening =
     DATABASE_ALERT_OPENINGS[openingIndex]
     ?? DATABASE_ALERT_OPENINGS[0];
@@ -1019,6 +1113,10 @@ function buildDatabaseAlertMessage(input: {
     )
   ).join("; ");
   return `${opening} ${evidence}. Checked ${checkedAt} UTC.`;
+}
+
+function normalizeModulo(value: number, modulus: number): number {
+  return ((value % modulus) + modulus) % modulus;
 }
 
 function resolveLinqDirectChatIdentity(

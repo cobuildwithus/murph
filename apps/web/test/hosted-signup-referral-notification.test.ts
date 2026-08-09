@@ -95,7 +95,7 @@ describe("hosted signup referral reward notice", () => {
       },
     });
     mocks.buildHostedUsageReferralRewardLabel.mockReturnValue(
-      "$2.75 of cost-weighted usage credit for your Murph",
+      "about 12 more days of Murph usage for your Murph",
     );
   });
 
@@ -104,7 +104,7 @@ describe("hosted signup referral reward notice", () => {
       beneficiaryMemberId: "member_referrer",
       destination: DIRECT_LINQ_DESTINATION,
       notificationKey: "usage-referral-reward:hur_signup",
-      rewardLabel: "$2.75 of cost-weighted usage credit for your Murph",
+      rewardLabel: "about 12 more days of Murph usage for your Murph",
       rewardedAt: REWARDED_AT,
     });
 
@@ -116,10 +116,10 @@ describe("hosted signup referral reward notice", () => {
       "someone completed Murph setup through their referral link",
     );
     expect(wake.notification.instructions).toContain(
-      "already received $2.75 of cost-weighted usage credit for your Murph",
+      "already received about 12 more days of Murph usage for your Murph",
     );
     expect(wake.notification.instructions).toContain(
-      'Final message: include "$2.75 of cost-weighted usage credit for your Murph" exactly',
+      'Final message: include "about 12 more days of Murph usage for your Murph" exactly',
     );
     expect(wake.notification.instructions).toContain(
       "Do not identify, name, or guess who joined",
@@ -161,6 +161,8 @@ describe("hosted signup referral reward notice", () => {
       mocks.buildHostedUsageReferralRewardLabel,
     ).toHaveBeenCalledExactlyOnceWith({
       destinationKind: "personal",
+      policyCode: "new_person_activation_v1",
+      policyVersion: SIGNUP_POLICY_VERSION,
       rewardUsdMicros: 2_750_000n,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
@@ -218,12 +220,14 @@ describe("hosted signup referral reward notice", () => {
 
     expect(mocks.buildHostedUsageReferralRewardLabel).toHaveBeenCalledWith({
       destinationKind: "personal",
+      policyCode: "new_person_activation_v1",
+      policyVersion: SIGNUP_POLICY_VERSION,
       rewardUsdMicros: 2_750_000n,
     });
     const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
       ?.envelope;
     expect(envelope?.notification.instructions).toContain(
-      "$2.75 of cost-weighted usage credit for your Murph",
+      "about 12 more days of Murph usage for your Murph",
     );
   });
 

@@ -52,6 +52,8 @@ function createPrisma() {
   const rewardedReferral = {
     beneficiaryMemberId: "member_group",
     celebrationQueuedAt: null,
+    policyCode: "active_group_v1",
+    policyVersion: "hosted-usage-referral-2026-07-v1",
     referrerMemberId: "member_referrer",
     rewardUsdMicros: 2_750_000n,
     rewardedAt: REWARDED_AT,
@@ -110,7 +112,7 @@ describe("hosted usage referral celebration", () => {
       .mockResolvedValueOnce(GROUP_DESTINATION);
   });
 
-  it("keeps a delayed notice bound to the persisted reward amount", async () => {
+  it("keeps a delayed notice bound to the persisted reward day estimate", async () => {
     const { findUnique, prisma, updateMany } = createPrisma();
 
     await expect(reconcileHostedUsageReferralRewardAfterCommit({
@@ -148,13 +150,13 @@ describe("hosted usage referral celebration", () => {
     const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
       ?.envelope;
     expect(envelope?.notification.instructions).toContain(
-      "$2.75 of cost-weighted usage credit for this room",
+      "about 12 more days of Murph usage for this room",
     );
     expect(envelope?.notification.instructions).toContain(
-      'Final message: include "$2.75 of cost-weighted usage credit for this room" exactly',
+      'Final message: include "about 12 more days of Murph usage for this room" exactly',
     );
     expect(envelope?.notification.instructions).not.toContain(
-      "$3.50 of cost-weighted usage credit",
+      "about 14 more days of Murph usage",
     );
   });
 });
