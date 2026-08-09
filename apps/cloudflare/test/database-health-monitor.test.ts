@@ -10,6 +10,8 @@ const DATABASE_NAME = "database_test";
 const ORGANIZATION = "org-test";
 const FIVE_MINUTES_MS = 5 * 60 * 1_000;
 const ONE_HOUR_MS = 60 * 60 * 1_000;
+const STALE_OR_CONDITION_SPECIFIC_OPENING_CLAIM =
+  /\b(?:active|availability|capacity|connection|current|degraded|headroom|live|now|pressure|remains?|still|threshold|unresolved|utilization)\b/iu;
 const POSTGRES_STATE_ALERT_CASES: ReadonlyArray<{
   condition: {
     count: number;
@@ -173,11 +175,14 @@ describe("database health monitor", () => {
       harness.primaryLinqRequests.map(readLinqRequestBody),
     );
     const openings = messages.map((body) =>
-      body.message.parts[0]?.value.split(" PgBouncer wait")[0]
+      readDatabaseAlertOpening(body.message.parts[0]?.value)
     );
     expect(messages).toHaveLength(101);
     expect(new Set(openings.slice(0, 100)).size).toBe(100);
     expect(openings[100]).toBe(openings[0]);
+    for (const opening of openings) {
+      expect(opening).not.toMatch(STALE_OR_CONDITION_SPECIFIC_OPENING_CLAIM);
+    }
   });
 
   it("fans one admitted alert out to two separate direct chats", async () => {
@@ -565,6 +570,14 @@ describe("database health monitor", () => {
     ).resolves.toMatchObject({ outcome: "alert_sent" });
 
     expect(harness.primaryLinqRequests).toHaveLength(2);
+    const incidentMessages = await Promise.all(
+      harness.primaryLinqRequests.map(readLinqRequestBody),
+    );
+    expect(readDatabaseAlertOpening(
+      incidentMessages[1]?.message.parts[0]?.value,
+    )).not.toBe(readDatabaseAlertOpening(
+      incidentMessages[0]?.message.parts[0]?.value,
+    ));
   });
 
   it("paces provider attempts by wall time when cron delivery is delayed", async () => {
@@ -1488,7 +1501,8 @@ describe("database health monitor", () => {
       harness.primaryLinqRequests[1],
     );
     expect(combinedAlert.message.parts[0]?.value).toBe(
-      "The data layer is operating in a degraded range. PgBouncer wait 9s; "
+      "The monitor logged evidence for an operator database review. "
+      + "PgBouncer wait 9s; "
       + "Database monitor telemetry was incomplete for 2 checks "
       + "(window ended 00:15 UTC; missing PlanetScale metric observed: "
       + "Postgres max connections). Checked 01:05 UTC.",
@@ -1553,10 +1567,14 @@ describe("database health monitor", () => {
       pendingAlertIncludesMonitoring: true,
     });
     expect(pressurePending.pendingAlertMessage).toBe(
-      "Live database capacity is below the required margin. PgBouncer wait 8s; "
+      "The recorded health check produced a database incident signal. "
+      + "PgBouncer wait 8s; "
       + "Database monitor telemetry was incomplete for 2 checks "
       + "(missing PlanetScale metric observed: Postgres max connections). "
       + "Checked 00:20 UTC.",
+    );
+    expectObservationScopedDatabaseOpening(
+      pressurePending.pendingAlertMessage,
     );
     expect(pressurePending.pendingAlertIdempotencyKey).not.toBeNull();
 
@@ -1677,7 +1695,8 @@ describe("database health monitor", () => {
       pendingAlertIncludesMonitoring: true,
     });
     expect(mixedPending.pendingAlertMessage).toBe(
-      "Live database capacity is below the required margin. PgBouncer wait 8s; "
+      "The recorded health check produced a database incident signal. "
+      + "PgBouncer wait 8s; "
       + "Database monitor telemetry was incomplete for 2 checks "
       + "(window ended 00:20 UTC; missing PlanetScale metric observed: "
       + "Postgres max connections). Checked 00:25 UTC.",
@@ -1793,7 +1812,8 @@ describe("database health monitor", () => {
       pendingAlertIncludesMonitoring: true,
     });
     expect(mixedPending.pendingAlertMessage).toBe(
-      "Live database capacity is below the required margin. PgBouncer wait 8s; "
+      "The recorded health check produced a database incident signal. "
+      + "PgBouncer wait 8s; "
       + "Database monitor telemetry was incomplete for 2 checks "
       + "(window ended 00:20 UTC; missing PlanetScale metric observed: "
       + "Postgres max connections); 2 direct migration connection errors. "
@@ -2269,9 +2289,14 @@ describe("database health monitor", () => {
       outcome: "alert_sent",
     });
 
-    expect(
-      (await readLinqRequestBody(harness.primaryLinqRequests[0])).message.parts[0]?.value,
-    ).toContain("2 direct migration connection errors");
+    const directErrorMessage = (await readLinqRequestBody(
+      harness.primaryLinqRequests[0],
+    )).message.parts[0]?.value;
+    expect(directErrorMessage)
+      .toContain("2 direct migration connection errors");
+    expect(directErrorMessage)
+      .not.toMatch(/\b(?:capacity|headroom|pressure|utilization)\b/iu);
+    expectObservationScopedDatabaseOpening(directErrorMessage);
   });
 
   it("delivers a one-sample direct error admitted inside the attempt fence", async () => {
@@ -2868,10 +2893,11 @@ describe("database health monitor", () => {
           conditions: [condition],
           outcome: "alert_sent",
         });
-      expect(
-        (await readLinqRequestBody(harness.primaryLinqRequests[0]))
-          .message.parts[0]?.value,
-      ).toContain(evidence);
+      const message = (await readLinqRequestBody(
+        harness.primaryLinqRequests[0],
+      )).message.parts[0]?.value;
+      expect(message).toContain(evidence);
+      expectObservationScopedDatabaseOpening(message);
     },
   );
 
@@ -3245,4 +3271,24 @@ async function readLinqRequestBody(
     throw new Error("Expected a Linq request.");
   }
   return await request.clone().json() as LinqRequestBody;
+}
+
+function expectObservationScopedDatabaseOpening(
+  message: string | null | undefined,
+): void {
+  expect(readDatabaseAlertOpening(message))
+    .not.toMatch(STALE_OR_CONDITION_SPECIFIC_OPENING_CLAIM);
+}
+
+function readDatabaseAlertOpening(
+  message: string | null | undefined,
+): string {
+  if (!message) {
+    throw new Error("Expected a database alert message.");
+  }
+  const sentenceEnd = message.indexOf(". ");
+  if (sentenceEnd === -1) {
+    throw new Error("Expected a database alert opening sentence.");
+  }
+  return message.slice(0, sentenceEnd + 1);
 }

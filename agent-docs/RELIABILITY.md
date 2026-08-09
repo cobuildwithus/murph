@@ -279,9 +279,12 @@ Last verified: 2026-08-09
   distinct recipients clears the pending alert. An idempotent replay of a
   destination that already succeeded cannot produce another recipient-visible
   message. Acknowledged concrete-condition recurrences advance the alert
-  sequence and deterministically select from one hundred reviewed openings by
-  persisted incident and alert identity; the current metric evidence and check
-  time make each body specific, while a retry retains the exact persisted body.
+  sequence and deterministically select from one hundred reviewed,
+  observation-scoped openings by persisted incident and alert identity. An
+  opening may say only that the recorded check met alert criteria; current-state
+  or condition-specific claims must come from evidence that proves them. The
+  recorded evidence and check time make each body specific, while a retry
+  retains that truthful exact body after recovery.
   Telemetry-only copy instead states that monitoring is incomplete or
   unavailable and cannot claim that the database itself is under pressure.
   Message variation must remain contextual and deterministic, never random
