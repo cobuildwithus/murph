@@ -25,6 +25,7 @@ import {
   upsertAutomation,
 } from '@murphai/core'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
+import { readMaterializedExportPackReceipt } from '@murphai/vault-usecases/export-packs'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   renderAssistantResponseCardText,
@@ -35,6 +36,7 @@ import {
   hasAssistantSeenFirstContact,
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.ts'
+import { ASSISTANT_GENERATED_DELIVERY_DIRECTORY } from '../src/assistant/generated-delivery-files.ts'
 import {
   completeAssistantOnboarding,
   reopenAssistantOnboarding,
@@ -151,6 +153,87 @@ afterEach(async () => {
 })
 
 describe('assistant outbox runtime', () => {
+  it('retires claimed export packs only after confirmed delivery', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-export-pack-retirement-',
+    )
+    const sentManifestPath = path.join(
+      vaultRoot,
+      'exports/packs/sent-pack/manifest.json',
+    )
+    const failedManifestPath = path.join(
+      vaultRoot,
+      'exports/packs/failed-pack/manifest.json',
+    )
+    await mkdir(path.dirname(sentManifestPath), { recursive: true })
+    await mkdir(path.dirname(failedManifestPath), { recursive: true })
+    await writeFile(sentManifestPath, JSON.stringify({ packId: 'sent-pack' }))
+    await writeFile(failedManifestPath, JSON.stringify({ packId: 'failed-pack' }))
+
+    const sentReceipt = await readMaterializedExportPackReceipt(
+      vaultRoot,
+      'sent-pack',
+    )
+    const failedReceipt = await readMaterializedExportPackReceipt(
+      vaultRoot,
+      'failed-pack',
+    )
+    const media = (receipt: typeof sentReceipt) => [{
+      approvalGeneration: null,
+      approvalId: null,
+      contentType: 'application/zip',
+      filename: 'vault.zip',
+      kind: 'vault_file' as const,
+      ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/vault.zip`,
+      retireExportPacks: [receipt],
+      sha256: 'a'.repeat(64),
+      sizeBytes: 42,
+    }]
+    const sentIntent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      media: media(sentReceipt),
+      message: 'vault.zip',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({ channel: 'linq' }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const sent = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: sentIntent.intentId,
+      vault: vaultRoot,
+    })
+    expect(sent.intent.status).toBe('sent')
+    await expect(readFile(sentManifestPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+
+    const failedIntent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      media: media(failedReceipt),
+      message: 'vault.zip',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('channel rejected the file'), {
+        code: 'CHANNEL_REJECTED',
+        context: { retryable: false },
+      }),
+    )
+    const failed = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: failedIntent.intentId,
+      vault: vaultRoot,
+    })
+    expect(failed.intent.status).toBe('failed')
+    await expect(readFile(failedManifestPath, 'utf8')).resolves.toContain(
+      'failed-pack',
+    )
+  })
+
   it('dedupes non-terminal intents, allows retries after permanent failure, and rejects blank messages', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-dedupe-')
 

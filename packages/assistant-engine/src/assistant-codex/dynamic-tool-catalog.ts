@@ -1040,7 +1040,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When a generated ZIP contains derived exports/packs/<packId> directories, pass those exact included ids in retire_export_pack_ids; never include a pack that is absent from the ZIP. The runtime retires only unchanged claimed packs after confirmed delivery. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1051,6 +1051,17 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
         maxLength: 1024,
         description:
           `Normalized vault-relative path, for example documents/report.pdf. The exact flat ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> runtime ref is also accepted; all other hidden paths, traversal, absolute paths, and unsupported file types are rejected.`,
+      },
+      retire_export_pack_ids: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 20,
+        items: {
+          type: 'string',
+          pattern: '^[A-Za-z0-9_-]+$',
+        },
+        description:
+          'Exact derived export-pack ids included in this generated ZIP. Omit for every other file.',
       },
     },
     required: ['ref'],
