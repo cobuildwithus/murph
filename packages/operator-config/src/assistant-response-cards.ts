@@ -44,7 +44,7 @@ const NUTRITION_CARD_GOAL_STATUS_LABELS = {
 
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
-export const LINQ_IMESSAGE_APP_CARD_ORIGIN = 'https://murph.ai'
+export const LINQ_IMESSAGE_APP_CARD_ORIGIN = 'https://www.withmurph.ai'
 const APP_CARD_URL_PREFIX =
   `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`
 const LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048

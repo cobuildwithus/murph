@@ -34,7 +34,7 @@ const TRACKED_WORKOUT_CARD = {
   },
 } satisfies AssistantResponseCard
 
-const APP_CARD_URL_PREFIX = 'https://murph.ai/#murph-card='
+const APP_CARD_URL_PREFIX = 'https://www.withmurph.ai/#murph-card='
 
 function encodeEnvelopeUrl(card: unknown): string {
   return `${APP_CARD_URL_PREFIX}${Buffer.from(

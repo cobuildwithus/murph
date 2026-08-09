@@ -2507,7 +2507,8 @@ canonical UTC snapshot instant. That reference remains in semantic transcript
 history so a later turn can reopen the workout without a second table store;
 the native presentation projection omits it before encoding the card URL.
 Linq requires an HTTPS app-card URL, so V3 compact-table envelopes use a
-bounded Base64URL fragment on the fixed `https://murph.ai/` origin. The
+bounded Base64URL fragment on the fixed canonical
+`https://www.withmurph.ai/` origin. The
 fragment stays inside the immutable message URL, is not sent to the Web origin
 by an HTTPS request, and is decoded locally by the Messages extension. This is
 a narrow presentation exception to the fixed-URL rule: the fragment may contain
