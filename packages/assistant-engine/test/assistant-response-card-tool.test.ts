@@ -176,7 +176,7 @@ describe('murph.attach_response_card', () => {
       'never calculate or reuse totals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Require one scalar active canonical daily goal for all five metrics',
+      'Require exactly one unambiguous active scalar target for each of the five metrics, resolved across active canonical Goals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'nutrition-strategy/references/daily-nutrition-card-goals.md',
@@ -189,6 +189,9 @@ describe('murph.attach_response_card', () => {
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Only a later eligible response may use the accepted goals',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A scheduled closeout must not ask for inputs or create, change, or explain a proposal',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Explicit active targets win metric by metric',

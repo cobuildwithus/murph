@@ -1,8 +1,11 @@
 # Daily nutrition-card goals
 
-Use this only when Murph is otherwise eligible to send a private daily
-nutrition card and the member does not already have one complete, unambiguous
-daily target for calories, protein, carbohydrate, fat, and fiber.
+Use this only after an explicit interactive request to set nutrition targets or
+to receive a numeric daily nutrition card when the member does not already have
+one complete, unambiguous daily target for calories, protein, carbohydrate,
+fat, and fiber. A scheduled closeout may use an already accepted active bundle,
+but it must not use this workflow to ask for inputs, derive or save targets, or
+surface a proposal.
 
 ## Safety and authority
 
@@ -25,9 +28,10 @@ daily target for calories, protein, carbohydrate, fat, and fiber.
 - A selected-value target is scalar when its comparator is `<`, `<=`, `>`, or
   `>=` using `value`, or `between` with identical `value` and `highValue`.
   Multiple active explicit owners or any other target shape is ambiguous.
-- If one consolidated question can collect the genuinely missing inputs, ask it
-  once. Until a responsible calorie estimate and all five goals exist, save no
-  active defaults and attach no card.
+- After explicit interactive target-setting intent, if one consolidated question
+  can collect the genuinely missing inputs, ask it once. Until a responsible
+  calorie estimate and all five goals exist, save no active defaults and attach
+  no card.
 
 ## Derive a conservative proposal
 
@@ -97,8 +101,14 @@ Use the existing canonical Goal owner; add no new state surface.
    - `murph-default-fat-grams`: `fat-grams`, `g`
    - `murph-default-fiber-grams`: `fiber-grams`, `g`
 
-   Reuse the same Goal id and stable target ids on every update. Read it back;
-   never create a duplicate or rewrite an unchanged proposal.
+   Reuse the same Goal id and stable target ids on every update. Supplying
+   `metricTargets` replaces that Goal's stored array; every edit or overlap
+   removal must therefore send the complete intended post-update array for the
+   managed Goal. Preserve every unchanged target and stable target id, and omit
+   only a metric deliberately removed because an explicit owner now exists.
+   Never send only the changed or removed target. Read the Goal back and verify
+   the complete retained set; never create a duplicate or rewrite an unchanged
+   proposal. A status-only update may omit `metricTargets`.
 4. A turn that creates or changes the paused proposal must be ordinary text,
    never a card. Briefly name all five effective values, which facts and labeled
    assumptions materially drove them, and why calories, protein, carbohydrate,
@@ -108,17 +118,17 @@ Use the existing canonical Goal owner; add no new state surface.
    `vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active`
    and read that same Goal back. First re-read target authority and remove from
    the managed proposal any metric that has gained an explicit owner. When the
-   member changes a proposed value, update that target in the same paused Goal
-   through `goal import-json`, explain the revision briefly, and wait for
-   acceptance. If the member declines, update the same Goal to `abandoned`. Do
-   not silently recalculate accepted values later. If an explicit target appears
-   after activation, remove only that overlapping metric from the managed Goal;
+   member changes a proposed value, send the complete intended post-update
+   `metricTargets` array for the same paused Goal through `goal import-json`,
+   explain the revision briefly, and wait for acceptance. If the member
+   declines, update the same Goal to `abandoned`. Do not silently recalculate
+   accepted values later. If an explicit target appears after activation, send
+   the managed Goal's complete retained array without that overlapping metric;
    never edit the explicit Goal.
 6. Only a later eligible response with five scalar values resolved from active
    canonical goals may attach the card. Re-read meal totals immediately before
    attachment. On an interactive card request, explain an existing paused
-   proposal again unless the member is accepting or changing it. Do not repeat
-   an automatic setup pitch on every scheduled closeout.
+   proposal again unless the member is accepting or changing it.
 
 ## Evidence register
 

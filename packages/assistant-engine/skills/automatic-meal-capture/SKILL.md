@@ -174,14 +174,13 @@ On a scheduled run:
    replaces retained image bytes with a privacy tombstone. Any removal failure
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
-6. After inspection, enrichment, read-back, and photo cleanup, read
-   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
-   and follow it exactly. Resolve all five targets from active canonical Goals.
-   If the workflow creates or changes its paused proposal, return only the
-   required ordinary-text explanation and stop; do not attach a card. If the
-   proposal already exists but remains paused, retain the ordinary compact
-   closeout without repeating the automatic proposal every night. Never infer a
-   target from this day's meal total or one wearable day.
+6. After inspection, enrichment, read-back, and photo cleanup, resolve all five
+   targets from active canonical Goals. This scheduled closeout does not provide
+   target-setting intent: do not ask for profile inputs, call `goal import-json`,
+   create or change a paused proposal, or surface a numeric target proposal. If
+   the active target bundle is incomplete or ambiguous, retain the ordinary
+   compact closeout and do not attach a card. Never infer a target from this
+   day's meal total or one wearable day.
 7. Only when all five scalar targets resolve from active canonical Goals, run
    the exact canonical
    `vault-cli meal totals --from <date> --to <date>` read for the selected date

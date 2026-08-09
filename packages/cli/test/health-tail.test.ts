@@ -573,6 +573,119 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
   }
 });
 
+test("goal import-json preserves sibling nutrition targets when editing or removing one metric", async () => {
+  const cli = createVaultCli();
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const createPayloadPath = path.join(vaultRoot, "nutrition-goal-create.json");
+  const editPayloadPath = path.join(vaultRoot, "nutrition-goal-edit.json");
+  const removePayloadPath = path.join(vaultRoot, "nutrition-goal-remove.json");
+  const target = (
+    targetId: string,
+    metricKey: string,
+    unit: string,
+    value: number,
+  ) => ({
+    targetId,
+    kind: "metric",
+    metricKey,
+    comparator: "between",
+    value,
+    highValue: value,
+    unit,
+    evaluation: { kind: "selected-value" },
+  });
+  const originalTargets = [
+    target("murph-default-dietary-calories", "dietary-calories", "kcal", 2_400),
+    target("murph-default-protein-grams", "protein-grams", "g", 150),
+    target("murph-default-carbs-grams", "carbs-grams", "g", 270),
+    target("murph-default-fat-grams", "fat-grams", "g", 80),
+    target("murph-default-fiber-grams", "fiber-grams", "g", 35),
+  ];
+
+  try {
+    await runInProcessJsonCli(cli, ["init", "--vault", vaultRoot]);
+    await writeFile(
+      createPayloadPath,
+      JSON.stringify({
+        title: "Daily nutrition targets",
+        slug: "murph-daily-nutrition-starting-targets",
+        status: "paused",
+        horizon: "ongoing",
+        domains: ["nutrition"],
+        metricTargets: originalTargets,
+      }),
+      "utf8",
+    );
+    const { envelope: created } = await runInProcessJsonCli<{
+      goalId: string;
+    }>(cli, [
+      "goal",
+      "import-json",
+      "--input",
+      `@${createPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const goalId = requireData(created).goalId;
+    const editedTargets = originalTargets.map((entry) =>
+      entry.metricKey === "protein-grams"
+        ? { ...entry, value: 155, highValue: 155 }
+        : entry,
+    );
+
+    await writeFile(
+      editPayloadPath,
+      JSON.stringify({ goalId, metricTargets: editedTargets }),
+      "utf8",
+    );
+    const { envelope: edited } = await runInProcessJsonCli(cli, [
+      "goal",
+      "import-json",
+      "--input",
+      `@${editPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const { envelope: shownAfterEdit } = await runInProcessJsonCli<{
+      entity: { data: { metricTargets: typeof editedTargets } };
+    }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
+
+    assert.equal(edited.ok, true);
+    assert.deepEqual(
+      requireData(shownAfterEdit).entity.data.metricTargets,
+      editedTargets,
+    );
+
+    const retainedTargets = editedTargets.filter(
+      (entry) => entry.metricKey !== "protein-grams",
+    );
+    await writeFile(
+      removePayloadPath,
+      JSON.stringify({ goalId, metricTargets: retainedTargets }),
+      "utf8",
+    );
+    const { envelope: removed } = await runInProcessJsonCli(cli, [
+      "goal",
+      "import-json",
+      "--input",
+      `@${removePayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const { envelope: shownAfterRemoval } = await runInProcessJsonCli<{
+      entity: { data: { metricTargets: typeof retainedTargets } };
+    }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
+
+    assert.equal(removed.ok, true);
+    assert.deepEqual(
+      requireData(shownAfterRemoval).entity.data.metricTargets,
+      retainedTargets,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("goal import-json validates payloads through the shared goal schema", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-invalid.json");
