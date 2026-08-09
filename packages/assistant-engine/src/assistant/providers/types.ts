@@ -121,6 +121,15 @@ export interface AssistantProviderDynamicTool {
   readonly namespace: string
 }
 
+/**
+ * Trusted per-turn limits for generated songs. This is execution policy only:
+ * prompts and model-supplied tool arguments cannot relax it.
+ */
+export interface AssistantGenerateSongTurnPolicy {
+  readonly maxAttempts: number
+  readonly requiredDurationSeconds: number
+}
+
 export interface AssistantProviderTurn {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
@@ -135,6 +144,7 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
+  generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((

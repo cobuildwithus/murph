@@ -139,6 +139,7 @@ import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from './assistant/message-target-selection.js'
 import type {
+  AssistantGenerateSongTurnPolicy,
   AssistantNoReplyDisposition,
   AssistantProviderDynamicTool,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
@@ -475,6 +476,7 @@ export interface CodexAppServerTurnInput {
   baseInstructions?: string | null
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
+  generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
   excludeResumeTurns?: boolean
   model?: string | null
   modelProvider?: string | null
@@ -3204,6 +3206,12 @@ async function runCodexAppServerTurnOnProcess(
   // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
+  const generateSongTurnState = input.generateSongPolicy
+    ? {
+        attemptCount: 0,
+        policy: input.generateSongPolicy,
+      }
+    : null
   const subagentTokenUsageByTurn =
     new Map<string, CodexSubagentTurnTokenUsageSample>()
   const trackedSubagentUsageThreadIds = new Set<string>()
@@ -4464,6 +4472,7 @@ async function runCodexAppServerTurnOnProcess(
               ? input.askGrokRuntime ?? null
               : null,
           askGrokTurnState,
+          generateSongTurnState,
         })
         return result
       },
