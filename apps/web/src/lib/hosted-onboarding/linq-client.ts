@@ -757,9 +757,17 @@ export async function sendHostedLinqAttachmentMessage(input: {
   contentType: string;
   fileName: string;
   idempotencyKey?: string | null;
+  /**
+   * Optional tighter deadline for the prepare phase only. Everything it bounds
+   * provably precedes the message POST, so expiring under it can never leave an
+   * ambiguous send. The final POST and its reconciliation deliberately keep the
+   * caller signal: cutting an irreversible send short is worse than waiting.
+   */
+  prepareSignal?: AbortSignal;
   signal?: AbortSignal;
 }): Promise<HostedLinqSendResult> {
   const chatId = normalizeRequiredString(input.chatId, "chat id");
+  const prepareSignal = input.prepareSignal ?? input.signal;
   // Everything before the final message POST is tagged phase "prepare":
   // failures here provably never created a chat message, so callers may undo
   // side effects such as share reservations. The message POST itself stays
@@ -774,7 +782,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
       method: "POST",
       operation: "attachment create",
       path: "attachments",
-      signal: input.signal,
+      signal: prepareSignal,
       timeoutMessage: "Linq attachment create timed out.",
     });
     if (!createResponse.ok) {
@@ -804,7 +812,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
       body: new Uint8Array(input.bytes).buffer,
       headers: parseHostedLinqAttachmentUploadHeaders(created?.required_headers),
       method: "PUT",
-      signal: input.signal ? AbortSignal.any([input.signal, uploadTimeout]) : uploadTimeout,
+      signal: prepareSignal ? AbortSignal.any([prepareSignal, uploadTimeout]) : uploadTimeout,
     });
     if (!uploadResponse.ok) {
       throw buildHostedLinqRequestFailedError({
@@ -954,7 +962,16 @@ async function withHostedLinqAttachmentPreparePhase<T>(run: () => Promise<T>): P
         retryable: error.retryable,
       });
     }
-    throw error;
+    // An abort or transport error here is still provably before the message
+    // POST, so callers may treat it as "nothing reached the chat" too.
+    throw hostedOnboardingError({
+      cause: error,
+      code: "LINQ_SEND_FAILED",
+      details: { phase: HOSTED_LINQ_ATTACHMENT_SEND_PHASE_PREPARE },
+      httpStatus: 502,
+      message: "Linq attachment preparation failed.",
+      retryable: false,
+    });
   }
 }
 

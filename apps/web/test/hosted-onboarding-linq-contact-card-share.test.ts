@@ -486,8 +486,14 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
       signal,
     })).resolves.toEqual({ status: "sent" });
 
-    expect(shareSendMocks.fetchMurphHostedLinqContactCardVcfPhoto)
-      .toHaveBeenCalledWith({ imageUrl, signal });
+    // The photo fetch is a pre-send phase, so it carries the composed pre-send
+    // deadline rather than the caller signal itself. The caller signal still
+    // aborts it, and the send below still gets the caller signal unbounded.
+    const [photoCall] = shareSendMocks.fetchMurphHostedLinqContactCardVcfPhoto
+      .mock.calls as [[{ imageUrl: string; signal: AbortSignal }]];
+    expect(photoCall[0].imageUrl).toBe(imageUrl);
+    expect(photoCall[0].signal).toBeInstanceOf(AbortSignal);
+    expect(photoCall[0].signal).not.toBe(signal);
     expect(shareSendMocks.buildMurphHostedLinqContactCardVcf).toHaveBeenCalledWith({
       backupPhoneNumber: "+15558880000",
       phoneNumber: "+15557770000",
@@ -529,7 +535,7 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
     });
 
     expect(shareSendMocks.fetchMurphHostedLinqContactCardVcfPhoto)
-      .toHaveBeenCalledWith({ imageUrl });
+      .toHaveBeenCalledWith({ imageUrl, signal: expect.any(AbortSignal) });
     expect(shareSendMocks.buildMurphHostedLinqContactCardVcf).not.toHaveBeenCalled();
     expect(shareSendMocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
     // The canonical reservation is untouched and the personalized attempt

@@ -11,9 +11,6 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 
 import {
-  readHostedRuntimeControlPlaneFetchFailureDiagnostics,
-} from "./control-plane-fetch.ts";
-import {
   fetchHostedWebControlPlaneJson,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
@@ -46,47 +43,25 @@ export function createHostedRuntimeGroupToolPort(input: {
           ? AbortSignal.any([signal, timeoutSignal])
           : timeoutSignal;
       }
-      let payload: unknown;
-      try {
-        payload = await fetchHostedWebControlPlaneJson({
-          body: request,
-          boundUserId: input.boundUserId,
-          description: "Hosted group tool",
-          fetchImpl: input.fetchImpl,
-          path: buildHostedRuntimeGroupToolPath(),
-          replayOnceOnRetryableFailure: isHostedAssistantAskGroupToolRequest(request),
-          ...(isParticipantDisplayNameRead
-            ? {
-                sensitiveResponseBody: {
-                  maxBytes:
-                    HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_RESPONSE_MAX_BYTES,
-                },
-              }
-            : {}),
-          signal,
-          timeoutMs,
-          transport: input.transport,
-        });
-      } catch (error) {
-        // Web deliberately finishes an irreversible card send even when this
-        // hop gives up on it, because aborting one is worse than waiting for
-        // it. So a personalized card whose answer never came back is the same
-        // uncertainty the send owner already names, and the turn must be able
-        // to say so instead of reporting a generic tool failure over a card
-        // that may be sitting in the conversation. Only a missing response
-        // counts: an answer from Web, including an error status, is a real
-        // answer and stays a failure.
-        if (
-          isHostedPersonalizedContactCardRequest(request)
-          && readHostedRuntimeControlPlaneFetchFailureDiagnostics(error) !== null
-        ) {
-          return {
-            action: "share_contact_card",
-            result: { status: "unconfirmed" },
-          };
-        }
-        throw error;
-      }
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted group tool",
+        fetchImpl: input.fetchImpl,
+        path: buildHostedRuntimeGroupToolPath(),
+        replayOnceOnRetryableFailure: isHostedAssistantAskGroupToolRequest(request),
+        ...(isParticipantDisplayNameRead
+          ? {
+              sensitiveResponseBody: {
+                maxBytes:
+                  HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_RESPONSE_MAX_BYTES,
+              },
+            }
+          : {}),
+        signal,
+        timeoutMs,
+        transport: input.transport,
+      });
 
       try {
         return parseHostedRuntimeGroupToolResponse(payload);
@@ -95,15 +70,6 @@ export function createHostedRuntimeGroupToolPort(input: {
       }
     },
   };
-}
-
-function isHostedPersonalizedContactCardRequest(
-  request: Parameters<
-    NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
-  >[0],
-): boolean {
-  return request.action === "share_contact_card"
-    && typeof request.contactCardImageUrl === "string";
 }
 
 function isHostedAssistantAskGroupToolRequest(

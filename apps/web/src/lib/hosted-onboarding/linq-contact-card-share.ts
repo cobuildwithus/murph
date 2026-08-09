@@ -71,6 +71,14 @@ type HostedLinqContactCardShareFindManyInput = {
 // imperceptible to it while still covering the retry backoff.
 const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 90 * 1000;
 
+// A personalized send must reach a terminal result inside the runner's
+// web-control hop, or the turn reports something the send owner never decided.
+// Only the phases that provably precede the message POST are bounded by this,
+// so expiring under it always means nothing was sent. It is sized to leave the
+// send and its one reconciliation their full budgets inside that hop, and it is
+// far above the sub-second times these reads actually take.
+const HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS = 8 * 1000;
+
 type HostedLinqContactCardShareSkipReason =
   | "missing_chat_id"
   | "recent_attempt";
@@ -428,6 +436,15 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
       shareKey: input.shareKey,
     };
   }
+  const preSendSignal = personalized
+    ? (input.signal
+      ? AbortSignal.any([
+        input.signal,
+        AbortSignal.timeout(HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS),
+      ])
+      : AbortSignal.timeout(HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS))
+    : input.signal;
+  const preSendSignalOption = preSendSignal ? { signal: preSendSignal } : {};
 
   // A personalized card is saved over the member's working Murph contact, so
   // an obsolete or ambiguous line is worse than no card. Require exactly one
@@ -437,7 +454,7 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
   try {
     const handles = await getHostedLinqChatHandles({
       chatId: input.chatId,
-      ...(input.signal ? { signal: input.signal } : {}),
+      ...preSendSignalOption,
     });
     rosterPresent = handles.length > 0;
     if (personalized) {
@@ -485,7 +502,7 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
     personalized
       ? fetchMurphHostedLinqContactCardVcfPhoto({
           imageUrl: personalized.imageUrl,
-          ...(input.signal ? { signal: input.signal } : {}),
+          ...preSendSignalOption,
         })
       : fetchMurphHostedLinqContactCardVcfPhoto(
           input.signal ? { signal: input.signal } : {},
@@ -520,6 +537,11 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
       contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
       fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
       idempotencyKey,
+      // The attachment create and upload are still before the message POST, so
+      // they carry the tighter deadline. The POST and its reconciliation keep
+      // the caller signal: the whole point is to let an irreversible send
+      // finish and be reported honestly.
+      ...(preSendSignal ? { prepareSignal: preSendSignal } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     });
   } catch (error) {

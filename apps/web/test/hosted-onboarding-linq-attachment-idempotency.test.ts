@@ -12,6 +12,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 const {
+  isHostedLinqAttachmentSendPrepareFailure,
   isHostedLinqIdempotencyKeyReuseFailure,
   isHostedLinqUnconfirmedAcknowledgementFailure,
   sendHostedLinqAttachmentMessage,
@@ -301,6 +302,31 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(isHostedLinqIdempotencyKeyReuseFailure(error)).toBe(false);
     expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
     expect(provider.observedSendBodies).toHaveLength(1);
+    expect(provider.acceptedMessageIds).toEqual([]);
+  });
+
+  it("treats a prepare-deadline expiry as provably unsent", async () => {
+    // Everything the prepare signal bounds happens before the message POST, so
+    // expiring under it can never leave an ambiguous send.
+    const prepareSignal = AbortSignal.abort(new DOMException("deadline", "TimeoutError"));
+
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        prepareSignal,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isHostedLinqAttachmentSendPrepareFailure(error)).toBe(true);
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
+    expect(provider.observedSendBodies).toEqual([]);
     expect(provider.acceptedMessageIds).toEqual([]);
   });
 
