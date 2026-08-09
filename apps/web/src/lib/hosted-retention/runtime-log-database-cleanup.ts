@@ -8,6 +8,9 @@ import {
   deleteExpiredHostedRuntimeLogs,
 } from "../hosted-runtime-log/store";
 import {
+  deleteExpiredHostedBrowserAssertionNonces,
+} from "./browser-assertion-nonces";
+import {
   HOSTED_RETENTION_BATCH_SIZE,
   HOSTED_RETENTION_MAX_BATCHES,
   HOSTED_RUN_LOG_RETENTION_MS,
@@ -27,10 +30,19 @@ export async function runHostedRetentionCleanupWithRuntimeLogDatabase(
     ...input,
     now,
   });
+  const expiredBrowserAssertionNoncesDeleted =
+    await deleteExpiredHostedBrowserAssertionNonces({
+      now,
+      prisma: input.prisma,
+    });
+  const primaryCleanup = {
+    ...cleanup,
+    expiredBrowserAssertionNoncesDeleted,
+  };
 
   try {
     if (!isHostedRuntimeLogDatabaseConfigured()) {
-      return cleanup;
+      return primaryCleanup;
     }
 
     // Keep optional observability cleanup serial. It must not fan out across the
@@ -44,11 +56,11 @@ export async function runHostedRetentionCleanupWithRuntimeLogDatabase(
       ),
     });
     return {
-      ...cleanup,
+      ...primaryCleanup,
       oldRuntimeLogsDeleted: dedicatedRuntimeLogsDeleted,
     };
   } catch (error) {
-    // Account-deletion receipt drain has already completed. Optional diagnostic
+    // Primary-database retention has already completed. Optional diagnostic
     // retention must not turn that work into a retrying cron failure. The next
     // hourly run retries the isolated bounded delete.
     console.warn("Hosted runtime log database retention failed.", {
@@ -56,7 +68,7 @@ export async function runHostedRetentionCleanupWithRuntimeLogDatabase(
         code: "HOSTED_RUNTIME_LOG_RETENTION_FAILED",
       }),
     });
-    return cleanup;
+    return primaryCleanup;
   }
 }
 

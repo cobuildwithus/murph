@@ -272,8 +272,10 @@ must use short-lived signed assertions with the existing HMAC, member,
 audience, method, path, and origin bindings plus single-use nonce replay
 protection. The shared browser-assertion policy makes an integer-second `exp`
 first invalid exactly at `(exp + 61) * 1000`; every earlier millisecond remains
-admissible. New nonce rows persist that first-invalid instant. For
-mixed-version rollout, foreground cleanup deletes only rows whose stored
+admissible. New nonce rows persist that first-invalid instant, while request
+admission performs one primary-key insert and treats only the exact nonce
+conflict as replay. For mixed-version rollout, the bounded hourly
+hosted-retention owner deletes only rows whose stored
 `expiresAt <= now - 61 seconds`, retaining legacy raw-`exp` rows through the
 full accepted window and intentionally retaining new-format rows for one extra
 61-second interval.
