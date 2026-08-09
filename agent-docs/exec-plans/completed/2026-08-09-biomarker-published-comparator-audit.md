@@ -89,10 +89,10 @@ Supporting authorities include the ACC discussion of assay-specific troponin
 and National Kidney Foundation guidance preferring urine albumin-to-creatinine
 ratio over raw urine albumin concentration:
 
-- https://www.acc.org/latest-in-cardiology/articles/2019/08/05/07/44/high-sensitivity-cardiac-troponin-and-the-2021-aha-acc-guideline-for-the-evaluation-and-diagnosis-of-chest-pain
-- https://www.niddk.nih.gov/health-information/professionals/clinical-tools-patient-management/kidney-disease/laboratory-evaluation/glomerular-filtration-rate/estimating
-- https://www.niddk.nih.gov/health-information/professionals/clinical-tools-patient-management/kidney-disease/identify-manage-patients/evaluate-urine-albumin
-- https://www.kidney.org/kidney-topics/urine-albumin-creatinine-ratio-uacr
+- https://www.acc.org/Latest-in-Cardiology/ten-points-to-remember/2022/07/14/18/12/High-Sensitivity-CTn-and-2021-Chest-Pain
+- https://www.niddk.nih.gov/research-funding/research-programs/kidney-clinical-research-epidemiology/laboratory/glomerular-filtration-rate-equations
+- https://www.niddk.nih.gov/health-information/professionals/clinical-tools-patient-management/kidney-disease/identify-manage-patients/evaluate-ckd/assess-urine-albumin
+- https://www.kidney.org/kidney-failure-risk-factor-urine-albumin-creatinine-ratio-uacr
 
 ## Architecture decision
 
