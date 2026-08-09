@@ -11,6 +11,8 @@ interface RecordedDatabaseHealthMessageRequest {
 
 const recordedDatabaseHealthMessageRequests:
   RecordedDatabaseHealthMessageRequest[] = [];
+let databaseHealthClientWaitSeconds = 8;
+let databaseHealthNowMs = Date.now();
 
 export function readDatabaseHealthMessageRequests():
   RecordedDatabaseHealthMessageRequest[] {
@@ -22,6 +24,20 @@ export function readDatabaseHealthMessageRequests():
 
 export function resetDatabaseHealthMessageRequests(): void {
   recordedDatabaseHealthMessageRequests.length = 0;
+  databaseHealthClientWaitSeconds = 8;
+  databaseHealthNowMs = Date.now();
+}
+
+export function readDatabaseHealthNowMs(): number {
+  return databaseHealthNowMs;
+}
+
+export function setDatabaseHealthClientWaitSeconds(value: number): void {
+  databaseHealthClientWaitSeconds = value;
+}
+
+export function setDatabaseHealthNowMs(value: number): void {
+  databaseHealthNowMs = value;
 }
 
 export async function handleDatabaseHealthEgress(
@@ -70,7 +86,7 @@ export async function handleDatabaseHealthEgress(
   ) {
     return new Response(buildMetricsBody({
       branchId: "branch_worker_test",
-      clientWaitSeconds: 8,
+      clientWaitSeconds: databaseHealthClientWaitSeconds,
     }));
   }
   if (
@@ -161,7 +177,7 @@ function readValidDatabaseHealthMessageRequest(input: {
     || !isObjectRecord(value.message.parts[0])
     || value.message.parts[0].type !== "text"
     || typeof value.message.parts[0].value !== "string"
-    || !value.message.parts[0].value.includes("PgBouncer wait 8s")
+    || !value.message.parts[0].value.includes("PgBouncer wait ")
     || !Array.isArray(value.to)
     || value.to.length !== 1
     || (

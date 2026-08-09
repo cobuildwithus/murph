@@ -364,6 +364,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-retell-call-result-roundtrip-e2e.test.ts",
     name: "retell-call-result-roundtrip",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-usage-limit-ambiguous-send-e2e.test.ts",

@@ -530,6 +530,14 @@ export interface HostedRuntimeGroupToolPort {
     request: HostedRuntimeGroupToolRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>;
+  /**
+   * Trusted-host direct-attachment route eligibility for the current turn.
+   * Only the turn-context wrapper knows the resolved route, so ports that are
+   * not route-aware omit this and leave post-generation binding as the gate.
+   */
+  directAttachmentRouteStatus?():
+    | { status: "ok" }
+    | { status: "unavailable"; unavailableReason: string };
 }
 
 export interface HostedRuntimeNewsletterToolPort {

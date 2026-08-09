@@ -1133,15 +1133,15 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Reserved support bypasses discovery/classification; follow Support')
     expect(prompt).toContain('Never retry after any tool result')
     expect(prompt).toContain('external/transient failures')
-    expect(prompt).toContain('Use `feature_request` for a missing path')
+    expect(prompt).toContain('Use `feature_request` for missing paths')
     expect(prompt).toContain(
-      'Record only kind, a concise product-only summary, and relevant changelog ids when known; ids are optional',
+      'Record only kind, a concise product-only summary, and optional changelog ids',
     )
-    expect(prompt).toContain('Prefix inferred summaries `Speculative:`')
-    expect(prompt).toContain('assistant-observed summaries `Murph-observed:`')
-    expect(prompt).toContain('Do not log vague low-confidence guesses')
     expect(prompt).toContain(
-      'raw user wording or conversation text, health details, identifiers, contact details, secrets, or provider payloads',
+      'append a privacy-safe `Reproduction:` section in that same summary field',
+    )
+    expect(prompt).toContain(
+      'follow the tool schema for prefixes, privacy, and exact contents',
     )
     expect(prompt).not.toContain('structured kind/topic')
     expect(prompt).not.toContain('feedback tags')

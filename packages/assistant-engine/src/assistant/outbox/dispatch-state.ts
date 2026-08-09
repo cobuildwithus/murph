@@ -7,6 +7,7 @@ import {
   type AssistantProviderMessageEffect,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { retireMaterializedExportPack } from '@murphai/vault-usecases/export-packs'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
@@ -310,11 +311,31 @@ export async function markAssistantOutboxIntentSent(input: {
     })
     return sentIntent
   })
+  await retireSentExportPacks(input.vault, sentIntent)
   await attemptAssistantCronDeliveryReconciliation({
     intent: sentIntent,
     vault: input.vault,
   })
   return sentIntent
+}
+
+async function retireSentExportPacks(
+  vault: string,
+  intent: AssistantOutboxIntent,
+): Promise<void> {
+  const receipts = intent.media.flatMap((media) =>
+    media.kind === 'vault_file' ? media.retireExportPacks ?? [] : []
+  )
+  await Promise.all(
+    receipts.map(async (receipt) => {
+      try {
+        await retireMaterializedExportPack(vault, receipt)
+      } catch {
+        // Delivery is already durably sent. Optional cleanup may leave derived
+        // residue, but it must never turn success into a retry or failure.
+      }
+    }),
+  )
 }
 
 export async function updateAssistantOutboxAfterDispatchFailure(input: {

@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer'
+
 import { describe, expect, it } from 'vitest'
 
 import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
@@ -7,6 +9,7 @@ import {
   executeMurphDynamicToolRequest,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   readMurphDynamicToolRequest,
+  resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 const CARD: AssistantResponseCard = {
@@ -42,6 +45,22 @@ const CARD_V2: AssistantResponseCard = {
   },
 }
 
+const CHALLENGE_CARD: AssistantResponseCard = {
+  kind: 'challenge_standings',
+  version: 1,
+  format: 'individual',
+  title: 'Weird Health Week',
+  subtitle: 'Day 4 of 7',
+  objective: { kind: 'ranking' },
+  entries: [{
+    label: 'Maya',
+    points: 120,
+    coverage: 'complete',
+    detail: 'Run selfie + 10k steps',
+  }],
+  footer: null,
+}
+
 const IMAGE: AssistantResponseMedia = {
   alt: null,
   kind: 'image',
@@ -52,6 +71,7 @@ const IMAGE: AssistantResponseMedia = {
 function executeCardTool(input: {
   currentResponseCard?: AssistantResponseCard | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  groupChallengeResponseCardAllowed?: boolean | null
   privateDirectResponseCardAllowed?: boolean | null
   request?: Parameters<typeof executeMurphDynamicToolRequest>[0]['request']
 }) {
@@ -60,6 +80,8 @@ function executeCardTool(input: {
     currentResponseMedia: input.currentResponseMedia ?? [],
     env: {},
     fetchImpl: fetch,
+    groupChallengeResponseCardAllowed:
+      input.groupChallengeResponseCardAllowed ?? false,
     nextUsageOrdinal: () => 0,
     privateDirectResponseCardAllowed:
       input.privateDirectResponseCardAllowed ?? true,
@@ -83,7 +105,92 @@ function readCardToolRequest(argumentsValue: unknown) {
   })
 }
 
+function isSchemaObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeCodexSchemaForSize(value: unknown): unknown {
+  if (!isSchemaObject(value)) {
+    return value
+  }
+  if ('$ref' in value || '$defs' in value || 'definitions' in value) {
+    throw new TypeError('The response-card tool schema must remain inline.')
+  }
+
+  const normalized: Record<string, unknown> = {}
+  for (const key of ['type', 'description', 'encrypted'] as const) {
+    if (key in value) {
+      normalized[key] = value[key]
+    }
+  }
+  if ('const' in value) {
+    normalized.enum = [value.const]
+  } else if ('enum' in value) {
+    normalized.enum = value.enum
+  }
+  if ('items' in value) {
+    normalized.items = normalizeCodexSchemaForSize(value.items)
+  }
+  if (isSchemaObject(value.properties)) {
+    normalized.properties = Object.fromEntries(
+      Object.entries(value.properties).map(([key, schema]) => [
+        key,
+        normalizeCodexSchemaForSize(schema),
+      ]),
+    )
+  }
+  if ('required' in value) {
+    normalized.required = value.required
+  }
+  if ('additionalProperties' in value) {
+    normalized.additionalProperties = isSchemaObject(value.additionalProperties)
+      ? normalizeCodexSchemaForSize(value.additionalProperties)
+      : value.additionalProperties
+  }
+  for (const key of ['anyOf', 'oneOf', 'allOf'] as const) {
+    const variants = value[key]
+    if (Array.isArray(variants)) {
+      normalized[key] = variants.map(normalizeCodexSchemaForSize)
+    }
+  }
+  return normalized
+}
+
 describe('murph.attach_response_card', () => {
+  it('keeps each audience-scoped schema below the Codex compaction boundary', () => {
+    const groupTool = resolveMurphDynamicTools({
+      groupChallengeResponseCardsAvailable: true,
+      responseCardsAvailable: false,
+    }).find((tool) => tool.name === 'attach_response_card')
+    expect(groupTool).toBeDefined()
+
+    for (const tool of [MURPH_ATTACH_RESPONSE_CARD_TOOL, groupTool!]) {
+      const serializedBytes = Buffer.byteLength(
+        JSON.stringify(normalizeCodexSchemaForSize(tool.inputSchema)),
+        'utf8',
+      )
+      expect(serializedBytes).toBeLessThan(5_000)
+    }
+
+    const privateSchema = JSON.stringify(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema,
+    )
+    const groupSchema = JSON.stringify(groupTool!.inputSchema)
+    expect(privateSchema).toContain('daily_nutrition')
+    expect(privateSchema).toContain('compact_table')
+    expect(privateSchema).not.toContain('challenge_standings')
+    expect(groupSchema).toContain('challenge_standings')
+    expect(groupSchema).not.toContain('daily_nutrition')
+    expect(groupSchema).not.toContain('compact_table')
+    expect(groupTool!.description).toContain('deterministic score-challenge')
+    expect(groupTool!.description).toContain(
+      'an incomplete average remains unscored',
+    )
+    expect(groupTool!.description).toContain(
+      'an all-unscored collective keeps collectivePoints null',
+    )
+  })
+
   it('describes the private on-demand canonical-read contract', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'saved instructions for the exact scheduled automation occurrence explicitly request it',
@@ -121,6 +228,10 @@ describe('murph.attach_response_card', () => {
     })
     expect(readCardToolRequest({ card: CARD_V2 })).toEqual({
       card: CARD_V2,
+      kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest({ card: CHALLENGE_CARD })).toEqual({
+      card: CHALLENGE_CARD,
       kind: 'attach-response-card',
     })
     expect(readCardToolRequest({ card: CARD, extra: true })).toMatchObject({
@@ -162,11 +273,11 @@ describe('murph.attach_response_card', () => {
     })
   })
 
-  it('rejects group use and a second card without echoing nutrition values', async () => {
-    const groupResult = await executeCardTool({
+  it('enforces audience-specific card kinds without weakening duplicate checks', async () => {
+    const groupNutrition = await executeCardTool({
       privateDirectResponseCardAllowed: false,
     })
-    expect(groupResult.rpcResult).toEqual({
+    expect(groupNutrition.rpcResult).toEqual({
       contentItems: [{
         text: 'response cards require a private direct conversation',
         type: 'inputText',
@@ -174,13 +285,37 @@ describe('murph.attach_response_card', () => {
       success: false,
     })
 
+    const privateChallenge = await executeCardTool({
+      request: {
+        card: CHALLENGE_CARD,
+        kind: 'attach-response-card',
+      },
+    })
+    expect(privateChallenge.rpcResult).toEqual({
+      contentItems: [{
+        text: 'challenge standings response cards require an authenticated Linq group conversation',
+        type: 'inputText',
+      }],
+      success: false,
+    })
+
+    const groupChallenge = await executeCardTool({
+      groupChallengeResponseCardAllowed: true,
+      privateDirectResponseCardAllowed: false,
+      request: {
+        card: CHALLENGE_CARD,
+        kind: 'attach-response-card',
+      },
+    })
+    expect(groupChallenge).toMatchObject({
+      responseCardPatch: { card: CHALLENGE_CARD },
+      rpcResult: { success: true },
+    })
+
     const first = await executeCardTool({})
     expect(first).toMatchObject({
       responseCardPatch: { card: CARD },
-      rpcResult: {
-        contentItems: [{ text: 'response card attached', type: 'inputText' }],
-        success: true,
-      },
+      rpcResult: { success: true },
     })
     expect(JSON.stringify(first.rpcResult)).not.toContain('1490.25')
 

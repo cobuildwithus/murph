@@ -2,6 +2,9 @@ import { Buffer } from 'node:buffer'
 
 import {
   assistantResponseCardSchema,
+  challengeStandingsResponseCardV1Schema,
+  compactTableResponseCardV1Schema,
+  dailyNutritionResponseCardV2Schema,
   type AssistantResponseCard,
   type ChallengeStandingsEntryV1,
   type ChallengeStandingsResponseCardV1,
@@ -120,6 +123,8 @@ export {
 
 export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
+export const challengeStandingsResponseCardJsonSchema =
+  createChallengeStandingsResponseCardJsonSchema()
 
 /**
  * User-visible semantic text used by non-native routes and definitive native
@@ -403,6 +408,10 @@ function buildChallengeStandingsLinqLayout(
     ? card.format === 'teams' ? 'Team standings' : 'Leaderboard'
     : `${leader.label} · ${formatChallengePoints(leader.points)}${
         leader.coverage === 'partial' ? '+' : ''
+      }${
+        card.objective.kind === 'target'
+          ? ` / ${formatChallengePoints(card.objective.targetPoints)}`
+          : ''
       } pts`
   return {
     caption: card.title,
@@ -543,13 +552,31 @@ function isDailyNutritionResponseCardV2(
 }
 
 function createAssistantResponseCardJsonSchema() {
+  // Retained nutrition V1 cards remain valid at the runtime boundary. New
+  // private tool calls author only the current nutrition or table contract.
+  const authoringSchema = z.union([
+    dailyNutritionResponseCardV2Schema,
+    compactTableResponseCardV1Schema,
+  ])
   const {
     $schema: _dialect,
     ...portableSchema
-  } = z.toJSONSchema(assistantResponseCardSchema)
+  } = z.toJSONSchema(authoringSchema)
   return {
     ...portableSchema,
     description:
-      'One closed Murph response card: daily_nutrition for a canonical daily meal summary, compact_table for a bounded one-off table or refreshed canonical workout snapshot, or challenge_standings for an individual leaderboard, team standings, or collective points target after deterministic challenge scoring.',
+      'Current private card authoring contract: daily_nutrition V2 or compact_table V1.',
+  }
+}
+
+function createChallengeStandingsResponseCardJsonSchema() {
+  const {
+    $schema: _dialect,
+    ...portableSchema
+  } = z.toJSONSchema(challengeStandingsResponseCardV1Schema)
+  return {
+    ...portableSchema,
+    description:
+      'Current group challenge card authoring contract: challenge_standings V1.',
   }
 }

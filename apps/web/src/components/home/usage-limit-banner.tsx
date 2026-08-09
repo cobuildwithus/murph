@@ -18,6 +18,7 @@ const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
   "edge_usage_limit_reached",
   "family_usage_limit_reached",
   "group_upgrade_pulse",
+  "max_usage_limit_reached",
   "pulse_upgrade_edge",
 ]);
 
@@ -47,6 +48,10 @@ const usageLimitBannerCopy: Record<
   group_upgrade_pulse: {
     body: "Murph is paused until your included usage resets.",
     title: "You've used 100% of this month's included Core usage",
+  },
+  max_usage_limit_reached: {
+    body: "Murph is paused until your included usage resets.",
+    title: "You've used 100% of this month's included Max usage",
   },
   pulse_upgrade_edge: {
     body: "Murph is paused until your included usage resets.",

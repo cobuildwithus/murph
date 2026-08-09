@@ -18,3 +18,12 @@ Add one bounded response-card contract that can represent the three existing gro
 - Contract tests cover all three formats, ordering, ties, nullability, text bounds, row bounds, unknown keys, and aggregate URL size.
 - Operator-config tests cover semantic fallback text, Linq layouts, and the exact schema-version-4 envelope consumed by iOS.
 - Existing nutrition and compact-table schema assertions remain additive through `arrayContaining`.
+
+
+## Final audit corrections
+
+- Merged the branch onto current `main` and retained the current response-card schema-compaction contract.
+- Kept one response-card tool name and runtime parser while selecting a minimal audience-scoped authoring schema for private versus Linq group turns.
+- Enforced card kind and audience at planning, dynamic-tool execution, outbox validation, and Linq delivery boundaries.
+- Reused the existing Linq app-card transport for group snapshots without a meaningless per-recipient capability probe.
+- Preserved scorer truth for withheld team averages, verified lower bounds, and all-unscored collective results.

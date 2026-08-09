@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer'
 import { describe, expect, it } from 'vitest'
 
 import {
-  assistantResponseCardJsonSchema,
+  challengeStandingsResponseCardJsonSchema,
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
   encodeChallengeStandingsAppCardUrl,
@@ -60,14 +60,51 @@ function decodeAppCardUrl(url: string): unknown {
 }
 
 describe('challenge standings response cards', () => {
-  it('publishes the closed model-facing schema', () => {
-    expect(assistantResponseCardJsonSchema.description).toContain(
+  it('publishes the closed group model-facing schema', () => {
+    expect(challengeStandingsResponseCardJsonSchema.description).toContain(
       'challenge_standings',
     )
-    const serializedSchema = JSON.stringify(assistantResponseCardJsonSchema)
+    const serializedSchema = JSON.stringify(challengeStandingsResponseCardJsonSchema)
     expect(serializedSchema).toContain('"challenge_standings"')
     expect(serializedSchema).toContain('"collective"')
     expect(serializedSchema).toContain('"targetPoints"')
+  })
+
+  it('keeps the group schema challenge-only and truthful for withheld scores', () => {
+    const serializedSchema = JSON.stringify(
+      challengeStandingsResponseCardJsonSchema,
+    )
+    expect(serializedSchema).toContain('\"challenge_standings\"')
+    expect(serializedSchema).not.toContain('daily_nutrition')
+    expect(serializedSchema).not.toContain('compact_table')
+
+    const unscoredTeam: ChallengeStandingsResponseCardV1 = {
+      ...INDIVIDUAL_CARD,
+      format: 'teams',
+      entries: [{
+        label: 'North team',
+        points: null,
+        coverage: 'unscored',
+        detail: 'Average withheld until coverage is complete',
+      }],
+      footer: null,
+    }
+    expect(renderAssistantResponseCardText(unscoredTeam)).toContain(
+      '— North team: unscored',
+    )
+
+    const allUnscoredCollective: ChallengeStandingsResponseCardV1 = {
+      ...COLLECTIVE_CARD,
+      collectivePoints: null,
+      coverage: 'unscored',
+      footer: null,
+    }
+    expect(renderAssistantResponseCardText(allUnscoredCollective)).toContain(
+      'No verified score yet / 1,000 points',
+    )
+    expect(buildLinqIMessageAppLayout(allUnscoredCollective).subcaption).toBe(
+      'Waiting for score',
+    )
   })
 
   it('renders ranked scores, ties, partial lower bounds, and unscored rows', () => {
@@ -127,6 +164,13 @@ describe('challenge standings response cards', () => {
       subcaption: 'Maya · 120 pts',
       trailing_caption: 'OPEN',
     })
+  })
+
+  it('includes target context in ranked static previews', () => {
+    expect(buildLinqIMessageAppLayout({
+      ...INDIVIDUAL_CARD,
+      objective: { kind: 'target', targetPoints: 150 },
+    }).subcaption).toBe('Maya · 120 / 150 pts')
   })
 
   it('encodes the exact schema-v4 snapshot consumed by iOS', () => {

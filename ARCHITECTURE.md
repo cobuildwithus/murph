@@ -819,7 +819,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/parsers`: workspace-private local-first audio/video attachment transcription (local whisper.cpp when installed, plus a config-driven remote transcription HTTP provider used by hosted execution), parser-service helpers, parser-owned runtime/store contracts for media transcription, and one versioned `result.json` bundle per derived attempt under `derived/inbox/**`; it also owns the strict bundle decoder and explicit legacy-attempt compactor, and does not own inbox daemon orchestration or depend upward on `@murphai/inboxd`
 - `packages/query`: workspace-private read helpers, export-pack generation, query-local event display-identity derivation, the semantic wearable day-summary and provider-neutral sleep-pattern read models over imported device evidence, the rebuildable local query projection over canonical vault data under `.runtime/projections/query.sqlite` that now backs both `readVault()` and lexical search, the stable reference-graph readers for `bank/library/**`, the pure parser/search/index helpers for derived knowledge pages under `derived/knowledge/**`, and the read-side adapters that consume shared MetricPoint contracts from `@murphai/health-metrics` plus shared health registry projection metadata, event lifecycle/revision collapse helpers, and static lookup-ID family classification from `@murphai/contracts` instead of maintaining duplicate query-local copies. Experiment progress-card sentiment accepts an injected snapshot of canonical biomarker desired directions and keeps that health interpretation separate from experiment-hypothesis agreement.
 - `packages/health-metrics`: workspace-private neutral MetricPoint contract owner for health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports
-- `packages/vault-usecases`: workspace-private CLI/headless vault usecase orchestration owner over `packages/core`, `packages/importers`, and `packages/query`. It owns command-shaped service interfaces, shared CLI-style input normalization, lazy runtime loaders, assistant-safe vault path helpers, and the neutral `@murphai/vault-usecases/vault-services` factory used by CLI, assistant, daemon, setup, hosted runtime, and inbox-service callers that need one composed vault service surface without importing owner internals. It composes the compact Health Commons desired-direction lookup into experiment progress-card snapshots without making query depend on the filesystem-backed Health Commons runtime. It must stay a thin composition layer: canonical record schemas and static lookup-ID family classification stay in `packages/contracts`, canonical writes stay in `packages/core`, imports stay in `packages/importers`, query projections and event display identity stay in `packages/query`, device runtime and control-plane composition stay in `packages/device-syncd`/`packages/cli`, inbox daemon behavior stays in `packages/inboxd` and `packages/inbox-services`, and assistant/session state stays in the assistant runtime packages.
+- `packages/vault-usecases`: workspace-private CLI/headless vault usecase orchestration owner over `packages/core`, `packages/importers`, and `packages/query`. It owns command-shaped service interfaces, shared CLI-style input normalization, lazy runtime loaders, assistant-safe vault path helpers, the narrow manifest-receipt/removal seam for derived export packs, and the neutral `@murphai/vault-usecases/vault-services` factory used by CLI, assistant, daemon, setup, hosted runtime, and inbox-service callers that need one composed vault service surface without importing owner internals. It composes the compact Health Commons desired-direction lookup into experiment progress-card snapshots without making query depend on the filesystem-backed Health Commons runtime. It must stay a thin composition layer: canonical record schemas and static lookup-ID family classification stay in `packages/contracts`, canonical writes stay in `packages/core`, imports stay in `packages/importers`, query projections and event display identity stay in `packages/query`, device runtime and control-plane composition stay in `packages/device-syncd`/`packages/cli`, inbox daemon behavior stays in `packages/inboxd` and `packages/inbox-services`, and assistant/session state stays in the assistant runtime packages.
 - `packages/health-commons`: workspace-private public Health Commons owner for protocol pages, biomarker pages, source pages, exact protocol revisions, generated catalogs, and future aggregate outcome summaries consumed across local and hosted surfaces
 - `packages/assistant-engine`: workspace-private headless assistant execution runtime that owns provider-turn execution, tool/runtime assembly, assistant state/outbox/status/store surfaces, assistant automation, the single assistant input spine, assistant-specific vault/inbox/knowledge tool surfaces, hosted computer-use dynamic tools, Murph-managed package skill assets under `skills/**`, attachment prompt-bundle audit support, and active-outbox reconciliation for assistant-owned one-time delivery staging under the exact flat assistant-runtime generated-delivery directory. Broad low-frequency native tools keep their argument contracts and set Codex `deferLoading` at `thread/start`, leaving direct-model `tool_search` and code-mode `ALL_TOOLS` discovery to the pinned App Server rather than adding a Murph-owned discovery protocol. The stable assistant prompt may route to those package-owned skill files through `$MURPH_ASSISTANT_SKILLS_ROOT`; local and hosted runtime env setup stamps that var to the canonical package-owned skill root. Hosted native Codex skill rendering stays disabled because rendered runner-local paths can break hosted prompt-cache stability. It consumes neutral vault usecase services, runtime loaders, and assistant vault path helpers from `@murphai/vault-usecases`, and consumes provider-target normalization plus hosted provider-preset/config helpers from `@murphai/operator-config` instead of owning duplicate copies.
 - `packages/operator-config`: workspace-private operator and setup configuration surface that owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider-preset/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and CLI/shared command contracts
@@ -850,6 +850,15 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   lifecycle/checkpoint state. Temporal owns execution wake orchestration, and
   the app-local Vercel OIDC adapter remains for browser/session/status/deletion
   calls into Cloudflare.
+
+  The shared public footer may read incident.io's fixed, public, bodyless,
+  queryless status summary directly from the browser. The response is display
+  evidence only and creates no product, incident, or availability authority.
+  Hosted Web keeps the global referrer policy at `strict-origin` and limits CSP
+  connectivity to the exact status-page origin, so the request carries no page
+  path, query, fragment, account data, prompt, health content, or message
+  content. Ordinary browser technical metadata still reaches incident.io and
+  is disclosed in the public subprocessor register.
 
   Nullable hosted-member model and reasoning preferences are web-owned,
   billing-gated control facts. Active personal members may select Luna or
@@ -1049,7 +1058,37 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   branch-local PgBouncer and Postgres connection conditions, and page two
   preconfigured direct operator Linq chats. Its SQLite contains only counts,
   ratios, bounded state maps, error-counter baselines, failure codes, and alert
-  admission state. First-incident and non-replayable direct-error alert
+  admission state. Metric families normalize independently: an unavailable
+  family stays null and its canonical allowlisted name is retained, while
+  available families continue to drive their own conditions. Missing data is
+  never treated as zero. A telemetry-only notification opens after two
+  consecutive incomplete or failed collections. The first two-check threshold
+  window counts incomplete versus unavailable observations, unions only
+  canonical missing families observed on partial checks, and uses the threshold
+  time as the window end; one bounded evidence value on each existing sample
+  preserves that provenance across restart. One bounded obligation in the
+  existing incident row survives a busy pending slot, restart, and recovery
+  until a telemetry-bearing page is acknowledged. Recovery and another metric
+  gap before that acknowledgment coalesce into the same unresolved operator
+  notification instead of creating a backlog; the first threshold window remains
+  authoritative. An owed telemetry page
+  alone does not occupy a closed provider fence. Before an incident admits its
+  first page, concrete evidence—including a direct-error delta—that appears on
+  the threshold or a later sample persists in one combined immutable body, so
+  the exact pressure and truthful
+  telemetry facts share the next eligible attempt and one acknowledgment cycle.
+  An acknowledged-incident recurrence waits for the eligible sample, which
+  includes any still-current unsafe evidence and labels
+  historical telemetry by its own observation time. A later complete collection rearms
+  telemetry only after the obligation is acknowledged. Its additive alert-state
+  and sample-evidence columns
+  preserve the existing schema
+  version; current code also recognizes a telemetry pending body cleared by the
+  prior Worker, preventing a duplicate after rollback and re-upgrade. Concrete
+  unsafe conditions retain paced recurrence, but acknowledged monitoring
+  evidence cannot enter their later pages without a currently owed obligation.
+  First-incident
+  and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring
   replayable evidence, and acknowledged replayable recurrence is admitted only
@@ -1992,7 +2031,20 @@ window to a well-formed past-or-near-present range. The shared Exa
 research-scout request recipe, query shape, and structured-output schema live
 in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 
-Hosted Linq typing events are verified and ignored. The Temporal mailbox
+Hosted Linq typing-start events are verified and parsed strictly. For Linq's
+supported direct-chat signal, Web acknowledges before post-response work reads
+only the private home-chat blind index plus active access and crypto-root
+eligibility, then issues the existing best-effort runtime shell-prewarm hint.
+Unknown, ambiguous, inactive, or ineligible chats remain no-ops. Typing never
+plans onboarding, binds a route, appends mailbox work, starts processing,
+signals Temporal, sends a receipt, or adds reconciliation work. Cloudflare
+still rechecks live Web-owned admission under the per-user consent-mutation
+barrier before it starts a container, so Web's lookup grants no runtime
+authority. The optional Cloudflare owner admits a hint only when its existing
+consent-mutation lock is idle; repeated hints and hints arriving during
+authoritative ensure, withdrawal, or deletion are dropped before the FIFO.
+The single admitted hint then relies on the existing container lifecycle's
+coalescing instead of a second dedupe or warm-state owner. The Temporal mailbox
 signal remains the only durable wake authority for hosted runtime work. For a
 committed known-checkpoint Linq message, Web first verifies the checkpoint owner
 and canonical participant-aware live access as part of the unconditional
@@ -2006,8 +2058,9 @@ only to cut wake latency and may be dropped at any time with no correctness
 impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
-fence coalesces runners that overlap in the same invocation. There is no other
-established-member Web-to-Cloudflare prewarm or nudge path. The separate
+fence coalesces runners that overlap in the same invocation. The typing-start
+shell hint is the only established-member Web-to-Cloudflare prewarm before
+durable message acceptance. The separate
 first-contact instant-start shell hint obtains the named `UserRunner` stub
 without binding durable state, enters the same per-user consent-mutation barrier
 as authoritative ensures and withdrawal, and re-reads live Web-owned admission.

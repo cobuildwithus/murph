@@ -68,6 +68,9 @@ const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "app/fonts/*.ttf",
   "public/logo.svg",
 ];
+// The footer availability indicator reads the incident.io status-page summary
+// from the browser, so the status-page origin must be reachable client-side.
+const STATUS_PAGE_CONNECT_SOURCES = ["https://status.withmurph.ai"] as const;
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -155,6 +158,7 @@ export function buildHostedWebContentSecurityPolicy(
     ...PRIVY_REQUIRED_CONNECT_SOURCES,
     ...privyOrigins,
     ...KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
+    ...STATUS_PAGE_CONNECT_SOURCES,
     ...(isDevelopment ? ["ws:", "wss:"] : []),
   ]);
   const scriptSources = uniqueSources([

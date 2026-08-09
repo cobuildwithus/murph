@@ -18,6 +18,9 @@ The response-card kind is `challenge_standings`, card version `1`, carried in Me
 - Ranked entries are descending, ties are derived from equal points, and unscored entries are last.
 - Collective cards require a positive target. Reaching a target with partial coverage is safe because the verified lower bound has already reached it.
 - Internal entity ids, evidence paths, and tracking metadata are not embedded in the Messages URL.
+- Individual rows copy scorer-owned `verifiedPoints` and coverage.
+- Team rows use `verifiedPoints` only when it is non-null. An incomplete average remains unscored even when a verified subtotal exists.
+- Collective coverage is complete only when every participant is complete, unscored only when every participant is unscored, and partial otherwise. An all-unscored collective keeps points null rather than displaying zero.
 
 ## Delivery boundary
 

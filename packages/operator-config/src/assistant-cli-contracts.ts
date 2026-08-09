@@ -13,6 +13,7 @@ import {
   type AutomationTimeScheduleKind,
 } from '@murphai/contracts'
 import {
+  isAssistantGeneratedDeliveryRef,
   isNormalizedAssistantVaultFileRef,
 } from '@murphai/runtime-state/assistant-generated-deliveries'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
@@ -448,6 +449,13 @@ const assistantVoiceMemoResponseMediaSchema = z
   })
   .strict()
 
+const assistantExportPackRetirementReceiptSchema = z
+  .object({
+    manifestSha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    packId: z.string().regex(/^[A-Za-z0-9_-]+$/u),
+  })
+  .strict()
+
 const assistantVaultFileResponseMediaSchema = z
   .object({
     approvalGeneration: z.string().regex(/^[0-9a-f]{64}$/u).nullable().default(null),
@@ -478,13 +486,42 @@ const assistantVaultFileResponseMediaSchema = z
       .min(3)
       .max(200)
       .regex(/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u),
+    retireExportPacks: z
+      .array(assistantExportPackRetirementReceiptSchema)
+      .min(1)
+      .max(20)
+      .optional(),
     sizeBytes: z.number().int().positive().max(assistantVaultFileMaxBytes),
   })
   .strict()
-  .refine(
-    (value) => (value.approvalGeneration === null) === (value.approvalId === null),
-    'Assistant vault file approval id and generation must be present together.',
-  )
+  .superRefine((value, context) => {
+    if ((value.approvalGeneration === null) !== (value.approvalId === null)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant vault file approval id and generation must be present together.',
+      })
+    }
+    if (value.retireExportPacks) {
+      if (
+        value.contentType !== 'application/zip'
+        || !isAssistantGeneratedDeliveryRef(value.ref)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Export-pack retirement requires an assistant-generated ZIP.',
+          path: ['retireExportPacks'],
+        })
+      }
+      const packIds = value.retireExportPacks.map((receipt) => receipt.packId)
+      if (new Set(packIds).size !== packIds.length) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Export-pack retirement receipts must have unique pack ids.',
+          path: ['retireExportPacks'],
+        })
+      }
+    }
+  })
 
 export const assistantResponseMediaSchema = z.union([
   assistantImageResponseMediaSchema,
@@ -959,7 +996,25 @@ export const assistantOutboxIntentSchema = z
       })
     }
 
-    if (intent.card !== null && intent.threadIsDirect !== true) {
+    if (
+      intent.card?.kind === 'challenge_standings' &&
+      !(
+        intent.threadIsDirect === false &&
+        intent.channel?.trim().toLowerCase() === 'linq'
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Challenge standings response cards require an authenticated Linq group conversation.',
+        path: ['card'],
+      })
+    }
+    if (
+      intent.card !== null &&
+      intent.card.kind !== 'challenge_standings' &&
+      intent.threadIsDirect !== true
+    ) {
       context.addIssue({
         code: 'custom',
         message: 'Assistant response cards require a private direct conversation.',
