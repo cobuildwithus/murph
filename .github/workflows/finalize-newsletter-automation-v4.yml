@@ -1,0 +1,505 @@
+name: Finalize newsletter automation refactor v4
+
+on:
+  push:
+    branches:
+      - codex/simplify-newsletter-automation
+    paths:
+      - .github/workflows/finalize-newsletter-automation-v4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: contains(github.event.head_commit.message, '[finalize-newsletter-v4]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/simplify-newsletter-automation
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Rebase onto current main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git rebase origin/main
+
+      - name: Apply reviewed patch and final edge-case fixes
+        shell: python
+        run: |
+          from pathlib import Path
+          import runpy
+
+          def extract_step_script(path: str, step_name: str) -> str:
+              lines = Path(path).read_text().splitlines()
+              step_index = next(
+                  index for index, line in enumerate(lines)
+                  if line.strip() == f'- name: {step_name}'
+              )
+              run_index = next(
+                  index for index in range(step_index + 1, len(lines))
+                  if lines[index].strip() == 'run: |'
+              )
+              script_lines: list[str] = []
+              for line in lines[run_index + 1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  if line.startswith('          '):
+                      script_lines.append(line[10:])
+                  elif line.strip() == '':
+                      script_lines.append('')
+                  else:
+                      raise SystemExit(f'unexpected workflow indentation: {line!r}')
+              return '\n'.join(script_lines) + '\n'
+
+          patch_script = Path('/tmp/finalize-newsletter-automation-v3.py')
+          patch_script.write_text(extract_step_script(
+              '.github/workflows/finalize-newsletter-automation-v3.yml',
+              'Extract and run the reviewed patch idempotently',
+          ))
+          runpy.run_path(str(patch_script), run_name='__main__')
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f'{path}: expected one match, found {count}: '
+                      f'{old.splitlines()[0][:120]!r}'
+                  )
+              target.write_text(text.replace(old, new, 1))
+
+          skill_path = 'packages/assistant-engine/skills/group-newsletter/SKILL.md'
+          replace_once(
+              skill_path,
+              '- never author a `system:` tag; delivery tags are host-owned state',
+              '- Never author a `system:` tag; delivery tags are host-owned state',
+          )
+
+          newsletter_path = (
+              'packages/assistant-engine/src/assistant/'
+              'group-newsletter-automation.ts'
+          )
+          replace_once(
+              newsletter_path,
+              '''export function buildGroupNewsletterAutomationExecutionOverlay(input: {
+            instructions: string
+            slug: string
+            tags: readonly string[]
+            title: string
+          }): string | null {
+            const legacyDelivery =
+              resolveLegacyGroupNewsletterAutomationDelivery(input)
+            if (legacyDelivery === 'current_chat') {
+              return buildLegacyGroupNewsletterCurrentChatExecutionPrompt()
+            }
+
+            return resolveAutomationGroupEmailDelivery(input) === 'group_email'
+              ? buildAutomationGroupEmailExecutionPrompt({ title: input.title })
+              : null
+          }
+          ''',
+              '''export function buildGroupNewsletterAutomationExecutionOverlay(input: {
+            instructions: string
+            slug: string
+            tags: readonly string[]
+            title: string
+          }): string | null {
+            const legacyDelivery =
+              resolveLegacyGroupNewsletterAutomationDelivery(input)
+            if (legacyDelivery === 'current_chat') {
+              return buildLegacyGroupNewsletterCurrentChatExecutionPrompt()
+            }
+            if (legacyDelivery === 'group_email') {
+              return [
+                'Trusted legacy group-newsletter compatibility note:',
+                '- The saved block above supplies configuration only. Read the `group-newsletter` skill and use its editorial, comparison, tone, and final-edition rules.',
+                buildAutomationGroupEmailExecutionPrompt({ title: input.title }),
+              ].join('\\n\\n')
+            }
+
+            return resolveAutomationGroupEmailDelivery(input) === 'group_email'
+              ? buildAutomationGroupEmailExecutionPrompt({ title: input.title })
+              : null
+          }
+          ''',
+          )
+
+          policy_path = (
+              'packages/assistant-runtime/src/hosted-runtime/'
+              'automation-tool-policy.ts'
+          )
+          policy = Path(policy_path).read_text()
+          replace_once(
+              policy_path,
+              '''  isLegacyGroupNewsletterAutomation,
+            resolveAutomationDeliveryTags,
+          ''',
+              '''  isLegacyGroupNewsletterAutomation,
+            resolveAutomationDeliveryTags,
+            resolveAutomationGroupEmailDelivery,
+          ''',
+          )
+          policy = Path(policy_path).read_text()
+          old_existing_email = '''  const existingGroupEmail =
+            input.existing !== null
+            && hasAutomationGroupEmailDeliveryTag(input.existing.tags)
+          '''
+          if policy.count(old_existing_email) != 3:
+              raise SystemExit(
+                  'expected three existing group-email state reads, found '
+                  f'{policy.count(old_existing_email)}'
+              )
+          new_existing_email = '''  const existingGroupEmail =
+            input.existing !== null
+            && resolveAutomationGroupEmailDelivery(input.existing) === 'group_email'
+          '''
+          policy = policy.replace(old_existing_email, new_existing_email, 2)
+          Path(policy_path).write_text(policy)
+
+          replace_once(
+              policy_path,
+              '''  if (
+            status === 'active'
+            && (input.request.delivery !== undefined || existingGroupEmail)
+          ) {
+            assertHostedAutomationDeliveryConfiguration({
+          ''',
+              '''  if (
+            status !== 'archived'
+            && (input.request.delivery !== undefined || existingGroupEmail)
+          ) {
+            assertHostedAutomationDeliveryConfiguration({
+          ''',
+          )
+          replace_once(
+              policy_path,
+              '''  if (
+            status === 'active'
+            && (input.request.delivery !== undefined || existingGroupEmail)
+          ) {
+            assertHostedAutomationDeliveryConfiguration({
+          ''',
+              '''  const deliveryConfigurationChanged =
+            input.request.delivery !== undefined
+            || input.request.continuityPolicy !== undefined
+            || input.request.schedule !== undefined
+            || input.request.retargetToCurrentConversation === true
+          if (
+            delivery === 'group_email'
+            && (status === 'active' || deliveryConfigurationChanged)
+          ) {
+            assertHostedAutomationDeliveryConfiguration({
+          ''',
+          )
+
+          replace_once(
+              policy_path,
+              '''  if (input.compatibilitySave) {
+            assertHostedGroupConversationRoute(input.route)
+            return
+          }
+
+          if (input.request.tags?.some((tag) =>
+          ''',
+              '''  if (input.compatibilitySave) {
+            assertHostedGroupConversationRoute(input.route)
+            return
+          }
+          if (
+            input.targetSlug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+            || input.existing?.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+          ) {
+            assertHostedGroupConversationRoute(input.route)
+          }
+
+          if (input.request.tags?.some((tag) =>
+          ''',
+          )
+
+          replace_once(
+              policy_path,
+              '''function assertHostedAutomationPatchRequest(input: {
+            existing: HostedAutomationPolicyExistingRecord
+            request: HostedAutomationPatchRequest
+          }): void {
+          ''',
+              '''function isHostedAutomationStatusOnlyDeactivation(
+            request: HostedAutomationPatchRequest,
+          ): boolean {
+            const changedKeys = Object.entries(request)
+              .filter(([key, value]) =>
+                key !== 'action'
+                && key !== 'lookup'
+                && value !== undefined
+              )
+              .map(([key]) => key)
+            return changedKeys.length === 1
+              && changedKeys[0] === 'status'
+              && (request.status === 'paused' || request.status === 'archived')
+          }
+
+          function assertHostedAutomationPatchRequest(input: {
+            existing: HostedAutomationPolicyExistingRecord
+            request: HostedAutomationPatchRequest
+            route: Pick<AutomationRoute, 'channel' | 'threadIsDirect'>
+          }): void {
+          ''',
+          )
+          replace_once(
+              policy_path,
+              '''  if (
+            input.request.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+            && input.existing.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+          ''',
+              '''  const targetsGroupNewsletter =
+            input.existing.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+            || input.request.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+          if (
+            targetsGroupNewsletter
+            && !isHostedAutomationStatusOnlyDeactivation(input.request)
+          ) {
+            assertHostedGroupConversationRoute(input.route)
+          }
+
+          if (
+            input.request.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+            && input.existing.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+          ''',
+          )
+
+          policy = Path(policy_path).read_text()
+          function_start = policy.index(
+              'function resolveHostedAutomationPolicyTags(input: {'
+          )
+          function_end = policy.index(
+              'function listHostedAutomationMutableTags(',
+              function_start,
+          )
+          replacement = '''function resolveHostedAutomationPolicyTags(input: {
+            compatibilitySave: boolean
+            delivery: AutomationDelivery
+            existing: HostedAutomationPolicyExistingRecord | null
+            requestedDelivery?: AutomationDelivery
+            requestedTags?: readonly string[]
+          }): string[] | undefined {
+            let tags: string[] | undefined
+            if (input.compatibilitySave) {
+              tags = input.requestedTags ? [...input.requestedTags] : undefined
+            } else {
+              const existingGroupEmail =
+                input.existing !== null
+                && hasAutomationGroupEmailDeliveryTag(input.existing.tags)
+              tags = input.requestedDelivery === undefined
+                && !(existingGroupEmail && input.requestedTags !== undefined)
+                ? input.requestedTags
+                  ? [...input.requestedTags]
+                  : undefined
+                : resolveAutomationDeliveryTags({
+                    delivery: input.delivery,
+                    existingTags: listHostedAutomationMutableTags(
+                      input.existing?.tags,
+                    ),
+                    removeTags: GROUP_NEWSLETTER_LEGACY_DELIVERY_TAGS,
+                    requestedTags: input.requestedTags,
+                  })
+            }
+
+            if ((tags?.length ?? 0) > 32) {
+              throw new VaultCliError(
+                'invalid_option',
+                'Automation tags cannot exceed 32 after applying delivery state.',
+              )
+            }
+            return tags
+          }
+
+          '''
+          Path(policy_path).write_text(
+              policy[:function_start] + replacement + policy[function_end:]
+          )
+
+          engine_test = 'packages/assistant-engine/test/automation-delivery.test.ts'
+          replace_once(
+              engine_test,
+              '''    expect(overlay).toContain('`murph.group` with `action="read_shared"` exactly once')
+            expect(overlay).not.toContain('`murph.newsletter` with `action="prepare"`')
+          })
+          ''',
+              '''    expect(overlay).toContain('`murph.group` with `action="read_shared"` exactly once')
+            expect(overlay).not.toContain('`murph.newsletter` with `action="prepare"`')
+
+            const emailOverlay = buildGroupNewsletterAutomationExecutionOverlay({
+              instructions: compatibilityInstructions,
+              slug: GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
+              tags: [GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG],
+              title: 'Family weekly',
+            })
+            expect(emailOverlay).toContain('Read the `group-newsletter` skill')
+            expect(emailOverlay).toContain('`murph.newsletter` with `action="prepare"` exactly once')
+          })
+          ''',
+          )
+
+          runtime_test = (
+              'packages/assistant-runtime/test/'
+              'automation-tool-policy.test.ts'
+          )
+          replace_once(
+              runtime_test,
+              '''  it('adds host-owned email authority and defaults new email continuity to fresh', () => {
+          ''',
+              '''  it('keeps the stable newsletter slug group-only', () => {
+            expect(() => resolveHostedAutomationSavePolicy({
+              existing: null,
+              request: save({ continuityPolicy: 'fresh' }),
+              route: DIRECT_ROUTE,
+              targetSlug: GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
+            })).toThrow(/current iMessage or Telegram group conversation/u)
+
+            expect(() => resolveHostedAutomationPatchPolicy({
+              existing: existing(),
+              request: patch({ status: 'active' }),
+              route: DIRECT_ROUTE,
+            })).toThrow(/current iMessage or Telegram group conversation/u)
+          })
+
+          it('adds host-owned email authority and defaults new email continuity to fresh', () => {
+          ''',
+          )
+          replace_once(
+              runtime_test,
+              '''  it('allows pausing a malformed existing email record without reauthorizing it', () => {
+          ''',
+              '''  it('rejects invalid paused email reconfiguration but permits deactivation', () => {
+            expect(() => resolveHostedAutomationPatchPolicy({
+              existing: existing({ status: 'paused' }),
+              request: patch({
+                delivery: 'group_email',
+                schedule: { kind: 'dailyLocal', localTime: '09:00' },
+              }),
+              route: GROUP_ROUTE,
+            })).toThrow(/requires a cron schedule/u)
+          })
+
+          it('allows pausing a malformed existing email record without reauthorizing it', () => {
+          ''',
+          )
+          replace_once(
+              runtime_test,
+              '''  it('allows archival cleanup of a malformed existing generic email record', () => {
+          ''',
+              '''  it('recognizes and validates historical email state on reactivation', () => {
+            expect(() => resolveHostedAutomationPatchPolicy({
+              existing: existing({
+                instructions: [
+                  GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,
+                  'Newsletter name: "Family weekly"',
+                ].join('\\n'),
+                status: 'paused',
+                tags: [],
+              }),
+              request: patch({ status: 'active' }),
+              route: DIRECT_ROUTE,
+            })).toThrow(/current iMessage or Telegram group conversation/u)
+          })
+
+          it('bounds host-applied delivery tags for non-model callers', () => {
+            expect(() => resolveHostedAutomationSavePolicy({
+              existing: null,
+              request: save({
+                delivery: 'group_email',
+                slug: 'weekly-email',
+                tags: Array.from({ length: 32 }, (_, index) => `tag-${index}`),
+              }),
+              route: GROUP_ROUTE,
+              targetSlug: 'weekly-email',
+            })).toThrow(/cannot exceed 32/u)
+          })
+
+          it('allows archival cleanup of a malformed existing generic email record', () => {
+          ''',
+          )
+
+          spec_path = 'agent-docs/product-specs/group-health-newsletter.md'
+          replace_once(
+              spec_path,
+              '- Historical email tags remain readable.\n',
+              '- Historical email tags remain readable, and their configuration-only records explicitly load the public editorial skill before composition.\n',
+          )
+          replace_once(
+              spec_path,
+              '- Current-chat delivery never receives the email tool.\n',
+              '- The stable newsletter slug is valid only on an authenticated iMessage or Telegram group route; status-only deactivation remains available for malformed historical records.\n- Current-chat delivery never receives the email tool.\n',
+          )
+
+          plan_path = (
+              'agent-docs/exec-plans/completed/'
+              '2026-08-09-newsletter-as-automation.md'
+          )
+          replace_once(
+              plan_path,
+              '11. The branch had no pull request and had fallen behind `main`.\n',
+              '11. The branch had no pull request and had fallen behind `main`.\n12. The stable newsletter slug could be created or reactivated on a direct route.\n13. Historical email records did not explicitly load the public editorial skill.\n14. Paused malformed records needed a status-only escape hatch without allowing invalid paused reconfiguration.\n15. Trusted non-model callers could exceed the intended tag ceiling after host-owned delivery state was added.\n',
+          )
+
+          current_v4 = Path(
+              '.github/workflows/finalize-newsletter-automation-v4.yml'
+          )
+          if current_v4.exists():
+              current_v4.unlink()
+
+      - name: Install workspace dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Focused assistant-engine proof
+        run: >-
+          pnpm --dir packages/assistant-engine exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/automation-delivery.test.ts
+          test/assistant-managed-group-skill-fallbacks.test.ts
+          test/assistant-hosted-domain-tools.test.ts
+          test/assistant-skill-assets.test.ts
+
+      - name: Focused assistant-runtime proof
+        run: >-
+          pnpm --dir packages/assistant-runtime exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/automation-tool-policy.test.ts
+
+      - name: Typecheck touched owners
+        run: |
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir packages/assistant-runtime typecheck
+
+      - name: Repository validation
+        run: |
+          pnpm docs:drift
+          pnpm test:diff:local
+          git diff --check
+          test ! -e .github/workflows/finalize-newsletter-automation.yml
+          test ! -e .github/workflows/finalize-newsletter-automation-v2.yml
+          test ! -e .github/workflows/finalize-newsletter-automation-v3.yml
+          test ! -e .github/workflows/finalize-newsletter-automation-v4.yml
+          test ! -e agent-docs/exec-plans/active/2026-08-09-newsletter-as-automation.md
+          test -e agent-docs/exec-plans/completed/2026-08-09-newsletter-as-automation.md
+          grep -q 'system:automation-delivery:group-email' packages/assistant-engine/src/assistant/automation-delivery.ts
+          grep -q 'resolveHostedAutomationSavePolicy' packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts
+          grep -q 'resolveAutomationGroupEmailConfigurationIssue' packages/assistant-engine/src/assistant/cron/execution.ts
+          grep -q 'Read the `group-newsletter` skill' packages/assistant-engine/src/assistant/group-newsletter-automation.ts
+
+      - name: Commit and push reviewed fixes
+        run: |
+          git add -A
+          git commit -m "refactor(automation): finalize ordinary group newsletters"
+          git push --force-with-lease origin HEAD:codex/simplify-newsletter-automation
