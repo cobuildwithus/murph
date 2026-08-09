@@ -36,7 +36,9 @@ jobs:
 
       - name: Apply implementation
         run: |
-          gzip -dc .github/agent-scripts/apply_message_current_sender.py.gz > /tmp/apply_message_current_sender.py
+          cat .github/agent-scripts/apply_message_current_sender.py.gz.b64.* \
+            | base64 --decode \
+            | gzip -dc > /tmp/apply_message_current_sender.py
           python /tmp/apply_message_current_sender.py
 
       - name: Check patch formatting
@@ -67,7 +69,7 @@ jobs:
         run: |
           git rm \
             .github/workflows/agent-apply-message-current-sender.yml \
-            .github/agent-scripts/apply_message_current_sender.py.gz
+            .github/agent-scripts/apply_message_current_sender.py.gz.b64.*
           git add -A
           git diff --cached --check
           git config user.name "OpenAI Codex"
