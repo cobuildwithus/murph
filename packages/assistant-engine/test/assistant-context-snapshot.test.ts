@@ -720,7 +720,7 @@ describe('assistant context snapshot', () => {
       expect(promptText).toContain('Penicillin allergy')
       expect(JSON.parse(await readFile(snapshotPath, 'utf8'))).toMatchObject({
         schema: 'murph.assistant-context-snapshot',
-        schemaVersion: 5,
+        schemaVersion: 6,
       })
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
