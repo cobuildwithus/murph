@@ -655,13 +655,13 @@ async function buildAssistantSnapshotCoverage(input: {
         : '- Blood test records are present. For a named biomarker, read it once with `vault-cli blood-test list --text "<biomarker>" --limit 1 --format json`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.'
       : null,
     bodyMeasurementsLine: renderAssistantSnapshotBodyMeasurementsLine(
-    deviceMeasurementCoverage.latestBodyMeasurementDate,
+  deviceMeasurementCoverage.latestBodyMeasurementDate,
+),
+bloodPressureMeasurementsLine:
+  renderAssistantSnapshotBloodPressureMeasurementsLine(
+    deviceMeasurementCoverage.latestBloodPressureMeasurementDate,
   ),
-  bloodPressureMeasurementsLine:
-    renderAssistantSnapshotBloodPressureMeasurementsLine(
-      deviceMeasurementCoverage.latestBloodPressureMeasurementDate,
-    ),
-  conditionCount: conditions.length,
+conditionCount: conditions.length,
     goalCount: goals.length,
     habitatLine: renderHabitatLine(habitatRead.records, input.currentDate),
     habitatRecordCount: habitatRead.records.length,
