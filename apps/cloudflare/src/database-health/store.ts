@@ -15,6 +15,13 @@ const DATABASE_HEALTH_SCHEMA_VERSION = 1;
 export interface DatabaseHealthMonitoringAlertObligation {
   checkedAtMs: number;
   failures: number;
+  incompleteChecks: number;
+  missingMetrics: readonly DatabaseHealthRequiredMetricName[];
+  unavailableChecks: number;
+}
+
+export interface DatabaseHealthMonitoringEvidence {
+  availability: "incomplete" | "unavailable";
   missingMetrics: readonly DatabaseHealthRequiredMetricName[];
 }
 
@@ -70,6 +77,7 @@ interface DatabaseHealthSampleRow extends Record<string, DurableObjectSqlValue> 
   conditions_json: string;
   direct_connection_error_delta: number | null;
   failure_code: string | null;
+  monitoring_evidence_json: string | null;
   observed_at_ms: number;
   postgres_connections: number | null;
   postgres_max_connections: number | null;
@@ -276,8 +284,9 @@ export class DatabaseHealthStore {
          postgres_connection_states_json,
          direct_connection_error_delta,
          direct_connection_error_counters_json,
+         monitoring_evidence_json,
          conditions_json
-       ) VALUES (?, 'ok', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, 'ok', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
        ON CONFLICT(observed_at_ms) DO UPDATE SET
          scrape_status = excluded.scrape_status,
          failure_code = excluded.failure_code,
@@ -293,6 +302,7 @@ export class DatabaseHealthStore {
          direct_connection_error_delta = excluded.direct_connection_error_delta,
          direct_connection_error_counters_json =
            excluded.direct_connection_error_counters_json,
+         monitoring_evidence_json = excluded.monitoring_evidence_json,
          conditions_json = excluded.conditions_json`,
       input.observedAtMs,
       input.snapshot.clientWaitSeconds,
@@ -314,6 +324,7 @@ export class DatabaseHealthStore {
     conditions: readonly DatabaseHealthCondition[];
     directConnectionErrorDelta: number | null;
     failureCode: string;
+    monitoringEvidence: DatabaseHealthMonitoringEvidence;
     observedAtMs: number;
     snapshot: DatabaseMetricObservationSnapshot | null;
   }): void {
@@ -334,8 +345,9 @@ export class DatabaseHealthStore {
          postgres_connection_states_json,
          direct_connection_error_delta,
          direct_connection_error_counters_json,
+         monitoring_evidence_json,
          conditions_json
-       ) VALUES (?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(observed_at_ms) DO UPDATE SET
          scrape_status = excluded.scrape_status,
          failure_code = excluded.failure_code,
@@ -353,6 +365,7 @@ export class DatabaseHealthStore {
            excluded.direct_connection_error_delta,
          direct_connection_error_counters_json =
            excluded.direct_connection_error_counters_json,
+         monitoring_evidence_json = excluded.monitoring_evidence_json,
          conditions_json = excluded.conditions_json`,
       input.observedAtMs,
       input.failureCode,
@@ -367,8 +380,34 @@ export class DatabaseHealthStore {
       JSON.stringify(snapshot?.postgresConnectionStates ?? {}),
       input.directConnectionErrorDelta,
       JSON.stringify(snapshot?.directConnectionErrorCounters ?? {}),
+      JSON.stringify(input.monitoringEvidence),
       JSON.stringify(input.conditions),
     );
+  }
+
+  readLatestMonitoringEvidence(): DatabaseHealthMonitoringEvidence | null {
+    const row = this.sql.exec<{
+      failure_code: string;
+      monitoring_evidence_json: string | null;
+    }>(
+      `SELECT failure_code, monitoring_evidence_json
+       FROM database_health_samples
+       WHERE scrape_status = 'failed'
+       ORDER BY observed_at_ms DESC
+       LIMIT 1`,
+    ).toArray()[0];
+    if (!row) {
+      return null;
+    }
+    if (row.monitoring_evidence_json !== null) {
+      return parseMonitoringEvidence(row.monitoring_evidence_json);
+    }
+    return {
+      availability: row.failure_code === "required_metrics_missing"
+        ? "incomplete"
+        : "unavailable",
+      missingMetrics: [],
+    };
   }
 
   pruneSamples(beforeMs: number): void {
@@ -497,6 +536,7 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
       postgres_connection_states_json TEXT NOT NULL,
       direct_connection_error_delta INTEGER,
       direct_connection_error_counters_json TEXT NOT NULL,
+      monitoring_evidence_json TEXT,
       conditions_json TEXT NOT NULL,
       CHECK (
         (scrape_status = 'ok' AND failure_code IS NULL)
@@ -532,6 +572,12 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
     sql,
     "database_health_meta",
     "monitoring_alert_owed_json",
+    "TEXT",
+  );
+  ensureDatabaseHealthTableColumn(
+    sql,
+    "database_health_samples",
+    "monitoring_evidence_json",
     "TEXT",
   );
   ensureDatabaseHealthTableColumn(
@@ -580,7 +626,9 @@ function parseMonitoringAlertObligation(
   }
   const checkedAtMs = parsed.checkedAtMs;
   const failures = parsed.failures;
+  const incompleteChecks = parsed.incompleteChecks;
   const missingMetrics = parsed.missingMetrics;
+  const unavailableChecks = parsed.unavailableChecks;
   const allowedMetrics = new Set<string>(
     DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
   );
@@ -599,7 +647,61 @@ function parseMonitoringAlertObligation(
   ) {
     throw new Error("Stored database monitoring alert obligation is invalid.");
   }
-  return { checkedAtMs, failures, missingMetrics };
+  const normalizedIncompleteChecks = incompleteChecks === undefined
+    ? (missingMetrics.length > 0 ? failures : 0)
+    : incompleteChecks;
+  const normalizedUnavailableChecks = unavailableChecks === undefined
+    ? (missingMetrics.length > 0 ? 0 : failures)
+    : unavailableChecks;
+  if (
+    typeof normalizedIncompleteChecks !== "number"
+    || !Number.isSafeInteger(normalizedIncompleteChecks)
+    || normalizedIncompleteChecks < 0
+    || typeof normalizedUnavailableChecks !== "number"
+    || !Number.isSafeInteger(normalizedUnavailableChecks)
+    || normalizedUnavailableChecks < 0
+    || normalizedIncompleteChecks + normalizedUnavailableChecks !== failures
+  ) {
+    throw new Error("Stored database monitoring alert obligation is invalid.");
+  }
+  return {
+    checkedAtMs,
+    failures,
+    incompleteChecks: normalizedIncompleteChecks,
+    missingMetrics,
+    unavailableChecks: normalizedUnavailableChecks,
+  };
+}
+
+function parseMonitoringEvidence(
+  value: string,
+): DatabaseHealthMonitoringEvidence {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("Stored database monitoring evidence is invalid.");
+  }
+  if (!isObjectRecord(parsed)) {
+    throw new Error("Stored database monitoring evidence is invalid.");
+  }
+  const availability = parsed.availability;
+  const missingMetrics = parsed.missingMetrics;
+  const allowedMetrics = new Set<string>(
+    DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
+  );
+  if (
+    (availability !== "incomplete" && availability !== "unavailable")
+    || !Array.isArray(missingMetrics)
+    || !missingMetrics.every(
+      (metric): metric is DatabaseHealthRequiredMetricName =>
+        typeof metric === "string" && allowedMetrics.has(metric),
+    )
+    || (availability === "unavailable" && missingMetrics.length > 0)
+  ) {
+    throw new Error("Stored database monitoring evidence is invalid.");
+  }
+  return { availability, missingMetrics };
 }
 
 function parseNumberRecord(value: string): Record<string, number> {

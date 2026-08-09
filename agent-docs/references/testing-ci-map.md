@@ -535,7 +535,9 @@ supported provider credential.
   and partial samples, SQLite sample persistence and 30-day pruning, concrete
   connection thresholds, two-failure collection hysteresis, one acknowledged
   page per unresolved telemetry-notification window, recovered threshold
-  coalescing before acknowledgment, failed-scrape incident preservation,
+  coalescing before acknowledgment, truthful partial-then-unavailable,
+  unavailable-then-partial, and different-family partial-window summaries with
+  bounded observed evidence, failed-scrape incident preservation,
   telemetry obligation retention behind older pending and direct-error-only
   pages across restart and recovery, current-pressure priority at the first
   eligible provider slot with historical observation time, exact combined

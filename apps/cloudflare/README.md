@@ -205,10 +205,14 @@ still open an incident immediately. Two consecutive incomplete or failed
 collections open the fallback monitoring incident. An acknowledged
 telemetry-only page is one-shot for one unresolved operator-notification window.
 Crossing the two-failure threshold records one bounded alert obligation in the
-existing incident row, so an older pending page or direct-error priority cannot
-lose it; recovery and another gap before acknowledgment coalesce into that same
-notification while the first threshold's bounded evidence and observation time
-remain authoritative. The obligation does not occupy a closed provider fence.
+existing incident row. The first two-check window counts incomplete versus
+unavailable observations, unions only canonical missing families observed on
+partial checks, and identifies the threshold time as the window end. A bounded
+per-sample evidence value preserves that provenance across restart. An older
+pending page or direct-error priority cannot lose the obligation; recovery and
+another gap before acknowledgment coalesce into that same notification while
+the first threshold window remains authoritative. The obligation does not occupy
+a closed provider fence.
 At the same time, until an incident admits its first page, concrete evidence
 that appears on the threshold or a later sample, including a direct-error delta,
 persists in one combined immutable body. The exact pressure and truthful
@@ -229,7 +233,7 @@ condition-local observation time. Concrete unsafe conditions retain their
 30-minute recurrence. The object writes Linq provider-attempt
 admission before egress, never attempts more than once per 30 minutes across all
 incidents, and reuses the exact body plus idempotency key after an ambiguous
-send. The obligation columns are added idempotently without advancing the
+send. The alert-state and sample-evidence columns are added idempotently without advancing the
 schema version, so the previously deployed Worker can ignore them during a
 rollback. If that Worker acknowledges a telemetry pending body, current code
 recognizes its cleared key/body plus retained marker and prevents duplicate

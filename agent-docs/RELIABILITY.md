@@ -191,16 +191,19 @@ Last verified: 2026-08-07
   Discovery, scrape, parse, or incomplete required metrics must recur on two
   consecutive runs before paging the monitoring condition. Crossing that
   threshold persists one bounded telemetry-page obligation in the existing
-  incident row. It survives an occupied pending-message slot, restart, recovery,
-  and direct-error-only prioritization; only acknowledgment of a pending body
-  that includes the monitoring condition clears it. Recovery and another
-  threshold before acknowledgment deliberately coalesce into that unresolved
-  notification, retaining the first threshold's bounded evidence and observation
-  time; this monitor does not maintain an outage backlog. The additive
-  columns retain the existing schema version so a rollback Worker can ignore
-  them. Current code recognizes the prior Worker's cleared pending key/body with
-  the telemetry marker still set as an acknowledgment and removes the stale
-  obligation before re-admission.
+  incident row. The represented first two-check window counts incomplete versus
+  unavailable observations, unions only canonical missing families observed on
+  partial checks, and uses the threshold time as its window end. One bounded
+  evidence value on each existing sample preserves that aggregate provenance
+  across restart. The obligation survives an occupied pending-message slot,
+  restart, recovery, and direct-error-only prioritization; only acknowledgment
+  of a pending body that includes the monitoring condition clears it. Recovery
+  and another threshold before acknowledgment deliberately coalesce into that
+  unresolved notification, retaining the first threshold window; this monitor
+  does not maintain an outage backlog. The additive columns retain the existing
+  schema version so a rollback Worker can ignore them. Current code recognizes
+  the prior Worker's cleared pending key/body with the telemetry marker still set
+  as an acknowledgment and removes the stale obligation before re-admission.
   A newly opened incident or one-shot direct migration admission failure admits
   its exact body and idempotency key in the same synchronous SQLite transaction
   that persists the sample and advances any direct-error counter baseline.

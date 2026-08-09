@@ -156,4 +156,17 @@ Updated: 2026-08-09
   uses the stored time, while a mixed aggregate uses the latest included check
   and telemetry retains its separate observation time. Focused telemetry-bearing
   and direct-only regressions cover both timestamp branches. ReviewGPT round 10
-  remains pending.
+  found the same aggregate-provenance mechanism in the original telemetry
+  threshold and required a new retrospective before remediation: mixed partial
+  and unavailable checks were labeled using only the threshold observation.
+  The continuation decision applies one rule across aggregates: count, category,
+  time, and evidence presented as one fact must describe the same represented
+  observations. The telemetry page will summarize the entire first two-check
+  threshold window, count incomplete versus unavailable checks, union canonical
+  missing families actually observed on partial checks, label that union as
+  observed evidence, and identify the threshold time as the window end. One
+  bounded per-sample monitoring-evidence value in the existing sample table is
+  sufficient to compose the existing obligation across restart; no backlog,
+  second identity, queue, scheduler, or lifecycle owner is added. Required proof
+  covers both mixed orders and two partial checks with different families,
+  including exact both-recipient delivery, restart/retry, and acknowledgment.

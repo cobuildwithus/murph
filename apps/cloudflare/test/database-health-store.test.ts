@@ -64,6 +64,66 @@ describe("database health store", () => {
     ).one().value).toBe(1);
   });
 
+  it("adds bounded monitoring evidence to version-one sample history", () => {
+    const sql = createTestSqlStorage();
+    sql.exec(`
+      CREATE TABLE database_health_schema_meta (
+        key TEXT PRIMARY KEY,
+        value INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      INSERT INTO database_health_schema_meta (key, value)
+      VALUES ('schema_version', 1)
+    `);
+    sql.exec(`
+      CREATE TABLE database_health_samples (
+        observed_at_ms INTEGER PRIMARY KEY,
+        scrape_status TEXT NOT NULL CHECK (scrape_status IN ('ok', 'failed')),
+        failure_code TEXT,
+        client_wait_seconds REAL,
+        client_waiting_connections INTEGER,
+        server_connections INTEGER,
+        server_pool_capacity INTEGER,
+        server_pool_saturation_ratio REAL,
+        server_pool_states_json TEXT NOT NULL,
+        postgres_connections INTEGER,
+        postgres_max_connections INTEGER,
+        postgres_connection_states_json TEXT NOT NULL,
+        direct_connection_error_delta INTEGER,
+        direct_connection_error_counters_json TEXT NOT NULL,
+        conditions_json TEXT NOT NULL
+      )
+    `);
+    sql.exec(`
+      INSERT INTO database_health_samples (
+        observed_at_ms,
+        scrape_status,
+        failure_code,
+        server_pool_states_json,
+        postgres_connection_states_json,
+        direct_connection_error_counters_json,
+        conditions_json
+      ) VALUES (300000, 'failed', 'required_metrics_missing', '{}', '{}', '{}', '[]')
+    `);
+
+    const store = new DatabaseHealthStore(sql);
+
+    expect(store.readLatestMonitoringEvidence()).toEqual({
+      availability: "incomplete",
+      missingMetrics: [],
+    });
+    expect(sql.exec<{ name: string }>(
+      "PRAGMA table_info(database_health_samples)",
+    ).toArray().map((column) => column.name))
+      .toContain("monitoring_evidence_json");
+    expect(sql.exec<{ value: number }>(
+      `SELECT value
+       FROM database_health_schema_meta
+       WHERE key = 'schema_version'`,
+    ).one().value).toBe(1);
+  });
+
   it("recognizes a telemetry pending body acknowledged by a rollback Worker", () => {
     const sql = createTestSqlStorage();
     const store = new DatabaseHealthStore(sql);
@@ -71,9 +131,11 @@ describe("database health store", () => {
     store.recordMonitoringAlertObligation({
       checkedAtMs: 600_000,
       failures: 2,
+      incompleteChecks: 2,
       missingMetrics: [
         "planetscale_postgres_settings_max_connections",
       ],
+      unavailableChecks: 0,
     });
     store.createPendingAlert({
       idempotencyKey: "murph-db-1-1",

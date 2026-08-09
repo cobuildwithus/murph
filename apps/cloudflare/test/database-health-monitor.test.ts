@@ -874,8 +874,8 @@ describe("database health monitor", () => {
     );
     expect(firstAlert.message.parts[0]?.value).toBe(
       "Database monitor telemetry was incomplete for 2 checks "
-      + "(missing PlanetScale metric: Postgres max connections). "
-      + "Checked 00:10 UTC.",
+      + "(missing PlanetScale metric observed: Postgres max connections). "
+      + "Window ended 00:10 UTC.",
     );
     expect(firstAlert.message.parts[0]?.value).not.toContain(
       "database is under pressure",
@@ -897,10 +897,12 @@ describe("database health monitor", () => {
     expect(failedSample?.conditions).toEqual([
       {
         failures: 2,
+        incompleteChecks: 2,
         kind: "monitoring_unavailable",
         missingMetrics: [
           "planetscale_postgres_settings_max_connections",
         ],
+        unavailableChecks: 0,
       },
     ]);
 
@@ -969,7 +971,7 @@ describe("database health monitor", () => {
     const alert = await readLinqRequestBody(harness.primaryLinqRequests[0]);
     expect(alert.message.parts[0]?.value).toBe(
       "Database monitor telemetry was unavailable for 2 checks. "
-      + "Checked 00:10 UTC.",
+      + "Window ended 00:10 UTC.",
     );
     expect(alert.message.parts[0]?.value).not.toContain(
       "database is under pressure",
@@ -977,6 +979,171 @@ describe("database health monitor", () => {
     expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
       failureCode: "service_discovery_failed",
       scrapeStatus: "failed",
+    });
+  });
+
+  it("summarizes a partial-then-unavailable telemetry window across retry", async () => {
+    const partialMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+    }).replace(
+      /^planetscale_postgres_settings_max_connections.*$/mu,
+      "",
+    );
+    const harness = createMonitorHarness({
+      linqResponses: [
+        () => {
+          throw new Error("ambiguous send");
+        },
+      ],
+      metricsBody: partialMetricsBody,
+      serviceDiscoveryResponses: [
+        createServiceDiscoveryResponse,
+        () => new Response(null, { status: 503 }),
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_failed", sampleStatus: "failed" });
+
+    const expectedMessage =
+      "Database monitor telemetry was impaired for 2 checks "
+      + "(1 incomplete, 1 unavailable; missing PlanetScale metric observed: "
+      + "Postgres max connections). Window ended 00:10 UTC.";
+    const pendingAlert = harness.monitor.readAlertState();
+    const idempotencyKey = pendingAlert.pendingAlertIdempotencyKey;
+    if (!idempotencyKey || !pendingAlert.pendingAlertMessage) {
+      throw new Error("Expected a persisted mixed telemetry alert.");
+    }
+    expect(pendingAlert).toMatchObject({
+      monitoringAlertObligation: {
+        checkedAtMs: FIVE_MINUTES_MS * 2,
+        failures: 2,
+        incompleteChecks: 1,
+        missingMetrics: [
+          "planetscale_postgres_settings_max_connections",
+        ],
+        unavailableChecks: 1,
+      },
+      pendingAlertMessage: expectedMessage,
+    });
+    const firstBodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    expect(firstBodies.map((body) => body.message.parts[0]?.value))
+      .toEqual([expectedMessage, expectedMessage]);
+
+    harness.restartMonitor();
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: idempotencyKey,
+      pendingAlertMessage: expectedMessage,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    const allBodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    expect(allBodies.map((body) => body.message.parts[0]?.value))
+      .toEqual([
+        expectedMessage,
+        expectedMessage,
+        expectedMessage,
+        expectedMessage,
+      ]);
+    expect(allBodies.map((body) => body.message.idempotency_key).sort())
+      .toEqual([
+        idempotencyKey,
+        idempotencyKey,
+        `${idempotencyKey}-recipient-2`,
+        `${idempotencyKey}-recipient-2`,
+      ].sort());
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      monitoringAlertObligation: null,
+      pendingAlertMessage: null,
+    });
+  });
+
+  it("summarizes an unavailable-then-partial telemetry window", async () => {
+    const partialMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+    }).replace(
+      /^planetscale_postgres_settings_max_connections.*$/mu,
+      "",
+    );
+    const harness = createMonitorHarness({
+      metricsBody: partialMetricsBody,
+      serviceDiscoveryResponses: [
+        () => new Response(null, { status: 503 }),
+        createServiceDiscoveryResponse,
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_sent", sampleStatus: "failed" });
+
+    const expectedMessage =
+      "Database monitor telemetry was impaired for 2 checks "
+      + "(1 incomplete, 1 unavailable; missing PlanetScale metric observed: "
+      + "Postgres max connections). Window ended 00:10 UTC.";
+    const bodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    expect(bodies).toHaveLength(2);
+    expect(bodies.map((body) => body.message.parts[0]?.value))
+      .toEqual([expectedMessage, expectedMessage]);
+    expect(bodies[1]?.message.idempotency_key)
+      .toBe(`${bodies[0]?.message.idempotency_key}-recipient-2`);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      monitoringAlertObligation: null,
+      pendingAlertMessage: null,
+    });
+  });
+
+  it("unions observed missing families across a partial telemetry window", async () => {
+    const healthyMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
+    let metricsBody = healthyMetricsBody.replace(
+      /^planetscale_postgres_settings_max_connections.*$/mu,
+      "",
+    );
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    metricsBody = healthyMetricsBody.replace(
+      /^planetscale_pgbouncer_pools_server.*$/gmu,
+      "",
+    );
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_sent", sampleStatus: "failed" });
+
+    const expectedMessage =
+      "Database monitor telemetry was incomplete for 2 checks "
+      + "(missing PlanetScale metrics observed: PgBouncer server pools, "
+      + "Postgres max connections). Window ended 00:10 UTC.";
+    const bodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    expect(bodies).toHaveLength(2);
+    expect(bodies.map((body) => body.message.parts[0]?.value))
+      .toEqual([expectedMessage, expectedMessage]);
+    expect(bodies[1]?.message.idempotency_key)
+      .toBe(`${bodies[0]?.message.idempotency_key}-recipient-2`);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      monitoringAlertObligation: null,
+      pendingAlertMessage: null,
     });
   });
 
@@ -1215,8 +1382,8 @@ describe("database health monitor", () => {
     expect(olderRetry).toEqual(firstAttempt);
     expect(telemetryAttempt.message.parts[0]?.value).toBe(
       "Database monitor telemetry was incomplete for 2 checks "
-      + "(missing PlanetScale metric: Postgres max connections). "
-      + "Checked 00:15 UTC.",
+      + "(missing PlanetScale metric observed: Postgres max connections). "
+      + "Window ended 00:15 UTC.",
     );
     const telemetryAttempts = (
       await Promise.all(harness.allLinqRequests.map(readLinqRequestBody))
@@ -1296,7 +1463,7 @@ describe("database health monitor", () => {
     expect(combinedAlert.message.parts[0]?.value).toBe(
       "Database health is outside the safe range. PgBouncer wait 9s; "
       + "Database monitor telemetry was incomplete for 2 checks "
-      + "(observed 00:15 UTC; missing PlanetScale metric: "
+      + "(window ended 00:15 UTC; missing PlanetScale metric observed: "
       + "Postgres max connections). Checked 00:35 UTC.",
     );
     const combinedAttempts = (
@@ -1361,7 +1528,7 @@ describe("database health monitor", () => {
     expect(pressurePending.pendingAlertMessage).toBe(
       "Database health is outside the safe range. PgBouncer wait 8s; "
       + "Database monitor telemetry was incomplete for 2 checks "
-      + "(missing PlanetScale metric: Postgres max connections). "
+      + "(missing PlanetScale metric observed: Postgres max connections). "
       + "Checked 00:20 UTC.",
     );
     expect(pressurePending.pendingAlertIdempotencyKey).not.toBeNull();
@@ -1485,7 +1652,7 @@ describe("database health monitor", () => {
     expect(mixedPending.pendingAlertMessage).toBe(
       "Database health is outside the safe range. PgBouncer wait 8s; "
       + "Database monitor telemetry was incomplete for 2 checks "
-      + "(observed 00:20 UTC; missing PlanetScale metric: "
+      + "(window ended 00:20 UTC; missing PlanetScale metric observed: "
       + "Postgres max connections). Checked 00:25 UTC.",
     );
     expect(mixedPending.pendingAlertIdempotencyKey).not.toBeNull();
@@ -1601,7 +1768,7 @@ describe("database health monitor", () => {
     expect(mixedPending.pendingAlertMessage).toBe(
       "Database health is outside the safe range. PgBouncer wait 8s; "
       + "Database monitor telemetry was incomplete for 2 checks "
-      + "(observed 00:20 UTC; missing PlanetScale metric: "
+      + "(window ended 00:20 UTC; missing PlanetScale metric observed: "
       + "Postgres max connections); 2 direct migration connection errors. "
       + "Checked 00:25 UTC.",
     );
@@ -1693,8 +1860,8 @@ describe("database health monitor", () => {
     );
     expect(firstTelemetryAlert.message.parts[0]?.value).toBe(
       "Database monitor telemetry was incomplete for 2 checks "
-      + "(missing PlanetScale metric: Postgres max connections). "
-      + "Checked 00:10 UTC.",
+      + "(missing PlanetScale metric observed: Postgres max connections). "
+      + "Window ended 00:10 UTC.",
     );
 
     clientWaitSeconds = 8;
@@ -1776,8 +1943,8 @@ describe("database health monitor", () => {
     );
     expect(secondTelemetryAlert.message.parts[0]?.value).toBe(
       "Database monitor telemetry was incomplete for 2 checks "
-      + "(missing PlanetScale metric: PgBouncer server pools). "
-      + "Checked 00:55 UTC.",
+      + "(missing PlanetScale metric observed: PgBouncer server pools). "
+      + "Window ended 00:55 UTC.",
     );
     const telemetryAttempts = (
       await Promise.all(harness.allLinqRequests.map(readLinqRequestBody))
@@ -2515,7 +2682,7 @@ describe("database health monitor", () => {
     expect(harness.monitor.readAlertState().pendingAlertMessage)
       .toContain(
         "Database monitor telemetry was incomplete for 2 checks "
-        + "(observed 00:25 UTC; missing PlanetScale metric: "
+        + "(window ended 00:25 UTC; missing PlanetScale metric observed: "
         + "Postgres max connections)",
       );
     expect(harness.monitor.readAlertState().pendingAlertMessage)
@@ -2544,7 +2711,7 @@ describe("database health monitor", () => {
     expect(directErrorPage.message.parts[0]?.value)
       .toContain(
         "Database monitor telemetry was incomplete for 2 checks "
-        + "(observed 00:25 UTC; missing PlanetScale metric: "
+        + "(window ended 00:25 UTC; missing PlanetScale metric observed: "
         + "Postgres max connections)",
       );
     expect(directErrorPage.message.parts[0]?.value)

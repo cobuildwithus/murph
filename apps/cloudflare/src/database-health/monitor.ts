@@ -1,6 +1,7 @@
 import type { DurableObjectSqlStorageLike } from "../user-runner/types.js";
 import {
   calculateDirectConnectionErrorDelta,
+  DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
   DatabaseMetricsParseError,
   evaluateDatabaseMetricSnapshot,
   parsePlanetScaleDatabaseMetricObservation,
@@ -13,6 +14,8 @@ import {
 import {
   DatabaseHealthStore,
   type DatabaseHealthAlertState,
+  type DatabaseHealthMonitoringAlertObligation,
+  type DatabaseHealthMonitoringEvidence,
   type DatabaseHealthStoredSample,
 } from "./store.js";
 
@@ -122,6 +125,7 @@ type DatabaseHealthCollectedSample =
     directConnectionErrorDelta: number | null;
     failureCode: DatabaseHealthFailureCode;
     failures: number;
+    monitoringEvidence: DatabaseHealthMonitoringEvidence;
     snapshot: DatabaseMetricObservationSnapshot | null;
     status: "failed";
   };
@@ -251,6 +255,10 @@ export class DatabaseHealthMonitor {
           directConnectionErrorDelta,
           failureCode: "required_metrics_missing",
           failures,
+          monitoringEvidence: {
+            availability: "incomplete",
+            missingMetrics: observation.missingMetrics,
+          },
           snapshot: observation.snapshot,
           status: "failed",
         };
@@ -293,6 +301,10 @@ export class DatabaseHealthMonitor {
         directConnectionErrorDelta: null,
         failureCode,
         failures,
+        monitoringEvidence: {
+          availability: "unavailable",
+          missingMetrics: [],
+        },
         snapshot: null,
         status: "failed",
       };
@@ -319,11 +331,23 @@ export class DatabaseHealthMonitor {
       && sample.failures === MONITORING_FAILURE_ALERT_COUNT
       && currentMonitoringCondition
     ) {
-      this.store.recordMonitoringAlertObligation({
+      const priorEvidence = this.store.readLatestMonitoringEvidence();
+      if (priorEvidence === null) {
+        throw new Error(
+          "Database monitoring threshold is missing prior evidence.",
+        );
+      }
+      const monitoringAlertObligation = buildMonitoringAlertObligation({
         checkedAtMs: input.checkedAtMs,
         failures: currentMonitoringCondition.failures,
-        missingMetrics: currentMonitoringCondition.missingMetrics,
+        observations: [priorEvidence, sample.monitoringEvidence],
       });
+      Object.assign(currentMonitoringCondition, {
+        incompleteChecks: monitoringAlertObligation.incompleteChecks,
+        missingMetrics: monitoringAlertObligation.missingMetrics,
+        unavailableChecks: monitoringAlertObligation.unavailableChecks,
+      });
+      this.store.recordMonitoringAlertObligation(monitoringAlertObligation);
     }
 
     let alertState = this.store.readAlertState();
@@ -365,8 +389,10 @@ export class DatabaseHealthMonitor {
       const monitoringConditionForAdmission = monitoringAlertObligation
         ? {
           failures: monitoringAlertObligation.failures,
+          incompleteChecks: monitoringAlertObligation.incompleteChecks,
           kind: "monitoring_unavailable" as const,
           missingMetrics: monitoringAlertObligation.missingMetrics,
+          unavailableChecks: monitoringAlertObligation.unavailableChecks,
         }
         : null;
       const currentReplayableConditions = sample.conditions.filter(
@@ -484,6 +510,7 @@ export class DatabaseHealthMonitor {
         conditions: sample.conditions,
         directConnectionErrorDelta: sample.directConnectionErrorDelta,
         failureCode: sample.failureCode,
+        monitoringEvidence: sample.monitoringEvidence,
         observedAtMs: input.observedAtMs,
         snapshot: sample.snapshot,
       });
@@ -973,7 +1000,7 @@ function buildDatabaseAlertMessage(input: {
         input.monitoringCheckedAtMs,
       ))
       .join("; ");
-    return `${evidence}. Checked ${checkedAt} UTC.`;
+    return `${evidence}. Window ended ${checkedAt} UTC.`;
   }
   const openingIndex =
     (
@@ -1127,30 +1154,67 @@ function formatMonitoringUnavailableCondition(
   >,
   observedAtMs: number | null,
 ): string {
+  const incompleteChecks = condition.incompleteChecks
+    ?? (condition.missingMetrics.length > 0 ? condition.failures : 0);
+  const unavailableChecks = condition.unavailableChecks
+    ?? (condition.missingMetrics.length > 0 ? 0 : condition.failures);
   const missingMetricLabels = condition.missingMetrics.map(
     (name) => DATABASE_METRIC_ALERT_LABELS[name],
   );
   const details = [
     observedAtMs === null
       ? null
-      : `observed ${
+      : `window ended ${
         new Date(observedAtMs).toISOString().slice(11, 16)
       } UTC`,
+    incompleteChecks > 0 && unavailableChecks > 0
+      ? `${formatCount(incompleteChecks)} incomplete, ${formatCount(
+        unavailableChecks,
+      )} unavailable`
+      : null,
     missingMetricLabels.length === 0
       ? null
       : `missing PlanetScale ${
-      missingMetricLabels.length === 1 ? "metric" : "metrics"
-      }: ${missingMetricLabels.join(", ")}`,
+        missingMetricLabels.length === 1 ? "metric" : "metrics"
+      } observed: ${missingMetricLabels.join(", ")}`,
   ].filter((detail): detail is string => detail !== null);
   const detailEvidence = details.length === 0
     ? ""
     : ` (${details.join("; ")})`;
-  const availability = missingMetricLabels.length === 0
-    ? "unavailable"
-    : "incomplete";
+  const availability = incompleteChecks > 0 && unavailableChecks > 0
+    ? "impaired"
+    : incompleteChecks > 0
+      ? "incomplete"
+      : "unavailable";
   return `Database monitor telemetry was ${availability} for ${formatCount(
     condition.failures,
   )} checks${detailEvidence}`;
+}
+
+function buildMonitoringAlertObligation(input: {
+  checkedAtMs: number;
+  failures: number;
+  observations: readonly DatabaseHealthMonitoringEvidence[];
+}): DatabaseHealthMonitoringAlertObligation {
+  if (input.observations.length !== input.failures) {
+    throw new Error("Database monitoring window evidence is incomplete.");
+  }
+  const incompleteChecks = input.observations.filter(
+    (observation) => observation.availability === "incomplete",
+  ).length;
+  const unavailableChecks = input.observations.length - incompleteChecks;
+  const observedMissingMetrics = new Set(
+    input.observations.flatMap((observation) => observation.missingMetrics),
+  );
+  return {
+    checkedAtMs: input.checkedAtMs,
+    failures: input.failures,
+    incompleteChecks,
+    missingMetrics: DATABASE_HEALTH_REQUIRED_METRIC_NAMES.filter(
+      (name) => observedMissingMetrics.has(name),
+    ),
+    unavailableChecks,
+  };
 }
 
 function buildDatabaseAlertIdempotencyKey(input: {

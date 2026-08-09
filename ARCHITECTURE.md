@@ -1053,12 +1053,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
   never treated as zero. A telemetry-only notification opens after two
-  consecutive incomplete or failed collections. One bounded obligation in the
+  consecutive incomplete or failed collections. The first two-check threshold
+  window counts incomplete versus unavailable observations, unions only
+  canonical missing families observed on partial checks, and uses the threshold
+  time as the window end; one bounded evidence value on each existing sample
+  preserves that provenance across restart. One bounded obligation in the
   existing incident row survives a busy pending slot, restart, and recovery
   until a telemetry-bearing page is acknowledged. Recovery and another metric
   gap before that acknowledgment coalesce into the same unresolved operator
-  notification instead of creating a backlog; the first threshold's bounded
-  evidence and observation time remain authoritative. An owed telemetry page
+  notification instead of creating a backlog; the first threshold window remains
+  authoritative. An owed telemetry page
   alone does not occupy a closed provider fence. Before an incident admits its
   first page, concrete evidence—including a direct-error delta—that appears on
   the threshold or a later sample persists in one combined immutable body, so
@@ -1067,7 +1071,8 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   An acknowledged-incident recurrence waits for the eligible sample, which
   includes any still-current unsafe evidence and labels
   historical telemetry by its own observation time. A later complete collection rearms
-  telemetry only after the obligation is acknowledged. Its additive columns
+  telemetry only after the obligation is acknowledged. Its additive alert-state
+  and sample-evidence columns
   preserve the existing schema
   version; current code also recognizes a telemetry pending body cleared by the
   prior Worker, preventing a duplicate after rollback and re-upgrade. Concrete
