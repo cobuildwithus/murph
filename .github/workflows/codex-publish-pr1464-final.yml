@@ -25,11 +25,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          expected_main="363505694d7c069b966dba40ede126d2b04280a6"
+          expected_main="f7359e41ad63bdd430b3d67d34e77161323091b0"
           expected_old_head="0feeae892ec981a0515ae2474b51dfdff1dd646e"
-          expected_first_tree="13200ca299e254163fb58e12dc729301e4c3d6ad"
-          expected_second_tree="2c62faf4f21186ba5c514df6e94e9d4a3bfe58c2"
-          expected_final_tree="21e5c096c40604b2832b7c0851ccf92873b81cca"
+          expected_final_tree="afcde634f72a93b544a20c9f13851aaa78231d28"
+          expected_harden_sha="c1295ffe14ce59c853d564c2065b3cc7862dbc9ce823e0929a3aa503e14d1e5f"
+          expected_supplement_sha="8fe82c99d222c3cfc36fe814e002e31644d407f90e9e42b833158f049e3594e6"
           implementation_commit="3a27da086599bf186120cf7061b978930553b2dd"
           workflow_commit="0feeae892ec981a0515ae2474b51dfdff1dd646e"
           helper_ref="origin/codex/starter-usage-export-final"
@@ -47,42 +47,72 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --detach "$expected_main"
 
-          mkdir -p /tmp/pr1464-payload
+          mkdir -p /tmp/pr1464-base /tmp/pr1464-supplement
           while IFS= read -r path; do
             git show "$helper_ref:$path"
           done < <(
             git ls-tree -r --name-only "$helper_ref" -- \
               '.github/pr1464-publish/payload-*' | sort
-          ) | base64 --decode | xz --decompress > /tmp/pr1464-payload.tar
-          tar -C /tmp/pr1464-payload -xf /tmp/pr1464-payload.tar
-          test -s /tmp/pr1464-payload/resolution.patch
-          test -s /tmp/pr1464-payload/harden.patch
+          ) | base64 --decode | xz --decompress > /tmp/pr1464-base.tar
+          tar -C /tmp/pr1464-base -xf /tmp/pr1464-base.tar
+          test "$(sha256sum /tmp/pr1464-base/harden.patch | cut -d' ' -f1)" = "$expected_harden_sha"
+
+          while IFS= read -r path; do
+            git show "$helper_ref:$path"
+          done < <(
+            git ls-tree -r --name-only "$helper_ref" -- \
+              '.github/pr1464-supplement/payload-*' | sort
+          ) | base64 --decode | xz --decompress > /tmp/pr1464-supplement.tar
+          tar -C /tmp/pr1464-supplement -xf /tmp/pr1464-supplement.tar
+          test "$(sha256sum /tmp/pr1464-supplement/supplement.patch | cut -d' ' -f1)" = "$expected_supplement_sha"
 
           set +e
           git cherry-pick "$implementation_commit"
-          cherry_pick_status=$?
+          implementation_status=$?
           set -e
-          test "$cherry_pick_status" -ne 0
+          test "$implementation_status" -ne 0
 
-          conflicts=(
+          implementation_conflicts=(
+            'apps/web/app/(dashboard)/settings/page.tsx'
+            'apps/web/app/design/group-member-plan-study.tsx'
             'apps/web/app/design/group-usage-funding-study.tsx'
+            'apps/web/app/design/sections-content.tsx'
             'apps/web/app/page.tsx'
+            'apps/web/src/components/settings/hosted-billing-settings.tsx'
+            'apps/web/src/lib/hosted-execution/usage-status.ts'
+            'apps/web/src/lib/hosted-onboarding/personal-usage-credit-eligibility.ts'
+            'apps/web/test/hosted-billing-settings.test.tsx'
             'apps/web/test/hosted-onboarding-billing-plans.test.ts'
           )
-          printf '%s\n' "${conflicts[@]}" | sort > /tmp/expected-conflicts
+          printf '%s\n' "${implementation_conflicts[@]}" | sort > /tmp/expected-conflicts
           git diff --name-only --diff-filter=U | sort > /tmp/actual-conflicts
           cmp /tmp/expected-conflicts /tmp/actual-conflicts
-
-          git checkout --ours -- "${conflicts[@]}"
-          git add -- "${conflicts[@]}"
-          git apply --index /tmp/pr1464-payload/resolution.patch
-          git cherry-pick --continue
-          test "$(git rev-parse 'HEAD^{tree}')" = "$expected_first_tree"
+          git checkout --ours -- "${implementation_conflicts[@]}"
+          git add -- "${implementation_conflicts[@]}"
+          GIT_EDITOR=true git cherry-pick --continue
 
           git cherry-pick "$workflow_commit"
-          test "$(git rev-parse 'HEAD^{tree}')" = "$expected_second_tree"
 
-          git am /tmp/pr1464-payload/harden.patch
+          set +e
+          git am --3way /tmp/pr1464-base/harden.patch
+          harden_status=$?
+          set -e
+          test "$harden_status" -ne 0
+
+          harden_conflicts=(
+            'apps/web/app/(dashboard)/settings/page.tsx'
+            'apps/web/src/lib/hosted-execution/usage-status.ts'
+          )
+          printf '%s\n' "${harden_conflicts[@]}" | sort > /tmp/expected-conflicts
+          git diff --name-only --diff-filter=U | sort > /tmp/actual-conflicts
+          cmp /tmp/expected-conflicts /tmp/actual-conflicts
+          git checkout --ours -- "${harden_conflicts[@]}"
+          git add -- "${harden_conflicts[@]}"
+          GIT_EDITOR=true git am --continue
+
+          git apply --index /tmp/pr1464-supplement/supplement.patch
+          git commit -m "Compose Starter usage with current paid plans"
+
           git diff --check "$expected_main"..HEAD
           test "$(git rev-parse 'HEAD^{tree}')" = "$expected_final_tree"
 
