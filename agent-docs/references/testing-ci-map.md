@@ -540,7 +540,8 @@ supported provider credential.
   pages across restart and recovery, current-pressure priority at the first
   eligible provider slot with historical observation time, rollback-compatible
   additive SQLite alert-state migration and legacy-ack normalization, recovery
-  reset and rearming,
+  reset and rearming, post-ack monitoring suppression inside concrete-pressure
+  recurrence, stale pressure retry isolation from a later rearmed obligation,
   global 30-minute wall-time provider-attempt pacing across incident recovery,
   current actual-check-time and rotated evidence-bearing recurrence copy,
   no stale fenced gauge page after recovery, exact body/idempotency reuse after

@@ -16,8 +16,8 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 Independent partial PlanetScale metric normalization, explicit unknown-family
 evidence, continued evaluation of available database signals, and one-shot
 telemetry-only operator paging with unresolved-window coalescing, current-pressure
-priority, durable owed-page preservation, and rollback-compatible additive state
-are jointly specified by `ARCHITECTURE.md`,
+priority, post-ack recurrence suppression, durable owed-page preservation, and
+rollback-compatible additive state are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, `agent-docs/references/testing-ci-map.md`, and
 `apps/cloudflare/README.md`.
 

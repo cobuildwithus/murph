@@ -229,8 +229,9 @@ Last verified: 2026-08-07
   historical telemetry evidence carries its own observation time. An
   acknowledged telemetry-only notification is one-shot while collection remains
   continuously incomplete or unavailable; its current samples remain queryable,
-  but they do not admit repeated pages. A complete healthy sample cannot discard
-  an unacknowledged telemetry obligation or rearm a separately recovered gap.
+  but they do not admit repeated pages or add monitoring copy to concrete-pressure
+  recurrences without a currently owed obligation. A complete healthy sample
+  cannot discard an unacknowledged telemetry obligation or rearm a separately recovered gap.
   Once any owed page is acknowledged, complete collection closes that incident
   and rearms telemetry. An already pending page is
   processed or deferred before a later clean sample can close the incident,

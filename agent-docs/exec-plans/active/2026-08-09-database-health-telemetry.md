@@ -78,7 +78,7 @@ Updated: 2026-08-09
 
 ## Verification log
 
-- Focused Node Vitest after review remediation: 4 files and 65 tests passed.
+- Focused Node Vitest after review remediation: 4 files and 66 tests passed.
 - Focused Workers-runtime Vitest: 1 file and 1 test passed.
 - Cloudflare package typecheck passed.
 - Raw health/model/vault log guard passed.
@@ -108,4 +108,13 @@ Updated: 2026-08-09
   historical telemetry with its own observation time, and normalizes a
   telemetry pending body acknowledged by the rollback Worker. Focused repeated-
   threshold, restart, both-recipient, current-pressure-ordering, exact-copy, and
-  legacy-ack tests cover that decision. Final ReviewGPT round 3 remains pending.
+  legacy-ack tests cover that decision.
+- Final ReviewGPT round 3 found that current post-ack monitoring conditions could
+  still enter a concrete-pressure pending body, whose later success could clear a
+  different rearmed obligation. The correction deletes that fallback: alert
+  admission includes monitoring only from the durable obligation and cannot
+  create an empty body. A focused two-window regression proves the first page to
+  both recipients, a pressure-only ambiguous recurrence, recovery, a distinct
+  rearmed missing-family obligation across restart, exact old-body retry without
+  clearing it, and delivery of the second page to both recipients. Final
+  ReviewGPT round 4 remains pending.

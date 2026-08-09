@@ -368,7 +368,7 @@ export class DatabaseHealthMonitor {
           kind: "monitoring_unavailable" as const,
           missingMetrics: monitoringAlertObligation.missingMetrics,
         }
-        : currentMonitoringCondition;
+        : null;
       const conditionsWithDeferredDirectErrors = [
         ...sample.conditions.filter(
           (condition) =>
@@ -387,11 +387,6 @@ export class DatabaseHealthMonitor {
       ];
       const hasDirectConnectionError =
         directErrorCountAvailableForAdmission > 0;
-      const isMonitoringOnly =
-        conditionsWithDeferredDirectErrors.length > 0
-        && conditionsWithDeferredDirectErrors.every(
-          (condition) => condition.kind === "monitoring_unavailable",
-        );
       const attemptFenceOpen =
         alertState.lastAlertAttemptedAtMs === null
         || (
@@ -433,15 +428,12 @@ export class DatabaseHealthMonitor {
           !alertState.pendingAlertIdempotencyKey
           || !alertState.pendingAlertMessage
         )
+        && admittedConditions.length > 0
         && !shouldHoldMonitoringForFence
         && (
           isNewIncident
           || hasDirectConnectionError
           || attemptFenceOpen
-          || monitoringAlertObligation !== null
-        )
-        && (
-          !isMonitoringOnly
           || monitoringAlertObligation !== null
         )
       ) {

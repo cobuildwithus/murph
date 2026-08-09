@@ -212,7 +212,9 @@ remain authoritative. The obligation does not occupy a closed provider fence. At
 next eligible sample, current unsafe database evidence shares the page while
 historical telemetry keeps its own observation time. Only acknowledgment of a
 telemetry-bearing page clears the obligation; a later complete sample then
-closes and rearms the incident. Concrete unsafe conditions retain their
+closes and rearms the incident. After acknowledgment, incomplete samples remain
+queryable but cannot repeat telemetry copy inside concrete-pressure pages unless
+a later rearmed threshold creates a new obligation. Concrete unsafe conditions retain their
 30-minute recurrence. The object writes Linq provider-attempt
 admission before egress, never attempts more than once per 30 minutes across all
 incidents, and reuses the exact body plus idempotency key after an ambiguous

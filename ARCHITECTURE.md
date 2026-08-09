@@ -1065,7 +1065,8 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   obligation is acknowledged. Its additive columns preserve the existing schema
   version; current code also recognizes a telemetry pending body cleared by the
   prior Worker, preventing a duplicate after rollback and re-upgrade. Concrete
-  unsafe conditions retain paced recurrence. First-incident
+  unsafe conditions retain paced recurrence, but acknowledged monitoring evidence
+  cannot enter their later pages without a currently owed obligation. First-incident
   and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring
