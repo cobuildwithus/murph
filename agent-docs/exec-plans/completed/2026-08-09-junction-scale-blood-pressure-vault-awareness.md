@@ -5,7 +5,7 @@ Date: 2026-08-09
 
 ## Outcome
 
-Connected scale and blood-pressure data already has canonical Junction ingestion. This change keeps that ingestion architecture intact, adds direct regression proof that the readings survive beyond raw evidence artifacts, and teaches Murph that the canonical history exists through the existing cached assistant-context snapshot.
+Connected scale and blood-pressure data already has canonical Junction ingestion. This change keeps that ingestion architecture intact, adds direct regression proof that readings survive beyond raw evidence artifacts, and teaches Murph that canonical scale and blood-pressure history exists through the existing cached assistant-context snapshot.
 
 ## Audit findings
 
@@ -38,15 +38,14 @@ The generic `wearables metric` summary route is not used for blood pressure beca
 
 ### Existing blood-test awareness
 
-Blood-test availability was already part of the assistant context snapshot. It includes the latest panel date and directs Murph to `vault-cli blood-test list`; this change composes scale/body and blood-pressure availability into that same navigation-only snapshot instead of introducing a second prompt-time datastore.
+Blood-test availability was already part of the assistant context snapshot. It includes the latest panel date and directs Murph to `vault-cli blood-test list`; this change adds scale/body and blood-pressure availability to that same navigation-only snapshot rather than introducing a second prompt-time datastore.
 
 ## Implementation
 
-- Added a small device-availability snapshot composer that queries the canonical metric projection for body weight/body fat and systolic/diastolic blood pressure.
-- The composer injects availability, the latest canonical date, and exact CLI navigation commands, but never injects the reading values themselves.
-- The block explicitly requires a canonical read before Murph quotes, compares, or interprets a value and forbids raw Junction artifacts as the normal read path.
-- The existing snapshot file stores a small composer-version marker. Canonical event-ledger writes already invalidate the base snapshot; the public refresh facade then rebuilds the base snapshot and recomposes device availability under the same runtime write lock.
-- Completed snapshots from before this change are lazily migrated without requiring a canonical data rewrite.
+- Extended the existing assistant context-snapshot builder to query the canonical metric projection for body weight/body fat and systolic/diastolic blood pressure in the same batched refresh as blood-test and saved-health-context coverage.
+- The snapshot injects availability, the latest canonical date, and exact CLI navigation commands, but never injects reading values themselves.
+- The prompt requires a canonical vault read before Murph quotes, compares, or interprets a value. Raw Junction artifacts may not substitute for canonical history; missing canonical data is treated as an ingestion problem.
+- Canonical event-ledger writes already invalidate the snapshot. Bumping the existing snapshot schema from version 5 to version 6 rebuilds previously completed snapshots once, with no second cache, version marker, locking pass, or datastore.
 
 ## Invariants preserved
 
@@ -54,7 +53,7 @@ Blood-test availability was already part of the assistant context snapshot. It i
 - Raw provider payloads remain bounded evidence, not an alternate query model.
 - No device reading value is copied into the system prompt.
 - Blood-pressure pairing is preserved at the event level.
-- Concurrent canonical writes win: the composer refuses to publish if the snapshot dirty sequence changes during its read.
+- Concurrent canonical writes keep the existing snapshot dirty-sequence guard and win over a stale background refresh.
 - Missing device history adds no prompt text.
 
 ## Focused proof
@@ -64,8 +63,8 @@ Blood-test availability was already part of the assistant context snapshot. It i
   - asserts canonical event-ledger records exist;
   - asserts canonical metric points exist with expected units and that systolic/diastolic share one source event.
 - `packages/assistant-engine/test/assistant-context-snapshot-device-availability.test.ts`
-  - asserts Murph receives the canonical read instructions and dates without the numeric readings;
-  - asserts an already-completed pre-composer snapshot is detected and migrated once.
+  - asserts Murph receives canonical read instructions and dates without numeric readings;
+  - asserts a snapshot written with the previous schema version is detected and rebuilt once.
 
 ## Verification
 
