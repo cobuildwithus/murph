@@ -140,7 +140,39 @@ export interface LinqMediaPart {
   size?: number | null;
 }
 
-export type LinqMessagePart = LinqTextPart | LinqLinkPart | LinqMediaPart;
+export interface LinqIMessageAppPart {
+  type: "imessage_app";
+  fallback_text?: string | null;
+}
+
+export type LinqMessagePart =
+  | LinqTextPart
+  | LinqLinkPart
+  | LinqMediaPart
+  | LinqIMessageAppPart;
+
+export type LinqMessageReceivedPartsValueKind =
+  | "array"
+  | "boolean"
+  | "missing"
+  | "null"
+  | "number"
+  | "object"
+  | "string";
+
+export interface LinqMessageReceivedPartsInspection {
+  compatibilityFallback: boolean;
+  dataKind: LinqMessageReceivedPartsValueKind;
+  messageKind: LinqMessageReceivedPartsValueKind;
+  partCount: number | null;
+  partKinds: string | null;
+  partsKind: LinqMessageReceivedPartsValueKind;
+  partsLocation: "data.message.parts" | "data.parts" | "unresolved";
+  payloadShape: "current-top-level" | "legacy-nested" | "unresolved";
+  topLevelActionPresent: boolean;
+  nestedActionPresent: boolean;
+  unsupportedPartCount: number;
+}
 
 type LinqWebhookHeaders = Headers | IncomingHttpHeaders | Record<string, string | string[] | undefined>;
 
@@ -250,6 +282,61 @@ export function parseLinqWebhookEvent(rawBody: Buffer | Uint8Array | ArrayBuffer
   };
 }
 
+export function inspectLinqMessageReceivedParts(
+  event: LinqWebhookEvent,
+): LinqMessageReceivedPartsInspection | null {
+  if (event.event_type !== "message.received") {
+    return null;
+  }
+
+  const dataKind = classifyLinqWebhookValueKind(event.data);
+  if (dataKind !== "object") {
+    return {
+      compatibilityFallback: false,
+      dataKind,
+      messageKind: "missing",
+      partCount: null,
+      partKinds: null,
+      partsKind: "missing",
+      partsLocation: "unresolved",
+      payloadShape: "unresolved",
+      topLevelActionPresent: false,
+      nestedActionPresent: false,
+      unsupportedPartCount: 0,
+    };
+  }
+
+  const data = event.data as Record<string, unknown>;
+  const messageKind = classifyLinqWebhookValueKind(data.message);
+  const nestedMessage = messageKind === "object"
+    ? data.message as Record<string, unknown>
+    : null;
+  const payloadShape = isNormalizedLinqMessageReceivedData(event, data)
+    ? "legacy-nested"
+    : "current-top-level";
+  const parts = payloadShape === "legacy-nested"
+    ? nestedMessage?.parts
+    : data.parts;
+  const partsKind = classifyLinqWebhookValueKind(parts);
+  const partInspection = inspectLinqMessagePartKinds(parts);
+
+  return {
+    compatibilityFallback: partsKind === "missing" || partsKind === "null",
+    dataKind,
+    messageKind,
+    partCount: partInspection.partCount,
+    partKinds: partInspection.partKinds,
+    partsKind,
+    partsLocation: payloadShape === "legacy-nested"
+      ? "data.message.parts"
+      : "data.parts",
+    payloadShape,
+    topLevelActionPresent: Object.hasOwn(data, "action"),
+    nestedActionPresent: nestedMessage ? Object.hasOwn(nestedMessage, "action") : false,
+    unsupportedPartCount: partInspection.unsupportedPartCount,
+  };
+}
+
 export function verifyLinqWebhookSignature(
   secret: string,
   payload: Buffer | Uint8Array | ArrayBuffer | string,
@@ -319,11 +406,7 @@ export function parseRawLinqMessageReceivedEvent(
   const senderHandle = parseRequiredChatHandle(data.sender_handle, "Linq message.received sender_handle");
   const ownerHandle = chat.owner_handle ?? undefined;
   const recipientHandle = parseOptionalChatHandle(data.recipient_handle) ?? ownerHandle;
-  const parts = data.parts;
-
-  if (!Array.isArray(parts)) {
-    throw new TypeError("Linq message.received message.parts must be an array.");
-  }
+  const parts = parseLinqMessageParts(data.parts);
 
   const createdAt = normalizeRequiredTimestamp(event.created_at, "Linq webhook created_at");
   const chatId = chat.id;
@@ -386,7 +469,7 @@ export function parseLinqMessageReceivedEvent(
   }
 
   const data = toLinqObjectRecord(event.data, "Linq message.received data");
-  if (!isNormalizedLinqMessageReceivedData(data)) {
+  if (!isNormalizedLinqMessageReceivedData(event, data)) {
     return parseRawLinqMessageReceivedEvent(event);
   }
 
@@ -564,8 +647,12 @@ export function buildLinqMessageText(
   parts: ReadonlyArray<LinqMessagePart> | null | undefined,
 ): string | null {
   const values = (parts ?? [])
-    .filter((part): part is Extract<LinqMessagePart, { type: "text" }> => part.type === "text")
-    .map((part) => normalizeTextValue(part.value))
+    .filter((part): part is LinqTextPart | LinqIMessageAppPart =>
+      part.type === "text" || part.type === "imessage_app"
+    )
+    .map((part) => part.type === "text"
+      ? normalizeTextValue(part.value)
+      : normalizeTextValue(part.fallback_text) ?? "[iMessage app]")
     .filter((value): value is string => value !== null);
 
   return values.length > 0 ? values.join("\n") : null;
@@ -912,9 +999,26 @@ function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
     };
   }
 
+  if (type === "imessage_app") {
+    return {
+      type,
+      fallback_text: normalizeNullableString(record.fallback_text),
+    };
+  }
+
   throw new TypeError(
-    `Linq message.received message.parts[${index}] type must be "text", "media", "link", or "voice_memo".`,
+    `Linq message.received message.parts[${index}] type must be "text", "media", "link", "voice_memo", or "imessage_app".`,
   );
+}
+
+function parseLinqMessageParts(value: unknown): unknown[] {
+  if (value == null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError("Linq message.received message.parts must be an array, null, or absent.");
+  }
+  return value;
 }
 
 function parseOptionalMessageEffect(value: unknown): LinqIncomingMessage["effect"] {
@@ -964,10 +1068,7 @@ function parseNormalizedLinqMessageReceivedEventData(
 ): LinqMessageReceivedEvent {
   const chat = parseRequiredChatInfo(data.chat);
   const message = toLinqObjectRecord(data.message, "Linq message.received message");
-  const parts = message.parts;
-  if (!Array.isArray(parts)) {
-    throw new TypeError("Linq message.received message.parts must be an array.");
-  }
+  const parts = parseLinqMessageParts(message.parts);
 
   const createdAt = normalizeRequiredTimestamp(event.created_at, "Linq webhook created_at");
   const senderHandle = parseRequiredChatHandle(
@@ -1023,18 +1124,24 @@ function parseNormalizedLinqMessageReceivedEventData(
   };
 }
 
-function isNormalizedLinqMessageReceivedData(value: unknown): value is LinqMessageReceivedData {
+function isNormalizedLinqMessageReceivedData(
+  event: LinqWebhookEvent,
+  value: unknown,
+): value is LinqMessageReceivedData {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
 
   const record = value as Record<string, unknown>;
-  return Boolean(
-    record.message
-      && typeof record.message === "object"
-      && !Array.isArray(record.message)
-      && "parts" in (record.message as Record<string, unknown>),
-  );
+  const message = record.message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return false;
+  }
+
+  return event.webhook_version === "2025-01-01"
+    || Object.hasOwn(record, "chat_id")
+    || Object.hasOwn(record, "is_from_me")
+    || Object.hasOwn(message, "parts");
 }
 
 function parseCanonicalLinqIsFromMe(data: Record<string, unknown>): boolean {
@@ -1161,6 +1268,13 @@ function pickLinqMessagePart(part: LinqMessagePart): Record<string, unknown> {
     });
   }
 
+  if (part.type === "imessage_app") {
+    return compactRecord({
+      fallback_text: part.fallback_text,
+      type: part.type,
+    });
+  }
+
   return compactRecord({
     type: part.type,
     url: part.url,
@@ -1169,6 +1283,73 @@ function pickLinqMessagePart(part: LinqMessagePart): Record<string, unknown> {
     mime_type: part.mime_type,
     size: part.size,
   });
+}
+
+function classifyLinqWebhookValueKind(value: unknown): LinqMessageReceivedPartsValueKind {
+  if (value === undefined) {
+    return "missing";
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (typeof value === "boolean") {
+    return "boolean";
+  }
+  if (typeof value === "number") {
+    return "number";
+  }
+  if (typeof value === "string") {
+    return "string";
+  }
+  return "object";
+}
+
+function inspectLinqMessagePartKinds(value: unknown): {
+  partCount: number | null;
+  partKinds: string | null;
+  unsupportedPartCount: number;
+} {
+  if (!Array.isArray(value)) {
+    return {
+      partCount: null,
+      partKinds: null,
+      unsupportedPartCount: 0,
+    };
+  }
+
+  const kinds = new Set<string>();
+  let unsupportedPartCount = 0;
+  for (const part of value) {
+    if (!part || typeof part !== "object" || Array.isArray(part)) {
+      kinds.add("invalid-entry");
+      unsupportedPartCount += 1;
+      continue;
+    }
+
+    const type = (part as Record<string, unknown>).type;
+    if (
+      type === "text"
+      || type === "link"
+      || type === "media"
+      || type === "voice_memo"
+      || type === "imessage_app"
+    ) {
+      kinds.add(type);
+      continue;
+    }
+
+    kinds.add(typeof type === "string" ? "unsupported" : "missing-type");
+    unsupportedPartCount += 1;
+  }
+
+  return {
+    partCount: value.length,
+    partKinds: kinds.size > 0 ? [...kinds].sort().join(",") : null,
+    unsupportedPartCount,
+  };
 }
 
 function pickLinqChatInfo(value: LinqChatInfo | null | undefined): Record<string, unknown> | undefined {

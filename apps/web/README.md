@@ -256,6 +256,16 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - storing raw provider webhook bodies or provider tokens in hosted API responses
 - turning Cloudflare execution mirrors into a second durable source of product truth
 
+Signed Linq `message.received` payloads accept both supported webhook shapes.
+An absent or null `parts` field uses the existing empty-message disposition: Web
+records the provider event, acknowledges it without an assistant wake, and emits
+a redacted warning containing only bounded shape categories, part counts and
+kinds, webhook-version category, outcome, and an event-id suffix. Non-array
+`parts` values and unsupported part types still fail closed with the same
+redacted warning. Inbound `imessage_app` parts contribute only their documented
+fallback text (or a fixed placeholder); app identity, layout, and URL metadata
+do not enter the durable mailbox payload or logs.
+
 ## Legal and health-permission publication surfaces
 
 Hosted deployments should expose HTML legal pages in addition to downloadable

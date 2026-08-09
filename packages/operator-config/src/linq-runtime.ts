@@ -1389,7 +1389,7 @@ function buildLinqProviderMessageEffects(input: {
     return []
   }
 
-  const textParts = input.body.message.parts.filter(
+  const textParts = (input.body.message.parts ?? []).filter(
     (part): part is TextPart => part.type === 'text',
   )
   const text = textParts.length === 1 ? textParts[0]!.value : null

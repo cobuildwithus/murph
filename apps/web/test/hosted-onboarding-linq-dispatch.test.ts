@@ -104,6 +104,7 @@ const mocks = vi.hoisted(() => {
       isGroup: false,
     })),
     logHostedOnboardingDiagnostic: vi.fn(),
+    logHostedOnboardingWarning: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     createHostedLinqChat: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
@@ -398,6 +399,7 @@ vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
     deriveHostedOnboardingTimingErrorName: mocks.deriveHostedOnboardingTimingErrorName,
     finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
     logHostedOnboardingDiagnostic: mocks.logHostedOnboardingDiagnostic,
+    logHostedOnboardingWarning: mocks.logHostedOnboardingWarning,
     startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
   };
 });
@@ -1791,6 +1793,80 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
+  it("stages only iMessage app fallback text in the canonical mailbox", async () => {
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [],
+      isGroup: false,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [{
+            app: {
+              bundle_id: "com.example.private",
+              name: "Private app name",
+            },
+            fallback_text: "Completed the check-in",
+            layout: {
+              caption: "Private layout metadata",
+            },
+            type: "imessage_app",
+            url: "https://example.test/private-capability",
+          }],
+        },
+        eventId: "evt_imessage_app",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(envelope).toEqual(expect.objectContaining({
+      message: expect.objectContaining({
+        linqMessage: expect.objectContaining({
+          parts: [{
+            type: "text",
+            value: "Completed the check-in",
+          }],
+          reactionEligible: true,
+        }),
+      }),
+    }));
+    expect(JSON.stringify(envelope)).not.toContain("private-capability");
+    expect(JSON.stringify(envelope)).not.toContain("Private app name");
+    expect(JSON.stringify(envelope)).not.toContain("Private layout metadata");
+    expect(mocks.logHostedOnboardingWarning).not.toHaveBeenCalled();
+  });
+
   it("ignores non-allowlisted local Linq inbound messages before member lookup or wake handoff", async () => {
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = ["+15559999999"];
     const prisma = asPrismaTransactionClient({
@@ -1845,7 +1921,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("ignores empty Linq message events before member lookup or wake handoff", async () => {
+  it("warns and acknowledges Linq message events with absent parts", async () => {
     const prisma = asPrismaTransactionClient({
       hostedMember: {
         findUnique: vi.fn(),
@@ -1876,7 +1952,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         data: {
-          parts: [],
+          parts: undefined,
         },
         eventId: "evt_empty_linq_message",
       }),
@@ -1902,6 +1978,23 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.logHostedOnboardingWarning).toHaveBeenCalledWith(
+      "hosted-onboarding.webhook.linq.message-parts",
+      expect.objectContaining({
+        compatibilityFallback: true,
+        dataKind: "object",
+        eventIdSuffix: "essage",
+        messageKind: "missing",
+        nestedActionPresent: false,
+        outcome: "compatibility-accepted",
+        partsKind: "missing",
+        partsLocation: "data.parts",
+        payloadShape: "current-top-level",
+        topLevelActionPresent: false,
+        unsupportedPartCount: 0,
+        webhookVersion: "2026-02-03",
+      }),
+    );
   });
 
   it("offers unbound Linq group chats from non-members setup without signup side effects", async () => {
@@ -12161,6 +12254,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       code: "LINQ_PAYLOAD_INVALID",
       httpStatus: 400,
     });
+    expect(mocks.logHostedOnboardingWarning).toHaveBeenCalledWith(
+      "hosted-onboarding.webhook.linq.message-parts",
+      expect.objectContaining({
+        compatibilityFallback: false,
+        errorCode: "LINQ_PAYLOAD_INVALID",
+        eventIdSuffix: "ayload",
+        outcome: "rejected",
+        partsKind: "string",
+        partsLocation: "data.parts",
+        payloadShape: "current-top-level",
+        webhookVersion: "2026-02-03",
+      }),
+    );
   });
 });
 

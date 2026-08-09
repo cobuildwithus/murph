@@ -3527,11 +3527,17 @@ function buildHostedLinqMailboxTextPart(
   let truncatedContent = false;
 
   for (const part of parts) {
-    if (part.type !== "text" && part.type !== "link") {
+    if (
+      part.type !== "text"
+      && part.type !== "link"
+      && part.type !== "imessage_app"
+    ) {
       continue;
     }
 
-    const value = normalizeHostedLinqPartText(part.value);
+    const value = part.type === "imessage_app"
+      ? normalizeHostedLinqPartText(part.fallback_text) ?? "[iMessage app]"
+      : normalizeHostedLinqPartText(part.value);
     if (!value) {
       continue;
     }
@@ -3618,8 +3624,14 @@ function buildMinimalHostedLinqMailboxParts(
   parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
 ): HostedExecutionLinqConversationMessagePart[] {
   const text = parts
-    .filter((part) => part.type === "text" || part.type === "link")
-    .map((part) => normalizeHostedLinqPartText(part.value) ?? "")
+    .filter((part) =>
+      part.type === "text"
+      || part.type === "link"
+      || part.type === "imessage_app"
+    )
+    .map((part) => part.type === "imessage_app"
+      ? normalizeHostedLinqPartText(part.fallback_text) ?? "[iMessage app]"
+      : normalizeHostedLinqPartText(part.value) ?? "")
     .filter(Boolean)
     .join("\n")
     .slice(0, HOSTED_LINQ_COMPACT_TEXT_BUDGET_CHARS);

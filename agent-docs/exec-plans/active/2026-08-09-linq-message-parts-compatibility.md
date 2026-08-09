@@ -1,0 +1,87 @@
+# linq-message-parts-compatibility
+
+Status: active
+Created: 2026-08-09
+Updated: 2026-08-09
+
+## Goal
+
+- Accept Linq `message.received` compatibility payloads whose optional legacy
+  `parts` field is absent or null without creating retrying 400s, support the
+  current documented inbound `imessage_app` part, and emit metadata-only warn
+  diagnostics whenever compatibility handling or invalid part structure is
+  observed.
+
+## Success criteria
+
+- Missing or null `parts` normalizes to the existing empty-message path, which
+  journals and acknowledges the provider event without waking the assistant.
+- Non-array, non-null `parts` remains invalid and emits a warning containing
+  only fixed structural facts and bounded identifier suffixes.
+- Current documented `imessage_app` parts preserve bounded fallback text for
+  assistant processing while omitting card URLs and provider-owned app/layout
+  metadata from canonical payloads and logs.
+- Existing text, link, media, voice memo, retry, dedupe, and webhook signature
+  behavior remains unchanged.
+- The two existing Linq SDK consumers use the current public-registry release
+  with the committed lockfile and dependency guards passing.
+
+## Scope
+
+- In scope: shared Linq ingress parsing/minimization, hosted Web structural warn
+  logging and mailbox normalization, focused inbox metadata normalization,
+  current SDK pins, tests, and current owner docs.
+- Out of scope: schema migrations, new queues/state owners, raw payload logging,
+  provider message refetch, webhook signature migration, and Cloudflare runtime
+  changes.
+
+## Constraints
+
+- Technical constraints: diagnostics must be metadata-only; never log message
+  content, handles, chat/message ids, URLs, app metadata, or raw request bodies.
+- Product/process constraints: do not silently turn malformed structured parts
+  into content, and do not wake the assistant for a genuinely contentless event.
+
+## Risks and mitigations
+
+1. Risk: relaxing validation could hide a provider contract regression.
+   Mitigation: relax only absent/null legacy content, retain strict rejection
+   for other types, and warn with the selected shape and version.
+2. Risk: app-card metadata may contain capabilities or private values.
+   Mitigation: retain only bounded `fallback_text` as user-visible content and
+   discard URL, app, and layout fields at ingress.
+3. Risk: an SDK upgrade changes unrelated provider surfaces.
+   Mitigation: use the exact public-registry release, inspect its changelog and
+   webhook types, and run both dependency guards plus focused typechecks/tests.
+
+## Tasks
+
+1. [x] Confirm current official Linq webhook contracts and the latest SDK package.
+2. [x] Add compatibility parsing, current part support, and privacy-safe warnings.
+3. [x] Add focused parser, Web service/logging, mailbox, and inbox regressions.
+4. [x] Update the live owner docs and SDK pins/lockfile.
+5. [ ] Run focused verification, dependency guards, exact-head review gates, and CI.
+
+## Decisions
+
+- The current SDK is `0.34.0`. Its 2026 message event requires `parts`, while
+  its legacy nested message model keeps `parts` optional; production evidence
+  shows the provider can still omit the field. Treat absent/null as an empty
+  compatibility payload and keep other non-array values invalid.
+- Support the SDK's documented `imessage_app` part explicitly rather than
+  treating all unknown provider part kinds as acceptable.
+
+## Verification
+
+- Focused Messaging Ingress (49), Inboxd (19), hosted Web (184), and
+  operator-config (65) tests pass.
+- Affected Messaging Ingress, Inboxd, operator-config, and hosted Web
+  typechecks pass. The SDK upgrade required one outbound read to tolerate the
+  newly optional SDK `message.parts` property; request construction is
+  unchanged.
+- `pnpm deps:guard`, `pnpm deps:ignored-builds`, `pnpm logs:guard`,
+  `pnpm docs:drift`, frozen-lockfile install, and `git diff --check` pass.
+- `pnpm deps:audit` remains blocked by repository-pre-existing transitive
+  advisories. None of its reported paths includes `@linqapp/sdk`, and the
+  lockfile diff adds no new SDK transitive dependency.
+- Exact-head ReviewGPT gates and PR CI remain pending.
