@@ -18,6 +18,7 @@ export const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA =
   "murph.hosted-workspace-snapshot-upload.v1";
 export const HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA =
   "murph.hosted-workspace-snapshot-orphan.v1";
+export const HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS = 10_000;
 
 export interface WorkspaceSnapshotR2ObjectLike {
   arrayBuffer?(): Promise<ArrayBuffer>;

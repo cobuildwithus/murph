@@ -21,6 +21,11 @@ Updated: 2026-08-09
 - Absent, mismatched, completed, and stale sessions add no wait; a dead runtime
   can defer replacement for the 10-second liveness window plus at most one
   additional retry interval (one second) after its final heartbeat.
+- Successful foreground preemption bypasses checkpoint preservation and stops
+  heartbeat liveness before detached snapshot-session cleanup.
+- Snapshot-session start has one six-second total deadline, the first heartbeat
+  begins immediately, and later serialized attempts keep a two-second
+  start-to-start cadence.
 - Existing production rollout defaults and the independent state-isolation
   preflight remain unchanged.
 - Focused coordination tests, Cloudflare typecheck, exact-head review, and PR CI
@@ -60,7 +65,11 @@ Updated: 2026-08-09
   replacement was accepted; it never published that snapshot.
 - Fleet snapshot completion distribution over 14 days: p50 3.253 seconds, p95
   7.781 seconds, p99 12.061 seconds, maximum 28.969 seconds.
-- Focused Cloudflare tests: 490 passed, including a 29-second live handoff,
+- Focused Cloudflare tests: 509 passed, including a 29-second live handoff,
   stale-heartbeat replacement, completion-marker replacement, heartbeat route,
-  heartbeat timer shutdown, and retry timing.
+  foreground-preemption bypass, total start-handshake timeout, immediate and
+  serialized heartbeat timing, heartbeat shutdown before stalled cleanup, and
+  retry timing.
 - Cloudflare package typecheck passed.
+- ReviewGPT round four found the foreground-preemption priority inversion and
+  the start/heartbeat timing inequality; both were reproduced and remediated.

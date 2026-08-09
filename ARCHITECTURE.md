@@ -2376,11 +2376,17 @@ legacy refs also cold-restore from durable bundles instead of trusting dirty
 warm local runtime markers across leases. Before an inactive fence is replaced,
 the `UserRunner` preserves it only when the durable current snapshot-upload
 session belongs to that exact attempt and lease generation, has not completed,
-and carries a runtime heartbeat less than 10 seconds old. The runtime refreshes
-that heartbeat every two seconds while snapshot publication is active and
-records completion after Web accepts the checkpoint. The one-second replacement
-retry therefore protects live snapshots without imposing a fixed publication
-deadline; absent, mismatched, completed, or stale handoffs proceed immediately.
+A runtime starts the first heartbeat immediately after the snapshot-session
+handshake and keeps later serialized attempts on a two-second start-to-start
+cadence while publication is active. That handshake has one six-second total
+deadline, leaving the two-second heartbeat request inside the 10-second stale
+boundary. A successful foreground preemption bypasses handoff preservation and
+stops heartbeat liveness before detached session cleanup. After Web accepts the
+checkpoint, the runtime stops heartbeating and best-effort records completion;
+a successful marker releases replacement immediately, while marker failure
+falls back to stale-heartbeat expiry. The one-second replacement retry therefore
+protects live snapshots without imposing a fixed publication deadline; absent,
+mismatched, completed, or stale handoffs proceed immediately.
 A dead runtime can defer replacement for the 10-second liveness window plus at
 most one additional retry interval (one second) after its final heartbeat.
 Encrypted hosted snapshots also carry

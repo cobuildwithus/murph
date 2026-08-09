@@ -3070,6 +3070,24 @@ describe("HostedUserRunner execution coordination", () => {
     });
     activeAttemptId = token.attemptId;
     activeGeneration = String(token.generation);
+    const snapshotId =
+      `snapshot_preempt_${activeProcessingMode}_${processingMode ?? "default"}`;
+    const snapshotObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}${snapshotId}.snapshot.enc`;
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession({
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: snapshotObjectKey,
+        snapshotId,
+      }),
+      attemptId: token.attemptId,
+      expectedWorkspaceVersion: "7",
+      leaseGeneration: String(token.generation),
+      workspaceVersion: "7",
+    })).resolves.toMatchObject({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      snapshotId,
+    });
 
     const ensureRuntimeProcessing = runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId:

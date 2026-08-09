@@ -19,6 +19,9 @@ import {
   type HostedExecutionContainerNamespaceLike,
 } from "../runner-container.js";
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS,
+} from "../workspace-snapshot-store.ts";
+import {
   readHostedRunnerContainerIdentity,
   resolveHostedExecutionRunnerContainerName,
 } from "../hosted-runner-container-identity.js";
@@ -70,11 +73,6 @@ import type {
 const RUNTIME_SHELL_PREWARM_TIMEOUT_MS = 20_000;
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
-// Snapshot sessions remain as orphan-cleanup evidence after publication. A
-// runtime-owned heartbeat is the liveness fact: live checkpoints may take as
-// long as their supported publication envelope, while a dead process can hold
-// replacement for less than this short stale-heartbeat window.
-const RUNTIME_CHECKPOINT_HANDOFF_HEARTBEAT_STALE_MS = 10_000;
 
 export type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   commandTimeoutMs?: number;
@@ -533,6 +531,7 @@ export class RuntimeProcessingController {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     input: RuntimeProcessingInput;
+    preserveCheckpointHandoff?: boolean;
     preserveStartingFence?: boolean;
     record: RunnerStateRecord;
     replacedStaleFence?: boolean;
@@ -549,7 +548,10 @@ export class RuntimeProcessingController {
       });
     }
 
-    if (await this.hasLiveCheckpointHandoff(activeFence, record.userId)) {
+    if (
+      input.preserveCheckpointHandoff !== false
+      && await this.hasLiveCheckpointHandoff(activeFence, record.userId)
+    ) {
       return this.createRetryLater({
         reason: "checkpoint_handoff_pending",
         userId: input.input.userId,
@@ -626,6 +628,7 @@ export class RuntimeProcessingController {
       activeFence,
       commandBudget: input.commandBudget,
       input: input.input,
+      preserveCheckpointHandoff: false,
       preserveStartingFence: false,
       record,
       replacedStaleFence: false,
@@ -1283,7 +1286,7 @@ export class RuntimeProcessingController {
     }
     const ageMs = Date.now() - heartbeatAtMs;
     return ageMs >= 0
-      && ageMs < RUNTIME_CHECKPOINT_HANDOFF_HEARTBEAT_STALE_MS;
+      && ageMs < HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS;
   }
 }
 
