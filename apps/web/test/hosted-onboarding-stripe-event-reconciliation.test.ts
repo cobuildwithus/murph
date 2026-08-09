@@ -772,7 +772,7 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
-  it("reconciles usage-credit Checkout before subscription-shaped handling", async () => {
+  it("completes usage-credit reconciliation after quiet sponsorship materialization", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();
     mocks.stripe.events.retrieve.mockResolvedValue(event);
@@ -783,6 +783,9 @@ describe("hosted Stripe event reconciliation", () => {
       purchaseId: "hucp_purchase_123",
       wakeRequired: true,
     });
+    mocks.materializeHostedGroupSponsorshipIfApplicable.mockResolvedValueOnce(
+      false,
+    );
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
 

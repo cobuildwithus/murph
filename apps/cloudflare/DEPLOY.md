@@ -38,6 +38,19 @@ of an existing Durable Object row: after write authority is cleared,
 is confirmed destroyed. Withdrawal and account deletion both consume this
 pending-stop pointer before acknowledging their respective cleanup boundary.
 
+The first-contact shell hint now writes that same exact target before the
+container acknowledges registration of its platform-start operation. Deploy
+this Worker with `container_rollout=immediate`: an older Worker can have started
+a versioned shell without recording its name, so a gradual container drain
+cannot prove withdrawal or deletion will find every old hint. Deploy Web first,
+then deploy this Worker immediately. The response shape is unchanged, but Web
+can now deny an absent or suspended member while reporting a non-revoked
+consent state. An older Worker rejects that combination and fails closed; the
+new Worker accepts both legacy and fail-closed responses. Do not deploy the new
+Worker before Web because the old Web admission owner cannot deny a hint queued
+behind account deletion. After the first shell-hint target is reserved, this
+Worker is part of the existing hard rollback floor described below.
+
 After the first such pending-stop row is written, this Worker is a hard
 Cloudflare rollback floor. An older Worker treats the absent active attempt as
 no exact target, derives a container name from its own version, and can erase

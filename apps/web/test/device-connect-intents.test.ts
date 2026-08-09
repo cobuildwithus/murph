@@ -47,6 +47,7 @@ describe("hosted device connect intents", () => {
     expect(url.search).toBe("");
     const fragment = new URLSearchParams(url.hash.slice(1));
     expect(fragment.get("deviceConnectIntent")).toBe(result.claim);
+    expect(fragment.get("connectProvider")).toBe("whoop");
     expect(fragment.get("connectSource")).toBe("whoop");
     expect(fragment.get("deviceConnectIntent")).toMatch(/^dc_[A-Za-z0-9_-]{32}$/u);
     expect(result.deviceConnectUrl).toBe(`https://join.example.test/device/connect/${result.claim}`);
@@ -60,5 +61,30 @@ describe("hosted device connect intents", () => {
         sourceProviderSlug: null,
       }),
     });
+  });
+
+  it("preserves the frozen provider in a long-lived reconnect URL", async () => {
+    const {
+      createHostedDeviceConnectIntent,
+    } = await import("@/src/lib/device-sync/connect-intents");
+    const {
+      HOSTED_DEVICE_RECONNECT_NOTICE_INTENT_TTL_MS,
+    } = await import("@/src/lib/device-sync/connect-intent-core");
+
+    const result = await createHostedDeviceConnectIntent({
+      connectSourceId: "whoop",
+      connectTarget: "whoop",
+      memberId: "member_123",
+      now: new Date("2026-05-10T12:00:00.000Z"),
+      provider: "junction",
+      request: new Request("https://join.example.test/reconnect"),
+      sourceProviderSlug: "whoop_v2",
+      ttlMs: HOSTED_DEVICE_RECONNECT_NOTICE_INTENT_TTL_MS,
+    });
+
+    const fragment = new URLSearchParams(new URL(result.connectUrl).hash.slice(1));
+    expect(fragment.get("connectProvider")).toBe("junction");
+    expect(fragment.get("connectSource")).toBe("whoop");
+    expect(result.expiresAt).toBe("2026-05-13T12:00:00.000Z");
   });
 });

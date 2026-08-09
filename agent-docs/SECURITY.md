@@ -17,7 +17,26 @@ Last verified: 2026-08-09
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. Cleanup failure must never restore authority. Keep Settings,
+  before granting. An instant-start or authenticated established-direct-chat
+  typing shell-prewarm hint uses that same per-user barrier and live admission
+  read. The typing producer resolves only the private home-chat blind index and
+  performs an advisory active-access/root check after acknowledging the webhook;
+  it receives no member id from Linq and grants no runtime authority. The shared
+  HTTP route obtains the named runner stub without binding durable state.
+  Because this hint is optional, it is admitted only when the barrier is idle;
+  repeated hints and hints arriving during authoritative ensure, withdrawal, or
+  deletion return without joining the FIFO. The
+  optional read abandons after a fixed 250 ms
+  deadline so it cannot hold authoritative processing, withdrawal, or deletion
+  behind the ordinary Web-control timeout; only allowed admission reserves and
+  binds its exact versioned container in the existing user-control stop-target
+  field, then waits for the container to register the hint before releasing the
+  barrier. Withdrawal and account deletion consume that exact target, while
+  container destruction supersedes a pending platform wait before stopping it.
+  Web admission also requires an
+  extant, non-suspended member, so a hint queued behind account deletion cannot
+  treat the deleted consent row as a compatible legacy grant and recreate
+  runner state. Cleanup failure must never restore authority. Keep Settings,
   export, and deletion available without waking the paused runtime; only
   renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
@@ -230,6 +249,7 @@ Last verified: 2026-08-09
   cascades the encrypted intent.
 - Account deletion must establish durable external-cleanup ownership before canonical member removal. The foreign-key-free retry receipt stores only KMS-encrypted runtime/vendor identifiers with receipt- and environment-bound authenticated data, remains pending for missing configuration, provider timeout, partial failure, or a legacy Cloudflare response without explicit `deleteAllCompleted` evidence, and is deleted only after Cloudflare, Stripe-customer, and Privy cleanup converge. Privy new-member resolution must first resolve any existing identity, then reject a pending deletion receipt, then require a bounded live-provider read; after binding, app-session issuance must lock and re-check the member so a missing or suspended deletion target cannot receive a session. Immediate and retention attempts have explicit target deadlines; the retention batch uses bounded concurrency so a stuck provider cannot become an unbounded response-path or sweep owner. Logs and the deleted member row are not retry owners.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
+- The public footer status read is a browser-to-incident.io technical-data boundary. Keep it on the fixed HTTPS status origin and fixed public summary path with no request body or query; retain the global `strict-origin` referrer policy and the exact-origin `connect-src` entry. Do not add account, page-path, query, fragment, prompt, health, message, cookie, or credential data to the request, and do not treat an empty public incident list as direct uptime proof. Keep incident.io and the technical metadata it receives disclosed in the public subprocessor register.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
 - External provider request params, nested params, and per-request options must
   use installed official SDK types and must not contain object spread syntax or

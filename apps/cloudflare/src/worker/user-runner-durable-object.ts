@@ -54,6 +54,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.reconcileRuntimeHealthDataConsentForUser(userId);
   }
 
+  async prewarmRuntimeShellForUser(
+    userId: string,
+  ): ReturnType<HostedUserRunner["prewarmRuntimeShellForUser"]> {
+    return this.runner.prewarmRuntimeShellForUser(userId);
+  }
+
   async publishHostedPrivateMedia(
     input: Parameters<HostedUserRunner["publishHostedPrivateMedia"]>[0],
   ): ReturnType<HostedUserRunner["publishHostedPrivateMedia"]> {

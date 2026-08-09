@@ -175,6 +175,7 @@ export interface AssistantHostedToolContext {
   sendVaultFile(
     ref: string,
     toolCallId?: string | null,
+    retireExportPackIds?: readonly string[],
   ): Promise<AssistantHostedVaultFileSendResult>
 }
 
@@ -205,6 +206,7 @@ export function createAssistantHostedToolContext(input: {
   sendVaultFile?: (
     ref: string,
     toolCallId?: string | null,
+    retireExportPackIds?: readonly string[],
   ) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {

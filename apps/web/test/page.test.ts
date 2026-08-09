@@ -210,6 +210,16 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /Walk challenge · Day 5 of 7/);
   assert.match(markup, /Weekly newsletter · Sunday 8:02 AM/);
   assert.match(markup, /No group\? You’re still not doing this alone\./);
+  const pricingStart = markup.indexOf('<section id="pricing"');
+  assert.ok(pricingStart >= 0, "signup pricing section missing");
+  const pricingSection = markup.slice(
+    pricingStart,
+    markup.indexOf("</section>", pricingStart),
+  );
+  assert.match(pricingSection, /\$8\/mo/);
+  assert.match(pricingSection, /Open source/);
+  assert.match(pricingSection, /Cancel anytime\./);
+  assert.doesNotMatch(pricingSection, /free trial/i);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
     markup,

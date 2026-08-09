@@ -8,7 +8,7 @@ import {
   MESSAGE_VOLUME_ENDPOINT,
 } from "@/src/lib/message-volume";
 
-export function MessageVolumeLine() {
+export function useMessageVolumeTotal(): number {
   const [total, setTotal] = useState(HOSTED_MESSAGE_VOLUME_BASE);
 
   useEffect(() => {
@@ -28,5 +28,19 @@ export function MessageVolumeLine() {
     };
   }, []);
 
-  return <>{formatMessageVolume(total)} messages and counting</>;
+  return total;
+}
+
+export function MessageVolumeCount() {
+  const total = useMessageVolumeTotal();
+
+  return <>{formatMessageVolume(total)}</>;
+}
+
+export function MessageVolumeLine() {
+  return (
+    <>
+      <MessageVolumeCount /> messages and counting
+    </>
+  );
 }

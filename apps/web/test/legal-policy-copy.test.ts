@@ -196,6 +196,19 @@ test("Subprocessor register separates connected services and powers the public p
   );
 
   assert.match(register, /# Murph Subprocessors, Model Providers, and Connected Services/u);
+  assert.match(register, /\*\*Last Updated:\*\* August 9, 2026/u);
+  assert.match(
+    register,
+    /\| incident\.io \| Public status-page hosting and the browser-readable incident summary used by Murph's footer availability indicator\./u,
+  );
+  assert.match(
+    register,
+    /The fixed footer request sends no page path, query, fragment, account data, prompt, health content, or message content\./u,
+  );
+  assert.match(
+    register,
+    /Status-page provider \/ subprocessor; independent controller for provider-owned security or legal processing where applicable\./u,
+  );
   assert.match(register, /\| Oura \|/u);
   assert.match(register, /\| WHOOP \|/u);
   assert.match(register, /\| Garmin \|/u);

@@ -172,10 +172,16 @@ export function isHostedMemberSolModelEligible(input: {
     return false;
   }
 
-  const hasDirectPaidEdgeAccess =
+  const directBillingPlanCode = parseHostedBillingPlanCode(
+    input.currentBillingPlanCode,
+  );
+  const hasDirectPaidPremiumAccess =
     input.billingStatus === HostedBillingStatus.active
     && parseHostedBillingPhase(input.currentBillingPhase) === "paid"
-    && parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_edge_monthly";
+    && (
+      directBillingPlanCode === "launch_edge_monthly"
+      || directBillingPlanCode === "launch_max_monthly"
+    );
   const hasFamilyEdgeAccess = input.accountGroupMemberships.some(
     (membership) => membership.status === "active"
       && parseHostedPlanCode(membership.planCode) === "edge"
@@ -183,7 +189,7 @@ export function isHostedMemberSolModelEligible(input: {
       && membership.group.suspendedAt === null,
   );
 
-  return hasDirectPaidEdgeAccess || hasFamilyEdgeAccess;
+  return hasDirectPaidPremiumAccess || hasFamilyEdgeAccess;
 }
 
 export async function readHostedMemberAssistantModelPreference(input: {
@@ -267,7 +273,7 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
     throw hostedOnboardingError({
       code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
       httpStatus: 403,
-      message: "GPT-5.6 Sol requires an active paid Edge plan.",
+      message: "GPT-5.6 Sol requires an active paid Edge or Max plan.",
     });
   }
 
