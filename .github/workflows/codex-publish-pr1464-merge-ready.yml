@@ -19,21 +19,17 @@ jobs:
           ref: agent/non-expiring-starter-usage
           fetch-depth: 0
 
-      - name: Apply the final audit fix and merge current main
+      - name: Merge current main into the audited PR head
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main agent/non-expiring-starter-usage
-          expected_head="34931f918eff2588ed5d61a7e6e719abba221b6d"
+          expected_head="d96d6428a1d574cddd1cd3c707e2289b1b35eace"
           actual_head="$(git rev-parse origin/agent/non-expiring-starter-usage)"
           test "$actual_head" = "$expected_head"
           git checkout -B agent/non-expiring-starter-usage "$actual_head"
-          printf '%s' 'ZGlmZiAtLWdpdCBhL2FwcHMvd2ViL3NyYy9saWIvaG9zdGVkLW9uYm9hcmRpbmcvc3RhcnRlci11c2FnZS1ncmFudC50cyBiL2FwcHMvd2ViL3NyYy9saWIvaG9zdGVkLW9uYm9hcmRpbmcvc3RhcnRlci11c2FnZS1ncmFudC50cwppbmRleCAwYzBmYTA4YTVjZC4uZjlhOWY0MGY0ZDEgMTAwNjQ0Ci0tLSBhL2FwcHMvd2ViL3NyYy9saWIvaG9zdGVkLW9uYm9hcmRpbmcvc3RhcnRlci11c2FnZS1ncmFudC50cworKysgYi9hcHBzL3dlYi9zcmMvbGliL2hvc3RlZC1vbmJvYXJkaW5nL3N0YXJ0ZXItdXNhZ2UtZ3JhbnQudHMKQEAgLTI2Niw5ICsyNjYsMTEgQEAgYXN5bmMgZnVuY3Rpb24gYXNzZXJ0SG9zdGVkU3RhcnRlclVzYWdlTGVnYWN5Q29uc3VtcHRpb25SZXBsYXlUeChpbnB1dDogewogICB9KTsKICAgY29uc3QgZXhwZWN0ZWRSZW1haW5pbmdVc2RNaWNyb3MgPQogICAgIEhPU1RFRF9TVEFSVEVSX1VTQUdFX0dSQU5UX1VTRF9NSUNST1MgLSBpbnB1dC5pbml0aWFsQ29uc3VtZWRVc2RNaWNyb3M7CisgIGNvbnN0IGFjdHVhbFJlbWFpbmluZ1VzZE1pY3JvcyA9CisgICAgaW5wdXQuZXhpc3RpbmdHcmFudC5ncmFudD8ucmVtYWluaW5nVXNkTWljcm9zID8/IC0xbjsKICAgaWYgKAotICAgIGlucHV0LmV4aXN0aW5nR3JhbnQuZ3JhbnQ/LnJlbWFpbmluZ1VzZE1pY3JvcwotICAgICAgIT09IGV4cGVjdGVkUmVtYWluaW5nVXNkTWljcm9zCisgICAgYWN0dWFsUmVtYWluaW5nVXNkTWljcm9zIDwgMG4KKyAgICB8fCBhY3R1YWxSZW1haW5pbmdVc2RNaWNyb3MgPiBleHBlY3RlZFJlbWFpbmluZ1VzZE1pY3JvcwogICAgIHx8ICFkZWJpdAogICAgIHx8IGRlYml0LmFtb3VudFVzZE1pY3JvcyAhPT0gLWlucHV0LmluaXRpYWxDb25zdW1lZFVzZE1pY3JvcwogICAgIHx8IGRlYml0LmJlbmVmaWNpYXJ5TWVtYmVySWQgIT09IGlucHV0Lm1lbWJlcklkCmRpZmYgLS1naXQgYS9hcHBzL3dlYi90ZXN0L2hvc3RlZC1vbmJvYXJkaW5nLXN0YXJ0ZXItdXNhZ2UtZ3JhbnQudGVzdC50cyBiL2FwcHMvd2ViL3Rlc3QvaG9zdGVkLW9uYm9hcmRpbmctc3RhcnRlci11c2FnZS1ncmFudC50ZXN0LnRzCmluZGV4IDJhMTYxYTg1MDMwLi44OTI1MDdmZTIxMCAxMDA2NDQKLS0tIGEvYXBwcy93ZWIvdGVzdC9ob3N0ZWQtb25ib2FyZGluZy1zdGFydGVyLXVzYWdlLWdyYW50LnRlc3QudHMKKysrIGIvYXBwcy93ZWIvdGVzdC9ob3N0ZWQtb25ib2FyZGluZy1zdGFydGVyLXVzYWdlLWdyYW50LnRlc3QudHMKQEAgLTM0NSw2ICszNDUsMzQgQEAgZGVzY3JpYmUoImhvc3RlZCBTdGFydGVyIHVzYWdlIGdyYW50IG93bmVyIiwgKCkgPT4gewogICAgIGV4cGVjdChtb2Nrcy5hcHBlbmRIb3N0ZWRVc2FnZUNyZWRpdEdyYW50VHgpLm5vdC50b0hhdmVCZWVuQ2FsbGVkKCk7CiAgIH0pOwogCisgIGl0KCJhY2NlcHRzIGEgcmVjb25jaWxlZCBsZWdhY3kgZ3JhbnQgYWZ0ZXIgbGF0ZXIgU3RhcnRlciB1c2FnZSByZWR1Y2VkIGl0cyByZW1haW5pbmcgYmFsYW5jZSIsIGFzeW5jICgpID0+IHsKKyAgICBjb25zdCBlbnRyeSA9IHsKKyAgICAgIC4uLnZhbGlkTGVnYWN5TWlncmF0aW9uRW50cnkoKSwKKyAgICAgIGdyYW50OiB7IHJlbWFpbmluZ1VzZE1pY3JvczogMl8yNTBfMDAwbiB9LAorICAgIH07CisgICAgY29uc3QgdHggPSB0eFdpdGhFbnRyeSgKKyAgICAgIGVudHJ5LAorICAgICAgbnVsbCwKKyAgICAgIHZhbGlkTGVnYWN5Q29uc3VtcHRpb25EZWJpdCgpLAorICAgICk7CisKKyAgICBhd2FpdCBleHBlY3QoZW5zdXJlSG9zdGVkU3RhcnRlclVzYWdlR3JhbnRUeCh7CisgICAgICBlZmZlY3RpdmVBdDogbmV3IERhdGUoIjIwMjYtMDgtMDlUMjA6MDA6MDAuMDAwWiIpLAorICAgICAgaW5pdGlhbENvbnN1bWVkVXNkTWljcm9zOiAxXzUwMF8wMDBuLAorICAgICAgbWVtYmVySWQ6ICJtZW1iZXJfMTIzIiwKKyAgICAgIHNvdXJjZTogImxlZ2FjeV90cmlhbF9taWdyYXRpb24iLAorICAgICAgdHg6IHR4IGFzIG5ldmVyLAorICAgIH0pKS5yZXNvbHZlcy50b0VxdWFsKHsKKyAgICAgIGJhbGFuY2VVc2RNaWNyb3M6IDJfMDAwXzAwMG4sCisgICAgICBlZmZlY3RpdmVBdDogRUZGRUNUSVZFX0FULAorICAgICAgZW50cnlJZDogImh1Y2Vfc3RhcnRlciIsCisgICAgICBncmFudGVkOiBmYWxzZSwKKyAgICAgIGxlZGdlclZlcnNpb246IDduLAorICAgIH0pOworCisgICAgZXhwZWN0KG1vY2tzLmFwcGVuZEhvc3RlZFVzYWdlQ3JlZGl0R3JhbnRUeCkubm90LnRvSGF2ZUJlZW5DYWxsZWQoKTsKKyAgfSk7CisKICAgaXQoImZhaWxzIGNsb3NlZCB3aGVuIGxhdGUgbGVnYWN5IGNvbnN1bXB0aW9uIGZpbmRzIGEgbm9uLW1pZ3JhdGlvbiBTdGFydGVyIGdyYW50IiwgYXN5bmMgKCkgPT4gewogICAgIGNvbnN0IHR4ID0gdHhXaXRoRW50cnkodmFsaWRFbnRyeSgpKTsKIAo=' | base64 --decode > /tmp/pr1464-final.patch
-          git apply --index /tmp/pr1464-final.patch
-          git diff --cached --check
-          git commit -m "Allow safe Starter cutover replays after usage"
           git merge --no-ff origin/main -m "Merge current main into Starter usage cutover"
           git diff --check
           git push origin HEAD:refs/heads/agent/non-expiring-starter-usage
