@@ -970,10 +970,22 @@ no direct wake. Linq instant start follows the same rule: enrollment returns the
 newly committed activation as an explicit per-request wake continuation instead
 of signaling it first. Once the instant-start planner has committed the member
 row, Web may fire one best-effort `runtime/shell-prewarm` request while trial
-enrollment runs. That endpoint maps the member id directly to the deterministic
-container name and issues only the platform start command. It does not resolve
-a `UserRunner`, read access or workspace state, select a mailbox owner, create a
-fence, wait for readiness, or invoke work. The active-member replan durably
+enrollment runs. That endpoint obtains the member's named `UserRunner` without
+binding durable state, enters the same per-user consent-mutation barrier used by
+authoritative ensures and withdrawal, and re-reads live Web-owned admission
+with a fixed 250 ms deadline. Timeout or transport failure abandons the optional
+hint and releases the barrier; authoritative processing and user-control reads
+retain their ordinary timeout. Allowed admission reserves and binds the
+deterministic versioned container in the existing
+`active_runner_container_name` user-control stop-target field. It then awaits a
+narrow container acknowledgement that the shell-prewarm operation is registered
+before releasing the barrier;
+the platform wait continues under the existing container lifecycle owner. It
+does not select a mailbox owner, create a write fence, wait for health
+readiness, or invoke workspace work. Withdrawal and account deletion consume
+the reserved exact target, and `destroyInstance()` supersedes an in-progress
+hint before stopping that container. A denied admission starts nothing. The
+active-member replan durably
 appends the original conversation item and Web awaits that conversation-mailbox
 Temporal signal; only then may the ordinary Linq direct ensure start and own
 readiness plus all runtime authority. The shell hint does not read the persisted
@@ -984,7 +996,10 @@ lifecycle queue; if a start wait fails after the platform command may have been
 issued, the uncertain hint remains claimable so that owner completes the
 canonical port and health path within its own budget. A stalled platform wait
 therefore relinquishes the existing lifecycle boundary without leaving a stale
-hint or partially initialized start ahead of foreground work. The signal
+hint or partially initialized start ahead of foreground work. If a Worker
+version changes before authoritative start, the `UserRunner` destroys and
+clears a different pending versioned target before binding the current fence.
+The signal
 reconciles both the foreground conversation lane and the already-durable
 activation item. Web then
 runs the deferred activation continuation so the existing best-effort activation signal

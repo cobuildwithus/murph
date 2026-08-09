@@ -2,20 +2,24 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const mocks = vi.hoisted(() => ({
-  getPrisma: vi.fn(),
-  prisma: { label: "test-prisma" },
-  readHostedHealthDataConsentState: vi.fn(),
-  requireHostedCloudflareCallbackRequest: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const hostedMemberFindUnique = vi.fn();
+  return {
+    getPrisma: vi.fn(),
+    hostedMemberFindUnique,
+    prisma: {
+      hostedMember: {
+        findUnique: hostedMemberFindUnique,
+      },
+      label: "test-prisma",
+    },
+    requireHostedCloudflareCallbackRequest: vi.fn(),
+  };
+});
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest:
     mocks.requireHostedCloudflareCallbackRequest,
-}));
-
-vi.mock("@/src/lib/legal/consent", () => ({
-  readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -38,17 +42,35 @@ describe("hosted runtime health-data admission route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.hostedMemberFindUnique.mockResolvedValue({
+      consentGrants: [],
+      suspendedAt: null,
+    });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
   });
 
   it.each([
-    ["granted", true],
-    ["missing", true],
-    ["revoked", false],
+    ["granted", "active member", {
+      consentGrants: [{ scope: "launch.health-data", status: "granted" }],
+      suspendedAt: null,
+    }, true],
+    ["missing", "active legacy member", {
+      consentGrants: [],
+      suspendedAt: null,
+    }, true],
+    ["revoked", "withdrawn member", {
+      consentGrants: [{ scope: "launch.health-data", status: "revoked" }],
+      suspendedAt: null,
+    }, false],
+    ["granted", "suspended member", {
+      consentGrants: [{ scope: "launch.health-data", status: "granted" }],
+      suspendedAt: new Date("2026-08-09T00:00:00.000Z"),
+    }, false],
+    ["missing", "deleted member", null, false],
   ] as const)(
-    "derives %s admission from the Web-owned consent grant",
-    async (consentState, processingAllowed) => {
-      mocks.readHostedHealthDataConsentState.mockResolvedValue(consentState);
+    "derives %s admission for %s",
+    async (consentState, _memberKind, member, processingAllowed) => {
+      mocks.hostedMemberFindUnique.mockResolvedValue(member);
       const request = new Request(
         "https://join.example.test/api/internal/hosted-runtime/health-data-admission",
       );
@@ -60,9 +82,22 @@ describe("hosted runtime health-data admission route", () => {
         request,
         { maxBodyBytes: 0 },
       );
-      expect(mocks.readHostedHealthDataConsentState).toHaveBeenCalledWith({
-        memberId: "member_123",
-        prisma: mocks.prisma,
+      expect(mocks.hostedMemberFindUnique).toHaveBeenCalledWith({
+        select: {
+          consentGrants: {
+            select: {
+              scope: true,
+              status: true,
+            },
+            where: {
+              scope: "launch.health-data",
+            },
+          },
+          suspendedAt: true,
+        },
+        where: {
+          id: "member_123",
+        },
       });
       await expect(response.json()).resolves.toEqual({
         consentState,
