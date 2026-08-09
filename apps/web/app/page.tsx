@@ -21,6 +21,7 @@ import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
+import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
@@ -30,6 +31,7 @@ import {
   formatHostedLandingTrialDurationPhrase,
   formatHostedLandingTrialPricingNote,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import { isHostedCustomInferenceEnabled } from "@/src/lib/hosted-inference/feature";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -154,6 +156,10 @@ export default async function HomePage() {
         <IntegrationsSection authenticated={authenticated} />
         <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
         <HowItWorksSection />
+        <TechnicalCapabilitiesSection
+          customInferenceAvailable={isHostedCustomInferenceEnabled()}
+          veniceAvailable={isHostedVeniceAssistantEnabled()}
+        />
         <SecurityTeaserSection />
         <FaqSection veniceAvailable={isHostedVeniceAssistantEnabled()} />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
