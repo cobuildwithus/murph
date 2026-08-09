@@ -116,9 +116,9 @@ const VISUALS: Record<string, ReactNode> = {
       label="Sponsor this group"
       meta="Monthly maximum"
       entries={[
-        { label: "Cost-weighted usage credit", value: "$5" },
-        { label: "Cost-weighted usage credit", value: "$10" },
-        { label: "Cost-weighted usage credit", value: "$20" },
+        { label: "Usage credit", value: "$5" },
+        { label: "Usage credit", value: "$10" },
+        { label: "Usage credit", value: "$20" },
       ]}
     />
   ),
@@ -192,9 +192,9 @@ const VISUALS: Record<string, ReactNode> = {
       label="Keep Murph going"
       meta="Usage credit"
       entries={[
-        { label: "Cost-weighted credit", value: "$5" },
-        { label: "Cost-weighted credit", value: "$10" },
-        { label: "Cost-weighted credit", value: "$25" },
+        { label: "Usage credit", value: "$5" },
+        { label: "Usage credit", value: "$10" },
+        { label: "Usage credit", value: "$25" },
       ]}
     />
   ),

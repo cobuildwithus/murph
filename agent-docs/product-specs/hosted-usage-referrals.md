@@ -62,14 +62,15 @@ an amount the tool did not return.
 
 | Path | Qualification | Public reward label |
 | --- | --- | --- |
-| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member, and the referral passes settlement eligibility and rolling-cap checks. | $2.00 of cost-weighted usage credit |
-| `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | $2.00 of cost-weighted usage credit |
-| `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 of cost-weighted usage credit |
+| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member, and the referral passes settlement eligibility and rolling-cap checks. | 10 days of Murph |
+| `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | 10 days of Murph |
+| `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | 14 days of Murph |
 
-Each dollar label states the exact cost-weighted usage value of its fixed offer.
-The ledger stores that value in USD micros. Actual message capacity varies by
-model, tools, media, task complexity, and response length, so Murph does not
-translate the credit into a message estimate.
+The referral page presents each fixed offer in days of Murph. The ledger stores
+the exact reward in USD micros, and assistant confirmations describe that amount
+as usage credit. Actual capacity varies by model, tools, media, task complexity,
+and response length, so Murph does not translate the credit into a message
+estimate.
 
 Available policies use the current fixed offer. Arming freezes that amount on
 the referral receipt; every active-mission snapshot, grant, completion notice,
@@ -336,10 +337,10 @@ After a qualifying signup-link reward commits, Settings history is the durable
 visible receipt. When the member has a current authorized Linq or Telegram
 route, Murph also sends one concise personal confirmation. It states that
 someone completed setup through the referral link and that the receipt's
-persisted dollar-denominated cost-weighted usage credit is already applied. It
-does not identify or guess who joined, mention internal qualification logic, or
-ask the member to do another step. A missing route delays only this notice; it
-never delays, reverses, or duplicates the reward.
+persisted usage credit is already applied. It does not identify or guess who
+joined, mention internal qualification logic, or ask the member to do another
+step. A missing route delays only this notice; it never delays, reverses, or
+duplicates the reward.
 
 Once a notification mailbox item is durable, failed signaling leaves that same
 item eligible for the next bounded pass regardless of its lane. A notification
@@ -361,8 +362,8 @@ Referral access and history remain read-only projections:
   supported Murph conversation exists;
 - the empty referral explanation says qualifying rewards are added
   automatically;
-- current mission rows show title, status, deadline, dollar-denominated
-  cost-weighted usage reward, and reward owner;
+- current mission rows show title, status, deadline, usage reward, and reward
+  owner;
 - reward columns stack below descriptions on narrow screens instead of forcing
   horizontal compression;
 - qualification requirements and selection date stay in one native details

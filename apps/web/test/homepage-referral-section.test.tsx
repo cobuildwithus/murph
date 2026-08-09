@@ -29,7 +29,7 @@ test("ReferralSection presents every available referral path on the homepage", (
   assert.match(markup, /See ways to earn/);
   assert.match(markup, /Typical-use estimate\. Actual capacity varies\./);
   assert.doesNotMatch(markup, /If eligible/);
-  assert.doesNotMatch(markup, /Dollar labels state exact cost-weighted usage credit/);
+  assert.doesNotMatch(markup, /weighted usage credit/);
   assert.doesNotMatch(markup, /applies earned usage automatically when/);
 });
 

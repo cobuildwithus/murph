@@ -150,7 +150,7 @@ export function buildHostedUsageReferralRewardLabel(input: {
   const subject = input.destinationKind === "group"
     ? "this room"
     : "your Murph";
-  return `${formatHostedUsageCreditUsd(input.rewardUsdMicros)} of cost-weighted usage credit for ${subject}`;
+  return `${formatHostedUsageCreditUsd(input.rewardUsdMicros)} in usage credit for ${subject}`;
 }
 
 function formatHostedUsageCreditUsd(usdMicros: bigint): string {

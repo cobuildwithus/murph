@@ -564,7 +564,7 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /cost-weighted usage credit/i,
+      /weighted usage credit/i,
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
@@ -1166,7 +1166,7 @@ test("keeps the one-time contribution action reachable in the mobile drawer", as
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /cost-weighted usage credit/i,
+      /weighted usage credit/i,
     );
     const selection = rendered.container.querySelector<HTMLElement>(
       '[data-slot="usage-top-up-selection"]',

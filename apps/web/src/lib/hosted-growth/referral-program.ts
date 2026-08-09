@@ -4,13 +4,6 @@ import {
 } from "./signup-referral-policy";
 import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
 
-const HOSTED_PUBLIC_REFERRAL_USD_FORMATTER = new Intl.NumberFormat("en-US", {
-  currency: "USD",
-  maximumFractionDigits: 2,
-  minimumFractionDigits: 2,
-  style: "currency",
-});
-
 export type HostedPublicReferralRewardId =
   | "active-group"
   | "new-person-group"
@@ -70,23 +63,6 @@ export function getAvailableHostedPublicReferralRewards(
     reward.id === "signup-link"
       ? signupRewardsEnabled
       : groupRewardsEnabled
-  );
-}
-
-export function formatHostedPublicReferralRewardValue(
-  rewardUsdMicros: bigint,
-): string {
-  return `${formatHostedPublicReferralRewardAmount(
-    rewardUsdMicros,
-  )} of cost-weighted usage credit`;
-}
-
-export function formatHostedPublicReferralRewardAmount(
-  rewardUsdMicros: bigint,
-): string {
-  const cents = (rewardUsdMicros + 5_000n) / 10_000n;
-  return HOSTED_PUBLIC_REFERRAL_USD_FORMATTER.format(
-    Number(cents) / 100,
   );
 }
 

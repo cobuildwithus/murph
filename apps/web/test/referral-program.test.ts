@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatHostedPublicReferralRewardAmount,
   formatHostedPublicReferralRewardDays,
-  formatHostedPublicReferralRewardValue,
   getAvailableHostedPublicReferralRewards,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
@@ -79,11 +77,11 @@ describe("public referral program projection", () => {
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
       rewardUsdMicros: newPersonGroup.rewardUsdMicros,
-    })).toBe("$2.00 of cost-weighted usage credit for your Murph");
+    })).toBe("$2.00 in usage credit for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
       rewardUsdMicros: activeGroup.rewardUsdMicros,
-    })).toBe("$3.50 of cost-weighted usage credit for your Murph");
+    })).toBe("$3.50 in usage credit for your Murph");
     expect(signup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
@@ -102,14 +100,6 @@ describe("public referral program projection", () => {
     expect(activeGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
     );
-    expect(formatHostedPublicReferralRewardValue(
-      HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
-    )).toBe(
-      "$2.00 of cost-weighted usage credit",
-    );
-    expect(formatHostedPublicReferralRewardAmount(
-      HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
-    )).toBe("$3.50");
     expect(formatHostedPublicReferralRewardDays(
       signup.estimatedUsageDays,
     )).toBe("10 days of Murph");

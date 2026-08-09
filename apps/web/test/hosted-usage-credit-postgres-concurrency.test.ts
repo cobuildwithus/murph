@@ -2153,7 +2153,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(persistedPayload).toMatchObject({
           notification: {
             instructions: expect.stringContaining(
-              "$2.00 of cost-weighted usage credit for this room",
+              "$2.00 in usage credit for this room",
             ),
           },
         });
@@ -2424,7 +2424,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               `usage-referral-reward:${referralId}`,
             deliveryDispatchMode: "queue-only",
             instructions: expect.stringContaining(
-              "$3.50 of cost-weighted usage credit for your Murph",
+              "$3.50 in usage credit for your Murph",
             ),
             responsePolicy: { kind: "require_send" },
             route: {

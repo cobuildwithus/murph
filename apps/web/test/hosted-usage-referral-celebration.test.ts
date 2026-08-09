@@ -148,13 +148,13 @@ describe("hosted usage referral celebration", () => {
     const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
       ?.envelope;
     expect(envelope?.notification.instructions).toContain(
-      "$2.75 of cost-weighted usage credit for this room",
+      "$2.75 in usage credit for this room",
     );
     expect(envelope?.notification.instructions).toContain(
-      'Final message: include "$2.75 of cost-weighted usage credit for this room" exactly',
+      'Final message: include "$2.75 in usage credit for this room" exactly',
     );
     expect(envelope?.notification.instructions).not.toContain(
-      "$3.50 of cost-weighted usage credit",
+      "$3.50 in usage credit",
     );
   });
 });

@@ -305,6 +305,25 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Referral page · group rewards">
+        <div
+          id="referral-page-group-rewards"
+          data-design-section="referral-page-group-rewards"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated={false}
+            identityKey={null}
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Referral rewards unavailable">
         <div
           data-design-section="referral-rewards-unavailable"

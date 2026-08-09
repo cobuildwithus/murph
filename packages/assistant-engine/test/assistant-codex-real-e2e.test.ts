@@ -2523,7 +2523,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                         requirementsLabel:
                           'Start a fresh group with one genuinely new person who activates their own Murph and says hi there.',
                         rewardLabel:
-                          '$2.00 of cost-weighted usage credit for your Murph',
+                          '$2.00 in usage credit for your Murph',
                       }],
                       trialCreditNotice: null,
                     },
@@ -2587,7 +2587,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(privatePlanUsageReads).toBe(1)
         expect(privateGroupActions).toEqual(['read_usage_referral'])
         expect(privateResult.finalMessage).toMatch(/add (?:one-time )?usage/iu)
-        expect(privateResult.finalMessage).toContain('$2.00 of cost-weighted usage credit')
+        expect(privateResult.finalMessage).toContain('$2.00 in usage credit')
 
         const groupResult = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
@@ -2635,7 +2635,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                           requirementsLabel:
                             'Start a fresh group and make it genuinely active, with multiple people actually talking.',
                           rewardLabel:
-                            '$3.50 of cost-weighted usage credit for your Murph',
+                            '$3.50 in usage credit for your Murph',
                         }],
                         trialCreditNotice: null,
                       },
@@ -2681,7 +2681,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           'read_usage_referral',
         ]))
         expect(groupResult.finalMessage).toContain(fundingUrl)
-        expect(groupResult.finalMessage).toContain('$3.50 of cost-weighted usage credit')
+        expect(groupResult.finalMessage).toContain('$3.50 in usage credit')
         expect(groupResult.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
 
         const fundingPrivacyResult = await executeRealCodexAppServerTurn({
@@ -2835,14 +2835,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                             requirementsLabel:
                               'Bring Murph and one genuinely new person together in a fresh group.',
                             rewardLabel:
-                              '$2.00 of cost-weighted usage credit for your Murph',
+                              '$2.00 in usage credit for your Murph',
                           },
                           {
                             code: 'active_group_v1',
                             requirementsLabel:
                               'Start a fresh group and make it genuinely active, with multiple people actually talking.',
                             rewardLabel:
-                              '$3.50 of cost-weighted usage credit for your Murph',
+                              '$3.50 in usage credit for your Murph',
                           },
                         ],
                         trialCreditNotice: null,

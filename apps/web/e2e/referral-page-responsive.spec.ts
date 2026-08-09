@@ -112,7 +112,7 @@ test("referral page stays contained and actionable at every marketing breakpoint
       }),
     ).toBeVisible();
     await expect(
-      page.getByText("$3.50 of cost-weighted usage credit", { exact: true }),
+      page.getByText("14 days of Murph", { exact: true }),
     ).toBeVisible();
   }
 });

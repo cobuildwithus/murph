@@ -55,8 +55,8 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /Opening a link or creating a group alone is never enough\./);
   assert.match(markup, /Choose a referral path\./);
   assert.match(markup, /eligibility, rolling-limit, and completion checks pass/);
-  assert.match(markup, /\$2\.00 of cost-weighted usage credit/);
-  assert.match(markup, /\$3\.50 of cost-weighted usage credit/);
+  assert.match(markup, /10 days of Murph/);
+  assert.match(markup, /14 days of Murph/);
   assert.match(markup, /15 human messages/);
   assert.match(markup, /8 from at least 2 other people/);
   assert.match(markup, /at least 10 minutes/);
@@ -76,7 +76,7 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.doesNotMatch(markup, /Murph tells you that/);
   assert.doesNotMatch(markup, /Ways to earn right now/);
   assert.doesNotMatch(markup, /the reward is added automatically/);
-  assert.match(markup, /Rewards are usage, not cash\./);
+  assert.match(markup, /Rewards add Murph time, not cash\./);
   assert.match(markup, /Health is hard\./);
   assert.match(markup, /Bring someone with you\./);
   assert.equal(
@@ -156,5 +156,5 @@ test("ReferralPageContent shows one unavailability state when every reward path 
   assert.doesNotMatch(markup, /does not earn usage/);
   assert.doesNotMatch(markup, /Referral action/);
   assert.doesNotMatch(markup, /Choose a referral path\./);
-  assert.doesNotMatch(markup, /cost-weighted usage credit/);
+  assert.doesNotMatch(markup, /weighted usage credit/);
 });
