@@ -124,6 +124,14 @@ Updated: 2026-08-09
   compatibility remains only for extant legacy members, and the Cloudflare
   ordering test proves that a queued hint settles without addressing a
   container or recreating runner state.
+- Final ReviewGPT round 4 proved that the production HTTP route still called the
+  shared eager-binding resolver before the corrected admission check, so a
+  request delayed until after completed deletion could recreate `runner_meta`
+  even though it started no container. The route now obtains the named
+  `UserRunner` stub directly without binding. The existing post-admission exact
+  target reservation remains the only bind owner. The production-entry test
+  completes deletion, delivers the signed delayed request, and proves no eager
+  bind, container lookup, or runner-row recreation.
 
 ## Evidence
 

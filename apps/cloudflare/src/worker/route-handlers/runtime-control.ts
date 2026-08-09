@@ -297,7 +297,7 @@ async function handleRuntimeShellPrewarmRoute(
       throw new TypeError("Hosted runtime shell prewarm request must be empty.");
     }
 
-    const stub = await resolveUserRunnerStub(context.env, userId);
+    const stub = context.env.USER_RUNNER.getByName(userId);
     if (!stub.prewarmRuntimeShellForUser) {
       throw new Error("User runner shell-prewarm RPC is unavailable.");
     }

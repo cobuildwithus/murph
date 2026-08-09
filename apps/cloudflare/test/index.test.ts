@@ -2957,9 +2957,57 @@ describe("cloudflare worker routes", () => {
       expect(response.status).toBe(202);
       await expect(response.json()).resolves.toEqual({ accepted: true });
       expect(userRunnerGetByName).toHaveBeenCalledWith("test-user");
-      expect(stub.bindUser).toHaveBeenCalledWith("test-user");
+      expect(stub.bindUser).not.toHaveBeenCalled();
       expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith("test-user");
       expect(runnerContainerGetByName).not.toHaveBeenCalled();
+    });
+
+    it("does not recreate runner state for a delayed shell hint after account deletion", async () => {
+      const request = await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+        {
+          body: "{}",
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "POST",
+        },
+      ));
+      const harness = createRuntimeControlRunnerHarness({
+        healthDataAdmission: {
+          consentState: "missing",
+          processingAllowed: false,
+        },
+      });
+      await harness.runner.bindUser("test-user");
+      await expect(
+        harness.runner.deleteHostedUserData("test-user"),
+      ).resolves.toMatchObject({ ok: true });
+      vi.mocked(harness.namespace.getByName).mockClear();
+      const bindUser = vi.fn(async (userId: string) =>
+        await harness.runner.bindUser(userId)
+      );
+      const prewarmRuntimeShellForUser = vi.fn(async (userId: string) =>
+        await harness.runner.prewarmRuntimeShellForUser(userId)
+      );
+      const stub = createUserRunnerStub({
+        bindUser,
+        prewarmRuntimeShellForUser,
+      });
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        USER_RUNNER: {
+          getByName: vi.fn(() => stub),
+        },
+      });
+
+      const response = await worker.fetch(request, env);
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({ accepted: true });
+      expect(bindUser).not.toHaveBeenCalled();
+      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith("test-user");
+      expect(harness.namespace.getByName).not.toHaveBeenCalled();
+      expect(
+        harness.sql.exec("SELECT user_id FROM runner_meta").toArray(),
+      ).toEqual([]);
     });
 
     it("rejects nonempty shell-prewarm bodies without resolving a runtime owner", async () => {
@@ -3699,6 +3747,10 @@ function createRuntimeControlRunnerHarness(input: {
   deleteAlarmError?: Error;
   ensureReadyForProcessing?: HostedExecutionContainerStubLike["ensureReadyForProcessing"];
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
+  healthDataAdmission?: {
+    consentState: "granted" | "missing" | "revoked";
+    processingAllowed: boolean;
+  };
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult>;
   workspace?: HostedWorkspaceState | null;
 } = {}) {
@@ -3713,8 +3765,9 @@ function createRuntimeControlRunnerHarness(input: {
 
     if (url.pathname === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
       return Response.json({
-        consentState: "granted",
-        processingAllowed: true,
+        consentState: input.healthDataAdmission?.consentState ?? "granted",
+        processingAllowed:
+          input.healthDataAdmission?.processingAllowed ?? true,
         userId: "test-user",
       });
     }
@@ -3727,6 +3780,7 @@ function createRuntimeControlRunnerHarness(input: {
   const sql = createTestSqlStorage();
   const storage: DurableObjectStorageLike = {
     delete: vi.fn(async (key: string) => values.delete(key)),
+    deleteAll: vi.fn(async () => values.clear()),
     deleteAlarm: vi.fn(async () => {
       if (input.deleteAlarmError) {
         throw input.deleteAlarmError;

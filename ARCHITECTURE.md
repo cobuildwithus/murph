@@ -2008,11 +2008,12 @@ impact: accepted Linq reply delivery stamps the exact mailbox item with
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
 fence coalesces runners that overlap in the same invocation. There is no other
 established-member Web-to-Cloudflare prewarm or nudge path. The separate
-first-contact instant-start shell hint resolves the owning `UserRunner`, enters
-the same per-user consent-mutation barrier as authoritative ensures and
-withdrawal, re-reads live Web-owned admission, reserves the exact versioned
-container in the existing user-control stop-target field, and awaits the
-container's registration acknowledgement. The platform wait continues under
+first-contact instant-start shell hint obtains the named `UserRunner` stub
+without binding durable state, enters the same per-user consent-mutation barrier
+as authoritative ensures and withdrawal, and re-reads live Web-owned admission.
+Only allowed admission reserves and binds the exact versioned container in the
+existing user-control stop-target field before awaiting the container's
+registration acknowledgement. The platform wait continues under
 the container's existing lifecycle owner after the barrier releases, so
 authoritative readiness or exact-target destruction can supersede it. A later
 current-version start destroys any different pending target before binding its
