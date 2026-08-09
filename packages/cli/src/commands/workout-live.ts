@@ -160,8 +160,6 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
   exercise.command('add', {
     description:
       'Add one exercise with empty set placeholders to the active live workout.',
-    hint:
-      'Read workout active first and pass an explicit unused --order. Retrying the same name/source id at that order is a no-op.',
     args: z.object({
       name: z.string().min(1).max(160).describe('Exercise name.'),
     }),
@@ -242,8 +240,6 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         },
       },
     ],
-    hint:
-      'Agents should first read workout active, then pass --workout-id, an explicit exercise selector, and --set-order. Repeating the same command then corrects the same canonical set instead of appending a duplicate.',
     options: withBaseOptions({
       workoutId: workoutIdOption,
       exerciseId: exerciseIdOption,
