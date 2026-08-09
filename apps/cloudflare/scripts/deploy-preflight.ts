@@ -9,6 +9,9 @@ import {
 import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
+import {
+  assertHostedCryptoStandbyKeyringJsons,
+} from "@murphai/runtime-state";
 
 import { readHostedDeployAutomationTimeouts } from "./deploy-automation/environment.ts";
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./deploy-automation/secrets.ts";
@@ -353,6 +356,7 @@ export function listHostedDeployEnvironmentInvariantErrors(
   if (hostedCryptoEnv && hostedCryptoEnv !== deployContext) {
     errors.push(`${deployContext} deploys must set HOSTED_CRYPTO_ENV=${deployContext}.`);
   }
+  appendHostedCryptoKeyringInvariantErrors(source, errors);
 
   const oidcEnvironment = normalizeHostedOidcEnvironment(
     source.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT,
@@ -463,6 +467,26 @@ export function listHostedDeployEnvironmentInvariantErrors(
   });
 
   return errors;
+}
+
+function appendHostedCryptoKeyringInvariantErrors(
+  source: EnvSource,
+  errors: string[],
+): void {
+  try {
+    assertHostedCryptoStandbyKeyringJsons({
+      activeAuthorityKeyVersionName:
+        source.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+      activeCloudflareRecipientKeyId:
+        source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
+      authorityVerifyKeyringJson:
+        source.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON,
+      cloudflarePrivateKeyringJson:
+        source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON,
+    });
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : "Hosted crypto standby keyrings are invalid.");
+  }
 }
 
 function readHostedR2PresignEndpointInvariantError(input: {
