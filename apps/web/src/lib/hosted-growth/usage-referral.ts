@@ -1678,6 +1678,7 @@ async function readHostedUsageReferralSnapshot(input: {
     select: {
       expiresAt: true,
       policyCode: true,
+      rewardUsdMicros: true,
       status: true,
     },
   });
@@ -1725,7 +1726,7 @@ async function readHostedUsageReferralSnapshot(input: {
             policyCode: mission.policyCode,
             rewardLabel: buildHostedUsageReferralRewardLabel({
               destinationKind,
-              rewardUsdMicros: POLICIES[mission.policyCode].rewardUsdMicros,
+              rewardUsdMicros: mission.rewardUsdMicros,
             }),
             state: mission.status === "armed" ? "armed" : "target_bound",
           }]

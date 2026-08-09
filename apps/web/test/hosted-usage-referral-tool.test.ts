@@ -254,6 +254,48 @@ describe("hosted usage referral tool", () => {
     });
   });
 
+  it("keeps an active mission bound to its persisted reward", async () => {
+    const { prisma, referrals } = buildPrisma();
+    referrals.push({
+      armedAt: new Date("2026-07-29T12:00:00.000Z"),
+      beneficiaryMemberId: "member_personal",
+      expiresAt: new Date("2030-08-05T12:00:00.000Z"),
+      id: "hur_frozen_reward",
+      policyCode: "active_group_v1",
+      referrerMemberId: "member_personal",
+      rewardUsdMicros: 2_750_000n,
+      sourceConversationJson: PERSONAL_SOURCE,
+      status: "armed",
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "read",
+        referral: {
+          activeMissions: [{
+            policyCode: "active_group_v1",
+            rewardLabel:
+              "$2.75 of cost-weighted usage credit for your Murph",
+          }],
+          availablePolicies: [{
+            code: "new_person_activation_v1",
+            rewardLabel:
+              "$2.00 of cost-weighted usage credit for your Murph",
+          }],
+        },
+        status: "ok",
+      },
+    });
+  });
+
   it("offers only the provider-neutral mission from Telegram", async () => {
     const { prisma } = buildPrisma();
 
@@ -1013,11 +1055,34 @@ function buildPrisma(input: {
         ?? null
     )),
     findMany: vi.fn(async (
-      input?: { where?: Parameters<typeof matchesReferral>[1] },
+      input?: {
+        select?: {
+          expiresAt?: boolean;
+          policyCode?: boolean;
+          rewardUsdMicros?: boolean;
+          status?: boolean;
+        };
+        where?: Parameters<typeof matchesReferral>[1];
+      },
     ) => runQuery(() =>
-      referrals.filter((referral) =>
-        matchesReferral(referral, input?.where)
-      )
+      referrals
+        .filter((referral) => matchesReferral(referral, input?.where))
+        .map((referral) =>
+          input?.select
+            ? {
+                ...(input.select.expiresAt
+                  ? { expiresAt: referral.expiresAt }
+                  : {}),
+                ...(input.select.policyCode
+                  ? { policyCode: referral.policyCode }
+                  : {}),
+                ...(input.select.rewardUsdMicros
+                  ? { rewardUsdMicros: referral.rewardUsdMicros }
+                  : {}),
+                ...(input.select.status ? { status: referral.status } : {}),
+              }
+            : referral
+        )
     )),
     update: vi.fn(async (input: {
       data: Partial<ReferralState> & { sourceConversationJson?: unknown };

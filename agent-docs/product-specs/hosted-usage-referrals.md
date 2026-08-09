@@ -52,6 +52,10 @@ The ledger stores that value in USD micros. Actual message capacity varies by
 model, tools, media, task complexity, and response length, so Murph does not
 translate the credit into a message estimate.
 
+Available policies use the current fixed offer. Arming freezes that amount on
+the referral receipt; every active-mission snapshot, grant, completion notice,
+and Settings projection thereafter uses the persisted receipt amount.
+
 Trial rewards add usage capacity but never extend the trial end date.
 
 ## Stable signup referral links
