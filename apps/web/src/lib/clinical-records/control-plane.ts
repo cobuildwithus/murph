@@ -164,12 +164,8 @@ export async function finishClinicalRecordAuthorization(input: {
   }
 
   const provider = requireProviderEntry(session.providerDirectoryEntryId);
-  if (createHash("sha256").update(provider.fhirBaseUrl).digest("hex") !== session.fhirBaseHash) {
-    throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED",
-      httpStatus: 409,
-      message: "The provider configuration changed. Start the connection again.",
-    });
+  if (hashClinicalFhirBaseUrl(provider.fhirBaseUrl) !== session.fhirBaseHash) {
+    throw providerConfigurationChangedError();
   }
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
   const verifier = await openClinicalOauthVerifier({
@@ -197,6 +193,7 @@ export async function finishClinicalRecordAuthorization(input: {
   }
   return persistClinicalConnection({
     connectIntentClaimHash: session.connectIntentClaimHash,
+    fhirBaseHash: session.fhirBaseHash,
     memberId: auth.member.id,
     now: new Date(),
     provider,
@@ -257,6 +254,7 @@ async function consumeClinicalOauthSession(input: {
 async function persistClinicalConnection(input: {
   clientId: string;
   connectIntentClaimHash: string;
+  fhirBaseHash: string;
   memberId: string;
   now: Date;
   provider: ClinicalProviderDirectoryEntry;
@@ -265,103 +263,106 @@ async function persistClinicalConnection(input: {
   tokenEndpoint: string;
   token: Awaited<ReturnType<typeof exchangeSmartAuthorizationCode>>;
 }): Promise<{ connectionId: string; retrievalRunId: string }> {
+  const prisma = getPrisma();
+  await assertClinicalRecordConnectionAvailable({
+    memberId: input.memberId,
+    providerDirectoryEntryId: input.provider.id,
+  }, prisma);
+
+  const connectionId = generateOpaqueId(CLINICAL_CONNECTION_ID_PREFIX);
+  const retrievalRunId = generateOpaqueId(CLINICAL_RETRIEVAL_RUN_ID_PREFIX);
+  const tokenVersion = 1;
+  const retrievalGeneration = 1;
+  const fhirBaseUrlEncrypted = await sealClinicalConnectionFhirBaseUrl({
+    connectionId,
+    memberId: input.memberId,
+    value: input.provider.fhirBaseUrl,
+  });
+  const patientIdEncrypted = await sealClinicalConnectionSecret({
+    connectionId,
+    field: "patientId",
+    memberId: input.memberId,
+    tokenVersion,
+    value: input.token.patientId,
+  });
+  const accessTokenEncrypted = await sealClinicalConnectionSecret({
+    connectionId,
+    field: "accessToken",
+    memberId: input.memberId,
+    tokenVersion,
+    value: input.token.accessToken,
+  });
+  if (!patientIdEncrypted || !accessTokenEncrypted) {
+    throw new TypeError("Clinical Records connection encryption returned an empty required value.");
+  }
+  const connectionData = {
+    accessTokenEncrypted,
+    accessTokenExpiresAt: input.token.expiresInSeconds
+      ? new Date(input.now.getTime() + input.token.expiresInSeconds * 1_000)
+      : null,
+    connectedAt: input.now,
+    clientId: input.clientId,
+    disconnectedAt: null,
+    displayName: input.provider.brandName,
+    fhirBaseHash: input.fhirBaseHash,
+    fhirBaseUrlEncrypted,
+    grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
+    id: connectionId,
+    lastErrorCode: null,
+    memberId: input.memberId,
+    patientIdEncrypted,
+    providerDirectoryEntryId: input.provider.id,
+    refreshTokenEncrypted: null,
+    requestedScopesJson: toClinicalJsonArray(input.requestedScopes),
+    retrievalGeneration,
+    sourceSystem: input.provider.sourceSystem,
+    status: "active",
+    tokenEndpoint: input.tokenEndpoint,
+    tokenVersion,
+  } satisfies Prisma.ClinicalRecordConnectionUncheckedCreateInput;
+  const retrievalRunData = {
+    connectionId,
+    createdAt: input.now,
+    generation: retrievalGeneration,
+    id: retrievalRunId,
+    memberId: input.memberId,
+    grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
+    retrievalPlanJson: buildEpicBetaRetrievalPlan({
+      frozenAt: input.now,
+      pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+      resourceTypes: input.resourceTypes,
+    }),
+    retrievalProtocol: "query-slices-v2",
+    resourceTypesJson: toClinicalJsonArray(input.resourceTypes),
+    status: "queued",
+  } satisfies Prisma.ClinicalRecordRetrievalRunUncheckedCreateInput;
   let persisted: {
     connectionId: string;
     retrievalRunId: string;
     wake: Awaited<ReturnType<typeof appendClinicalRetrievalWakeTx>>;
   };
   try {
-    persisted = await getPrisma().$transaction(async (tx) => {
-      const existing = await tx.clinicalRecordConnection.findUnique({
-        select: { id: true },
-        where: {
-          memberId_providerDirectoryEntryId: {
-            memberId: input.memberId,
-            providerDirectoryEntryId: input.provider.id,
-          },
-        },
+    persisted = await prisma.$transaction(async (tx) => {
+      await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: tx });
+      assertCurrentClinicalProviderConfiguration({
+        fhirBaseHash: input.fhirBaseHash,
+        provider: input.provider,
       });
-      if (existing) throw connectionAlreadyExistsError();
-      const connectionId = generateOpaqueId(CLINICAL_CONNECTION_ID_PREFIX);
-      const tokenVersion = 1;
-      const retrievalGeneration = 1;
-      const fhirBaseUrlEncrypted = await sealClinicalConnectionFhirBaseUrl({
-        connectionId,
+      await assertClinicalRecordConnectionAvailable({
         memberId: input.memberId,
-        prisma: tx,
-        value: input.provider.fhirBaseUrl,
-      });
-      const patientIdEncrypted = await sealClinicalConnectionSecret({
-        connectionId,
-        field: "patientId",
-        memberId: input.memberId,
-        prisma: tx,
-        tokenVersion,
-        value: input.token.patientId,
-      });
-      const accessTokenEncrypted = await sealClinicalConnectionSecret({
-        connectionId,
-        field: "accessToken",
-        memberId: input.memberId,
-        prisma: tx,
-        tokenVersion,
-        value: input.token.accessToken,
-      });
-      if (!patientIdEncrypted || !accessTokenEncrypted) {
-        throw new TypeError("Clinical Records connection encryption returned an empty required value.");
-      }
-      const connectionData = {
-        accessTokenEncrypted,
-        accessTokenExpiresAt: input.token.expiresInSeconds
-          ? new Date(input.now.getTime() + input.token.expiresInSeconds * 1_000)
-          : null,
-        connectedAt: input.now,
-        clientId: input.clientId,
-        disconnectedAt: null,
-        displayName: input.provider.brandName,
-        fhirBaseHash: createHash("sha256").update(input.provider.fhirBaseUrl).digest("hex"),
-        fhirBaseUrlEncrypted,
-        grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
-        id: connectionId,
-        lastErrorCode: null,
-        memberId: input.memberId,
-        patientIdEncrypted,
         providerDirectoryEntryId: input.provider.id,
-        refreshTokenEncrypted: null,
-        requestedScopesJson: toClinicalJsonArray(input.requestedScopes),
-        retrievalGeneration,
-        sourceSystem: input.provider.sourceSystem,
-        status: "active",
-        tokenEndpoint: input.tokenEndpoint,
-        tokenVersion,
-      } satisfies Prisma.ClinicalRecordConnectionUncheckedCreateInput;
-      await tx.clinicalRecordConnection.create({
-        data: connectionData,
-      });
-      const retrievalRunId = generateOpaqueId(CLINICAL_RETRIEVAL_RUN_ID_PREFIX);
-      await tx.clinicalRecordRetrievalRun.create({
-        data: {
-          connectionId,
-          createdAt: input.now,
-          generation: retrievalGeneration,
-          id: retrievalRunId,
-          memberId: input.memberId,
-          grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
-          retrievalPlanJson: buildEpicBetaRetrievalPlan({
-            frozenAt: input.now,
-            pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
-            resourceTypes: input.resourceTypes,
-          }),
-          retrievalProtocol: "query-slices-v2",
-          resourceTypesJson: toClinicalJsonArray(input.resourceTypes),
-          status: "queued",
-        },
-      });
+      }, tx);
       await completeClinicalRecordConnectIntent({
         claimHash: input.connectIntentClaimHash,
         memberId: input.memberId,
         now: input.now,
       }, tx);
+      await tx.clinicalRecordConnection.create({
+        data: connectionData,
+      });
+      await tx.clinicalRecordRetrievalRun.create({
+        data: retrievalRunData,
+      });
       const wake = await appendClinicalRetrievalWakeTx({
         generation: retrievalGeneration,
         memberId: input.memberId,
@@ -391,17 +392,43 @@ function isUniqueConstraintError(error: unknown): boolean {
   );
 }
 
-async function assertClinicalRecordConnectionAvailable(input: {
-  memberId: string;
-  providerDirectoryEntryId: string;
-}): Promise<void> {
-  const existing = await getPrisma().clinicalRecordConnection.findUnique({
+async function assertClinicalRecordConnectionAvailable(
+  input: {
+    memberId: string;
+    providerDirectoryEntryId: string;
+  },
+  prisma: Pick<Prisma.TransactionClient, "clinicalRecordConnection"> = getPrisma(),
+): Promise<void> {
+  const existing = await prisma.clinicalRecordConnection.findUnique({
     select: { id: true },
     where: {
       memberId_providerDirectoryEntryId: input,
     },
   });
   if (existing) throw connectionAlreadyExistsError();
+}
+
+function assertCurrentClinicalProviderConfiguration(input: {
+  fhirBaseHash: string;
+  provider: ClinicalProviderDirectoryEntry;
+}): void {
+  const currentProvider = resolveClinicalProviderDirectoryEntry(input.provider.id);
+  if (
+    !currentProvider
+    || currentProvider.id !== input.provider.id
+    || currentProvider.clientIdEnvironmentKey !== input.provider.clientIdEnvironmentKey
+    || currentProvider.policyId !== input.provider.policyId
+    || currentProvider.sourceSystem !== input.provider.sourceSystem
+    || !sameStringArray(currentProvider.requestedBaseScopes, input.provider.requestedBaseScopes)
+    || !sameStringArray(currentProvider.resourceTypes, input.provider.resourceTypes)
+    || hashClinicalFhirBaseUrl(currentProvider.fhirBaseUrl) !== input.fhirBaseHash
+  ) {
+    throw providerConfigurationChangedError();
+  }
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function requireProviderEntry(entryId: string): ClinicalProviderDirectoryEntry {
@@ -464,6 +491,18 @@ function connectionAlreadyExistsError() {
     httpStatus: 409,
     message: "This Clinical Records provider is already connected.",
   });
+}
+
+function providerConfigurationChangedError() {
+  return clinicalRecordsError({
+    code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED",
+    httpStatus: 409,
+    message: "The provider configuration changed. Start the connection again.",
+  });
+}
+
+function hashClinicalFhirBaseUrl(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function generateOpaqueId(prefix: string): string {

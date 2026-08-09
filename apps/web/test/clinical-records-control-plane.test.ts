@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   openClinicalOauthVerifier: vi.fn(),
   readGrantedSmartResourceTypes: vi.fn(),
+  resolveClinicalProviderDirectoryEntry: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   sealClinicalConnectionFhirBaseUrl: vi.fn(),
   sealClinicalConnectionSecret: vi.fn(),
@@ -32,7 +33,7 @@ vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
 }));
 vi.mock("@/src/lib/clinical-records/provider-directory-store", () => ({
-  resolveClinicalProviderDirectoryEntry: () => provider,
+  resolveClinicalProviderDirectoryEntry: mocks.resolveClinicalProviderDirectoryEntry,
 }));
 vi.mock("@/src/lib/clinical-records/secrets", () => ({
   openClinicalOauthVerifier: mocks.openClinicalOauthVerifier,
@@ -86,6 +87,7 @@ describe("Clinical Records authorization persistence", () => {
       member: { id: MEMBER_ID },
       sessionId: "hws_clinical_1",
     });
+    mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.buildSmartAuthorizationUrl.mockReturnValue(
       "https://fhir.example.test/oauth2/authorize",
     );
@@ -115,6 +117,7 @@ describe("Clinical Records authorization persistence", () => {
       refreshToken: "unexpected-refresh-token",
     });
     mocks.readGrantedSmartResourceTypes.mockReturnValue(["Patient", "Observation"]);
+    mocks.resolveClinicalProviderDirectoryEntry.mockImplementation(() => provider);
     mocks.sealClinicalConnectionFhirBaseUrl.mockResolvedValue("sealed-fhir-base-url");
     mocks.sealClinicalOauthVerifier.mockResolvedValue("sealed-verifier");
     mocks.sealClinicalConnectionSecret.mockImplementation(async (input: { field: string }) =>
@@ -126,6 +129,7 @@ describe("Clinical Records authorization persistence", () => {
       laneSeq: "1",
       userId: MEMBER_ID,
     });
+    mocks.signalClinicalRetrievalWake.mockResolvedValue(undefined);
     vi.stubEnv("EPIC_SMART_CLIENT_ID", "epic-client-id");
   });
 
@@ -274,6 +278,153 @@ describe("Clinical Records authorization persistence", () => {
     expect(retrievalRun.retrievalPlanJson.slices
       .filter((slice) => slice.coverage === "bounded-window")
       .every((slice) => slice.to === retrievalRun.createdAt.toISOString())).toBe(true);
+    expect(harness.connectionCreate).toHaveBeenCalledTimes(1);
+    expect(harness.retrievalRunCreate).toHaveBeenCalledTimes(1);
+    expect(harness.connectIntentUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mocks.appendClinicalRetrievalWakeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.signalClinicalRetrievalWake).toHaveBeenCalledTimes(1);
+  });
+
+  it("prepares every connection ciphertext before opening the persistence transaction", async () => {
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    const sealStarted = createDeferred();
+    const releaseSeal = createDeferred();
+    mocks.sealClinicalConnectionFhirBaseUrl.mockImplementation(async (input) => {
+      harness.callOrder.push("seal:fhirBaseUrl:start");
+      expect(harness.transactionDepth).toBe(0);
+      expect(input).not.toHaveProperty("prisma");
+      sealStarted.resolve();
+      await releaseSeal.promise;
+      harness.callOrder.push("seal:fhirBaseUrl:end");
+      return "sealed-fhir-base-url";
+    });
+    mocks.sealClinicalConnectionSecret.mockImplementation(async (input: {
+      connectionId: string;
+      field: string;
+      tokenVersion: number;
+    }) => {
+      harness.callOrder.push(`seal:${input.field}`);
+      expect(harness.transactionDepth).toBe(0);
+      expect(input).not.toHaveProperty("prisma");
+      return `sealed-${input.field}`;
+    });
+    mocks.signalClinicalRetrievalWake.mockImplementation(async () => {
+      expect(harness.transactionDepth).toBe(0);
+      harness.callOrder.push("signal:wake");
+    });
+
+    const authorization = finishAuthorization();
+    await sealStarted.promise;
+
+    expect(harness.transactionDepth).toBe(0);
+    expect(harness.transactionCalls).toBe(1);
+    expect(harness.callOrder).toEqual([
+      "transaction:1:start",
+      "transaction:1:end",
+      "seal:fhirBaseUrl:start",
+    ]);
+
+    releaseSeal.resolve();
+    await authorization;
+
+    expect(harness.callOrder).toEqual([
+      "transaction:1:start",
+      "transaction:1:end",
+      "seal:fhirBaseUrl:start",
+      "seal:fhirBaseUrl:end",
+      "seal:patientId",
+      "seal:accessToken",
+      "transaction:2:start",
+      "transaction:2:end",
+      "signal:wake",
+    ]);
+    const fhirSealInput = mocks.sealClinicalConnectionFhirBaseUrl.mock.calls[0]?.[0];
+    const secretSealInputs = mocks.sealClinicalConnectionSecret.mock.calls.map(([input]) => input);
+    expect(secretSealInputs).toEqual([
+      expect.objectContaining({
+        connectionId: fhirSealInput?.connectionId,
+        field: "patientId",
+        tokenVersion: 1,
+      }),
+      expect.objectContaining({
+        connectionId: fhirSealInput?.connectionId,
+        field: "accessToken",
+        tokenVersion: 1,
+      }),
+    ]);
+    expect(harness.connectionCreate.mock.calls[0]?.[0]?.data.id).toBe(
+      fhirSealInput?.connectionId,
+    );
+  });
+
+  it("rechecks launch consent inside the persistence transaction after ciphertext preparation", async () => {
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    const sealStarted = createDeferred();
+    const releaseSeal = createDeferred();
+    let launchConsentGranted = true;
+    mocks.sealClinicalConnectionFhirBaseUrl.mockImplementation(async () => {
+      sealStarted.resolve();
+      await releaseSeal.promise;
+      return "sealed-fhir-base-url";
+    });
+    mocks.assertHostedLaunchRequiredConsentGranted.mockImplementation(async ({ prisma }) => {
+      if (prisma === harness.tx && !launchConsentGranted) {
+        throw Object.assign(new Error("launch consent withdrawn"), {
+          code: "HOSTED_CONSENT_REQUIRED",
+        });
+      }
+    });
+
+    const authorization = finishAuthorization();
+    await sealStarted.promise;
+    launchConsentGranted = false;
+    releaseSeal.resolve();
+
+    await expect(authorization).rejects.toMatchObject({ code: "HOSTED_CONSENT_REQUIRED" });
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenLastCalledWith({
+      memberId: MEMBER_ID,
+      prisma: harness.tx,
+    });
+    expect(harness.connectionCreate).not.toHaveBeenCalled();
+    expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
+    expect(mocks.appendClinicalRetrievalWakeTx).not.toHaveBeenCalled();
+    expect(mocks.signalClinicalRetrievalWake).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when provider configuration changes after ciphertext preparation", async () => {
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    const sealStarted = createDeferred();
+    const releaseSeal = createDeferred();
+    const changedProvider = {
+      ...productionProvider,
+      fhirBaseUrl: "https://changed-fhir.example.test/FHIR/R4",
+    };
+    mocks.resolveClinicalProviderDirectoryEntry.mockImplementation(() =>
+      harness.transactionDepth > 0 ? changedProvider : productionProvider
+    );
+    mocks.sealClinicalConnectionFhirBaseUrl.mockImplementation(async () => {
+      sealStarted.resolve();
+      await releaseSeal.promise;
+      return "sealed-fhir-base-url";
+    });
+
+    const authorization = finishAuthorization();
+    await sealStarted.promise;
+    expect(harness.transactionDepth).toBe(0);
+    expect(mocks.resolveClinicalProviderDirectoryEntry).toHaveBeenCalledTimes(1);
+    releaseSeal.resolve();
+
+    await expect(authorization).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED",
+    });
+    expect(mocks.resolveClinicalProviderDirectoryEntry).toHaveBeenCalledTimes(2);
+    expect(harness.connectionCreate).not.toHaveBeenCalled();
+    expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
+    expect(mocks.appendClinicalRetrievalWakeTx).not.toHaveBeenCalled();
+    expect(mocks.signalClinicalRetrievalWake).not.toHaveBeenCalled();
   });
 
   it("rejects a second retrieval for the same member and provider", async () => {
@@ -283,6 +434,7 @@ describe("Clinical Records authorization persistence", () => {
     await expect(finishAuthorization()).rejects.toMatchObject({
       code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS",
     });
+    expect(mocks.sealClinicalConnectionFhirBaseUrl).not.toHaveBeenCalled();
     expect(mocks.sealClinicalConnectionSecret).not.toHaveBeenCalled();
     expect(harness.connectionCreate).not.toHaveBeenCalled();
     expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
@@ -318,6 +470,33 @@ describe("Clinical Records authorization persistence", () => {
       code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS",
     });
     expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
+    expect(mocks.appendClinicalRetrievalWakeTx).not.toHaveBeenCalled();
+    expect(mocks.signalClinicalRetrievalWake).not.toHaveBeenCalled();
+  });
+
+  it("does not persist or signal when the connect intent is superseded during preparation", async () => {
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    const sealStarted = createDeferred();
+    const releaseSeal = createDeferred();
+    mocks.sealClinicalConnectionFhirBaseUrl.mockImplementation(async () => {
+      sealStarted.resolve();
+      await releaseSeal.promise;
+      return "sealed-fhir-base-url";
+    });
+
+    const authorization = finishAuthorization();
+    await sealStarted.promise;
+    harness.connectIntentUpdateMany.mockResolvedValueOnce({ count: 0 });
+    releaseSeal.resolve();
+
+    await expect(authorization).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_CONNECT_INTENT_SUPERSEDED",
+    });
+    expect(harness.connectionCreate).not.toHaveBeenCalled();
+    expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
+    expect(mocks.appendClinicalRetrievalWakeTx).not.toHaveBeenCalled();
+    expect(mocks.signalClinicalRetrievalWake).not.toHaveBeenCalled();
   });
 
   it("rejects a superseded OAuth session before exchanging its provider code", async () => {
@@ -376,14 +555,12 @@ function createHarness(
   oauthOverrides: Partial<ReturnType<typeof oauthSession>> = {},
 ) {
   const connectionCreate = vi.fn();
+  const connectionFindUnique = vi.fn(async () => existing ? { ...existing } : null);
+  const connectIntentUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const oauthSessionCreate = vi.fn();
   const retrievalRunCreate = vi.fn();
-  const harness = {
-    connectionCreate,
-    oauthSessionCreate,
-    retrievalRunCreate,
-    prisma: {} as Record<string, unknown>,
-  };
+  const callOrder: string[] = [];
+  const transactionState = { calls: 0, depth: 0 };
   const tx = {
     clinicalRecordConnectIntent: {
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -396,11 +573,11 @@ function createHarness(
         providerDirectoryEntryId: null,
         startedAt: null,
       }),
-      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      updateMany: connectIntentUpdateMany,
     },
     clinicalRecordConnection: {
       create: connectionCreate,
-      findUnique: vi.fn(async () => existing ? { ...existing } : null),
+      findUnique: connectionFindUnique,
     },
     clinicalRecordOauthSession: {
       create: oauthSessionCreate,
@@ -413,12 +590,38 @@ function createHarness(
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
   };
-  harness.prisma = {
-    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => {
+      transactionState.calls += 1;
+      const call = transactionState.calls;
+      callOrder.push(`transaction:${call}:start`);
+      transactionState.depth += 1;
+      try {
+        return await callback(tx);
+      } finally {
+        transactionState.depth -= 1;
+        callOrder.push(`transaction:${call}:end`);
+      }
+    },
     clinicalRecordConnectIntent: tx.clinicalRecordConnectIntent,
     clinicalRecordConnection: tx.clinicalRecordConnection,
   };
-  return harness;
+  return {
+    callOrder,
+    connectionCreate,
+    connectionFindUnique,
+    connectIntentUpdateMany,
+    get transactionCalls() {
+      return transactionState.calls;
+    },
+    get transactionDepth() {
+      return transactionState.depth;
+    },
+    oauthSessionCreate,
+    prisma,
+    retrievalRunCreate,
+    tx,
+  };
 }
 
 function oauthSession() {
@@ -457,4 +660,12 @@ function finishAuthorization() {
     ),
     state: "opaque-state",
   });
+}
+
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
