@@ -1,0 +1,39 @@
+name: PR 1381 final audit export 2026-08-09
+
+on:
+  push:
+    branches:
+      - agent/pr1381-final-audit-export-20260809
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch exact PR and main refs
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/agent/codex-exact-app-server-protocol:refs/remotes/origin/agent/codex-exact-app-server-protocol
+      - name: Create recoverable git bundle
+        run: |
+          git bundle create /tmp/murph-pr1381-final-audit.bundle \
+            refs/remotes/origin/main \
+            refs/remotes/origin/agent/codex-exact-app-server-protocol
+          git rev-parse refs/remotes/origin/main > /tmp/main.sha
+          git rev-parse refs/remotes/origin/agent/codex-exact-app-server-protocol > /tmp/pr.sha
+          git bundle verify /tmp/murph-pr1381-final-audit.bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murph-pr1381-final-audit-bundle
+          path: |
+            /tmp/murph-pr1381-final-audit.bundle
+            /tmp/main.sha
+            /tmp/pr.sha
+          if-no-files-found: error
+          retention-days: 1
