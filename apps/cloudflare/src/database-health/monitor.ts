@@ -405,7 +405,8 @@ export class DatabaseHealthMonitor {
         )
           ? conditionsWithDeferredDirectErrors.filter(
             (condition) =>
-              condition.kind === "direct_migration_admission_failures",
+              condition.kind === "direct_migration_admission_failures"
+              || condition.kind === "monitoring_unavailable",
           )
           : conditionsWithDeferredDirectErrors;
       const shouldHoldMonitoringForFence =
@@ -417,10 +418,11 @@ export class DatabaseHealthMonitor {
           || currentReplayableConditions.length === 0
         );
       const admittedCheckedAtMs =
-        admittedConditions.length === 1
-        && admittedConditions[0]?.kind
-          === "direct_migration_admission_failures"
-        && currentDirectError === undefined
+        isPromotingDeferredDirectError
+        && admittedConditions.some(
+          (condition) =>
+            condition.kind === "direct_migration_admission_failures",
+        )
         && alertState.deferredDirectErrorCheckedAtMs !== null
           ? alertState.deferredDirectErrorCheckedAtMs
           : admittedConditions.length === 1

@@ -220,8 +220,12 @@ own observation time. Only acknowledgment of a
 telemetry-bearing page clears the obligation; a later complete sample then
 closes and rearms the incident. After acknowledgment, incomplete samples remain
 queryable but cannot repeat telemetry copy inside concrete-pressure pages unless
-a later rearmed threshold creates a new obligation. Concrete unsafe conditions
-retain their 30-minute recurrence. The object writes Linq provider-attempt
+a later rearmed threshold creates a new obligation. When a direct-error delta
+takes admission priority after an earlier page, any currently owed telemetry
+travels in that same immutable body while replayable gauges remain excluded;
+the direct error keeps its original check time and telemetry keeps its own
+condition-local observation time. Concrete unsafe conditions retain their
+30-minute recurrence. The object writes Linq provider-attempt
 admission before egress, never attempts more than once per 30 minutes across all
 incidents, and reuses the exact body plus idempotency key after an ambiguous
 send. The obligation columns are added idempotently without advancing the

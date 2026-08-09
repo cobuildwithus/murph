@@ -141,4 +141,12 @@ Updated: 2026-08-09
   there while preserving direct-only promotion behind an older admitted page.
   A focused three-condition, recovery, restart, both-recipient,
   acknowledgment, and no-second-attempt regression covers the path. Final
-  ReviewGPT round 8 remains pending.
+  ReviewGPT round 8 found that the deliberately retained direct-only path could
+  split an already owed telemetry fact from a non-replayable direct-error page,
+  forcing a second provider fence and acknowledgment lifecycle. The accepted
+  correction retains both durable non-replayable conditions in one immutable
+  body while still excluding replayable gauges, and derives the page check time
+  from promoted deferred direct evidence even when telemetry is also present.
+  Focused inside-fence and deferred-promotion regressions prove exact identity,
+  restart, recovery, both recipients, condition-local times, obligation cleanup,
+  and no second telemetry page. ReviewGPT round 9 remains pending.

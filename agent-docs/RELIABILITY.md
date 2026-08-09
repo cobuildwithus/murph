@@ -209,18 +209,22 @@ Last verified: 2026-08-07
   direct-error count plus latest check time in the existing alert row instead
   of dropping it. An acknowledged older page cannot close the incident while
   that evidence remains. The next run with a free slot atomically promotes the
-  accumulated count into one direct-error page, which then follows the ordinary
-  attempt fence, health preflight, exact-body retry, and restart contract.
+  accumulated count into one non-replayable page, retaining any owed telemetry
+  condition in the same body, which then follows the ordinary attempt fence,
+  health preflight, exact-body retry, and restart contract.
   When a direct error forces admission inside an acknowledged incident's
-  closed attempt fence, that pending body contains only the non-replayable
-  direct-error evidence; co-occurring replayable gauges remain in the persisted
-  sample but cannot become stale pending claims. That exact direct-error page
-  owns the next eligible attempt. A replayable condition still unsafe at that
-  boundary remains eligible for the following paced recurrence. The same
-  one-slot ordering applies in reverse: a later direct-error obligation waits
-  behind an older page but cannot be consumed by the counter baseline. This
-  explicit prioritization keeps admitted bodies immutable without another
-  message queue or delivery lifecycle.
+  closed attempt fence, that pending body contains the non-replayable direct
+  error plus any durable telemetry obligation already available at admission;
+  co-occurring replayable gauges remain in the persisted sample but cannot
+  become stale pending claims. The direct error keeps its original check time,
+  while historical telemetry carries its separate observation time. That exact
+  combined page owns the next eligible attempt and acknowledgment clears the
+  represented telemetry obligation, avoiding a second notification lifecycle.
+  A replayable condition still unsafe at that boundary remains eligible for the
+  following paced recurrence. The same one-slot ordering applies in reverse: a
+  later direct-error obligation waits behind an older page but cannot be consumed
+  by the counter baseline. This explicit prioritization keeps admitted bodies
+  immutable without another message queue or delivery lifecycle.
   An acknowledged incident's replayable gauge does not admit stale evidence
   while the attempt fence is closed; once the fence opens, a still-unsafe
   current gauge admits the recurrence. An unadmitted monitoring obligation does
