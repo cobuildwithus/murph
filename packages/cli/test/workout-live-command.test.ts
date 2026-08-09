@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 
 import { Cli } from 'incur'
-import { afterEach } from 'vitest'
+import { afterAll } from 'vitest'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 
 import { registerVaultCommands } from '../src/commands/vault.js'
@@ -17,7 +17,7 @@ import { localParallelCliTest as test } from './local-parallel-test.js'
 
 const cleanupPaths: string[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   await Promise.all(
     cleanupPaths.splice(0).map((target) =>
       rm(target, { recursive: true, force: true }),
