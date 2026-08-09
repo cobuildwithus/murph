@@ -1,0 +1,62 @@
+name: Diagnose PR 1464 typecheck
+
+on:
+  push:
+    branches:
+      - codex/starter-usage-export-final
+    paths:
+      - .github/workflows/codex-diagnose-pr1464-typecheck.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/non-expiring-starter-usage
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate exact-head prerequisites and capture diagnostics
+        shell: bash
+        run: |
+          set -uo pipefail
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            echo "--- source symbols ---"
+            grep -R -n "GroupPlanStatusSheet" apps packages 2>/dev/null || true
+            echo "--- design source around compiler line ---"
+            nl -ba apps/web/app/design/sections-content.tsx | sed -n '195,225p'
+            echo "--- group member design source ---"
+            nl -ba apps/web/app/design/group-member-plan-study.tsx | sed -n '190,225p'
+          } > /tmp/pr1464-source-diagnostics.txt
+
+          pnpm --dir apps/web health-commons:generate
+          pnpm --dir apps/web prisma:generate
+          pnpm --dir apps/web typecheck:prepared > /tmp/pr1464-typecheck.log 2>&1
+          status=$?
+          echo "$status" > /tmp/pr1464-typecheck-status.txt
+          grep -n -C 5 "error TS" /tmp/pr1464-typecheck.log > /tmp/pr1464-typecheck-errors.txt || true
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr1464-typecheck-diagnostics
+          path: |
+            /tmp/pr1464-source-diagnostics.txt
+            /tmp/pr1464-typecheck.log
+            /tmp/pr1464-typecheck-errors.txt
+            /tmp/pr1464-typecheck-status.txt
+          retention-days: 1
