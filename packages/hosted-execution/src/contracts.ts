@@ -285,10 +285,17 @@ export interface HostedExecutionAssistantAskGroupSenderTarget {
   permissionDigest: string;
 }
 
+export interface HostedExecutionAssistantAskPrivateGroupSenderTarget {
+  groupRuntimeMemberId: string;
+  kind: "group_sender_private";
+  permissionDigest: string;
+}
+
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
-  | HostedExecutionAssistantAskGroupSenderTarget;
+  | HostedExecutionAssistantAskGroupSenderTarget
+  | HostedExecutionAssistantAskPrivateGroupSenderTarget;
 
 export interface HostedExecutionAssistantAskAcceptedInputOrigin {
   assistantInputId: string;
@@ -338,10 +345,18 @@ export interface HostedExecutionAssistantAskGroupSenderRequestedPayload {
   target: HostedExecutionAssistantAskGroupSenderTarget;
 }
 
+export interface HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload {
+  expiresAt: string;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  question: string;
+  target: HostedExecutionAssistantAskPrivateGroupSenderTarget;
+}
+
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
-  | HostedExecutionAssistantAskGroupSenderRequestedPayload;
+  | HostedExecutionAssistantAskGroupSenderRequestedPayload
+  | HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload;
 
 export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   expiresAt: string;

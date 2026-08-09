@@ -53,8 +53,13 @@ import {
   readHostedGroupDisclosureGrantAuthorityTx,
 } from "./group-disclosure-store";
 import {
+  appendHostedGroupCurrentSenderPrivateCompletionTx,
   createHostedGroupCurrentSenderAssistantAskRequestId,
+  createHostedGroupCurrentSenderPrivateAssistantAskRequestId,
   readHostedGroupCurrentSenderAssistantAskAuthorityTx,
+  readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx,
+  readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx,
+  type HostedGroupCurrentSenderPrivateCompletionAuthority,
 } from "./group-current-sender-assistant-ask";
 
 const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
@@ -119,9 +124,15 @@ type HostedAssistantAskConsentedAuthority = {
   targetLabel: null;
 };
 
+type HostedAssistantAskPrivateCurrentSenderAuthority =
+  HostedAssistantAskConsentedAuthority & {
+    privateCurrentSender: HostedGroupCurrentSenderPrivateCompletionAuthority;
+  };
+
 type HostedAssistantAskAuthority =
   | HostedAssistantAskLegacyAuthority
-  | HostedAssistantAskConsentedAuthority;
+  | HostedAssistantAskConsentedAuthority
+  | HostedAssistantAskPrivateCurrentSenderAuthority;
 
 interface HostedAssistantAskRequestReadResult {
   authority: HostedAssistantAskAuthority | null;
@@ -467,29 +478,52 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
       mailboxItemId: completionId,
       prisma: tx,
     });
+    const privateCurrentSenderAuthority =
+      isHostedAssistantAskPrivateCurrentSenderAuthority(authority)
+        ? authority
+        : null;
+    const existingPrivateCompletionMailboxWake =
+      existingCompletion && privateCurrentSenderAuthority
+        ? await readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx({
+            authority: privateCurrentSenderAuthority.privateCurrentSender,
+            completionId,
+            existingCompletion: {
+              dedupeKey: existingCompletion.dedupeKey,
+              expiresAt: existingCompletion.expiresAt ?? null,
+              kind: existingCompletion.kind,
+              userId: existingCompletion.userId,
+            },
+            now,
+            tx,
+          })
+        : null;
     const existingCompletionIsValid = existingCompletion
-      ? await isMatchingHostedAssistantAskCompletionTx({
-          completionId,
-          existingDedupeKey: existingCompletion.dedupeKey,
-          existingExpiresAt: existingCompletion.expiresAt ?? null,
-          existingKind: existingCompletion.kind,
-          existingUserId: existingCompletion.userId,
-          expectedAuthority: authority,
-          expectedRequestId: input.request.requestId,
-          now,
-          tx,
-        })
+      ? privateCurrentSenderAuthority
+        ? existingPrivateCompletionMailboxWake !== null
+        : await isMatchingHostedAssistantAskCompletionTx({
+            completionId,
+            existingDedupeKey: existingCompletion.dedupeKey,
+            existingExpiresAt: existingCompletion.expiresAt ?? null,
+            existingKind: existingCompletion.kind,
+            existingUserId: existingCompletion.userId,
+            expectedAuthority: authority,
+            expectedRequestId: input.request.requestId,
+            now,
+            tx,
+          })
       : false;
+    const existingCompletionMailboxWake = existingCompletionIsValid
+      ? existingPrivateCompletionMailboxWake
+        ?? resolveHostedAssistantAskCompletionMailboxWake({
+          authority,
+          completionId,
+        })
+      : null;
 
     if (input.request.action === "prepare") {
       if (existingCompletion) {
         return {
-          mailboxWake: existingCompletionIsValid
-            ? resolveHostedAssistantAskCompletionMailboxWake({
-                authority,
-                completionId,
-              })
-            : null,
+          mailboxWake: existingCompletionMailboxWake,
           response: {
             action: "prepare",
             status: "terminal",
@@ -522,14 +556,30 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
 
     if (existingCompletion) {
       return {
-        mailboxWake: existingCompletionIsValid
-          ? resolveHostedAssistantAskCompletionMailboxWake({
-              authority,
-              completionId,
-            })
-          : null,
+        mailboxWake: existingCompletionMailboxWake,
         response: existingCompletionIsValid
           ? { action: "complete", status: "already_completed" }
+          : {
+              action: "complete",
+              status: "terminal",
+              terminalReason: "unavailable",
+            },
+      };
+    }
+
+    if (privateCurrentSenderAuthority) {
+      const mailboxWake =
+        await appendHostedGroupCurrentSenderPrivateCompletionTx({
+          authority: privateCurrentSenderAuthority.privateCurrentSender,
+          completionId,
+          now,
+          result: input.request.result,
+          tx,
+        });
+      return {
+        mailboxWake,
+        response: mailboxWake
+          ? { action: "complete", status: "completed" }
           : {
               action: "complete",
               status: "terminal",
@@ -576,10 +626,22 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
   });
 }
 
+function isHostedAssistantAskPrivateCurrentSenderAuthority(
+  authority: HostedAssistantAskAuthority,
+): authority is HostedAssistantAskPrivateCurrentSenderAuthority {
+  return "privateCurrentSender" in authority;
+}
+
 function resolveHostedAssistantAskCompletionMailboxWake(input: {
   authority: HostedAssistantAskAuthority;
   completionId: string;
 }): HostedAssistantAskMailboxWake | null {
+  if (isHostedAssistantAskPrivateCurrentSenderAuthority(input.authority)) {
+    return {
+      expectedUserId: input.authority.privateCurrentSender.targetMemberId,
+      mailboxItemId: input.completionId,
+    };
+  }
   if (
     "origin" in input.authority
     && input.authority.origin.kind === "automation_occurrence"
@@ -1005,6 +1067,50 @@ async function readHostedAssistantAskAuthorityTx(input: {
         originSessionId: wake.ask.originSessionId,
         question: wake.ask.question,
         targetLabel: membershipAuthority.targetLabel,
+      },
+      terminalReason: null,
+    };
+  }
+
+  if (wake.ask.target.kind === "group_sender_private") {
+    if (wake.ask.origin.kind !== "accepted_input") {
+      return { authority: null, terminalReason: "unavailable" };
+    }
+    const currentSenderAuthority =
+      await readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx({
+        expectedGroupRuntimeMemberId:
+          wake.ask.target.groupRuntimeMemberId,
+        expectedTargetMemberId: item.userId,
+        now: input.now,
+        origin: wake.ask.origin,
+        tx: input.tx,
+      });
+    if (
+      !currentSenderAuthority
+      || currentSenderAuthority.question !== wake.ask.question
+      || currentSenderAuthority.permissionDigest
+        !== wake.ask.target.permissionDigest
+      || createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
+        groupRuntimeMemberId: currentSenderAuthority.groupRuntimeMemberId,
+        originAssistantInputId: wake.ask.origin.assistantInputId,
+      }) !== input.requestId
+    ) {
+      return { authority: null, terminalReason: "unavailable" };
+    }
+    const privateCurrentSender = {
+      ...currentSenderAuthority,
+      expiresAt: wake.ask.expiresAt,
+      origin: wake.ask.origin,
+    } satisfies HostedGroupCurrentSenderPrivateCompletionAuthority;
+    return {
+      authority: {
+        expiresAt: wake.ask.expiresAt,
+        origin: wake.ask.origin,
+        originMemberId: currentSenderAuthority.groupRuntimeMemberId,
+        permissionText: currentSenderAuthority.permissionText,
+        privateCurrentSender,
+        question: currentSenderAuthority.question,
+        targetLabel: null,
       },
       terminalReason: null,
     };

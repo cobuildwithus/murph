@@ -70,6 +70,27 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     })).toThrow(/unsupported field/u);
   });
 
+  it("round-trips the accepted-input-only private group-sender request", () => {
+    const privateAsk = {
+      ...CURRENT_SENDER_ASK,
+      target: {
+        ...CURRENT_SENDER_ASK.target,
+        kind: "group_sender_private" as const,
+      },
+    };
+    expect(parseHostedExecutionAssistantAskRequestedPayload(
+      privateAsk,
+    )).toEqual(privateAsk);
+    expect(() => parseHostedExecutionAssistantAskRequestedPayload({
+      ...privateAsk,
+      origin: {
+        automationId: "automation_1",
+        kind: "automation_occurrence",
+        occurrenceAt: REQUESTED_AT,
+      },
+    })).toThrow(/accepted input/u);
+  });
+
   it("parses the narrow group-tool request and shared member-ask results", () => {
     const request = {
       action: "ask_current_sender",
@@ -109,6 +130,47 @@ describe("hosted current-sender Assistant Ask contracts", () => {
       action: "ask_current_sender",
       result: { status: "unavailable" },
     });
+  });
+
+  it("parses the current sender's private-continuation action", () => {
+    const request = {
+      action: "message_current_sender",
+      origin: CURRENT_SENDER_ASK.origin,
+    } as const;
+    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      ...request,
+      text: "model-authored private message",
+    })).toThrow(/not allowed/u);
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "message_current_sender",
+      result: { status: "accepted" },
+    })).toEqual({
+      action: "message_current_sender",
+      result: { status: "accepted" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "message_current_sender",
+      result: {
+        status: "unavailable",
+        unavailableReason: "private_route_unavailable",
+      },
+    })).toEqual({
+      action: "message_current_sender",
+      result: {
+        status: "unavailable",
+        unavailableReason: "private_route_unavailable",
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "message_current_sender",
+      result: {
+        answer: "not a private delivery result",
+        outcome: "answered",
+        status: "completed",
+      },
+    })).toThrow(/status is invalid/u);
   });
 
   it("reads exactly the authored Linq or Telegram text and never email text", () => {
