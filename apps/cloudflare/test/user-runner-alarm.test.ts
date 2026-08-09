@@ -165,10 +165,17 @@ describe("HostedUserRunner execution coordination", () => {
     expect(runnerContainerNames).toEqual([]);
   });
 
-  it("serializes consent withdrawal behind an admitted shell prewarm", async () => {
+  it("lets a new Worker withdraw the exact prior-version shell while prewarm is pending", async () => {
     let consentState: "granted" | "revoked" = "granted";
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
     const prewarmStarted = createDeferred<void>();
     const releasePrewarm = createDeferred<void>();
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
     const events: string[] = [];
     const prewarmShell = vi.fn(async () => {
       events.push("prewarm");
@@ -178,25 +185,38 @@ describe("HostedUserRunner execution coordination", () => {
     });
     const destroyInstance = vi.fn(async () => {
       events.push("destroy");
+      destroyStarted.resolve(undefined);
+      releasePrewarm.resolve(undefined);
+      await releaseDestroy.promise;
     });
-    const { runner } = createRunnerHarness({
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
       destroyInstance,
       prewarmShell,
       readHealthDataConsentState: () => consentState,
+      runnerRuntimeEnvSource,
     });
 
     const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
     await prewarmStarted.promise;
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
     consentState = "revoked";
     const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
+    await destroyStarted.promise;
     let withdrawalSettled = false;
     void withdrawal.finally(() => {
       withdrawalSettled = true;
     });
     await Promise.resolve();
     expect(withdrawalSettled).toBe(false);
+    expect(runnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
+      priorRunnerContainerName,
+    );
 
-    releasePrewarm.resolve(undefined);
+    releaseDestroy.resolve(undefined);
     await expect(prewarm).resolves.toBeUndefined();
     await expect(withdrawal).resolves.toMatchObject({
       consentState: "revoked",
@@ -204,6 +224,115 @@ describe("HostedUserRunner execution coordination", () => {
       runnerContainerDestroyOk: true,
     });
     expect(events).toEqual(["prewarm", "destroy"]);
+    expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
+  });
+
+  it("lets authoritative readiness overtake a pending shell prewarm", async () => {
+    const prewarmStarted = createDeferred<void>();
+    const releasePrewarm = createDeferred<void>();
+    const readinessStarted = createDeferred<void>();
+    const events: string[] = [];
+    const prewarmShell = vi.fn(async () => {
+      events.push("prewarm");
+      prewarmStarted.resolve(undefined);
+      await releasePrewarm.promise;
+      return { action: "start_issued" as const, kind: "started" as const };
+    });
+    const ensureReadyForProcessing = vi.fn(async () => {
+      events.push("ensure-ready");
+      readinessStarted.resolve(undefined);
+      releasePrewarm.resolve(undefined);
+      return { action: "started" as const, kind: "ready" as const };
+    });
+    const { runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await prewarmStarted.promise;
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-prewarm",
+      userId: TEST_USER_ID,
+    });
+    await readinessStarted.promise;
+
+    await expect(prewarm).resolves.toBeUndefined();
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+    expect(events).toEqual(["prewarm", "ensure-ready"]);
+  });
+
+  it("destroys a prior-version pending prewarm before binding a current fence", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const priorDestroyInstance = vi.fn(async () => undefined);
+    let priorRunnerContainerAccessCount = 0;
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      prewarmShell: vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      })),
+      readHealthDataConsentState: () => "granted",
+      runnerContainerStubForName(name, defaultStub) {
+        if (name !== priorRunnerContainerName) {
+          return defaultStub;
+        }
+        priorRunnerContainerAccessCount += 1;
+        return priorRunnerContainerAccessCount === 1
+          ? defaultStub
+          : { ...defaultStub, destroyInstance: priorDestroyInstance };
+      },
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "current-after-prior-prewarm",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(runnerContainerNames.slice(0, 2)).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(runnerContainerNames).toContain(currentRunnerContainerName);
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
+  });
+
+  it("does not replace a pending prior-version stop target with another hint", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner, sql } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(prewarmShell).toHaveBeenCalledOnce();
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
+      priorRunnerContainerName,
+    );
   });
 
   it("does not recreate a shell after completed consent withdrawal", async () => {
@@ -4820,6 +4949,53 @@ describe("HostedUserRunner execution coordination", () => {
     },
   );
 
+  it("deletes the exact prior-version target reserved by shell prewarm", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const priorDestroyInstance = vi.fn(async () => undefined);
+    const currentDestroyInstance = vi.fn(async () => undefined);
+    let priorRunnerContainerAccessCount = 0;
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      prewarmShell: vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      })),
+      runnerContainerStubForName(name, defaultStub) {
+        if (name === priorRunnerContainerName) {
+          priorRunnerContainerAccessCount += 1;
+          if (priorRunnerContainerAccessCount === 1) {
+            return defaultStub;
+          }
+        }
+        return {
+          ...defaultStub,
+          destroyInstance: name === priorRunnerContainerName
+            ? priorDestroyInstance
+            : currentDestroyInstance,
+        };
+      },
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
+      ok: true,
+      userId: TEST_USER_ID,
+    });
+
+    expect(runnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
+    expect(currentDestroyInstance).not.toHaveBeenCalled();
+  });
+
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});
     const bucket = new ListableMemoryEncryptedR2Bucket();
@@ -6002,6 +6178,19 @@ function createRunnerHarness(input: {
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
     ...(input.prewarmShell
       ? {
+          beginShellPrewarm: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["beginShellPrewarm"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              prewarmInput,
+            ) {
+              expect(this).toBe(stub);
+              const operation = input.prewarmShell?.call(this, prewarmInput);
+              void operation?.catch(() => undefined);
+              return { accepted: true };
+            },
+          ),
           prewarmShell: createDirectOnlyRpcMethod<
             NonNullable<HostedExecutionContainerStubLike["prewarmShell"]>
           >(

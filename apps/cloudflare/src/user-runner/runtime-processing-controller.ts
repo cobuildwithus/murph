@@ -169,21 +169,28 @@ export class RuntimeProcessingController {
     });
   }
 
-  async prewarmShellForUser(userId: string): Promise<void> {
+  async beginShellPrewarmForUser(userId: string): Promise<void> {
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
       throw new Error("Runner container namespace is unavailable.");
     }
-    const container = namespace.getByName(
-      resolveHostedExecutionRunnerContainerName({
-        source: this.input.runnerRuntimeEnvSource,
-        userId,
-      }),
-    );
-    if (!container.prewarmShell) {
+    const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+      source: this.input.runnerRuntimeEnvSource,
+      userId,
+    });
+    const container = namespace.getByName(runnerContainerName);
+    if (!container.beginShellPrewarm) {
       throw new Error("Runner container shell-prewarm RPC is unavailable.");
     }
-    await container.prewarmShell({
+    const reserved =
+      await this.input.stateStore.reserveRunnerContainerStopTargetForShellPrewarm({
+        runnerContainerName,
+        userId,
+      });
+    if (!reserved) {
+      return;
+    }
+    await container.beginShellPrewarm({
       timeoutMs: RUNTIME_SHELL_PREWARM_TIMEOUT_MS,
       userId,
     });
@@ -803,6 +810,34 @@ export class RuntimeProcessingController {
       throw new Error("Hosted runner container identity did not match the runtime start user.");
     }
     const runnerContainerName = runnerContainerIdentity.runnerContainerName;
+    const pendingRunnerContainerName = initialRecord.pendingRunnerContainerName;
+    if (
+      pendingRunnerContainerName
+      && pendingRunnerContainerName !== runnerContainerName
+    ) {
+      const destroyed = await destroyHostedExecutionContainer({
+        runnerContainerName: pendingRunnerContainerName,
+        runnerContainerNamespace: this.input.runnerContainerNamespace,
+        userId: processingInput.userId,
+      });
+      if (!destroyed.ok) {
+        return this.createRetryLater({
+          reason: "container_rpc_error",
+          userId: processingInput.userId,
+        });
+      }
+      const cleared =
+        await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
+          runnerContainerName: pendingRunnerContainerName,
+          userId: processingInput.userId,
+        });
+      if (!cleared) {
+        return this.createRetryLater({
+          reason: "container_busy",
+          userId: processingInput.userId,
+        });
+      }
+    }
     let token: RunnerWriteFenceToken;
     try {
       token = await this.input.stateStore.beginWriteFence({

@@ -208,13 +208,15 @@ export class HostedUserRunner {
   }
 
   async deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult> {
-    return this.withPrivateMediaMutationLock(async () => {
-      this.runnerStoreCache.clearIfUser(userId);
-      return await deleteHostedRunnerUserData({
-        ...this.userDataDeletionInput,
-        userId,
-      });
-    });
+    return this.withRuntimeConsentMutationLock(async () =>
+      await this.withPrivateMediaMutationLock(async () => {
+        this.runnerStoreCache.clearIfUser(userId);
+        return await deleteHostedRunnerUserData({
+          ...this.userDataDeletionInput,
+          userId,
+        });
+      })
+    );
   }
 
   async publishHostedPrivateMedia(
@@ -290,7 +292,7 @@ export class HostedUserRunner {
       if (!admission.processingAllowed) {
         return;
       }
-      await this.runtimeProcessing.prewarmShellForUser(userId);
+      await this.runtimeProcessing.beginShellPrewarmForUser(userId);
     });
   }
 

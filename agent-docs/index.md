@@ -10,7 +10,9 @@ It intentionally lists live architecture, product, verification, and package-bou
 Hosted cold-start ownership keeps established-member startup on the ordinary
 post-Temporal direct ensure so container boot can overlap fenced invocation
 preparation. The separate first-contact shell hint is serialized by the
-per-user health-data consent barrier. This contract is jointly specified by
+per-user health-data consent barrier through exact stop-target reservation and
+container registration, after which foreground readiness and exact-target
+destruction retain priority over the platform wait. This contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 

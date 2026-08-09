@@ -2010,8 +2010,13 @@ fence coalesces runners that overlap in the same invocation. There is no other
 established-member Web-to-Cloudflare prewarm or nudge path. The separate
 first-contact instant-start shell hint resolves the owning `UserRunner`, enters
 the same per-user consent-mutation barrier as authoritative ensures and
-withdrawal, re-reads live Web-owned admission, and holds that barrier through
-the platform start. It creates no fence or workspace authority; the later
+withdrawal, re-reads live Web-owned admission, reserves the exact versioned
+container in the existing user-control stop-target field, and awaits the
+container's registration acknowledgement. The platform wait continues under
+the container's existing lifecycle owner after the barrier releases, so
+authoritative readiness or exact-target destruction can supersede it. A later
+current-version start destroys any different pending target before binding its
+fence. The hint creates no workspace or processing authority; the later
 post-Temporal direct ensure remains authoritative.
 
 Hosted Linq message edits are immutable correction inputs, not mutations of an

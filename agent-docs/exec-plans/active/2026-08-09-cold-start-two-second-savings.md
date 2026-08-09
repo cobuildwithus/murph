@@ -80,6 +80,37 @@ Updated: 2026-08-09
   delivery invariants, and the existing mailbox prefetch already depends on the
   restored canonical cursor.
 
+## Required retrospective
+
+- Final ReviewGPT round 2 proved that the first consent correction repeated the
+  prior shell-after-withdrawal mechanism across a Worker version transition. A
+  versioned shell hint had no persisted stop target, so a later Worker could
+  derive and destroy only its own version while reporting cleanup complete. It
+  also proved that holding the consent barrier through the 20-second shell RPC
+  prevented authoritative readiness from reaching the container's existing
+  prewarm-supersession boundary.
+- Deleting the first-contact hint is rejected because its completed controlled
+  benchmark measured about 693 ms lower provider-start p50 and 662 ms lower
+  delivery p50 with non-overlapping samples. That evidence applies to the
+  longer first-contact enrollment lead; it does not justify an
+  established-member hint.
+- The retained design reuses the existing persisted
+  `active_runner_container_name` user-control stop target. Under the consent
+  barrier it re-reads admission, reserves the exact versioned name, and starts
+  the shell RPC. It waits only for the container to acknowledge that the
+  prewarm operation is registered, then releases the barrier while the platform
+  wait continues, allowing authoritative readiness to enter, bind its fence,
+  and use the existing container-local supersession path.
+- Withdrawal and account deletion consume the reserved exact name. Container
+  destruction supersedes an in-progress shell hint before joining the lifecycle
+  queue. If an authoritative start observes a prior-version pending hint, it
+  destroys and clears that exact target before binding the current-version
+  fence. This adds no new persisted field, state owner, queue, generation,
+  scheduler, or reconciliation loop.
+- Deployment must use immediate container rollout because an older deployed
+  Worker can still have created unrecorded shell hints. The new Worker becomes
+  the rollback floor after it writes the first reserved stop target.
+
 ## Evidence
 
 - Supplied cold trace: accepted-to-provider about 9.3 seconds; container
