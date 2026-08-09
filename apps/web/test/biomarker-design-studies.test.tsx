@@ -123,7 +123,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Group sponsorship and mobile one-time contribution",
+    "Group sponsorship with optional creative response",
   );
   expect(sectionsMarkup).toContain(
     "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",

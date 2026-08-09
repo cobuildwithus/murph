@@ -1,6 +1,9 @@
 import Link from "next/link";
 
 import { MURPH_SUPPORT_EMAIL } from "@/src/components/support/contact-support-action";
+import {
+  getAvailableHostedPublicReferralRewards,
+} from "@/src/lib/hosted-growth/referral-program";
 
 function GitHubIcon() {
   return (
@@ -33,6 +36,7 @@ function XIcon() {
 const footerLinks = {
   murph: [
     { label: "Clubs", href: "/clubs", external: false },
+    { label: "Referrals", href: "/refer", external: false },
     { label: "Changelog", href: "/changelog", external: false },
     {
       label: "Status",
@@ -60,7 +64,17 @@ const footerLinks = {
   ],
 };
 
-export function SiteFooter({ id = "site-footer" }: { id?: string }) {
+export function SiteFooter({
+  id = "site-footer",
+  referralsAvailable = getAvailableHostedPublicReferralRewards().length > 0,
+}: {
+  id?: string;
+  referralsAvailable?: boolean;
+}) {
+  const productLinks = referralsAvailable
+    ? footerLinks.murph
+    : footerLinks.murph.filter(({ href }) => href !== "/refer");
+
   return (
     <footer id={id} className="border-t border-[rgba(196,168,130,0.25)] bg-[#f5f0e8] px-6 sm:px-10 lg:px-16">
       <div className="mx-auto max-w-[1080px]">
@@ -77,7 +91,7 @@ export function SiteFooter({ id = "site-footer" }: { id?: string }) {
                 Murph
               </span>
               <nav className="flex flex-col gap-2" aria-label="Product links">
-                {footerLinks.murph.map((link) => (
+                {productLinks.map((link) => (
                   <a
                     key={link.href}
                     href={link.href}

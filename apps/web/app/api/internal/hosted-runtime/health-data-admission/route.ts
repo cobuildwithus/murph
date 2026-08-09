@@ -6,7 +6,10 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readHostedHealthDataConsentState } from "@/src/lib/legal/consent";
+import {
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  resolveHostedHealthDataConsentState,
+} from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_BODY_LIMIT_BYTES = 0;
@@ -15,14 +18,31 @@ export const GET = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_BODY_LIMIT_BYTES,
   });
-  const consentState = await readHostedHealthDataConsentState({
-    memberId: userId,
-    prisma: getPrisma(),
+  const member = await getPrisma().hostedMember.findUnique({
+    select: {
+      consentGrants: {
+        select: {
+          scope: true,
+          status: true,
+        },
+        where: {
+          scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+        },
+      },
+      suspendedAt: true,
+    },
+    where: {
+      id: userId,
+    },
   });
+  const consentState = resolveHostedHealthDataConsentState(
+    member?.consentGrants,
+  );
 
   return jsonOk(parseHostedRuntimeHealthDataAdmissionResponse({
     consentState,
-    processingAllowed: consentState !== "revoked",
+    processingAllowed:
+      member?.suspendedAt === null && consentState !== "revoked",
     userId,
   }));
 });

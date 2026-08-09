@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
   isReferralEnabled: vi.fn(),
   missionFindMany: vi.fn(),
   policyDisplay: vi.fn(),
-  rewardLabel: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -36,8 +35,10 @@ vi.mock("@/src/lib/hosted-growth/signup-referral-policy", () => ({
 
 vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
   buildHostedUsageReferralOutstandingWhere: mocks.buildOutstandingWhere,
-  buildHostedUsageReferralRewardLabel: mocks.rewardLabel,
   getHostedUsageReferralPolicyDisplay: mocks.policyDisplay,
+}));
+
+vi.mock("@/src/lib/hosted-growth/usage-referral-policy", () => ({
   isHostedUsageReferralEnabled: mocks.isReferralEnabled,
 }));
 
@@ -71,16 +72,6 @@ beforeEach(() => {
           title: "Bring someone new to Murph",
         }
   );
-  mocks.rewardLabel.mockImplementation((input: {
-    destinationKind: "group" | "personal";
-    policyCode: "active_group_v1" | "new_person_activation_v1";
-  }) => {
-    const count = input.policyCode === "active_group_v1" ? 140 : 100;
-    const subject = input.destinationKind === "group"
-      ? "this room"
-      : "your Murph";
-    return `about ${count} more messages for ${subject}`;
-  });
 });
 
 describe("readHostedAiUsageActivity", () => {
@@ -117,6 +108,7 @@ describe("readHostedAiUsageActivity", () => {
         policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: null,
         rewardedAt: null,
+        rewardUsdMicros: 2_000_000n,
         status: "armed",
       },
       {
@@ -128,6 +120,7 @@ describe("readHostedAiUsageActivity", () => {
         policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: null,
         rewardedAt: null,
+        rewardUsdMicros: 3_500_000n,
         status: "target_bound",
       },
       {
@@ -139,6 +132,7 @@ describe("readHostedAiUsageActivity", () => {
         policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: null,
         rewardedAt: null,
+        rewardUsdMicros: 3_500_000n,
         status: "target_bound",
       },
       {
@@ -150,6 +144,7 @@ describe("readHostedAiUsageActivity", () => {
         policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: new Date("2026-07-29T11:00:00.000Z"),
         rewardedAt: null,
+        rewardUsdMicros: 3_500_000n,
         status: "target_bound",
       },
     ]).mockResolvedValueOnce([
@@ -162,6 +157,7 @@ describe("readHostedAiUsageActivity", () => {
         policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: new Date("2026-07-16T11:00:00.000Z"),
         rewardedAt: new Date("2026-07-16T12:00:00.000Z"),
+        rewardUsdMicros: 2_000_000n,
         status: "rewarded",
       },
     ]);
@@ -198,7 +194,10 @@ describe("readHostedAiUsageActivity", () => {
     expect(mocks.missionFindMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        select: expect.objectContaining({ policyVersion: true }),
+        select: expect.objectContaining({
+          policyVersion: true,
+          rewardUsdMicros: true,
+        }),
         take: 50,
         where: {
           OR: outstandingWhere,
@@ -209,7 +208,10 @@ describe("readHostedAiUsageActivity", () => {
     expect(mocks.missionFindMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        select: expect.objectContaining({ policyVersion: true }),
+        select: expect.objectContaining({
+          policyVersion: true,
+          rewardUsdMicros: true,
+        }),
         take: 46,
         where: {
           referrerMemberId: "member_123",
@@ -243,7 +245,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_pending",
-        rewardLabel: "about 140 more messages for this room",
+        rewardLabel: "$3.50",
         selectedLabel: "Jul 28, 2026",
         status: "reward_pending",
         statusLabel: "Reward pending",
@@ -252,7 +254,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_checking_final",
-        rewardLabel: "about 140 more messages for this room",
+        rewardLabel: "$3.50",
         selectedLabel: "Jul 28, 2026",
         status: "checking_final_activity",
         statusLabel: "Checking final activity",
@@ -261,7 +263,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_in_progress",
-        rewardLabel: "about 140 more messages for this room",
+        rewardLabel: "$3.50",
         selectedLabel: "Jul 27, 2026",
         status: "in_progress",
         statusLabel: "In progress",
@@ -270,7 +272,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "your Murph",
         id: "hur_waiting",
-        rewardLabel: "about 100 more messages for your Murph",
+        rewardLabel: "$2.00",
         selectedLabel: "Jul 26, 2026",
         status: "waiting_for_group",
         statusLabel: "Waiting for a new group",
@@ -279,7 +281,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "your Murph",
         id: "hur_completed",
-        rewardLabel: "about 100 more messages for your Murph",
+        rewardLabel: "$2.00",
         selectedLabel: "Jul 10, 2026",
         status: "completed",
         statusLabel: "Completed",
@@ -302,6 +304,7 @@ describe("readHostedAiUsageActivity", () => {
         policyVersion: SIGNUP_POLICY_VERSION,
         qualifiedAt: new Date("2026-08-06T10:00:00.000Z"),
         rewardedAt: new Date("2026-08-06T10:01:00.000Z"),
+        rewardUsdMicros: 2_750_000n,
         status: "rewarded",
       },
     ]);
@@ -319,11 +322,36 @@ describe("readHostedAiUsageActivity", () => {
         id: "hur_signup_link",
         requirementsLabel:
           "A new member completed Murph setup through your referral link.",
-        rewardLabel: "about 100 more messages for your Murph",
+        rewardLabel: "$2.75",
         title: "Invite someone to Murph",
       }),
     ]);
     expect(mocks.policyDisplay).not.toHaveBeenCalled();
+  });
+
+  it("omits cap-disqualified signup activations from Settings history", async () => {
+    const now = new Date("2026-08-06T12:00:00.000Z");
+    mocks.creditFindMany.mockResolvedValue([]);
+    mocks.missionFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    const { readHostedAiUsageActivity } = await import(
+      "@/src/lib/hosted-execution/usage-activity"
+    );
+    const activity = await readHostedAiUsageActivity({
+      memberId: "member_123",
+      now,
+    });
+
+    expect(mocks.missionFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: {
+          referrerMemberId: "member_123",
+          status: "rewarded",
+        },
+      }),
+    );
+    expect(activity.missions).toEqual([]);
   });
 
   it("switches an unqualified bound mission to final checking at its exact cutoff", async () => {
@@ -337,6 +365,7 @@ describe("readHostedAiUsageActivity", () => {
       policyVersion: ORDINARY_POLICY_VERSION,
       qualifiedAt: null,
       rewardedAt: null,
+      rewardUsdMicros: 3_500_000n,
       status: "target_bound",
     });
     mocks.creditFindMany.mockResolvedValue([]);
@@ -393,6 +422,7 @@ describe("readHostedAiUsageActivity", () => {
         policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: null,
         rewardedAt: null,
+        rewardUsdMicros: 3_500_000n,
         status: "target_bound",
       },
     ]).mockResolvedValueOnce([]);
@@ -477,7 +507,7 @@ describe("HostedAiUsageActivity", () => {
             destinationLabel: "the group",
             id: "mission_1",
             requirementsLabel: "Start a fresh group and get people talking.",
-            rewardLabel: "about 140 more messages for this room",
+            rewardLabel: "$3.50",
             selectedLabel: "Jul 27, 2026",
             status: "in_progress",
             statusLabel: "In progress",
@@ -488,7 +518,7 @@ describe("HostedAiUsageActivity", () => {
             destinationLabel: "your Murph",
             id: "mission_completed",
             requirementsLabel: "Invite someone.",
-            rewardLabel: "about 100 more messages for your Murph",
+            rewardLabel: "$2.00",
             selectedLabel: "Jul 10, 2026",
             status: "completed",
             statusLabel: "Completed",
@@ -515,7 +545,7 @@ describe("HostedAiUsageActivity", () => {
     );
     assert.match(markup, /aria-label="Current usage referrals"/);
     assert.match(markup, /Start an active group/);
-    assert.match(markup, /about 140 more messages for this room/);
+    assert.match(markup, /\$3\.50/);
     assert.match(markup, />History</);
     assert.match(markup, /aria-label="Usage activity history"/);
     assert.match(markup, /Invite someone to Murph/);
@@ -546,7 +576,7 @@ describe("HostedAiUsageActivity", () => {
       destinationLabel: "the group",
       id,
       requirementsLabel: `Requirements for ${statusLabel}`,
-      rewardLabel: "about 140 more messages for this room",
+      rewardLabel: "$3.50",
       selectedLabel: "Jul 27, 2026",
       status,
       statusLabel,
@@ -592,7 +622,7 @@ describe("HostedAiUsageActivity", () => {
           destinationLabel: "your Murph",
           id: "mission_completed",
           requirementsLabel: "Complete the selected mission.",
-          rewardLabel: "about 100 more messages for your Murph",
+          rewardLabel: "$2.00",
           selectedLabel: "Jul 10, 2026",
           status: "completed",
           statusLabel: "Completed",

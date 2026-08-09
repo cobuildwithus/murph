@@ -152,6 +152,306 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
+  it("does not address the runner container when shell prewarm observes revoked consent", async () => {
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "revoked",
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
+  });
+
+  it("abandons a slow shell hint admission before authoritative processing begins", async () => {
+    vi.useFakeTimers();
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const authoritativeAdmissionStarted = createDeferred<void>();
+    const releaseAuthoritativeAdmission = createDeferred<"granted">();
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
+          });
+        }
+        expect(timeoutMs).toBe(30_000);
+        authoritativeAdmissionStarted.resolve(undefined);
+        return releaseAuthoritativeAdmission.promise;
+      },
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-slow-hint-admission",
+      userId: TEST_USER_ID,
+    });
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(admissionReads).toBe(1);
+    expect(runnerContainerNames).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(prewarm).resolves.toBeUndefined();
+    await authoritativeAdmissionStarted.promise;
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+
+    releaseAuthoritativeAdmission.resolve("granted");
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+  });
+
+  it("releases consent withdrawal after the bounded shell hint admission budget", async () => {
+    vi.useFakeTimers();
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const withdrawalAdmissionStarted = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => undefined);
+    const prewarmShell = vi.fn();
+    const { runner } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
+          });
+        }
+        expect(timeoutMs).toBe(30_000);
+        withdrawalAdmissionStarted.resolve(undefined);
+        return "revoked";
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(
+      TEST_USER_ID,
+    );
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(admissionReads).toBe(1);
+    expect(destroyInstance).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(prewarm).resolves.toBeUndefined();
+    await withdrawalAdmissionStarted.promise;
+    await expect(withdrawal).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
+  });
+
+  it("lets a new Worker withdraw the exact prior-version shell while prewarm is pending", async () => {
+    let consentState: "granted" | "revoked" = "granted";
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const prewarmStarted = createDeferred<void>();
+    const releasePrewarm = createDeferred<void>();
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const events: string[] = [];
+    const prewarmShell = vi.fn(async () => {
+      events.push("prewarm");
+      prewarmStarted.resolve(undefined);
+      await releasePrewarm.promise;
+      return { action: "start_issued" as const, kind: "started" as const };
+    });
+    const destroyInstance = vi.fn(async () => {
+      events.push("destroy");
+      destroyStarted.resolve(undefined);
+      releasePrewarm.resolve(undefined);
+      await releaseDestroy.promise;
+    });
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: () => consentState,
+      runnerRuntimeEnvSource,
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await prewarmStarted.promise;
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    consentState = "revoked";
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
+    await destroyStarted.promise;
+    let withdrawalSettled = false;
+    void withdrawal.finally(() => {
+      withdrawalSettled = true;
+    });
+    await Promise.resolve();
+    expect(withdrawalSettled).toBe(false);
+    expect(runnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
+      priorRunnerContainerName,
+    );
+
+    releaseDestroy.resolve(undefined);
+    await expect(prewarm).resolves.toBeUndefined();
+    await expect(withdrawal).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+    expect(events).toEqual(["prewarm", "destroy"]);
+    expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
+  });
+
+  it("lets authoritative readiness overtake a pending shell prewarm", async () => {
+    const prewarmStarted = createDeferred<void>();
+    const releasePrewarm = createDeferred<void>();
+    const readinessStarted = createDeferred<void>();
+    const events: string[] = [];
+    const prewarmShell = vi.fn(async () => {
+      events.push("prewarm");
+      prewarmStarted.resolve(undefined);
+      await releasePrewarm.promise;
+      return { action: "start_issued" as const, kind: "started" as const };
+    });
+    const ensureReadyForProcessing = vi.fn(async () => {
+      events.push("ensure-ready");
+      readinessStarted.resolve(undefined);
+      releasePrewarm.resolve(undefined);
+      return { action: "started" as const, kind: "ready" as const };
+    });
+    const { runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await prewarmStarted.promise;
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-prewarm",
+      userId: TEST_USER_ID,
+    });
+    await readinessStarted.promise;
+
+    await expect(prewarm).resolves.toBeUndefined();
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+    expect(events).toEqual(["prewarm", "ensure-ready"]);
+  });
+
+  it("destroys a prior-version pending prewarm before binding a current fence", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const priorDestroyInstance = vi.fn(async () => undefined);
+    let priorRunnerContainerAccessCount = 0;
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      prewarmShell: vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      })),
+      readHealthDataConsentState: () => "granted",
+      runnerContainerStubForName(name, defaultStub) {
+        if (name !== priorRunnerContainerName) {
+          return defaultStub;
+        }
+        priorRunnerContainerAccessCount += 1;
+        return priorRunnerContainerAccessCount === 1
+          ? defaultStub
+          : { ...defaultStub, destroyInstance: priorDestroyInstance };
+      },
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "current-after-prior-prewarm",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(runnerContainerNames.slice(0, 2)).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(runnerContainerNames).toContain(currentRunnerContainerName);
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
+  });
+
+  it("does not replace a pending prior-version stop target with another hint", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner, sql } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(prewarmShell).toHaveBeenCalledOnce();
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
+      priorRunnerContainerName,
+    );
+  });
+
+  it("does not recreate a shell after completed consent withdrawal", async () => {
+    const prewarmShell = vi.fn();
+    const destroyInstance = vi.fn(async () => undefined);
+    const { runner } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: () => "revoked",
+    });
+
+    await expect(
+      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
+    ).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+    });
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(prewarmShell).not.toHaveBeenCalled();
+  });
+
   it("captures existing control-plane boundaries without writing retry analytics for an accepted start", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -4745,6 +5045,88 @@ describe("HostedUserRunner execution coordination", () => {
     },
   );
 
+  it("deletes the exact prior-version target reserved by shell prewarm", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const priorDestroyInstance = vi.fn(async () => undefined);
+    const currentDestroyInstance = vi.fn(async () => undefined);
+    let priorRunnerContainerAccessCount = 0;
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      prewarmShell: vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      })),
+      runnerContainerStubForName(name, defaultStub) {
+        if (name === priorRunnerContainerName) {
+          priorRunnerContainerAccessCount += 1;
+          if (priorRunnerContainerAccessCount === 1) {
+            return defaultStub;
+          }
+        }
+        return {
+          ...defaultStub,
+          destroyInstance: name === priorRunnerContainerName
+            ? priorDestroyInstance
+            : currentDestroyInstance,
+        };
+      },
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
+      ok: true,
+      userId: TEST_USER_ID,
+    });
+
+    expect(runnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
+    expect(currentDestroyInstance).not.toHaveBeenCalled();
+  });
+
+  it("does not recreate runner state when shell prewarm was queued behind account deletion", async () => {
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => {
+      destroyStarted.resolve(undefined);
+      await releaseDestroy.promise;
+    });
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      destroyInstance,
+      healthDataProcessingAllowed: false,
+      prewarmShell,
+      readHealthDataConsentState: () => "missing",
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const deletion = runner.deleteHostedUserData(TEST_USER_ID);
+    await destroyStarted.promise;
+    let prewarmSettled = false;
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID).finally(() => {
+      prewarmSettled = true;
+    });
+    await Promise.resolve();
+    expect(prewarmSettled).toBe(false);
+
+    releaseDestroy.resolve(undefined);
+    await expect(deletion).resolves.toMatchObject({ ok: true });
+    await expect(prewarm).resolves.toBeUndefined();
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toHaveLength(1);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});
     const bucket = new ListableMemoryEncryptedR2Bucket();
@@ -5857,16 +6239,18 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onCryptoContextRead?: () => Promise<void> | void;
-  readHealthDataConsentState?: () =>
+  readHealthDataConsentState?: (input: { timeoutMs: number }) =>
     | "granted"
     | "missing"
     | "revoked"
     | Promise<"granted" | "missing" | "revoked">;
+  healthDataProcessingAllowed?: boolean | (() => boolean);
   onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
   onStatusRead?: () => Promise<void> | void;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   platformAiUsageAllowed?: boolean | (() => boolean);
+  prewarmShell?: HostedExecutionContainerStubLike["prewarmShell"];
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
@@ -5924,6 +6308,37 @@ function createRunnerHarness(input: {
         }
       : {}),
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
+    ...(input.prewarmShell
+      ? {
+          beginShellPrewarm: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["beginShellPrewarm"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              prewarmInput,
+            ) {
+              expect(this).toBe(stub);
+              const operation = input.prewarmShell?.call(this, prewarmInput);
+              void operation?.catch(() => undefined);
+              return { accepted: true };
+            },
+          ),
+          prewarmShell: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["prewarmShell"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              prewarmInput,
+            ) {
+              expect(this).toBe(stub);
+              return await input.prewarmShell?.call(this, prewarmInput) ?? {
+                action: "start_issued",
+                kind: "started",
+              };
+            },
+          ),
+        }
+      : {}),
     ...(input.ensureProcessing
       ? {
           ensureProcessing: createDirectOnlyRpcMethod<
@@ -5995,6 +6410,7 @@ function createRunnerHarness(input: {
   };
 
   installWebControlResponses(input.workspace ?? createWorkspaceState(), {
+    healthDataProcessingAllowed: input.healthDataProcessingAllowed,
     readMailboxLag: () => input.mailboxLag ?? [createMailboxLag()],
     onCryptoContextRead: input.onCryptoContextRead,
     readHealthDataConsentState: input.readHealthDataConsentState,
@@ -6194,8 +6610,9 @@ function createDurableObjectState(input: {
 function installWebControlResponses(
   workspace: HostedWorkspaceState | null,
   hooks: {
+    healthDataProcessingAllowed?: boolean | (() => boolean);
     onCryptoContextRead?: () => Promise<void> | void;
-    readHealthDataConsentState?: () =>
+    readHealthDataConsentState?: (input: { timeoutMs: number }) =>
       | "granted"
       | "missing"
       | "revoked"
@@ -6232,10 +6649,16 @@ function installWebControlResponses(
       }
 
       if (input.path === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
-        const consentState = await hooks.readHealthDataConsentState?.() ?? "granted";
+        const consentState = await hooks.readHealthDataConsentState?.({
+          timeoutMs: input.timeoutMs,
+        }) ?? "granted";
+        const processingAllowed =
+          typeof hooks.healthDataProcessingAllowed === "function"
+            ? hooks.healthDataProcessingAllowed()
+            : hooks.healthDataProcessingAllowed ?? consentState !== "revoked";
         return jsonResponse({
           consentState,
-          processingAllowed: consentState !== "revoked",
+          processingAllowed,
           userId: input.boundUserId,
         });
       }

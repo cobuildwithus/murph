@@ -50,8 +50,10 @@ vi.mock("@/src/lib/hosted-execution/usage-status", async (importOriginal) => {
 
 import {
   handleHostedUsageReferralGroupTool,
-  isHostedUsageReferralEnabled,
 } from "@/src/lib/hosted-growth/usage-referral";
+import {
+  isHostedUsageReferralEnabled,
+} from "@/src/lib/hosted-growth/usage-referral-policy";
 
 type ReferralState = {
   armedAt: Date;
@@ -184,13 +186,15 @@ describe("hosted usage referral tool", () => {
               code: "new_person_activation_v1",
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
-              rewardLabel: "about 100 more messages for your Murph",
+              rewardLabel:
+                "$2.00 of cost-weighted usage credit for your Murph",
             },
             {
               code: "active_group_v1",
               requirementsLabel:
                 "Start a fresh group and make it genuinely active, with multiple people actually talking.",
-              rewardLabel: "about 140 more messages for your Murph",
+              rewardLabel:
+                "$3.50 of cost-weighted usage credit for your Murph",
             },
           ],
         },
@@ -199,7 +203,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("frames personal referral rewards as approximate messages", async () => {
+  it("frames personal referral rewards as cost-weighted credit", async () => {
     const { prisma } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
@@ -218,11 +222,13 @@ describe("hosted usage referral tool", () => {
               code: "new_person_activation_v1",
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
-              rewardLabel: "about 100 more messages for your Murph",
+              rewardLabel:
+                "$2.00 of cost-weighted usage credit for your Murph",
             },
             {
               code: "active_group_v1",
-              rewardLabel: "about 140 more messages for your Murph",
+              rewardLabel:
+                "$3.50 of cost-weighted usage credit for your Murph",
             },
           ],
         },
@@ -230,7 +236,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("frames group referral rewards as approximate messages", async () => {
+  it("frames group referral rewards as cost-weighted credit", async () => {
     const { prisma } = buildPrisma({
       containerMemberId: "member_group",
     });
@@ -249,7 +255,8 @@ describe("hosted usage referral tool", () => {
         referral: {
           availablePolicies: [{
             code: "active_group_v1",
-            rewardLabel: "about 140 more messages for this room",
+            rewardLabel:
+              "$3.50 of cost-weighted usage credit for this room",
           }],
         },
         status: "ok",
@@ -261,6 +268,48 @@ describe("hosted usage referral tool", () => {
     );
     expect(mocks.readHostedGroupFundingRecoveryStatus).not.toHaveBeenCalled();
     expect(mocks.readHostedGroupUsageStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps an active mission bound to its persisted reward", async () => {
+    const { prisma, referrals } = buildPrisma();
+    referrals.push({
+      armedAt: new Date("2026-07-29T12:00:00.000Z"),
+      beneficiaryMemberId: "member_personal",
+      expiresAt: new Date("2030-08-05T12:00:00.000Z"),
+      id: "hur_frozen_reward",
+      policyCode: "active_group_v1",
+      referrerMemberId: "member_personal",
+      rewardUsdMicros: 2_750_000n,
+      sourceConversationJson: PERSONAL_SOURCE,
+      status: "armed",
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "read",
+        referral: {
+          activeMissions: [{
+            policyCode: "active_group_v1",
+            rewardLabel:
+              "$2.75 of cost-weighted usage credit for your Murph",
+          }],
+          availablePolicies: [{
+            code: "new_person_activation_v1",
+            rewardLabel:
+              "$2.00 of cost-weighted usage credit for your Murph",
+          }],
+        },
+        status: "ok",
+      },
+    });
   });
 
   it("offers only the provider-neutral mission from Telegram", async () => {
@@ -1022,11 +1071,34 @@ function buildPrisma(input: {
         ?? null
     )),
     findMany: vi.fn(async (
-      input?: { where?: Parameters<typeof matchesReferral>[1] },
+      input?: {
+        select?: {
+          expiresAt?: boolean;
+          policyCode?: boolean;
+          rewardUsdMicros?: boolean;
+          status?: boolean;
+        };
+        where?: Parameters<typeof matchesReferral>[1];
+      },
     ) => runQuery(() =>
-      referrals.filter((referral) =>
-        matchesReferral(referral, input?.where)
-      )
+      referrals
+        .filter((referral) => matchesReferral(referral, input?.where))
+        .map((referral) =>
+          input?.select
+            ? {
+                ...(input.select.expiresAt
+                  ? { expiresAt: referral.expiresAt }
+                  : {}),
+                ...(input.select.policyCode
+                  ? { policyCode: referral.policyCode }
+                  : {}),
+                ...(input.select.rewardUsdMicros
+                  ? { rewardUsdMicros: referral.rewardUsdMicros }
+                  : {}),
+                ...(input.select.status ? { status: referral.status } : {}),
+              }
+            : referral
+        )
     )),
     update: vi.fn(async (input: {
       data: Partial<ReferralState> & { sourceConversationJson?: unknown };
