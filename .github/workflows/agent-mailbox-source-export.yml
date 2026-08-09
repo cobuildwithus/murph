@@ -1,0 +1,31 @@
+name: Agent mailbox source export
+
+on:
+  push:
+    branches:
+      - agent/mailbox-prepared-append-source
+    paths:
+      - .github/workflows/agent-mailbox-source-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Archive tracked source worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz --output=murph-source.tar.gz HEAD
+      - name: Upload source worktree
+        uses: actions/upload-artifact@v4
+        with:
+          name: murph-mailbox-base
+          path: murph-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
