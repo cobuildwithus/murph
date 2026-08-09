@@ -1,6 +1,6 @@
 # sponsorship-creative-explicit-consent
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -113,5 +113,11 @@ Updated: 2026-08-09
   settlement, and conflicting reference-naming prompt rules. Both are corrected;
   277 focused Web tests, the focused assistant prompt test, changed-Web ESLint,
   Web typecheck, assistant-engine typecheck, and `git diff --check` pass.
-- Remaining gates: final ReviewGPT, exact-head GitHub Actions, parent final
-  review, and clean merge proof.
+- Final ReviewGPT round 2 audited the fresh full snapshot at `ecbdbb47b8` and
+  returned `ROUND_OUTCOME: PASS` with no qualifying findings.
+- Exact-head GitHub Actions at `ecbdbb47b8` are green, including release app
+  verification, build/typecheck, assistant/CLI/platform coverage, billing,
+  design proof, viewport, fixture, artifact, and host-matrix checks. The PR is
+  mergeable and remains draft as requested.
+- Remaining gate after archival: exact-head CI for the plan-archive-only commit.
+Completed: 2026-08-09
