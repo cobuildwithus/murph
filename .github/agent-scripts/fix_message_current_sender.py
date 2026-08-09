@@ -25,15 +25,46 @@ def append_once(path: str, marker: str, addition: str) -> None:
         raise RuntimeError(f"{path}: marker missing: {marker!r}")
     write(path, text.replace(marker, marker + addition, 1))
 """
-new_funcs = """def replace_once(path: str, old: str, new: str) -> None:
+new_funcs = """def indent_nonblank_lines(value: str, width: int) -> str:
+    prefix = ' ' * width
+    return ''.join(
+        prefix + line if line.strip() else line
+        for line in value.splitlines(keepends=True)
+    )
+
+
+def resolve_indented_pair(
+    text: str,
+    old: str,
+    new: str,
+) -> tuple[str, str] | None:
+    exact_count = text.count(old)
+    if exact_count == 1:
+        return old, new
+    if exact_count > 1:
+        return None
+
+    matches: list[tuple[str, str]] = []
+    for width in range(1, 41):
+        candidate_old = indent_nonblank_lines(old, width)
+        count = text.count(candidate_old)
+        if count == 1:
+            matches.append((candidate_old, indent_nonblank_lines(new, width)))
+        elif count > 1:
+            return None
+    return matches[0] if len(matches) == 1 else None
+
+
+def replace_once(path: str, old: str, new: str) -> None:
     text = read(path)
-    count = text.count(old)
-    if count != 1:
+    pair = resolve_indented_pair(text, old, new)
+    if pair is None:
         FAILURES.append(
-            f"{path}: expected one occurrence, found {count}: {old[:160]!r}",
+            f"{path}: expected one exact or uniformly indented occurrence: {old[:160]!r}",
         )
         return
-    write(path, text.replace(old, new, 1))
+    resolved_old, resolved_new = pair
+    write(path, text.replace(resolved_old, resolved_new, 1))
 
 
 def append_once(path: str, marker: str, addition: str) -> None:
@@ -41,10 +72,12 @@ def append_once(path: str, marker: str, addition: str) -> None:
     if addition.strip() in text:
         FAILURES.append(f"{path}: addition already present")
         return
-    if marker not in text:
-        FAILURES.append(f"{path}: marker missing: {marker!r}")
+    pair = resolve_indented_pair(text, marker, marker + addition)
+    if pair is None:
+        FAILURES.append(f"{path}: marker missing or ambiguous: {marker!r}")
         return
-    write(path, text.replace(marker, marker + addition, 1))
+    resolved_marker, resolved_replacement = pair
+    write(path, text.replace(resolved_marker, resolved_replacement, 1))
 """
 if old_funcs not in s:
     raise SystemExit('function block not found')
