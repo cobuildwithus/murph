@@ -7,6 +7,7 @@ import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 const FUNCTION_DOCUMENTS_URL = 'https://my.functionhealth.com/documents'
+const LIVONGO_SIGN_IN_URL = 'https://my.livongo.com'
 const TELADOC_EXPORT_URL =
   'https://library.teladochealth.com/hc/en-us/articles/360044659034-How-to-Export-Your-Personal-Data-from-the-Secure-Livongo-Website'
 const STRONG_EXPORT_URL =
@@ -86,6 +87,7 @@ describe('assistant manual provider export guidance', () => {
     const normalizedReference = reference.replace(/\s+/gu, ' ')
 
     expect(reference).toContain(FUNCTION_DOCUMENTS_URL)
+    expect(reference).toContain(LIVONGO_SIGN_IN_URL)
     expect(reference).toContain(TELADOC_EXPORT_URL)
     expect(reference).toContain(STRONG_EXPORT_URL)
     expect(reference).toContain(HEVY_EXPORT_URL)
@@ -99,10 +101,16 @@ describe('assistant manual provider export guidance', () => {
     )
     expect(reference).toContain('`Reports and Data`')
     expect(normalizedReference).toContain(
+      'For the normal legacy handoff, use the Livongo sign-in page as the user-facing action link',
+    )
+    expect(normalizedReference).toContain(
       "download contains all of the member's data but does not state the file format",
     )
     expect(normalizedReference).toContain(
       'does not document an equivalent export menu',
+    )
+    expect(normalizedReference).toContain(
+      'Give the official export article below as the fallback action link',
     )
     expect(normalizedReference).toContain(
       'one-time snapshot, not continuous Teladoc sync',

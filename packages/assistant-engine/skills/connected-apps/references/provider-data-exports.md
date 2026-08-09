@@ -78,6 +78,12 @@ The official legacy export instructions are:
 4. Choose the relevant report and click `Export`.
 5. Send the downloaded original file to Murph without changing it.
 
+For the normal legacy handoff, use the Livongo sign-in page as the user-facing
+action link and put it alone on the final line. Do not make the member open the
+help article first when the documented account flow is available.
+
+https://my.livongo.com
+
 Teladoc's article says the download contains all of the member's data but does
 not state the file format, schema, timestamp semantics, or how migrated accounts
 are represented. Never call it a CSV or promise reading-level fields before
@@ -87,9 +93,9 @@ Some members now see existing Livongo information in the Teladoc Health app or
 website under `Programs` → `Condition Management`. Teladoc's public migration
 FAQ documents that viewing path but does not document an equivalent export menu
 for the newer experience. If the legacy `Reports and Data` path is unavailable,
-do not invent another menu. Give the official export article and tell the
-member to use any first-party export their account shows or contact Teladoc
-support.
+do not invent another menu. Give the official export article below as the
+fallback action link and tell the member to use any first-party export their
+account shows or contact Teladoc support.
 
 This is a one-time snapshot, not continuous Teladoc sync. The member must export
 again to refresh later readings. When the file arrives, inspect its real format
