@@ -64,6 +64,9 @@ Updated: 2026-08-09
 5. Risk: ReviewGPT expands the mechanism back into the old architecture.
    Mitigation: accept only findings with a concrete current invariant break and
    prefer refusal or harmless residue over locks, replay, or new state owners.
+6. Risk: private cleanup receipts cross the strict hosted provider boundary.
+   Mitigation: project vault-file media onto transport fields only; the original
+   outbox intent remains the sole cleanup-authority owner.
 
 ## Tasks
 
@@ -80,6 +83,8 @@ Updated: 2026-08-09
   rather than inferred later by parsing archive bytes.
 - The cleanup receipt lives on the existing vault-file media record, so approval
   and retry naturally preserve it without another persisted owner.
+- Hosted side effects deliberately omit the receipt. Provider delivery needs
+  transport fields only and re-reads the original intent for local cleanup.
 - Restart recovery is intentionally absent. A crash can leave regenerable
   derived residue; it cannot lose the delivered attachment or canonical data.
 - Manifest identity is the proportional stale-generation guard. This change
