@@ -83,7 +83,7 @@ describe('assistant vault-file send', () => {
       bindingDelivery: { kind: 'thread', target: 'chat_123' },
       channel: 'linq',
       ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/vault.zip`,
-      retireExportPackIds: ['pack-one'],
+      retireExportPackIds: ['pack-one', 'missing-pack'],
       sessionId: 'session_export_pack',
       threadId: 'chat_123',
       threadIsDirect: true,

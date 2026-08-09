@@ -15,8 +15,9 @@ Updated: 2026-08-09
 
 - `send_vault_file` can attach a bounded list of included export-pack ids only
   to an assistant-generated ZIP.
-- The host replaces those ids with manifest receipts before persisting the
-  delivery, so later cleanup refuses a pack whose generation changed.
+- The host replaces available matching ids with manifest receipts before
+  persisting the delivery, skips invalid cleanup claims without blocking the
+  attachment, and later refuses a pack whose generation changed.
 - A successful outbox transition attempts the existing export-pack removal
   operation; failed, denied, expired, or unsent deliveries leave packs intact.
 - Cleanup failure never changes a persisted successful delivery, triggers a
@@ -57,7 +58,10 @@ Updated: 2026-08-09
 3. Risk: optional deletion fails after provider success.
    Mitigation: persist `sent` first, contain cleanup failure, and deliberately
    accept leftover derived files instead of retry/recovery machinery.
-4. Risk: ReviewGPT expands the mechanism back into the old architecture.
+4. Risk: an unavailable or mismatched optional claim blocks the primary send.
+   Mitigation: omit that claim from persisted receipts and continue approval;
+   malformed tool input remains a hard boundary error.
+5. Risk: ReviewGPT expands the mechanism back into the old architecture.
    Mitigation: accept only findings with a concrete current invariant break and
    prefer refusal or harmless residue over locks, replay, or new state owners.
 

@@ -134,13 +134,13 @@ export async function requestAssistantVaultFileSend(input: {
     vaultRoot: input.vault,
   })
   const retireExportPacks = retireExportPackIds
-    ? await Promise.all(
+    ? (await Promise.allSettled(
         retireExportPackIds.map((packId) =>
           readMaterializedExportPackReceipt(input.vault, packId)
         ),
-      )
-    : null
-  const file: AssistantVaultFileResponseMedia = retireExportPacks
+      )).flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
+    : []
+  const file: AssistantVaultFileResponseMedia = retireExportPacks.length > 0
     ? { ...resolvedFile, retireExportPacks }
     : resolvedFile
   const approval = await input.actionApprovalPort.request(

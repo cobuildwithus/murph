@@ -17,7 +17,7 @@ afterEach(async () => {
   ))
 })
 
-it('retires only the export-pack generation named by its manifest receipt', async () => {
+it('retires only an unchanged export pack with a matching manifest id', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-export-pack-receipt-'))
   tempRoots.push(vaultRoot)
   const packDirectory = path.join(vaultRoot, 'exports/packs/pack-one')
@@ -49,4 +49,11 @@ it('retires only the export-pack generation named by its manifest receipt', asyn
     retireMaterializedExportPack(vaultRoot, currentReceipt),
   ).resolves.toBe(true)
   await expect(readFile(manifestPath)).rejects.toMatchObject({ code: 'ENOENT' })
+
+  await mkdir(packDirectory, { recursive: true })
+  await writeFile(manifestPath, JSON.stringify({ packId: 'pack-two' }))
+  await expect(
+    readMaterializedExportPackReceipt(vaultRoot, 'pack-one'),
+  ).rejects.toMatchObject({ code: 'manifest_invalid' })
+  await expect(readFile(manifestPath, 'utf8')).resolves.toContain('pack-two')
 })

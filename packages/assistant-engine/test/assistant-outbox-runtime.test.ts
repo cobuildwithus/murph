@@ -157,41 +157,49 @@ describe('assistant outbox runtime', () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-export-pack-retirement-',
     )
-    const sentManifestPath = path.join(
-      vaultRoot,
-      'exports/packs/sent-pack/manifest.json',
+    const manifestPath = (packId: string) =>
+      path.join(vaultRoot, `exports/packs/${packId}/manifest.json`)
+    const sentManifestPath = manifestPath('sent-pack')
+    const failedManifestPath = manifestPath('failed-pack')
+    const changedManifestPath = manifestPath('changed-pack')
+    const missingManifestPath = manifestPath('missing-pack')
+    await Promise.all(
+      ['sent-pack', 'failed-pack', 'changed-pack', 'missing-pack'].map(
+        async (packId) => {
+          const target = manifestPath(packId)
+          await mkdir(path.dirname(target), { recursive: true })
+          await writeFile(target, JSON.stringify({ packId }))
+        },
+      ),
     )
-    const failedManifestPath = path.join(
-      vaultRoot,
-      'exports/packs/failed-pack/manifest.json',
-    )
-    await mkdir(path.dirname(sentManifestPath), { recursive: true })
-    await mkdir(path.dirname(failedManifestPath), { recursive: true })
-    await writeFile(sentManifestPath, JSON.stringify({ packId: 'sent-pack' }))
-    await writeFile(failedManifestPath, JSON.stringify({ packId: 'failed-pack' }))
 
-    const sentReceipt = await readMaterializedExportPackReceipt(
-      vaultRoot,
-      'sent-pack',
+    const [sentReceipt, failedReceipt, changedReceipt, missingReceipt] =
+      await Promise.all([
+        readMaterializedExportPackReceipt(vaultRoot, 'sent-pack'),
+        readMaterializedExportPackReceipt(vaultRoot, 'failed-pack'),
+        readMaterializedExportPackReceipt(vaultRoot, 'changed-pack'),
+        readMaterializedExportPackReceipt(vaultRoot, 'missing-pack'),
+      ])
+    await writeFile(
+      changedManifestPath,
+      JSON.stringify({ generation: 2, packId: 'changed-pack' }),
     )
-    const failedReceipt = await readMaterializedExportPackReceipt(
-      vaultRoot,
-      'failed-pack',
-    )
-    const media = (receipt: typeof sentReceipt) => [{
+    await rm(path.dirname(missingManifestPath), { force: true, recursive: true })
+
+    const media = (...receipts: (typeof sentReceipt)[]) => [{
       approvalGeneration: null,
       approvalId: null,
       contentType: 'application/zip',
       filename: 'vault.zip',
       kind: 'vault_file' as const,
       ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/vault.zip`,
-      retireExportPacks: [receipt],
+      retireExportPacks: receipts,
       sha256: 'a'.repeat(64),
       sizeBytes: 42,
     }]
     const sentIntent = await createIntent(vaultRoot, {
       channel: 'linq',
-      media: media(sentReceipt),
+      media: media(sentReceipt, changedReceipt, missingReceipt),
       message: 'vault.zip',
     })
     mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
@@ -208,9 +216,15 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     expect(sent.intent.status).toBe('sent')
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, sentIntent.intentId),
+    ).resolves.toMatchObject({ status: 'sent' })
     await expect(readFile(sentManifestPath)).rejects.toMatchObject({
       code: 'ENOENT',
     })
+    await expect(readFile(changedManifestPath, 'utf8')).resolves.toContain(
+      '"generation":2',
+    )
 
     const failedIntent = await createIntent(vaultRoot, {
       channel: 'linq',
