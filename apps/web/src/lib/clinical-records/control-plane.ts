@@ -2,8 +2,11 @@ import "server-only";
 
 import { createHash, randomBytes } from "node:crypto";
 
+import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import type { Prisma } from "@prisma/client";
 
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
+import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
 import {
   requireActiveHostedAppSessionFromRequest,
@@ -191,7 +194,7 @@ export async function finishClinicalRecordAuthorization(input: {
       message: "The provider did not grant enough Clinical Records permissions.",
     });
   }
-  return persistClinicalConnection({
+  const persisted = await runWithHostedDomainRootUnwrapCache(() => persistClinicalConnection({
     connectIntentClaimHash: session.connectIntentClaimHash,
     fhirBaseHash: session.fhirBaseHash,
     memberId: auth.member.id,
@@ -202,7 +205,12 @@ export async function finishClinicalRecordAuthorization(input: {
     resourceTypes,
     tokenEndpoint: session.tokenEndpoint,
     token,
-  });
+  }));
+  await signalClinicalRetrievalWake(persisted.wake);
+  return {
+    connectionId: persisted.connectionId,
+    retrievalRunId: persisted.retrievalRunId,
+  };
 }
 
 async function consumeClinicalOauthSession(input: {
@@ -262,12 +270,16 @@ async function persistClinicalConnection(input: {
   resourceTypes: readonly string[];
   tokenEndpoint: string;
   token: Awaited<ReturnType<typeof exchangeSmartAuthorizationCode>>;
-}): Promise<{ connectionId: string; retrievalRunId: string }> {
+}): Promise<{
+  connectionId: string;
+  retrievalRunId: string;
+  wake: Awaited<ReturnType<typeof appendClinicalRetrievalWakeTx>>;
+}> {
   const prisma = getPrisma();
   await assertClinicalRecordConnectionAvailable({
     memberId: input.memberId,
     providerDirectoryEntryId: input.provider.id,
-  }, prisma);
+  });
 
   const connectionId = generateOpaqueId(CLINICAL_CONNECTION_ID_PREFIX);
   const retrievalRunId = generateOpaqueId(CLINICAL_RETRIEVAL_RUN_ID_PREFIX);
@@ -336,6 +348,18 @@ async function persistClinicalConnection(input: {
     resourceTypesJson: toClinicalJsonArray(input.resourceTypes),
     status: "queued",
   } satisfies Prisma.ClinicalRecordRetrievalRunUncheckedCreateInput;
+
+  // The wake payload is sealed with commit-time laneSeq AAD, so it must stay
+  // inside the transaction. Warm the exact mailbox-payload root beforehand;
+  // the scoped cache makes the later seal local work while locks are held.
+  const mailboxRoot = await unwrapHostedDomainRootForWeb({
+    domain: getHostedCryptoDomainForLane("mailbox-payload"),
+    prisma,
+    retainFailureInScopedCache: true,
+    userId: input.memberId,
+  });
+  mailboxRoot.rootKey.fill(0);
+
   let persisted: {
     connectionId: string;
     retrievalRunId: string;
@@ -344,25 +368,17 @@ async function persistClinicalConnection(input: {
   try {
     persisted = await prisma.$transaction(async (tx) => {
       await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: tx });
-      assertCurrentClinicalProviderConfiguration({
-        fhirBaseHash: input.fhirBaseHash,
-        provider: input.provider,
-      });
-      await assertClinicalRecordConnectionAvailable({
-        memberId: input.memberId,
-        providerDirectoryEntryId: input.provider.id,
-      }, tx);
-      await completeClinicalRecordConnectIntent({
-        claimHash: input.connectIntentClaimHash,
-        memberId: input.memberId,
-        now: input.now,
-      }, tx);
       await tx.clinicalRecordConnection.create({
         data: connectionData,
       });
       await tx.clinicalRecordRetrievalRun.create({
         data: retrievalRunData,
       });
+      await completeClinicalRecordConnectIntent({
+        claimHash: input.connectIntentClaimHash,
+        memberId: input.memberId,
+        now: input.now,
+      }, tx);
       const wake = await appendClinicalRetrievalWakeTx({
         generation: retrievalGeneration,
         memberId: input.memberId,
@@ -376,11 +392,7 @@ async function persistClinicalConnection(input: {
     if (isUniqueConstraintError(error)) throw connectionAlreadyExistsError();
     throw error;
   }
-  await signalClinicalRetrievalWake(persisted.wake);
-  return {
-    connectionId: persisted.connectionId,
-    retrievalRunId: persisted.retrievalRunId,
-  };
+  return persisted;
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -392,43 +404,17 @@ function isUniqueConstraintError(error: unknown): boolean {
   );
 }
 
-async function assertClinicalRecordConnectionAvailable(
-  input: {
-    memberId: string;
-    providerDirectoryEntryId: string;
-  },
-  prisma: Pick<Prisma.TransactionClient, "clinicalRecordConnection"> = getPrisma(),
-): Promise<void> {
-  const existing = await prisma.clinicalRecordConnection.findUnique({
+async function assertClinicalRecordConnectionAvailable(input: {
+  memberId: string;
+  providerDirectoryEntryId: string;
+}): Promise<void> {
+  const existing = await getPrisma().clinicalRecordConnection.findUnique({
     select: { id: true },
     where: {
       memberId_providerDirectoryEntryId: input,
     },
   });
   if (existing) throw connectionAlreadyExistsError();
-}
-
-function assertCurrentClinicalProviderConfiguration(input: {
-  fhirBaseHash: string;
-  provider: ClinicalProviderDirectoryEntry;
-}): void {
-  const currentProvider = resolveClinicalProviderDirectoryEntry(input.provider.id);
-  if (
-    !currentProvider
-    || currentProvider.id !== input.provider.id
-    || currentProvider.clientIdEnvironmentKey !== input.provider.clientIdEnvironmentKey
-    || currentProvider.policyId !== input.provider.policyId
-    || currentProvider.sourceSystem !== input.provider.sourceSystem
-    || !sameStringArray(currentProvider.requestedBaseScopes, input.provider.requestedBaseScopes)
-    || !sameStringArray(currentProvider.resourceTypes, input.provider.resourceTypes)
-    || hashClinicalFhirBaseUrl(currentProvider.fhirBaseUrl) !== input.fhirBaseHash
-  ) {
-    throw providerConfigurationChangedError();
-  }
-}
-
-function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function requireProviderEntry(entryId: string): ClinicalProviderDirectoryEntry {
