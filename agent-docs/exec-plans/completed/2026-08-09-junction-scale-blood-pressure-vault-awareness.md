@@ -1,6 +1,6 @@
 # Junction scale and blood-pressure vault awareness
 
-Status: implementation complete; final exact-head CI pending on the reconciled pull-request head
+Status: implementation complete; final exact-head CI and required review gates pending
 Date: 2026-08-09
 
 ## Outcome
@@ -18,6 +18,7 @@ The hosted Junction connect catalog includes device/app routes relevant to scale
 - `body` is a default Junction summary resource.
 - `blood_pressure` is a default sparse timeseries resource.
 - Standalone `weight` timeseries is intentionally not enabled by default. A live weight notification triggers the existing reconcile floor, which fetches the authoritative `body` summary instead of averaging repeated scale samples or creating duplicate daily readings.
+- The audit found one historical-coverage asymmetry outside this prompt-awareness change: body summaries use the full connection-history window while the generic timeseries backfill was capped to 14 days. Draft PR #1523 fixes that separately by reusing the existing resumable resource job for sparse blood-pressure history while retaining the dense-timeseries bound.
 
 ### Canonical vault storage
 
@@ -82,5 +83,9 @@ pnpm --filter @murphai/assistant-engine typecheck
 Verification history:
 
 - The first PR-head package-coverage run identified one owned stale assertion that still expected context-snapshot schema version 5; it was updated to version 6.
-- The branch was reconciled with `main` at `e1b4c0ed15ff1a05c915df0747b756d1cff8370b` before the final exact-head run.
-- Final exact-head CI and any required review-gate evidence remain pending and must be recorded in the pull request before merge.
+- Exact-head package, CLI, fixture, build, typecheck, architecture, hygiene, and billing checks passed on commit `1946288349105f1d6c5e391113bd15f5e39b9fb1`.
+- That run's viewport failure was unrelated: the named overflow script also executed a manual design-proof capture spec requiring `DESIGN_PROOF_OUTPUT_DIR`. Draft PR #1521 scopes the script to its intended viewport spec and its exact viewport workflow passes.
+- That run's app-verification failure was also unrelated: current-main hosted-web expectations failed in `biomarker-design-studies.test.tsx` and `join-invite-page-view.test.ts`; this change touches no web source or test.
+- The branch was reconciled without conflicts with `main` at `4d910baed613be48ecf329b0625676a760109b05` before the final exact-head run.
+- Draft PR #1523 contains the separately verified sparse blood-pressure historical-backfill correction found by this audit.
+- Final exact-head CI and the required preliminary/final ReviewGPT gates remain pending and must be recorded in the pull request before merge.
