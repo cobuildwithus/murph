@@ -71,18 +71,24 @@ export function isHostedLinqDeliverableFirstContact(input: {
   return isHostedLinqIMessageService(input.event.data.service);
 }
 
-export function hostedLinqFirstContactContainsBlockedContent(input: {
+export type HostedLinqFirstContactContentDisposition =
+  | "allow"
+  | "blocked"
+  | "contentless";
+
+export function resolveHostedLinqFirstContactContentDisposition(input: {
   event: HostedLinqMessageReceivedEvent;
   participantContact: HostedLinqParticipantContact;
-}): boolean {
+}): HostedLinqFirstContactContentDisposition {
   const blocksStandaloneSmsOptOutCommand = shouldBlockStandaloneSmsOptOutCommand({
     participantContact: input.participantContact,
     service: input.event.data.service,
   });
+  let hasContent = false;
 
-  return input.event.data.message.parts.some((part) => {
+  for (const part of input.event.data.message.parts) {
     if (part.type === "link") {
-      return true;
+      return "blocked";
     }
 
     if (part.type === "text" || part.type === "imessage_app") {
@@ -90,19 +96,31 @@ export function hostedLinqFirstContactContainsBlockedContent(input: {
         ? part.fallback_text?.trim()
         : part.value;
       if (!value) {
-        return false;
+        // Preserve legacy blank-text handling while making the new app-card
+        // fallback the only content authority for unknown senders.
+        hasContent ||= part.type === "text";
+        continue;
       }
 
-      return containsUrlLikeText(value)
+      hasContent = true;
+      if (
+        containsUrlLikeText(value)
         || containsSmsOptOutBoilerplate(value)
         || (
           blocksStandaloneSmsOptOutCommand
           && containsStandaloneSmsOptOutCommand(value)
-        );
+        )
+      ) {
+        return "blocked";
+      }
+      continue;
     }
 
-    return false;
-  });
+    // Media and voice memo first contacts retain their existing behavior.
+    hasContent = true;
+  }
+
+  return hasContent ? "allow" : "contentless";
 }
 
 export function isHostedLinqIMessageService(

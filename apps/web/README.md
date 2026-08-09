@@ -265,9 +265,11 @@ kinds, webhook-version category, outcome, and an event-id suffix. Non-array
 redacted warning. Inbound `imessage_app` parts contribute only their documented
 fallback text (or a fixed placeholder); app identity, layout, and URL metadata
 do not enter the durable mailbox payload or logs. First-contact admission and
-blocked-content screening use that same fallback text before any signup or
-group routing; an app card without fallback text remains contentless for
-admission rather than receiving the active-member placeholder.
+blocked-content screening use one shared disposition for that same fallback
+text before any signup or group routing, independent of admission mode. An app
+card without fallback text remains contentless there rather than receiving the
+active-member placeholder. This rule is app-card-specific; legacy media-only
+first contacts retain their existing behavior.
 
 ## Legal and health-permission publication surfaces
 

@@ -22,7 +22,9 @@ Updated: 2026-08-09
   assistant processing while omitting card URLs and provider-owned app/layout
   metadata from canonical payloads and logs.
 - Unknown-sender direct and group admission screens the same fallback text with
-  the existing first-contact rules; a card without fallback stays contentless.
+  one mode-independent first-contact disposition before side effects; a card
+  without fallback stays contentless while legacy media-only behavior remains
+  unchanged.
 - Existing text, link, media, voice memo, retry, dedupe, and webhook signature
   behavior remains unchanged.
 - The two existing Linq SDK consumers use the current public-registry release
@@ -75,6 +77,11 @@ Updated: 2026-08-09
 - Use one fallback-text interpretation across active-member mailbox delivery
   and unknown-sender admission. Keep the fixed contentless placeholder confined
   to accepted active-member canonicalization.
+- Round 2 exposed that the first correction still depended on optional
+  admission. The recorded retrospective chose a shared allow/blocked/contentless
+  disposition in the existing first-contact owner, evaluated after identity but
+  before direct signup or unbound-group setup. This replaces the prior boolean
+  screen and adds no owner, queue, state, wait, or compatibility path.
 
 ## Verification
 
@@ -83,6 +90,9 @@ Updated: 2026-08-09
 - After both first-round review gates identified the same first-contact gap, the
   hosted dispatch regression suite passes 176 tests covering direct, group,
   contentless, URL, and opt-out app-card fallback cases.
+- After the round-2 retrospective redesign, the hosted dispatch suite passes
+  178 tests, including default/off direct and group contentlessness, the
+  active-member placeholder, and unchanged media-only signup.
 - Affected Messaging Ingress, Inboxd, operator-config, and hosted Web
   typechecks pass. The SDK upgrade required one outbound read to tolerate the
   newly optional SDK `message.parts` property; request construction is
@@ -98,4 +108,6 @@ Updated: 2026-08-09
   manifest step. A standalone assistant-engine build succeeded once; subsequent
   standalone generation reproduced the same timeout. Focused dispatch coverage
   and exact-head CI remain the executable proof for this change.
-- Exact-head ReviewGPT gates and PR CI remain pending.
+- Final ReviewGPT round 2 required a retrospective for the default/off mode
+  gap. The retrospective is recorded in the PR body; round 3 and exact-head CI
+  remain pending after the corrected candidate is pushed.

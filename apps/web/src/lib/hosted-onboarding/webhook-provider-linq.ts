@@ -93,9 +93,9 @@ import {
   buildSignupLinkResponse,
   buildInactiveMemberAccessNoticeResponse,
   HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON,
-  hostedLinqFirstContactContainsBlockedContent,
   isHostedLinqDeliverableFirstContact,
   isHostedLinqIMessageService,
+  resolveHostedLinqFirstContactContentDisposition,
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
@@ -1367,10 +1367,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
     // overrides recipient control. Keep that decision inside this one ordered
     // branch so opt-out wins before the group link, which wins before generic
     // billing and home-route handling below.
-    if (hostedLinqFirstContactContainsBlockedContent({
-      event: messageEvent,
-      participantContact,
-    })) {
+    if (
+      resolveHostedLinqFirstContactContentDisposition({
+        event: messageEvent,
+        participantContact,
+      }) === "blocked"
+    ) {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -1674,10 +1676,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  if (hostedLinqFirstContactContainsBlockedContent({
-    event: messageEvent,
-    participantContact,
-  })) {
+  const firstContactContentDisposition =
+    resolveHostedLinqFirstContactContentDisposition({
+      event: messageEvent,
+      participantContact,
+    });
+  if (firstContactContentDisposition === "contentless") {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("contentless-first-contact"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "contentless-first-contact",
+        routeStage: "ignored-contentless-first-contact",
+      }),
+    );
+  }
+
+  if (firstContactContentDisposition === "blocked") {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -2668,6 +2684,7 @@ const HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES = new Set([
 
 type HostedLinqNewGroupAdmissionIgnoreReason =
   | "blocked-first-contact-content"
+  | "contentless-first-contact"
   | "empty-message-parts"
   | "local-inbound-not-allowlisted"
   | "own-message"
@@ -2795,6 +2812,12 @@ async function planHostedLinqGroupChatWebhook(input: {
   const senderAccessAllowed = senderAccess?.allowed ?? false;
   const activeSenderMemberId = senderAccessAllowed ? sender?.id ?? null : null;
   const inactiveSender = sender !== null && !senderAccessAllowed;
+  const firstContactContentDisposition = !activeSenderMemberId
+    ? resolveHostedLinqFirstContactContentDisposition({
+        event: messageEvent,
+        participantContact,
+      })
+    : null;
 
   if (senderSuspended) {
     return ignored("suspended-member", senderIdentityMatch);
@@ -2808,6 +2831,12 @@ async function planHostedLinqGroupChatWebhook(input: {
     && senderAccess.reason === "health_data_consent_withdrawn"
   ) {
     return ignored("sender-inactive", senderIdentityMatch);
+  }
+  if (
+    sender === null
+    && firstContactContentDisposition === "contentless"
+  ) {
+    return ignored("contentless-first-contact", senderIdentityMatch);
   }
   const lineState = await readHostedLinqIncomingLineState({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
@@ -2851,10 +2880,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   }
   if (
     !activeSenderMemberId
-    && hostedLinqFirstContactContainsBlockedContent({
-      event: messageEvent,
-      participantContact,
-    })
+    && firstContactContentDisposition === "blocked"
   ) {
     return ignored("blocked-first-contact-content", senderIdentityMatch);
   }
