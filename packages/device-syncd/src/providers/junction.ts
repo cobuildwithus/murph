@@ -2649,7 +2649,7 @@ function buildInitialJobs(
       now,
       payload,
       windowStart: subtractDays(now, summaryBackfillDays),
-      priority: 30,
+      priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
     }),
     ...extendedBackfillTimeseriesResources.map((resource) =>
       buildExtendedTimeseriesBackfillJob({
@@ -2663,41 +2663,41 @@ function buildInitialJobs(
       now,
       payload,
       windowStart: subtractDays(now, reconcileDays),
-      priority: 40,
+      priority: JUNCTION_SCHEDULED_RECONCILE_PRIORITY,
     }),
   ];
 }
 
 return {
   provider: "junction",
-    descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
-    credentialPolicy: {
-      kind: "provider_config",
-      providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
-    },
-    connectionHandler: {
-      beginConnection,
-      completeConnection,
-      isSourceAccessActive,
-      revokeAccess,
-      revokeSourceAccess,
-    },
-    sdkConnectionHandler: {
-      ensureConnection: ensureSdkConnection,
-      createSignInToken: createSdkSignInToken,
-    },
-    webhookHandler: {
-      verifyAndParseWebhook,
-    },
-    diagnostics: {
-      diagnoseBackfill,
-      probeRest,
-    },
-    jobExecutor: {
-      createScheduledJobs,
-      executeJob,
-    },
-  };
+  descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+  credentialPolicy: {
+    kind: "provider_config",
+    providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
+  },
+  connectionHandler: {
+    beginConnection,
+    completeConnection,
+    isSourceAccessActive,
+    revokeAccess,
+    revokeSourceAccess,
+  },
+  sdkConnectionHandler: {
+    ensureConnection: ensureSdkConnection,
+    createSignInToken: createSdkSignInToken,
+  },
+  webhookHandler: {
+    verifyAndParseWebhook,
+  },
+  diagnostics: {
+    diagnoseBackfill,
+    probeRest,
+  },
+  jobExecutor: {
+    createScheduledJobs,
+    executeJob,
+  },
+};
 }
 
 function withJunctionSkippedResourceMetadata(
