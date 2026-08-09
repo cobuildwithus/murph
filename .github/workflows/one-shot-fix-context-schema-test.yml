@@ -1,0 +1,52 @@
+name: One-shot fix context snapshot schema assertion
+
+on:
+  push:
+    branches:
+      - codex/junction-scale-bp-vault-awareness
+    paths:
+      - .github/workflows/one-shot-fix-context-schema-test.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: contains(github.event.head_commit.message, '[fix-context-schema-test]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/junction-scale-bp-vault-awareness
+
+      - name: Update the schema-version assertion
+        shell: python
+        run: |
+          from pathlib import Path
+
+          target = Path('packages/assistant-engine/test/assistant-context-snapshot.test.ts')
+          text = target.read_text()
+          old = """      expect(JSON.parse(await readFile(snapshotPath, 'utf8'))).toMatchObject({
+            schema: 'murph.assistant-context-snapshot',
+            schemaVersion: 5,
+          })
+          """.replace('\n          ', '\n')
+          new = """      expect(JSON.parse(await readFile(snapshotPath, 'utf8'))).toMatchObject({
+            schema: 'murph.assistant-context-snapshot',
+            schemaVersion: 6,
+          })
+          """.replace('\n          ', '\n')
+          if text.count(old) != 1:
+              raise RuntimeError(f'expected one schema assertion, found {text.count(old)}')
+          target.write_text(text.replace(old, new, 1))
+          Path('.github/workflows/one-shot-fix-context-schema-test.yml').unlink()
+
+      - name: Commit the repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "test: expect current context snapshot schema"
+          git push origin HEAD:codex/junction-scale-bp-vault-awareness
