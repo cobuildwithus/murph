@@ -260,6 +260,12 @@ describe("hosted usage referral tool", () => {
         status: "ok",
       },
     });
+    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
+      "member_group",
+      { prisma },
+    );
+    expect(mocks.readHostedGroupFundingRecoveryStatus).not.toHaveBeenCalled();
+    expect(mocks.readHostedGroupUsageStatus).not.toHaveBeenCalled();
   });
 
   it("keeps an active mission bound to its persisted reward", async () => {
@@ -302,12 +308,6 @@ describe("hosted usage referral tool", () => {
         status: "ok",
       },
     });
-    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
-      "member_group",
-      { prisma },
-    );
-    expect(mocks.readHostedGroupFundingRecoveryStatus).not.toHaveBeenCalled();
-    expect(mocks.readHostedGroupUsageStatus).not.toHaveBeenCalled();
   });
 
   it("offers only the provider-neutral mission from Telegram", async () => {
