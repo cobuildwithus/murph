@@ -1,0 +1,155 @@
+name: One-shot normalize Junction blood pressure backfill
+
+on:
+  push:
+    branches:
+      - codex/junction-blood-pressure-history-backfill
+    paths:
+      - .github/workflows/one-shot-format-junction-bp-backfill.yml
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: contains(github.event.head_commit.message, '[format-junction-bp-backfill]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/junction-blood-pressure-history-backfill
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Normalize helper ownership and indentation
+        shell: python
+        run: |
+          from pathlib import Path
+
+          target = Path('packages/device-syncd/src/providers/junction.ts')
+          text = target.read_text()
+          start = text.index('  function buildExtendedTimeseriesBackfillJob(input: {')
+          end = text.index('\nfunction withJunctionSkippedResourceMetadata(', start)
+          replacement = '''  function buildExtendedTimeseriesBackfillJob(input: {
+            now: string;
+            resource: string;
+            sourceProviderSlug: string | null;
+          }): DeviceSyncJobInput {
+            const windowStart = subtractDays(input.now, extendedTimeseriesBackfillDays);
+            const payload = {
+              resource: input.resource,
+              resourceCategory: "timeseries",
+              ...(input.sourceProviderSlug
+                ? { sourceProviderSlug: input.sourceProviderSlug }
+                : {}),
+              windowStart,
+              windowEnd: input.now,
+            } satisfies JunctionDeviceSyncJobPayloads["resource"];
+
+            return {
+              kind: "resource",
+              payload,
+              priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
+              dedupeKey: sha256Text(JSON.stringify([
+                "junction",
+                "extended-timeseries-backfill",
+                input.sourceProviderSlug,
+                input.resource,
+                windowStart,
+                input.now,
+              ])),
+            };
+          }
+
+          function buildInitialJobs(
+            now: string,
+            sourceProviderSlug?: string | null,
+          ): DeviceSyncJobInput[] {
+            const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+            const payload = normalizedSourceProviderSlug
+              ? { sourceProviderSlug: normalizedSourceProviderSlug }
+              : undefined;
+            return [
+              buildWindowJob({
+                kind: "backfill",
+                now,
+                payload,
+                windowStart: subtractDays(now, summaryBackfillDays),
+                priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
+              }),
+              ...extendedBackfillTimeseriesResources.map((resource) =>
+                buildExtendedTimeseriesBackfillJob({
+                  now,
+                  resource,
+                  sourceProviderSlug: normalizedSourceProviderSlug,
+                })
+              ),
+              buildWindowJob({
+                kind: "reconcile",
+                now,
+                payload,
+                windowStart: subtractDays(now, reconcileDays),
+                priority: JUNCTION_SCHEDULED_RECONCILE_PRIORITY,
+              }),
+            ];
+          }
+
+          return {
+            provider: "junction",
+            descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+            credentialPolicy: {
+              kind: "provider_config",
+              providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
+            },
+            connectionHandler: {
+              beginConnection,
+              completeConnection,
+              isSourceAccessActive,
+              revokeAccess,
+              revokeSourceAccess,
+            },
+            sdkConnectionHandler: {
+              ensureConnection: ensureSdkConnection,
+              createSignInToken: createSdkSignInToken,
+            },
+            webhookHandler: {
+              verifyAndParseWebhook,
+            },
+            diagnostics: {
+              diagnoseBackfill,
+              probeRest,
+            },
+            jobExecutor: {
+              createScheduledJobs,
+              executeJob,
+            },
+          };
+          }
+          '''.replace('\n          ', '\n')
+          target.write_text(text[:start] + replacement + text[end:])
+          Path('.github/workflows/one-shot-format-junction-bp-backfill.yml').unlink()
+
+      - name: Re-run package proof
+        run: |
+          pnpm --filter @murphai/device-syncd test
+          pnpm --filter @murphai/device-syncd typecheck
+
+      - name: Commit normalized implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: normalize sparse blood pressure backfill"
+          git push origin HEAD:codex/junction-blood-pressure-history-backfill
