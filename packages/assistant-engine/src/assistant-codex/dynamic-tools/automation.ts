@@ -27,6 +27,8 @@ import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
 import {
+  AUTOMATION_DELIVERY_VALUES,
+  AUTOMATION_GROUP_EMAIL_DELIVERY_TAG,
   buildGroupNewsletterAutomationSaveRequest,
   GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES,
   GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES,
@@ -101,6 +103,9 @@ const saveAutomationArgumentsSchema = z.object({
     .optional(),
   automationId: automationIdentifierSchema.optional(),
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
+  delivery: z.enum(AUTOMATION_DELIVERY_VALUES).optional().describe(
+    'Optional delivery mode for this automation. Omit or use current_conversation for the normal bound-chat response. Use group_email only for a group-scoped scheduled automation whose instructions explicitly read the relevant skill and shared projections before composing one authorized email.',
+  ),
   instructions: automationInstructionsSchema,
   schedule: automationScheduleSchema,
   slug: automationSlugSchema.optional(),
@@ -190,6 +195,9 @@ const reconcileAutomationArgumentsSchema = z.object({
   supportSeriesId: automationSupportSeriesIdSchema,
 }).strict()
 
+// Compatibility only for records and callers created before newsletters became
+// ordinary automations. New setup is owned by the group-newsletter skill and
+// must use action="save" with ordinary instructions plus optional delivery.
 const saveGroupNewsletterArgumentsSchema = z.object({
   action: z.literal('save_newsletter'),
   customNote: z.string().trim().min(1).max(2_000).nullable().optional(),
@@ -235,7 +243,7 @@ export const MURPH_AUTOMATION_TOOL = {
   name: 'automation',
   deferLoading: true,
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. For ordinary save or patch, choose assistantTargetOverride deliberately: use Luna for self-contained cues and reminders with all needed context in the instructions and no reads or tools; use Terra for bounded contextual judgment or a few targeted reads; inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On save, omit assistantTargetOverride to inherit. On patch, assistantTargetOverride replaces the whole stored override: omit the field only to preserve it, use null to return to conversation inheritance, or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. For ordinary save or patch, choose assistantTargetOverride deliberately: use Luna for self-contained cues and reminders with all needed context in the instructions and no reads or tools; use Terra for bounded contextual judgment or a few targeted reads; inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On save, omit assistantTargetOverride to inherit. On patch, assistantTargetOverride replaces the whole stored override: omit the field only to preserve it, use null to return to conversation inheritance, or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. For a group automation that should send one consented email instead of replying in chat, use ordinary save with delivery="group_email" and put the complete skill-driven behavior in instructions. save_newsletter exists only as a migration compatibility action and must not be used for new setup. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -257,7 +265,6 @@ export function readAutomationDynamicToolRequest(input: {
   if (input.tool !== MURPH_AUTOMATION_TOOL.name) {
     return null
   }
-
   const parsed = parseDynamicToolArguments({
     schema: automationArgumentsSchema,
     schemaRootKeys: [
@@ -313,12 +320,31 @@ export function readAutomationDynamicToolRequest(input: {
                   },
                   schedule: parsed.args.schedule,
                 })
-              : parsed.args,
+              : parsed.args.action === 'save'
+                ? buildAutomationSaveRequest(parsed.args)
+                : parsed.args,
       }
     : {
         kind: 'invalid-automation-arguments',
         validationDigest: parsed.validationDigest,
       }
+}
+
+function buildAutomationSaveRequest(
+  input: z.infer<typeof saveAutomationArgumentsSchema>,
+): AssistantHostedAutomationToolRequest {
+  const { delivery, tags, ...request } = input
+  if (delivery !== 'group_email') {
+    return {
+      ...request,
+      ...(tags ? { tags } : {}),
+    }
+  }
+
+  return {
+    ...request,
+    tags: [...(tags ?? []), AUTOMATION_GROUP_EMAIL_DELIVERY_TAG],
+  }
 }
 
 export async function executeAutomationDynamicTool(input: {
