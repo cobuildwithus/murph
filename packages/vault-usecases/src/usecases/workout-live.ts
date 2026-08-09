@@ -21,6 +21,7 @@ import {
   hasLoggedWorkoutSet,
 } from './workout-live-model.js'
 import {
+  assertTargetableLiveWorkout,
   compactSetPatch,
   findActiveLiveWorkouts,
   normalizeLiveWorkoutActivityType,
@@ -28,6 +29,7 @@ import {
   normalizeWorkoutTimestamp,
   optionalString,
   parseShownWorkout,
+  requireLiveWorkoutSetOrder,
   requireNonEmptyText,
   requireString,
   resolveExerciseIndex,
@@ -38,6 +40,9 @@ import {
 
 export * from './workout-live-model.js'
 
+const MAX_LIVE_WORKOUT_EXERCISES = 100
+const MAX_LIVE_WORKOUT_SETS_PER_EXERCISE = 150
+
 export async function startLiveWorkout(input: StartLiveWorkoutInput) {
   return withLiveWorkoutMutationLock(input.vault, () =>
     startLiveWorkoutWithLockHeld(input),
@@ -45,6 +50,13 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
 }
 
 async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
+  const routineLookup =
+    input.routine === undefined
+      ? undefined
+      : requireNonEmptyText(
+          input.routine,
+          'Workout routine lookup is required.',
+        )
   const active = await findActiveLiveWorkouts(input.vault)
   if (active.length > 0) {
     throw new VaultCliError(
@@ -65,9 +77,8 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
     startedAt,
     new Date().toISOString(),
   )
-
-  if (input.routine) {
-    const routine = await showWorkoutFormat(input.vault, input.routine.trim())
+  if (routineLookup !== undefined) {
+    const routine = await showWorkoutFormat(input.vault, routineLookup)
     const routineTitle = requireString(
       routine.entity.title,
       'Workout routine title is missing.',
@@ -82,6 +93,10 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
       startedAt,
       sessionNote: note,
     })
+    assertTargetableLiveWorkout(
+      workout,
+      `Workout routine "${routineTitle}"`,
+    )
 
     return addStructuredWorkoutRecord({
       vault: input.vault,
@@ -140,6 +155,7 @@ async function addLiveWorkoutExerciseWithLockHeld(
 ) {
   const shown = await resolveLiveWorkout(input, { requireActive: true })
   const workout = parseShownWorkout(shown)
+  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
   const exercises = structuredClone(workout.exercises)
   const order = input.order
   const setCount = input.setCount ?? 1
@@ -181,6 +197,12 @@ async function addLiveWorkoutExerciseWithLockHeld(
       `Exercise order ${order} is already used by ${existing.name}.`,
     )
   }
+  if (exercises.length >= MAX_LIVE_WORKOUT_EXERCISES) {
+    throw new VaultCliError(
+      'invalid_operation',
+      `Live workouts support at most ${MAX_LIVE_WORKOUT_EXERCISES} exercises.`,
+    )
+  }
 
   exercises.push(parsedProposed)
   exercises.sort((left, right) => left.order - right.order)
@@ -194,8 +216,10 @@ export async function logLiveWorkoutSet(input: LogLiveWorkoutSetInput) {
 }
 
 async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
+  const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
   const shown = await resolveLiveWorkout(input, { requireActive: true })
   const workout = parseShownWorkout(shown)
+  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
   const exercises = structuredClone(workout.exercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
   const exercise = exercises[exerciseIndex]!
@@ -203,18 +227,24 @@ async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
   if (Object.keys(patch).length === 0) {
     throw new VaultCliError('invalid_option', 'Log at least one set value or note.')
   }
-  if (!Number.isInteger(input.setOrder) || input.setOrder < 1) {
-    throw new VaultCliError('invalid_option', 'Set order must be a positive integer.')
-  }
 
-  const setIndex = exercise.sets.findIndex((set) => set.order === input.setOrder)
+  const setIndex = exercise.sets.findIndex((set) => set.order === setOrder)
   const currentSet = setIndex >= 0 ? exercise.sets[setIndex] : undefined
+  if (
+    currentSet === undefined &&
+    exercise.sets.length >= MAX_LIVE_WORKOUT_SETS_PER_EXERCISE
+  ) {
+    throw new VaultCliError(
+      'invalid_operation',
+      `Each exercise supports at most ${MAX_LIVE_WORKOUT_SETS_PER_EXERCISE} sets.`,
+    )
+  }
   const parsedSet = workoutSessionSchema.parse({
     exercises: [
       {
         name: exercise.name,
         order: 1,
-        sets: [{ ...(currentSet ?? {}), ...patch, order: input.setOrder }],
+        sets: [{ ...(currentSet ?? {}), ...patch, order: setOrder }],
       },
     ],
   }).exercises[0]!.sets[0]!
@@ -244,16 +274,18 @@ export async function clearLiveWorkoutSet(input: ClearLiveWorkoutSetInput) {
 async function clearLiveWorkoutSetWithLockHeld(
   input: ClearLiveWorkoutSetInput,
 ) {
+  const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
   const shown = await resolveLiveWorkout(input, { requireActive: true })
   const workout = parseShownWorkout(shown)
+  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
   const exercises = structuredClone(workout.exercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
   const exercise = exercises[exerciseIndex]!
-  const setIndex = exercise.sets.findIndex((set) => set.order === input.setOrder)
+  const setIndex = exercise.sets.findIndex((set) => set.order === setOrder)
   if (setIndex < 0) {
     throw new VaultCliError(
       'not_found',
-      `No set ${input.setOrder} exists for ${exercise.name}.`,
+      `No set ${setOrder} exists for ${exercise.name}.`,
     )
   }
 

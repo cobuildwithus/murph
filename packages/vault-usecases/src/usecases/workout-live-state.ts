@@ -14,7 +14,7 @@ import {
 } from '../commands/query-record-command-helpers.js'
 import { loadWorkoutCoreRuntime } from './workout-core.js'
 import { editWorkoutRecord } from './workout.js'
-import { showWorkoutRecord } from './workout-read.js'
+import { showWorkoutRecord, workoutLookupSchema } from './workout-read.js'
 import {
   type LiveWorkoutExerciseLookup,
   type LiveWorkoutLookupInput,
@@ -61,8 +61,9 @@ export async function resolveLiveWorkout(
   input: LiveWorkoutLookupInput,
   options: { requireActive: boolean; allowCompleted?: boolean },
 ): Promise<WorkoutShowResult> {
-  if (input.workoutId) {
-    const shown = await showWorkoutRecord(input.vault, input.workoutId)
+  const workoutId = normalizeLiveWorkoutId(input.workoutId)
+  if (workoutId !== undefined) {
+    const shown = await showWorkoutRecord(input.vault, workoutId)
     const workout = parseShownWorkout(shown)
     assertLiveWorkout(workout, shown.entity.id)
     if (options.requireActive && !isActiveLiveWorkout(workout)) {
@@ -128,8 +129,19 @@ export async function updateLiveWorkoutExercises(
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
 ) {
-  workoutSessionSchema.parse({ ...workout, exercises })
-  const set = [`${EXERCISES_PATCH_PREFIX}${JSON.stringify(exercises)}`]
+  const parsed = workoutSessionSchema.safeParse({ ...workout, exercises })
+  if (!parsed.success) {
+    throw new VaultCliError(
+      'contract_invalid',
+      `Workout ${shown.entity.id} would contain an invalid structured workout session.`,
+      { issues: parsed.error.issues },
+    )
+  }
+  assertTargetableLiveWorkout(parsed.data, `Workout ${shown.entity.id}`)
+
+  const set = [
+    `${EXERCISES_PATCH_PREFIX}${JSON.stringify(parsed.data.exercises)}`,
+  ]
   if (workout.startedAt) {
     set.push(
       `durationMinutes=${elapsedDurationMinutes(
@@ -226,6 +238,67 @@ export function compactSetPatch(input: LogLiveWorkoutSetInput): Partial<WorkoutS
       ? { addedWeightKg: input.addedWeightKg }
       : {}),
   }
+}
+
+export function assertTargetableLiveWorkout(
+  workout: WorkoutSession,
+  label: string,
+): void {
+  const exerciseOrders = new Set<number>()
+
+  for (const exercise of workout.exercises) {
+    if (exerciseOrders.has(exercise.order)) {
+      throw new VaultCliError(
+        'contract_invalid',
+        `${label} contains duplicate exercise order ${exercise.order}. Repair the workout structure before using targeted live commands.`,
+        { exerciseOrder: exercise.order },
+      )
+    }
+    exerciseOrders.add(exercise.order)
+
+    const setOrders = new Set<number>()
+    for (const set of exercise.sets) {
+      if (setOrders.has(set.order)) {
+        throw new VaultCliError(
+          'contract_invalid',
+          `${label} contains duplicate set order ${set.order} for exercise ${exercise.order} (${exercise.name}). Repair the workout structure before using targeted live commands.`,
+          {
+            exerciseName: exercise.name,
+            exerciseOrder: exercise.order,
+            setOrder: set.order,
+          },
+        )
+      }
+      setOrders.add(set.order)
+    }
+  }
+}
+
+export function normalizeLiveWorkoutId(
+  value: string | undefined,
+): string | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  const parsed = workoutLookupSchema.safeParse(value.trim())
+  if (!parsed.success) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Workout id must be a canonical evt_* identifier.',
+    )
+  }
+  return parsed.data
+}
+
+export function requireLiveWorkoutSetOrder(value: number): number {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Set order must be a positive integer.',
+    )
+  }
+  return value
 }
 
 export function normalizeWorkoutTimestamp(value: string, label: string): string {

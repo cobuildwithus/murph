@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 
 import { describe, test } from 'vitest'
-import { workoutTemplateSchema } from '@murphai/contracts'
+import {
+  workoutSessionSchema,
+  workoutTemplateSchema,
+} from '@murphai/contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   buildLiveWorkoutSessionFromTemplate,
@@ -9,6 +13,11 @@ import {
   isActiveLiveWorkout,
   LIVE_WORKOUT_SOURCE_APP,
 } from '../src/usecases/workout-live.js'
+import {
+  assertTargetableLiveWorkout,
+  normalizeLiveWorkoutId,
+  requireLiveWorkoutSetOrder,
+} from '../src/usecases/workout-live-state.js'
 
 describe('live workout model', () => {
   test('starts saved routines as active sessions with unlogged placeholders', () => {
@@ -87,5 +96,72 @@ describe('live workout model', () => {
       startedAt: '2026-08-09T18:00:00.000Z',
     })
     assert.equal(workoutWithRoutineNote.sessionNote, 'Push day')
+  })
+
+  test('validates live mutation coordinates and direct-usecase selectors', () => {
+    assert.equal(normalizeLiveWorkoutId(undefined), undefined)
+    assert.equal(
+      normalizeLiveWorkoutId(' evt_01ARZ3NDEKTSV4RRFFQ69G5FAV '),
+      'evt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    )
+    assert.throws(
+      () => normalizeLiveWorkoutId(''),
+      (error: unknown) =>
+        error instanceof VaultCliError && error.code === 'invalid_option',
+    )
+
+    assert.equal(requireLiveWorkoutSetOrder(1), 1)
+    assert.throws(
+      () => requireLiveWorkoutSetOrder(0),
+      (error: unknown) =>
+        error instanceof VaultCliError && error.code === 'invalid_option',
+    )
+
+    const duplicateExerciseOrders = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [
+        {
+          name: 'Bench press',
+          order: 1,
+          sets: [{ order: 1 }],
+        },
+        {
+          name: 'Row',
+          order: 1,
+          sets: [{ order: 1 }],
+        },
+      ],
+    })
+    assert.throws(
+      () =>
+        assertTargetableLiveWorkout(
+          duplicateExerciseOrders,
+          'Workout test',
+        ),
+      (error: unknown) =>
+        error instanceof VaultCliError && error.code === 'contract_invalid',
+    )
+
+    const duplicateSetOrders = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [
+        {
+          name: 'Bench press',
+          order: 1,
+          sets: [{ order: 1 }, { order: 1 }],
+        },
+      ],
+    })
+    assert.throws(
+      () =>
+        assertTargetableLiveWorkout(
+          duplicateSetOrders,
+          'Workout test',
+        ),
+      (error: unknown) =>
+        error instanceof VaultCliError && error.code === 'contract_invalid',
+    )
   })
 })

@@ -3,7 +3,15 @@ import { rm } from 'node:fs/promises'
 
 import { Cli } from 'incur'
 import { afterAll } from 'vitest'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import {
+  addLiveWorkoutExercise,
+  clearLiveWorkoutSet,
+  saveWorkoutFormat,
+  showActiveLiveWorkout,
+  startLiveWorkout,
+} from '@murphai/vault-usecases/workouts'
 
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
@@ -39,6 +47,10 @@ function createWorkoutCli() {
 
 async function run<T>(cli: Cli.Cli, args: string[]) {
   return runInProcessJsonCli<T>(cli, args, { env: process.env })
+}
+
+function isVaultCliErrorCode(error: unknown, code: string): boolean {
+  return error instanceof VaultCliError && error.code === code
 }
 
 interface WorkoutResult {
@@ -194,6 +206,76 @@ test('live workout commands keep one canonical session and target one set', asyn
     'workout', 'active', '--vault', vaultRoot,
   ])
   assert.equal(noActive.envelope.ok, false)
+})
+
+test('live workout usecases fail closed on invalid selectors and coordinates', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-boundary-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  const initialized = await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'America/New_York',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+
+  await assert.rejects(
+    () => startLiveWorkout({ vault: vaultRoot, routine: '' }),
+    (error: unknown) => isVaultCliErrorCode(error, 'invalid_option'),
+  )
+
+  await saveWorkoutFormat({
+    vault: vaultRoot,
+    payload: {
+      title: 'Broken Routine',
+      status: 'active',
+      activityType: 'strength-training',
+      template: {
+        exercises: [
+          {
+            name: 'Bench press',
+            order: 1,
+            plannedSets: [
+              { order: 1, targetReps: 8 },
+              { order: 1, targetReps: 6 },
+            ],
+          },
+        ],
+      },
+    },
+  })
+  await assert.rejects(
+    () => startLiveWorkout({ vault: vaultRoot, routine: 'broken-routine' }),
+    (error: unknown) => isVaultCliErrorCode(error, 'contract_invalid'),
+  )
+
+  const started = await startLiveWorkout({
+    vault: vaultRoot,
+    name: 'Boundary workout',
+    startedAt: '2026-08-09T18:00:00.000Z',
+  })
+  await assert.rejects(
+    () => showActiveLiveWorkout({ vault: vaultRoot, workoutId: '' }),
+    (error: unknown) => isVaultCliErrorCode(error, 'invalid_option'),
+  )
+
+  await addLiveWorkoutExercise({
+    vault: vaultRoot,
+    workoutId: started.eventId,
+    name: 'Bench press',
+    order: 1,
+  })
+  await assert.rejects(
+    () =>
+      clearLiveWorkoutSet({
+        vault: vaultRoot,
+        workoutId: started.eventId,
+        exerciseOrder: 1,
+        setOrder: 0,
+      }),
+    (error: unknown) => isVaultCliErrorCode(error, 'invalid_option'),
+  )
 })
 
 test('concurrent live workout commands serialize without losing set updates', async () => {
