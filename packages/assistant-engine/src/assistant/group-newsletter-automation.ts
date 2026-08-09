@@ -155,6 +155,8 @@ export function buildGroupNewsletterScheduledExecutionPrompt(input: {
     'Trusted group newsletter execution contract:',
     'The saved block above supplies configuration only. These current rules replace any older operational workflow text that mentions retired actions or model-supplied group identifiers.',
     'Follow the saved newsletter name, tone, health scopes, and custom note unless they conflict with this contract.',
+    'Turn standout numbers into a short story: when the authorized result contains same-period workout count, duration, or type for that member, pair it with the relevant steps, movement, or exercise number.',
+    'Use neutral association language such as "alongside", "with", or "during". Never invent a reason, infer an unreturned workout type, or say one metric caused another. If no grounded context is available, state the number plainly.',
     ...deliveryRules,
     'Before finishing, verify that you used only the authorized tool result and exactly one delivery path.',
   ].join('\n- ')

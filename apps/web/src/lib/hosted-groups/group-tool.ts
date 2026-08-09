@@ -124,9 +124,9 @@ import {
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
-  normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
+  resolveHostedGroupAccessOfferProjectionScopes,
 } from "./join-policy";
 import { sha256Hex } from "../primitives";
 import {
@@ -1049,10 +1049,9 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
       return { kind: ownerAccess.unavailableReason };
     }
     const requestedVaultShareProjectionScopes =
-      normalizeHostedGroupAccessOfferProjectionScopes(
+      resolveHostedGroupAccessOfferProjectionScopes(
         input.joinLink?.requestedVaultShareProjectionScopes
-          ?? input.joinLink?.requestedVaultShareProjectionKinds
-          ?? [],
+          ?? input.joinLink?.requestedVaultShareProjectionKinds,
       );
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
@@ -1255,10 +1254,9 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
+  const projectionScopes = resolveHostedGroupAccessOfferProjectionScopes(
     input.joinOffer?.projectionScopes
-      ?? input.joinOffer?.projectionKinds
-      ?? [],
+      ?? input.joinOffer?.projectionKinds,
   );
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
@@ -1537,15 +1535,15 @@ async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
   return { status: "ok", chatId: authorized.chatId };
 }
 
-function buildHostedGroupJoinOfferMessage(input: {
+export function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  // The link stays as the control for choosing different permissions, and works
-  // for everyone.
-  return `Like or heart this message if these default sharing choices look right: ${
+  // Keep one deterministic server-owned sentence: it is the reaction's
+  // consent surface and must replay with the exact stored scope snapshot.
+  return `Sounds good. Like or heart this message to share ${
     renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  }. Use ${input.joinUrl} to choose different permissions.`;
+  } with the group, or use ${input.joinUrl} to customize what you share.`;
 }
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {

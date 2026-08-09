@@ -4079,6 +4079,7 @@ async function executeGroupTool(input: {
     let modelResult:
       | ReturnType<typeof groupAccessOfferModelResult>
       | ReturnType<typeof groupToolModelResult>
+    let nativeAccessOfferOwnsReply = false
     if (input.request.action === 'offer_access') {
       if (
         result.action !== 'create_join_link'
@@ -4087,6 +4088,10 @@ async function executeGroupTool(input: {
         return toolTextResult(false, 'group tool request failed')
       }
       modelResult = groupAccessOfferModelResult(result)
+      nativeAccessOfferOwnsReply =
+        modelResult.result.status === 'ok'
+        && modelResult.result.presentation === 'native'
+        && modelResult.result.recencyEvidence === 'eligible'
     } else {
       modelResult = groupToolModelResult(result)
     }
@@ -4095,6 +4100,9 @@ async function executeGroupTool(input: {
       : modelResult
     return {
       ...toolTextResult(true, safeToolPayloadText(payload)),
+      ...(nativeAccessOfferOwnsReply
+        ? { finalActionPatch: { kind: 'none' as const } }
+        : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch (error) {

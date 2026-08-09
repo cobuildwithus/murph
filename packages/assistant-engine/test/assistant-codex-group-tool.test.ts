@@ -197,6 +197,10 @@ describe("murph.group dynamic tool", () => {
       .toContain("immediately preceding read_chat_name result");
     expect(MURPH_GROUP_TOOL.inputSchema.properties).not.toHaveProperty("messageTemplate");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+      .toContain("initial group creation");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+      .toContain("exact new projections requested");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("trusted host owns the exact consent copy");
@@ -3142,6 +3146,8 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(readGroupToolPayload(nativeResult))).not.toContain(
       "native-hidden",
     );
+    expect(standaloneResult.finalActionPatch).toBeUndefined();
+    expect(nativeResult.finalActionPatch).toEqual({ kind: "none" });
   });
 
   it("shows a fresh exact link for a reused native offer and fails closed without recency evidence", async () => {
@@ -3252,6 +3258,9 @@ describe("murph.group dynamic tool", () => {
         status: "ok",
       },
     });
+    expect(reusedResult.finalActionPatch).toBeUndefined();
+    expect(legacyResult.finalActionPatch).toBeUndefined();
+    expect(replayedProviderResult.finalActionPatch).toBeUndefined();
   });
 
   it("normalizes a host-substituted access link after requesting the native path", async () => {

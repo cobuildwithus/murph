@@ -283,6 +283,36 @@ export function normalizeHostedGroupAccessOfferProjectionScopes(
   return normalizeHostedVaultShareProjectionScopes(offered);
 }
 
+/**
+ * New groups ask for every top-level selectable permission up front. The
+ * member still grants the exact disclosed set through the reaction or join
+ * page and may deselect anything there. Selector-specific activity scopes
+ * remain opt-in additions because workout details already carry type.
+ */
+export const HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES =
+  Object.freeze(
+    normalizeHostedGroupAccessOfferProjectionScopes(
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.map(
+        (projectionKind): HostedVaultShareProjectionScope => ({
+          projectionKind,
+        }),
+      ),
+    ),
+  );
+
+export function resolveHostedGroupAccessOfferProjectionScopes(
+  value: unknown,
+): HostedVaultShareProjectionScope[] {
+  const normalized = normalizeHostedGroupAccessOfferProjectionScopes(value);
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  if (Array.isArray(value) && value.length > 0) {
+    return [];
+  }
+  return [...HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES];
+}
+
 export function legacyHostedGroupSleepProjectionScope(
   projectionScope: HostedVaultShareProjectionScope,
 ): HostedVaultShareProjectionScope | null {

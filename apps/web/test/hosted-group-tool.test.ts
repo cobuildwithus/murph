@@ -295,6 +295,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 import {
+  buildHostedGroupJoinOfferMessage,
   buildHostedGroupJoinOfferProviderIdempotencyKey,
   HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION,
   HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
@@ -317,10 +318,12 @@ import {
   buildHostedVaultShareProjectionScopeKey,
 } from "@murphai/hosted-execution/vault-share";
 import {
+  HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
   mergeHostedGroupJoinPolicy,
   normalizeHostedGroupAccessOfferProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
   readHostedGroupJoinPolicy,
+  resolveHostedGroupAccessOfferProjectionScopes,
 } from "@/src/lib/hosted-groups/join-policy";
 
 const GROUP_SUMMARY = {
@@ -403,6 +406,33 @@ function groupSummaryWithOwnerEmailGrant() {
     }],
   };
 }
+
+describe("hosted group access-offer defaults", () => {
+  it("requests every top-level permission when no narrower set is supplied", () => {
+    const resolved = resolveHostedGroupAccessOfferProjectionScopes([]);
+    expect(resolved).toEqual(HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES);
+    expect(resolved).toEqual(expect.arrayContaining([
+      SLEEP_DURATION_SCOPE,
+      WORKOUTS_SCOPE,
+      PROTEIN_SCOPE,
+    ]));
+    expect(resolved.every((scope) => !("selector" in scope))).toBe(true);
+    expect(resolved.length).toBeLessThan(
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
+    );
+  });
+
+  it("keeps explicit scopes narrow and renders one natural consent sentence", () => {
+    expect(resolveHostedGroupAccessOfferProjectionScopes([WORKOUTS_SCOPE]))
+      .toEqual([WORKOUTS_SCOPE]);
+    expect(buildHostedGroupJoinOfferMessage({
+      joinUrl: "https://www.withmurph.ai/groups/join/example",
+      projectionScopes: [WORKOUTS_SCOPE],
+    })).toBe(
+      "Sounds good. Like or heart this message to share your Murph profile name and workout details with the group, or use https://www.withmurph.ai/groups/join/example to customize what you share.",
+    );
+  });
+});
 
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
@@ -3365,7 +3395,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         idempotencyKey: expect.stringMatching(/^group-join-offer:v2:[a-f0-9]{40}$/u),
         message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "Sounds good. Like or heart this message to share your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -3452,22 +3482,15 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.not.stringContaining(
-          "Like or heart this message to share",
+        message: expect.stringContaining(
+          "Sounds good. Like or heart this message to share",
         ),
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.stringContaining(
-          "Like or heart this message if these default sharing choices look right:",
-        ),
-      }),
-    );
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.stringContaining(
-          "Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
         ),
       }),
     );
@@ -3496,7 +3519,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name and health source connection status. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "Sounds good. Like or heart this message to share your Murph profile name and health source connection status with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -3526,7 +3549,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name and daily protein (nutrition totals come from your meals in Murph, including meals imported from connected apps). Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "Sounds good. Like or heart this message to share your Murph profile name and daily protein (nutrition totals come from your meals in Murph, including meals imported from connected apps) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
@@ -3554,7 +3577,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           message:
-            `Like or heart this message if these default sharing choices look right: your Murph profile name and ${displayLabel} (by-source sleep includes every available source's value and name, plus when Murph recorded that source value). Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.`,
+            `Sounds good. Like or heart this message to share your Murph profile name and ${displayLabel} (by-source sleep includes every available source's value and name, plus when Murph recorded that source value) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.`,
         }),
       );
       const offeredScopes = [{ projectionKind: offeredProjectionKind }];
@@ -3677,7 +3700,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("posts an explicit profile-only offer for a complete current roster", async () => {
+  it("posts the comprehensive default offer for a complete current roster", async () => {
     const fullyGrantedGroup = {
       ...GROUP_SUMMARY,
       memberCount: 1,
@@ -3711,20 +3734,20 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      projectionScopes: [],
+      projectionScopes: HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
       tx: fakeTx,
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_group_1",
-        message: expect.stringContaining("your Murph profile name"),
+        message: expect.stringContaining("workout details"),
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
-      projectionScopes: [],
+      projectionScopes: HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
       tx: fakeTx,
     });
   });
@@ -3874,7 +3897,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name, steps, and health source connection status. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "Sounds good. Like or heart this message to share your Murph profile name, steps, and health source connection status with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -3911,7 +3934,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name, running minutes, and health source connection status. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "Sounds good. Like or heart this message to share your Murph profile name, running minutes, and health source connection status with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -3923,7 +3946,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("renders profile-only share scope when no optional kinds are requested", async () => {
+  it("renders comprehensive defaults when no optional kinds are requested", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
@@ -3939,10 +3962,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: { status: "sent" },
     });
 
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        requestedVaultShareProjectionScopes:
+          HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
+      }));
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+        message: expect.stringContaining("workout details"),
       }),
     );
   });
@@ -3966,7 +3993,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name and email address. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "Sounds good. Like or heart this message to share your Murph profile name and email address with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
@@ -3996,7 +4023,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "Sounds good. Like or heart this message to share your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
@@ -4028,7 +4055,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "Sounds good. Like or heart this message to share your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
@@ -4064,12 +4091,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name and recent running distance and session count. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+          "Sounds good. Like or heart this message to share your Murph profile name and recent running distance and session count with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
 
-  it("posts the canonical profile-only offer when the legacy template is missing", async () => {
+  it("posts the comprehensive canonical offer when the legacy template is missing", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: { action: "post_join_offer", linqThread: LINQ_THREAD },
@@ -4080,15 +4107,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message:
-          "Like or heart this message if these default sharing choices look right: your Murph profile name. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.",
+        message: expect.stringContaining("workout details"),
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
-      projectionScopes: [],
+      projectionScopes: HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
       tx: fakeTx,
     });
   });

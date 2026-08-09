@@ -1289,7 +1289,7 @@ describe("sendHostedLinqChatMessage", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const message =
-      "Like or heart this message if these default sharing choices look right: your Murph profile name. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.";
+      "Sounds good. Like or heart this message to share your Murph profile name with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.";
 
     await expect(sendHostedLinqChatMessage({
       chatId: "chat_123",

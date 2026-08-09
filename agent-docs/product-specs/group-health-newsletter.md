@@ -30,7 +30,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Delivery shape | One stable newsletter automation chooses either **one ordinary current-chat update** or **one shared email thread** to all eligible participants. |
 | Email permission | Included in the disclosed newsletter reaction-share scope and on the join page as **"share your email with this group."** The shared thread exposes addresses to co-members by design. |
 | Newsletter content opt-in | Liking the newsletter permission offer opts into the disclosed default snapshot: profile name, email, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV. It grants membership only when needed; the customize link lets a member share more or less. |
-| New-group requested permissions | For email delivery, Murph normally requests email plus the supported health scopes, narrowed by any explicit creator choice. For current-chat delivery, it requests only the chosen one to three health scopes and omits email. Every member may deselect any requested permission. |
+| New-group requested permissions | Murph requests every top-level selectable group permission by default so the initial consent surface is complete. The member still opts in through the disclosed reaction or join page and may deselect any permission. Later additive permission offers remain narrow when Murph supplies the exact new scopes requested. Selector-specific activity scopes stay optional because workout details already include type. |
 | Setup flow | **Ask before creating.** Murph asks for the name, schedule, and email-versus-chat delivery in one short message, with tone optional. If the group already answered or says "just set it up," Murph uses sensible defaults and confirms the essentials. |
 | Naming | The **group-chosen name** becomes the automation title, the group display name when a group join link is created, and the name in the setup notice. |
 | Individual opt-out | **Revoke email sharing** through settings, an authenticated Linq/iMessage or Telegram group message, or a private Murph chat. Email headers do not prove the sender's self-revocation authority. Leaves challenge/health-sharing intact. Forward-only. |
@@ -57,15 +57,14 @@ There is deliberately **no separate "newsletter" permission.** Email sharing is 
 
 It rides the existing `HostedVaultShare` table (`apps/web/prisma/schema.prisma`) and grant/revoke control plane (`apps/web/src/lib/hosted-vault-share/share-grant-store.ts`). No schema migration is required beyond registering the kind. Grant caps apply as-is.
 
-It is **default-checked at group creation**: the server adds `group-email.v0`
-to the group's `joinPolicyJson` requested set at creation
-(`apps/web/src/lib/hosted-groups/group-store.ts` / `join-policy.ts`). The
-creation-time assistant policy normally adds the reusable core health scopes:
-`steps-days.v0`, `activity-days.v0`, `workout-days.v0`,
-`sleep-duration-days.v0`, `sleep-times.v0`, `resting-heart-rate-days.v0`, and
-`hrv-days.v0`. A member can uncheck any item at join to decline. This gives
-common newsletters and challenges one upfront, customizable consent step while
-avoiding a blanket request for every selectable projection.
+It is **default-checked at group creation**: the server requests every
+top-level selectable projection in the group's `joinPolicyJson` requested set.
+This includes workout summaries and workout details so a later weekly update can
+explain a movement number with the observed training context when available.
+The reaction or join page remains the consent gate: each member can deselect any
+requested permission before granting it. Later additive offers remain narrow
+when Murph supplies the exact new scopes requested. Selector-specific activity
+scopes remain optional additions rather than duplicating the workout-detail contract.
 
 ### Newsletter automation — the schedule + config
 
@@ -198,6 +197,13 @@ metrics. Do not rank "healthiest person" or default to raw biomarker
 leaderboards; use HRV, resting heart rate, weight, symptoms, and similar
 context-dependent measures mainly for group-level patterns unless the group
 explicitly chose that challenge metric.
+
+When a standout number has directly observed behavior from the same member and
+period, pair the two: for example, describe high steps alongside the returned
+workout count, duration, or type. Use association language such as "alongside,"
+"with," or "during"; never invent a workout type or claim the behavior caused
+the metric. If the authorized result has no such context, state the number
+plainly instead of guessing.
 
 Express durations in human units. Use "about 30 minutes of movement a day"
 instead of raw minute totals when the returned fact's semantic owner identifies

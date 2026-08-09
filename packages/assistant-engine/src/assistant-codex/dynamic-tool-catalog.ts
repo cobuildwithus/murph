@@ -992,7 +992,7 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, optional bounded health projections offered as one fixed permission request. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',
+          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, omit projectionScopes only for initial group creation to request every top-level default permission; existing-group additions must supply the exact new projections requested. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',
       },
       standaloneLink: {
         type: 'boolean',
