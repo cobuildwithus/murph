@@ -1,6 +1,6 @@
 # Canonical iMessage card origin
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -15,10 +15,10 @@ Updated: 2026-08-09
 
 ## Root cause
 
-- The card URL origin was a fixed operator-config constant rather than a
-  runtime setting.
-- The initial HTTPS card implementation used a non-product domain and pinned it
-  into cross-platform fixtures and the companion decoder.
+- The initial HTTPS card implementation duplicated a non-product origin across
+  the encoder, aggregate contract bound, fixtures, and companion decoder.
+- Changing only emission exposed an eight-character contract/encoder budget
+  split, so both now derive from the existing canonical product origin.
 
 ## Scope
 
@@ -37,7 +37,8 @@ Updated: 2026-08-09
 
 ## Tasks
 
-1. [ ] Land the companion compatibility decoder and focused tests.
-2. [ ] Switch new backend card URLs and cross-platform fixtures.
-3. [ ] Run focused TypeScript, Swift, typecheck, and diff/privacy proof.
-4. [ ] Open linked PRs and complete their required review and CI gates.
+1. [x] Implement the companion compatibility decoder and focused tests.
+2. [x] Switch new backend card URLs and cross-platform fixtures.
+3. [x] Run focused TypeScript, Swift, typecheck, and diff/privacy proof.
+4. [x] Open linked PRs and complete their required review and CI gates.
+Completed: 2026-08-09
