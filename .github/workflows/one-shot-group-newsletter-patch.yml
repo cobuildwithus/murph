@@ -1,0 +1,411 @@
+name: One-shot group sharing patch
+
+on:
+  push:
+    branches:
+      - fix/group-newsletter-sharing-prompts
+    paths:
+      - .github/workflows/one-shot-group-newsletter-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, '[apply-group-newsletter-patch]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: fix/group-newsletter-sharing-prompts
+
+      - name: Apply focused patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {count}")
+              target.write_text(text.replace(old, new, 1))
+
+          join_policy = "apps/web/src/lib/hosted-groups/join-policy.ts"
+          replace_once(
+              join_policy,
+              '''export function normalizeHostedGroupAccessOfferProjectionScopes(
+            value: unknown,
+          ): HostedVaultShareProjectionScope[] {
+            const offered = normalizeHostedVaultShareProjectionScopes(value).map((scope) => {
+              if (scope.projectionKind === "deep-sleep-days.v0") {
+                return { projectionKind: "deep-sleep-sources-days.v1" } as const;
+              }
+              if (scope.projectionKind === "rem-sleep-days.v0") {
+                return { projectionKind: "rem-sleep-sources-days.v1" } as const;
+              }
+              return scope;
+            });
+            return normalizeHostedVaultShareProjectionScopes(offered);
+          }
+          ''',
+              '''export function normalizeHostedGroupAccessOfferProjectionScopes(
+            value: unknown,
+          ): HostedVaultShareProjectionScope[] {
+            const offered = normalizeHostedVaultShareProjectionScopes(value).map((scope) => {
+              if (scope.projectionKind === "deep-sleep-days.v0") {
+                return { projectionKind: "deep-sleep-sources-days.v1" } as const;
+              }
+              if (scope.projectionKind === "rem-sleep-days.v0") {
+                return { projectionKind: "rem-sleep-sources-days.v1" } as const;
+              }
+              return scope;
+            });
+            return normalizeHostedVaultShareProjectionScopes(offered);
+          }
+
+          /**
+           * New groups ask for every top-level selectable permission up front. The
+           * member still grants the exact disclosed set through the reaction or join
+           * page and may deselect anything there. Selector-specific activity scopes
+           * remain opt-in additions because workout details already carry type.
+           */
+          export const HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES =
+            Object.freeze(
+              normalizeHostedGroupAccessOfferProjectionScopes(
+                HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.map(
+                  (projectionKind): HostedVaultShareProjectionScope => ({
+                    projectionKind,
+                  }),
+                ),
+              ),
+            );
+
+          export function resolveHostedGroupAccessOfferProjectionScopes(
+            value: unknown,
+          ): HostedVaultShareProjectionScope[] {
+            const normalized = normalizeHostedGroupAccessOfferProjectionScopes(value);
+            if (normalized.length > 0) {
+              return normalized;
+            }
+            if (Array.isArray(value) && value.length > 0) {
+              return [];
+            }
+            return [...HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES];
+          }
+          ''',
+          )
+
+          group_tool = "apps/web/src/lib/hosted-groups/group-tool.ts"
+          replace_once(
+              group_tool,
+              '''import {
+            normalizeHostedGroupAccessOfferProjectionScopes,
+            normalizeHostedVaultShareProjectionScopes,
+            projectHostedVaultShareProjectionDisplays,
+          } from "./join-policy";
+          ''',
+              '''import {
+            normalizeHostedVaultShareProjectionScopes,
+            projectHostedVaultShareProjectionDisplays,
+            resolveHostedGroupAccessOfferProjectionScopes,
+          } from "./join-policy";
+          ''',
+          )
+          replace_once(
+              group_tool,
+              '''    const requestedVaultShareProjectionScopes =
+                normalizeHostedGroupAccessOfferProjectionScopes(
+                  input.joinLink?.requestedVaultShareProjectionScopes
+                    ?? input.joinLink?.requestedVaultShareProjectionKinds
+                    ?? [],
+                );
+          ''',
+              '''    const requestedVaultShareProjectionScopes =
+                resolveHostedGroupAccessOfferProjectionScopes(
+                  input.joinLink?.requestedVaultShareProjectionScopes
+                    ?? input.joinLink?.requestedVaultShareProjectionKinds,
+                );
+          ''',
+          )
+          replace_once(
+              group_tool,
+              '''  const projectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
+              input.joinOffer?.projectionScopes
+                ?? input.joinOffer?.projectionKinds
+                ?? [],
+            );
+          ''',
+              '''  const projectionScopes = resolveHostedGroupAccessOfferProjectionScopes(
+              input.joinOffer?.projectionScopes
+                ?? input.joinOffer?.projectionKinds,
+            );
+          ''',
+          )
+          replace_once(
+              group_tool,
+              '''function buildHostedGroupJoinOfferMessage(input: {
+            joinUrl: string;
+            projectionScopes: readonly HostedVaultShareProjectionScope[];
+          }): string {
+            // The link stays as the control for choosing different permissions, and works
+            // for everyone.
+            return `Like or heart this message if these default sharing choices look right: ${
+              renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
+            }. Use ${input.joinUrl} to choose different permissions.`;
+          }
+          ''',
+              '''export function buildHostedGroupJoinOfferMessage(input: {
+            joinUrl: string;
+            projectionScopes: readonly HostedVaultShareProjectionScope[];
+          }): string {
+            // Keep one deterministic server-owned sentence: it is the reaction's
+            // consent surface and must replay with the exact stored scope snapshot.
+            return `Sounds good — like or heart this message to share ${
+              renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
+            } with the group, or use ${input.joinUrl} to customize what you share.`;
+          }
+          ''',
+          )
+
+          dynamic_tools = "packages/assistant-engine/src/assistant-codex/dynamic-tools.ts"
+          replace_once(
+              dynamic_tools,
+              '''    let modelResult:
+                | ReturnType<typeof groupAccessOfferModelResult>
+                | ReturnType<typeof groupToolModelResult>
+              if (input.request.action === 'offer_access') {
+          ''',
+              '''    let modelResult:
+                | ReturnType<typeof groupAccessOfferModelResult>
+                | ReturnType<typeof groupToolModelResult>
+              let nativeAccessOfferOwnsReply = false
+              if (input.request.action === 'offer_access') {
+          ''',
+          )
+          replace_once(
+              dynamic_tools,
+              '''      modelResult = groupAccessOfferModelResult(result)
+              } else {
+          ''',
+              '''      modelResult = groupAccessOfferModelResult(result)
+                nativeAccessOfferOwnsReply =
+                  modelResult.result.status === 'ok'
+                  && modelResult.result.presentation === 'native'
+                  && modelResult.result.recencyEvidence === 'eligible'
+              } else {
+          ''',
+          )
+          replace_once(
+              dynamic_tools,
+              '''    return {
+                ...toolTextResult(true, safeToolPayloadText(payload)),
+                ...(usageDraft ? { usageDraft } : {}),
+              }
+          ''',
+              '''    return {
+                ...toolTextResult(true, safeToolPayloadText(payload)),
+                ...(nativeAccessOfferOwnsReply
+                  ? { finalActionPatch: { kind: 'none' as const } }
+                  : {}),
+                ...(usageDraft ? { usageDraft } : {}),
+              }
+          ''',
+          )
+
+          newsletter = "packages/assistant-engine/src/assistant/group-newsletter-automation.ts"
+          replace_once(
+              newsletter,
+              '''    'Follow the saved newsletter name, tone, health scopes, and custom note unless they conflict with this contract.',
+              ...deliveryRules,
+          ''',
+              '''    'Follow the saved newsletter name, tone, health scopes, and custom note unless they conflict with this contract.',
+              'Turn standout numbers into a short story: when the authorized result contains same-period workout count, duration, or type for that member, pair it with the relevant steps, movement, or exercise number.',
+              'Use neutral association language such as "alongside", "with", or "during". Never invent a reason, infer an unreturned workout type, or say one metric caused another. If no grounded context is available, state the number plainly.',
+              ...deliveryRules,
+          ''',
+          )
+
+          assistant_test = "packages/assistant-engine/test/assistant-codex-group-tool.test.ts"
+          replace_once(
+              assistant_test,
+              '''    expect(JSON.stringify(readGroupToolPayload(nativeResult))).not.toContain(
+                "native-hidden",
+              );
+            });
+          ''',
+              '''    expect(JSON.stringify(readGroupToolPayload(nativeResult))).not.toContain(
+                "native-hidden",
+              );
+              expect(standaloneResult.finalActionPatch).toBeUndefined();
+              expect(nativeResult.finalActionPatch).toEqual({ kind: "none" });
+            });
+          ''',
+          )
+          replace_once(
+              assistant_test,
+              '''    expect(readGroupToolPayload(replayedProviderResult)).toEqual({
+                action: "offer_access",
+                result: {
+                  presentation: "native",
+                  recencyEvidence: "unavailable",
+                  status: "ok",
+                },
+              });
+            });
+          ''',
+              '''    expect(readGroupToolPayload(replayedProviderResult)).toEqual({
+                action: "offer_access",
+                result: {
+                  presentation: "native",
+                  recencyEvidence: "unavailable",
+                  status: "ok",
+                },
+              });
+              expect(reusedResult.finalActionPatch).toBeUndefined();
+              expect(legacyResult.finalActionPatch).toBeUndefined();
+              expect(replayedProviderResult.finalActionPatch).toBeUndefined();
+            });
+          ''',
+          )
+
+          web_test = "apps/web/test/hosted-group-tool.test.ts"
+          replace_once(
+              web_test,
+              '''import {
+            buildHostedGroupJoinOfferProviderIdempotencyKey,
+            HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION,
+          ''',
+              '''import {
+            buildHostedGroupJoinOfferMessage,
+            buildHostedGroupJoinOfferProviderIdempotencyKey,
+            HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION,
+          ''',
+          )
+          replace_once(
+              web_test,
+              '''import {
+            mergeHostedGroupJoinPolicy,
+            normalizeHostedGroupAccessOfferProjectionScopes,
+            projectHostedVaultShareProjectionDisplays,
+            readHostedGroupJoinPolicy,
+          } from "@/src/lib/hosted-groups/join-policy";
+          ''',
+              '''import {
+            HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
+            mergeHostedGroupJoinPolicy,
+            normalizeHostedGroupAccessOfferProjectionScopes,
+            projectHostedVaultShareProjectionDisplays,
+            readHostedGroupJoinPolicy,
+            resolveHostedGroupAccessOfferProjectionScopes,
+          } from "@/src/lib/hosted-groups/join-policy";
+          ''',
+          )
+          replace_once(
+              web_test,
+              '''describe("handleHostedRuntimeGroupTool", () => {
+          ''',
+              '''describe("hosted group access-offer defaults", () => {
+            it("requests every top-level permission when no narrower set is supplied", () => {
+              const resolved = resolveHostedGroupAccessOfferProjectionScopes([]);
+              expect(resolved).toEqual(HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES);
+              expect(resolved).toEqual(expect.arrayContaining([
+                SLEEP_DURATION_SCOPE,
+                WORKOUTS_SCOPE,
+                PROTEIN_SCOPE,
+              ]));
+              expect(resolved.every((scope) => !("selector" in scope))).toBe(true);
+              expect(resolved.length).toBeLessThan(
+                HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
+              );
+            });
+
+            it("keeps explicit scopes narrow and renders one natural consent sentence", () => {
+              expect(resolveHostedGroupAccessOfferProjectionScopes([WORKOUTS_SCOPE]))
+                .toEqual([WORKOUTS_SCOPE]);
+              expect(buildHostedGroupJoinOfferMessage({
+                joinUrl: "https://www.withmurph.ai/groups/join/example",
+                projectionScopes: [WORKOUTS_SCOPE],
+              })).toBe(
+                "Sounds good — like or heart this message to share your Murph profile name and workout details with the group, or use https://www.withmurph.ai/groups/join/example to customize what you share.",
+              );
+            });
+          });
+
+          describe("handleHostedRuntimeGroupTool", () => {
+          ''',
+          )
+
+          domain_test = "packages/assistant-engine/test/group-newsletter-automation.test.ts"
+          Path(domain_test).write_text('''import { describe, expect, it } from 'vitest'\n\nimport {\n  buildGroupNewsletterScheduledExecutionPrompt,\n} from '../src/assistant/group-newsletter-automation.js'\n\ndescribe('group newsletter execution prompt', () => {\n  for (const delivery of ['current_chat', 'group_email'] as const) {\n    it(`grounds contextual stories for ${delivery}`, () => {\n      const prompt = buildGroupNewsletterScheduledExecutionPrompt({\n        delivery,\n        newsletterName: 'Weekly check-in',\n      })\n      expect(prompt).toContain('same-period workout count, duration, or type')\n      expect(prompt).toContain('Never invent a reason')\n      expect(prompt).toContain('If no grounded context is available, state the number plainly')\n    })\n  }\n})\n''')
+
+          product_spec = Path("agent-docs/product-specs/group-health-newsletter.md")
+          text = product_spec.read_text()
+          old_row = '| New-group requested permissions | For email delivery, Murph normally requests email plus the supported health scopes, narrowed by any explicit creator choice. For current-chat delivery, it requests only the chosen one to three health scopes and omits email. Every member may deselect any requested permission. |'
+          new_row = '| New-group requested permissions | Murph requests every top-level selectable group permission by default so the initial consent surface is complete. The member still opts in through the disclosed reaction or join page and may deselect any permission; an explicit creator request for a narrower set remains narrow. Selector-specific activity scopes stay optional because workout details already include type. |'
+          if text.count(old_row) != 1:
+              raise SystemExit('group-health-newsletter.md: requested-permissions row drifted')
+          text = text.replace(old_row, new_row, 1)
+          pattern = re.compile(
+              r'It is \*\*default-checked at group creation\*\*:.*?avoiding a blanket request for every selectable projection\.',
+              re.S,
+          )
+          replacement = '''It is **default-checked at group creation**: the server requests every
+          top-level selectable projection in the group's `joinPolicyJson` requested set.
+          This includes workout summaries and workout details so a later weekly update can
+          explain a movement number with the observed training context when available.
+          The reaction or join page remains the consent gate: each member can deselect any
+          requested permission before granting it, and an explicit creator request for a
+          narrower set remains narrow. Selector-specific activity scopes remain optional
+          additions rather than duplicating the workout-detail contract.'''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('group-health-newsletter.md: creation-default paragraph drifted')
+          content_anchor = '''Cross-person comparisons may include exercise, movement, steps,
+          sleep duration, sleep timing, consistency, and other consented group
+          metrics. Do not rank "healthiest person" or default to raw biomarker
+          leaderboards; use HRV, resting heart rate, weight, symptoms, and similar
+          context-dependent measures mainly for group-level patterns unless the group
+          explicitly chose that challenge metric.
+          '''
+          contextual = content_anchor + '''\nWhen a standout number has directly observed behavior from the same member and
+          period, pair the two: for example, describe high steps alongside the returned
+          workout count, duration, or type. Use association language such as "alongside,"
+          "with," or "during"; never invent a workout type or claim the behavior caused
+          the metric. If the authorized result has no such context, state the number
+          plainly instead of guessing.\n'''
+          if text.count(content_anchor) != 1:
+              raise SystemExit('group-health-newsletter.md: content anchor drifted')
+          product_spec.write_text(text.replace(content_anchor, contextual, 1))
+
+          workflow = Path('.github/workflows/one-shot-group-newsletter-patch.yml')
+          workflow.unlink()
+
+      - name: Check patch shape
+        run: |
+          git diff --check
+          test ! -e .github/workflows/one-shot-group-newsletter-patch.yml
+          git diff --exit-code -- .github/workflows || true
+          grep -q "nativeAccessOfferOwnsReply" packages/assistant-engine/src/assistant-codex/dynamic-tools.ts
+          grep -q "same-period workout count" packages/assistant-engine/src/assistant/group-newsletter-automation.ts
+          grep -q "HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES" apps/web/src/lib/hosted-groups/join-policy.ts
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/web/src/lib/hosted-groups/group-tool.ts \
+            apps/web/src/lib/hosted-groups/join-policy.ts \
+            apps/web/test/hosted-group-tool.test.ts \
+            packages/assistant-engine/src/assistant/group-newsletter-automation.ts \
+            packages/assistant-engine/src/assistant-codex/dynamic-tools.ts \
+            packages/assistant-engine/test/assistant-codex-group-tool.test.ts \
+            packages/assistant-engine/test/group-newsletter-automation.test.ts \
+            agent-docs/product-specs/group-health-newsletter.md \
+            .github/workflows/one-shot-group-newsletter-patch.yml
+          git commit -m "fix: improve group sharing and weekly context"
+          git push origin HEAD:fix/group-newsletter-sharing-prompts

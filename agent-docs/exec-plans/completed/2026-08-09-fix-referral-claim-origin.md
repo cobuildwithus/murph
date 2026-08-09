@@ -1,6 +1,6 @@
 # Fix referral claim origin policy
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -71,9 +71,27 @@ Updated: 2026-08-09
 
 ## Verification
 
-- Commands to run: focused Vitest suites for referral UX/routes, hosted
-  onboarding CSRF, and Next security headers; `pnpm --dir apps/web typecheck`;
-  real-browser local form submission; exact-head GitHub Actions.
-- Expected outcomes: legitimate same-origin form POST carries the canonical
-  origin and redirects into signup; missing, opaque, and cross-origin requests
-  remain denied; all focused and remote checks pass.
+- Focused referral UX, route, hosted-onboarding CSRF, and Next security-header
+  suites passed: 4 files and 63 tests.
+- The Web typecheck passed, and a real Chromium submission proved that the
+  canonical `Origin` is present while the token path is absent from `Referer`.
+- The preliminary specialist pass and final ReviewGPT round 1 returned no
+  findings on the shipped head. Required runnable CI checks passed except the
+  design-proof bookkeeping gate, which is closed by the catalog binding in the
+  follow-up commit.
+- The production deployment for PR #1492 succeeded. A synthetic invalid-token
+  smoke proved that the live landing emits `strict-origin`, a same-origin claim
+  reaches ordinary referral handling with a `303`, and a foreign-origin claim
+  remains rejected with a `403`.
+- The existing synthetic referral-flow design study is explicitly bound to the
+  origin-only claim contract, and its focused 10-test suite plus the prepared
+  Web typecheck passed.
+
+## Outcome
+
+- PR #1492 shipped the smallest correction: the referral page now uses
+  `strict-origin`; the mutation guard and onboarding semantics are unchanged.
+- Existing reusable referral links remain valid and no migration is required.
+- No private referral token was reused in tests, repository artifacts, review
+  packets, or production smoke evidence.
+Completed: 2026-08-09
