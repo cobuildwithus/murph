@@ -10,6 +10,9 @@ import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 const RETELL_WEBHOOK_MAX_BODY_BYTES = 4 * 1024 * 1024;
+const RETELL_RESULT_SIGNAL_FAILURE_TEST_ENV =
+  "MURPH_HOSTED_LOCAL_E2E_FAIL_FIRST_RETELL_RESULT_RUNTIME_SIGNAL";
+let failedFirstRetellResultSignalForHostedLocalE2e = false;
 
 export const POST = withJsonError(async (request: Request) => {
   const rawBody = (await readRawBodyBuffer(request, {
@@ -35,7 +38,7 @@ export const POST = withJsonError(async (request: Request) => {
         async () => {
           const result = await handleRetellCallAnalyzed({ call: payload.call });
           if (result.notificationMailboxItemId) {
-            await signalHostedMailboxAppendRuntime({
+            await signalRetellResultMailboxAppendRuntime({
               expectedUserId: result.notificationUserId,
               mailboxItemId: result.notificationMailboxItemId,
             });
@@ -51,6 +54,24 @@ export const POST = withJsonError(async (request: Request) => {
 
   return new Response(null, { status: 204 });
 });
+
+async function signalRetellResultMailboxAppendRuntime(input: {
+  expectedUserId: string | null;
+  mailboxItemId: string;
+}): Promise<void> {
+  // This hosted-local-only seam proves replay after a durable append and failed
+  // Temporal signal without adding a production request surface.
+  if (
+    process.env.MURPH_HOSTED_LOCAL_PROFILE?.startsWith("e2e:")
+    && process.env[RETELL_RESULT_SIGNAL_FAILURE_TEST_ENV] === "1"
+    && !failedFirstRetellResultSignalForHostedLocalE2e
+  ) {
+    failedFirstRetellResultSignalForHostedLocalE2e = true;
+    throw new Error("Hosted-local Retell result runtime signal fault injection.");
+  }
+
+  await signalHostedMailboxAppendRuntime(input);
+}
 
 async function settleRetellWebhookBranches(
   branches: ReadonlyArray<() => Promise<unknown>>,

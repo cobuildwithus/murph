@@ -5,6 +5,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   listHostedAiUsageForTest,
+  readHostedMailboxItemForTest,
   readHostedPhoneCallForTest,
   seedHostedPhoneCallForTest,
 } from "#hosted-web-testing";
@@ -77,10 +78,13 @@ describe("hosted local Retell result roundtrip e2e", () => {
       requiredRunnerEnvProfile: "linq",
       scenarioLabel: "Local hosted Retell result roundtrip e2e",
       streamLogs: streamDevLogs,
+      webProcessEnvOverrides: {
+        MURPH_HOSTED_LOCAL_E2E_FAIL_FIRST_RETELL_RESULT_RUNTIME_SIGNAL: "1",
+      },
     });
   }, 300_000);
 
-  it("delivers one signed call result proactively without a follow-up user turn", async () => {
+  it("replays one signed call result after the post-commit runtime signal fails", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -165,8 +169,49 @@ describe("hosted local Retell result roundtrip e2e", () => {
     const baselineSends = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequests = countAssistantProviderRequests();
     const payload = buildRetellCallAnalyzedPayload();
-    const response = await postSignedRetellWebhook(payload);
-    expect(response.status).toBe(204);
+    const signedPayload = buildSignedRetellWebhookRequest(payload);
+    const firstResponse = await postSignedRetellWebhook(signedPayload);
+    expect(firstResponse.status).toBe(500);
+
+    const notificationDedupeKey =
+      `assistant.notification.requested:phone-call-result:${phoneCallId}`;
+    const committedMailboxItem = await readHostedMailboxItemForTest({
+      dedupeKey: notificationDedupeKey,
+      environment: requireScenario().runtimeEnv,
+      userId,
+    });
+    expect(committedMailboxItem).toMatchObject({
+      consumedAt: null,
+      dedupeKey: notificationDedupeKey,
+      kind: "assistant.notification.requested",
+    });
+    expect(countAssistantProviderRequests()).toBe(baselineProviderRequests);
+    expect(requireLinqStub().countObservedSends(replyPath)).toBe(baselineSends);
+
+    const storedAfterFailedSignal = await readHostedPhoneCallForTest({
+      environment: requireScenario().runtimeEnv,
+      id: phoneCallId,
+    });
+    expect(storedAfterFailedSignal).toMatchObject({
+      analyzedAt: expect.any(Date),
+      memberId: userId,
+      originSessionId,
+      providerCallId,
+      resultEncrypted: expect.any(String),
+      resultJson: null,
+      status: "completed",
+    });
+
+    // Replay the exact same raw body and Retell signature.
+    const replay = await postSignedRetellWebhook(signedPayload);
+    expect(replay.status).toBe(204);
+    const replayMailboxItem = await readHostedMailboxItemForTest({
+      dedupeKey: notificationDedupeKey,
+      environment: requireScenario().runtimeEnv,
+      userId,
+    });
+    expect(replayMailboxItem.id).toBe(committedMailboxItem.id);
+    expect(replayMailboxItem.laneSeq).toBe(committedMailboxItem.laneSeq);
 
     // Proactive delivery: one message is sent WITHOUT any follow-up user turn.
     await requireScenario().waitForLatestPendingWake(userId);
@@ -206,11 +251,13 @@ describe("hosted local Retell result roundtrip e2e", () => {
     expect(storedCall?.resultEncrypted).not.toHaveLength(0);
     expect(storedCall?.resultJson).toBeNull();
 
-    // Idempotent replay: re-POSTing the same call_analyzed sends no second
-    // message and runs no second turn (deliveryIdempotencyKey dedupe on
-    // phone-call-result:${call.id}).
-    const replay = await postSignedRetellWebhook(payload);
-    expect(replay.status).toBe(204);
+    // Idempotent replay after recovery: re-POSTing the same call_analyzed sends
+    // no second message and runs no second turn (deliveryIdempotencyKey dedupe
+    // on phone-call-result:${call.id}).
+    const duplicateReplay = await postSignedRetellWebhook(
+      buildSignedRetellWebhookRequest(payload),
+    );
+    expect(duplicateReplay.status).toBe(204);
     await requireScenario().waitForHostedIdle(userId);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(baselineSends + 1);
     expect(countAssistantProviderRequests()).toBe(baselineProviderRequests + 1);
@@ -250,18 +297,33 @@ function buildRetellCallAnalyzedPayload(): Record<string, unknown> {
   };
 }
 
-async function postSignedRetellWebhook(payload: Record<string, unknown>): Promise<Response> {
+interface SignedRetellWebhookRequest {
+  rawBody: string;
+  signature: string;
+}
+
+function buildSignedRetellWebhookRequest(
+  payload: Record<string, unknown>,
+): SignedRetellWebhookRequest {
   const rawBody = JSON.stringify(payload);
   const timestamp = String(Date.now());
   const digest = createHmac("sha256", retellApiKey)
     .update(`${rawBody}${timestamp}`)
     .digest("hex");
+  return {
+    rawBody,
+    signature: `v=${timestamp},d=${digest}`,
+  };
+}
 
+async function postSignedRetellWebhook(
+  request: SignedRetellWebhookRequest,
+): Promise<Response> {
   return await fetch(`${requireScenario().harness.webBaseUrl}/api/retell/webhook`, {
-    body: rawBody,
+    body: request.rawBody,
     headers: {
       "content-type": "application/json",
-      "x-retell-signature": `v=${timestamp},d=${digest}`,
+      "x-retell-signature": request.signature,
     },
     method: "POST",
   });

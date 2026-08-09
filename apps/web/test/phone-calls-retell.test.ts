@@ -1185,6 +1185,80 @@ describe("Retell phone-call result handling", () => {
     expect(store.appendResultNotificationCalls).toEqual([]);
   });
 
+  it("treats account deletion during failed result encryption as terminal", async () => {
+    const encryptionError = new Error("result encryption unavailable");
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      encryptResultError: encryptionError,
+      onEncryptResult: async (call) => {
+        expect(call.id).toBe("hpc_123");
+        return null;
+      },
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+    })).resolves.toEqual({
+      notificationMailboxItemId: null,
+      notificationUserId: null,
+    });
+
+    expect(store.currentCall()).toBeNull();
+    expect(store.findUniqueCalls).toEqual([
+      { where: { providerCallId: "retell_call_123" } },
+      { where: { id: "hpc_123" } },
+    ]);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.appendResultNotificationCalls).toEqual([]);
+    expect(store.transactionCalls()).toBe(0);
+  });
+
+  it("rethrows failed result encryption while the exact call row survives", async () => {
+    const encryptionError = new Error("result encryption unavailable");
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      encryptResultError: encryptionError,
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+    })).rejects.toBe(encryptionError);
+
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      id: "hpc_123",
+      resultEncrypted: null,
+      resultJson: null,
+    });
+    expect(store.findUniqueCalls).toEqual([
+      { where: { providerCallId: "retell_call_123" } },
+      { where: { id: "hpc_123" } },
+    ]);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.appendResultNotificationCalls).toEqual([]);
+    expect(store.transactionCalls()).toBe(0);
+  });
+
   it("treats account deletion during the post-commit append as terminal", async () => {
     const store = createWebhookStore({
       appendResultNotification: async () => {
@@ -1809,6 +1883,7 @@ function createWebhookStore(input: {
     result?: HostedPhoneCallResult,
   ) => Promise<void>;
   call: HostedPhoneCall;
+  encryptResultError?: Error;
   onEncryptResult?: (
     call: HostedPhoneCall,
   ) => Promise<HostedPhoneCall | null | undefined>;
@@ -1896,6 +1971,9 @@ function createWebhookStore(input: {
         if (externallyCommitted !== undefined) {
           currentCall = externallyCommitted;
         }
+      }
+      if (input.encryptResultError) {
+        throw input.encryptResultError;
       }
       return `hsb-test:${Buffer.from(
         JSON.stringify({
