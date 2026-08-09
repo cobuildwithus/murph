@@ -23,13 +23,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Refreshed after the referral-display merge advanced main.
-          git fetch origin main agent/non-expiring-starter-usage
+          git fetch origin \
+            main \
+            agent/non-expiring-starter-usage \
+            codex/starter-usage-export-final
           git branch --force export-main origin/main
           git branch --force export-pr origin/agent/non-expiring-starter-usage
-          git bundle create /tmp/pr1464-current.bundle export-main export-pr
+          git branch --force export-helper origin/codex/starter-usage-export-final
+          git bundle create /tmp/pr1464-current.bundle \
+            export-main export-pr export-helper
           git rev-parse export-main > /tmp/pr1464-main.txt
           git rev-parse export-pr > /tmp/pr1464-head.txt
+          git rev-parse export-helper > /tmp/pr1464-helper.txt
 
       - uses: actions/upload-artifact@v4
         with:
@@ -38,5 +43,6 @@ jobs:
             /tmp/pr1464-current.bundle
             /tmp/pr1464-main.txt
             /tmp/pr1464-head.txt
+            /tmp/pr1464-helper.txt
           retention-days: 1
           compression-level: 0
