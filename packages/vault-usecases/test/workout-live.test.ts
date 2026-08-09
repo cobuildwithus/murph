@@ -52,6 +52,7 @@ describe('live workout model', () => {
     assert.equal(workout.sourceApp, LIVE_WORKOUT_SOURCE_APP)
     assert.equal(workout.startedAt, '2026-08-09T18:00:00.000Z')
     assert.equal(workout.endedAt, undefined)
+    assert.equal(workout.sessionNote, 'Gym session')
     assert.equal(isActiveLiveWorkout(workout), true)
     assert.deepEqual(workout.exercises, [
       {
@@ -78,5 +79,13 @@ describe('live workout model', () => {
       }),
       false,
     )
+
+    const workoutWithRoutineNote = buildLiveWorkoutSessionFromTemplate({
+      template,
+      routineId: 'wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      routineName: 'Push Day',
+      startedAt: '2026-08-09T18:00:00.000Z',
+    })
+    assert.equal(workoutWithRoutineNote.sessionNote, 'Push day')
   })
 })

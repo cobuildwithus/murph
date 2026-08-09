@@ -7,23 +7,55 @@ import {
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
+import {
+  compareByLatest,
+  loadQueryRuntime,
+  toCommandShowEntity,
+} from '../commands/query-record-command-helpers.js'
+import { loadWorkoutCoreRuntime } from './workout-core.js'
 import { editWorkoutRecord } from './workout.js'
+import { showWorkoutRecord } from './workout-read.js'
 import {
-  listWorkoutRecords,
-  showWorkoutRecord,
-} from './workout-read.js'
-import {
-  ACTIVE_WORKOUT_SCAN_LIMIT,
   type LiveWorkoutExerciseLookup,
   type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
   elapsedDurationMinutes,
   isActiveLiveWorkout,
 } from './workout-live-model.js'
+import { toVaultCliError } from './vault-usecase-helpers.js'
 
 const EXERCISES_PATCH_PREFIX = 'workout.exercises='
+const LIVE_WORKOUT_RESOURCE_KEY = 'events/live-workout-session'
+const LIVE_WORKOUT_RESOURCE_LABEL = 'live workout session'
 
 export type WorkoutShowResult = Awaited<ReturnType<typeof showWorkoutRecord>>
+
+export async function withLiveWorkoutMutationLock<TResult>(
+  vault: string,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  const core = await loadWorkoutCoreRuntime()
+
+  try {
+    return await core.withCanonicalResourceLocks({
+      vaultRoot: vault,
+      resources: [
+        core.canonicalLogicalResource(
+          LIVE_WORKOUT_RESOURCE_KEY,
+          LIVE_WORKOUT_RESOURCE_LABEL,
+        ),
+      ],
+      run,
+    })
+  } catch (error) {
+    throw toVaultCliError(error, {
+      CANONICAL_RESOURCE_LOCKED: {
+        code: 'command_failed',
+        details: { retryable: true },
+      },
+    })
+  }
+}
 
 export async function resolveLiveWorkout(
   input: LiveWorkoutLookupInput,
@@ -60,17 +92,23 @@ export async function resolveLiveWorkout(
 }
 
 export async function findActiveLiveWorkouts(vault: string): Promise<WorkoutShowResult[]> {
-  const listed = await listWorkoutRecords({
+  const query = await loadQueryRuntime('live workout query reads')
+  const readModel = await query.readVault(vault)
+  const records = query
+    .listEntities(readModel, {
+      families: ['event'],
+      kinds: ['activity_session'],
+    })
+    .filter((record) => {
+      const parsed = workoutSessionSchema.safeParse(record.attributes.workout)
+      return parsed.success && isActiveLiveWorkout(parsed.data)
+    })
+    .sort(compareByLatest)
+
+  return records.map((record) => ({
     vault,
-    limit: ACTIVE_WORKOUT_SCAN_LIMIT,
-  })
-  const shown = await Promise.all(
-    listed.items.map((item) => showWorkoutRecord(vault, item.id)),
-  )
-  return shown.filter((entry) => {
-    const parsed = workoutSessionSchema.safeParse(entry.entity.data.workout)
-    return parsed.success && isActiveLiveWorkout(parsed.data)
-  })
+    entity: toCommandShowEntity(record),
+  }))
 }
 
 export function parseShownWorkout(shown: WorkoutShowResult): WorkoutSession {
@@ -101,41 +139,51 @@ export async function updateLiveWorkoutExercises(
     )
   }
 
-  await editWorkoutRecord({
+  return editWorkoutRecord({
     vault: shown.vault,
     lookup: shown.entity.id,
     set,
   })
-  return showWorkoutRecord(shown.vault, shown.entity.id)
 }
 
 export function resolveExerciseIndex(
   exercises: readonly WorkoutExercise[],
   lookup: LiveWorkoutExerciseLookup,
 ): number {
-  let candidates = exercises.map((exercise, index) => ({ exercise, index }))
+  const exerciseId = normalizeOptionalText(lookup.exerciseId)
+  const exerciseName = normalizeOptionalText(lookup.exerciseName)
+  const exerciseOrder = lookup.exerciseOrder
 
-  if (lookup.exerciseId) {
-    const id = lookup.exerciseId.trim()
-    candidates = candidates.filter(({ exercise }) => exercise.sourceExerciseId === id)
-  }
-  if (lookup.exerciseOrder !== undefined) {
-    candidates = candidates.filter(
-      ({ exercise }) => exercise.order === lookup.exerciseOrder,
+  if (
+    exerciseOrder !== undefined &&
+    (!Number.isInteger(exerciseOrder) || exerciseOrder < 1)
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Exercise order must be a positive integer.',
     )
   }
-  if (lookup.exerciseName) {
-    const name = normalizeExerciseName(lookup.exerciseName)
+
+  let candidates = exercises.map((exercise, index) => ({ exercise, index }))
+
+  if (exerciseId) {
+    candidates = candidates.filter(
+      ({ exercise }) => exercise.sourceExerciseId === exerciseId,
+    )
+  }
+  if (exerciseOrder !== undefined) {
+    candidates = candidates.filter(
+      ({ exercise }) => exercise.order === exerciseOrder,
+    )
+  }
+  if (exerciseName) {
+    const name = normalizeExerciseName(exerciseName)
     candidates = candidates.filter(
       ({ exercise }) => normalizeExerciseName(exercise.name) === name,
     )
   }
 
-  if (
-    lookup.exerciseId === undefined &&
-    lookup.exerciseOrder === undefined &&
-    lookup.exerciseName === undefined
-  ) {
+  if (!exerciseId && exerciseOrder === undefined && !exerciseName) {
     throw new VaultCliError(
       'invalid_option',
       'Identify the exercise by name, source id, or order.',
@@ -219,10 +267,6 @@ export function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : undefined
-}
-
-export function optionalNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 function assertLiveWorkout(workout: WorkoutSession, workoutId: string): void {

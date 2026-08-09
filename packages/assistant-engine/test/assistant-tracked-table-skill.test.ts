@@ -80,9 +80,21 @@ describe('assistant tracked workout table skill', () => {
       'Do not reconstruct and replace the complete nested exercise/set array',
     )
     expect(skill).toContain('pass `--workout-id`')
+    expect(skill).toContain(
+      'pass `--workout-id` on every live-workout mutation',
+    )
     expect(skill).toContain('one explicit exercise selector, and `--set-order`')
     expect(skill).toContain('correct the same set rather than append a duplicate')
     expect(skill).toContain('Saved target values remain in the workout format')
+    expect(skill).toContain('vault-cli workout format show')
+    expect(skill).toContain(
+      'Never copy planned targets into actual set fields',
+    )
+    expect(skill).toContain(
+      'refuses a structured replacement that omits a saved exercise or set',
+    )
+    expect(skill).toContain('Use `--clear-workout` only')
+    expect(skill).toContain('remove the entire record')
     expect(skill).toContain('Finish only when the member explicitly says they are done')
     expect(skill).toContain('Never infer weight, repetitions, effort, assistance')
   })

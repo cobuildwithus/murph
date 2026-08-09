@@ -7,8 +7,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { showWorkoutFormat } from './workout-format.js'
-import { showWorkoutRecord } from './workout-read.js'
-import { addWorkoutRecord, editWorkoutRecord } from './workout.js'
+import { addStructuredWorkoutRecord, editWorkoutRecord } from './workout.js'
 import {
   LIVE_WORKOUT_SOURCE_APP,
   type AddLiveWorkoutExerciseInput,
@@ -26,7 +25,6 @@ import {
   findActiveLiveWorkouts,
   normalizeOptionalText,
   normalizeWorkoutTimestamp,
-  optionalNumber,
   optionalString,
   parseShownWorkout,
   requireNonEmptyText,
@@ -34,11 +32,18 @@ import {
   resolveExerciseIndex,
   resolveLiveWorkout,
   updateLiveWorkoutExercises,
+  withLiveWorkoutMutationLock,
 } from './workout-live-state.js'
 
 export * from './workout-live-model.js'
 
 export async function startLiveWorkout(input: StartLiveWorkoutInput) {
+  return withLiveWorkoutMutationLock(input.vault, () =>
+    startLiveWorkoutWithLockHeld(input),
+  )
+}
+
+async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
   const active = await findActiveLiveWorkouts(input.vault)
   if (active.length > 0) {
     throw new VaultCliError(
@@ -54,6 +59,10 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
   )
   const name = normalizeOptionalText(input.name)
   const note = normalizeOptionalText(input.note)
+  const durationMinutes = elapsedDurationMinutes(
+    startedAt,
+    new Date().toISOString(),
+  )
 
   if (input.routine) {
     const routine = await showWorkoutFormat(input.vault, input.routine.trim())
@@ -71,20 +80,27 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
       startedAt,
       sessionNote: note,
     })
+    const eventNote =
+      note ??
+      optionalString(routine.entity.data.templateText) ??
+      optionalString(routine.entity.data.text) ??
+      workout.sessionNote ??
+      routineTitle
 
-    return addWorkoutRecord({
+    return addStructuredWorkoutRecord({
       vault: input.vault,
-      workout,
-      text: note ?? routineTitle,
-      title: name ?? routineTitle,
-      durationMinutes: elapsedDurationMinutes(startedAt, new Date().toISOString()),
-      activityType:
-        normalizeOptionalText(input.activityType) ??
-        optionalString(routine.entity.data.activityType) ??
-        'strength-training',
-      distanceKm: optionalNumber(routine.entity.data.distanceKm),
-      occurredAt: startedAt,
-      source: 'manual',
+      draft: {
+        occurredAt: startedAt,
+        source: 'manual',
+        title: name ?? routineTitle,
+        note: eventNote,
+        activityType:
+          normalizeOptionalText(input.activityType) ??
+          optionalString(routine.entity.data.activityType) ??
+          'strength-training',
+        durationMinutes,
+        workout,
+      },
     })
   }
 
@@ -95,15 +111,18 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
     ...(note ? { sessionNote: note } : {}),
     exercises: [],
   })
-  return addWorkoutRecord({
+  return addStructuredWorkoutRecord({
     vault: input.vault,
-    workout,
-    text: note ?? title,
-    title,
-    durationMinutes: elapsedDurationMinutes(startedAt, new Date().toISOString()),
-    activityType: normalizeOptionalText(input.activityType) ?? 'strength-training',
-    occurredAt: startedAt,
-    source: 'manual',
+    draft: {
+      occurredAt: startedAt,
+      source: 'manual',
+      title,
+      note: note ?? title,
+      activityType:
+        normalizeOptionalText(input.activityType) ?? 'strength-training',
+      durationMinutes,
+      workout,
+    },
   })
 }
 
@@ -112,6 +131,14 @@ export async function showActiveLiveWorkout(input: LiveWorkoutLookupInput) {
 }
 
 export async function addLiveWorkoutExercise(
+  input: AddLiveWorkoutExerciseInput,
+) {
+  return withLiveWorkoutMutationLock(input.vault, () =>
+    addLiveWorkoutExerciseWithLockHeld(input),
+  )
+}
+
+async function addLiveWorkoutExerciseWithLockHeld(
   input: AddLiveWorkoutExerciseInput,
 ) {
   const shown = await resolveLiveWorkout(input, { requireActive: true })
@@ -144,7 +171,9 @@ export async function addLiveWorkoutExercise(
     ...(note ? { note } : {}),
     sets: Array.from({ length: setCount }, (_, index) => ({ order: index + 1 })),
   }
-  const parsedProposed = workoutSessionSchema.parse({ exercises: [proposed] }).exercises[0]!
+  const parsedProposed = workoutSessionSchema.parse({
+    exercises: [proposed],
+  }).exercises[0]!
   const existing = exercises.find((exercise) => exercise.order === order)
   if (existing) {
     if (JSON.stringify(existing) === JSON.stringify(parsedProposed)) {
@@ -162,6 +191,12 @@ export async function addLiveWorkoutExercise(
 }
 
 export async function logLiveWorkoutSet(input: LogLiveWorkoutSetInput) {
+  return withLiveWorkoutMutationLock(input.vault, () =>
+    logLiveWorkoutSetWithLockHeld(input),
+  )
+}
+
+async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
   const shown = await resolveLiveWorkout(input, { requireActive: true })
   const workout = parseShownWorkout(shown)
   const exercises = structuredClone(workout.exercises)
@@ -204,6 +239,14 @@ export async function logLiveWorkoutSet(input: LogLiveWorkoutSetInput) {
 }
 
 export async function clearLiveWorkoutSet(input: ClearLiveWorkoutSetInput) {
+  return withLiveWorkoutMutationLock(input.vault, () =>
+    clearLiveWorkoutSetWithLockHeld(input),
+  )
+}
+
+async function clearLiveWorkoutSetWithLockHeld(
+  input: ClearLiveWorkoutSetInput,
+) {
   const shown = await resolveLiveWorkout(input, { requireActive: true })
   const workout = parseShownWorkout(shown)
   const exercises = structuredClone(workout.exercises)
@@ -231,6 +274,12 @@ export async function clearLiveWorkoutSet(input: ClearLiveWorkoutSetInput) {
 }
 
 export async function finishLiveWorkout(input: FinishLiveWorkoutInput) {
+  return withLiveWorkoutMutationLock(input.vault, () =>
+    finishLiveWorkoutWithLockHeld(input),
+  )
+}
+
+async function finishLiveWorkoutWithLockHeld(input: FinishLiveWorkoutInput) {
   const shown = await resolveLiveWorkout(input, {
     requireActive: input.workoutId === undefined,
     allowCompleted: input.workoutId !== undefined,
@@ -258,7 +307,7 @@ export async function finishLiveWorkout(input: FinishLiveWorkoutInput) {
   }
   const durationMinutes = elapsedDurationMinutes(workout.startedAt, endedAt)
 
-  await editWorkoutRecord({
+  return editWorkoutRecord({
     vault: input.vault,
     lookup: shown.entity.id,
     set: [
@@ -266,5 +315,4 @@ export async function finishLiveWorkout(input: FinishLiveWorkoutInput) {
       `durationMinutes=${durationMinutes}`,
     ],
   })
-  return showWorkoutRecord(input.vault, shown.entity.id)
 }

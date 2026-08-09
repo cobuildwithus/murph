@@ -43,9 +43,12 @@ async function run<T>(cli: Cli.Cli, args: string[]) {
 
 interface WorkoutResult {
   eventId: string
+  distanceKm: number | null
+  note: string
   workout: {
     sourceApp?: string
     endedAt?: string
+    sessionNote?: string
     exercises: Array<{
       name: string
       sourceExerciseId?: string
@@ -82,6 +85,9 @@ test('live workout commands keep one canonical session and target one set', asyn
     '--vault', vaultRoot,
     '--type', 'strength-training',
     '--duration', '45',
+    '--distance-km', '5',
+    '--routine-note', 'Keep the tempo controlled.',
+    '--template-text', 'Planned 5 km cooldown after lifting.',
     '--exercise',
     'order=1;name=Bench press;sourceExerciseId=EX123;mode=weight_reps;unitOverride=lb',
     '--set-template',
@@ -98,6 +104,9 @@ test('live workout commands keep one canonical session and target one set', asyn
     '--vault', vaultRoot,
   ])).envelope)
   assert.equal(started.workout?.sourceApp, 'murph-live')
+  assert.equal(started.workout?.sessionNote, 'Keep the tempo controlled.')
+  assert.equal(started.note, 'Planned 5 km cooldown after lifting.')
+  assert.equal(started.distanceKm, null)
   assert.deepEqual(started.workout?.exercises[0]?.sets, [
     { order: 1, type: 'warmup' },
     { order: 2 },
@@ -156,20 +165,106 @@ test('live workout commands keep one canonical session and target one set', asyn
     order: 2,
   })
 
-  const finished = requireData((await run<ShowResult>(cli, [
+  const finishArgs = [
     'workout', 'finish',
     '--workout-id', workoutId,
     '--ended-at', '2026-08-09T18:45:00.000Z',
     '--vault', vaultRoot,
-  ])).envelope)
+  ]
+  const finished = requireData((await run<ShowResult>(cli, finishArgs)).envelope)
   assert.equal(
     finished.entity.data.workout.endedAt,
     '2026-08-09T18:45:00.000Z',
   )
   assert.equal(finished.entity.data.durationMinutes, 45)
 
+  const finishRetry = requireData(
+    (await run<ShowResult>(cli, finishArgs)).envelope,
+  )
+  assert.equal(
+    finishRetry.entity.data.workout.endedAt,
+    '2026-08-09T18:45:00.000Z',
+  )
+  assert.equal(finishRetry.entity.data.durationMinutes, 45)
+
   const noActive = await run(cli, [
     'workout', 'active', '--vault', vaultRoot,
   ])
   assert.equal(noActive.envelope.ok, false)
+})
+
+test('concurrent live workout commands serialize without losing set updates', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-concurrent-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const setupCli = createWorkoutCli()
+  const initialized = await run<{ created: boolean }>(setupCli, [
+    'init', '--vault', vaultRoot, '--timezone', 'America/New_York',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+
+  const startResults = await Promise.all(
+    Array.from({ length: 4 }, (_, index) =>
+      run<WorkoutResult>(createWorkoutCli(), [
+        'workout', 'start', `Concurrent workout ${index + 1}`,
+        '--started-at', '2026-08-09T18:00:00.000Z',
+        '--vault', vaultRoot,
+      ]),
+    ),
+  )
+  const successfulStarts = startResults.filter(
+    (result) => result.envelope.ok,
+  )
+  assert.equal(successfulStarts.length, 1)
+  const workoutId = requireData(successfulStarts[0]!.envelope).eventId
+
+  const added = requireData((await run<ShowResult>(setupCli, [
+    'workout', 'exercise', 'add', 'Bench press',
+    '--workout-id', workoutId,
+    '--order', '1',
+    '--sets', '4',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(added.entity.data.workout.exercises[0]?.sets.length, 4)
+
+  const loggedSets = await Promise.all(
+    Array.from({ length: 4 }, (_, index) =>
+      run<ShowResult>(createWorkoutCli(), [
+        'workout', 'set', 'log',
+        '--workout-id', workoutId,
+        '--exercise-order', '1',
+        '--set-order', String(index + 1),
+        '--reps', String(8 - index),
+        '--weight', String(135 + index * 10),
+        '--weight-unit', 'lb',
+        '--vault', vaultRoot,
+      ]),
+    ),
+  )
+  assert.equal(
+    loggedSets.filter((result) => result.envelope.ok).length,
+    loggedSets.length,
+  )
+
+  const active = requireData((await run<ShowResult>(setupCli, [
+    'workout', 'active',
+    '--workout-id', workoutId,
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(active.entity.data.workout.exercises[0]?.sets, [
+    { order: 1, reps: 8, weight: 135, weightUnit: 'lb' },
+    { order: 2, reps: 7, weight: 145, weightUnit: 'lb' },
+    { order: 3, reps: 6, weight: 155, weightUnit: 'lb' },
+    { order: 4, reps: 5, weight: 165, weightUnit: 'lb' },
+  ])
+
+  const finished = requireData((await run<ShowResult>(setupCli, [
+    'workout', 'finish',
+    '--workout-id', workoutId,
+    '--ended-at', '2026-08-09T19:00:00.000Z',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(finished.entity.data.durationMinutes, 60)
 })

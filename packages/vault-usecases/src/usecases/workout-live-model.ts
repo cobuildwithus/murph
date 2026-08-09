@@ -9,7 +9,6 @@ import {
 import { deriveDurationMinutesFromTimestamps } from './workout-model.js'
 
 export const LIVE_WORKOUT_SOURCE_APP = 'murph-live' as const
-export const ACTIVE_WORKOUT_SCAN_LIMIT = 200
 
 export type ExerciseMode = NonNullable<WorkoutExercise['mode']>
 export type LoadUnit = NonNullable<WorkoutExercise['unitOverride']>
@@ -102,12 +101,14 @@ export function buildLiveWorkoutSessionFromTemplate(input: {
   startedAt: string
   sessionNote?: string
 }): WorkoutSession {
+  const sessionNote = input.sessionNote ?? input.template.routineNote
+
   return workoutSessionSchema.parse({
     sourceApp: LIVE_WORKOUT_SOURCE_APP,
     startedAt: input.startedAt,
     routineId: input.routineId,
     routineName: input.routineName,
-    ...(input.sessionNote ? { sessionNote: input.sessionNote } : {}),
+    ...(sessionNote ? { sessionNote } : {}),
     exercises: input.template.exercises
       .slice()
       .sort((left, right) => left.order - right.order)

@@ -15,15 +15,17 @@ Let a private member run one structured workout through ordinary Murph messages 
 - Keep canonical `activity_session` events and saved workout formats as the only durable owners.
 - Start saved routines with unlogged set placeholders so target values are not mistaken for completed work.
 - Move ordinary live-set updates away from model-authored full nested replacements.
+- Reuse the existing canonical resource-lock primitive to serialize the short read-modify-write window for one live session per vault.
 - Tighten the existing tracked-table skill around explicit exercise/set identity, verification, corrections, and low-noise card refreshes.
 
 ## Invariants
 
-- At most one Murph live workout is active per vault.
+- At most one Murph live workout is active per vault, including concurrent start attempts.
 - Existing historical and imported workouts are not reclassified as active; the live surface owns an explicit `murph-live` source marker plus start/end timestamps.
-- A set command changes one identified set while preserving every other exercise and set.
+- A set command changes one identified set while preserving every other exercise and set, including overlapping targeted updates.
 - Agent writes use an explicit workout id, exercise selector, and set order so retries overwrite the same set rather than append a duplicate.
-- Saved routine targets remain in the routine. A live session contains placeholders until actual values are reported.
+- Saved routine targets remain in the routine. A live session contains placeholders until actual values are reported, and saved distance defaults are not recorded as completed distance.
+- Saved routine notes remain available on the live session without passing through freeform workout inference.
 - Finishing records elapsed duration but never fills missing set values from the plan or prior history.
 - Compact tables remain immutable snapshots and never become workout authority.
 
@@ -31,13 +33,16 @@ Let a private member run one structured workout through ordinary Murph messages 
 
 - no new workout record family
 - no database table, tracker document, queue, lock service, or synchronization owner
+- no broad vault-wide lock around the workout; the existing per-vault logical-resource lock covers only the live-session mutation window
 - no mutable iMessage card or extension networking
 - no program planner, analytics service, timer service, or web UI in this slice
 - no schema migration
 
 ## Verification
 
-- Focused vault-usecase tests cover routine-to-live placeholder semantics and active/completed classification.
+- Focused vault-usecase tests cover routine-to-live placeholder semantics, saved routine-note fallback, and active/completed classification.
 - Focused CLI integration covers start, duplicate-start rejection, active resolution, explicit set logging, retry idempotence, exercise addition, set clearing, finish, finish retry, and no-active state.
-- Focused assistant-skill coverage pins the targeted command flow, no-inference rules, canonical set notes, and four-set presentation behavior.
+- Concurrent CLI coverage proves that simultaneous starts yield one active session and overlapping set writes preserve every set.
+- Focused assistant-skill coverage pins the targeted command flow, planned-versus-actual separation, fail-closed full replacements, no-inference rules, canonical set notes, and four-set presentation behavior.
+- Active-session discovery performs one canonical query read rather than a bounded list followed by repeated full-vault reads.
 - Exact-head repository CI remains the broad typecheck, generated CLI-artifact, package, and release verifier.
