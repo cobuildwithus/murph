@@ -32,6 +32,9 @@ jobs:
       - name: Register live workout commands
         run: node scripts/apply-live-workout-foundation.mjs
 
+      - name: Prepare CLI runtime dependencies
+        run: pnpm --dir packages/cli verify:prepared-runtime
+
       - name: Regenerate CLI artifacts
         run: pnpm --dir packages/cli gen:config-schema
 
