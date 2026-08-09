@@ -1129,10 +1129,10 @@ concurrent first-failure callbacks produce at most one immediate recheck and
 cannot all suppress each other. Recovery therefore does not depend on the
 diagnostic row having been written or read back: runtime logs stay purely
 diagnostic and remain subject to ordinary retention. The callback reports the
-number of rows actually persisted. If account deletion removes the member
-before a draining runtime's diagnostic batch arrives, Web treats only the exact
-`hosted_runtime_log_user_id_fkey` failure as a successful zero-row diagnostic
-drop; every other database failure remains visible.
+number of rows actually persisted. If account deletion removes or suspends the
+member before a draining runtime's diagnostic batch arrives, the dedicated
+writer returns a successful zero-row diagnostic result after rechecking primary
+member authority under the subject lock; database failures remain visible.
 Cloudflare only reports the accepted-attempt failure through the existing
 signed runtime-log callback; it does not schedule retries or become a recovery
 orchestrator.
@@ -2278,7 +2278,7 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - `HostedMailboxPayload`
 - `HostedMailboxLaneCounter`
 - `HostedWorkspace`
-- `HostedRuntimeLog`
+- the dedicated hosted runtime-log Postgres store
 - `hosted_user_crypto_envelope` signed wrapped domain-root envelopes
 - `hosted_user_crypto_audit` append-only hosted crypto authority audit events
 - runtime status projection from `HostedWorkspace.redactedStatusJson`, mailbox lag, and bounded logs
@@ -2380,7 +2380,7 @@ explicitly appends one.
 
 ## Observability
 
-`HostedRuntimeLog` is redacted observability, not correctness state. Logs may be
+The dedicated hosted runtime-log store is redacted observability, not correctness state. Logs may be
 lossy and must not contain plaintext messages, transcripts, vault data,
 provider payloads, secrets, local paths, or direct personal identifiers. The
 hosted onboarding-follow-up path emits distinct metadata-only records when the

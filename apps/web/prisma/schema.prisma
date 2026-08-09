@@ -570,7 +570,6 @@ model HostedMember {
   hostedMailboxPayloads          HostedMailboxPayload[]
   hostedMailboxLaneCounters      HostedMailboxLaneCounter[]
   hostedWorkspace                HostedWorkspace?
-  hostedRuntimeLogs              HostedRuntimeLog[]
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
@@ -1179,36 +1178,6 @@ model HostedWorkspace {
   @@map("hosted_workspace")
 }
 
-model HostedRuntimeLog {
-  id                String       @id
-  userId            String       @map("user_id")
-  at                DateTime
-  level             String
-  component         String
-  phase             String
-  eventCode         String       @map("event_code")
-  attemptId         String?      @map("attempt_id")
-  leaseGeneration   BigInt?      @map("lease_generation")
-  workspaceVersion  BigInt?      @map("workspace_version")
-  checkpointVersion BigInt?      @map("checkpoint_version")
-  mailboxLane       String?      @map("mailbox_lane")
-  mailboxSeqStart   BigInt?      @map("mailbox_seq_start")
-  mailboxSeqEnd     BigInt?      @map("mailbox_seq_end")
-  outboxIntentRef   String?      @map("outbox_intent_ref")
-  errorCode         String?      @map("error_code")
-  redactedJson      Json?        @map("redacted_json")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, at])
-  @@index([userId, eventCode, createdAt])
-  @@index([attemptId, eventCode, at])
-  @@index([level, at])
-  @@index([component, at])
-  @@index([at, id])
-  @@map("hosted_runtime_log")
-}
-
 model HostedInvite {
   id                           String        @id
   memberId                     String        @map("member_id")
@@ -1365,6 +1334,10 @@ model HostedGrowthDailySnapshot {
   // Null means the window is unknown or incomplete, never zero.
   activeUsersPriorDay      Int? @map("active_users_prior_day")
   activeUsersTrailing7Days Int? @map("active_users_trailing_7_days")
+  // MRR split behind mrr_usd_cents: individual plans versus family seats.
+  // Null means the row predates split capture, never zero.
+  individualMrrUsdCents Int? @map("individual_mrr_usd_cents")
+  familyMrrUsdCents     Int? @map("family_mrr_usd_cents")
 
   @@map("hosted_growth_daily_snapshot")
 }

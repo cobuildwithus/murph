@@ -2884,7 +2884,6 @@ export function parseHostedRuntimeGroupToolResponse(
             usage: {
               fundingNeeded: capacityState !== "healthy",
               fundingUrl,
-              sponsorshipStatus: "not_sponsored",
             },
           },
         };
@@ -2898,17 +2897,19 @@ export function parseHostedRuntimeGroupToolResponse(
         ]),
         "Hosted runtime group tool read_usage usage",
       );
-      const sponsorshipStatus = requireString(
-        usage.sponsorshipStatus,
-        "Hosted runtime group tool read_usage sponsorshipStatus",
-      );
-      if (
-        sponsorshipStatus !== "not_sponsored"
-        && sponsorshipStatus !== "sponsored"
-      ) {
-        throw new TypeError(
-          "Hosted runtime group tool read_usage sponsorshipStatus is invalid.",
+      if (usage.sponsorshipStatus !== undefined) {
+        const legacySponsorshipStatus = requireString(
+          usage.sponsorshipStatus,
+          "Hosted runtime group tool read_usage sponsorshipStatus",
         );
+        if (
+          legacySponsorshipStatus !== "not_sponsored"
+          && legacySponsorshipStatus !== "sponsored"
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage sponsorshipStatus is invalid.",
+          );
+        }
       }
       if (typeof usage.fundingNeeded !== "boolean") {
         throw new TypeError(
@@ -2925,7 +2926,6 @@ export function parseHostedRuntimeGroupToolResponse(
               usage.fundingUrl,
               "Hosted runtime group tool read_usage fundingUrl",
             ),
-            sponsorshipStatus,
           },
         },
       };

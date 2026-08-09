@@ -60,6 +60,14 @@ const TELEGRAM_REQUIRED_FRAME_SOURCES = [
   "https://oauth.telegram.org",
 ] as const;
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
+// Brand assets that OG and share-card route handlers read from disk at render
+// time through app/font-files.ts. They must be traced into each of those
+// serverless functions or every non-prerendered render 500s with ENOENT.
+// scripts/check-og-asset-traces.ts fails the build when a trace goes missing.
+const OG_SHARE_ASSET_TRACE_INCLUDES = [
+  "app/fonts/*.ttf",
+  "public/logo.svg",
+];
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -324,6 +332,14 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
       ],
+      // Keys are picomatch globs matched with `contains: true` against the
+      // route path (route groups stripped), so "/opengraph-image" covers every
+      // `opengraph-image` metadata route: the static marketing images and the
+      // dynamic invite/group/biomarker/experiment unfurls that are never
+      // prerendered. The two share-card route handlers are keyed explicitly.
+      "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
+      "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
+      "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],

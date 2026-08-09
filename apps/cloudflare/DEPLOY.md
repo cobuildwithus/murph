@@ -421,19 +421,19 @@ read-side tolerance is only the first deployment step.
 
 1. Deploy the Cloudflare Worker and runner bundle first with
    `container_rollout=immediate`. Require managed-container smoke to report the
-   new bundle fingerprint and drain older warm runners. During this phase, old
-   Web may still emit
-   `{capacityState,fundingUrl,periodEnd,remainingPercent?}`; the new runtime
-   validates that exact shape, derives only whether funding is needed, maps it
-   to `not_sponsored`, and discards the period and percentage.
+   new bundle fingerprint and drain older warm runners. The compatible runtime
+   accepts the current `{fundingNeeded,fundingUrl}` response, strips the
+   immediately preceding optional `sponsorshipStatus` field, and still accepts
+   the older `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response.
+   It derives only whether funding is needed from that oldest shape and
+   discards period, percentage, and funding-setup fields.
 2. Apply the additive capped-sponsorship migration, then deploy the compatible
    Web release. Confirm both the migration and new Web have converged before
    enabling monthly authorization creation or automatic refill admission. Web
-   must emit only `{fundingNeeded,fundingUrl,sponsorshipStatus}` before the
-   feature is enabled.
-3. Smoke one unsponsored and one sponsored group read. The runtime and assistant
-   may learn only `not_sponsored` or `sponsored`; quantitative fields must not
-   reappear.
+   now emits only `{fundingNeeded,fundingUrl}`.
+3. Smoke group reads with and without an active automatic sponsor. The runtime
+   and assistant may learn only funding urgency and the first-party capability;
+   funding setup and quantitative fields must not reappear.
 
 The first monthly authorization is the old-Web rollback floor. The preceding
 Web reconciliation code cannot activate that authorization, so after the first
@@ -452,14 +452,24 @@ to runtime or assistant policy.
 
 The current projection separates urgency from capability: `fundingNeeded`
 controls assistant-initiated depletion messaging, while a non-null `fundingUrl`
-may be used after an explicit funding request at any capacity. For that behavior,
-deploy the Cloudflare runner bundle first, then Web. Old Web leaves a healthy
-group's URL null, so the first step is inert; old runners may ignore a healthy
-URL from new Web, so the opposite skew is incomplete but safe. After both
-deployments, smoke an explicit funding request in a healthy unsponsored group
-and confirm Murph returns the first-party link without claiming the room needs
-funding. Open the link and confirm both monthly sponsorship and one-time
-contribution are available.
+may be used after an explicit funding request at any capacity. Deploy the
+Cloudflare runner bundle first, then Web: the new runtime safely strips the old
+producer's sponsorship field, while an old runtime rejects the new reduced
+shape. After both deployments, smoke a low room with automatic refill headroom
+or a pending refill and confirm Murph does not start a funding thread. Include
+an already-bound current-period payment on a paused authorization. Then
+smoke a low room with no automatic recovery and confirm Murph gives the ordinary
+link-free warning without payment-setup, payer, cap, amount, balance, or refill
+detail. Exhaust a room in each funding setup and confirm both receive the same
+deterministic neutral pause contract plus the first-party link, with no
+immediate-restoration promise or payer pressure. Opening the link must still
+preserve the single-automatic-sponsor invariant and show the payment options
+appropriate to the authenticated payer. Also smoke an explicit funding request
+in a healthy room and confirm Murph returns the first-party link without
+claiming the room needs funding. Finally, make mandatory-link projection fail
+before a denied-gate attempt, confirm no Linq or Telegram claim/provider send is
+made with linkless copy, restore the projection, and confirm the same capacity
+epoch sends the validated linked notice.
 
 ## Thread Usage Crossing Notice Rollout
 

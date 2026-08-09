@@ -548,9 +548,13 @@ export class PrismaHostedConnectionStore {
       ...hostedConnectionRecordArgs,
     });
 
-    return await this.buildDurableConnectionRecord(record, {
-      externalAccountId: account.externalAccountId,
-    });
+    return await this.buildDurableConnectionRecord(
+      record,
+      {
+        externalAccountId: account.externalAccountId,
+      },
+      prisma,
+    );
   }
 
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
@@ -564,7 +568,9 @@ export class PrismaHostedConnectionStore {
     tx?: HostedPrismaTransactionClient,
   ): Promise<PublicDeviceSyncAccount | null> {
     const record = await this.getConnectionRecordForUser(userId, connectionId, tx);
-    return record ? await this.buildDurableConnectionRecord(record) : null;
+    return record
+      ? await this.buildDurableConnectionRecord(record, {}, tx ?? this.prisma)
+      : null;
   }
 
   async getStoredConnectionAccountForUser(
@@ -981,9 +987,13 @@ export class PrismaHostedConnectionStore {
     fallback: {
       externalAccountId?: string | null;
     } = {},
+    // Callers already inside a transaction must pass their transaction client:
+    // the secure-box read otherwise checks out a second pooled connection while
+    // the transaction holds its own, which self-starves the pool under bursts.
+    prisma: HostedSecureBoxPrismaClient = this.prisma,
   ): Promise<PublicDeviceSyncAccount> {
     const mappedRecord = mapHostedConnectionRecord(record);
-    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec, this.prisma);
+    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec, prisma);
 
     return toRedactedPublicDeviceSyncAccount(
       buildHostedPublicDeviceSyncAccount({

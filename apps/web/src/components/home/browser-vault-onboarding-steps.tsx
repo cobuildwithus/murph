@@ -6,14 +6,13 @@ import {
   type BrowserVaultQueryClient,
 } from "@murphai/query/browser-overview";
 
+import { BrowserVaultUnavailableAlert } from "./browser-vault-unavailable-alert";
 import { HomeExperiments } from "./home-experiments";
 import {
   OnboardingSteps,
   type OnboardingStepsProps,
 } from "./onboarding-steps";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import {
   buildExperimentLibraryCards,
@@ -49,17 +48,10 @@ export function BrowserVaultOnboardingStepsContent({
   if (vaultUnavailable) {
     return (
       <>
-        <Alert variant="destructive">
-          <AlertTitle>Could not load your dashboard</AlertTitle>
-          <AlertDescription>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>{error ?? "Your dashboard data is not available right now."}</span>
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
-                Retry
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
+        <BrowserVaultUnavailableAlert
+          message={error}
+          onRetry={() => void refresh()}
+        />
         <OnboardingSteps
           {...props}
           hideExperimentStep

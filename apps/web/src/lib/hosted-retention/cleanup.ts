@@ -68,10 +68,6 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  const oldRuntimeLogsDeleted = await deleteOldHostedRuntimeLogs({
-    now,
-    prisma,
-  });
   // Serial by design: these are background deletes and must never fan out
   // across the same pool that serves user-facing control-plane work.
   const expiredIngressLatencyTracesDeleted = await deleteExpiredIngressLatencyTraces({
@@ -117,7 +113,7 @@ export async function runHostedRetentionCleanup(input: {
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
-    oldRuntimeLogsDeleted,
+    oldRuntimeLogsDeleted: 0,
     staleWebSessionsDeleted,
   };
 }
@@ -445,31 +441,6 @@ export async function retireExpiredMailboxContent(input: {
       tombstonesDeleted: Number(result?.tombstonesDeleted ?? 0n),
     };
   });
-}
-
-// Verbose levels are the overwhelming majority of the table and are only ever
-// read while an incident is fresh; warn/error keep the longer window.
-async function deleteOldHostedRuntimeLogs(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  const cutoff = new Date(input.now.getTime() - HOSTED_RUN_LOG_RETENTION_MS);
-  const verboseCutoff = new Date(
-    input.now.getTime() - HOSTED_RUN_LOG_VERBOSE_RETENTION_MS,
-  );
-  return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_runtime_log"
-      WHERE "at" < ${verboseCutoff}
-        AND ("at" < ${cutoff} OR "level" NOT IN ('warn', 'error'))
-      ORDER BY "at" ASC, "id" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-    )
-    DELETE FROM "hosted_runtime_log" AS runtime_log
-    USING doomed
-    WHERE runtime_log."id" = doomed."id"
-  `);
 }
 
 export async function deleteExpiredIngressLatencyTraces(input: {
