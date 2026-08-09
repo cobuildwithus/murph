@@ -413,7 +413,7 @@ export class DatabaseHealthStore {
   }
 
   private readMetaRow(): DatabaseHealthMetaRow {
-    return this.sql.exec<DatabaseHealthMetaRow>(
+    const row = this.sql.exec<DatabaseHealthMetaRow>(
       `SELECT
          run_lease_until_ms,
          consecutive_scrape_failures,
@@ -430,6 +430,25 @@ export class DatabaseHealthStore {
        FROM database_health_meta
        WHERE singleton = 1`,
     ).one();
+    if (
+      row.pending_alert_includes_monitoring === 1
+      && row.pending_alert_idempotency_key === null
+      && row.pending_alert_message === null
+    ) {
+      this.sql.exec(
+        `UPDATE database_health_meta
+         SET
+           monitoring_alert_owed_json = NULL,
+           pending_alert_includes_monitoring = 0
+         WHERE singleton = 1`,
+      );
+      return {
+        ...row,
+        monitoring_alert_owed_json: null,
+        pending_alert_includes_monitoring: 0,
+      };
+    }
+    return row;
   }
 }
 

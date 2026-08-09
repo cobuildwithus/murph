@@ -193,8 +193,14 @@ Last verified: 2026-08-07
   threshold persists one bounded telemetry-page obligation in the existing
   incident row. It survives an occupied pending-message slot, restart, recovery,
   and direct-error-only prioritization; only acknowledgment of a pending body
-  that includes the monitoring condition clears it. The additive columns retain
-  the existing schema version so a rollback Worker can safely ignore them.
+  that includes the monitoring condition clears it. Recovery and another
+  threshold before acknowledgment deliberately coalesce into that unresolved
+  notification, retaining the first threshold's bounded evidence and observation
+  time; this monitor does not maintain an outage backlog. The additive
+  columns retain the existing schema version so a rollback Worker can ignore
+  them. Current code recognizes the prior Worker's cleared pending key/body with
+  the telemetry marker still set as an acknowledgment and removes the stale
+  obligation before re-admission.
   A newly opened incident or one-shot direct migration admission failure admits
   its exact body and idempotency key in the same synchronous SQLite transaction
   that persists the sample and advances any direct-error counter baseline.
@@ -217,12 +223,16 @@ Last verified: 2026-08-07
   message queue or delivery lifecycle.
   An acknowledged incident's replayable gauge does not admit stale evidence
   while the attempt fence is closed; once the fence opens, a still-unsafe
-  current gauge admits the recurrence. An acknowledged telemetry-only incident
-  is one-shot while collection remains continuously incomplete or unavailable;
-  its current samples remain queryable, but they do not admit repeated pages.
-  A complete healthy sample cannot discard an unacknowledged telemetry
-  obligation. Once any owed page is acknowledged, complete collection closes
-  that incident and rearms a future telemetry outage. An already pending page is
+  current gauge admits the recurrence. An unadmitted monitoring obligation does
+  not occupy a closed provider fence. At the first eligible sample, current
+  concrete database evidence shares the page and keeps its ordinary recurrence;
+  historical telemetry evidence carries its own observation time. An
+  acknowledged telemetry-only notification is one-shot while collection remains
+  continuously incomplete or unavailable; its current samples remain queryable,
+  but they do not admit repeated pages. A complete healthy sample cannot discard
+  an unacknowledged telemetry obligation or rearm a separately recovered gap.
+  Once any owed page is acknowledged, complete collection closes that incident
+  and rearms telemetry. An already pending page is
   processed or deferred before a later clean sample can close the incident,
   and only an acknowledged provider response clears it. Provider entry is
   globally fenced by the persisted last-attempt

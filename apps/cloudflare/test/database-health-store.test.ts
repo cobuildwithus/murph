@@ -63,4 +63,37 @@ describe("database health store", () => {
        WHERE key = 'schema_version'`,
     ).one().value).toBe(1);
   });
+
+  it("recognizes a telemetry pending body acknowledged by a rollback Worker", () => {
+    const sql = createTestSqlStorage();
+    const store = new DatabaseHealthStore(sql);
+    store.openIncident();
+    store.recordMonitoringAlertObligation({
+      checkedAtMs: 600_000,
+      failures: 2,
+      missingMetrics: [
+        "planetscale_postgres_settings_max_connections",
+      ],
+    });
+    store.createPendingAlert({
+      idempotencyKey: "murph-db-1-1",
+      includesMonitoring: true,
+      message: "telemetry alert",
+    });
+
+    sql.exec(
+      `UPDATE database_health_meta
+       SET
+         pending_alert_idempotency_key = NULL,
+         pending_alert_message = NULL
+       WHERE singleton = 1`,
+    );
+
+    expect(store.readAlertState()).toMatchObject({
+      monitoringAlertObligation: null,
+      pendingAlertIncludesMonitoring: false,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+  });
 });

@@ -1052,13 +1052,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   admission state. Metric families normalize independently: an unavailable
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
-  never treated as zero. A telemetry-only incident pages once after two
+  never treated as zero. A telemetry-only notification opens after two
   consecutive incomplete or failed collections. One bounded obligation in the
   existing incident row survives a busy pending slot, restart, and recovery
-  until a telemetry-bearing page is acknowledged; complete collection then
-  rearms the next outage. Its additive columns preserve the existing schema
-  version so the prior Worker remains rollback-compatible. Concrete unsafe
-  conditions retain paced recurrence. First-incident
+  until a telemetry-bearing page is acknowledged. Recovery and another metric
+  gap before that acknowledgment coalesce into the same unresolved operator
+  notification instead of creating a backlog; the first threshold's bounded
+  evidence and observation time remain authoritative. An owed telemetry page does not
+  occupy a closed provider fence: the next eligible sample includes any current
+  unsafe database evidence, with historical telemetry labeled by its own
+  observation time. A later complete collection rearms telemetry only after the
+  obligation is acknowledged. Its additive columns preserve the existing schema
+  version; current code also recognizes a telemetry pending body cleared by the
+  prior Worker, preventing a duplicate after rollback and re-upgrade. Concrete
+  unsafe conditions retain paced recurrence. First-incident
   and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring

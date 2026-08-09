@@ -9,8 +9,10 @@ Updated: 2026-08-09
 - Keep genuine production database-pressure conditions fail-closed and recurring.
 - Report PlanetScale telemetry loss as a monitoring outage, not as evidence that
   the database itself is degraded.
-- Send one acknowledged operator page per uninterrupted telemetry outage while
-  retaining paced exact-body retries for failed or ambiguous delivery.
+- Send one acknowledged operator page per unresolved telemetry-notification
+  window while retaining paced exact-body retries for failed or ambiguous
+  delivery. Recovery before acknowledgment coalesces instead of creating a
+  notification backlog.
 - Preserve a bounded, allowlisted record of which required metric families were
   absent so the next provider-side outage is diagnosable without raw payloads.
 
@@ -36,8 +38,8 @@ Updated: 2026-08-09
   do not admit recurrent pages until a successful sample closes the incident.
 - A failed or ambiguous first page remains pending and retries under the existing
   30-minute provider-attempt fence with the same body and idempotency keys.
-- A later successful sample closes the telemetry incident, and a fresh sequence
-  of failures can page again.
+- A successful sample closes and rearms telemetry only after any unresolved page
+  is acknowledged; intervening recovered gaps remain part of that notification.
 - Real gauge and direct-migration conditions retain their existing recurrence,
   ordering, and retry behavior.
 - Telemetry-only copy is calm and explicit that the monitor is blind; it does
@@ -66,15 +68,17 @@ Updated: 2026-08-09
 
 1. [x] Add bounded missing-family evidence to parse failures and monitoring
    conditions.
-2. [x] Admit telemetry-only pages once per uninterrupted incident and make their
-   copy truthful while leaving genuine unsafe recurrence unchanged.
+2. [x] Admit telemetry-only pages once per unresolved notification window,
+   preserve current-pressure priority at the first eligible provider slot, and
+   make historical copy truthful while leaving genuine unsafe recurrence
+   unchanged.
 3. [x] Add focused parser, retry, recurrence, recovery, and copy regressions.
 4. [x] Update the durable operational contract and run focused verification.
 5. [ ] Push the exact candidate, open the PR, and complete ReviewGPT plus CI.
 
 ## Verification log
 
-- Focused Node Vitest after review remediation: 4 files and 63 tests passed.
+- Focused Node Vitest after review remediation: 4 files and 65 tests passed.
 - Focused Workers-runtime Vitest: 1 file and 1 test passed.
 - Cloudflare package typecheck passed.
 - Raw health/model/vault log guard passed.
@@ -94,3 +98,14 @@ Updated: 2026-08-09
 - Parent rollout review replaced the schema-version bump with idempotent
   additive columns at the existing version, preserving compatibility with the
   previously deployed Worker during overlap or rollback.
+- Final ReviewGPT round 2 required a second anomaly retrospective after proving
+  that two recovered threshold epochs cannot both fit one bounded obligation and
+  that early telemetry admission could overtake current pressure. The chosen
+  contract coalesces all thresholds before acknowledgment into one unresolved
+  notification with the first threshold's evidence, holds unadmitted telemetry
+  outside a closed provider fence,
+  includes current unsafe evidence at the first eligible sample, labels
+  historical telemetry with its own observation time, and normalizes a
+  telemetry pending body acknowledged by the rollback Worker. Focused repeated-
+  threshold, restart, both-recipient, current-pressure-ordering, exact-copy, and
+  legacy-ack tests cover that decision. Final ReviewGPT round 3 remains pending.

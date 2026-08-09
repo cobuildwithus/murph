@@ -534,10 +534,13 @@ supported provider credential.
   direct-port counter deltas with reset/new-series suppression across complete
   and partial samples, SQLite sample persistence and 30-day pruning, concrete
   connection thresholds, two-failure collection hysteresis, one acknowledged
-  page per uninterrupted telemetry-only outage, failed-scrape incident
-  preservation, telemetry obligation retention behind older pending and
-  direct-error-only pages across restart and recovery, rollback-compatible
-  additive SQLite alert-state migration, recovery reset and rearming,
+  page per unresolved telemetry-notification window, recovered threshold
+  coalescing before acknowledgment, failed-scrape incident preservation,
+  telemetry obligation retention behind older pending and direct-error-only
+  pages across restart and recovery, current-pressure priority at the first
+  eligible provider slot with historical observation time, rollback-compatible
+  additive SQLite alert-state migration and legacy-ack normalization, recovery
+  reset and rearming,
   global 30-minute wall-time provider-attempt pacing across incident recovery,
   current actual-check-time and rotated evidence-bearing recurrence copy,
   no stale fenced gauge page after recovery, exact body/idempotency reuse after

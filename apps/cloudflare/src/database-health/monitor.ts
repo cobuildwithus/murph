@@ -411,15 +411,11 @@ export class DatabaseHealthMonitor {
             (condition) =>
               condition.kind === "direct_migration_admission_failures",
           )
-          : (
-            monitoringAlertObligation
-            && !isNewIncident
-            && !attemptFenceOpen
-          )
-            ? conditionsWithDeferredDirectErrors.filter(
-              (condition) => condition.kind === "monitoring_unavailable",
-            )
-            : conditionsWithDeferredDirectErrors;
+          : conditionsWithDeferredDirectErrors;
+      const shouldHoldMonitoringForFence =
+        monitoringAlertObligation !== null
+        && !attemptFenceOpen
+        && !hasDirectConnectionError;
       const admittedCheckedAtMs =
         admittedConditions.length === 1
         && admittedConditions[0]?.kind
@@ -437,6 +433,7 @@ export class DatabaseHealthMonitor {
           !alertState.pendingAlertIdempotencyKey
           || !alertState.pendingAlertMessage
         )
+        && !shouldHoldMonitoringForFence
         && (
           isNewIncident
           || hasDirectConnectionError
@@ -462,6 +459,8 @@ export class DatabaseHealthMonitor {
             checkedAtMs: admittedCheckedAtMs,
             conditions: admittedConditions,
             incidentSequence: alertState.incidentSequence,
+            monitoringCheckedAtMs:
+              monitoringAlertObligation?.checkedAtMs ?? null,
           }),
         });
         if (
@@ -958,6 +957,7 @@ function buildDatabaseAlertMessage(input: {
   checkedAtMs: number;
   conditions: readonly DatabaseHealthCondition[];
   incidentSequence: number;
+  monitoringCheckedAtMs: number | null;
 }): string {
   const checkedAt = new Date(input.checkedAtMs).toISOString().slice(11, 16);
   if (
@@ -967,7 +967,11 @@ function buildDatabaseAlertMessage(input: {
     )
   ) {
     const evidence = input.conditions
-      .map(formatDatabaseHealthCondition)
+      .map((condition) => formatDatabaseHealthCondition(
+        condition,
+        input.checkedAtMs,
+        input.monitoringCheckedAtMs,
+      ))
       .join("; ");
     return `${evidence}. Checked ${checkedAt} UTC.`;
   }
@@ -980,7 +984,13 @@ function buildDatabaseAlertMessage(input: {
   const opening =
     DATABASE_ALERT_OPENINGS[openingIndex]
     ?? DATABASE_ALERT_OPENINGS[0];
-  const evidence = input.conditions.map(formatDatabaseHealthCondition).join("; ");
+  const evidence = input.conditions.map((condition) =>
+    formatDatabaseHealthCondition(
+      condition,
+      input.checkedAtMs,
+      input.monitoringCheckedAtMs,
+    )
+  ).join("; ");
   return `${opening} ${evidence}. Checked ${checkedAt} UTC.`;
 }
 
@@ -1071,6 +1081,8 @@ function hasHealthyLinqSenderLine(input: {
 
 function formatDatabaseHealthCondition(
   condition: DatabaseHealthCondition,
+  checkedAtMs: number,
+  monitoringCheckedAtMs: number | null,
 ): string {
   switch (condition.kind) {
     case "client_wait":
@@ -1098,7 +1110,13 @@ function formatDatabaseHealthCondition(
         condition.count === 1 ? "connection error" : "connection errors"
       }`;
     case "monitoring_unavailable":
-      return formatMonitoringUnavailableCondition(condition);
+      return formatMonitoringUnavailableCondition(
+        condition,
+        monitoringCheckedAtMs !== null
+          && monitoringCheckedAtMs !== checkedAtMs
+          ? monitoringCheckedAtMs
+          : null,
+      );
   }
 }
 
@@ -1107,21 +1125,32 @@ function formatMonitoringUnavailableCondition(
     DatabaseHealthCondition,
     { kind: "monitoring_unavailable" }
   >,
+  observedAtMs: number | null,
 ): string {
   const missingMetricLabels = condition.missingMetrics.map(
     (name) => DATABASE_METRIC_ALERT_LABELS[name],
   );
-  const missingMetricEvidence = missingMetricLabels.length === 0
-    ? ""
-    : ` (missing PlanetScale ${
+  const details = [
+    observedAtMs === null
+      ? null
+      : `observed ${
+        new Date(observedAtMs).toISOString().slice(11, 16)
+      } UTC`,
+    missingMetricLabels.length === 0
+      ? null
+      : `missing PlanetScale ${
       missingMetricLabels.length === 1 ? "metric" : "metrics"
-    }: ${missingMetricLabels.join(", ")})`;
+      }: ${missingMetricLabels.join(", ")}`,
+  ].filter((detail): detail is string => detail !== null);
+  const detailEvidence = details.length === 0
+    ? ""
+    : ` (${details.join("; ")})`;
   const availability = missingMetricLabels.length === 0
     ? "unavailable"
     : "incomplete";
-  return `Database monitor telemetry is ${availability} for ${formatCount(
+  return `Database monitor telemetry was ${availability} for ${formatCount(
     condition.failures,
-  )} checks${missingMetricEvidence}`;
+  )} checks${detailEvidence}`;
 }
 
 function buildDatabaseAlertIdempotencyKey(input: {
