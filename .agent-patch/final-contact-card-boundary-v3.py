@@ -63,5 +63,55 @@ if text.count(old_exec) != 1:
     raise RuntimeError("could not locate the stale exec-plan target")
 text = text.replace(old_exec, new_exec, 1)
 
+old_idempotency_test = '''replace_once(
+    LINQ_IDEMPOTENCY_TEST,
+    ''' + "'''" + '''    const serverError = await sendWithFinalResponse(
+      jsonResponse(500, JSON.stringify({ error: "boom" })),
+    );
+''' + "'''" + ''',
+    ''' + "'''" + '''    const wrappedConflict = await sendWithFinalResponse(
+      jsonResponse(409, JSON.stringify({
+        error: "Proxy wrapped: Conflicting Linq idempotency-key reuse.",
+      })),
+    );
+    expect(wrappedConflict).toBeInstanceOf(Error);
+    expect(isHostedLinqIdempotencyKeyReuseFailure(wrappedConflict)).toBe(false);
+
+    const serverError = await sendWithFinalResponse(
+      jsonResponse(500, JSON.stringify({ error: "boom" })),
+    );
+''' + "'''" + ''',
+)
+'''
+new_idempotency_test = '''replace_once(
+    LINQ_IDEMPOTENCY_TEST,
+    ''' + "'''" + '''    const serverError = await sendWithFinalResponse(
+      jsonResponse(
+        500,
+        JSON.stringify({ error: "upstream unavailable" }),
+      ),
+    );
+''' + "'''" + ''',
+    ''' + "'''" + '''    const wrappedConflict = await sendWithFinalResponse(
+      jsonResponse(409, JSON.stringify({
+        error: "Proxy wrapped: Conflicting Linq idempotency-key reuse.",
+      })),
+    );
+    expect(wrappedConflict).toBeInstanceOf(Error);
+    expect(isHostedLinqIdempotencyKeyReuseFailure(wrappedConflict)).toBe(false);
+
+    const serverError = await sendWithFinalResponse(
+      jsonResponse(
+        500,
+        JSON.stringify({ error: "upstream unavailable" }),
+      ),
+    );
+''' + "'''" + ''',
+)
+'''
+if text.count(old_idempotency_test) != 1:
+    raise RuntimeError("could not locate the stale idempotency-test target")
+text = text.replace(old_idempotency_test, new_idempotency_test, 1)
+
 path.write_text(text)
 runpy.run_path(str(path), run_name="__main__")
