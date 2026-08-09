@@ -51,6 +51,9 @@
       "@murphai/health-commons/biomarker-entity-mappings": [
         "../../packages/health-commons/src/biomarker-entity-mappings.ts"
       ],
+      "@murphai/health-commons/biomarker-fallback-ranges": [
+        "../../packages/health-commons/src/biomarker-fallback-ranges.ts"
+      ],
       "@murphai/health-commons/runtime": [
         "../../packages/health-commons/src/runtime.ts"
       ],
