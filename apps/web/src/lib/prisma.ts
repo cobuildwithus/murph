@@ -91,6 +91,10 @@ const DATABASE_POOL_FAILURE_BY_SQLSTATE = new Map<
   ["53300", "connection_limit"],
 ]);
 
+const PGBOUNCER_MAX_CLIENT_CONN_SQLSTATE = "08P01";
+const PGBOUNCER_MAX_CLIENT_CONN_MESSAGE =
+  "no more connections allowed (max_client_conn)";
+
 installHostedWebWarningFilters();
 
 export interface CreatePrismaClientInput {
@@ -426,6 +430,12 @@ function resolveDatabasePoolFailureCategory(
 
     const message = readUnknownStringProperty(current, "message")
       ?? readUnknownStringProperty(current, "originalMessage");
+    if (
+      code === PGBOUNCER_MAX_CLIENT_CONN_SQLSTATE
+      && message === PGBOUNCER_MAX_CLIENT_CONN_MESSAGE
+    ) {
+      return "connection_limit";
+    }
     if (message?.includes("timeout exceeded when trying to connect")) {
       return "pool_checkout_timeout";
     }
