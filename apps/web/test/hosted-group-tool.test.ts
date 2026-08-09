@@ -40,7 +40,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId: vi.fn(),
-  readHostedGroupUsageStatus: vi.fn(),
+  readHostedGroupFundingRecoveryStatus: vi.fn(),
   readHostedGroupSharedDataByRuntimeMemberId: vi.fn(),
   readHostedOwnerAddressBookAdvisoryNames: vi.fn(),
   readHostedPendingGroupSetup: vi.fn(),
@@ -229,7 +229,8 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
     joinCode: string;
     publicBaseUrl: string;
   }) => `${input.publicBaseUrl}/groups/fund/${input.joinCode}`,
-  readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
+  readHostedGroupFundingRecoveryStatus:
+    mocks.readHostedGroupFundingRecoveryStatus,
 }));
 
 vi.mock("@/src/lib/hosted-address-book/projection", () => ({
@@ -441,10 +442,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       }],
       truncated: false,
     });
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+    mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      sponsorshipStatus: "not_sponsored",
+      sponsorshipStatus: "sponsored",
     });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
@@ -691,7 +692,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
-  it("returns only sponsorship state and a first-party funding handoff", async () => {
+  it("does not expose private sponsorship state to the runtime", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: { action: "read_usage" },
@@ -703,11 +704,10 @@ describe("handleHostedRuntimeGroupTool", () => {
           fundingNeeded: true,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
-    expect(mocks.readHostedGroupUsageStatus).toHaveBeenCalledWith({
+    expect(mocks.readHostedGroupFundingRecoveryStatus).toHaveBeenCalledWith({
       runtimeMemberId: "member_group_runtime",
     });
   });

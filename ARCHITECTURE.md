@@ -145,14 +145,23 @@ bounded seven-day tail of committed transcripts from those same authenticated
 group-chat channels. It fully rewrites the one page only when the evidence
 materially improves a compact list of room canon, likely person-specific comedy
 preferences, successful Murph formats, retired material, and open callbacks.
+Silent consolidation targets a compact 2-6 KiB guide and treats 20 KiB as a
+generous soft ceiling, never a write gate. When the page exceeds that ceiling,
+is materially bloated with duplicate or stale detail, or approaches the
+defensive 64 KiB serialized-page limit, the next evidence-supported rewrite
+merges duplicates, summarizes old examples into durable patterns, and prunes
+stale or completed detail while preserving explicit setup, current boundaries,
+unresolved loops, and high-confidence room or participant patterns.
 One dedicated owner reads, replaces, or deletes the fixed page. Generic
 knowledge show, list, search, append, upsert, and generated index surfaces
 exclude it. Every mutation passes the digest returned by the immediately prior
 show and compares that digest under the same fixed-page lock, so a concurrent
-rewrite cannot be lost. Replacement validates the normalized body and complete
-6 KiB advisory envelope before writing; ordinary prompts never truncate an
-accepted page. Raw `Sender:` handles remain transient evidence attribution and
-cannot be persisted in the page.
+rewrite cannot be lost. There is no separate authored-body byte cap. Replacement
+validates the complete serialized fixed page against the defensive 64 KiB raw
+file ceiling before writing. Ordinary prompts render the complete accepted page
+without revalidating it against a wrapper-dependent byte ceiling. Raw `Sender:`
+handles remain transient evidence attribution and cannot be persisted in the
+page.
 
 Ordinary authenticated hosted group-chat turns read that fixed page directly
 from the same group vault and append a bounded rendering to dynamic turn
@@ -163,14 +172,18 @@ the page nor contributes maintenance evidence, and its spoofable sender cannot
 receive the mutation tool. Silent consolidation receives that same dynamic tool
 only from the immutable managed-automation id, runs in a fresh one-shot Codex
 thread with workspace access denied and network disabled, and has no generic
-knowledge or shell write surface. Ordinary prompt reads fail open, but mutation reads
-distinguish a genuinely missing page from malformed, unreadable, or wrong-type
-fixed-slug state; conflicts stop both explicit and scheduled replacement. The
-rendering is quoted as fallible data and
-explicitly tells the model to skim it lightly: most turns should use none of it,
-and at most one naturally relevant tip should shape a reply. Current
-conversation, safety rules, authoritative tool results, and explicit canonical
-room style settings always outrank it. This adds no database table, mailbox
+knowledge or shell write surface.
+Ordinary prompt reads fail open by withholding every unusable page body and
+injecting only a compact trusted status for missing, inactive, or unavailable
+state. Mutation reads still distinguish a genuinely missing page from malformed,
+unreadable, or wrong-type fixed-slug state; conflicts stop both explicit and
+scheduled replacement. The rendering remains quoted as fallible data. The
+resident group-context principle uses the smallest relevant safe set, combines
+several details only when shared history is essential, and applies room context
+whenever it materially improves the current result without forcing callbacks or
+roll calls. Current messages, explicit corrections, safety rules, authoritative
+tool results, and explicit canonical room style settings always outrank it.
+This adds no database table, mailbox
 kind, roster service, cursor, vector index, per-participant page, or pruning
 workflow; the admitted committed transcript is evidence and the single page is
 the only durable room-intelligence owner.
@@ -919,16 +932,21 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   entitlement, and separate daily Linq anti-abuse gates, remain enforceable.
 
   The group-tool privacy projection has one bounded rolling-deploy reader seam.
-  A compatible runtime accepts both the current exact
-  `{fundingNeeded,fundingUrl,sponsorshipStatus}` response and the immediately
-  preceding exact `{capacityState,fundingUrl,periodEnd,remainingPercent?}`
-  response. It maps the preceding shape to `not_sponsored`, derives only the
-  funding boolean, and discards period and percentage fields before they reach
-  assistant policy. In the current shape, `fundingNeeded` expresses urgency
-  while `fundingUrl` remains the capability for an explicit contribution at
-  any valid group-capacity state. Assistant policy uses the boolean only for
-  proactive depletion messaging and may share the returned URL after an
-  explicit funding request even when the boolean is false. Deploy that reader
+  A compatible runtime accepts the current exact `{fundingNeeded,fundingUrl}`
+  response, strips the immediately preceding optional `sponsorshipStatus`
+  field, and also accepts the older exact
+  `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response. It derives
+  only the funding boolean from that oldest shape and discards period,
+  percentage, and funding-setup fields before they reach assistant policy. In
+  the current shape, `fundingNeeded` is false for healthy capacity and for low
+  capacity with an available or pending automatic refill; it is true for low
+  capacity without automatic recovery and for every exhausted room.
+  `fundingUrl` remains the capability for an explicit contribution at any valid
+  group-capacity state. Assistant policy has one contract regardless of payment
+  setup: it uses the boolean only for proactive depletion messaging and may
+  share the returned URL after an explicit funding request even when the
+  boolean is false. A Web-owned exhaustion projection always appends that
+  current URL to the ordinary group pause copy. Deploy that reader
   throughout Cloudflare/runner before Web begins emitting the current shape.
   Because the preceding producer cannot represent an active monthly
   sponsorship, the Web switch becomes a forward-only tandem cutover once

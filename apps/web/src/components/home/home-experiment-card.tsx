@@ -15,6 +15,8 @@ interface HomeExperimentCardProps {
   variant: "default" | "history";
 }
 
+const MAX_EXACT_CADENCE_SEGMENTS = 12;
+
 export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
   const dateLabel = resolveDateLabel(card);
   const content = (
@@ -112,6 +114,10 @@ function ExperimentDataVisual({ card, variant }: HomeExperimentCardProps) {
   const summary = card.runSummary;
   const inProgress = card.runStatus === "active" || card.runStatus === "paused";
   const comparableMetrics = summary?.metrics ?? [];
+
+  if (inProgress && summary?.dailyCadence) {
+    return <ExperimentDailyCadence summary={summary} />;
+  }
 
   if (inProgress && typeof summary?.completionPercent === "number") {
     return <ExperimentProgress summary={summary} />;
@@ -242,6 +248,103 @@ function ResultValue({ label, value }: { label: string; value: string }) {
       <p className="mt-1 truncate font-serif text-lg font-semibold tabular-nums text-foreground">
         {value}
       </p>
+    </div>
+  );
+}
+
+function ExperimentDailyCadence({ summary }: { summary: ExperimentRunCardSummary }) {
+  const cadence = summary.dailyCadence;
+  if (!cadence) {
+    return null;
+  }
+
+  const expected = Math.max(1, Math.trunc(cadence.expected));
+  const completed = Math.min(expected, Math.max(0, Math.trunc(cadence.completed)));
+  const progress = Math.round((completed / expected) * 100);
+  const context = [cadence.label, cadence.cadence]
+    .filter((value): value is string =>
+      typeof value === "string" && value.trim().length > 0
+    )
+    .join(" · ");
+  const ariaLabel = cadence.label
+    ? `${cadence.label} today`
+    : "Today's cadence";
+  const ariaValueText = `${completed} of ${expected} completed today`;
+  const showExactSegments = expected <= MAX_EXACT_CADENCE_SEGMENTS;
+
+  return (
+    <div className="w-full" data-home-experiment-daily-cadence>
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Today
+          </p>
+          <p
+            aria-hidden="true"
+            className="mt-2 font-serif text-4xl font-semibold leading-none tabular-nums text-foreground"
+          >
+            {completed}
+            <span className="mx-1.5 text-foreground/30">/</span>
+            <span className="text-foreground/55">{expected}</span>
+          </p>
+          <p className="sr-only">{ariaValueText}</p>
+        </div>
+        {typeof summary.day === "number" ? (
+          <p className="pb-1 text-sm tabular-nums text-muted-foreground">
+            Day {summary.day}
+          </p>
+        ) : null}
+      </div>
+
+      {context ? (
+        <p className="mt-2 text-sm text-muted-foreground">
+          {context}
+        </p>
+      ) : null}
+
+      {showExactSegments ? (
+        <div
+          role="progressbar"
+          aria-label={ariaLabel}
+          aria-valuemin={0}
+          aria-valuemax={expected}
+          aria-valuenow={completed}
+          aria-valuetext={ariaValueText}
+          className="mt-5 grid gap-1.5"
+          style={{ gridTemplateColumns: `repeat(${expected}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: expected }, (_, index) => {
+            const complete = index < completed;
+            return (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "h-2 rounded-full",
+                  complete ? "bg-primary" : "bg-secondary/35",
+                )}
+                data-complete={complete ? "true" : "false"}
+                data-home-experiment-cadence-segment
+                key={index}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <div
+          role="progressbar"
+          aria-label={ariaLabel}
+          aria-valuemin={0}
+          aria-valuemax={expected}
+          aria-valuenow={completed}
+          aria-valuetext={ariaValueText}
+          className="mt-5 h-2 overflow-hidden rounded-full bg-secondary/35"
+        >
+          <div
+            className="h-full rounded-full bg-primary"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }

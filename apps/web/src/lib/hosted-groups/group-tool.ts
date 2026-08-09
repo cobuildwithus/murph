@@ -100,7 +100,7 @@ import {
 import {
   buildHostedGroupUsageFundingLocatorForRuntimeMember,
   buildHostedGroupUsageFundingUrl,
-  readHostedGroupUsageStatus,
+  readHostedGroupFundingRecoveryStatus,
 } from "./group-usage-funding";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
@@ -391,13 +391,19 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (input.request.action === "read_usage") {
-    const usage = await readHostedGroupUsageStatus({
+    const usage = await readHostedGroupFundingRecoveryStatus({
       runtimeMemberId: input.memberId,
     });
     return {
       action: "read_usage",
       result: usage
-        ? { status: "ok", usage }
+        ? {
+            status: "ok",
+            usage: {
+              fundingNeeded: usage.fundingNeeded,
+              fundingUrl: usage.fundingUrl,
+            },
+          }
         : {
             status: "unavailable",
             unavailableReason: "group_usage_unavailable",

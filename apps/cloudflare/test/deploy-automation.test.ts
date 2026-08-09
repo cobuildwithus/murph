@@ -239,6 +239,10 @@ describe("hosted deploy automation helpers", () => {
           name: string;
         }>;
       };
+      analytics_engine_datasets: Array<{
+        binding: string;
+        dataset: string;
+      }>;
       main: string;
       migrations: Array<{
         new_sqlite_classes: string[];
@@ -321,6 +325,12 @@ describe("hosted deploy automation helpers", () => {
       {
         class_name: "DeploySmokeRunnerContainer",
         name: "RUNNER_CONTAINER_SMOKE",
+      },
+    ]);
+    expect(config.analytics_engine_datasets).toEqual([
+      {
+        binding: "HOSTED_RUNTIME_RETRY_ANALYTICS",
+        dataset: "murph_hosted_runtime_retries",
       },
     ]);
     expect(config.migrations).toEqual([
@@ -484,6 +494,10 @@ describe("hosted deploy automation helpers", () => {
           name: string;
         }>;
       };
+      analytics_engine_datasets: Array<{
+        binding: string;
+        dataset: string;
+      }>;
       migrations: Array<{
         new_sqlite_classes: string[];
         tag: string;
@@ -523,6 +537,10 @@ describe("hosted deploy automation helpers", () => {
           name: string;
         }>;
       };
+      analytics_engine_datasets: Array<{
+        binding: string;
+        dataset: string;
+      }>;
       migrations: Array<{
         new_sqlite_classes: string[];
         tag: string;
@@ -563,6 +581,9 @@ describe("hosted deploy automation helpers", () => {
       });
     }
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
+    expect(checkedInConfig.analytics_engine_datasets).toEqual(
+      generatedConfig.analytics_engine_datasets,
+    );
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
     expect(checkedInConfig.r2_buckets).toEqual(generatedConfig.r2_buckets);

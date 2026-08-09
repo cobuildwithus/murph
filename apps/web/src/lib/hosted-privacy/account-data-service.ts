@@ -129,10 +129,10 @@ const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
 } as const;
 const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
 const HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS = 10;
-const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS = {
+const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS: Stripe.RequestOptions = {
   maxNetworkRetries: 0,
   timeout: HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS,
-} as const satisfies Stripe.RequestOptions;
+};
 
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
@@ -327,12 +327,6 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted physical notes",
     deletion: "live-delete",
     note: "Deletes bounded Lob request, status, pricing, and provider-reference rows with the hosted member. Postal addresses and artwork are never stored here; mail already accepted by Lob cannot be recalled from Lob or postal carriers.",
-  },
-  {
-    slug: "prisma.hosted_runtime_log",
-    label: "Legacy primary runtime logs",
-    deletion: "live-delete",
-    note: "Deletes pre-cutover per-user hosted runtime logs and redacted runtime JSON during the bounded migration window. Export omits runtime log rows and counts.",
   },
   {
     slug: "postgres.hosted_runtime_log",
@@ -2055,7 +2049,6 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_ingress_latency_trace", await input.prisma.hostedIngressLatencyTrace.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_mailbox_item", await input.prisma.hostedMailboxItem.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_mailbox_lane_counter", await input.prisma.hostedMailboxLaneCounter.deleteMany({ where: { userId: memberIdFilter } }));
-  record("prisma.hosted_runtime_log", await input.prisma.hostedRuntimeLog.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_user_crypto_audit", await deleteHostedUserCryptoAuditRows(input.prisma, input.memberIds));
   record("prisma.hosted_user_crypto_envelope", await deleteHostedUserCryptoEnvelopeRows(input.prisma, input.memberIds));
   const usageCreditEntryDeletionWhere =

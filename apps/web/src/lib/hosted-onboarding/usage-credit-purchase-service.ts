@@ -1601,8 +1601,7 @@ function hostedUsageCreditTargetMatches(input: {
     case "personal":
       return frozenTarget.kind === "personal";
     case "group":
-      return frozenTarget.kind === "group"
-        && frozenTarget.groupJoinCode === input.target.joinCode;
+      return frozenTarget.kind === "group";
     case "family":
       return frozenTarget.kind === "family"
         && (input.target.groupId === null

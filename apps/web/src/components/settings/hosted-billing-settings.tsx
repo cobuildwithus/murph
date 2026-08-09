@@ -16,6 +16,12 @@ import {
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  SETTINGS_CORE_FEATURES,
+  SETTINGS_EDGE_FEATURES,
+  SETTINGS_FAMILY_FEATURES,
+  SETTINGS_PULSE_FEATURES,
+} from "@/src/lib/hosted-onboarding/plan-features";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
@@ -32,36 +38,6 @@ import {
   type HostedUsageTopUpOffer,
   type HostedUsageTopUpReturn,
 } from "./hosted-usage-top-up-dialog";
-
-const GROUP_FEATURES = [
-  "Stay connected to Murph groups",
-  "Sync your health and activity data",
-  "Keep group scores current",
-  "Private Murph chat",
-  "Lighter included AI usage",
-];
-
-const PULSE_FEATURES = [
-  "Run experiments, see what changed",
-  "Sync your health data",
-  "Private before/after outcomes",
-  "Chat with Murph via iMessage, Telegram, or email",
-];
-
-const EDGE_FEATURES = [
-  "Everything in Pulse",
-  "The most capable AI models",
-  "Higher monthly usage",
-  "Murph remembers more of your history",
-  "Deeper research and analysis",
-];
-
-const FAMILY_FEATURES = [
-  "2 to 6 people, one bill",
-  "Choose Pulse or Edge for each person",
-  "Each person keeps a private Murph",
-  "You can't see members' chats or health data",
-];
 
 interface PlanCardModel {
   action: ReactNode;
@@ -210,7 +186,7 @@ export function HostedBillingSettings(props: {
                   : null,
             current: groupCurrent,
             currentLabel: "Current plan",
-            features: GROUP_FEATURES,
+            features: SETTINGS_CORE_FEATURES,
             key: "launch_group_monthly",
             name: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
             note: pendingGroupSwitchDate
@@ -256,7 +232,7 @@ export function HostedBillingSettings(props: {
             : <BillingPortalButton block variant="secondary" label="Choose Pulse" />,
       current: pulseCurrent,
       currentLabel: isPulseTrial ? "Free trial" : "Current plan",
-      features: PULSE_FEATURES,
+      features: SETTINGS_PULSE_FEATURES,
       key: "launch_monthly",
       name: "Pulse",
       note: familyOwner
@@ -298,7 +274,7 @@ export function HostedBillingSettings(props: {
           : <BillingPortalButton block variant="secondary" label="Choose Edge" />,
       current: edgeCurrent,
       currentLabel: "Current plan",
-      features: EDGE_FEATURES,
+      features: SETTINGS_EDGE_FEATURES,
       key: "launch_edge_monthly",
       name: "Edge",
       note: familyOwner
@@ -334,7 +310,7 @@ export function HostedBillingSettings(props: {
             : null,
       current: familyCurrent,
       currentLabel: familyState === "sponsored" ? "Sponsored" : "Current plan",
-      features: FAMILY_FEATURES,
+      features: SETTINGS_FAMILY_FEATURES,
       key: "family",
       name: "Family",
       note: familyState === "sponsored" ? "Paid by your family plan owner." : null,

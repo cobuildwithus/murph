@@ -1,6 +1,13 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 
+import {
+  buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingPath,
+  buildHostedGroupUsageFundingUrl,
+  readHostedGroupUsageFundingLocatorRuntimeMemberId,
+} from "../src/lib/hosted-groups/group-usage-funding-locator";
 import { readHostedAppSessionHmacKey } from "../src/lib/hosted-onboarding/app-session-config";
+import { readHostedPublicBaseUrl } from "../src/lib/hosted-web/public-url";
 
 export const hostedRuntimeLogProductionMigrationCommand = {
   command: resolvePnpmCommand(),
@@ -29,6 +36,9 @@ export type HostedWebProductionMigrationRunner = (
   args: readonly string[],
 ) => Promise<void>;
 
+const HOSTED_GROUP_FUNDING_PREFLIGHT_MEMBER_ID =
+  "hosted_group_funding_preflight";
+
 export function shouldRunHostedWebProductionMigrations(
   environment: HostedWebProductionMigrationEnvironment,
 ): boolean {
@@ -37,6 +47,61 @@ export function shouldRunHostedWebProductionMigrations(
     environment.VERCEL_ENV === "production" &&
     environment.VERCEL_GIT_COMMIT_REF === "main"
   );
+}
+
+export function assertHostedGroupFundingRecoveryConfiguration(
+  environment: HostedWebProductionMigrationEnvironment,
+): void {
+  readHostedAppSessionHmacKey(environment);
+
+  const publicBaseUrl = readHostedPublicBaseUrl(environment);
+  if (!publicBaseUrl) {
+    throw new TypeError(
+      "A hosted public base URL is required for group funding recovery.",
+    );
+  }
+  const trustedOrigin = new URL(publicBaseUrl);
+  if (trustedOrigin.protocol !== "https:") {
+    throw new TypeError(
+      "The hosted public base URL for group funding recovery must use HTTPS.",
+    );
+  }
+
+  const locator = buildHostedGroupUsageFundingLocatorForRuntimeMember(
+    HOSTED_GROUP_FUNDING_PREFLIGHT_MEMBER_ID,
+    environment,
+  );
+  const fundingUrl = locator
+    ? buildHostedGroupUsageFundingUrl({
+        environment,
+        joinCode: locator,
+        publicBaseUrl,
+      })
+    : null;
+  const parsedMemberId = locator
+    ? readHostedGroupUsageFundingLocatorRuntimeMemberId(locator, environment)
+    : null;
+  if (
+    !locator
+    || !fundingUrl
+    || parsedMemberId !== HOSTED_GROUP_FUNDING_PREFLIGHT_MEMBER_ID
+  ) {
+    throw new TypeError(
+      "The hosted group funding recovery signing authority is unusable.",
+    );
+  }
+
+  const parsedFundingUrl = new URL(fundingUrl);
+  if (
+    parsedFundingUrl.origin !== trustedOrigin.origin
+    || parsedFundingUrl.pathname !== buildHostedGroupUsageFundingPath(locator)
+    || parsedFundingUrl.search
+    || parsedFundingUrl.hash
+  ) {
+    throw new TypeError(
+      "The hosted public base URL cannot produce a trusted group funding recovery URL.",
+    );
+  }
 }
 
 export async function runHostedWebProductionMigrationsIfNeeded(
@@ -48,7 +113,7 @@ export async function runHostedWebProductionMigrationsIfNeeded(
     return "skipped";
   }
 
-  readHostedAppSessionHmacKey(environment);
+  assertHostedGroupFundingRecoveryConfiguration(environment);
 
   console.log("Applying pending hosted runtime log database migrations.");
   await runCommand(

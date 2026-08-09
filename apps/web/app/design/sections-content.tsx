@@ -13,6 +13,7 @@ import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
+import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
@@ -110,6 +111,34 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Homepage technical runtime">
+        <div
+          id="homepage-technical-runtime"
+          data-design-section="homepage-technical-runtime"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <TechnicalCapabilitiesSection customInferenceAvailable veniceAvailable />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage technical runtime · provider flags off">
+        <div
+          data-design-section="homepage-technical-runtime-minimal"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <TechnicalCapabilitiesSection
+            customInferenceAvailable={false}
+            veniceAvailable={false}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Homepage security and privacy">
         <SecurityTeaserSection />
       </StudySection>
@@ -175,7 +204,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Secure approval pending and recorded states">
-        <ActionApprovalLifecycleStudy />
+        <div id="action-approval-lifecycle">
+          <ActionApprovalLifecycleStudy />
+        </div>
       </StudySection>
 
       <Separator />
@@ -318,7 +349,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery and sponsored billing">
+      <StudySection title="Subscription recovery, sponsored billing, and usage limits">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -330,7 +361,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Home partial-load recovery">
+      <StudySection title="Home partial-load and vault-unavailable recovery">
         <HomeLoadStateStudy />
       </StudySection>
 
@@ -384,7 +415,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with messaging-activity and message-volume history">
+      <StudySection title="Ops weekly growth compass with sponsorship accounting, messaging-activity, message-volume, and monthly-revenue history">
         <div inert>
           <GrowthScorecardStudy />
         </div>
@@ -405,7 +436,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Biomarker result detail">
-        <BiomarkerDetailStudy />
+        <div id="biomarker-result-range-bands">
+          <BiomarkerDetailStudy />
+        </div>
       </StudySection>
 
       <Separator />

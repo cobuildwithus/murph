@@ -18,11 +18,9 @@ import {
   isHostedRuntimeLogDatabaseConfigured,
 } from "@/src/lib/hosted-runtime-log/database";
 import {
-  listHostedRuntimeLogs as listDedicatedHostedRuntimeLogs,
-  mergeHostedRuntimeLogRecords,
+  listHostedRuntimeLogs,
 } from "@/src/lib/hosted-runtime-log/store";
 import {
-  listHostedRuntimeLogs as listLegacyHostedRuntimeLogs,
   readHostedWorkspace,
 } from "@/src/lib/hosted-workspace/store";
 
@@ -86,25 +84,18 @@ export const GET = withJsonError(async (request: Request) => {
 });
 
 type HostedRuntimeStatusLogRecord =
-  | Awaited<ReturnType<typeof listDedicatedHostedRuntimeLogs>>[number]
-  | Awaited<ReturnType<typeof listLegacyHostedRuntimeLogs>>[number];
+  Awaited<ReturnType<typeof listHostedRuntimeLogs>>[number];
 
 async function readRecentHostedRuntimeLogsBestEffort(input: {
   limit: number;
   userId: string;
 }): Promise<HostedRuntimeStatusLogRecord[] | undefined> {
-  const legacyLogs = await listLegacyHostedRuntimeLogs(input);
-
   try {
     if (!isHostedRuntimeLogDatabaseConfigured()) {
-      return legacyLogs;
+      return [];
     }
 
-    const dedicatedLogs = await listDedicatedHostedRuntimeLogs(input);
-    return mergeHostedRuntimeLogRecords<HostedRuntimeStatusLogRecord>(
-      [dedicatedLogs, legacyLogs],
-      input.limit,
-    );
+    return await listHostedRuntimeLogs(input);
   } catch (error) {
     console.warn("Hosted runtime status isolated-log read failed.", {
       ...formatHostedExecutionSafeLogErrorDetails(error, {
