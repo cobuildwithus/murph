@@ -970,12 +970,16 @@ no direct wake. Linq instant start follows the same rule: enrollment returns the
 newly committed activation as an explicit per-request wake continuation instead
 of signaling it first. Once the instant-start planner has committed the member
 row, Web may fire one best-effort `runtime/shell-prewarm` request while trial
-enrollment runs. That endpoint resolves the member's `UserRunner`, enters the
-same per-user consent-mutation barrier used by authoritative ensures and
-withdrawal, re-reads live Web-owned admission, and reserves the deterministic
-versioned container in the existing `active_runner_container_name`
-user-control stop-target field. It then awaits a narrow container acknowledgement
-that the shell-prewarm operation is registered before releasing the barrier;
+enrollment runs. That endpoint obtains the member's named `UserRunner` without
+binding durable state, enters the same per-user consent-mutation barrier used by
+authoritative ensures and withdrawal, and re-reads live Web-owned admission
+with a fixed 250 ms deadline. Timeout or transport failure abandons the optional
+hint and releases the barrier; authoritative processing and user-control reads
+retain their ordinary timeout. Allowed admission reserves and binds the
+deterministic versioned container in the existing
+`active_runner_container_name` user-control stop-target field. It then awaits a
+narrow container acknowledgement that the shell-prewarm operation is registered
+before releasing the barrier;
 the platform wait continues under the existing container lifecycle owner. It
 does not select a mailbox owner, create a write fence, wait for health
 readiness, or invoke workspace work. Withdrawal and account deletion consume

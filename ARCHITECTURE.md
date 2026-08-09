@@ -2011,9 +2011,12 @@ established-member Web-to-Cloudflare prewarm or nudge path. The separate
 first-contact instant-start shell hint obtains the named `UserRunner` stub
 without binding durable state, enters the same per-user consent-mutation barrier
 as authoritative ensures and withdrawal, and re-reads live Web-owned admission.
-Only allowed admission reserves and binds the exact versioned container in the
-existing user-control stop-target field before awaiting the container's
-registration acknowledgement. The platform wait continues under
+The optional read has a fixed 250 ms deadline, well below the measured 693 ms
+provider-start p50 benefit; an unavailable admission abandons the hint and
+releases the barrier while authoritative and user-control reads keep their
+ordinary timeout. Only allowed admission reserves and binds the exact versioned
+container in the existing user-control stop-target field before awaiting the
+container's registration acknowledgement. The platform wait continues under
 the container's existing lifecycle owner after the barrier releases, so
 authoritative readiness or exact-target destruction can supersede it. A later
 current-version start destroys any different pending target before binding its

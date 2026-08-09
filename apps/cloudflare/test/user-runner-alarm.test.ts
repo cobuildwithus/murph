@@ -165,6 +165,102 @@ describe("HostedUserRunner execution coordination", () => {
     expect(runnerContainerNames).toEqual([]);
   });
 
+  it("abandons a slow shell hint admission before authoritative processing begins", async () => {
+    vi.useFakeTimers();
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const authoritativeAdmissionStarted = createDeferred<void>();
+    const releaseAuthoritativeAdmission = createDeferred<"granted">();
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
+          });
+        }
+        expect(timeoutMs).toBe(30_000);
+        authoritativeAdmissionStarted.resolve(undefined);
+        return releaseAuthoritativeAdmission.promise;
+      },
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-slow-hint-admission",
+      userId: TEST_USER_ID,
+    });
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(admissionReads).toBe(1);
+    expect(runnerContainerNames).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(prewarm).resolves.toBeUndefined();
+    await authoritativeAdmissionStarted.promise;
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+
+    releaseAuthoritativeAdmission.resolve("granted");
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+  });
+
+  it("releases consent withdrawal after the bounded shell hint admission budget", async () => {
+    vi.useFakeTimers();
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const withdrawalAdmissionStarted = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => undefined);
+    const prewarmShell = vi.fn();
+    const { runner } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
+          });
+        }
+        expect(timeoutMs).toBe(30_000);
+        withdrawalAdmissionStarted.resolve(undefined);
+        return "revoked";
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(
+      TEST_USER_ID,
+    );
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(admissionReads).toBe(1);
+    expect(destroyInstance).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(prewarm).resolves.toBeUndefined();
+    await withdrawalAdmissionStarted.promise;
+    await expect(withdrawal).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
+  });
+
   it("lets a new Worker withdraw the exact prior-version shell while prewarm is pending", async () => {
     let consentState: "granted" | "revoked" = "granted";
     const runnerRuntimeEnvSource: Record<string, unknown> = {
@@ -6143,7 +6239,7 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onCryptoContextRead?: () => Promise<void> | void;
-  readHealthDataConsentState?: () =>
+  readHealthDataConsentState?: (input: { timeoutMs: number }) =>
     | "granted"
     | "missing"
     | "revoked"
@@ -6516,7 +6612,7 @@ function installWebControlResponses(
   hooks: {
     healthDataProcessingAllowed?: boolean | (() => boolean);
     onCryptoContextRead?: () => Promise<void> | void;
-    readHealthDataConsentState?: () =>
+    readHealthDataConsentState?: (input: { timeoutMs: number }) =>
       | "granted"
       | "missing"
       | "revoked"
@@ -6553,7 +6649,9 @@ function installWebControlResponses(
       }
 
       if (input.path === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
-        const consentState = await hooks.readHealthDataConsentState?.() ?? "granted";
+        const consentState = await hooks.readHealthDataConsentState?.({
+          timeoutMs: input.timeoutMs,
+        }) ?? "granted";
         const processingAllowed =
           typeof hooks.healthDataProcessingAllowed === "function"
             ? hooks.healthDataProcessingAllowed()

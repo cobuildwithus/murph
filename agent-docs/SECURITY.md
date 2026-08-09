@@ -19,9 +19,11 @@ Last verified: 2026-08-09
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
   before granting. An instant-start shell-prewarm hint uses that same per-user
   barrier and live admission read. Its HTTP route obtains the named runner stub
-  without binding durable state; only allowed admission reserves and binds its
-  exact versioned container in the existing user-control stop-target field,
-  then waits for the container to register the hint before releasing the
+  without binding durable state. The optional read abandons after a fixed 250 ms
+  deadline so it cannot hold authoritative processing, withdrawal, or deletion
+  behind the ordinary Web-control timeout; only allowed admission reserves and
+  binds its exact versioned container in the existing user-control stop-target
+  field, then waits for the container to register the hint before releasing the
   barrier. Withdrawal and account deletion consume that exact target, while
   container destruction supersedes a pending platform wait before stopping it.
   Web admission also requires an

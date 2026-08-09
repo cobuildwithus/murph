@@ -132,6 +132,16 @@ Updated: 2026-08-09
   target reservation remains the only bind owner. The production-entry test
   completes deletion, delivers the signed delayed request, and proves no eager
   bind, container lookup, or runner-row recreation.
+- Final ReviewGPT round 5 proved that the optional prewarm still held the shared
+  consent barrier during the ordinary 30-second Web-control timeout, so a slow
+  admission could convoy authoritative first-contact processing, withdrawal,
+  or deletion before container registration existed to supersede. The hint now
+  gives only its admission read a fixed 250 ms deadline and abandons fail-closed
+  on timeout or transport failure. That cap is below half of the measured 693 ms
+  provider-start p50 benefit; authoritative and user-control reads retain the
+  ordinary timeout. Fake-clock ordering tests prove no target or container
+  mutation before abandonment and prove both authoritative processing and
+  withdrawal enter their fresh admission path at the bound.
 
 ## Evidence
 

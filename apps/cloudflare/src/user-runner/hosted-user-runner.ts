@@ -85,6 +85,9 @@ export interface HostedRuntimeHealthDataConsentReconcileResult {
 }
 
 const HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS = 60_000;
+// The retained hint measured a 693 ms provider-start p50 gain. Abandon its
+// optional admission before it can consume even half of that useful overlap.
+const HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS = 250;
 
 export class HostedUserRunner {
   protected readonly stateStore: RunnerStateStore;
@@ -287,8 +290,15 @@ export class HostedUserRunner {
 
   async prewarmRuntimeShellForUser(userId: string): Promise<void> {
     await this.withRuntimeConsentMutationLock(async () => {
-      const admission =
-        await this.readHostedRuntimeHealthDataAdmissionFromWeb(userId);
+      let admission: HostedRuntimeHealthDataAdmissionResponse;
+      try {
+        admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
+          userId,
+          { timeoutMs: HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS },
+        );
+      } catch {
+        return;
+      }
       if (!admission.processingAllowed) {
         return;
       }
@@ -540,6 +550,7 @@ export class HostedUserRunner {
 
   private async readHostedRuntimeHealthDataAdmissionFromWeb(
     userId: string,
+    input: { timeoutMs?: number } = {},
   ): Promise<HostedRuntimeHealthDataAdmissionResponse> {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       ...(this.env.hostedWebAllowHttpHosts
@@ -550,7 +561,7 @@ export class HostedUserRunner {
       callbackSigning: this.env.webCallbackSigning,
       method: "GET",
       path: HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
-      timeoutMs: this.env.webControlTimeoutMs,
+      timeoutMs: input.timeoutMs ?? this.env.webControlTimeoutMs,
     });
 
     if (!response.ok) {
