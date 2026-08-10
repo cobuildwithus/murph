@@ -324,10 +324,13 @@ Required:
   scale when a narrow mobile component crop would otherwise miss the width
   floor. Inspect each local file at native resolution and confirm that body copy
   is immediately legible before upload. Keep screenshot binaries out of the
-  repository. Capture them only in an ignored local audit path, then upload them
-  from the local machine through
+  repository. Capture them only in an ignored local audit path. Host each image
+  with either a GitHub attachment in the pull request body or Cloudflare Images.
+  For a GitHub attachment, paste or drag the image into the GitHub pull request
+  editor and keep the generated hosted image Markdown in the matching screenshot
+  item. For Cloudflare Images, use
   the [Cloudflare Images upload API](https://developers.cloudflare.com/api/resources/images/subresources/v1/methods/create/)
-  using `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
+  with `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
   token supplied only as local `CLOUDFLARE_IMAGES_API_KEY`. Set
   `requireSignedURLs=false`. From any repository worktree, run
   `pnpm design-proof:upload -- <desktop-image> <mobile-image>`; the command
@@ -343,10 +346,9 @@ Required:
   local capture only until
   required review packaging is complete, then delete it. Never print, commit,
   persist in repository files, or pass the credential to ReviewGPT or another
-  external reviewer; if the local credential is unavailable, report the
-  blocker instead of committing proof images. Proof screenshots must not
-  contain private member data. PRs without a user-facing frontend UI diff may
-  write `Not applicable`.
+  external reviewer. If the local Cloudflare credential is unavailable, use a
+  GitHub attachment instead. Proof screenshots must not contain private member
+  data. PRs without a user-facing frontend UI diff may write `Not applicable`.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 
