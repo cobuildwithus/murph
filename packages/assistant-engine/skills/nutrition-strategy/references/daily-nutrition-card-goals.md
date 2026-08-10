@@ -1,11 +1,14 @@
 # Daily nutrition-card goals
 
-Use this only after an explicit interactive request to set nutrition targets or
-to receive a numeric daily nutrition card when the member does not already have
-one complete, unambiguous, unit- and comparator-compatible daily target for
-calories, protein, carbohydrate, fat, and fiber. A scheduled closeout may use
-an already accepted active bundle, but it must not use this workflow to ask for
-inputs, derive or save targets, or surface a proposal.
+Use the target-authority and canonical-discovery rules below after every explicit
+interactive request to set nutrition targets or receive a numeric daily
+nutrition card, even when the visible context appears to contain a complete
+bundle. Use the proposal workflow only when the complete read proves that the
+member does not already have one unambiguous, unit- and comparator-compatible
+daily target for calories, protein, carbohydrate, fat, and fiber. A scheduled
+closeout follows the equivalent discovery contract in its owning skill and may
+use an already accepted active bundle, but it must not use this workflow to ask
+for inputs, derive or save targets, or surface a proposal.
 
 Before using this workflow, read and apply `daily-nutrition-card-safety.md`. If
 its card-time gate suppresses numeric goals, stop here and keep the owning
@@ -19,6 +22,18 @@ remain required before the proposal can affect a card.
 
 ## Target authority
 
+- Before treating any target bundle as complete or deciding that a metric is
+  missing, run `vault-cli goal list --status active --limit 200 --format json`.
+  If it returns 200 records, the bounded read may be incomplete: fail closed
+  with ordinary text, no Goal or measurement mutation, and no card. Otherwise,
+  run `vault-cli goal show <goal-id> --format json` for every returned active
+  Goal whose list item reports a nonzero `data.metricTargetsCount`. Do not
+  select detail reads by title, slug, domain, context-snapshot visibility, or
+  the default list prefix. Resolve metric identity, unit, comparator, effective
+  date, conflicts, and the 1,200-kcal boundary only after inspecting that
+  complete detail set. Keep this active-target authority read separate from the
+  all-status lookup used below to reuse or honor Murph's managed paused or
+  abandoned proposal; neither read substitutes for the other.
 - Read already-known goals, body measurements, training, weight trend, activity,
   and stated body-composition direction before asking. Never infer a missing
   physiological sex input from a name, pronouns, or gender label, and never infer
@@ -151,9 +166,11 @@ Keep population guidance separate from Murph's product judgment.
 
 Use the existing canonical Goal owner; add no new state surface.
 
-1. Run `vault-cli goal list --limit 200 --format json`, then show only candidate
-   records. If the list is saturated or target authority is ambiguous, do not
-   write or attach a card.
+1. Separately run `vault-cli goal list --limit 200 --format json`, then show only
+   candidate records, to find the managed Goal in any status. If this all-status
+   list is saturated or target authority is ambiguous, do not write or attach a
+   card. Do not use this lookup in place of the complete active-target authority
+   read above.
 2. Reuse at most one Goal with slug `murph-daily-nutrition-starting-targets`.
    Create it only when absent, with title `Daily nutrition targets`, domain
    `nutrition`, horizon `ongoing`, and status `paused`. Before that first write,

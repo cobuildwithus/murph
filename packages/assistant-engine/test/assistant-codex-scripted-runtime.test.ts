@@ -174,6 +174,37 @@ function executeCodexAppServerTurn(
   })
 }
 
+function quotePosixShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+function buildReadOnlyVaultCliScript(input: {
+  commandLog: string
+  commandOutputs: readonly (readonly [string, unknown])[]
+}): string {
+  const branches = input.commandOutputs.map(([command, output]) => {
+    const payload = JSON.stringify(output)
+    if (payload === undefined) {
+      throw new Error(`Scripted command output for ${command} is not JSON-serializable.`)
+    }
+    return [
+      `if [ "$*" = ${quotePosixShellLiteral(command)} ]; then`,
+      `  printf '%s\\n' ${quotePosixShellLiteral(payload)}`,
+      '  exit 0',
+      'fi',
+    ].join('\n')
+  })
+
+  return [
+    '#!/bin/sh',
+    `printf '%s\\n' "$*" >> ${quotePosixShellLiteral(input.commandLog)}`,
+    ...branches,
+    `printf '%s\\n' '{"error":"unexpected scripted command"}' >&2`,
+    'exit 1',
+    '',
+  ].join('\n')
+}
+
 async function requireScriptedStub(): Promise<ScriptedStub> {
   stub ??= await startScriptedResponsesStub()
   return stub
@@ -1574,6 +1605,374 @@ if (!tool) {
     }
   })
 
+  it('proves complete Goal discovery before scheduled and interactive nutrition cards', {
+    timeout: 240_000,
+  }, async () => {
+    const activeListCommand =
+      'goal list --status active --limit 200 --format json'
+    const visibleGoalShowCommand =
+      'goal show goal_visible_bundle --format json'
+    const hiddenGoalShowCommand =
+      'goal show goal_hidden_conflict --format json'
+    const measurementCommand =
+      'measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from 2026-06-15 --to 2026-07-30 --limit 200 --format json'
+    const totalsCommand =
+      'meal totals --from 2026-07-30 --to 2026-07-30 --format json'
+
+    const pointTarget = (
+      id: string,
+      metric: string,
+      unit: string,
+      value: number,
+    ) => ({
+      evaluation: {
+        comparator: 'between',
+        highValue: value,
+        kind: 'selected-value',
+        value,
+      },
+      id,
+      kind: 'metric',
+      metric,
+      unit,
+    })
+    const completeTargets = [
+      pointTarget('target_calories', 'dietary-calories', 'kcal', 1_800),
+      pointTarget('target_protein', 'protein-grams', 'g', 140),
+      pointTarget('target_carbs', 'carbs-grams', 'g', 190),
+      pointTarget('target_fat', 'fat-grams', 'g', 55),
+      pointTarget('target_fiber', 'fiber-grams', 'g', 25),
+    ]
+    const visibleGoal = {
+      entity: {
+        data: {
+          metricTargets: completeTargets,
+          status: 'active',
+          windowStartAt: '2026-07-01',
+        },
+        id: 'goal_visible_bundle',
+        kind: 'goal',
+        title: 'Plan A',
+      },
+      vault: 'synthetic-vault',
+    }
+    const hiddenGoal = {
+      entity: {
+        data: {
+          metricTargets: [
+            pointTarget(
+              'target_hidden_calories',
+              'dietary-calories',
+              'kcal',
+              1_100,
+            ),
+          ],
+          status: 'active',
+          windowStartAt: '2026-07-01',
+        },
+        id: 'goal_hidden_conflict',
+        kind: 'goal',
+        title: 'Plan L',
+      },
+      vault: 'synthetic-vault',
+    }
+    const conflictItems = Array.from({ length: 12 }, (_, index) => {
+      const itemNumber = index + 1
+      const id = index === 0
+        ? 'goal_visible_bundle'
+        : index === 11
+          ? 'goal_hidden_conflict'
+          : `goal_opaque_${itemNumber}`
+      return {
+        data: {
+          metricTargetsCount: index === 0 ? 5 : index === 11 ? 1 : 0,
+          status: 'active',
+        },
+        id,
+        kind: 'goal',
+        title: `Plan ${itemNumber}`,
+      }
+    })
+    const conflictList = {
+      count: conflictItems.length,
+      filters: { limit: 200, status: 'active' },
+      items: conflictItems,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const saturatedItems = Array.from({ length: 200 }, (_, index) => ({
+      data: {
+        metricTargetsCount: index % 17 === 0 ? 1 : 0,
+        status: 'active',
+      },
+      id: `goal_saturated_${index + 1}`,
+      kind: 'goal',
+      title: `Plan ${index + 1}`,
+    }))
+    const saturatedList = {
+      count: saturatedItems.length,
+      filters: { limit: 200, status: 'active' },
+      items: saturatedItems,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const completeList = {
+      count: 1,
+      filters: { limit: 200, status: 'active' },
+      items: [conflictItems[0]],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const safeMeasurements = {
+      count: 0,
+      filters: {
+        from: '2026-06-15',
+        limit: 200,
+        metrics: ['bmi', 'height', 'weight', 'body-weight'],
+        to: '2026-07-30',
+      },
+      items: [],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const canonicalTotals = {
+      from: '2026-07-30',
+      mealCount: 3,
+      metrics: {
+        calories: { mealCount: 3, total: 1_760 },
+        carbsGrams: { mealCount: 3, total: 185 },
+        fatGrams: { mealCount: 3, total: 54 },
+        fiberGrams: { mealCount: 3, total: 24 },
+        proteinGrams: { mealCount: 3, total: 137 },
+      },
+      to: '2026-07-30',
+      vault: 'synthetic-vault',
+    }
+    const eligibleCard = {
+      goals: {
+        calories: { status: 'on_target', target: 1_800 },
+        carbsGrams: { status: 'on_target', target: 190 },
+        fatGrams: { status: 'on_target', target: 55 },
+        fiberGrams: { status: 'on_target', target: 25 },
+        proteinGrams: { status: 'on_target', target: 140 },
+      },
+      kind: 'daily_nutrition',
+      localDate: '2026-07-30',
+      mealCount: 3,
+      totals: canonicalTotals.metrics,
+      version: 2,
+    }
+
+    const runCase = async (input: {
+      card?: Record<string, unknown>
+      commandOutputs: readonly (readonly [string, unknown])[]
+      expectedCommands: readonly string[]
+      finalMessage: string
+      prompt: string
+      scheduled: boolean
+      skillReadCommands: readonly string[]
+      skillSlugs: readonly string[]
+    }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const skillsRoot = path.join(
+        scenario.turnInput.workingDirectory,
+        'skills',
+      )
+      await mkdir(skillsRoot, { recursive: true })
+      await Promise.all(input.skillSlugs.map((slug) =>
+        cp(
+          path.join(resolveAssistantSkillsRoot(), slug),
+          path.join(skillsRoot, slug),
+          { recursive: true },
+        )))
+      const commandLog = path.join(
+        scenario.turnInput.workingDirectory,
+        'nutrition-goal-discovery-commands.log',
+      )
+      await writeFile(
+        path.join(scenario.turnInput.workingDirectory, 'vault-cli'),
+        buildReadOnlyVaultCliScript({
+          commandLog,
+          commandOutputs: input.commandOutputs,
+        }),
+        { encoding: 'utf8', mode: 0o755 },
+      )
+
+      const responses: ScriptedResponse[] = []
+      input.skillReadCommands.forEach((command, index) => {
+        responses.push({
+          customToolCall: {
+            input: `
+const result = await tools.exec_command({ cmd: ${JSON.stringify(command)} });
+text(result.output);
+`,
+            name: 'exec',
+          },
+          ...(index === 0
+            ? {
+                requestIncludes: [
+                  'Before every goal-aware daily_nutrition card',
+                  'goal list --status active --limit 200 --format json',
+                  'nonzero data.metricTargetsCount',
+                ],
+              }
+            : {}),
+        })
+      })
+      input.expectedCommands.forEach((command) => {
+        responses.push({
+          customToolCall: {
+            input: `
+const result = await tools.exec_command({ cmd: ${JSON.stringify(`./vault-cli ${command}`)} });
+text(result.output);
+`,
+            name: 'exec',
+          },
+        })
+      })
+      if (input.card) {
+        responses.push({
+          functionCall: {
+            arguments: { card: input.card },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        })
+      }
+      responses.push({ text: input.finalMessage })
+      scenario.stub.queue(...responses)
+
+      try {
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput,
+          baseInstructions: buildScriptedHostedSystemPrompt(
+            'direct',
+            false,
+            input.scheduled ? '2026-07-30T21:00:00.000-04:00' : undefined,
+          ),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+          env: {
+            ...scenario.turnInput.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          groupConversation: false,
+          prompt: input.prompt,
+          sandbox: 'danger-full-access',
+        })
+        const commands = (await readFile(commandLog, 'utf8'))
+          .trim()
+          .split('\n')
+
+        expect(commands).toEqual(input.expectedCommands)
+        expect(result.responseCard).toEqual(input.card ?? null)
+        if (input.card) {
+          expect(result.finalMessage).toContain(
+            'Targets: 1,800 calories (ON TARGET)',
+          )
+          expect(result.finalMessage).toContain('25g fiber (ON TARGET).')
+          expect(result.finalMessage).not.toContain(input.finalMessage)
+        } else {
+          expect(result.finalMessage).toBe(input.finalMessage)
+        }
+      } finally {
+        await stopWarmCodexAppServer()
+      }
+    }
+
+    const scheduledSkillReads = [
+      "sed -n '1,320p' skills/automatic-meal-capture/SKILL.md",
+      "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
+    ]
+    const interactiveSkillReads = [
+      "sed -n '1,180p' skills/food-journal/SKILL.md",
+      "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
+      "sed -n '1,320p' skills/nutrition-strategy/references/daily-nutrition-card-goals.md",
+    ]
+    const conflictOutputs = [
+      [activeListCommand, conflictList],
+      [visibleGoalShowCommand, visibleGoal],
+      [hiddenGoalShowCommand, hiddenGoal],
+    ] as const
+    const conflictCommands = [
+      activeListCommand,
+      visibleGoalShowCommand,
+      hiddenGoalShowCommand,
+    ]
+
+    await runCase({
+      commandOutputs: conflictOutputs,
+      expectedCommands: conflictCommands,
+      finalMessage: 'Closeout saved without a goal card because active targets conflict.',
+      prompt: [
+        'Scheduled automatic meal closeout for the 2026-07-30 occurrence.',
+        'The visible context suggests one complete bundle, but canonical state has more than ten active Goals.',
+        'Follow the scheduled skill, resolve card authority, and fail closed on any hidden conflict.',
+      ].join(' '),
+      scheduled: true,
+      skillReadCommands: scheduledSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
+    await runCase({
+      commandOutputs: conflictOutputs,
+      expectedCommands: conflictCommands,
+      finalMessage: 'I found conflicting active targets, so I did not attach a card.',
+      prompt: [
+        'Show my daily nutrition card for 2026-07-30.',
+        'The visible context suggests one complete bundle, but canonical state has more than ten active Goals.',
+      ].join(' '),
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+    await runCase({
+      commandOutputs: [[activeListCommand, saturatedList]],
+      expectedCommands: [activeListCommand],
+      finalMessage: 'Closeout saved without a goal card because the active Goal read was saturated.',
+      prompt: [
+        'Scheduled automatic meal closeout for the 2026-07-30 occurrence.',
+        'Resolve the requested goal-aware card, but fail closed if canonical Goal discovery is saturated.',
+      ].join(' '),
+      scheduled: true,
+      skillReadCommands: scheduledSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
+
+    const controlOutputs = [
+      [activeListCommand, completeList],
+      [visibleGoalShowCommand, visibleGoal],
+      [measurementCommand, safeMeasurements],
+      [totalsCommand, canonicalTotals],
+    ] as const
+    const controlCommands = [
+      activeListCommand,
+      visibleGoalShowCommand,
+      measurementCommand,
+      totalsCommand,
+    ]
+    for (const control of [
+      {
+        prompt: 'Run the scheduled automatic meal closeout and attach the eligible 2026-07-30 goal-aware card.',
+        scheduled: true,
+        skillReadCommands: scheduledSkillReads,
+        skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+      },
+      {
+        prompt: 'Show my eligible daily nutrition card for 2026-07-30.',
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      },
+    ]) {
+      await runCase({
+        card: eligibleCard,
+        commandOutputs: controlOutputs,
+        expectedCommands: controlCommands,
+        finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_GOAL_READ',
+        ...control,
+      })
+    }
+  })
+
   it('discovers deferred Murph schemas through native Codex tool_search', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -2879,6 +3278,7 @@ function createScriptedSongRuntime(
 function buildScriptedHostedSystemPrompt(
   conversationScope: 'direct' | 'group',
   onboardingGuidance = false,
+  scheduledOccurrenceAt?: string,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
@@ -2897,8 +3297,11 @@ function buildScriptedHostedSystemPrompt(
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance,
-    ordinaryInboundTurn: true,
-    turnTrigger: 'automation-auto-reply',
+    ordinaryInboundTurn: scheduledOccurrenceAt === undefined,
+    scheduledOccurrenceAt,
+    turnTrigger: scheduledOccurrenceAt === undefined
+      ? 'automation-auto-reply'
+      : 'automation-cron',
   })
 }
 

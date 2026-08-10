@@ -174,7 +174,19 @@ On a scheduled run:
    replaces retained image bytes with a privacy tombstone. Any removal failure
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
-6. After inspection, enrichment, read-back, and photo cleanup, read and apply
+6. After inspection, enrichment, read-back, and photo cleanup, first prove the
+   active Goal read is complete. Run `vault-cli goal list --status active
+   --limit 200 --format json`. If it returns 200 records, fail closed with the
+   ordinary compact closeout: run no Goal detail reads, perform no Goal or
+   measurement mutation, ask no question, and attach no card. Otherwise, run
+   `vault-cli goal show <goal-id> --format json` for every returned active Goal
+   whose list item reports a nonzero `data.metricTargetsCount`. Do not select
+   detail reads by title, slug, domain, context-snapshot visibility, or the
+   default list prefix. Resolve metric identity, unit, comparator, effective
+   date, conflicts, and the 1,200-kcal boundary only after inspecting that
+   complete detail set. This active-target authority read is separate from any
+   all-status Goal lookup used to reuse or honor Murph's managed paused or
+   abandoned proposal; never substitute that lookup here. Then read and apply
    `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
    before resolving a card, even when five accepted goals already exist. This
    scheduled closeout uses only that card-time safety gate and does not provide

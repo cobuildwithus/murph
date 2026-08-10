@@ -41,9 +41,11 @@ Ask at most one question, and only when the missing detail materially changes sa
 
 Before every requested daily nutrition card, read and apply
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`,
-even when all five goals already exist. Require all five canonical daily goals.
-If any are missing, also read and follow
-`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`.
+even when all five goals already appear to exist. Also read and follow the
+target-authority and complete active-Goal discovery contract in
+`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
+before deciding that the five canonical daily goals are complete. Use its
+proposal workflow only if a target is genuinely missing after that read.
 The first setup response explains a paused canonical proposal in ordinary text;
 it does not attach a goal-less card. An unambiguous acceptance may complete the
 pending explicit card request in that next response after activation, safety

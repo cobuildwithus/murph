@@ -264,7 +264,25 @@ describe('assistant nutrition strategy skill', () => {
       'Reuse at most one Goal with slug `murph-daily-nutrition-starting-targets`.',
     )
     expect(compactGoals).toContain(
-      'Use this only after an explicit interactive request to set nutrition targets or to receive a numeric daily nutrition card',
+      'Use the target-authority and canonical-discovery rules below after every explicit interactive request to set nutrition targets or receive a numeric daily nutrition card, even when the visible context appears to contain a complete bundle.',
+    )
+    expect(compactGoals).toContain(
+      'run `vault-cli goal list --status active --limit 200 --format json`.',
+    )
+    expect(compactGoals).toContain(
+      'If it returns 200 records, the bounded read may be incomplete: fail closed with ordinary text, no Goal or measurement mutation, and no card.',
+    )
+    expect(compactGoals).toContain(
+      'run `vault-cli goal show <goal-id> --format json` for every returned active Goal whose list item reports a nonzero `data.metricTargetsCount`.',
+    )
+    expect(compactGoals).toContain(
+      'Do not select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix.',
+    )
+    expect(compactGoals).toContain(
+      'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',
+    )
+    expect(compactGoals).toContain(
+      'Separately run `vault-cli goal list --limit 200 --format json`',
     )
     expect(compactGoals).toContain(
       'It authorizes only the one paused canonical proposal below so the provisional values do not live in transient assistant state; it does not accept, activate, or use those targets.',
@@ -273,7 +291,7 @@ describe('assistant nutrition strategy skill', () => {
       'explicit numeric-card request authorizes that canonical draft',
     )
     expect(compactGoals).toContain(
-      'A scheduled closeout may use an already accepted active bundle, but it must not use this workflow to ask for inputs, derive or save targets, or surface a proposal.',
+      'A scheduled closeout follows the equivalent discovery contract in its owning skill and may use an already accepted active bundle, but it must not use this workflow to ask for inputs, derive or save targets, or surface a proposal.',
     )
     expect(compactGoals).toContain('status `paused`')
     expect(compactGoals).toContain(

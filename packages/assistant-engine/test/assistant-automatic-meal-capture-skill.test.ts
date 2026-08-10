@@ -135,6 +135,21 @@ describe('assistant automatic meal capture skill', () => {
     )
     const compactSkill = compact(skill)
     expect(compactSkill).toContain(
+      'Run `vault-cli goal list --status active --limit 200 --format json`.',
+    )
+    expect(compactSkill).toContain(
+      'If it returns 200 records, fail closed with the ordinary compact closeout: run no Goal detail reads, perform no Goal or measurement mutation, ask no question, and attach no card.',
+    )
+    expect(compactSkill).toContain(
+      'run `vault-cli goal show <goal-id> --format json` for every returned active Goal whose list item reports a nonzero `data.metricTargetsCount`.',
+    )
+    expect(compactSkill).toContain(
+      'Do not select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix.',
+    )
+    expect(compactSkill).toContain(
+      'This active-target authority read is separate from any all-status Goal lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
+    )
+    expect(compactSkill).toContain(
       'Only when all five qualifying exact point targets resolve from active canonical Goals',
     )
     expect(compactSkill).toContain(
@@ -262,6 +277,11 @@ describe('assistant automatic meal capture skill', () => {
     ).toBeLessThan(attachCardIndex)
     expect(compactSkill.indexOf('daily-nutrition-card-safety.md'))
       .toBeLessThan(attachCardIndex)
+    expect(
+      compactSkill.indexOf(
+        'vault-cli goal list --status active --limit 200 --format json',
+      ),
+    ).toBeLessThan(attachCardIndex)
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')

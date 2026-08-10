@@ -79,8 +79,16 @@ describe('assistant food journal skill', () => {
     expect(skill.indexOf('daily-nutrition-card-safety.md')).toBeLessThan(
       skill.indexOf('daily-nutrition-card-goals.md'),
     )
-    expect(skill).toContain('even when all five goals already exist')
-    expect(skill).toContain('Require all five canonical daily goals')
+    expect(skill).toContain('even when all five goals already appear to exist')
+    expect(skill).toContain(
+      'target-authority and complete active-Goal discovery contract',
+    )
+    expect(skill).toContain(
+      'before deciding that the five canonical daily goals are complete',
+    )
+    expect(skill).toContain(
+      'Use its\nproposal workflow only if a target is genuinely missing after that read.',
+    )
     expect(skill).toContain(
       'first setup response explains a paused canonical proposal in ordinary text',
     )
