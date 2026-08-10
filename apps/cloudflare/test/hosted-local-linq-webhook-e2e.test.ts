@@ -11,10 +11,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 
-import {
-  buildStableNumericSuffix,
-  didShellPrewarmArriveByIngressAcceptance,
-} from "./helpers/hosted-local-e2e-support.js";
+import { buildStableNumericSuffix } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -307,11 +304,12 @@ describe("hosted local Linq webhook e2e", () => {
       ),
       shellPrewarmSource: "linq-typing-started",
     });
-    expect(didShellPrewarmArriveByIngressAcceptance({
-      acceptedAt: latencyTrace.acceptedAt,
-      firstHintAtEpochMs:
-        latencyTrace.phaseBreakdown?.orchestration?.shellPrewarmFirstHintAtEpochMs,
-    })).toBe(true);
+    const acceptedAtEpochMs = Date.parse(latencyTrace.acceptedAt);
+    const firstHintAtEpochMs =
+      latencyTrace.phaseBreakdown?.orchestration?.shellPrewarmFirstHintAtEpochMs;
+    expect(acceptedAtEpochMs).not.toBeNaN();
+    expect(firstHintAtEpochMs).toEqual(expect.any(Number));
+    expect(firstHintAtEpochMs).toBeLessThanOrEqual(acceptedAtEpochMs);
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {

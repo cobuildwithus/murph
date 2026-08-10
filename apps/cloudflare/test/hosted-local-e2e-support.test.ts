@@ -10,7 +10,6 @@ import {
   buildAssistantProviderVaultCliCall,
   buildHostedLocalDeviceSyncProviderEnvClearances,
   buildHostLoopbackStubBaseUrl,
-  didShellPrewarmArriveByIngressAcceptance,
   expectAdvertisedMurphDynamicTools,
   HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS,
   HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS,
@@ -29,29 +28,6 @@ import {
 } from "@murphai/hosted-local-harness/e2e";
 
 const temporalDevUiPortOffset = 1_000;
-
-describe("didShellPrewarmArriveByIngressAcceptance", () => {
-  const acceptedAt = "2026-08-10T19:25:00.000Z";
-  const acceptedAtEpochMs = Date.parse(acceptedAt);
-
-  it("accepts a shell-prewarm hint recorded no later than ingress acceptance", () => {
-    expect(didShellPrewarmArriveByIngressAcceptance({
-      acceptedAt,
-      firstHintAtEpochMs: acceptedAtEpochMs - 1,
-    })).toBe(true);
-    expect(didShellPrewarmArriveByIngressAcceptance({
-      acceptedAt,
-      firstHintAtEpochMs: acceptedAtEpochMs,
-    })).toBe(true);
-  });
-
-  it("rejects a post-response shell-prewarm hint recorded after ingress acceptance", () => {
-    expect(didShellPrewarmArriveByIngressAcceptance({
-      acceptedAt,
-      firstHintAtEpochMs: acceptedAtEpochMs + 1,
-    })).toBe(false);
-  });
-});
 
 describe("mergeRequiredEnvProfile", () => {
   it("preserves the default hosted runner profiles when adding a required channel profile", () => {
