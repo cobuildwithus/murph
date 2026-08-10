@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { PassThrough } from 'node:stream'
+import { PassThrough, type TransformCallback } from 'node:stream'
 
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -504,8 +504,8 @@ async function runCodexResponseMediaToolTurn(
           params: {
             item: {
               id: 'assistant-response-media-tool',
-              type: 'assistant_message',
-              message: 'Tool media complete',
+              type: 'agentMessage',
+              text: 'Tool media complete',
             },
           },
         }))
@@ -601,8 +601,8 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
             params: {
               item: {
                 id: 'user-before-voice-memo-steer',
-                type: 'user_message',
-                message: 'Answer this first',
+                type: 'userMessage',
+                content: [{ type: 'text', text: 'Answer this first' }],
               },
             },
           }))
@@ -611,8 +611,8 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
             params: {
               item: {
                 id: 'assistant-before-voice-memo-steer',
-                type: 'assistant_message',
-                message: input.precedingFinalText,
+                type: 'agentMessage',
+                text: input.precedingFinalText,
               },
             },
           }))
@@ -621,8 +621,11 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
             params: {
               item: {
                 id: 'user-voice-memo-steer',
-                type: 'user_message',
-                message: 'Send that as a voice memo instead',
+                type: 'userMessage',
+                content: [{
+                  type: 'text',
+                  text: 'Send that as a voice memo instead',
+                }],
               },
             },
           }))
@@ -643,9 +646,9 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
             params: {
               item: {
                 id: 'assistant-voice-memo-commentary',
-                type: 'assistant_message',
+                type: 'agentMessage',
                 phase: 'commentary',
-                message: input.commentaryText,
+                text: input.commentaryText,
               },
             },
           }))
@@ -681,8 +684,8 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
           params: {
             item: {
               id: 'assistant-voice-memo-only',
-              type: 'assistant_message',
-              message: '',
+              type: 'agentMessage',
+              text: '',
             },
           },
         }))
@@ -1244,7 +1247,7 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'command-1',
-                  type: 'command.execution',
+                  type: 'commandExecution',
                   command: 'pwd',
                 },
               },
@@ -1252,13 +1255,10 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(
             jsonLine({
-              method: 'assistant.message.delta',
+              method: 'item/agentMessage/delta',
               params: {
-                item: {
-                  id: 'assistant-1',
-                  type: 'assistant_message',
-                },
                 delta: 'Hello ',
+                itemId: 'assistant-1',
               },
             }),
           )
@@ -1268,8 +1268,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-1',
-                  type: 'assistant_message',
-                  message: 'Hello world',
+                  type: 'agentMessage',
+                  text: 'Hello world',
                 },
               },
             }),
@@ -1280,8 +1280,9 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'command-1',
-                  type: 'command.execution',
+                  type: 'commandExecution',
                   command: 'pwd',
+                  exitCode: 0,
                 },
               },
             }),
@@ -1964,8 +1965,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-image-order',
-                  type: 'assistant_message',
-                  message: 'Ordered media complete',
+                  type: 'agentMessage',
+                  text: 'Ordered media complete',
                 },
               },
             }),
@@ -2142,8 +2143,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-configuration-order',
-                message: 'Configuration updates complete',
-                type: 'assistant_message',
+                text: 'Configuration updates complete',
+                type: 'agentMessage',
               },
             },
           }))
@@ -2285,8 +2286,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-subscription-order',
-                message: 'Subscription actions complete',
-                type: 'assistant_message',
+                text: 'Subscription actions complete',
+                type: 'agentMessage',
               },
             },
           }))
@@ -2464,8 +2465,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-computer-order',
-                  type: 'assistant_message',
-                  message: scenario.modelMessage,
+                  type: 'agentMessage',
+                  text: scenario.modelMessage,
                 },
               },
             }),
@@ -2571,6 +2572,16 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: 'turn-computer-pause-live-turn',
+                },
+              },
+            }),
+          )
           await liveTurnReady.promise
           child.stdout.write(
             jsonLine({
@@ -2618,8 +2629,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-computer-pause-live-turn',
-                  type: 'assistant_message',
-                  message: 'Paused for confirmation.',
+                  type: 'agentMessage',
+                  text: 'Paused for confirmation.',
                 },
               },
             }),
@@ -2830,8 +2841,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-computer-pause-no-reply',
-                  type: 'assistant_message',
-                  message:
+                  type: 'agentMessage',
+                  text:
                     'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
                 },
               },
@@ -3041,8 +3052,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-vault-approval-url',
-                message: 'Approval is required.',
-                type: 'assistant_message',
+                text: 'Approval is required.',
+                type: 'agentMessage',
               },
             },
           }))
@@ -3489,8 +3500,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'user-vault-send-steer-1',
-                message: 'Send the report.',
-                type: 'user_message',
+                content: [{ type: 'text', text: 'Send the report.' }],
+                type: 'userMessage',
               },
             },
           }))
@@ -3515,8 +3526,11 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'user-vault-send-steer-2',
-                message: 'Now attach a different image.',
-                type: 'user_message',
+                content: [{
+                  type: 'text',
+                  text: 'Now attach a different image.',
+                }],
+                type: 'userMessage',
               },
             },
           }))
@@ -3544,8 +3558,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-vault-send-steer-2',
-                message: 'Here is the separate image.',
-                type: 'assistant_message',
+                text: 'Here is the separate image.',
+                type: 'agentMessage',
               },
             },
           }))
@@ -3649,9 +3663,11 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
-              status: 'failed',
               threadId: 'thread-vault-approval-failure',
-              turnId: 'turn-vault-approval-failure',
+              turn: {
+                id: 'turn-vault-approval-failure',
+                status: 'failed',
+              },
             },
           }))
         })()
@@ -3902,8 +3918,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-image-progress',
-                  type: 'assistant_message',
-                  message: 'Progress and image complete',
+                  type: 'agentMessage',
+                  text: 'Progress and image complete',
                 },
               },
             }),
@@ -4056,8 +4072,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-image-limit',
-                  type: 'assistant_message',
-                  message: 'Media limit handled',
+                  type: 'agentMessage',
+                  text: 'Media limit handled',
                 },
               },
             }),
@@ -4131,8 +4147,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-preinitialized-first',
-                message: 'Prepared answer',
-                type: 'assistant_message',
+                text: 'Prepared answer',
+                type: 'agentMessage',
               },
             },
           }))
@@ -4346,8 +4362,8 @@ describe('assistant codex runtime', () => {
       params: {
         item: {
           id: 'assistant-foreground-exact-preparation',
-          message: 'Foreground replacement answer',
-          type: 'assistant_message',
+          text: 'Foreground replacement answer',
+          type: 'agentMessage',
         },
       },
     }))
@@ -4388,8 +4404,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-after-preinitialize-boundary',
-                  message: 'Fresh process answer',
-                  type: 'assistant_message',
+                  text: 'Fresh process answer',
+                  type: 'agentMessage',
                 },
               },
             }))
@@ -4628,8 +4644,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-boundary-first-foreground',
-                  message: 'Unexpected replacement answer',
-                  type: 'assistant_message',
+                  text: 'Unexpected replacement answer',
+                  type: 'agentMessage',
                 },
               },
             }))
@@ -4734,8 +4750,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-foreground-boundary-replacement',
-                message: 'Replacement answer',
-                type: 'assistant_message',
+                text: 'Replacement answer',
+                type: 'agentMessage',
               },
             },
           }))
@@ -4804,8 +4820,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-preinitialize-fallback',
-                  message: 'Fallback answer',
-                  type: 'assistant_message',
+                  text: 'Fallback answer',
+                  type: 'agentMessage',
                 },
               },
             }))
@@ -4889,8 +4905,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-boundary-claim-one',
-                message: 'First boundary answer',
-                type: 'assistant_message',
+                text: 'First boundary answer',
+                type: 'agentMessage',
               },
             },
           }))
@@ -4925,8 +4941,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-boundary-claim-two',
-                message: 'Second boundary answer',
-                type: 'assistant_message',
+                text: 'Second boundary answer',
+                type: 'agentMessage',
               },
               turnId: 'turn-boundary-claim-two',
             },
@@ -5031,22 +5047,16 @@ describe('assistant codex runtime', () => {
             },
           }))
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              item: {
-                id: 'assistant-local-warm-1',
-                type: 'assistant_message',
-              },
-              delta: 'First answer',
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-local-warm-1', delta: 'First answer' },
           }))
           child.stdout.write(jsonLine({
             method: 'item/completed',
             params: {
               item: {
                 id: 'assistant-local-warm-1',
-                type: 'assistant_message',
-                message: 'First answer',
+                type: 'agentMessage',
+                text: 'First answer',
               },
             },
           }))
@@ -5082,23 +5092,16 @@ describe('assistant codex runtime', () => {
             },
           }))
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              item: {
-                id: 'assistant-local-warm-2',
-                type: 'assistant_message',
-              },
-              delta: 'Second answer',
-              turnId: 'turn-local-warm-2',
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-local-warm-2', delta: 'Second answer', turnId: 'turn-local-warm-2' },
           }))
           child.stdout.write(jsonLine({
             method: 'item/completed',
             params: {
               item: {
                 id: 'assistant-local-warm-2',
-                type: 'assistant_message',
-                message: 'Second answer',
+                type: 'agentMessage',
+                text: 'Second answer',
               },
               turnId: 'turn-local-warm-2',
             },
@@ -5721,9 +5724,9 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-member-read-checkin',
-                message:
+                text:
                   '{"kind":"skip","privateSummary":"No useful check-in now."}',
-                type: 'assistant_message',
+                type: 'agentMessage',
               },
             },
           }))
@@ -5886,14 +5889,8 @@ describe('assistant codex runtime', () => {
 
           await completeTurn.promise
           spawnedChild.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              item: {
-                id: 'assistant-local-stop-busy',
-                type: 'assistant_message',
-              },
-              delta: 'Still completed',
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-local-stop-busy', delta: 'Still completed' },
           }))
           spawnedChild.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -6125,13 +6122,13 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 25_000,
                   inputTokens: 75_000,
                   outputTokens: 12,
                   totalTokens: 75_012,
                 },
-                total: {
+                total: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 25_000,
                   inputTokens: 75_000,
                   outputTokens: 12,
@@ -6146,8 +6143,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-personal-compact-threshold',
-                message: 'Seeded personal thread below its threshold',
-                type: 'assistant_message',
+                text: 'Seeded personal thread below its threshold',
+                type: 'agentMessage',
               },
             },
           }))
@@ -6225,13 +6222,13 @@ describe('assistant codex runtime', () => {
                 threadId: parentThreadId,
                 turnId: parentTurnId,
                 tokenUsage: {
-                  last: {
+                  last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                     cachedInputTokens: 25_000,
                     inputTokens: 75_000,
                     outputTokens: 12,
                     totalTokens: 75_012,
                   },
-                  total: {
+                  total: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                     cachedInputTokens: 25_000,
                     inputTokens: 75_000,
                     outputTokens: 12,
@@ -6261,8 +6258,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-group-compact-detached',
-                  message: 'The group reply completed before its detached work.',
-                  type: 'assistant_message',
+                  text: 'The group reply completed before its detached work.',
+                  type: 'agentMessage',
                 },
                 threadId: parentThreadId,
                 turnId: parentTurnId,
@@ -6396,13 +6393,13 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 25_000,
                   inputTokens: 50_000,
                   outputTokens: 12,
                   totalTokens: 50_012,
                 },
-                total: {
+                total: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 25_000,
                   inputTokens: 50_000,
                   outputTokens: 12,
@@ -6417,8 +6414,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-compact-provider-usage',
-                type: 'assistant_message',
-                message: 'Seeded before compact',
+                type: 'agentMessage',
+                text: 'Seeded before compact',
               },
             },
           }))
@@ -6448,13 +6445,13 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 24_000,
                   inputTokens: 125_000,
                   outputTokens: 700,
                   totalTokens: 125_700,
                 },
-                total: {
+                total: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 49_000,
                   inputTokens: 250_000,
                   outputTokens: 712,
@@ -6470,13 +6467,13 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 0,
                   inputTokens: 0,
                   outputTokens: 0,
                   totalTokens: 43_000,
                 },
-                total: {
+                total: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 49_000,
                   inputTokens: 250_000,
                   outputTokens: 712,
@@ -6493,6 +6490,7 @@ describe('assistant codex runtime', () => {
                 id: 'context-compact-provider-usage',
                 type: 'contextCompaction',
               },
+              threadId,
             },
           }))
         })()
@@ -6539,7 +6537,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('uses provider usage attached to the context compaction completion', async () => {
+  it('uses the pre-compaction estimate when the exact completion has no billing payload', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-explicit-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-explicit-usage-home-')
     const threadId = 'thread-compact-explicit-usage'
@@ -6565,13 +6563,13 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 25_000,
                   inputTokens: 125_000,
                   outputTokens: 12,
                   totalTokens: 125_012,
                 },
-                total: {
+                total: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 25_000,
                   inputTokens: 125_000,
                   outputTokens: 12,
@@ -6586,8 +6584,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-compact-explicit-usage',
-                type: 'assistant_message',
-                message: 'Seeded before explicit compact',
+                type: 'agentMessage',
+                text: 'Seeded before explicit compact',
               },
             },
           }))
@@ -6617,20 +6615,6 @@ describe('assistant codex runtime', () => {
               item: {
                 id: 'context-compact-explicit-usage',
                 type: 'contextCompaction',
-                providerUsage: {
-                  last: {
-                    cached_input_tokens: 24_000,
-                    input_tokens: 125_000,
-                    output_tokens: 700,
-                    total_tokens: 125_700,
-                  },
-                  total: {
-                    cached_input_tokens: 24_000,
-                    input_tokens: 125_000,
-                    output_tokens: 700,
-                    total_tokens: 125_700,
-                  },
-                },
               },
               threadId,
             },
@@ -6654,165 +6638,6 @@ describe('assistant codex runtime', () => {
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Seeded before explicit compact',
-      sessionId: threadId,
-      turnId,
-    })
-
-    await expect(
-      compactWarmCodexThread({
-        minThreadTokens: 100_000,
-        timeoutMs: 5_000,
-      }),
-    ).resolves.toMatchObject({
-      kind: 'compacted',
-      threadContextTokensBefore: 125_000,
-      threadId,
-      usage: {
-        cachedInputTokens: 24_000,
-        inputTokens: 125_000,
-        outputTokens: 700,
-        source: 'provider',
-        totalTokens: 125_700,
-      },
-    })
-  })
-
-  it('falls back to pre-compact estimate when compaction provider usage is impossible', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-compact-estimated-usage-work-')
-    const codexHome = await createTempDir('assistant-codex-compact-estimated-usage-home-')
-    const threadId = 'thread-compact-estimated-usage'
-    const turnId = 'turn-compact-estimated-usage'
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId,
-            turnId,
-          })
-          child.stdout.write(jsonLine({
-            method: 'thread/tokenUsage/updated',
-            params: {
-              threadId,
-              turnId,
-              tokenUsage: {
-                last: {
-                  cachedInputTokens: 25_000,
-                  inputTokens: 125_000,
-                  outputTokens: 12,
-                  totalTokens: 125_012,
-                },
-                total: {
-                  cachedInputTokens: 25_000,
-                  inputTokens: 125_000,
-                  outputTokens: 12,
-                  totalTokens: 125_012,
-                },
-                modelContextWindow: 128_000,
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-compact-estimated-usage',
-                type: 'assistant_message',
-                message: 'Seeded before estimated compact',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: turnId,
-                status: 'completed',
-              },
-            },
-          }))
-
-          const barrier = await waitForRpcMethod(child, 'config/read')
-          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
-          const compact = await waitForRpcMethod(child, 'thread/compact/start')
-          expect(asRecord(compact.params)).toEqual({ threadId })
-          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
-          writeContextCompactionStarted({
-            child,
-            itemId: 'context-compact-estimated-usage',
-            threadId,
-          })
-          child.stdout.write(jsonLine({
-            method: 'thread/tokenUsage/updated',
-            params: {
-              threadId,
-              turnId,
-              tokenUsage: {
-                last: {
-                  cachedInputTokens: 0,
-                  inputTokens: 0,
-                  outputTokens: 0,
-                  totalTokens: 43_000,
-                },
-                total: {
-                  cachedInputTokens: 25_000,
-                  inputTokens: 125_000,
-                  outputTokens: 12,
-                  totalTokens: 125_012,
-                },
-                modelContextWindow: 128_000,
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'context-compact-estimated-usage',
-                type: 'contextCompaction',
-                providerUsage: {
-                  cached_input_tokens: 150_000,
-                  input_tokens: 125_000,
-                  output_tokens: 700,
-                  total_tokens: 125_700,
-                },
-              },
-              tokenUsage: {
-                last: {
-                  cached_input_tokens: 24_000,
-                  input_tokens: 125_000,
-                  output_tokens: 700,
-                  total_tokens: 125_700,
-                },
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    await expect(
-      executeCodexAppServerTurn({
-        approvalPolicy: 'never',
-        codexHome,
-        env: {
-          PATH: '/custom/bin',
-        },
-        prompt: 'seed compact estimated usage',
-        sandbox: 'workspace-write',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      finalMessage: 'Seeded before estimated compact',
       sessionId: threadId,
       turnId,
     })
@@ -6863,7 +6688,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 10_000,
                   inputTokens: 125_000,
                   outputTokens: 100,
@@ -6877,7 +6702,7 @@ describe('assistant codex runtime', () => {
             params: {
               threadId: childThreadId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 0,
                   inputTokens: 126_000,
                   outputTokens: 200,
@@ -6891,8 +6716,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-compact-parent-vitals',
-                type: 'assistant_message',
-                message: 'Seeded parent before compact',
+                type: 'agentMessage',
+                text: 'Seeded parent before compact',
               },
             },
           }))
@@ -6922,7 +6747,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 0,
                   inputTokens: 0,
                   outputTokens: 0,
@@ -7009,7 +6834,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 10_000,
                   inputTokens: 125_000,
                   outputTokens: 100,
@@ -7023,8 +6848,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-compact-stale-completion',
-                type: 'assistant_message',
-                message: 'Seeded before stale completion',
+                type: 'agentMessage',
+                text: 'Seeded before stale completion',
               },
             },
           }))
@@ -7048,7 +6873,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 4_000,
                   inputTokens: 111_000,
                   outputTokens: 222,
@@ -7081,7 +6906,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 0,
                   inputTokens: 0,
                   outputTokens: 0,
@@ -7176,7 +7001,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 10_000,
                   inputTokens: 125_000,
                   outputTokens: 100,
@@ -7190,8 +7015,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-compact-legacy-completion',
-                type: 'assistant_message',
-                message: 'Seeded before legacy completion',
+                type: 'agentMessage',
+                text: 'Seeded before legacy completion',
               },
             },
           }))
@@ -7286,7 +7111,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 10_000,
                   inputTokens: 125_000,
                   outputTokens: 100,
@@ -7300,8 +7125,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: `${contextItemId}-assistant`,
-                type: 'assistant_message',
-                message: seedMessage,
+                type: 'agentMessage',
+                text: seedMessage,
               },
             },
           }))
@@ -7407,7 +7232,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 10_000,
                   inputTokens: 125_000,
                   outputTokens: 100,
@@ -7421,8 +7246,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: `${contextItemId}-assistant`,
-                type: 'assistant_message',
-                message: seedMessage,
+                type: 'agentMessage',
+                text: seedMessage,
               },
             },
           }))
@@ -7536,7 +7361,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 10_000,
                   inputTokens: 125_000,
                   outputTokens: 100,
@@ -7550,8 +7375,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-compact-stale-after-rpc',
-                type: 'assistant_message',
-                message: 'Seeded before stale after rpc',
+                type: 'agentMessage',
+                text: 'Seeded before stale after rpc',
               },
             },
           }))
@@ -7695,7 +7520,7 @@ describe('assistant codex runtime', () => {
               threadId,
               turnId,
               tokenUsage: {
-                last: {
+                last: { cacheWriteInputTokens: 0, reasoningOutputTokens: 0,
                   cachedInputTokens: 10_000,
                   inputTokens: 125_000,
                   outputTokens: 100,
@@ -7709,8 +7534,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-compact-abort-barrier',
-                type: 'assistant_message',
-                message: 'Seeded before abort barrier',
+                type: 'agentMessage',
+                text: 'Seeded before abort barrier',
               },
             },
           }))
@@ -7809,7 +7634,7 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('accepts reused warm events with alternate current-turn id shapes', async () => {
+  it('rejects alternate current-turn id shapes on reused warm processes', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-turn-id-shapes-work-')
     const codexHome = await createTempDir('assistant-codex-local-turn-id-shapes-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -7854,21 +7679,17 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({
             id: secondTurn.id,
             result: {
-              turn_id: 'turn-local-turn-id-shape-2',
+              turn: {
+                id: 'turn-local-turn-id-shape-2',
+              },
             },
           }))
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
+            method: 'item/agentMessage/delta',
             data: {
               turn_id: 'turn-local-turn-id-shape-2',
             },
-            params: {
-              item: {
-                id: 'assistant-local-turn-id-shape-2',
-                type: 'assistant_message',
-              },
-              delta: 'Second answer',
-            },
+            params: { itemId: 'assistant-local-turn-id-shape-2', delta: 'Second answer' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -7910,10 +7731,11 @@ describe('assistant codex runtime', () => {
         ...stableInput,
         prompt: 'second local turn with alternate id shapes',
       }),
-    ).resolves.toMatchObject({
-      finalMessage: 'Second answer',
-      sessionId: 'thread-local-turn-id-shape-2',
-      turnId: 'turn-local-turn-id-shape-2',
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
+      context: {
+        retryable: false,
+      },
     })
   })
 
@@ -8128,15 +7950,8 @@ describe('assistant codex runtime', () => {
           }))
           controlledNowMs = secondProviderStartedAtMs + 40
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              item: {
-                id: 'assistant-local-prestart-tagged-2',
-                type: 'assistant_message',
-              },
-              delta: 'Tagged event succeeded',
-              turnId: 'turn-local-prestart-tagged-2',
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-local-prestart-tagged-2', delta: 'Tagged event succeeded', turnId: 'turn-local-prestart-tagged-2' },
           }))
           controlledNowMs = secondProviderStartedAtMs + 50
           child.stdout.write(jsonLine({
@@ -8263,7 +8078,9 @@ describe('assistant codex runtime', () => {
               arguments: {
                 text: 'Starting early work',
               },
+              callId: 'call-local-prestart-request-2',
               namespace: 'murph',
+              threadId: 'thread-local-prestart-request-2',
               tool: 'send_progress_update',
               turnId: 'turn-local-prestart-request-2',
             },
@@ -8286,15 +8103,8 @@ describe('assistant codex runtime', () => {
           })
 
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              item: {
-                id: 'assistant-local-prestart-request-2',
-                type: 'assistant_message',
-              },
-              delta: 'Pre-start request completed',
-              turnId: 'turn-local-prestart-request-2',
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-local-prestart-request-2', delta: 'Pre-start request completed', turnId: 'turn-local-prestart-request-2' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -8348,6 +8158,154 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-local-prestart-request-2',
     })
     expect(progressUpdates).toEqual(['Starting early work'])
+  })
+
+  it('attributes only post-start unscoped reroutes on a reused warm process', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-warm-reroute-work-')
+    const codexHome = await createTempDir('assistant-codex-warm-reroute-home-')
+    const onTraceEvent = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-warm-reroute',
+            turnId: 'turn-warm-reroute-1',
+          })
+          writeCodexV2AssistantEventTurn({
+            child,
+            finalMessage: 'First warm turn complete',
+            threadId: 'thread-warm-reroute',
+            turnId: 'turn-warm-reroute-1',
+          })
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: { id: 'thread-warm-reroute' },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: { id: 'turn-warm-reroute-2' },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'model/rerouted',
+            params: { toModel: 'gpt-5.6-terra' },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              threadId: 'thread-warm-reroute',
+              turn: { id: 'turn-warm-reroute-2' },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'model/rerouted',
+            params: { toModel: 'gpt-5.6-sol' },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId: 'thread-warm-reroute',
+              tokenUsage: {
+                last: {
+                  cacheWriteInputTokens: 0,
+                  cachedInputTokens: 12,
+                  inputTokens: 120,
+                  outputTokens: 45,
+                  reasoningOutputTokens: 8,
+                  totalTokens: 165,
+                },
+                modelContextWindow: 258_400,
+                total: {
+                  cacheWriteInputTokens: 0,
+                  cachedInputTokens: 12,
+                  inputTokens: 120,
+                  outputTokens: 45,
+                  reasoningOutputTokens: 8,
+                  totalTokens: 165,
+                },
+              },
+              turnId: 'turn-warm-reroute-2',
+            },
+          }))
+          writeCodexV2AssistantEventTurn({
+            child,
+            finalMessage: 'Current turn used the rerouted model',
+            threadId: 'thread-warm-reroute',
+            turnId: 'turn-warm-reroute-2',
+          })
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: { PATH: '/custom/bin' },
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+    await expect(executeCodexAppServerTurn({
+      ...stableInput,
+      prompt: 'seed the warm process',
+    })).resolves.toMatchObject({
+      sessionId: 'thread-warm-reroute',
+      turnId: 'turn-warm-reroute-1',
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...stableInput,
+      onTraceEvent,
+      prompt: 'use the current rerouted model',
+    })
+
+    expect(result).toMatchObject({
+      finalMessage: 'Current turn used the rerouted model',
+      sessionId: 'thread-warm-reroute',
+      turnId: 'turn-warm-reroute-2',
+    })
+    expect(result.jsonEvents.filter(
+      (event) => isTestRecord(event) && asRecord(event).method === 'model/rerouted',
+    )).toEqual([
+      {
+        method: 'model/rerouted',
+        params: { toModel: 'gpt-5.6-sol' },
+      },
+    ])
+    expect(onTraceEvent).toHaveBeenCalledWith(expect.objectContaining({
+      rawEvent: {
+        method: 'model/rerouted',
+        params: { toModel: 'gpt-5.6-sol' },
+      },
+      updates: [{
+        kind: 'status',
+        mode: 'replace',
+        streamKey: 'status:model-reroute',
+        text: 'Switched to gpt-5.6-sol.',
+      }],
+    }))
+    expect(onTraceEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      rawEvent: {
+        method: 'model/rerouted',
+        params: { toModel: 'gpt-5.6-terra' },
+      },
+    }))
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
 
   it('ignores stale same-thread messages tagged with an older turn id', async () => {
@@ -8455,16 +8413,8 @@ describe('assistant codex runtime', () => {
           })
 
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              item: {
-                id: 'assistant-local-stale-turn-id-2',
-                type: 'assistant_message',
-              },
-              delta: 'Current turn survived stale output',
-              threadId: 'thread-local-stale-turn-id',
-              turnId: 'turn-local-stale-turn-id-2',
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-local-stale-turn-id-2', delta: 'Current turn survived stale output', threadId: 'thread-local-stale-turn-id', turnId: 'turn-local-stale-turn-id-2' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -8565,6 +8515,7 @@ describe('assistant codex runtime', () => {
             id: 99,
             method: 'item/tool/call',
             params: {
+              __testPreserveMissingIdentity: true,
               arguments: {
                 text: 'This unscoped progress must not send',
               },
@@ -8589,16 +8540,8 @@ describe('assistant codex runtime', () => {
           }))
 
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              item: {
-                id: 'assistant-local-untagged-request-2',
-                type: 'assistant_message',
-              },
-              delta: 'Current turn rejected untagged request',
-              threadId: 'thread-local-untagged-request',
-              turnId: 'turn-local-untagged-request-2',
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-local-untagged-request-2', delta: 'Current turn rejected untagged request', threadId: 'thread-local-untagged-request', turnId: 'turn-local-untagged-request-2' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -8695,14 +8638,8 @@ describe('assistant codex runtime', () => {
           }))
           const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              delta: 'This unscoped output must not be accepted',
-              item: {
-                id: 'assistant-local-untagged-output-2',
-                type: 'assistant_message',
-              },
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-local-untagged-output-2', delta: 'This unscoped output must not be accepted' },
           }))
           child.stdout.write(jsonLine({
             id: secondTurn.id,
@@ -8713,16 +8650,8 @@ describe('assistant codex runtime', () => {
             },
           }))
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              delta: 'Current turn ignored untagged output',
-              item: {
-                id: 'assistant-local-untagged-output-current',
-                type: 'assistant_message',
-              },
-              threadId: 'thread-local-untagged-output',
-              turnId: 'turn-local-untagged-output-2',
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-local-untagged-output-current', delta: 'Current turn ignored untagged output', threadId: 'thread-local-untagged-output', turnId: 'turn-local-untagged-output-2' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -8883,15 +8812,8 @@ describe('assistant codex runtime', () => {
           }))
 
           child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              item: {
-                id: 'assistant-prestart-pause-live-turn-2',
-                type: 'assistant_message',
-              },
-              delta: 'Paused for confirmation.',
-              turnId: 'turn-prestart-pause-live-turn-2',
-            },
+            method: 'item/agentMessage/delta',
+            params: { itemId: 'assistant-prestart-pause-live-turn-2', delta: 'Paused for confirmation.', turnId: 'turn-prestart-pause-live-turn-2' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/completed',
@@ -8993,6 +8915,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({
             id: secondTurn.id,
             error: {
+              code: -32000,
               message: 'turn/start failed before a turn id was allocated',
             },
           }))
@@ -9039,7 +8962,7 @@ describe('assistant codex runtime', () => {
     expect(process.kill).toHaveBeenCalledWith(-25_935, 'SIGTERM')
   })
 
-  it('completes reused warm turns from dotted lifecycle event names', async () => {
+  it('rejects dotted lifecycle event aliases on reused warm processes', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-dotted-events-work-')
     const codexHome = await createTempDir('assistant-codex-local-dotted-events-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -9096,7 +9019,7 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-local-dotted-events-2',
-                type: 'assistant_message',
+                type: 'agentMessage',
               },
               delta: 'Dotted lifecycle completed',
             },
@@ -9140,14 +9063,16 @@ describe('assistant codex runtime', () => {
         ...stableInput,
         prompt: 'second local turn with dotted events',
       }),
-    ).resolves.toMatchObject({
-      finalMessage: 'Dotted lifecycle completed',
-      sessionId: 'thread-local-dotted-events-2',
-      turnId: 'turn-local-dotted-events-2',
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
+      context: {
+        retryable: false,
+      },
     })
+    expect(process.kill).toHaveBeenCalledWith(-25_940, 'SIGTERM')
   })
 
-  it('rejects failed turn/completed status carried in data fields', async () => {
+  it('rejects turn completion status carried outside exact params', async () => {
     const workingDirectory = await createTempDir('assistant-codex-data-failed-work-')
     const codexHome = await createTempDir('assistant-codex-data-failed-home-')
 
@@ -9194,11 +9119,10 @@ describe('assistant codex runtime', () => {
         workingDirectory,
       }),
     ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_FAILED',
+      code: 'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
       context: {
-        codexTurnStatus: 'failed',
+        retryable: false,
       },
-      message: expect.stringContaining('data failure detail'),
     })
   })
 
@@ -9551,6 +9475,8 @@ describe('assistant codex runtime', () => {
                   cwd: '/tmp/raw-private-cwd',
                   status: 'running',
                 },
+                threadId: 'thread-diagnostics',
+                turnId: 'turn-diagnostics',
               },
             }),
           )
@@ -9568,6 +9494,8 @@ describe('assistant codex runtime', () => {
                   exitCode: 0,
                   aggregatedOutput: 'command raw output must not appear',
                 },
+                threadId: 'thread-diagnostics',
+                turnId: 'turn-diagnostics',
               },
             }),
           )
@@ -9598,6 +9526,8 @@ describe('assistant codex runtime', () => {
                     },
                   ],
                 },
+                threadId: 'thread-diagnostics',
+                turnId: 'turn-diagnostics',
               },
             }),
           )
@@ -9609,8 +9539,8 @@ describe('assistant codex runtime', () => {
                 item: {
                   id: 'mcp-1',
                   type: 'mcpToolCall',
-                  server_name: 'web',
-                  name: 'search_query',
+                  server: 'web',
+                  tool: 'search_query',
                   status: 'completed',
                   durationMs: 80,
                   arguments: {
@@ -9631,6 +9561,8 @@ describe('assistant codex runtime', () => {
                     },
                   },
                 },
+                threadId: 'thread-diagnostics',
+                turnId: 'turn-diagnostics',
               },
             }),
           )
@@ -9638,16 +9570,17 @@ describe('assistant codex runtime', () => {
             jsonLine({
               method: 'thread/tokenUsage/updated',
               params: {
+                threadId: 'thread-diagnostics',
                 turnId: 'turn-diagnostics',
                 tokenUsage: {
-                  last: {
+                  last: { cacheWriteInputTokens: 0,
                     cachedInputTokens: 1000,
                     inputTokens: 81000,
                     outputTokens: 1200,
                     reasoningOutputTokens: 300,
                     totalTokens: 82500,
                   },
-                  total: {
+                  total: { cacheWriteInputTokens: 0,
                     cachedInputTokens: 1000,
                     inputTokens: 81000,
                     outputTokens: 1200,
@@ -9827,8 +9760,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-transport',
-                  type: 'assistant_message',
-                  message: 'Recovered.',
+                  type: 'agentMessage',
+                  text: 'Recovered.',
                 },
               },
             }),
@@ -10039,8 +9972,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-product-feedback-retry',
-                message: 'Recovered response.',
-                type: 'assistant_message',
+                text: 'Recovered response.',
+                type: 'agentMessage',
               },
             },
           }))
@@ -10214,9 +10147,16 @@ describe('assistant codex runtime', () => {
     const staleTokenEvent = {
       method: 'thread/tokenUsage/updated',
       params: {
+        threadId: 'thread-current',
         turnId: 'turn-previous',
         tokenUsage: {
-          last: {
+          last: { cacheWriteInputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0,
+            inputTokens: 999999,
+            outputTokens: 999999,
+            totalTokens: 999999,
+          },
+          modelContextWindow: null,
+          total: { cacheWriteInputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0,
             inputTokens: 999999,
             outputTokens: 999999,
             totalTokens: 999999,
@@ -10227,9 +10167,16 @@ describe('assistant codex runtime', () => {
     const currentTokenEvent = {
       method: 'thread/tokenUsage/updated',
       params: {
+        threadId: 'thread-current',
         turnId: activeTurnId,
         tokenUsage: {
-          last: {
+          last: { cacheWriteInputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0,
+            inputTokens: 123,
+            outputTokens: 45,
+            totalTokens: 168,
+          },
+          modelContextWindow: null,
+          total: { cacheWriteInputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0,
             inputTokens: 123,
             outputTokens: 45,
             totalTokens: 168,
@@ -10238,40 +10185,34 @@ describe('assistant codex runtime', () => {
       },
     }
     const rawStartedEvent = {
-      event: 'item.started',
-      startedAtMs: 10,
-      turnId: activeTurnId,
-      data: {
+      method: 'item/started',
+      params: {
+        startedAtMs: 10,
         item: {
           id: 'raw-action-id',
           type: 'commandExecution',
           status: 'running',
         },
+        threadId: 'thread-current',
+        turnId: activeTurnId,
       },
     }
     const rawCompletedEvent = {
-      event: 'item.completed',
-      completedAtMs: 70,
-      turnId: activeTurnId,
-      data: {
+      method: 'item/completed',
+      params: {
+        completedAtMs: 70,
         item: {
           id: 'raw-action-id',
           type: 'commandExecution',
           status: 'completed',
           aggregatedOutput: 'raw output must not appear',
         },
+        threadId: 'thread-current',
+        turnId: activeTurnId,
       },
     }
-    const rawStartedNormalized: CodexNormalizedEvent = {
-      kind: 'unknown',
-      eventType: 'item.started',
-      rawEvent: rawStartedEvent,
-    }
-    const rawCompletedNormalized: CodexNormalizedEvent = {
-      kind: 'unknown',
-      eventType: 'item.completed',
-      rawEvent: rawCompletedEvent,
-    }
+    const rawStartedNormalized = normalizeCodexEvent(rawStartedEvent)
+    const rawCompletedNormalized = normalizeCodexEvent(rawCompletedEvent)
 
     reducer.recordEvent({
       activeTurnId,
@@ -10338,8 +10279,8 @@ describe('assistant codex runtime', () => {
 
   it('builds privacy-safe runtime issues for failed Codex action events', () => {
     const failedCommandEvent = {
-      event: 'item.completed',
-      data: {
+      method: 'item/completed',
+      params: {
         item: {
           id: 'cmd-1',
           type: 'commandExecution',
@@ -10351,6 +10292,8 @@ describe('assistant codex runtime', () => {
           stderr: 'private stderr',
           aggregatedOutput: 'private aggregate',
         },
+        threadId: 'thread-current',
+        turnId: 'turn-current',
       },
     }
     expect(
@@ -10375,14 +10318,16 @@ describe('assistant codex runtime', () => {
     })
 
     const successfulCommandEvent = {
-      event: 'item.completed',
-      data: {
+      method: 'item/completed',
+      params: {
         item: {
           id: 'cmd-2',
           type: 'commandExecution',
           exitCode: 0,
           stdout: 'ok',
         },
+        threadId: 'thread-current',
+        turnId: 'turn-current',
       },
     }
     expect(
@@ -10392,40 +10337,15 @@ describe('assistant codex runtime', () => {
       }),
     ).toBeNull()
 
-    const failedSnakeCaseCommandEvent = {
-      event: 'item.completed',
-      data: {
-        item: {
-          id: 'cmd-3',
-          type: 'command_execution',
-          exit_code: '2',
-          duration_ms: '120',
-        },
-      },
-    }
-    expect(
-      buildRuntimeIssueInputForFailedCodexAction({
-        normalizedEvent: normalizeCodexEvent(failedSnakeCaseCommandEvent),
-        rawEvent: failedSnakeCaseCommandEvent,
-      }),
-    ).toMatchObject({
-      component: 'assistant.codex-action',
-      operation: 'command.execution',
-      errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
-      details: {
-        exitCode: 2,
-      },
-    })
-
     const failedMcpEvent = {
-      event: 'item.completed',
-      data: {
+      method: 'item/completed',
+      params: {
         item: {
           id: 'mcp-1',
           type: 'mcpToolCall',
           status: 'failed',
-          server_name: 'web',
-          name: 'search_query',
+          server: 'web',
+          tool: 'search_query',
           result: {
             content: [
               {
@@ -10435,6 +10355,8 @@ describe('assistant codex runtime', () => {
             ],
           },
         },
+        threadId: 'thread-current',
+        turnId: 'turn-current',
       },
     }
     expect(
@@ -10459,8 +10381,8 @@ describe('assistant codex runtime', () => {
     })
 
     const failedDynamicEvent = {
-      event: 'item.completed',
-      data: {
+      method: 'item/completed',
+      params: {
         item: {
           id: 'dynamic-1',
           type: 'dynamicToolCall',
@@ -10472,6 +10394,8 @@ describe('assistant codex runtime', () => {
           },
           formattedOutput: 'dynamic private output',
         },
+        threadId: 'thread-current',
+        turnId: 'turn-current',
       },
     }
     const dynamicIssue = buildRuntimeIssueInputForFailedCodexAction({
@@ -10508,73 +10432,6 @@ describe('assistant codex runtime', () => {
     expect(encodedIssues).not.toContain('/tmp/private-file')
     expect(encodedIssues).not.toContain('private prompt')
     expect(encodedIssues).not.toContain('dynamic private output')
-  })
-
-  it('dedupes Codex action diagnostics without item ids when normalized identity is available', () => {
-    const reducer = createCodexActionDiagnosticsReducer()
-    const activeTurnId = 'turn-current'
-    const rawCompletedEvent = {
-      event: 'item.completed',
-      turnId: activeTurnId,
-      data: {
-        item: {
-          type: 'mcpToolCall',
-          server_name: 'web',
-          name: 'search_query',
-          status: 'completed',
-          result: {
-            content: [
-              {
-                type: 'text',
-                text: 'raw output must not appear',
-              },
-            ],
-          },
-        },
-      },
-    }
-    const normalized: CodexNormalizedEvent = {
-      itemId: null,
-      itemState: 'completed',
-      kind: 'tool_call',
-      rawEvent: rawCompletedEvent,
-      toolName: 'search_query',
-      toolServer: 'web',
-    }
-
-    reducer.recordEvent({
-      activeTurnId,
-      normalizedEvent: normalized,
-      rawEvent: rawCompletedEvent,
-    })
-    reducer.recordEvent({
-      activeTurnId,
-      normalizedEvent: normalized,
-      rawEvent: rawCompletedEvent,
-    })
-
-    const trace = reducer.buildTraceEvent({
-      codexThreadId: 'thread-current',
-      providerActionCount: 0,
-      turnId: activeTurnId,
-    })
-    expect(trace).toMatchObject({
-      codexActionCompletedCount: 1,
-      codexActionMcpToolCallCount: 1,
-      codexActionOutputBytesMax: 26,
-      codexActionOutputBytesTotal: 26,
-      codexActionToolSummaries: [
-        {
-          callCount: 1,
-          kind: 'mcp.tool.call',
-          outputBytesMax: 26,
-          outputBytesTotal: 26,
-          serverPresent: true,
-          tool: 'search_query',
-        },
-      ],
-    })
-    expect(JSON.stringify(trace)).not.toContain('raw output')
   })
 
   it('emits Codex action diagnostics when a turn fails', async () => {
@@ -11477,13 +11334,11 @@ describe('assistant codex runtime', () => {
             },
           })
 
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              status: 'completed',
-              turnId: 'turn-unsupported-request',
-            },
-          }))
+          writeCompletedTurn(
+            spawnedChild,
+            'thread-unsupported-request',
+            'turn-unsupported-request',
+          )
         })()
       })
 
@@ -11531,26 +11386,22 @@ describe('assistant codex runtime', () => {
             threadId: 'thread-off-turn-one',
             turnId: 'turn-off-turn-one',
           })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              status: 'completed',
-              turnId: 'turn-off-turn-one',
-            },
-          }))
+          writeCompletedTurn(
+            spawnedChild,
+            'thread-off-turn-one',
+            'turn-off-turn-one',
+          )
           await writeWarmTurnStarted({
             child: spawnedChild,
             requestCount: 2,
             threadId: 'thread-off-turn-two',
             turnId: 'turn-off-turn-two',
           })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              status: 'completed',
-              turnId: 'turn-off-turn-two',
-            },
-          }))
+          writeCompletedTurn(
+            spawnedChild,
+            'thread-off-turn-two',
+            'turn-off-turn-two',
+          )
         })()
       })
 
@@ -13574,6 +13425,7 @@ describe('assistant codex runtime', () => {
             jsonLine({
               id: 2,
               error: {
+                code: -32000,
                 message: 'thread/resume failed: no rollout found for thread id stale-thread',
               },
             }),
@@ -13632,6 +13484,7 @@ describe('assistant codex runtime', () => {
               jsonLine({
                 id: 2,
                 error: {
+                  code: -32000,
                   message: rpcErrorMessage,
                 },
               }),
@@ -14160,8 +14013,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'user-progress-initial',
-                message: 'Process this blood test.',
-                type: 'user_message',
+                content: [{ type: 'text', text: 'Process this blood test.' }],
+                type: 'userMessage',
               },
             },
           }))
@@ -14170,8 +14023,8 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'user-progress-steered',
-                message: 'Include the late result too.',
-                type: 'user_message',
+                content: [{ type: 'text', text: 'Include the late result too.' }],
+                type: 'userMessage',
               },
             },
           }))
@@ -14214,8 +14067,8 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-progress-final',
-                  type: 'assistant_message',
-                  message: 'Final answer after the progress update.',
+                  type: 'agentMessage',
+                  text: 'Final answer after the progress update.',
                 },
               },
             }),
@@ -14499,9 +14352,9 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-commentary-progress',
-                  type: 'assistant_message',
+                  type: 'agentMessage',
                   phase: 'commentary',
-                  message: 'Reading the report now.',
+                  text: 'Reading the report now.',
                 },
               },
             }),
@@ -14540,9 +14393,9 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-commentary-final',
-                  type: 'assistant_message',
+                  type: 'agentMessage',
                   phase: 'final_answer',
-                  message: 'Final answer after commentary.',
+                  text: 'Final answer after commentary.',
                 },
               },
             }),
@@ -14641,9 +14494,9 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-progress-drain-final',
-                  type: 'assistant_message',
+                  type: 'agentMessage',
                   phase: 'final_answer',
-                  message: 'Final answer after progress.',
+                  text: 'Final answer after progress.',
                 },
               },
             }),
@@ -14855,9 +14708,9 @@ describe('assistant codex runtime', () => {
               params: {
                 item: {
                   id: 'assistant-progress-drain-timeout-final',
-                  type: 'assistant_message',
+                  type: 'agentMessage',
                   phase: 'final_answer',
-                  message: 'Final answer after stalled progress.',
+                  text: 'Final answer after stalled progress.',
                 },
               },
             }),
@@ -15297,20 +15150,18 @@ describe('assistant codex runtime', () => {
             id: 99,
             method: 'item/tool/call',
             params: {
+              __testPreserveMissingIdentity: true,
               namespace: 'murph',
               tool: 'device',
               arguments: { action: 'list_accounts' },
             },
           }))
           await expect(waitForRpcResponse(child, 99)).resolves.toEqual({
-            id: 99,
-            result: {
-              success: false,
-              contentItems: [{
-                type: 'inputText',
-                text: 'tool is unavailable outside the active root turn',
-              }],
+            error: {
+              code: -32000,
+              message: 'Murph does not support interactive Codex app-server request item/tool/call in noninteractive assistant turns.',
             },
+            id: 99,
           })
 
           child.stdout.write(jsonLine({
@@ -16032,7 +15883,7 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('counts slash-form and dot-form provider actions from normalized events and skips pure image.view reads', async () => {
+  it('counts canonical provider actions and skips pure image views', async () => {
     const workingDirectory = await createTempDir('assistant-codex-provider-actions-')
 
     codexMocks.spawn.mockImplementation(() => {
@@ -16066,12 +15917,18 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(
             jsonLine({
-              item: {
-                id: 'search-dot',
-                query: 'murph app server',
-                type: 'web_search',
+              method: 'item/completed',
+              params: {
+                item: {
+                  action: null,
+                  id: 'search-canonical',
+                  query: 'murph app server',
+                  results: null,
+                  type: 'webSearch',
+                },
+                threadId: 'thread-actions',
+                turnId: 'turn-actions',
               },
-              type: 'item.completed',
             }),
           )
           child.stdout.write(
@@ -16079,22 +15936,36 @@ describe('assistant codex runtime', () => {
               method: 'item/completed',
               params: {
                 item: {
+                  appContext: null,
+                  arguments: {},
+                  durationMs: null,
+                  error: null,
                   id: 'tool-slash',
-                  name: 'search_query',
-                  server_name: 'web',
-                  type: 'tool_call',
+                  pluginId: null,
+                  readOnlyHint: null,
+                  result: null,
+                  server: 'web',
+                  status: 'completed',
+                  tool: 'search_query',
+                  type: 'mcpToolCall',
                 },
+                threadId: 'thread-actions',
+                turnId: 'turn-actions',
               },
             }),
           )
           child.stdout.write(
             jsonLine({
-              item: {
-                id: 'image-dot',
-                path: '/tmp/look.png',
-                type: 'image_view',
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'image-canonical',
+                  path: '/tmp/look.png',
+                  type: 'imageView',
+                },
+                threadId: 'thread-actions',
+                turnId: 'turn-actions',
               },
-              type: 'item.completed',
             }),
           )
           child.stdout.write(
@@ -16726,277 +16597,173 @@ describe('assistant codex runtime', () => {
 })
 
 describe('assistant codex event shaping', () => {
-  it('normalizes Codex raw events across the supported item families', () => {
-    expect(
-      normalizeCodexEvent({
-        targetModel: 'gpt-5-codex',
-        type: 'model.rerouted',
-      }),
-    ).toEqual({
+  it('normalizes exact Codex 0.147 notifications across the consumed item families', () => {
+    const modelRerouted = {
+      method: 'model/rerouted',
+      params: { toModel: 'gpt-5-codex' },
+    }
+    expect(normalizeCodexEvent(modelRerouted)).toEqual({
       kind: 'model_rerouted',
       model: 'gpt-5-codex',
-      rawEvent: {
-        targetModel: 'gpt-5-codex',
-        type: 'model.rerouted',
-      },
+      rawEvent: modelRerouted,
     })
 
-    expect(
-      normalizeCodexEvent({
+    const planDelta = {
+      method: 'item/plan/delta',
+      params: {
+        delta: 'Inspect files\nPatch tests',
         itemId: 'plan-1',
-        summary: 'Inspect files\nPatch tests',
-        type: 'agent.plan.updated',
-      }),
-    ).toEqual({
+      },
+    }
+    expect(normalizeCodexEvent(planDelta)).toEqual({
       kind: 'plan_update',
       itemId: 'plan-1',
-      rawEvent: {
-        itemId: 'plan-1',
-        summary: 'Inspect files\nPatch tests',
-        type: 'agent.plan.updated',
-      },
+      rawEvent: planDelta,
       text: 'Inspect files\nPatch tests',
     })
 
-    expect(
-      normalizeCodexEvent({
-        delta: {
-          text: 'token',
-        },
-        item_id: 'assistant-9',
-        type: 'assistant.message.delta',
-      }),
-    ).toEqual({
+    const assistantDelta = {
+      method: 'item/agentMessage/delta',
+      params: {
+        delta: 'token',
+        itemId: 'assistant-9',
+      },
+    }
+    expect(normalizeCodexEvent(assistantDelta)).toEqual({
       deltaText: 'token',
       itemId: 'assistant-9',
       kind: 'assistant_delta',
-      rawEvent: {
-        delta: {
-          text: 'token',
-        },
-        item_id: 'assistant-9',
-        type: 'assistant.message.delta',
-      },
+      rawEvent: assistantDelta,
     })
 
-    expect(
-      normalizeCodexEvent({
-        item: {
-          id: 'reason-1',
-          type: 'reasoning',
-        },
-        textDelta: 'thinking',
-        type: 'reasoning.text.delta',
-      }),
-    ).toEqual({
+    const reasoningDelta = {
+      method: 'item/reasoning/textDelta',
+      params: {
+        delta: 'thinking',
+        itemId: 'reason-1',
+      },
+    }
+    expect(normalizeCodexEvent(reasoningDelta)).toEqual({
       deltaText: 'thinking',
       itemId: 'reason-1',
       kind: 'reasoning_delta',
-      rawEvent: {
-        item: {
-          id: 'reason-1',
-          type: 'reasoning',
-        },
-        textDelta: 'thinking',
-        type: 'reasoning.text.delta',
-      },
+      rawEvent: reasoningDelta,
     })
 
-    expect(
-      normalizeCodexEvent({
+    const assistantCompleted = {
+      method: 'item/completed',
+      params: {
         item: {
           id: 'assistant-4',
-          parts: [{ text: 'structured reply' }],
-          type: 'assistant_message',
+          memoryCitation: null,
+          phase: null,
+          text: 'structured reply',
+          type: 'agentMessage',
         },
-        type: 'item.completed',
-      }),
-    ).toEqual({
+      },
+    }
+    expect(normalizeCodexEvent(assistantCompleted)).toEqual({
       itemId: 'assistant-4',
       itemState: 'completed',
       kind: 'assistant_message',
       messagePhase: null,
-      rawEvent: {
-        item: {
-          id: 'assistant-4',
-          parts: [{ text: 'structured reply' }],
-          type: 'assistant_message',
-        },
-        type: 'item.completed',
-      },
+      rawEvent: assistantCompleted,
       text: 'structured reply',
     })
 
-    expect(
-      normalizeCodexEvent({
+    const webSearchStarted = {
+      method: 'item/started',
+      params: {
         item: {
+          action: null,
           id: 'search-1',
           query: 'murph coverage',
-          type: 'web_search',
+          results: null,
+          type: 'webSearch',
         },
-        type: 'item.started',
-      }),
-    ).toEqual({
+      },
+    }
+    expect(normalizeCodexEvent(webSearchStarted)).toEqual({
       itemId: 'search-1',
       itemState: 'running',
       kind: 'web_search',
       query: 'murph coverage',
-      rawEvent: {
-        item: {
-          id: 'search-1',
-          query: 'murph coverage',
-          type: 'web_search',
-        },
-        type: 'item.started',
-      },
+      rawEvent: webSearchStarted,
     })
 
-    expect(
-      normalizeCodexEvent({
+    const mcpToolCompleted = {
+      method: 'item/completed',
+      params: {
         item: {
+          appContext: null,
+          arguments: {},
+          durationMs: null,
+          error: null,
           id: 'tool-1',
-          name: 'search_query',
-          server_name: 'web',
-          type: 'tool_call',
+          pluginId: null,
+          readOnlyHint: null,
+          result: null,
+          server: 'web',
+          status: 'completed',
+          tool: 'search_query',
+          type: 'mcpToolCall',
         },
-        type: 'item.completed',
-      }),
-    ).toEqual({
+      },
+    }
+    expect(normalizeCodexEvent(mcpToolCompleted)).toEqual({
       itemId: 'tool-1',
       itemState: 'completed',
       kind: 'tool_call',
-      rawEvent: {
-        item: {
-          id: 'tool-1',
-          name: 'search_query',
-          server_name: 'web',
-          type: 'tool_call',
-        },
-        type: 'item.completed',
-      },
+      rawEvent: mcpToolCompleted,
       toolName: 'search_query',
       toolServer: 'web',
     })
 
-    expect(
-      normalizeCodexEvent({
+    const commandCompleted = {
+      method: 'item/completed',
+      params: {
         item: {
-          command_line: 'node /tmp/bin.js pnpm test --watch',
-          exit_code: '2',
+          aggregatedOutput: null,
+          command: 'node /tmp/bin.js pnpm test --watch',
+          commandActions: [],
+          cwd: '/tmp',
+          durationMs: null,
+          exitCode: 2,
           id: 'cmd-1',
-          type: 'command_execution',
+          pluginId: null,
+          processId: null,
+          scriptPath: null,
+          source: 'agent',
+          status: 'failed',
+          type: 'commandExecution',
         },
-        type: 'item.completed',
-      }),
-    ).toEqual({
+      },
+    }
+    expect(normalizeCodexEvent(commandCompleted)).toEqual({
       commandLabel: 'node /tmp/bin.js pnpm test --watch',
-      exitCode: null,
+      exitCode: 2,
       filePaths: [],
       itemId: 'cmd-1',
       itemState: 'completed',
-      itemType: 'command.execution',
+      itemType: 'commandExecution',
       kind: 'status_item',
       planText: null,
-      rawEvent: {
-        item: {
-          command_line: 'node /tmp/bin.js pnpm test --watch',
-          exit_code: '2',
-          id: 'cmd-1',
-          type: 'command_execution',
-        },
-        type: 'item.completed',
-      },
+      rawEvent: commandCompleted,
       reasoningText: null,
     })
 
-    expect(
-      normalizeCodexEvent({
-        errorMessage: 'Connection reset by peer',
-        type: 'turn.failed',
-      }),
-    ).toEqual({
-      kind: 'error',
-      message: 'Connection reset by peer',
-      rawEvent: {
-        errorMessage: 'Connection reset by peer',
-        type: 'turn.failed',
-      },
-    })
-
-    expect(normalizeCodexEvent(null)).toEqual({
-      eventType: null,
-      kind: 'unknown',
-      rawEvent: null,
-    })
-
-    expect(
-      normalizeCodexEvent({
-        type: 'model.rerouted',
-      }),
-    ).toEqual({
-      eventType: 'model.rerouted',
-      kind: 'unknown',
-      rawEvent: {
-        type: 'model.rerouted',
-      },
-    })
-
-    expect(
-      normalizeCodexEvent({
-        item_id: 'assistant-empty',
-        type: 'assistant.message.delta',
-      }),
-    ).toEqual({
-      eventType: 'assistant.message.delta',
-      kind: 'unknown',
-      rawEvent: {
-        item_id: 'assistant-empty',
-        type: 'assistant.message.delta',
-      },
-    })
-
-    expect(
-      normalizeCodexEvent({
-        type: '   ',
-      }),
-    ).toEqual({
-      eventType: null,
-      kind: 'unknown',
-      rawEvent: {
-        type: '   ',
-      },
-    })
-
-    expect(
-      normalizeCodexEvent({
+    const reasoningCompleted = {
+      method: 'item/completed',
+      params: {
         item: {
-          message: 'pending',
-          type: 'assistant_message',
-        },
-        type: 'item.updated',
-      }),
-    ).toEqual({
-      eventType: 'item.updated',
-      kind: 'unknown',
-      rawEvent: {
-        item: {
-          message: 'pending',
-          type: 'assistant_message',
-        },
-        type: 'item.updated',
-      },
-    })
-
-    expect(
-      normalizeCodexEvent({
-        item: {
+          content: ['First detail'],
           id: 'reason-raw',
-          summary: [{ text: ['First summary', { value: 'Second summary' }] }],
+          summary: ['First summary', 'Second summary'],
           type: 'reasoning',
         },
-        type: 'item.completed',
-      }),
-    ).toEqual({
+      },
+    }
+    expect(normalizeCodexEvent(reasoningCompleted)).toEqual({
       commandLabel: null,
       exitCode: null,
       filePaths: [],
@@ -17005,121 +16772,76 @@ describe('assistant codex event shaping', () => {
       itemType: 'reasoning',
       kind: 'status_item',
       planText: null,
-      rawEvent: {
-        item: {
-          id: 'reason-raw',
-          summary: [{ text: ['First summary', { value: 'Second summary' }] }],
-          type: 'reasoning',
-        },
-        type: 'item.completed',
-      },
-      reasoningText: 'First summarySecond summary',
+      rawEvent: reasoningCompleted,
+      reasoningText: 'First summary\n\nSecond summary',
     })
 
-    expect(
-      normalizeCodexEvent({
+    const fileCompleted = {
+      method: 'item/completed',
+      params: {
         item: {
-          id: 'file-raw',
-          nested: [
+          changes: [
             {
-              relativePath: `${codexMocks.fakeHome}/src/file-a.ts`,
+              diff: '',
+              kind: 'update',
+              path: `${codexMocks.fakeHome}/src/file-a.ts`,
             },
             {
-              filePath: 'src/file-b.ts',
+              diff: '',
+              kind: 'add',
+              path: 'src/file-b.ts',
             },
           ],
-          type: 'file_change',
+          id: 'file-raw',
+          status: 'completed',
+          type: 'fileChange',
         },
-        type: 'item.completed',
-      }),
-    ).toEqual({
+      },
+    }
+    expect(normalizeCodexEvent(fileCompleted)).toEqual({
       commandLabel: null,
       exitCode: null,
       filePaths: ['~/src/file-a.ts', 'src/file-b.ts'],
       itemId: 'file-raw',
       itemState: 'completed',
-      itemType: 'file.change',
+      itemType: 'fileChange',
       kind: 'status_item',
       planText: null,
-      rawEvent: {
-        item: {
-          id: 'file-raw',
-          nested: [
-            {
-              relativePath: `${codexMocks.fakeHome}/src/file-a.ts`,
-            },
-            {
-              filePath: 'src/file-b.ts',
-            },
-          ],
-          type: 'file_change',
-        },
-        type: 'item.completed',
-      },
+      rawEvent: fileCompleted,
       reasoningText: null,
     })
 
+    const turnError = {
+      method: 'error',
+      params: {
+        error: {
+          message: 'Connection reset by peer',
+        },
+      },
+    }
+    expect(normalizeCodexEvent(turnError)).toEqual({
+      kind: 'error',
+      message: 'Connection reset by peer',
+      rawEvent: turnError,
+    })
+
+    expect(normalizeCodexEvent(null)).toEqual({
+      eventType: null,
+      kind: 'unknown',
+      rawEvent: null,
+    })
     expect(
       normalizeCodexEvent({
-        item: {
-          details: [{ exitCode: 7 }],
-          id: 'cmd-nested',
-          type: 'command_execution',
-        },
-        type: 'item.completed',
+        method: 'model/rerouted',
+        params: {},
       }),
     ).toEqual({
-      commandLabel: null,
-      exitCode: 7,
-      filePaths: [],
-      itemId: 'cmd-nested',
-      itemState: 'completed',
-      itemType: 'command.execution',
-      kind: 'status_item',
-      planText: null,
+      eventType: 'model/rerouted',
+      kind: 'unknown',
       rawEvent: {
-        item: {
-          details: [{ exitCode: 7 }],
-          id: 'cmd-nested',
-          type: 'command_execution',
-        },
-        type: 'item.completed',
+        method: 'model/rerouted',
+        params: {},
       },
-      reasoningText: null,
-    })
-
-    const recursiveFileItem: Record<string, unknown> = {
-      id: 'file-cycle',
-      type: 'file_change',
-    }
-    recursiveFileItem.self = recursiveFileItem
-    expect(
-      normalizeCodexEvent({
-        item: recursiveFileItem,
-        type: 'item.completed',
-      }),
-    ).toMatchObject({
-      filePaths: [],
-      itemId: 'file-cycle',
-      itemType: 'file.change',
-      kind: 'status_item',
-    })
-
-    const recursiveCommandItem: Record<string, unknown> = {
-      id: 'cmd-cycle',
-      type: 'command_execution',
-    }
-    recursiveCommandItem.self = recursiveCommandItem
-    expect(
-      normalizeCodexEvent({
-        item: recursiveCommandItem,
-        type: 'item.completed',
-      }),
-    ).toMatchObject({
-      exitCode: null,
-      itemId: 'cmd-cycle',
-      itemType: 'command.execution',
-      kind: 'status_item',
     })
   })
 
@@ -17149,7 +16871,7 @@ describe('assistant codex event shaping', () => {
         filePaths: [],
         itemId: 'cmd-2',
         itemState: 'running',
-        itemType: 'command.execution',
+        itemType: 'commandExecution',
         kind: 'status_item',
         planText: null,
         rawEvent: {
@@ -17177,7 +16899,7 @@ describe('assistant codex event shaping', () => {
         filePaths: ['src/one.ts', 'src/two.ts', 'src/three.ts', 'src/four.ts'],
         itemId: 'files-1',
         itemState: 'completed',
-        itemType: 'file.change',
+        itemType: 'fileChange',
         kind: 'status_item',
         planText: null,
         rawEvent: {
@@ -17374,7 +17096,7 @@ describe('assistant codex event shaping', () => {
         filePaths: [],
         itemId: 'command-empty',
         itemState: 'running',
-        itemType: 'command.execution',
+        itemType: 'commandExecution',
         kind: 'status_item',
         planText: null,
         rawEvent: {
@@ -17480,7 +17202,7 @@ describe('assistant codex event shaping', () => {
         filePaths: ['src/example.ts'],
         itemId: 'file-2',
         itemState: 'completed',
-        itemType: 'file.change',
+        itemType: 'fileChange',
         kind: 'status_item',
         planText: null,
         rawEvent: {
@@ -17560,7 +17282,7 @@ describe('assistant codex event shaping', () => {
         filePaths: [],
         itemId: 'cmd-5',
         itemState: 'completed',
-        itemType: 'command.execution',
+        itemType: 'commandExecution',
         kind: 'status_item',
         planText: null,
         rawEvent: {
@@ -17591,7 +17313,7 @@ describe('assistant codex event shaping', () => {
       {
         kind: 'status',
         mode: 'replace',
-        streamKey: 'status:web.search',
+        streamKey: 'status:webSearch',
         text: 'Searching the web.',
       },
     ])
@@ -17603,7 +17325,7 @@ describe('assistant codex event shaping', () => {
         filePaths: [],
         itemId: null,
         itemState: 'completed',
-        itemType: 'command.execution',
+        itemType: 'commandExecution',
         kind: 'status_item',
         planText: null,
         rawEvent: {
@@ -17615,7 +17337,7 @@ describe('assistant codex event shaping', () => {
       {
         kind: 'status',
         mode: 'replace',
-        streamKey: 'status:command.execution',
+        streamKey: 'status:commandExecution',
         text: 'Command finished.',
       },
     ])
@@ -17634,14 +17356,14 @@ describe('assistant codex event shaping', () => {
       {
         kind: 'status',
         mode: 'replace',
-        streamKey: 'status:web.search',
+        streamKey: 'status:webSearch',
         text: 'Finished web search.',
       },
     ])
   })
 
   describe('codex subagent thread events', () => {
-    it('uses protocol-carried V2 child models without a lookup and keeps V1 parent fallback', async () => {
+    it('inherits the parent model for activity-only children and uses collab spawn models', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-usage-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-usage-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -17662,7 +17384,8 @@ describe('assistant codex event shaping', () => {
               threadId: 'thread-subagent-parent',
               turnId: 'turn-subagent-parent',
             })
-            // Newer V2 activity can carry the effective child model directly.
+            // The exact activity item has no model field, so the child
+            // inherits the parent model.
             child.stdout.write(jsonLine({
               method: 'item/completed',
               params: {
@@ -17672,7 +17395,6 @@ describe('assistant codex event shaping', () => {
                   kind: 'started',
                   agentThreadId: 'thread-subagent-child-a',
                   agentPath: 'root/terra_check',
-                  model: 'gpt-5.6-terra',
                 },
                 threadId: 'thread-subagent-parent',
                 turnId: 'turn-subagent-parent',
@@ -17695,14 +17417,14 @@ describe('assistant codex event shaping', () => {
                 threadId: 'thread-subagent-child-a',
                 turnId: 'turn-subagent-child-a',
                 tokenUsage: {
-                  total: {
+                  total: { cacheWriteInputTokens: 0,
                     totalTokens: 1_000,
                     inputTokens: 800,
                     cachedInputTokens: 0,
                     outputTokens: 200,
                     reasoningOutputTokens: 0,
                   },
-                  last: {
+                  last: { cacheWriteInputTokens: 0,
                     totalTokens: 1_000,
                     inputTokens: 800,
                     cachedInputTokens: 0,
@@ -17717,7 +17439,7 @@ describe('assistant codex event shaping', () => {
               params: {
                 item: {
                   id: 'child-cmd-1',
-                  type: 'command_execution',
+                  type: 'commandExecution',
                   command: 'true',
                 },
                 threadId: 'thread-subagent-child-a',
@@ -17730,14 +17452,14 @@ describe('assistant codex event shaping', () => {
                 threadId: 'thread-subagent-child-a',
                 turnId: 'turn-subagent-child-a',
                 tokenUsage: {
-                  total: {
+                  total: { cacheWriteInputTokens: 0,
                     totalTokens: 5_000,
                     inputTokens: 4_000,
                     cachedInputTokens: 2_000,
                     outputTokens: 1_000,
                     reasoningOutputTokens: 120,
                   },
-                  last: {
+                  last: { cacheWriteInputTokens: 0,
                     totalTokens: 4_000,
                     inputTokens: 3_200,
                     cachedInputTokens: 2_000,
@@ -17765,7 +17487,7 @@ describe('assistant codex event shaping', () => {
               },
             }))
             child.stdout.write(jsonLine({
-              method: 'turn.started',
+              method: 'turn/started',
               params: {
                 threadId: 'thread-subagent-child-b',
                 turn: {
@@ -17779,14 +17501,14 @@ describe('assistant codex event shaping', () => {
                 threadId: 'thread-subagent-child-b',
                 turnId: 'turn-subagent-child-b',
                 tokenUsage: {
-                  total: {
+                  total: { cacheWriteInputTokens: 0,
                     totalTokens: 700,
                     inputTokens: 600,
                     cachedInputTokens: 100,
                     outputTokens: 100,
                     reasoningOutputTokens: 0,
                   },
-                  last: {
+                  last: { cacheWriteInputTokens: 0,
                     totalTokens: 700,
                     inputTokens: 600,
                     cachedInputTokens: 100,
@@ -17833,12 +17555,13 @@ describe('assistant codex event shaping', () => {
           outputTokens: 1_000,
           providerName: 'local-test-provider',
           reasoningTokens: 120,
-          requestedModel: 'gpt-5.6-terra',
-          servedModel: 'gpt-5.6-terra',
+          requestedModel: 'gpt-5.6-sol',
+          servedModel: 'gpt-5.6-sol',
           totalTokens: 5_000,
         },
       })
       expect(result.additionalUsages[0]?.usage.rawUsageJson).toEqual({
+        cacheWriteInputTokens: 0,
         cachedInputTokens: 2_000,
         inputTokens: 4_000,
         outputTokens: 1_000,
@@ -17918,6 +17641,7 @@ describe('assistant codex event shaping', () => {
                 writeTokenUsage({
                   child,
                   last: {
+                    cacheWriteInputTokens: 0,
                     cachedInputTokens: 0,
                     inputTokens: 80,
                     outputTokens: 20,
@@ -17926,6 +17650,7 @@ describe('assistant codex event shaping', () => {
                   },
                   threadId: 'thread-subagent-reset-child',
                   total: {
+                    cacheWriteInputTokens: 0,
                     cachedInputTokens: 0,
                     inputTokens: 80,
                     outputTokens: 20,
@@ -17952,7 +17677,7 @@ describe('assistant codex event shaping', () => {
 
                 vi.setSystemTime(afterReset)
                 child.stdout.write(jsonLine({
-                  method: 'turn.started',
+                  method: 'turn/started',
                   params: {
                     threadId: 'thread-subagent-reset-child',
                     turn: { id: 'turn-subagent-after-reset' },
@@ -17961,6 +17686,7 @@ describe('assistant codex event shaping', () => {
                 writeTokenUsage({
                   child,
                   last: {
+                    cacheWriteInputTokens: 0,
                     cachedInputTokens: 0,
                     inputTokens: 40,
                     outputTokens: 10,
@@ -17969,6 +17695,7 @@ describe('assistant codex event shaping', () => {
                   },
                   threadId: 'thread-subagent-reset-child',
                   total: {
+                    cacheWriteInputTokens: 0,
                     cachedInputTokens: 0,
                     inputTokens: 120,
                     outputTokens: 30,
@@ -17980,6 +17707,7 @@ describe('assistant codex event shaping', () => {
                 writeTokenUsage({
                   child,
                   last: {
+                    cacheWriteInputTokens: 0,
                     cachedInputTokens: 0,
                     inputTokens: 80,
                     outputTokens: 20,
@@ -17988,6 +17716,7 @@ describe('assistant codex event shaping', () => {
                   },
                   threadId: 'thread-subagent-reset-child',
                   total: {
+                    cacheWriteInputTokens: 0,
                     cachedInputTokens: 0,
                     inputTokens: 200,
                     outputTokens: 50,
@@ -18256,14 +17985,14 @@ describe('assistant codex event shaping', () => {
                 threadId: 'thread-subagent-fail-child',
                 turnId: 'turn-subagent-fail-child',
                 tokenUsage: {
-                  total: {
+                  total: { cacheWriteInputTokens: 0,
                     totalTokens: 1_000,
                     inputTokens: 800,
                     cachedInputTokens: 0,
                     outputTokens: 200,
                     reasoningOutputTokens: 0,
                   },
-                  last: {
+                  last: { cacheWriteInputTokens: 0,
                     totalTokens: 1_000,
                     inputTokens: 800,
                     cachedInputTokens: 0,
@@ -18275,14 +18004,12 @@ describe('assistant codex event shaping', () => {
             }))
             // The parent turn fails AFTER child usage was observed: the
             // billed child usage must survive into the failure context.
-            child.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                status: 'failed',
-                threadId: 'thread-subagent-fail-parent',
-                turnId: 'turn-subagent-fail-parent',
-              },
-            }))
+            writeCompletedTurn(
+              child,
+              'thread-subagent-fail-parent',
+              'turn-subagent-fail-parent',
+              'failed',
+            )
           })()
         })
 
@@ -18322,6 +18049,7 @@ describe('assistant codex event shaping', () => {
         },
       ])
       expect(failureContext?.additionalUsages[0]?.usage.rawUsageJson).toEqual({
+        cacheWriteInputTokens: 0,
         cachedInputTokens: 0,
         inputTokens: 800,
         outputTokens: 200,
@@ -18391,14 +18119,12 @@ describe('assistant codex event shaping', () => {
                 success: true,
               },
             })
-            child.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                status: 'failed',
-                threadId: 'thread-reaction-fail-parent',
-                turnId: 'turn-reaction-fail-parent',
-              },
-            }))
+            writeCompletedTurn(
+              child,
+              'thread-reaction-fail-parent',
+              'turn-reaction-fail-parent',
+              'failed',
+            )
           })()
         })
 
@@ -18507,8 +18233,8 @@ describe('assistant codex event shaping', () => {
               params: {
                 item: {
                   id: 'user-cross-context-initial',
-                  type: 'user_message',
-                  message: 'react to my earlier message',
+                  type: 'userMessage',
+                  content: [{ type: 'text', text: 'react to my earlier message' }],
                 },
               },
             }))
@@ -18517,8 +18243,8 @@ describe('assistant codex event shaping', () => {
               params: {
                 item: {
                   id: 'user-cross-context-steered',
-                  type: 'user_message',
-                  message: 'steered follow up',
+                  type: 'userMessage',
+                  content: [{ type: 'text', text: 'steered follow up' }],
                 },
               },
             }))
@@ -18539,14 +18265,12 @@ describe('assistant codex event shaping', () => {
                 success: true,
               },
             })
-            child.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                status: 'failed',
-                threadId: 'thread-cross-context-reaction',
-                turnId: 'turn-cross-context-reaction',
-              },
-            }))
+            writeCompletedTurn(
+              child,
+              'thread-cross-context-reaction',
+              'turn-cross-context-reaction',
+              'failed',
+            )
           })()
         })
 
@@ -18754,6 +18478,7 @@ describe('assistant codex event shaping', () => {
             }))
             for (let childIndex = 1; childIndex <= trackedThreadCount + 1; childIndex += 1) {
               const totals = {
+                cacheWriteInputTokens: 0,
                 totalTokens: childIndex * 100,
                 inputTokens: childIndex * 80,
                 cachedInputTokens: 0,
@@ -18789,14 +18514,14 @@ describe('assistant codex event shaping', () => {
                 threadId: overflowThreadId,
                 turnId: `turn-subagent-cap-${trackedThreadCount + 1}`,
                 tokenUsage: {
-                  total: {
+                  total: { cacheWriteInputTokens: 0,
                     totalTokens: 9_900,
                     inputTokens: 9_000,
                     cachedInputTokens: 0,
                     outputTokens: 900,
                     reasoningOutputTokens: 0,
                   },
-                  last: {
+                  last: { cacheWriteInputTokens: 0,
                     totalTokens: 9_900,
                     inputTokens: 9_000,
                     cachedInputTokens: 0,
@@ -18814,6 +18539,7 @@ describe('assistant codex event shaping', () => {
             writeTokenUsage({
               child,
               last: {
+                cacheWriteInputTokens: 0,
                 totalTokens: 50,
                 inputTokens: 40,
                 cachedInputTokens: 0,
@@ -18822,6 +18548,7 @@ describe('assistant codex event shaping', () => {
               },
               threadId: 'thread-subagent-cap-1',
               total: {
+                cacheWriteInputTokens: 0,
                 totalTokens: 150,
                 inputTokens: 120,
                 cachedInputTokens: 0,
@@ -18946,14 +18673,14 @@ describe('assistant codex event shaping', () => {
                 threadId: 'thread-subagent-ordinal-child',
                 turnId: 'turn-subagent-ordinal-child',
                 tokenUsage: {
-                  total: {
+                  total: { cacheWriteInputTokens: 0,
                     totalTokens: 1_000,
                     inputTokens: 800,
                     cachedInputTokens: 0,
                     outputTokens: 200,
                     reasoningOutputTokens: 0,
                   },
-                  last: {
+                  last: { cacheWriteInputTokens: 0,
                     totalTokens: 1_000,
                     inputTokens: 800,
                     cachedInputTokens: 0,
@@ -19029,6 +18756,7 @@ describe('assistant codex event shaping', () => {
         },
       ])
       expect(result.additionalUsages[1]?.usage.rawUsageJson).toEqual({
+        cacheWriteInputTokens: 0,
         cachedInputTokens: 0,
         inputTokens: 800,
         outputTokens: 200,
@@ -19059,14 +18787,11 @@ describe('assistant codex event shaping', () => {
               threadId: 'thread-subagent-idle-parent',
               turnId: 'turn-subagent-idle-one',
             })
-            child.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                status: 'completed',
-                threadId: 'thread-subagent-idle-parent',
-                turnId: 'turn-subagent-idle-one',
-              },
-            }))
+            writeCompletedTurn(
+              child,
+              'thread-subagent-idle-parent',
+              'turn-subagent-idle-one',
+            )
 
             await writeWarmTurnStarted({
               child,
@@ -19074,14 +18799,11 @@ describe('assistant codex event shaping', () => {
               threadId: 'thread-subagent-idle-parent-2',
               turnId: 'turn-subagent-idle-two',
             })
-            child.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                status: 'completed',
-                threadId: 'thread-subagent-idle-parent-2',
-                turnId: 'turn-subagent-idle-two',
-              },
-            }))
+            writeCompletedTurn(
+              child,
+              'thread-subagent-idle-parent-2',
+              'turn-subagent-idle-two',
+            )
           })()
         })
 
@@ -19123,14 +18845,14 @@ describe('assistant codex event shaping', () => {
           threadId: 'thread-subagent-idle-child',
           turnId: 'turn-subagent-idle-child',
           tokenUsage: {
-            total: {
+            total: { cacheWriteInputTokens: 0,
               totalTokens: 400,
               inputTokens: 300,
               cachedInputTokens: 0,
               outputTokens: 100,
               reasoningOutputTokens: 0,
             },
-            last: {
+            last: { cacheWriteInputTokens: 0,
               totalTokens: 400,
               inputTokens: 300,
               cachedInputTokens: 0,
@@ -19754,14 +19476,11 @@ describe('assistant codex event shaping', () => {
               threadId: 'thread-subagent-prestart-one',
               turnId: 'turn-subagent-prestart-one',
             })
-            child.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                status: 'completed',
-                threadId: 'thread-subagent-prestart-one',
-                turnId: 'turn-subagent-prestart-one',
-              },
-            }))
+            writeCompletedTurn(
+              child,
+              'thread-subagent-prestart-one',
+              'turn-subagent-prestart-one',
+            )
 
             // The second turn has bound the warm process, but its
             // thread/start response has not been written yet: a late child
@@ -19774,14 +19493,14 @@ describe('assistant codex event shaping', () => {
                 threadId: 'thread-subagent-prestart-child',
                 turnId: 'turn-subagent-prestart-child',
                 tokenUsage: {
-                  total: {
+                  total: { cacheWriteInputTokens: 0,
                     totalTokens: 600,
                     inputTokens: 500,
                     cachedInputTokens: 0,
                     outputTokens: 100,
                     reasoningOutputTokens: 0,
                   },
-                  last: {
+                  last: { cacheWriteInputTokens: 0,
                     totalTokens: 600,
                     inputTokens: 500,
                     cachedInputTokens: 0,
@@ -19808,14 +19527,11 @@ describe('assistant codex event shaping', () => {
                 },
               },
             }))
-            child.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                status: 'completed',
-                threadId: 'thread-subagent-prestart-two',
-                turnId: 'turn-subagent-prestart-two',
-              },
-            }))
+            writeCompletedTurn(
+              child,
+              'thread-subagent-prestart-two',
+              'turn-subagent-prestart-two',
+            )
           })()
         })
 
@@ -19936,14 +19652,14 @@ describe('assistant codex event shaping', () => {
                 threadId: 'thread-subagent-evict-child',
                 turnId: 'turn-subagent-evict-child',
                 tokenUsage: {
-                  total: {
+                  total: { cacheWriteInputTokens: 0,
                     totalTokens: 2_500,
                     inputTokens: 2_000,
                     cachedInputTokens: 500,
                     outputTokens: 500,
                     reasoningOutputTokens: 0,
                   },
-                  last: {
+                  last: { cacheWriteInputTokens: 0,
                     totalTokens: 2_500,
                     inputTokens: 2_000,
                     cachedInputTokens: 500,
@@ -19990,6 +19706,7 @@ describe('assistant codex event shaping', () => {
         },
       })
       expect(result.additionalUsages[0]?.usage.rawUsageJson).toEqual({
+        cacheWriteInputTokens: 0,
         cachedInputTokens: 500,
         inputTokens: 2_000,
         outputTokens: 500,
@@ -20441,10 +20158,27 @@ describe('steered final segments', () => {
   }
 
   function completedItemEvent(item: Record<string, unknown>) {
+    const { message, ...itemWithoutMessage } = item
+    const canonicalItem =
+      (item.type === 'assistant_message' || item.type === 'agentMessage') &&
+      typeof message === 'string'
+        ? {
+            ...itemWithoutMessage,
+            text: message,
+            type: 'agentMessage',
+          }
+        : (item.type === 'user_message' || item.type === 'userMessage') &&
+            typeof message === 'string'
+          ? {
+              ...itemWithoutMessage,
+              content: [{ type: 'text', text: message }],
+              type: 'userMessage',
+            }
+          : item
     return {
       method: 'item/completed',
       params: {
-        item,
+        item: canonicalItem,
       },
     }
   }
@@ -21313,12 +21047,20 @@ describe('steered final segments', () => {
             },
           }))
           child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-batched-steer',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
             method: 'item/completed',
             params: {
               item: {
                 id: 'user-initial-question',
-                message: 'Initial question',
-                type: 'user_message',
+                content: [{ type: 'text', text: 'Initial question' }],
+                type: 'userMessage',
               },
               threadId: 'thread-batched-steer',
               turnId: 'turn-batched-steer',
@@ -21334,8 +21076,8 @@ describe('steered final segments', () => {
               params: {
                 item: {
                   id: 'assistant-before-batched-steer',
-                  message: 'First response.',
-                  type: 'assistant_message',
+                  text: 'First response.',
+                  type: 'agentMessage',
                 },
                 threadId: 'thread-batched-steer',
                 turnId: 'turn-batched-steer',
@@ -21347,8 +21089,8 @@ describe('steered final segments', () => {
             params: {
               item: {
                 id: 'user-batched-steer',
-                message: 'Clarification accepted by the provider',
-                type: 'user_message',
+                content: [{ type: 'text', text: 'Clarification accepted by the provider' }],
+                type: 'userMessage',
               },
               threadId: 'thread-batched-steer',
               turnId: 'turn-batched-steer',
@@ -21359,8 +21101,8 @@ describe('steered final segments', () => {
             params: {
               item: {
                 id: 'assistant-after-batched-steer',
-                message: 'Revised response.',
-                type: 'assistant_message',
+                text: 'Revised response.',
+                type: 'agentMessage',
               },
               threadId: 'thread-batched-steer',
               turnId: 'turn-batched-steer',
@@ -21933,8 +21675,8 @@ it('rejects finish_without_reply after context compaction progress was sent', as
           params: {
             item: {
               id: 'assistant-context-compact-no-reply-final',
-              type: 'assistant_message',
-              message: 'Final answer after system progress.',
+              type: 'agentMessage',
+              text: 'Final answer after system progress.',
             },
           },
         }))
@@ -21980,7 +21722,7 @@ class MockChildProcess extends EventEmitter {
   signalCode: NodeJS.Signals | null = null
   readonly stderr = new PassThrough()
   readonly stdin = new MockStdin()
-  readonly stdout = new PassThrough()
+  readonly stdout = new MockStdout()
   readonly kill = vi.fn((signal?: NodeJS.Signals) => {
     this.killed = true
     queueMicrotask(() => {
@@ -22002,6 +21744,90 @@ class MockChildProcess extends EventEmitter {
           : null
     }
     return super.emit(eventName, ...args)
+  }
+}
+
+class MockStdout extends PassThrough {
+  private threadId: string | null = null
+  private turnId: string | null = null
+
+  override _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: TransformCallback,
+  ): void {
+    const encoded = chunk.toString('utf8').split('\n').map((line) => {
+      if (line.trim().length === 0) {
+        return line
+      }
+      try {
+        const payload = asRecord(JSON.parse(line))
+        const result = isTestRecord(payload.result)
+          ? asRecord(payload.result)
+          : null
+        const resultThread = result && isTestRecord(result.thread)
+          ? asRecord(result.thread)
+          : null
+        if (
+          typeof resultThread?.id === 'string' &&
+          resultThread.id.length > 0
+        ) {
+          this.threadId = resultThread.id
+        }
+        const resultTurn = result && isTestRecord(result.turn)
+          ? asRecord(result.turn)
+          : null
+        if (
+          typeof resultTurn?.id === 'string' &&
+          resultTurn.id.length > 0
+        ) {
+          this.turnId = resultTurn.id
+        }
+        if (payload.method === 'thread/tokenUsage/updated') {
+          const params = asRecord(payload.params)
+          const tokenUsage = asRecord(params.tokenUsage)
+          const last = asRecord(tokenUsage.last)
+          return JSON.stringify({
+            ...payload,
+            params: {
+              ...params,
+              tokenUsage: {
+                last,
+                modelContextWindow: tokenUsage.modelContextWindow ?? null,
+                total: tokenUsage.total ?? last,
+              },
+            },
+          })
+        }
+        if (payload.method !== 'item/tool/call') {
+          return line
+        }
+        const params = asRecord(payload.params)
+        const preserveMissingIdentity =
+          params.__testPreserveMissingIdentity === true
+        const requestParams = { ...params }
+        delete requestParams.__testPreserveMissingIdentity
+        if (preserveMissingIdentity) {
+          return JSON.stringify({
+            ...payload,
+            params: requestParams,
+          })
+        }
+        return JSON.stringify({
+          ...payload,
+          params: {
+            callId: `call-${String(payload.id)}`,
+            threadId: this.threadId ?? 'thread-test',
+            turnId: this.turnId ?? 'turn-test',
+            ...requestParams,
+          },
+        })
+      } catch {
+        return line
+      }
+    }).join('\n')
+    this.push(encoded)
+    callback()
   }
 }
 
@@ -22099,9 +21925,11 @@ async function writeSuccessfulContextCompactionTurn(input: {
       params: {
         item: {
           id: userMessage.id,
-          message: userMessage.message,
-          type: 'user_message',
+          content: [{ type: 'text', text: userMessage.message }],
+          type: 'userMessage',
         },
+        threadId: input.threadId,
+        turnId: input.turnId,
       },
     }))
   }
@@ -22115,24 +21943,8 @@ async function writeSuccessfulContextCompactionTurn(input: {
         id: input.itemId,
         type: 'contextCompaction',
       },
-    },
-  }))
-  input.child.stdout.write(jsonLine({
-    method: 'item/started',
-    params: {
-      item: {
-        id: input.itemId,
-        type: 'context_compaction',
-      },
-    },
-  }))
-  input.child.stdout.write(jsonLine({
-    method: 'item/completed',
-    params: {
-      item: {
-        id: input.itemId,
-        type: 'context.compaction',
-      },
+      threadId: input.threadId,
+      turnId: input.turnId,
     },
   }))
   if (input.progressText) {
@@ -22165,9 +21977,11 @@ async function writeSuccessfulContextCompactionTurn(input: {
     params: {
       item: {
         id: `${input.itemId}-final`,
-        message: input.finalMessage,
-        type: 'assistant_message',
+        text: input.finalMessage,
+        type: 'agentMessage',
       },
+      threadId: input.threadId,
+      turnId: input.turnId,
     },
   }))
   input.child.stdout.write(jsonLine({
@@ -22217,6 +22031,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   throw new TypeError('Expected a record value.')
 }
 
+function isTestRecord(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function readWrittenRpcMessages(
   child: MockChildProcess,
 ): Record<string, unknown>[] {
@@ -22230,7 +22048,7 @@ async function waitForRpcMessages(
   child: MockChildProcess,
   count: number,
 ): Promise<Record<string, unknown>[]> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 5_000; attempt += 1) {
     const messages = readWrittenRpcMessages(child)
     if (messages.length >= count) {
       return messages
@@ -22238,14 +22056,21 @@ async function waitForRpcMessages(
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
 
-  throw new Error(`Expected at least ${count} RPC messages from Murph.`)
+  const observed = readWrittenRpcMessages(child).map((message) =>
+    typeof message.method === 'string'
+      ? message.method
+      : `response:${String(message.id)}`
+  )
+  throw new Error(
+    `Expected at least ${count} RPC messages from Murph; observed ${observed.join(', ')}.`,
+  )
 }
 
 async function waitForRpcResponse(
   child: MockChildProcess,
   id: number,
 ): Promise<Record<string, unknown>> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 5_000; attempt += 1) {
     const message = readWrittenRpcMessages(child).find(
       (candidate) => candidate.id === id,
     )
@@ -22262,7 +22087,7 @@ async function waitForRpcMethod(
   child: MockChildProcess,
   method: string,
 ): Promise<Record<string, unknown>> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 5_000; attempt += 1) {
     const message = readWrittenRpcMessages(child).find(
       (candidate) => candidate.method === method,
     )
@@ -22280,7 +22105,7 @@ async function waitForRpcMethodCount(
   method: string,
   count: number,
 ): Promise<Record<string, unknown>> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 5_000; attempt += 1) {
     const messages = readWrittenRpcMessages(child).filter(
       (candidate) => candidate.method === method,
     )
@@ -22618,6 +22443,7 @@ function writeTokenUsage(input: {
       threadId: input.threadId,
       tokenUsage: {
         last: input.last,
+        modelContextWindow: null,
         total: input.total,
       },
       turnId: input.turnId,
@@ -22634,9 +22460,11 @@ function writeCompletedTurn(
   child.stdout.write(jsonLine({
     method: 'turn/completed',
     params: {
-      status,
       threadId,
-      turnId,
+      turn: {
+        id: turnId,
+        status,
+      },
     },
   }))
 }
@@ -22697,7 +22525,7 @@ function writeCodexV2AssistantEventTurn(input: {
     params: {
       item: {
         id: `status-${input.turnId}`,
-        type: 'command_execution',
+        type: 'commandExecution',
         command: 'true',
       },
       threadId: input.threadId,
@@ -22709,7 +22537,7 @@ function writeCodexV2AssistantEventTurn(input: {
     params: {
       item: {
         id: itemId,
-        type: 'agent_message',
+        type: 'agentMessage',
         phase: 'final_answer',
         text: input.finalMessage,
       },
@@ -22720,9 +22548,11 @@ function writeCodexV2AssistantEventTurn(input: {
   input.child.stdout.write(jsonLine({
     method: 'turn/completed',
     params: {
-      status: 'completed',
       threadId: input.threadId,
-      turnId: input.turnId,
+      turn: {
+        id: input.turnId,
+        status: 'completed',
+      },
     },
   }))
 }

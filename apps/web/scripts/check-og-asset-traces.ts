@@ -39,6 +39,7 @@ const requiredOgRouteTraceMarkers = [
   "server/app/(dashboard)/experiments/[experimentId]/opengraph-image",
   "server/app/(dashboard)/experiments/[experimentId]/card/route.js.nft.json",
   "server/app/changelog/card/v1/[items]/route.js.nft.json",
+  "server/app/imessage/card/v1/[payload]/route.js.nft.json",
 ] as const;
 
 const ogImageTracePattern = /server\/app\/.*opengraph-image[^/]*\/route\.js\.nft\.json$/u;

@@ -205,6 +205,21 @@ on larger screens it centers at no more than 540px wide.
 ### Signal Cards
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
+### iMessage Nutrition Card Image
+Render the macOS and app-absent fallback as the compact default state of the
+shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
+cream balloon, small system-style badge, large calorie value, calorie progress
+ring, and one-row protein, carbohydrates, fat, and fiber readings visually
+aligned with the Messages extension. Status color may tint nutrient values, but
+the ring draws quantitative progress only for a complete calorie total with an
+assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
+the neutral track. The static image does not expose the native card's
+tap-to-reveal target state.
+The provider captions beneath the image use one text column to retain the date,
+meal count, every available total, partial state, and each V2 target/status for
+assistive technology and image-failure recovery. V1 renders an unavailable
+fiber dash in the image while its caption correctly omits a fiber claim.
+
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
 current MRR, tracked fulfilled usage top-ups, paying-customer growth, active
@@ -451,6 +466,15 @@ that control. Do not add a second sales card, decorative status badge, duplicate
 headline, or explanatory paragraph. Retain `Back to Murph` as the quiet
 secondary action.
 
+A signed-out funding link first shows one neutral sign-in handoff and returns to
+the exact funding URL after authentication. Do not reveal whether the group or
+the viewer has a private sponsorship relationship before that handoff. An
+authenticated payer keeps the cancellation path even when the group is no
+longer eligible for new funding; authenticated non-payers see the ordinary
+unavailable state. After cancellation, replace the action with a durable receipt
+that confirms future automatic refills stopped and existing usage credit stays
+with the group. Do not reload into an unrelated unavailable state.
+
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
 and $20 as visually prominent monthly maximums. On desktop, use the shared
 choice cards. On phones, use a near-full-height bottom drawer with one large
@@ -551,6 +575,7 @@ View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Moti
 - Logo (dark): `apps/web/public/logo-dark.svg`
 - Favicon (auto dark mode): `apps/web/app/icon.svg`
 - Dynamic OG image: `apps/web/app/opengraph-image.tsx` (1200×630, Fraunces + DM Sans, hero.jpg background)
+- Static iMessage nutrition image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200×568, DM Sans, immutable bounded snapshot)
 - Canonical hero image: `apps/web/public/hero.jpg` (3583×2000)
 - Supporting texture: `apps/web/public/warmglow.png` (1376×768)
 - Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`)

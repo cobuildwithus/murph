@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   isHostedThreadContainerMember: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
+  readHostedMemberStripeBillingRef: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -26,6 +27,10 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS: {},
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   isHostedThreadContainerMember: mocks.isHostedThreadContainerMember,
 }));
@@ -39,6 +44,12 @@ describe("hosted runtime Family plan tool", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({
       $transaction: vi.fn((callback) => callback({ label: "tx" })),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: "active",
+          suspendedAt: null,
+        }),
+      },
     });
     mocks.ensureHostedAccountGroupForOwnerTx.mockResolvedValue({
       billingStatus: "not_started",
@@ -65,6 +76,7 @@ describe("hosted runtime Family plan tool", () => {
       replyText: "Done. I prepared a Murph Family invite for Adam.",
     });
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
     mocks.isHostedThreadContainerMember.mockResolvedValue(false);
   });
 
@@ -153,6 +165,45 @@ describe("hosted runtime Family plan tool", () => {
       prisma: expect.any(Object),
     });
     expect(mocks.issueHostedFamilyInviteFromOwnerTx).not.toHaveBeenCalled();
+  });
+
+  it("returns authoritative active-trial conversion terms and forwards fresh consent", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      stripeCustomerId: "cus_trial",
+      stripeSubscriptionId: "sub_trial",
+    });
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: { action: "read_status" },
+    })).resolves.toMatchObject({
+      action: "read_status",
+      result: {
+        activeTrialConversion: {
+          includedPulseSeats: 2,
+          monthlyAmountUsdCents: 1_400,
+          perSeatMonthlyAmountUsdCents: 700,
+          trialEndsImmediately: true,
+        },
+      },
+    });
+
+    await handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "start_checkout",
+        confirmedTrialConversion: true,
+      },
+    });
+
+    expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+      confirmedTrialConversion: true,
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: expect.any(Object),
+    });
   });
 
   it("does not create checkout when the owner already has active Family billing", async () => {

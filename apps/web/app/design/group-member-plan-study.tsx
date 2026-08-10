@@ -89,6 +89,22 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Pulse trial owner starting paid Family billing"
+        state="trial-family-confirmation"
+      >
+        <HostedBillingSettings
+          authenticated
+          billingStatus="active"
+          canStartFamily
+          currentBillingPhase="trial"
+          currentBillingPlanCode="launch_monthly"
+          currentCheckoutOffer="pulse_trial_7d"
+          familyState="none"
+          payerMemberId="design_trial_family_owner"
+        />
+      </StudyState>
+
+      <StudyState
         label="Group member on the $3.50 Core plan"
         state="active-core-usage"
       >
@@ -156,6 +172,21 @@ export function GroupMemberPlanStudy() {
             currentBillingPlanCode="launch_monthly"
             currentCheckoutOffer="standard"
             showGroupPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Inactive Family billing owner can repair or cancel from Settings"
+        state="family-billing-recovery"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="not_started"
+            canStartFamily
+            familyBillingOwner
+            familyState="none"
           />
         </div>
       </StudyState>

@@ -1,10 +1,10 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
   MURPH_AUTOMATION_TOOL,
   MURPH_DEVICE_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
@@ -487,7 +487,7 @@ describe('hosted domain dynamic tools', () => {
 })
 
 function readToolRequest(tool: 'automation' | 'device', argumentsValue: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     method: 'item/tool/call',
     params: {
       arguments: argumentsValue,

@@ -1916,7 +1916,15 @@ export type HostedRuntimeFamilyPlanToolRequest =
     }
   | {
       action: "start_checkout";
+      confirmedTrialConversion?: true;
     };
+
+export interface HostedRuntimeFamilyPlanActiveTrialConversion {
+  includedPulseSeats: number;
+  monthlyAmountUsdCents: number;
+  perSeatMonthlyAmountUsdCents: number;
+  trialEndsImmediately: true;
+}
 
 export interface HostedRuntimeFamilyPlanToolSeatStatus {
   active: number;
@@ -1960,6 +1968,7 @@ export type HostedRuntimeFamilyPlanToolPlans = Record<
 >;
 
 export interface HostedRuntimeFamilyPlanToolStatusResponse {
+  activeTrialConversion: HostedRuntimeFamilyPlanActiveTrialConversion | null;
   billingActive: boolean;
   billingStatus: string;
   members: HostedRuntimeFamilyPlanToolMember[];
