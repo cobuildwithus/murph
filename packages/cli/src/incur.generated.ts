@@ -310,6 +310,7 @@ declare module 'incur' {
       'wearables latest': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[] } }
       'wearables metric latest': { args: { metric: string }; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
       'wearables metric trend': { args: { metric: string }; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
+      'wearables patterns': { args: {}; options: { requestId?: string; date?: string; windowDays: number } }
       'wearables recovery list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep pattern': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; timeZone?: string; windowDays: number } }
