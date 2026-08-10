@@ -209,14 +209,17 @@ That execution-time access does not make Cloudflare the durable owner of hosted 
 
 Paused companion access uses the existing `system_mailbox` invocation mode as
 a narrow execution lane. Web admits only device-sync system lag after companion
-access and historical health consent are rechecked. The runner imports and
-executes only `run-device-sync-wake`, then crosses the ordinary durable
-checkpoint and dirty-ack boundary; it cannot enter conversation, delivery,
-assistant automation, or model work. If preparation or post-checkpoint receipt
-recording fails, the workspace may retain only an exact
-`device-sync.reconcile` wake paired with the persisted paused-companion retry
-marker. A successful receipt clears that marker. All other workspace wakes stay
-projected out while billing is paused.
+access and historical health consent are rechecked. The runner preserves the
+ordinary lane-contiguous import of older accepted system work and its bounded
+import-owned durability effects, then executes only `run-device-sync-wake` and
+crosses the ordinary durable checkpoint and dirty-ack boundary. It does not
+execute unrelated pending route actions, conversation, delivery, assistant, or
+model work, and the restricted device-sync run suppresses new device-activity
+automation scheduling. If preparation or post-checkpoint receipt recording
+fails, or a successful receipt reports remaining dirty work, the workspace may
+retain only an exact `device-sync.reconcile` wake paired with the persisted
+paused-companion retry marker. Only a successful clean receipt clears that
+marker. All other workspace wakes stay projected out while billing is paused.
 
 ### Local runtime
 

@@ -251,6 +251,8 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     await activeScenario.harness.expireRunnerActivityForTest(pausedCompanionUserId);
 
     const observationCount = 17;
+    // Submit past the 16-payload cap without waiting for each request to drain.
+    // This covers append-during-processing and the no-second-mailbox-wake path.
     for (let index = 0; index < observationCount; index += 1) {
       const acceptedAt = new Date(Date.now() + index).toISOString();
       const nightDate = new Date(Date.UTC(2026, 6, index + 1))
@@ -270,12 +272,12 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
           schema: "murph.companion.overnight-prv-rmssd.v1",
         },
       });
-      await waitForPausedCompanionDirtyDrain({
-        connectionId: connection.connectionId,
-        scenario: activeScenario,
-        userId: pausedCompanionUserId,
-      });
     }
+    await waitForPausedCompanionDirtyDrain({
+      connectionId: connection.connectionId,
+      scenario: activeScenario,
+      userId: pausedCompanionUserId,
+    });
 
     const finalStatus = await assertHostedRunnerCompletedWithoutError({
       context: "paused companion backlog drain",

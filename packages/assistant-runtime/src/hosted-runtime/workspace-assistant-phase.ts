@@ -3839,6 +3839,7 @@ interface DeferredHostedSystemMailboxPostCheckpointRecord {
     nextWakeAt: string | null;
     nextWakeReason?: string | null;
     recorded: number;
+    stillDirty: boolean;
   };
 }
 
@@ -3925,6 +3926,7 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
       failed: 0,
       nextWakeAt: null,
       recorded: 0,
+      stillDirty: false,
     },
   };
 }
@@ -5813,8 +5815,11 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       input.input.systemMailboxRouteActions?.length === 1
       && input.input.systemMailboxRouteActions[0] === "run-device-sync-wake"
       && input.systemMailboxPreparation.item.routeAction === "run-device-sync-wake";
+    const pausedCompanionDeviceSyncRetryPending =
+      pausedCompanionDeviceSyncRecord
+      && (statusCallback.failed > 0 || statusCallback.stillDirty === true);
     const statusCallbackWakeReason = pausedCompanionDeviceSyncRecord
-      && statusCallback.failed > 0
+      && pausedCompanionDeviceSyncRetryPending
       ? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
       : statusCallback.nextWakeReason ?? "assistant";
     const dirtyPostCheckpointWakeAt = dirtyPostCheckpoint?.nextWakeAt ?? null;
@@ -5852,7 +5857,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       ),
       foregroundCausalOnly
         && input.input.systemMailboxRouteActions
-        && !(pausedCompanionDeviceSyncRecord && statusCallback.failed > 0)
+        && !pausedCompanionDeviceSyncRetryPending
         ? assistantCronWake
         : null,
       foregroundCausalOnly
@@ -5898,7 +5903,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           ...(pausedCompanionDeviceSyncRecord
             ? {
                 hostedPausedCompanionDeviceSyncRetryPending:
-                  statusCallback.failed > 0,
+                  pausedCompanionDeviceSyncRetryPending,
               }
             : {}),
         },
@@ -5923,7 +5928,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         ...(pausedCompanionDeviceSyncRecord
           ? {
               hostedPausedCompanionDeviceSyncRetryPending:
-                statusCallback.failed > 0,
+                pausedCompanionDeviceSyncRetryPending,
             }
           : {}),
       },

@@ -571,11 +571,17 @@ Last verified: 2026-08-09
   launch consent are rechecked. Reconciliation exposes only pending system lag,
   removes conversation lag and ordinary workspace wake authority, and blocks
   again once that deterministic backlog drains. The existing `system_mailbox`
-  invocation imports and executes only `run-device-sync-wake` and remains
-  model-free. A failed preparation or receipt may preserve only an exact
-  `device-sync.reconcile` wake with the persisted paused-companion retry marker;
-  success clears it. Web projects `platformAiUsageAllowed: false`, and the
-  write-fence provider-egress guard remains the final fail-closed boundary.
+  invocation preserves lane-contiguous import of older accepted system work,
+  including its bounded import-time durability effects, before selecting and
+  executing only `run-device-sync-wake`; it cannot execute unrelated pending
+  route actions, delivery, assistant/model work, or provider egress while
+  paused. The restricted device-sync execution also suppresses new
+  device-activity automation scheduling. A failed preparation or receipt, or a
+  successful receipt that reports remaining dirty work, may preserve only an
+  exact `device-sync.reconcile` wake with the persisted paused-companion retry
+  marker; only a successful clean receipt clears it. Web projects
+  `platformAiUsageAllowed: false`, and the write-fence provider-egress guard
+  remains the final fail-closed boundary.
 - Automatic meal-photo enrollment, activation, and upload retain active paid
   access. Enrollment and activation translate the canonical inactive-access
   failure into the feature-scoped error only when the same member still

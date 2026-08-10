@@ -217,6 +217,32 @@ describe("hosted runtime event coverage", () => {
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
   });
 
+  it("suppresses device activity automations for restricted paused device-sync runs", async () => {
+    const runtime = createRuntime();
+    const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
+      eventId: "evt_wake_paused_restricted",
+      occurredAt: "2026-04-08T00:10:00.000Z",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+
+    await expect(executeHostedMailboxEvent({
+      wake: deviceSyncWake,
+      executionContext,
+      runtime,
+      runtimeEnv: {},
+      suppressDeviceActivityAutomations: true,
+      vaultRoot: "/tmp/assistant-runtime-events-paused-restricted",
+    })).resolves.toMatchObject({
+      mailboxLane: "device-sync",
+      nextWakeAt: "2026-04-08T00:20:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+    });
+
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+    expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
+  });
+
   it("returns an assistant wake when device activity automation schedules notification work", async () => {
     const runtime = createRuntime();
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({

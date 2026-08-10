@@ -52,6 +52,7 @@ export async function executeHostedMailboxEvent(input: {
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  suppressDeviceActivityAutomations?: boolean;
   sourceMailboxItemId?: string | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -110,6 +111,8 @@ export async function executeHostedMailboxEvent(input: {
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
+    suppressDeviceActivityAutomations:
+      input.suppressDeviceActivityAutomations ?? false,
     sourceMailboxItemId: input.sourceMailboxItemId ?? null,
     vaultRoot: input.vaultRoot,
   });
@@ -146,6 +149,7 @@ async function handleHostedMailboxEvent(input: {
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  suppressDeviceActivityAutomations?: boolean;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
@@ -172,6 +176,8 @@ async function handleHostedMailboxEvent(input: {
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
+    suppressDeviceActivityAutomations:
+      input.suppressDeviceActivityAutomations ?? false,
     sourceMailboxItemId: input.sourceMailboxItemId,
     vaultRoot: input.vaultRoot,
   });
@@ -193,6 +199,7 @@ async function executeHostedSystemWake(input: {
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  suppressDeviceActivityAutomations?: boolean;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
@@ -312,7 +319,8 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
-      const activityAutomation = input.shouldYieldDeviceSync?.() === true
+      const activityAutomation = input.suppressDeviceActivityAutomations === true
+        || input.shouldYieldDeviceSync?.() === true
         ? { matched: 0, nextWakeAt: null, scheduled: 0 }
         : await scheduleDeviceActivityTriggeredAutomations({
           vault: input.vaultRoot,

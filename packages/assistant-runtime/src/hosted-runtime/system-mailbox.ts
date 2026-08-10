@@ -342,6 +342,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       runtimeEnv: input.runtimeEnv,
       signal: input.signal ?? null,
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
+      suppressDeviceActivityAutomations:
+        input.allowedRouteActions?.length === 1
+        && input.allowedRouteActions[0] === "run-device-sync-wake",
       vaultRoot: input.vaultRoot,
     });
     const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
@@ -479,12 +482,14 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   nextWakeAt: string | null;
   nextWakeReason?: string | null;
   recorded: number;
+  stillDirty: boolean;
 }> {
   if (!input.item.postCheckpointRecord) {
     return {
       failed: 0,
       nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
       recorded: 0,
+      stillDirty: false,
     };
   }
 
@@ -513,6 +518,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
         ? { nextWakeReason: nextWake.reason }
         : {}),
       recorded: recordResult.recorded,
+      stillDirty: recordResult.stillDirty,
     };
   } catch (error) {
     const normalized = normalizeHostedSystemMailboxError(error);
@@ -531,6 +537,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       failed: 1,
       nextWakeAt,
       recorded: 0,
+      stillDirty: false,
     };
   }
 }
@@ -575,6 +582,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  suppressDeviceActivityAutomations?: boolean;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
   const executionContext =
@@ -593,6 +601,8 @@ async function executePendingHostedSystemMailboxItem(input: {
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    suppressDeviceActivityAutomations:
+      input.suppressDeviceActivityAutomations ?? false,
     ...(input.shouldYieldBackgroundMaintenance
       ? {
           shouldYieldAssistantAskCompletion: input.shouldYieldBackgroundMaintenance,

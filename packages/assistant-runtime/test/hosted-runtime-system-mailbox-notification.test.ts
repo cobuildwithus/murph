@@ -819,6 +819,7 @@ describe("hosted system mailbox notification execution context", () => {
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
+        stillDirty: false,
       });
       expect(ackDirtyStateProcessed).toHaveBeenCalledWith({
         connectionId: "dsc_dirty_123",
@@ -974,6 +975,7 @@ describe("hosted system mailbox notification execution context", () => {
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
+        stillDirty: false,
       });
       expect(recordOutcome).toHaveBeenCalledOnce();
       expect(recordOutcome).toHaveBeenCalledWith(request);
@@ -1201,6 +1203,7 @@ describe("hosted system mailbox notification execution context", () => {
         failed: 0,
         nextWakeAt: null,
         recorded: 2,
+        stillDirty: false,
       });
       expect(ackDirtyStateProcessed).toHaveBeenNthCalledWith(1, {
         connectionId: "dsc_dirty_batch_1",
@@ -1336,6 +1339,7 @@ describe("hosted system mailbox notification execution context", () => {
         nextWakeAt: "2026-04-05T00:03:00.000Z",
         nextWakeReason: "device-sync.reconcile",
         recorded: 2,
+        stillDirty: true,
       });
     } finally {
       await workspace.cleanup();
@@ -1483,6 +1487,7 @@ describe("hosted system mailbox notification execution context", () => {
         failed: 0,
         nextWakeAt: null,
         recorded: 2,
+        stillDirty: false,
       });
       expect(ackDirtyStateProcessed).toHaveBeenCalledTimes(4);
       expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
@@ -1730,6 +1735,7 @@ describe("hosted system mailbox notification execution context", () => {
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
+        stillDirty: false,
       });
       expect(updateCodexAuth).toHaveBeenCalledWith({
         attemptId: "hca_abcdefghijklmnop",
@@ -1802,6 +1808,7 @@ describe("hosted system mailbox notification execution context", () => {
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
+        stillDirty: false,
       });
       expect(updateCodexAuth).toHaveBeenCalledWith({
         attemptId: "hca_abcdefghijklmnop",
@@ -1875,6 +1882,7 @@ describe("hosted system mailbox notification execution context", () => {
         failed: 0,
         nextWakeAt: null,
         recorded: 0,
+        stillDirty: false,
       });
       expect(updateCodexAuth).toHaveBeenCalledWith({
         attemptId: "hca_abcdefghijklmnop",
@@ -1946,6 +1954,7 @@ describe("hosted system mailbox notification execution context", () => {
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
+        stillDirty: false,
       });
       expect(updateCodexAuth).toHaveBeenCalledWith({
         attemptId: "hca_abcdefghijklmnop",
@@ -1991,6 +2000,44 @@ describe("hosted system mailbox notification execution context", () => {
           wake: expect.objectContaining({
             kind: "device-sync.wake",
           }),
+        }),
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("suppresses device activity automations for an exact device-sync route", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync.wake:paused-restricted",
+      occurredAt: FIXED_NOW,
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceMailboxItemId: "mailbox_item_system_device_sync",
+          suppressDeviceActivityAutomations: true,
+          wake: expect.objectContaining({ kind: "device-sync.wake" }),
         }),
       );
     } finally {

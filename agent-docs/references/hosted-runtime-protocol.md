@@ -493,12 +493,17 @@ The Web-owned paused-companion exception can select this mode only from pending
 device-sync system-lane lag after companion access and historical consent are
 rechecked. Its reconciliation projection omits conversation lag and ordinary
 workspace wakes, and the workspace read projects managed AI usage denied. The
-runtime imports and executes only `run-device-sync-wake` through the existing
-checkpoint and dirty-ack path. A failed preparation or post-checkpoint receipt
-may retain only an exact persisted paused-companion retry marker paired with a
-`device-sync.reconcile` wake; success clears the marker. The mode therefore
-cannot enter assistant admission, and the bound fence continues to reject
-metered provider egress if an unexpected path reaches it.
+runtime retains the ordinary lane-contiguous import of older accepted system
+work and its bounded import-owned durability effects, then selects and executes
+only `run-device-sync-wake` through the existing checkpoint and dirty-ack path.
+It does not execute unrelated pending route actions, delivery, assistant
+admission, or provider work, and the restricted device-sync action suppresses
+new device-activity automation scheduling. A failed preparation or
+post-checkpoint receipt, or a successful receipt that reports `stillDirty`, may
+retain only an exact persisted paused-companion retry marker paired with a
+`device-sync.reconcile` wake; only a successful clean receipt clears the marker.
+The bound fence continues to reject metered provider egress if an unexpected
+path reaches it.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
