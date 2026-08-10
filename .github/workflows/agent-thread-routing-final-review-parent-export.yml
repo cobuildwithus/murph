@@ -1,0 +1,31 @@
+name: Agent thread routing final review parent export
+
+on:
+  push:
+    branches:
+      - agent/thread-routing-final-review-parent-export
+    paths:
+      - .github/workflows/agent-thread-routing-final-review-parent-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Archive tracked source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz --output=murph-thread-routing-parent.tar.gz HEAD
+      - name: Upload tracked source
+        uses: actions/upload-artifact@v4
+        with:
+          name: murph-thread-routing-final-review-parent
+          path: murph-thread-routing-parent.tar.gz
+          if-no-files-found: error
+          retention-days: 1
