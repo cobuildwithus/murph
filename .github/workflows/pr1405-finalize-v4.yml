@@ -1,0 +1,77 @@
+name: Validate clean PR 1405 implementation
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/pr1405-final-build-v4'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Assemble clean candidate
+        run: |
+          set -euo pipefail
+          cp .github/scripts/pr1405-finalize-v4.py /tmp/pr1405-finalize.py
+          git checkout --detach 878dbf3e424bac4bf43fa148d033a29760d87486
+          python3 /tmp/pr1405-finalize.py
+          test ! -e packages/assistant-engine/skills/red-light-therapy
+          ! rg -n "red-light-therapy" packages/assistant-engine
+          ! find .github -path '*pr1405-*' -print -quit | grep -q .
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate Health Commons
+        run: pnpm --dir packages/health-commons generate
+
+      - name: Verify Health Commons
+        run: pnpm --dir packages/health-commons verify
+
+      - name: Verify CLI
+        run: |
+          pnpm --dir packages/cli typecheck
+          pnpm --dir . exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/commons-command-coverage.test.ts
+
+      - name: Verify assistant routing and skills
+        run: |
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir . exec vitest run --config packages/assistant-engine/vitest.config.ts --no-coverage packages/assistant-engine/test/model-behavior.test.ts packages/assistant-engine/test/assistant-skill-assets.test.ts packages/assistant-engine/test/assistant-codex-real-e2e.test.ts
+
+      - name: Verify hosted packaging
+        run: |
+          pnpm --dir apps/cloudflare typecheck
+          pnpm --dir . exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage apps/cloudflare/test/deploy-artifacts.test.ts apps/cloudflare/test/runner-bundle-workspace-artifacts.test.ts
+
+      - name: Verify simplified contract
+        run: |
+          ! rg -n "overall evidence|same catalogHash|<exact title or alias>|\"<focus>\"" packages/assistant-engine/src/assistant/system-prompt.ts
+          rg -n 'vault-cli commons knowledge search "<member.s health question in concise English>" --format json' packages/assistant-engine/src/assistant/system-prompt.ts
+          git diff --check
+
+      - name: Publish tested tree
+        run: |
+          git add -A
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "test: validate simplified Health Commons bridge"
+          git push --force origin HEAD:agent/pr1405-final-tested-v4
