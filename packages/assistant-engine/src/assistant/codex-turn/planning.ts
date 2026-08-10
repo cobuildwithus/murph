@@ -547,7 +547,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.toolProfile === 'provider-turn'
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
-  const explicitAssistantPersona = privateInteractiveProviderTurn
+  const explicitAssistantPersona =
+    privateInteractiveProviderTurn || groupAssistantStylePreferencesApply
     ? preferenceContext.assistantPersona ?? null
     : null
   const effectiveAssistantStyle = explicitAssistantPersona

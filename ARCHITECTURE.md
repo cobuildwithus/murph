@@ -689,8 +689,9 @@ tone, and voice changes continue to
 append the existing `member.preferences.updated` mailbox event inside the web
 transaction and converge into canonical vault preferences through normal
 runtime handling. Personal Settings projects the canonical combined persona ID
-and reuses the onboarding selector for a persona-only save; browser Settings do
-not expose or accept the numeric personality dials. Hosted
+and reuses the onboarding selector for a persona-only save. The existing
+browser Style levels editor continues to project and update Humor, Push, and
+Detail independently; Unhinged remains conversational-only. Hosted
 `murph.assistant_style` set/reset operations use a
 separate strict personality action on that same signed, input-bound callback;
 local mode continues to mutate the canonical vault directly. Web resolves the

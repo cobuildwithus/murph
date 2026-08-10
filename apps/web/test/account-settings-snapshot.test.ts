@@ -252,10 +252,10 @@ describe("hosted account settings snapshot", () => {
       where: { id: "member_123" },
     });
     expect(query.select).toHaveProperty("assistantPersona", true);
-    expect(query.select).not.toHaveProperty("assistantDetail");
-    expect(query.select).not.toHaveProperty("assistantHumor");
-    expect(query.select).not.toHaveProperty("assistantPush");
-    expect(query.select).not.toHaveProperty("assistantUnhinged");
+    expect(query.select).toHaveProperty("assistantDetail", true);
+    expect(query.select).toHaveProperty("assistantHumor", true);
+    expect(query.select).toHaveProperty("assistantPush", true);
+    expect(query.select).toHaveProperty("assistantUnhinged", true);
     expect(query.select.identity.select).toEqual({
       memberId: true,
       phoneNumberEncrypted: true,
@@ -394,7 +394,7 @@ describe("hosted account settings snapshot", () => {
     });
   });
 
-  it("keeps conversation-only personality dials out of the settings snapshot", async () => {
+  it("projects web style levels while keeping Unhinged out of Settings", async () => {
     mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord({
       assistantDetail: 8,
       assistantHumor: 7,
@@ -408,7 +408,12 @@ describe("hosted account settings snapshot", () => {
     });
 
     expect(snapshot.assistant?.persona).toBe("scientist-with-classic");
-    expect(snapshot.assistant).not.toHaveProperty("personality");
+    expect(snapshot.assistant?.personality).toEqual({
+      detail: 8,
+      humor: 7,
+      push: 6,
+    });
+    expect(snapshot.assistant?.personality).not.toHaveProperty("unhinged");
   });
 
   it("normalizes assistant preferences for settings display", async () => {
@@ -426,6 +431,11 @@ describe("hosted account settings snapshot", () => {
         dormantSolPreference: false,
         model: "gpt-5.6-terra",
         persona: "scientist-with-classic",
+        personality: {
+          detail: null,
+          humor: null,
+          push: null,
+        },
         provider: "openai",
         solAvailable: false,
         tone: "casual",
@@ -447,6 +457,11 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         model: "gpt-5.6-terra",
         persona: null,
+        personality: {
+          detail: null,
+          humor: null,
+          push: null,
+        },
         solAvailable: false,
         tone: null,
         voice: null,
@@ -461,6 +476,11 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         model: "gpt-5.6-terra",
         persona: null,
+        personality: {
+          detail: null,
+          humor: null,
+          push: null,
+        },
         solAvailable: false,
         tone: null,
         voice: null,

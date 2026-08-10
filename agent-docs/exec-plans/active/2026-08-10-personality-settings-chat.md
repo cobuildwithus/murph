@@ -14,11 +14,12 @@ Updated: 2026-08-10
 
 - Settings shows the saved main and optional supporting personality and opens
   the existing persona selector in a focused two-step edit flow.
-- A Settings save updates only `persona`; it does not implicitly change tone,
-  voice, or the separate conversation-only style dials.
+- A Settings persona save updates only `persona`; it does not implicitly change
+  tone, voice, or the existing independently editable style levels.
 - `murph.personalization` can read and atomically update the same main and
   optional supporting personality under its existing input-bound authority.
-- Existing onboarding, tone, voice, and dial behavior remains unchanged.
+- Existing onboarding, tone, voice, and dial behavior remains available and
+  unchanged.
 - Focused tests, Web and package typechecks, responsive design proof, required
   ReviewGPT rounds, Claude UI review, exact-head CI, and mergeability are green.
 
@@ -27,9 +28,10 @@ Updated: 2026-08-10
 - In scope: Settings snapshot/row/picker wiring, persona-only picker mode,
   hosted personalization contract/handler/tool guidance, focused coverage,
   design catalog, changelog, and owner-doc alignment.
-- Out of scope: Humor/Push/Detail/Unhinged Settings controls, another persona
-  model, new dependencies, a generalized preferences framework, or model,
-  provider, and reasoning changes.
+- Out of scope: new Humor/Push/Detail/Unhinged controls, another persona model,
+  new dependencies, a generalized preferences framework, or model, provider,
+  and reasoning changes. The existing Humor/Push/Detail Settings editor remains
+  in scope for preservation.
 
 ## Constraints
 
@@ -57,8 +59,9 @@ Updated: 2026-08-10
 1. Project the canonical persona into Settings and adapt the existing picker
    for a focused main/supporting edit flow.
 2. Extend the hosted personalization contract, transactional handler, dynamic
-   tool schema, and prompt guidance with main/supporting persona fields.
-3. Delete the obsolete Settings dial dialog and replace its catalog study with
+   tool schema, prompt guidance, and group next-turn prompt with
+   main/supporting persona fields.
+3. Preserve the existing Settings style-level dialog and catalog study beside
    the real persona picker mode.
 4. Add focused contract, persistence, component, prompt/tool, snapshot, and
    changelog coverage.
@@ -72,8 +75,12 @@ Updated: 2026-08-10
 - Keep `AssistantPersonaId` as the only persisted persona value; chat exposes
   main/supporting base-persona inputs and resolves them through the existing
   contract helper.
-- Remove the Settings-only numeric-dial dialog because it is replaced and has
-  no remaining production consumer; the independent chat dial owner remains.
+- Keep the Settings numeric-dial dialog as the independent Humor, Push, and
+  Detail editor; the persona picker does not replace it.
+- Require persona changes to send a complete main/supporting pair after any
+  needed read, so the write stays atomic without a new pre-write database read.
+- Reject persona writes from scheduled occurrences while preserving their
+  existing tone, voice, and dial authority.
 
 ## Verification
 
@@ -98,6 +105,9 @@ Updated: 2026-08-10
   packet, but the account returned an explicit out-of-usage-credits response.
   Per repository policy, this is recorded as a non-blocking unavailable review,
   not as a pass; no further Claude request was made.
-- Remaining gates: preliminary specialist ReviewGPT, final ReviewGPT, exact-head
-  GitHub Actions, parent final diff review, merge-tree proof, plan archival, and
-  marking the draft PR ready.
+- Exact-head preliminary and final ReviewGPT both returned actionable findings.
+  Remediation preserves style levels, applies room-owned personas to later
+  group turns, closes scheduled persona authority, requires complete persona
+  pairs, and removes pointer mutation while saving. Focused proof, provider
+  measurement, the final remediation review round, exact-head CI, mergeability,
+  plan archival, and marking the draft PR ready remain.

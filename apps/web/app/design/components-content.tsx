@@ -149,6 +149,7 @@ import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/h
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
+import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
   DESIGN_AI_USAGE_DISABLED_HISTORY,
@@ -602,6 +603,7 @@ export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
+  const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
   const [vitalConnectionDialogSource, setVitalConnectionDialogSource] = useState<
     Pick<ConnectSource, "id" | "logo" | "name" | "requiresReconnect"> | null
   >(null);
@@ -2275,6 +2277,30 @@ export function ComponentsContent() {
               })}
             />
           ) : null}
+        </Section>
+
+        <Separator />
+
+        <Section title="Style Levels">
+          <p className="text-sm text-muted-foreground">
+            Private Humor, Push, and Detail controls. The mobile preview uses a
+            full-height drawer with a safe-area footer; desktop uses a dialog.
+          </p>
+          <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">
+            <Button onClick={() => setPersonalitySettingsOpen(true)}>
+              Preview style levels
+            </Button>
+          </div>
+          <MurphPersonalitySettingsDialog
+            onOpenChange={setPersonalitySettingsOpen}
+            open={personalitySettingsOpen}
+            personality={{ detail: 5, humor: 7, push: 8 }}
+            savePersonality={async (changedDials) => ({
+              detail: changedDials.detail ?? 5,
+              humor: changedDials.humor ?? 7,
+              push: changedDials.push ?? 8,
+            })}
+          />
         </Section>
 
         <Separator />

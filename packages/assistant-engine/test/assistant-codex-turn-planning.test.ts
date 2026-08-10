@@ -3075,11 +3075,9 @@ describe('assistant Codex turn planning', () => {
         deliverResponse: true,
       },
       preferenceContext: {
-        assistantPersona: 'navy-seal',
+        assistantPersona: 'scientist-with-classic',
         assistantPersonality: {
-          detail: 7,
           humor: 9,
-          push: 8,
         },
         assistantTone: 'casual',
         assistantVoice: 'warm',
@@ -3109,16 +3107,16 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).toContain(
-      'Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
+      'Main Personality, Supporting Personality, Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
     )
     expect(plan.developerInstructions).toContain(
       'Assistant personality preferences for this group room:',
     )
     expect(plan.developerInstructions).toContain('Humor 9/10')
-    expect(plan.developerInstructions).toContain('Push 8/10')
-    expect(plan.developerInstructions).toContain('Detail 7/10')
-    expect(plan.developerInstructions).not.toContain(
-      'Be direct, disciplined, and accountable.',
+    expect(plan.developerInstructions).toContain('Push 4/10')
+    expect(plan.developerInstructions).toContain('Detail 9/10')
+    expect(plan.developerInstructions).toContain(
+      'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
     )
     expect(plan.developerInstructions).toContain(
       'Casual is a persistent user-facing writing invariant',

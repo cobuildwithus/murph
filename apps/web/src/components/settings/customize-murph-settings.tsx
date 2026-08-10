@@ -1,15 +1,17 @@
 "use client";
 
 import {
+  assistantWebPersonalitySettingIds,
   assistantVoiceOptions,
   defaultAssistantPersonaId,
   resolveAssistantBasePersonaOption,
   resolveAssistantPersonaParts,
   type AssistantPersonaId,
+  type AssistantWebPersonalitySettingId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
-import { IdCard, MessageSquareText, Mic2, SlidersHorizontal } from "lucide-react";
+import { IdCard, MessageSquareText, Mic2, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -24,11 +26,26 @@ import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-car
 import { Button } from "@/src/components/ui/button";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
+import {
+  MurphPersonalitySettingsDialog,
+  resolveAssistantPersonalitySnapshotScores,
+  type AssistantPersonalitySnapshot,
+} from "./murph-personality-settings-dialog";
 import { SettingsRow, SettingsRowList } from "./settings-row";
 import { stripSettingsQueryParam } from "./hosted-settings-utils";
 
 type CustomizeMurphAssistant = MurphAssistantStylePreferences & {
   persona?: AssistantPersonaId | null;
+  personality?: AssistantPersonalitySnapshot | null;
+};
+
+const PERSONALITY_DIAL_SUMMARY_LABELS: Record<
+  AssistantWebPersonalitySettingId,
+  string
+> = {
+  humor: "Humor",
+  push: "Push",
+  detail: "Detail",
 };
 
 type AssistantStyleStep = "tone" | "voice";
@@ -57,10 +74,14 @@ export function CustomizeMurphSettings({
   const [persona, setPersona] = useState<AssistantPersonaId>(
     assistant?.persona ?? defaultAssistantPersonaId,
   );
+  const [personality, setPersonality] = useState<AssistantPersonalitySnapshot | null>(
+    assistant?.personality ?? null,
+  );
   const [pickerStep, setPickerStep] = useState<AssistantStyleStep | null>(
     openVoiceLink ? "voice" : null,
   );
-  const [personalityOpen, setPersonalityOpen] = useState(false);
+  const [personaPickerOpen, setPersonaPickerOpen] = useState(false);
+  const [styleLevelsOpen, setStyleLevelsOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [previousOpenVoiceLink, setPreviousOpenVoiceLink] = useState(openVoiceLink);
 
@@ -92,11 +113,21 @@ export function CustomizeMurphSettings({
           }
         />
         <SettingsRow
-          icon={<SlidersHorizontal className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+          icon={<Sparkles className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Personality"
           value={formatPersonalitySummary(persona)}
           action={
-            <Button type="button" size="default" variant="ghost" onClick={() => setPersonalityOpen(true)}>
+            <Button type="button" size="default" variant="ghost" onClick={() => setPersonaPickerOpen(true)}>
+              Customize
+            </Button>
+          }
+        />
+        <SettingsRow
+          icon={<SlidersHorizontal className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+          label="Style levels"
+          value={formatStyleLevelsSummary(personality, persona)}
+          action={
+            <Button type="button" size="default" variant="ghost" onClick={() => setStyleLevelsOpen(true)}>
               Customize
             </Button>
           }
@@ -147,7 +178,7 @@ export function CustomizeMurphSettings({
           open
         />
       ) : null}
-      {personalityOpen ? (
+      {personaPickerOpen ? (
         <MurphPersonaPicker
           initialPersona={persona}
           initialTone={style.tone}
@@ -156,11 +187,24 @@ export function CustomizeMurphSettings({
           onSaved={(preferences) => setPersona(preferences.persona)}
           onOpenChange={(open) => {
             if (!open) {
-              setPersonalityOpen(false);
+              setPersonaPickerOpen(false);
             }
           }}
           open
           savePreference={saveAssistantPersonaOnlyPreference}
+        />
+      ) : null}
+      {styleLevelsOpen ? (
+        <MurphPersonalitySettingsDialog
+          persona={persona}
+          personality={personality}
+          onSaved={setPersonality}
+          onOpenChange={(open) => {
+            if (!open) {
+              setStyleLevelsOpen(false);
+            }
+          }}
+          open
         />
       ) : null}
       {contactPickerOpen ? (
@@ -190,6 +234,16 @@ function formatPersonalitySummary(
   return parts.supportingId
     ? `${main} + ${resolveAssistantBasePersonaOption(parts.supportingId).label}`
     : main;
+}
+
+function formatStyleLevelsSummary(
+  personality: AssistantPersonalitySnapshot | null,
+  persona: AssistantPersonaId = defaultAssistantPersonaId,
+): string {
+  const scores = resolveAssistantPersonalitySnapshotScores(personality, persona);
+  return assistantWebPersonalitySettingIds
+    .map((id) => `${PERSONALITY_DIAL_SUMMARY_LABELS[id]} ${scores[id]}`)
+    .join(" · ");
 }
 
 function formatAssistantTone(tone: AssistantTonePreference): string {

@@ -650,7 +650,7 @@ function PersonaMatchCard({
       />
       <label
         htmlFor={inputId}
-        onClick={onSelect}
+        onClick={disabled ? undefined : onSelect}
         className="absolute inset-0 cursor-pointer rounded-xl"
       >
         <span className="sr-only">Select {option.label}</span>
@@ -726,7 +726,7 @@ function SupportingPersonaChoice({
       />
       <label
         htmlFor={inputId}
-        onClick={onSelect}
+        onClick={disabled ? undefined : onSelect}
         className="absolute inset-0 cursor-pointer rounded-xl"
       >
         <span className="sr-only">Select {label}</span>
@@ -802,7 +802,7 @@ function ToneChoiceCard({
       />
       <label
         htmlFor={inputId}
-        onClick={onSelect}
+        onClick={disabled ? undefined : onSelect}
         className="absolute inset-0 cursor-pointer rounded-xl"
       >
         <span className="sr-only">Select {label}</span>

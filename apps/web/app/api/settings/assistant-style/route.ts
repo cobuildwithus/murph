@@ -1,10 +1,14 @@
 import {
+  assistantWebPersonalityPreferencesSchema,
+  assistantWebPersonalitySettingIds,
   isAssistantPersonaId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
   type AssistantPersonaId,
+  type AssistantPersonalityPreferences,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
+  type AssistantWebPersonalitySettingId,
 } from "@murphai/contracts";
 
 import { getPrisma } from "@/src/lib/prisma";
@@ -33,6 +37,7 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboardi
 const ASSISTANT_STYLE_REQUEST_BODY_LIMIT_BYTES = 1_024;
 const ASSISTANT_STYLE_REQUEST_FIELDS = new Set([
   "persona",
+  "personality",
   "tone",
   "voice",
 ]);
@@ -68,6 +73,11 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     assistantPersona: result.assistantPersona,
+    // Project to the web-visible dials so the conversational-only Unhinged score
+    // never crosses the server boundary into browser network or client state,
+    // even when the saved personality includes it. The client filters again as
+    // defense in depth.
+    assistantPersonality: projectWebVisiblePersonality(result.assistantPersonality),
     assistantTone: result.assistantTone,
     assistantVoice: result.assistantVoice,
     ok: true,
@@ -76,6 +86,15 @@ export const POST = withJsonError(async (request: Request) => {
   });
 });
 
+function projectWebVisiblePersonality(
+  personality: Record<string, number | null>,
+): Record<AssistantWebPersonalitySettingId, number | null> {
+  const projected = {} as Record<AssistantWebPersonalitySettingId, number | null>;
+  for (const id of assistantWebPersonalitySettingIds) {
+    projected[id] = personality[id] ?? null;
+  }
+  return projected;
+}
 function parseAssistantStyleRequestBody(
   body: Record<string, unknown>,
 ): HostedMemberAssistantPreferencesUpdate {
@@ -92,6 +111,9 @@ function parseAssistantStyleRequestBody(
   const persona = body.persona === undefined
     ? undefined
     : parseAssistantPersona(body.persona);
+  const personality = body.personality === undefined
+    ? undefined
+    : parseAssistantPersonality(body.personality);
   const tone = body.tone === undefined
     ? undefined
     : parseAssistantTone(body.tone);
@@ -100,19 +122,32 @@ function parseAssistantStyleRequestBody(
     : parseAssistantVoice(body.voice);
 
   if (
+    personality !== undefined
+    && (persona !== undefined || tone !== undefined || voice !== undefined)
+  ) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_STYLE_MIXED_UPDATE",
+      httpStatus: 400,
+      message: "Update personality separately from persona, tone, and voice.",
+    });
+  }
+
+  if (
     persona === undefined
+    && personality === undefined
     && tone === undefined
     && voice === undefined
   ) {
     throw hostedOnboardingError({
       code: "ASSISTANT_STYLE_EMPTY_UPDATE",
       httpStatus: 400,
-      message: "Choose a persona, tone, or voice before continuing.",
+      message: "Choose a persona, tone, voice, or personality setting before continuing.",
     });
   }
 
   return {
     ...(persona === undefined ? {} : { persona }),
+    ...(personality === undefined ? {} : { personality }),
     ...(tone === undefined ? {} : { tone }),
     ...(voice === undefined ? {} : { voice }),
   };
@@ -124,6 +159,19 @@ function parseAssistantPersona(value: unknown): AssistantPersonaId {
     code: "ASSISTANT_STYLE_INVALID_PERSONA",
     httpStatus: 400,
     message: "Choose a valid Murph persona.",
+  });
+}
+
+function parseAssistantPersonality(value: unknown): AssistantPersonalityPreferences {
+  // The browser Settings surface only exposes the web-visible dials. The
+  // conversational-only `unhinged` dial is rejected as an unknown key here and
+  // can be changed only through Murph in conversation.
+  const result = assistantWebPersonalityPreferencesSchema.safeParse(value);
+  if (result.success && Object.keys(result.data).length > 0) return result.data;
+  throw hostedOnboardingError({
+    code: "ASSISTANT_STYLE_INVALID_PERSONALITY",
+    httpStatus: 400,
+    message: "Choose a valid personality setting.",
   });
 }
 

@@ -137,6 +137,8 @@ function requireValidAssistantPersonalizationUpdate(
   },
   context: z.RefinementCtx,
 ): void {
+  const mainPersonaRequested = request.mainPersona !== undefined;
+  const supportingPersonaRequested = request.supportingPersona !== undefined;
   if (
     request.action === "update"
     && request.mainPersona === undefined
@@ -148,6 +150,16 @@ function requireValidAssistantPersonalizationUpdate(
       code: z.ZodIssueCode.custom,
       message:
         "Assistant personalization update requires a main persona, supporting persona, tone, or voice.",
+    });
+  }
+  if (
+    request.action === "update"
+    && mainPersonaRequested !== supportingPersonaRequested
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "Assistant persona updates require both main and supporting persona fields.",
     });
   }
   if (

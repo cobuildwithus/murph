@@ -227,6 +227,70 @@ test("MurphPersonaPicker reuses the main and supporting steps without changing t
   }
 });
 
+test.each([
+  { mobile: false, surface: "desktop" },
+  { mobile: true, surface: "mobile" },
+])("MurphPersonaPicker blocks pointer selection while saving on $surface", async ({
+  mobile,
+}) => {
+  componentMocks.useIsMobile.mockReturnValue(mobile);
+  let resolveSave: ((preferences: MurphPersonaPreferences) => void) | undefined;
+  const savePreference = vi.fn(
+    () => new Promise<MurphPersonaPreferences>((resolve) => {
+      resolveSave = resolve;
+    }),
+  );
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      initialPersona: "classic",
+      initialTone: "formal",
+      initialVoice: "upbeat",
+      mode: "personality",
+      onOpenChange: vi.fn(),
+      open: true,
+      savePreference,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Scientist");
+    await clickControlContaining(rendered, "Save personality");
+
+    const selected = rendered.container.querySelector<HTMLInputElement>(
+      "input[type='radio'][value='scientist']",
+    );
+    const other = rendered.container.querySelector<HTMLInputElement>(
+      "input[type='radio'][value='navy-seal']",
+    );
+    assert.ok(selected);
+    assert.ok(other);
+    assert.equal(selected.checked, true);
+    assert.equal(selected.disabled, true);
+
+    const otherLabel = rendered.container.querySelector<HTMLLabelElement>(
+      `label[for='${other.id}']`,
+    );
+    assert.ok(otherLabel);
+    await act(async () => otherLabel.click());
+    assert.equal(selected.checked, true);
+    assert.equal(other.checked, false);
+
+    assert.ok(resolveSave);
+    await act(async () => resolveSave?.({
+      persona: "classic-with-scientist",
+      tone: "formal",
+      voice: "upbeat",
+    }));
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("MurphPersonaPicker skips without writing preferences", async () => {
   const fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);

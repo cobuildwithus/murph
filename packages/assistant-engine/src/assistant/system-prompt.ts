@@ -688,7 +688,7 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
-    conversationScope === "direct" && input.assistantPersona
+    assistantStylePreferencesApply && input.assistantPersona
       ? buildAssistantPersonaPrompt(input.assistantPersona)
       : null,
     assistantStylePreferencesApply

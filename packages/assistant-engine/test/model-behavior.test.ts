@@ -2915,6 +2915,7 @@ describe('assistant conversation scope', () => {
 
   it('presents hosted Linq style controls as room-owned settings', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantPersona: 'scientist-with-classic',
       assistantPersonality: {
         detail: 7,
         humor: 9,
@@ -2932,6 +2933,9 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       "Read or save this room's explicit main personality, optional supporting personality, tone, and voice fields",
+    )
+    expect(prompt).toContain(
+      'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
     )
     expect(prompt).toContain(
       "They never read or change any participant's private Murph settings",

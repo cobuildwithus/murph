@@ -105,6 +105,14 @@ describe("hosted assistant personalization contract", () => {
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
       mainPersona: "scientist",
+    })).toThrow("require both main and supporting persona fields");
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: "update",
+      supportingPersona: null,
+    })).toThrow("require both main and supporting persona fields");
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: "update",
+      mainPersona: "scientist",
       supportingPersona: "scientist",
     })).toThrow("Supporting persona must differ");
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({

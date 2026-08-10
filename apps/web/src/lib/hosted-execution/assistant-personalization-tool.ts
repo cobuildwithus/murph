@@ -23,7 +23,6 @@ import {
   resolveAssistantPersonaCombinationId,
   resolveAssistantPersonaParts,
   resolveAssistantEffectiveStyle,
-  type AssistantBasePersonaId,
   type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantPreferenceFieldId,
@@ -102,10 +101,15 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
         : {}),
     });
   }
+  const requestedPersona = resolveRequestedAssistantPersona(request);
+  if (requestedPersona && "automationId" in authority) {
+    throw new TypeError(
+      "Scheduled automation occurrences cannot change Murph personas.",
+    );
+  }
   const prisma = getPrisma();
   const transactionResult = await prisma.$transaction(async (tx) => {
-    const personaRequested = request.mainPersona !== undefined
-      || request.supportingPersona !== undefined;
+    const personaRequested = requestedPersona !== null;
     const requestedFields: AssistantPreferenceFieldId[] = [
       ...(personaRequested ? ["persona" as const] : []),
       ...(request.tone === undefined ? [] : ["tone" as const]),
@@ -119,19 +123,6 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
         prisma: tx,
         requestedFields,
       });
-    const currentPreferences = personaRequested
-      ? await readHostedMemberAssistantPreferences({
-          memberId: input.memberId,
-          prisma: tx,
-        })
-      : null;
-    const requestedPersona = currentPreferences
-      ? resolveRequestedAssistantPersona({
-          currentPersona: resolveHostedAssistantEffectiveStyle(currentPreferences).persona,
-          mainPersona: request.mainPersona,
-          supportingPersona: request.supportingPersona,
-        })
-      : null;
     const styleResult = await upsertHostedMemberAssistantPreferencesTx({
       causalOrigin: "turn",
       memberId: input.memberId,
@@ -483,25 +474,31 @@ async function readHostedAssistantPersonalization(
   };
 }
 
-function resolveRequestedAssistantPersona(input: {
-  currentPersona: AssistantPersonaId;
-  mainPersona?: AssistantBasePersonaId;
-  supportingPersona?: AssistantBasePersonaId | null;
-}): AssistantPersonaId {
-  const current = resolveAssistantPersonaParts(input.currentPersona);
-  const main = input.mainPersona ?? current.mainId;
-  let supporting = input.supportingPersona === undefined
-    ? current.supportingId
-    : input.supportingPersona;
+function resolveRequestedAssistantPersona(
+  input: Extract<
+    HostedRuntimeAssistantPersonalizationToolRequest,
+    { action: "update" }
+  >,
+): AssistantPersonaId | null {
   if (
-    input.mainPersona !== undefined
+    input.mainPersona === undefined
     && input.supportingPersona === undefined
-    && supporting === main
   ) {
-    supporting = null;
+    return null;
   }
-  if (supporting === main) {
+  if (
+    input.mainPersona === undefined
+    || input.supportingPersona === undefined
+  ) {
+    throw new TypeError(
+      "Assistant persona updates require both main and supporting persona fields.",
+    );
+  }
+  if (input.supportingPersona === input.mainPersona) {
     throw new TypeError("Supporting persona must differ from the main persona.");
   }
-  return resolveAssistantPersonaCombinationId(main, supporting);
+  return resolveAssistantPersonaCombinationId(
+    input.mainPersona,
+    input.supportingPersona,
+  );
 }

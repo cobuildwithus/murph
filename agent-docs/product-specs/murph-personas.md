@@ -32,7 +32,12 @@ Every combination has a bespoke prompt body. Runtime code does not concatenate t
 
 ## Prompt behavior and scope
 
-Personal personality choices apply to private Murph conversations. Hosted room Murph remains independent and does not inherit a participant's private choice. Personality changes relationship and delivery style only. It never changes facts, evidence standards, safety, privacy, consent, authorization, tool authority, notification cadence, or action truthfulness.
+Personal personality choices apply to private Murph conversations. An
+authenticated hosted room has its own persona and never inherits a
+participant's private choice. Personality changes relationship and delivery
+style only. It never changes facts, evidence standards, safety, privacy,
+consent, authorization, tool authority, notification cadence, or action
+truthfulness.
 
 The assistant must not announce the personality configuration, imitate a real person, claim credentials or biography, claim military authority or a family relationship, demean or manipulate the member, diagnose, or perform false intimacy. Message-shaping guidance stays conversational and reciprocal; it does not introduce broadcast, acquisition, signup, notification, or exact-send automation framing.
 
@@ -65,6 +70,20 @@ successful final save advances to the Welcome to Murph dialog with the current
 messaging action. Skipping or dismissing the personality picker closes it
 without writing preferences or showing that final dialog.
 
+Existing members reuse the same selector in Settings as a focused two-step
+main/supporting editor. That save writes only the canonical persona ID; it does
+not rewrite tone, voice, or sparse Humor, Push, and Detail overrides. Those
+three existing Settings controls remain available separately under **Style
+levels**, while Unhinged remains conversational-only.
+
+Hosted private and authenticated Linq group conversations expose the same
+persona through `murph.personalization`. A persona mutation requires accepted
+current input and a complete pair: `mainPersona` plus `supportingPersona`, where
+null removes support. Murph reads first when it must preserve either current
+part. Scheduled automation authority can still update tone or voice under the
+existing contract but cannot write a persona. A group mutation targets only
+the synthetic room runtime and begins shaping replies on a later turn.
+
 ## Existing members and legacy reads
 
 No backfill or schema migration is required. Legacy stored IDs normalize at persisted read boundaries to a sensible canonical main-only ID, while public choices and new writes accept only the 36 canonical IDs:
@@ -85,4 +104,12 @@ The shared voice sample at `/audio/murph-voices/<voice-id>.mp3` remains the dete
 
 ## Deployment
 
-Deploy the contracts, generated schema, and runtime readers before Web can emit supported combination IDs, then converge warm hosted containers and deploy Web. An older runtime rejects an unfamiliar combination ID instead of consuming and losing it, so Web-first skew is fail-closed but can block later preference mailbox work for that member. Verify one onboarding save produces one consumed mailbox item and that `bank/preferences.json` contains the selected combination ID, tone, and voice.
+Deploy the strict Web callback and hosted contract together, then converge warm
+hosted containers before enabling conversational persona writes. An older
+runtime rejects an unfamiliar combination ID instead of consuming and losing
+it, while an older Web callback rejects the new main/supporting request shape;
+both skews fail closed but can block the requested preference change. Verify a
+Settings persona-only save and one accepted private or group chat change each
+produce one consumed mailbox item, and confirm the matching runtime's
+`bank/preferences.json` contains the selected combination ID without changing
+unrequested tone, voice, or dial overrides.

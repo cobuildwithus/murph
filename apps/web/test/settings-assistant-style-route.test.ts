@@ -90,6 +90,11 @@ describe("assistant style settings route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       assistantPersona: null,
+      assistantPersonality: {
+        detail: 5,
+        humor: 3,
+        push: 3,
+      },
       assistantTone: "formal",
       assistantVoice: "warm",
       ok: true,
@@ -155,32 +160,51 @@ describe("assistant style settings route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   });
 
-  it("persists a persona-only Settings edit without touching tone or voice", async () => {
-    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValueOnce({
-      assistantPersona: "scientist-with-classic",
-      assistantPersonality: { detail: 9, humor: 2, push: 4 },
-      assistantTone: "casual",
-      assistantVoice: "warm",
-      dispatch: { mailboxItemId: "mailbox_item_persona_only" },
-      updated: true,
-    });
-
+  it("persists a sparse validated personality update", async () => {
     const response = await route.POST(jsonRequest({
-      persona: "scientist-with-classic",
+      personality: {
+        detail: 8,
+        humor: 7,
+      },
     }));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      assistantPersona: "scientist-with-classic",
-      assistantTone: "casual",
-      assistantVoice: "warm",
-      ok: true,
-    });
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
-      preferences: { persona: "scientist-with-classic" },
+      preferences: {
+        personality: {
+          detail: 8,
+          humor: 7,
+        },
+      },
       prisma: { tx: true },
+    });
+  });
+
+  it("never returns the conversational-only Unhinged dial in the response", async () => {
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValueOnce({
+      assistantPersona: null,
+      // The saved projection can carry a conversationally-set Unhinged score;
+      // the server boundary must strip it before the browser sees it.
+      assistantPersonality: { detail: 5, humor: 3, push: 3, unhinged: 9 },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      dispatch: { mailboxItemId: "mailbox_item_preferences" },
+      updated: true,
+    });
+
+    const response = await route.POST(jsonRequest({ personality: { humor: 3 } }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      assistantPersona: null,
+      assistantPersonality: { detail: 5, humor: 3, push: 3 },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      ok: true,
+      runTriggered: true,
+      updated: true,
     });
   });
 
@@ -206,6 +230,11 @@ describe("assistant style settings route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       assistantPersona: null,
+      assistantPersonality: {
+        detail: 5,
+        humor: 3,
+        push: 3,
+      },
       assistantTone: "formal",
       assistantVoice: "warm",
       ok: true,
@@ -234,6 +263,11 @@ describe("assistant style settings route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       assistantPersona: null,
+      assistantPersonality: {
+        detail: 5,
+        humor: 3,
+        push: 3,
+      },
       assistantTone: "formal",
       assistantVoice: "warm",
       ok: true,
@@ -283,7 +317,7 @@ describe("assistant style settings route", () => {
   });
 
   it("rejects unknown style fields instead of silently ignoring them", async () => {
-    const response = await route.POST(jsonRequest({ personality: { humor: 5 } }));
+    const response = await route.POST(jsonRequest({ tone: "formal", surprise: 5 }));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -331,6 +365,52 @@ describe("assistant style settings route", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { personality: {} },
+    { personality: null },
+    { personality: [] },
+    { personality: "maximum" },
+    { personality: { detail: 11 } },
+    { personality: { humor: 2.5 } },
+    { personality: { surprise: 4 } },
+    // The conversational-only Unhinged dial has no browser Settings surface.
+    { personality: { unhinged: 7 } },
+    { personality: { humor: 4, unhinged: 7 } },
+  ])("rejects invalid personality updates before opening persistence: %j", async (body) => {
+    const response = await route.POST(jsonRequest(body));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "ASSISTANT_STYLE_INVALID_PERSONALITY",
+        message: "Choose a valid personality setting.",
+        retryable: false,
+      },
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects mixed personality and tone or voice updates", async () => {
+    const response = await route.POST(jsonRequest({
+      personality: {
+        humor: 7,
+      },
+      tone: "formal",
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "ASSISTANT_STYLE_MIXED_UPDATE",
+        message: "Update personality separately from persona, tone, and voice.",
+        retryable: false,
+      },
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it("rejects empty preference updates before opening the persistence transaction", async () => {
     const response = await route.POST(jsonRequest({}));
 
@@ -338,7 +418,7 @@ describe("assistant style settings route", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "ASSISTANT_STYLE_EMPTY_UPDATE",
-        message: "Choose a persona, tone, or voice before continuing.",
+        message: "Choose a persona, tone, voice, or personality setting before continuing.",
         retryable: false,
       },
     });

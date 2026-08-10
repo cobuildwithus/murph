@@ -45,6 +45,15 @@ describe('assistant personalization tool', () => {
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
       'a one-reply formatting request does not persist',
     )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'Persona changes require current accepted user input',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'both mainPersona and supportingPersona',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'scheduled automation occurrences may update tone and voice but never personas',
+    )
     expect(JSON.stringify(MURPH_PERSONALIZATION_TOOL.inputSchema)).not.toContain(
       'memberId',
     )
@@ -193,6 +202,18 @@ describe('assistant personalization tool', () => {
       method: 'item/tool/call',
       params: {
         arguments: { action: 'update' },
+        namespace: 'murph',
+        tool: 'personalization',
+      },
+    })?.kind).toBe('invalid-personalization-arguments')
+
+    expect(readTestMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          action: 'update',
+          mainPersona: 'scientist',
+        },
         namespace: 'murph',
         tool: 'personalization',
       },

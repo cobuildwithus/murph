@@ -237,6 +237,28 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
   });
 
+  it("rejects scheduled persona changes before opening a transaction", async () => {
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: {
+        automationId: "automation_daily_style",
+        occurrenceAt: "2026-08-06T14:30:00.000Z",
+      },
+      memberId: "member_personalization_1",
+      request: {
+        action: "update",
+        mainPersona: "scientist",
+        supportingPersona: "classic",
+      },
+    })).rejects.toThrow(
+      "Scheduled automation occurrences cannot change Murph personas.",
+    );
+
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberAssistantPreferences).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
   it("uses an independent stable identity for scheduled personality updates", async () => {
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       appliedFields: ["humor"],
@@ -284,17 +306,6 @@ describe("hosted assistant personalization tool owner adapter", () => {
   });
 
   it("resolves and persists main and supporting personalities without changing tone or voice", async () => {
-    mocks.readHostedMemberAssistantPreferences.mockResolvedValue({
-      persona: "classic-with-navy-seal",
-      personality: {
-        detail: null,
-        humor: null,
-        push: null,
-        unhinged: null,
-      },
-      tone: "formal",
-      voice: "warm",
-    });
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       appliedFields: ["persona"],
       assistantPersona: "scientist-with-classic",
@@ -347,6 +358,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
         requestedFields: ["persona"],
       }),
     });
+    expect(mocks.readHostedMemberAssistantPreferences).not.toHaveBeenCalled();
   });
 
   it("scopes scheduled personality identities to the requested dials", async () => {
