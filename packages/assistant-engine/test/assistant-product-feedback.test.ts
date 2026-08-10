@@ -1,10 +1,10 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from "vitest";
 
 import {
   executeMurphDynamicToolRequest,
   MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
 import {
@@ -248,7 +248,7 @@ describe("assistant product feedback", () => {
       acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
       productFeedbackCandidateSink: { acceptProductFeedbackCandidate },
     });
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -304,7 +304,7 @@ describe("assistant product feedback", () => {
       contentItems: [{ type: "inputText", text: "product feedback candidate accepted" }],
     });
 
-    const repeatedRequest = readMurphDynamicToolRequest({
+    const repeatedRequest = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -374,7 +374,7 @@ describe("assistant product feedback", () => {
         supportArea: "connected_source",
       },
     ]) {
-      const request = readMurphDynamicToolRequest({
+      const request = readTestMurphDynamicToolRequest({
         method: "item/tool/call",
         params: {
           arguments: malformedArguments,
@@ -420,7 +420,7 @@ describe("assistant product feedback", () => {
     if (!productFeedbackRecorder) {
       throw new Error("Expected a turn-scoped product feedback recorder.");
     }
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -496,7 +496,7 @@ describe("assistant product feedback", () => {
     if (!productFeedbackRecorder) {
       throw new Error("Expected a turn-scoped product feedback recorder.");
     }
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -597,7 +597,7 @@ describe("assistant product feedback", () => {
   });
 
   it("parses generalized feature-request feedback without changelog ids", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -616,7 +616,7 @@ describe("assistant product feedback", () => {
       kind: "submit-product-feedback",
     });
 
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -639,7 +639,7 @@ describe("assistant product feedback", () => {
   });
 
   it("redacts sensitive-looking summary spans before recording", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -661,7 +661,7 @@ describe("assistant product feedback", () => {
   });
 
   it("rejects malformed generalized feedback tool arguments", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -674,7 +674,7 @@ describe("assistant product feedback", () => {
       },
     })?.kind).toBe("invalid-product-feedback-arguments");
 
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -687,7 +687,7 @@ describe("assistant product feedback", () => {
       },
     })?.kind).toBe("invalid-product-feedback-arguments");
 
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -698,7 +698,7 @@ describe("assistant product feedback", () => {
       },
     })?.kind).toBe("invalid-product-feedback-arguments");
 
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {

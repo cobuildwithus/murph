@@ -122,6 +122,8 @@ import { readAssistantDeviceActivityParentAutomation } from '../device-activity-
 import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
+  isAssistantCronNotificationOccurrenceFresh,
+  isCanonicalAssistantCronNotificationOccurrenceDeliverable,
   isCanonicalAssistantCronSourceEnabled,
   automationContinuityUsesSessionPin,
   listCanonicalAssistantCronRecords,
@@ -154,7 +156,6 @@ import {
 
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
-const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
 const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_POLL_MS = 250
@@ -2479,40 +2480,28 @@ function resolveStaleAssistantCronNotificationError(input: {
     return null
   }
 
-  const nowMs = Date.parse(input.nowIso)
-  const occurrenceMs = Date.parse(input.occurrenceAt)
-  if (!Number.isFinite(nowMs) || !Number.isFinite(occurrenceMs)) {
+  const now = new Date(input.nowIso)
+  const deliverable = input.job.kind === 'canonical'
+    ? isCanonicalAssistantCronNotificationOccurrenceDeliverable({
+        now,
+        occurrenceAt: input.occurrenceAt,
+        source: input.job.source,
+      })
+    : isAssistantCronNotificationOccurrenceFresh({
+        now,
+        occurrenceAt: input.occurrenceAt,
+      })
+  if (deliverable) {
     return null
   }
 
-  if (assistantCronHasOpenFiniteOneShotActiveWindow(input.job, nowMs)) {
-    return null
-  }
-
-  const ageMs = nowMs - occurrenceMs
-  if (ageMs <= ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS) {
-    return null
-  }
-
+  const ageMs = now.getTime() - Date.parse(input.occurrenceAt)
   const lateMinutes = Math.floor(ageMs / 60_000)
   return {
     latenessMinutes: lateMinutes,
     message:
       `${ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR} Scheduled occurrence was ${lateMinutes} minute(s) late.`,
   }
-}
-
-function assistantCronHasOpenFiniteOneShotActiveWindow(
-  job: ResolvedAssistantCronJob,
-  nowMs: number,
-): boolean {
-  return (
-    job.kind === 'canonical' &&
-    job.source.kind === 'automation' &&
-    job.source.schedule.kind === 'at' &&
-    job.source.activeUntil !== null &&
-    nowMs < Date.parse(job.source.activeUntil)
-  )
 }
 
 function emitAssistantCronOccurrenceExpiredEvent(input: {

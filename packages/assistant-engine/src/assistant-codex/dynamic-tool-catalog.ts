@@ -248,7 +248,7 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_response_card',
   description:
-    'Attach one private-direct response card only when the current accepted member message or the saved instructions for the exact scheduled automation occurrence explicitly request it, during managed meal closeout, or for an unambiguous update to the single active tracked workout whose table was explicitly established earlier. Occurrence authority alone is not card intent. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. V2 adds fiber and nullable goal snapshots. Keep a goal null unless current active canonical goals prove exactly one daily target for that metric and unit; otherwise freeze the exact target and Murph\'s context-aware status without a universal threshold. Use compact_table only for an explicit table or structured-tracker request, or for that unambiguous active tracked-workout update; with no active table or multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
+    'Attach one private-direct response card only when the current accepted member message or the saved instructions for the exact scheduled automation occurrence explicitly request it, during managed meal closeout, for the verified initial card after starting or resuming one canonical live workout, or for an unambiguous update to its established workout card. Occurrence authority alone is not card intent. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. V2 adds fiber and nullable goal snapshots. Keep a goal null unless current active canonical goals prove exactly one daily target for that metric and unit; otherwise freeze the exact target and Murph\'s context-aware status without a universal threshold. Use compact_table only for an explicit table or structured-tracker request, that verified initial live-workout card, or an unambiguous update to the same active workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -385,6 +385,12 @@ export const MURPH_FAMILY_PLAN_TOOL = {
           action: {
             type: 'string',
             enum: ['start_checkout'],
+          },
+          confirmedTrialConversion: {
+            type: 'boolean',
+            enum: [true],
+            description:
+              'Pass true only after read_status returned activeTrialConversion terms and the member explicitly confirmed those fresh terms. Omit for every other checkout.',
           },
         },
         required: ['action'],

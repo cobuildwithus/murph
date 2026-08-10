@@ -81,7 +81,7 @@ a boundary. This contract is jointly specified by `ARCHITECTURE.md`,
 
 Hosted inbound reply-thread binding, active-turn route preservation, ephemeral
 delivery-context preservation, and provider-rendered iMessage response-card
-fallback are jointly specified by
+image and semantic-caption fallback are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/operations/imessage-deliverability.md`.
 
@@ -96,13 +96,15 @@ docs.
 
 Response-card request eligibility, multi-input live-turn invalidation,
 whole-response semantics, delivery ownership, interactive Messages-extension
-transcript rendering with a truthful provider-static fallback, one trusted provider
-reply-thread binding, and bounded offline V3 compact-table fragments are
-specified by
+transcript rendering with a truthful provider-static fallback, one trusted
+provider reply-thread binding, bounded offline V3 compact-table plus V4
+workout-session fragments, and the shared strict queryless static-image route
+are specified by
 `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`,
-`agent-docs/RELIABILITY.md`, and
-`agent-docs/operations/imessage-deliverability.md`.
+`agent-docs/RELIABILITY.md`,
+`agent-docs/operations/imessage-deliverability.md`, and
+`agent-docs/product-specs/imessage-workout-tracking.md`.
 
 Hosted R2 uses one canonical ENAM production bucket and one isolated preview
 bucket. The Worker binding, presign target, lifecycle helper, cold restore, and
@@ -168,6 +170,7 @@ the rule that alerts never become billing or retry authority are jointly specifi
 | `agent-docs/compliance/vendor-health-data-addendum.md` | Vendor clause library and procurement checklist for providers that process identifiable health data or health-context metadata. | Vendor health-data contracting | High | 2026-04-29 |
 | `agent-docs/compliance/health-data-tracking-and-ads-rule.md` | Hard rule and review checklist for analytics, telemetry, ad pixels, attribution, and marketing tools on health-data surfaces. | Health-data tracking policy | High | 2026-04-29 |
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
+| `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards, closed generic/workout payload shapes, bounded positional V4 native wire encoding, display-to-canonical coordinate reconciliation, member-entered actuals, fail-closed explicit commands, immutable native and stateless image snapshots, complete semantic captions, privacy boundaries, persisted-owner rollback floors, and reader-first release gating. | iMessage workout product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/bring-your-own-inference.md` | Personal custom inference contract covering verified member-owned endpoints, explicit selection, no silent fallback, privacy, metering, and recovery. | Hosted assistant/custom inference product spec | High | 2026-07-31 |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history, including explicit admission, alias, and disclosure-layout contracts. | Biomarkers product spec | High | 2026-07-20 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
@@ -232,7 +235,7 @@ the rule that alerts never become billing or retry authority are jointly specifi
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router and compact agent work contract for task classes, action authority, evidence/tool use, progress updates, plans, focused local PR proof with exact-head CI ownership, parallel same-head specialist/final ReviewGPT routing, mandatory pre-direct-default acceptance, commit paths, worktree isolation, and safe retirement. | Agent workflow routing | High | 2026-07-30 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path: focused local proof plus broad exact-head CI for PRs, evidence-driven local CI diagnosis, mandatory acceptance before direct shared-default pushes, canonical command and executor semantics, runtime proof boundaries, private Temporal worker/deploy/rollback ownership, required repo-local Playwright fallback for unattached browser proof, and package/app testing surfaces including the internal product-feedback digest. | Verification policy | High | 2026-07-30 |
 | `agent-docs/operations/typescript-verification-performance.md` | TypeScript 7 worker budgets, optional local canonical verification with explicit Crabbox-on-Blacksmith escalation and an exclusive heavyweight lane, focused PR proof, direct-default acceptance, scoped diff and repo-tools caps, incremental CI state, editor/watch guidance, and benchmark method. | Verification performance policy | Medium | 2026-07-29 |
-| `agent-docs/operations/completion-workflow.md` | Outcome-based completion bar with focused local PR proof, exact-head GitHub Actions as the broad PR gate, mandatory pre-direct-default acceptance, required repo-local Playwright fallback before browser-proof blockers, objective coverage-review admission, same-head parallel preliminary/final ReviewGPT starts with independent resolution state, risk-and-size-aware later-round full-audit versus correction-delta selection, plan/commit closure, PR intent, hot-reply-path impact, complete individual/group initial provider-input token and byte impact with prompt/tool/generated-guidance attribution, change-shape contracts, and merge-readiness handoff. | Completion workflow | High | 2026-08-05 |
+| `agent-docs/operations/completion-workflow.md` | Outcome-based completion bar with same-PR changelog classification through `$write-changelog`, production-owner checks for factual visuals and independently selectable consent scopes, exact invocation-route, audience, authorization, destination, and recovery checks for asynchronous claims, and silent-feedback plus bounded-redaction truth checks; focused local PR proof; exact-head GitHub Actions as the broad PR gate; mandatory pre-direct-default acceptance; required repo-local Playwright fallback before browser-proof blockers; objective coverage-review admission; same-head parallel preliminary/final ReviewGPT starts with independent resolution state; risk-and-size-aware later-round full-audit versus correction-delta selection; plan/commit closure; PR intent; hot-reply-path impact; complete individual/group initial provider-input token and byte impact with prompt/tool/generated-guidance attribution; change-shape contracts; and merge-readiness handoff. | Completion workflow | High | 2026-08-10 |
 | `agent-docs/operations/imessage-deliverability.md` | iMessage/SMS deliverability guidance for assistant prompts, outbound copy, exact-message targeting, inbound-triggered daily home-line redirects with a one-hundred-message explicit-resend bank, reminders, member-owned current-home routing, daily line limits, notifications, line health, pacing, links, cold-contact behavior, outbox-owned interactive response cards with a provider-static fallback and physical-device visibility gate, first-rate-limit and complete-response 2.5-second capability-deadline fallback, durable failure-only fallback log entries, classified stale-app-card recovery under the promoted identity, one trusted provider reply-thread binding, invocation-local late-input delivery context without durable recipient exposure, bounded offline V1/V2/V3 fragments, offline native decoding, one effective text-fallback identity across provider entry, authorized stale-thread recovery, replay, and ambiguous-delivery suppression, the one-hundred-message group outreach bank, provider-native authoritative group-signup reply identity and accepted-day suppression, conversation-first instant-start activation signaling with request-local failure handling and provider-dependent crash recovery, member-wide accepted meal-capture engagement, and blocked-model system-import admission. | Phone-number messaging policy | High | 2026-08-07 |
 | `agent-docs/operations/local-storage-lifecycle.md` | Local Vitest temp-root ownership, abrupt-run stale cleanup, unmanaged temporary checkout ratcheting, and exact build-output cleanup rules. | Local rebuildable-storage lifecycle | High | 2026-07-19 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Hosted-local worktree dev workflow and helper spec for running `pnpm dev` from secondary worktrees without colliding with the main checkout's ports, database, local hosted crypto state, Wrangler state, Next dist dir, optional MinIO data, and webhook tunnel setup. | Local hosted runtime workflow | Medium | 2026-06-22 |

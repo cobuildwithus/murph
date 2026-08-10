@@ -140,6 +140,11 @@ import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'
 import {
+  readCodexNonEmptyString,
+  readCodexServerRequest,
+  readCodexString,
+} from './app-server-protocol.js'
+import {
   executeGenerateImageTool,
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
@@ -664,6 +669,7 @@ const familyPlanArgumentsSchema = z
     }).strict(),
     z.object({
       action: z.literal('start_checkout'),
+      confirmedTrialConversion: z.literal(true).optional(),
     }).strict(),
     z.object({
       action: z.literal('create_invite'),
@@ -5471,31 +5477,35 @@ function toolTextResult(
 function parseDynamicToolCallRequest(
   message: CodexRpcMessage,
 ): ParsedDynamicToolCallRequest | null {
-  if (message.method !== CODEX_DYNAMIC_TOOL_CALL_METHOD) {
+  const request = readCodexServerRequest(message)
+  if (request?.method !== CODEX_DYNAMIC_TOOL_CALL_METHOD) {
     return null
   }
 
-  const params = asRecord(message.params)
-  if (!params) {
-    return {
-      arguments: null,
-      namespace: null,
-      tool: null,
-      toolCallId: null,
-    }
+  const params = request.params
+  const threadId = readCodexNonEmptyString(params.threadId)
+  const turnId = readCodexNonEmptyString(params.turnId)
+  const toolCallId = readCodexNonEmptyString(params.callId)
+  const tool = readCodexNonEmptyString(params.tool)
+  const namespace = params.namespace === null
+    ? null
+    : readCodexString(params.namespace)
+  if (
+    !threadId ||
+    !turnId ||
+    !toolCallId ||
+    !tool ||
+    (params.namespace !== null && namespace === null) ||
+    !Object.hasOwn(params, 'arguments')
+  ) {
+    return null
   }
 
   return {
     arguments: params.arguments,
-    namespace: normalizeNullableStringValue(params.namespace),
-    tool: normalizeNullableStringValue(params.tool),
-    toolCallId:
-      normalizeNullableStringValue(params.callId) ??
-      normalizeNullableStringValue(params.call_id) ??
-      normalizeNullableStringValue(params.toolCallId) ??
-      normalizeNullableStringValue(params.tool_call_id) ??
-      normalizeNullableStringValue(params.itemId) ??
-      normalizeNullableStringValue(params.item_id),
+    namespace,
+    tool,
+    toolCallId,
   }
 }
 
@@ -5639,6 +5649,9 @@ function parseFamilyPlanArguments(
       ok: true,
       request: {
         action: 'start_checkout',
+        ...(parsed.data.confirmedTrialConversion
+          ? { confirmedTrialConversion: true as const }
+          : {}),
       },
     }
   }
