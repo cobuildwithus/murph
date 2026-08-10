@@ -63,7 +63,7 @@ export function resolveHostedRuntimeDeviceSyncProviderConfigs(
   return runtimeProviderConfigs;
 }
 
-function hasHostedRuntimeJunctionPlatformEnv(
+export function hasHostedRuntimeJunctionPlatformEnv(
   platformEnv: Readonly<Record<string, string>>,
 ): boolean {
   return HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS.some((key) => Boolean(platformEnv[key]));

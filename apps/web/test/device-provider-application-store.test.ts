@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { isDeviceSyncError } from "@murphai/device-syncd/errors";
+
 const mocks = vi.hoisted(() => ({
   decrypt: vi.fn(),
   encrypt: vi.fn(),
@@ -11,6 +13,7 @@ vi.mock("@/src/lib/device-sync/provider-applications/crypto", () => ({
 }));
 
 import {
+  DeviceProviderApplicationError,
   resolveDeviceProviderApplication,
   saveDeviceProviderApplication,
 } from "@/src/lib/device-sync/provider-applications/store";
@@ -26,6 +29,20 @@ describe("member-owned device provider application store", () => {
     mocks.encrypt.mockResolvedValue("sealed-next");
   });
 
+  it("exposes provider-application failures through the device-sync error contract", () => {
+    const error = new DeviceProviderApplicationError(
+      "DEVICE_PROVIDER_APPLICATION_INVALID",
+      "Private provider application credentials are invalid.",
+    );
+
+    expect(isDeviceSyncError(error)).toBe(true);
+    expect(error).toMatchObject({
+      code: "DEVICE_PROVIDER_APPLICATION_INVALID",
+      httpStatus: 409,
+      retryable: false,
+    });
+  });
+
   it("resolves only the exact member, provider, and revision", async () => {
     const row = {
       configEncrypted: "sealed",
@@ -39,6 +56,13 @@ describe("member-owned device provider application store", () => {
     const prisma = {
       deviceProviderApplication: {
         findUnique: vi.fn(async () => row),
+      },
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          hostedGroupRuntime: null,
+          id: "member_123",
+          threadContainer: null,
+        })),
       },
     };
 
@@ -86,6 +110,13 @@ describe("member-owned device provider application store", () => {
           updatedAt: new Date("2026-08-10T00:00:00.000Z"),
         })),
       },
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          hostedGroupRuntime: null,
+          id: "member_123",
+          threadContainer: null,
+        })),
+      },
     };
 
     await expect(resolveDeviceProviderApplication({
@@ -102,6 +133,7 @@ describe("member-owned device provider application store", () => {
   it("blocks private application creation while a legacy connection is active", async () => {
     const hostedMember = {
       findUnique: vi.fn(async () => ({
+        hostedGroupRuntime: null,
         id: "member_123",
         threadContainer: null,
       })),
@@ -150,6 +182,7 @@ describe("member-owned device provider application store", () => {
     };
     const hostedMember = {
       findUnique: vi.fn(async () => ({
+        hostedGroupRuntime: null,
         id: "member_123",
         threadContainer: null,
       })),
@@ -187,7 +220,7 @@ describe("member-owned device provider application store", () => {
     expect(mocks.encrypt).not.toHaveBeenCalled();
   });
 
-  it("rejects missing or synthetic members before any encryption work", async () => {
+  it("rejects a missing member before any encryption work", async () => {
     const prisma = {
       hostedMember: {
         findUnique: vi.fn(async () => null),
@@ -203,7 +236,69 @@ describe("member-owned device provider application store", () => {
       provider: "strava",
     })).rejects.toMatchObject({
       code: "DEVICE_PROVIDER_APPLICATION_MEMBER_NOT_FOUND",
+      httpStatus: 404,
     });
     expect(mocks.encrypt).not.toHaveBeenCalled();
+  });
+
+  it("rejects a synthetic thread-container member before any encryption work", async () => {
+    const prisma = {
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          hostedGroupRuntime: null,
+          id: "member_thread_runtime",
+          threadContainer: { memberId: "member_thread_runtime" },
+        })),
+      },
+    };
+
+    await expect(saveDeviceProviderApplication({
+      clientId: "member-client",
+      clientSecret: "member-secret",
+      expectedRevision: null,
+      memberId: "member_thread_runtime",
+      prisma: prisma as never,
+      provider: "strava",
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED",
+      httpStatus: 403,
+    });
+    expect(mocks.encrypt).not.toHaveBeenCalled();
+  });
+
+  it("rejects a synthetic group runtime member before any encryption work", async () => {
+    const prisma = {
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          hostedGroupRuntime: { id: "group_123" },
+          id: "member_group_runtime",
+          threadContainer: null,
+        })),
+      },
+    };
+
+    await expect(saveDeviceProviderApplication({
+      clientId: "member-client",
+      clientSecret: "member-secret",
+      expectedRevision: null,
+      memberId: "member_group_runtime",
+      prisma: prisma as never,
+      provider: "strava",
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED",
+      httpStatus: 403,
+    });
+    await expect(resolveDeviceProviderApplication({
+      applicationId: "dpa_group",
+      expectedRevision: 1,
+      memberId: "member_group_runtime",
+      prisma: prisma as never,
+      provider: "strava",
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED",
+      httpStatus: 403,
+    });
+    expect(mocks.encrypt).not.toHaveBeenCalled();
+    expect(mocks.decrypt).not.toHaveBeenCalled();
   });
 });

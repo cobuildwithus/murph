@@ -3128,6 +3128,7 @@ describe("deleteHostedAccountData", () => {
         provider: "strava",
         providerAccountBlindIndex: "blind-index",
       }],
+      onTransaction: () => undefined,
     });
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       store: {

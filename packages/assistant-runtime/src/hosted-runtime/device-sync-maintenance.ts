@@ -56,6 +56,7 @@ import {
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
 } from "./system-mailbox-state.ts";
 import {
+  hasHostedRuntimeJunctionPlatformEnv,
   resolveHostedRuntimeDeviceSyncProviderConfigs,
 } from "./device-sync-provider-configs.ts";
 

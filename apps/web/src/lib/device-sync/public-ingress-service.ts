@@ -123,7 +123,7 @@ export class HostedDeviceSyncPublicIngressService {
             connectionStartedAt: connectionStartedAt ?? null,
             now,
             sourceProviderSlug: sourceProviderSlug ?? null,
-            store: input.store,
+            store: this.context.store,
           });
 
           if (input.ensureWebhookAdmin) {
@@ -143,7 +143,7 @@ export class HostedDeviceSyncPublicIngressService {
             connectionStartedAt,
             registry: input.registry,
             sourceProviderSlug,
-            store: input.store,
+            store: this.context.store,
           });
         },
         onConnectionSourceObserved: async ({
@@ -165,7 +165,7 @@ export class HostedDeviceSyncPublicIngressService {
               account,
               registry: input.registry,
               sourceProviderSlug,
-              store: input.store,
+              store: this.context.store,
             });
             if (reconciliation === "admitted") {
               return { sourceAdmissionCommitted: true };
@@ -209,7 +209,7 @@ export class HostedDeviceSyncPublicIngressService {
             account,
             claimToken,
             now,
-            store: input.store,
+            store: this.context.store,
             traceId,
             webhook,
           });

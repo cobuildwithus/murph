@@ -42,6 +42,7 @@ describe("DeviceProviderApplicationIngressStore", () => {
         },
       },
       externalAccountId: "athlete_123",
+      existingAccountPolicy: "replace" as const,
       ownerId: "member_123",
       provider: "strava",
       scopes: ["activity:read_all"],

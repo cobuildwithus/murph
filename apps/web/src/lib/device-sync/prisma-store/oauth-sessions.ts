@@ -1,7 +1,13 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
+
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import type { ConsumeOAuthStateResult, OAuthStateRecord } from "@murphai/device-syncd/types";
 
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+} from "../../hosted-onboarding/shared";
 import type { DeviceProviderApplicationBinding } from "../provider-applications/types";
 import {
   requireDeviceProviderApplicationRevision,
@@ -36,7 +42,8 @@ export class PrismaHostedOAuthSessionStore {
     input: OAuthStateRecord,
     binding: DeviceProviderApplicationBinding,
   ): Promise<OAuthStateRecord> {
-    if (!input.ownerId) {
+    const ownerId = input.ownerId;
+    if (!ownerId) {
       throw new TypeError(
         "Member-owned provider application OAuth state requires an owner.",
       );
@@ -55,11 +62,32 @@ export class PrismaHostedOAuthSessionStore {
         "Member-owned provider application OAuth state provider mismatch.",
       );
     }
-    return createOAuthStateRecord(this.prisma, input, {
-      applicationId: binding.applicationId,
-      provider,
-      revision,
-    });
+    return this.prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, ownerId);
+      const application = await tx.deviceProviderApplication.findFirst({
+        select: { id: true },
+        where: {
+          id: binding.applicationId,
+          memberId: ownerId,
+          provider,
+          revision,
+        },
+      });
+      if (!application) {
+        throw deviceSyncError({
+          code: "PROVIDER_APPLICATION_STALE",
+          httpStatus: 409,
+          message: "Private provider application changed and must be reauthorized.",
+          retryable: false,
+        });
+      }
+
+      return createOAuthStateRecord(tx, input, {
+        applicationId: binding.applicationId,
+        provider,
+        revision,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   }
 
   async readOAuthStateProviderApplicationBinding(input: {
@@ -200,7 +228,7 @@ export class PrismaHostedOAuthSessionStore {
 }
 
 async function createOAuthStateRecord(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   input: OAuthStateRecord,
   binding: DeviceProviderApplicationBinding | null,
 ): Promise<OAuthStateRecord> {

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { DeviceSyncError } from "@murphai/device-syncd/errors";
 import { getPrisma } from "../../prisma";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -40,21 +41,43 @@ type DeviceProviderApplicationReadClient =
   | PrismaClient
   | Prisma.TransactionClient;
 
-export class DeviceProviderApplicationError extends Error {
-  constructor(
-    readonly code:
-      | "DEVICE_PROVIDER_APPLICATION_CONFLICT"
-      | "DEVICE_PROVIDER_APPLICATION_NOT_FOUND"
-      | "DEVICE_PROVIDER_APPLICATION_INVALID"
-      | "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED"
-      | "DEVICE_PROVIDER_APPLICATION_REVISION_MISMATCH"
-      | "DEVICE_PROVIDER_APPLICATION_PROVIDER_MISMATCH"
-      | "DEVICE_PROVIDER_APPLICATION_MEMBER_NOT_FOUND"
-      | "DEVICE_PROVIDER_APPLICATION_CONNECTION_CONFLICT",
-    message: string,
-  ) {
-    super(message);
+export type DeviceProviderApplicationErrorCode =
+  | "DEVICE_PROVIDER_APPLICATION_CONFLICT"
+  | "DEVICE_PROVIDER_APPLICATION_NOT_FOUND"
+  | "DEVICE_PROVIDER_APPLICATION_INVALID"
+  | "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED"
+  | "DEVICE_PROVIDER_APPLICATION_REVISION_MISMATCH"
+  | "DEVICE_PROVIDER_APPLICATION_PROVIDER_MISMATCH"
+  | "DEVICE_PROVIDER_APPLICATION_MEMBER_NOT_FOUND"
+  | "DEVICE_PROVIDER_APPLICATION_CONNECTION_CONFLICT";
+
+export class DeviceProviderApplicationError extends DeviceSyncError {
+  constructor(code: DeviceProviderApplicationErrorCode, message: string) {
+    super({
+      code,
+      httpStatus: deviceProviderApplicationErrorHttpStatus(code),
+      message,
+      retryable: false,
+    });
     this.name = "DeviceProviderApplicationError";
+  }
+}
+
+function deviceProviderApplicationErrorHttpStatus(
+  code: DeviceProviderApplicationErrorCode,
+): number {
+  switch (code) {
+    case "DEVICE_PROVIDER_APPLICATION_NOT_FOUND":
+    case "DEVICE_PROVIDER_APPLICATION_MEMBER_NOT_FOUND":
+      return 404;
+    case "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED":
+      return 403;
+    case "DEVICE_PROVIDER_APPLICATION_CONFLICT":
+    case "DEVICE_PROVIDER_APPLICATION_INVALID":
+    case "DEVICE_PROVIDER_APPLICATION_REVISION_MISMATCH":
+    case "DEVICE_PROVIDER_APPLICATION_PROVIDER_MISMATCH":
+    case "DEVICE_PROVIDER_APPLICATION_CONNECTION_CONFLICT":
+      return 409;
   }
 }
 
@@ -259,6 +282,7 @@ export async function resolveDeviceProviderApplication(input: {
       input.expectedRevision,
     );
     const prisma = input.prisma ?? getPrisma();
+    await requirePersonalMember({ memberId: input.memberId, prisma });
     const row = await prisma.deviceProviderApplication.findUnique({
       select: DEVICE_PROVIDER_APPLICATION_SELECT,
       where: { id: input.applicationId },
@@ -356,6 +380,7 @@ async function requirePersonalMember(input: {
 }): Promise<void> {
   const member = await input.prisma.hostedMember.findUnique({
     select: {
+      hostedGroupRuntime: { select: { id: true } },
       id: true,
       threadContainer: { select: { memberId: true } },
     },
@@ -367,7 +392,7 @@ async function requirePersonalMember(input: {
       "Finish signup before connecting a private provider application.",
     );
   }
-  if (member.threadContainer !== null) {
+  if (member.threadContainer !== null || member.hostedGroupRuntime !== null) {
     throw new DeviceProviderApplicationError(
       "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED",
       "Private provider applications are available only for personal Murph members.",

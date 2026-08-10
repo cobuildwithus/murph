@@ -724,7 +724,7 @@ async function resolveHostedRuntimeProviderApplications(input: {
         continue;
       }
 
-      const identity = JSON.stringify(config);
+      const identity = `${application.applicationId}:r${application.revision}`;
       const existing = providerIdentity.get(application.provider);
       if (existing?.identity === null) {
         existing.connectionIds.push(record.id);

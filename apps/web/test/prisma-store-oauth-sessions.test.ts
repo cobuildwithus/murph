@@ -64,9 +64,18 @@ describe("PrismaHostedOAuthSessionStore member-owned provider binding", () => {
       providerApplicationRevision: 4,
       userId: "user_123",
     });
+    const applicationFindFirst = vi.fn().mockResolvedValue({ id: "dpa_123" });
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      deviceOauthSession: { create },
+      deviceProviderApplication: { findFirst: applicationFindFirst },
+    };
     const store = {
       prisma: {
-        deviceOauthSession: { create, findFirst },
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+        deviceOauthSession: { findFirst },
       },
       createOAuthStateWithProviderApplication:
         PrismaHostedOAuthSessionStore.prototype.createOAuthStateWithProviderApplication,
@@ -96,6 +105,15 @@ describe("PrismaHostedOAuthSessionStore member-owned provider binding", () => {
       state: "state_123",
     })).resolves.toEqual(binding);
 
+    expect(applicationFindFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        id: "dpa_123",
+        memberId: "user_123",
+        provider: "strava",
+        revision: 4,
+      },
+    });
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         providerApplicationId: "dpa_123",
@@ -109,6 +127,44 @@ describe("PrismaHostedOAuthSessionStore member-owned provider binding", () => {
         userId: "user_123",
       }),
     }));
+  });
+
+  it("rejects a stale application revision before persisting OAuth state", async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      deviceOauthSession: { create },
+      deviceProviderApplication: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const store = {
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      },
+      createOAuthStateWithProviderApplication:
+        PrismaHostedOAuthSessionStore.prototype.createOAuthStateWithProviderApplication,
+    };
+
+    await expect(store.createOAuthStateWithProviderApplication({
+      state: "state_123",
+      ownerId: "user_123",
+      provider: "strava",
+      returnTo: null,
+      metadata: {},
+      createdAt: "2026-04-13T12:00:00.000Z",
+      expiresAt: "2026-04-13T12:15:00.000Z",
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_STALE",
+      httpStatus: 409,
+    });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("rejects provider mismatch before persisting state", async () => {

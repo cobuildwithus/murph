@@ -5,9 +5,9 @@ import {
   createConfiguredDeviceSyncRegistryFromConfigs,
   readConfiguredDeviceSyncProviderConfigs,
   type ConfiguredDeviceSyncProviderConfigs,
-  type DeviceSyncEnvSource,
   type SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
+import type { DeviceSyncEnvSource } from "@murphai/device-syncd/provider-configs";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import type {
   DeviceSyncProvider,
