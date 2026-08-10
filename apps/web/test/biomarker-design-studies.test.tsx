@@ -126,7 +126,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
     "Group sponsorship purchase, signed-out management, cancellation, and completion",
   );
   expect(sectionsMarkup).toContain(
-    "Subscription recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and exact usage status",
+    "Exact-plan billing recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and usage status",
   );
   expect(sectionsMarkup).toContain(
     "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
