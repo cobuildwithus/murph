@@ -141,7 +141,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("This link isn’t available");
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
-  expect(sectionsMarkup).toContain("Boundary result detail");
+  expect(sectionsMarkup).toContain(
+    "Biomarker boundary result · published comparator provenance",
+  );
   expect(sectionsMarkup).toContain('data-design-study="biomarker-preparing"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-detail"');
@@ -464,7 +466,7 @@ test("boundary result study keeps comparator data out of the numeric chart", () 
   expect(markup).toContain("&lt;10");
   expect(markup).not.toContain("Why there is no line chart");
   expect(markup).not.toContain("invented midpoint");
-  expect(markup).toContain("Source range not listed");
+  expect(markup).toContain("Published comparator — not the reporting lab&#x27;s range");
   expect(markup).not.toContain('role="img"');
 });
 

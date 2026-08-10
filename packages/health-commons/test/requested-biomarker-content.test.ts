@@ -177,6 +177,20 @@ const EXPECTED_GUIDANCE_CLASSIFICATION_COUNTS = {
 } as const;
 
 const EXPECTED_FALLBACK_RANGES = {
+  "biomarker:bilirubin": {
+    lowerBound: 0,
+    title: "Bilirubin, Total, Serum",
+    unit: "mg/dL",
+    upperBound: 1.2,
+    url: "https://www.mayocliniclabs.com/test-catalog/Overview/81785",
+  },
+  "biomarker:carbon-dioxide": {
+    lowerBound: 22,
+    title: "Bicarbonate, Serum",
+    unit: "mmol/L",
+    upperBound: 29,
+    url: "https://www.mayocliniclabs.com/test-catalog/Overview/876",
+  },
   "biomarker:chloride": {
     lowerBound: 98,
     title: "Chloride, Serum",
@@ -198,6 +212,20 @@ const EXPECTED_FALLBACK_RANGES = {
     upperBound: 4.5,
     url: "https://www.mayocliniclabs.com/test-catalog/Overview/8408",
   },
+  "biomarker:potassium": {
+    lowerBound: 3.6,
+    title: "Potassium, Serum",
+    unit: "mmol/L",
+    upperBound: 5.2,
+    url: "https://www.mayocliniclabs.com/test-catalog/Overview/602352",
+  },
+  "biomarker:sodium": {
+    lowerBound: 135,
+    title: "Sodium, Serum",
+    unit: "mmol/L",
+    upperBound: 145,
+    url: "https://www.mayocliniclabs.com/test-catalog/Overview/602353",
+  },
   "biomarker:total-protein": {
     lowerBound: 6.3,
     title: "Protein, Total, Serum",
@@ -210,19 +238,32 @@ const EXPECTED_FALLBACK_RANGES = {
 const REPRESENTATIVE_CONTEXT_DEPENDENT_FALLBACK_OMISSIONS = [
   "biomarker:blood-glucose", // fasting state and test context
   "biomarker:hba1c", // diagnostic decision limits are not reference intervals
+  "biomarker:vldl-cholesterol-calculated", // calculated output and method
+  "biomarker:ldl-calculated", // calculation method and risk category
+  "biomarker:ldl-chol-calc-nih", // named calculation method and risk category
+  "biomarker:poc-troponin-i", // assay generation and 99th-percentile URL
   "biomarker:serum-creatinine", // age and sex
+  "biomarker:bun-creatinine-ratio", // calculated output, age, and sex
+  "biomarker:gfr-mdrd-af-amer", // historical race-based calculation
+  "biomarker:gfr-mdrd-non-af-amer", // historical calculation method
+  "biomarker:urine-albumin-random-without-creatinine", // urine concentration and hydration
   "biomarker:calcium", // adult interval changes with age and sex
   "biomarker:alkaline-phosphatase", // age and sex
   "biomarker:albumin", // assay method
-  "biomarker:potassium", // serum versus plasma
   "biomarker:thyroid-stimulating-hormone", // pregnancy and clinical setting
   "biomarker:free-t4", // assay method
-  "biomarker:bilirubin", // age and method harmonization limits
-  "biomarker:sodium", // local analytical verification
+  "biomarker:hemoglobin", // age, sex, and pregnancy
+  "biomarker:immature-granulocyte-percentage", // analyzer and local interval
+  "biomarker:absolute-immature-granulocytes", // analyzer and local interval
+  "biomarker:estradiol", // sex, reproductive stage, and assay
+  "biomarker:follicle-stimulating-hormone", // sex and reproductive stage
+  "biomarker:luteinizing-hormone", // sex and reproductive stage
+  "biomarker:prolactin", // sex, pregnancy, and assay
+  "biomarker:omega-6-total", // proprietary panel method
+  "biomarker:omegacheck-total", // proprietary panel method
+  "biomarker:anion-gap", // calculation formula and local method
   "biomarker:triglycerides", // fasting state and risk category
   "biomarker:ldl-c", // treatment target and risk category
-  "biomarker:poc-troponin-i", // assay generation
-  "biomarker:hemoglobin", // age, sex, and pregnancy
   "biomarker:mercury", // specimen
   "biomarker:psa-total", // age and risk context
 ] as const;
@@ -388,7 +429,7 @@ describe("requested biomarker Health Commons coverage", () => {
     );
   });
 
-  it("keeps authored fallback ranges sparse, sourced, bounded, and unit-specific", () => {
+  it("keeps authored fallback ranges reviewed, sourced, bounded, and unit-specific", () => {
     const requestedLabEntityKeys = new Set(
       REQUESTED_LAB_MARKERS.map(([, , entityKey]) => entityKey),
     );
@@ -446,7 +487,7 @@ describe("requested biomarker Health Commons coverage", () => {
       }
     }
 
-    expect(actualFallbackEntityKeys.length).toBeGreaterThanOrEqual(4);
+    expect(actualFallbackEntityKeys.length).toBeGreaterThanOrEqual(8);
     expect(actualFallbackEntityKeys.sort()).toEqual(
       Object.keys(EXPECTED_FALLBACK_RANGES).sort(),
     );
