@@ -553,8 +553,16 @@ function assertHostedStripeSubscriptionScheduleableState(input: {
     throw buildHostedStripeSubscriptionStateUnsupportedError("status");
   }
 
-  if (input.subscription.cancel_at_period_end) {
-    throw buildHostedStripeSubscriptionStateUnsupportedError("cancel_at_period_end");
+  if (input.subscription.cancel_at || input.subscription.cancel_at_period_end) {
+    throw buildHostedStripeSubscriptionStateUnsupportedError("cancellation");
+  }
+
+  if (input.subscription.collection_method !== "charge_automatically") {
+    throw buildHostedStripeSubscriptionStateUnsupportedError("collection_method");
+  }
+
+  if (input.subscription.pause_collection) {
+    throw buildHostedStripeSubscriptionStateUnsupportedError("pause_collection");
   }
 
   if (input.subscription.pending_update) {

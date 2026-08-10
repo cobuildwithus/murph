@@ -33,10 +33,20 @@ dates, launch terms, seat state, or unsupported admin controls.
 
 ## Start or convert Family access
 
-For an explicit request to start or convert to Family, use
-`action: "start_checkout"` only to establish Family billing. Never pass invite
-context to `start_checkout`; checkout cannot create or prepare an invite. Return
-a checkout URL plainly.
+For an explicit request to start or convert to Family, call `read_status` first,
+then use `action: "start_checkout"` only to establish Family billing. Never pass
+invite context to `start_checkout`; checkout cannot create or prepare an invite.
+Return a checkout URL plainly.
+
+When `read_status.activeTrialConversion` is non-null, do not start checkout yet.
+Tell the member that their free trial ends immediately and state the exact
+monthly amount, included Pulse-seat count, and per-seat amount from that object.
+Ask them to confirm those terms explicitly. On their confirmation turn, read
+status again. Only if the same active-trial conversion remains available may
+you call `start_checkout` with `confirmedTrialConversion: true`. Never send that
+field when the status is null, the terms changed, or the member has not freshly
+confirmed them. The billing owner revalidates the current trial and pricing;
+do not infer terms from earlier conversation text.
 
 - If the same request also asks to invite someone, call `read_status` first. If
   billing is active, skip checkout and follow the invite flow below. Otherwise,

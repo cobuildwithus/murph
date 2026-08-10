@@ -961,6 +961,54 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
   }
 });
 
+test("HostedFamilyManager keeps Telegram invites from authorizing an automatic paid seat", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      seats: {
+        active: 1,
+        billed: 2,
+        invited: 1,
+        max: 6,
+        min: 2,
+        remaining: 0,
+        used: 2,
+      },
+      plans: {
+        edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+        max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+        pulse: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+      },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    await clickButton(container, window, "Telegram");
+    await act(async () => {
+      setInputValue(
+        window,
+        inputById(container, "family-invite-telegram"),
+        "@relative",
+      );
+    });
+
+    assert.match(
+      container.textContent ?? "",
+      /Use iMessage or Email to add a paid Pulse seat, or change Family capacity first\./,
+    );
+    assert.equal(buttonByText(container, "Create invite").disabled, true);
+    assert.doesNotMatch(container.textContent ?? "", /Create invite & add Pulse/);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  } finally {
+    await cleanup();
+  }
+});
+
 test("HostedFamilyManager defaults to the phone channel with name first", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"

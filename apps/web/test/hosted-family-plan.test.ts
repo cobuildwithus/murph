@@ -452,6 +452,205 @@ describe("hosted Family plan", () => {
     );
   });
 
+  it("converts an active direct trial into Family on the same subscription", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({ billedSeatCount: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(
+      createMemberBillingRefMock({ currentBillingPhase: "trial" }),
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const checkoutCreate = vi.fn();
+    const directTrial = makeFamilyStripeSubscription({
+      customerId: "cus_direct",
+      itemQuantity: 1,
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "pulse_trial_7d",
+        memberId: "member_owner",
+      },
+      priceId: "price_pulse",
+      status: "trialing",
+      subscriptionId: "sub_direct",
+    });
+    const updatedSubscription = makeFamilyStripeSubscription({
+      customerId: "cus_direct",
+      itemQuantity: 2,
+      metadata: {
+        accountGroupId: "hbag_family",
+        billingPlanCode: "launch_family_monthly",
+        kind: "hosted_family_plan",
+        ownerMemberId: "member_owner",
+      },
+      priceId: "price_family",
+      subscriptionId: "sub_direct",
+    });
+    const subscriptionUpdate = vi.fn().mockResolvedValue(updatedSubscription);
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: { sessions: { create: checkoutCreate } },
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(directTrial),
+        update: subscriptionUpdate,
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_TRIAL_CONVERSION_CONFIRMATION_REQUIRED",
+      httpStatus: 409,
+    });
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+
+    await expect(createHostedFamilyBillingCheckout({
+      confirmedTrialConversion: true,
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).resolves.toEqual({ alreadyActive: false, url: null });
+
+    expect(checkoutCreate).not.toHaveBeenCalled();
+    expect(subscriptionUpdate).toHaveBeenCalledWith(
+      "sub_direct",
+      expect.objectContaining({
+        items: [{ id: "si_family", price: "price_family", quantity: 2 }],
+        trial_end: "now",
+      }),
+      {
+        idempotencyKey:
+          "hosted-family-direct-trial-upgrade:hbag_family:sub_direct:launch_monthly:price_pulse:price_family:seats-2",
+      },
+    );
+  });
+
+  it.each([
+    ["scheduled cancellation", { cancelAt: FAMILY_STRIPE_PERIOD_END_SECONDS }],
+    ["period-end cancellation", { cancelAtPeriodEnd: true }],
+    ["manual collection", { collectionMethod: "send_invoice" as const }],
+    ["paused collection", {
+      pauseCollection: { behavior: "void" as const, resumes_at: null },
+    }],
+    ["pending provider update", { pendingUpdate: { expires_at: FAMILY_STRIPE_PERIOD_END_SECONDS } as NonNullable<Stripe.Subscription["pending_update"]> }],
+    ["attached schedule", { schedule: "sched_direct" }],
+  ])("rejects a direct-to-Family conversion with %s before mutation", async (_label, state) => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({ billedSeatCount: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(
+      createMemberBillingRefMock(),
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const subscriptionUpdate = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(makeFamilyStripeSubscription({
+          ...state,
+          customerId: "cus_direct",
+          itemQuantity: 1,
+          metadata: {
+            billingPlanCode: "launch_monthly",
+            checkoutOffer: "standard",
+            memberId: "member_owner",
+          },
+          priceId: "price_pulse",
+          subscriptionId: "sub_direct",
+        })),
+        update: subscriptionUpdate,
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DIRECT_PAID_SUBSCRIPTION_STATE_UNSUPPORTED",
+    });
+
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not convert a direct subscription after account suspension wins the owner lock", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({ billedSeatCount: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(
+      createMemberBillingRefMock(),
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    let transactionCount = 0;
+    prisma.$transaction = vi.fn((callback) => {
+      transactionCount += 1;
+      if (transactionCount === 2) {
+        tx.hostedMember.findUnique.mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: new Date("2026-08-10T12:00:00.000Z"),
+        });
+      }
+      return callback(tx);
+    });
+    const subscriptionRetrieve = vi.fn();
+    const subscriptionUpdate = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: subscriptionRetrieve,
+        update: subscriptionUpdate,
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DIRECT_PAID_UPGRADE_STALE",
+    });
+
+    expect(subscriptionRetrieve).not.toHaveBeenCalled();
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
   it("retains a stale unbound Family attempt as ambiguous billing ownership", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([{
@@ -1143,7 +1342,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.create).not.toHaveBeenCalled();
   });
 
-  it("keeps a reused invite on its tier when the requested tier is full", async () => {
+  it("requires an explicit capacity rebalance when a reused invite changes to a full tier", async () => {
     const tx = createTxMock();
     const existingInvite = createPendingInvite({
       planCode: "pulse",
@@ -1164,10 +1363,52 @@ describe("hosted Family plan", () => {
       targetEmail: "mom@example.com",
       tx,
     })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      code: "HOSTED_FAMILY_INVITE_PLAN_CAPACITY_REQUIRED",
     });
 
     expect(tx.hostedAccountGroupInvite.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a verified contact already active in the same Family before reserving a seat", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      id: "hbagm_existing",
+    });
+
+    await expect(issueHostedFamilyInviteTx({
+      groupId: "hbag_family",
+      invitedByMemberId: "member_owner",
+      targetEmail: "owner@example.test",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_IN_GROUP",
+    });
+
+    expect(tx.hostedAccountGroupInvite.count).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects invite acceptance by a member already active in the same Family", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
+      createPendingInvite({ targetEmailLookupKey: null }),
+    );
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce({
+        id: "hbagm_existing",
+        planCode: "pulse",
+      });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_relative",
+      inviteCode: "FAMILY123",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_IN_GROUP",
+    });
+
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
   it("accepts a plain Telegram /start when one pending invite is pre-bound to that username", async () => {
@@ -2608,6 +2849,83 @@ describe("hosted Family plan", () => {
     expect(nextServerMocks.after).not.toHaveBeenCalled();
   });
 
+  it("lets a Family owner with a separate direct trial change a member tier", async () => {
+    const tx = createTxMock();
+    const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingRef: {
+        currentBillingPhase: "trial",
+        stripeSubscriptionIdEncrypted: "encrypted:sub_direct_trial",
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce({
+        id: "hbagm_member",
+        pendingPlanCode: null,
+        planCode: "pulse",
+        updatedAt: new Date("2026-07-15T11:00:00.000Z"),
+      })
+      .mockResolvedValueOnce(null);
+    tx.hostedAccountGroupMembership.update.mockResolvedValueOnce({
+      id: "hbagm_member",
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+      updatedAt: pendingStartedAt,
+    });
+    tx.hostedAccountGroupMembership.findUnique.mockResolvedValueOnce({
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+    });
+    tx.hostedAccountGroupMembership.findMany
+      .mockResolvedValue([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_relative", planCode: "edge" },
+      ])
+      .mockResolvedValueOnce([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_relative", planCode: "pulse" },
+      ])
+      .mockResolvedValueOnce([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_relative", planCode: "pulse" },
+      ]);
+    const currentCapacities = [{ billedQuantity: 2, planCode: "pulse" }];
+    tx.hostedAccountGroupPlanCapacity.findMany
+      .mockResolvedValue([
+        { billedQuantity: 1, planCode: "pulse" },
+        { billedQuantity: 1, planCode: "edge" },
+      ])
+      .mockResolvedValueOnce(currentCapacities)
+      .mockResolvedValueOnce(currentCapacities);
+    const stripeUpdate = vi.fn().mockResolvedValue(
+      makeFamilyStripeSubscription({ edgeItemQuantity: 1, itemQuantity: 1 }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscription({ itemQuantity: 2 }),
+        ),
+        update: stripeUpdate,
+      },
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(updateHostedFamilyMemberPlan({
+      groupId: "hbag_family",
+      memberId: "member_relative",
+      ownerMemberId: "member_owner",
+      planCode: "edge",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ syncing: false });
+
+    expect(stripeUpdate).toHaveBeenCalledOnce();
+  });
+
   it("reuses the original pending timestamp and idempotency key on retry", async () => {
     const tx = createTxMock();
     const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
@@ -2850,6 +3168,95 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: { planCode: "edge" } }),
     );
+  });
+
+  it("clears a fresh pending member tier when validation fails before Stripe mutation", async () => {
+    const tx = createTxMock();
+    const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce({
+        id: "hbagm_member",
+        pendingPlanCode: null,
+        planCode: "pulse",
+        updatedAt: new Date("2026-07-15T11:00:00.000Z"),
+      })
+      .mockResolvedValueOnce(null);
+    tx.hostedAccountGroupMembership.update.mockResolvedValueOnce({
+      id: "hbagm_member",
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+      updatedAt: pendingStartedAt,
+    });
+    tx.hostedAccountGroupMembership.findUnique.mockResolvedValueOnce({
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+    });
+    tx.hostedAccountGroupMembership.findMany
+      .mockResolvedValue([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_relative", planCode: "edge" },
+      ])
+      .mockResolvedValueOnce([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_relative", planCode: "pulse" },
+      ])
+      .mockResolvedValueOnce([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_relative", planCode: "pulse" },
+      ]);
+    const currentCapacities = [{ billedQuantity: 2, planCode: "pulse" }];
+    tx.hostedAccountGroupPlanCapacity.findMany
+      .mockResolvedValue([
+        { billedQuantity: 1, planCode: "pulse" },
+        { billedQuantity: 1, planCode: "edge" },
+      ])
+      .mockResolvedValueOnce(currentCapacities)
+      .mockResolvedValueOnce(currentCapacities);
+    const stripeUpdate = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscription({ priceId: "price_unknown" }),
+        ),
+        update: stripeUpdate,
+      },
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    const transactionOutcomes: string[] = [];
+    prisma.$transaction = vi.fn(async (callback) => {
+      try {
+        const result = await callback(tx);
+        transactionOutcomes.push("committed");
+        return result;
+      } catch (error) {
+        transactionOutcomes.push("rolled_back");
+        throw error;
+      }
+    });
+
+    await expect(updateHostedFamilyMemberPlan({
+      groupId: "hbag_family",
+      memberId: "member_relative",
+      ownerMemberId: "member_owner",
+      planCode: "edge",
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SUBSCRIPTION_INVALID",
+    });
+
+    expect(stripeUpdate).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.updateMany).toHaveBeenCalledWith({
+      data: { pendingPlanCode: null },
+      where: {
+        id: "hbagm_member",
+        pendingPlanCode: "edge",
+        planCode: "pulse",
+        updatedAt: pendingStartedAt,
+      },
+    });
+    expect(transactionOutcomes).toEqual(["committed", "committed"]);
   });
 
   it("alerts for request-id-free member-tier failures with stable transition identity", async () => {
@@ -3301,9 +3708,11 @@ describe("hosted Family plan", () => {
 
   it("does not let one member use active sponsorship from two family plans", async () => {
     const tx = createTxMock();
-    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
-      id: "hbagm_other",
-    });
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "hbagm_other",
+      });
 
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
 
@@ -3321,9 +3730,11 @@ describe("hosted Family plan", () => {
 
   it("does not let one member hold active memberships in two family plans before billing", async () => {
     const tx = createTxMock();
-    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
-      id: "hbagm_other",
-    });
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "hbagm_other",
+      });
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
 
     await expect(acceptHostedFamilyInviteTx({
@@ -4508,6 +4919,28 @@ describe("hosted Family plan", () => {
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
+  it.each([
+    HostedBillingStatus.incomplete,
+    HostedBillingStatus.past_due,
+    HostedBillingStatus.paused,
+    HostedBillingStatus.unpaid,
+  ])("offers Family billing management while an exact subscription is %s", async (billingStatus) => {
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce({
+      billingRef: {
+        checkoutAttemptId: null,
+        stripeSubscriptionIdEncrypted: "encrypted:sub_family",
+      },
+      billingStatus,
+      suspendedAt: null,
+    });
+
+    await expect(readHostedFamilyBillingRecoveryForOwner({
+      ownerMemberId: "member_owner",
+      prisma: tx,
+    })).resolves.toBe("manage");
+  });
+
   it("derives active Family billing from memberships read under the owner lock", async () => {
     const tx = createTxMock();
     let ownerLocked = false;
@@ -5104,12 +5537,12 @@ describe("hosted Family plan", () => {
       billedSeatCount: null,
       group,
     });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
-    tx.hostedMember.findUnique.mockResolvedValueOnce({
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    tx.hostedMember.findUnique.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
     });
-    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(createMemberBillingRefMock({
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(createMemberBillingRefMock({
       currentBillingPlanCode: currentPlanCode,
     }));
 
@@ -5257,6 +5690,85 @@ describe("hosted Family plan", () => {
     }));
   });
 
+  it("normalizes metadata on an already-applied direct-to-Family retry without rebuilding the obsolete direct item swap", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({ billedSeatCount: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(
+      createMemberBillingRefMock(),
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    const alreadyApplied = makeFamilyStripeSubscription({
+      customerId: "cus_direct",
+      itemQuantity: 2,
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_owner",
+      },
+      priceId: "price_family",
+      subscriptionId: "sub_direct",
+    });
+    const normalized = makeFamilyStripeSubscription({
+      customerId: "cus_direct",
+      itemQuantity: 2,
+      metadata: {
+        accountGroupId: "hbag_family",
+        billingPlanCode: "launch_family_monthly",
+        kind: "hosted_family_plan",
+        ownerMemberId: "member_owner",
+      },
+      priceId: "price_family",
+      subscriptionId: "sub_direct",
+    });
+    const subscriptionUpdate = vi.fn().mockResolvedValue(normalized);
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(alreadyApplied),
+        update: subscriptionUpdate,
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).resolves.toEqual({ alreadyActive: false, url: null });
+
+    expect(subscriptionUpdate).toHaveBeenCalledWith(
+      "sub_direct",
+      {
+        expand: ["items.data.price"],
+        metadata: expect.objectContaining({
+          accountGroupId: "hbag_family",
+          billingPlanCode: "launch_family_monthly",
+          checkoutOffer: "",
+          kind: "hosted_family_plan",
+          ownerMemberId: "member_owner",
+        }),
+      },
+      {
+        idempotencyKey:
+          "hosted-family-direct-paid-metadata:hbag_family:sub_direct",
+      },
+    );
+    expect(subscriptionUpdate.mock.calls[0]?.[1]).not.toHaveProperty("items");
+  });
+
   it("distinguishes direct-paid Family actions by their complete provider effect", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,
@@ -5326,12 +5838,12 @@ describe("hosted Family plan", () => {
       billedSeatCount: null,
       group,
     });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
-    tx.hostedMember.findUnique.mockResolvedValueOnce({
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    tx.hostedMember.findUnique.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
     });
-    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(createMemberBillingRefMock());
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(createMemberBillingRefMock());
 
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
@@ -6825,6 +7337,63 @@ describe("hosted Family plan", () => {
     expect(nextServerMocks.after).not.toHaveBeenCalled();
   });
 
+  it("revalidates an automatic-seat invite target under the capacity owner lock", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+      { memberId: "member_target", planCode: "pulse" },
+    ]);
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "hbagm_target" });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(updateHostedFamilyPlanCapacities({
+      autoSeatInviteTarget: {
+        targetEmail: "target@example.test",
+        targetPhoneNumber: null,
+      },
+      groupId: "hbag_family",
+      now: new Date("2026-08-10T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetCapacities: { edge: 0, max: 0, pulse: 3 },
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_IN_GROUP",
+    });
+
+    expect(tx.hostedAccountGroupMembership.findFirst).toHaveBeenLastCalledWith({
+      select: { id: true },
+      where: {
+        groupId: "hbag_family",
+        member: {
+          OR: [
+            {
+              emailAuthorization: {
+                verifiedEmailLookupKey: {
+                  in: expect.arrayContaining([
+                    expect.stringMatching(/^hbidx:email:/u),
+                  ]),
+                },
+                verifiedEmailVerifiedAt: { not: null },
+              },
+            },
+          ],
+        },
+        status: "active",
+      },
+    });
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+  });
+
   it("lets an active Family owner with a separate direct trial add capacity", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
@@ -7541,14 +8110,20 @@ function makeFamilyStripeSubscriptionEvent(): Stripe.Event {
 }
 
 function makeFamilyStripeSubscription(input: {
+  cancelAt?: number | null;
+  cancelAtPeriodEnd?: boolean;
+  collectionMethod?: Stripe.Subscription["collection_method"];
   customerId?: string;
   duplicateFamilyItems?: boolean;
   edgeItemQuantity?: number;
   itemQuantity?: number;
   maxItemQuantity?: number;
   metadata?: Stripe.Metadata;
+  pauseCollection?: Stripe.Subscription["pause_collection"];
+  pendingUpdate?: Stripe.Subscription["pending_update"];
   periodLocation?: "subscription" | "subscription_item";
   priceId?: string;
+  schedule?: string | null;
   status?: Stripe.Subscription.Status;
   subscriptionId?: string;
 } = {}): Stripe.Subscription {
@@ -7612,11 +8187,11 @@ function makeFamilyStripeSubscription(input: {
       type: "classic",
     },
     billing_thresholds: null,
-    cancel_at: null,
-    cancel_at_period_end: false,
+    cancel_at: input.cancelAt ?? null,
+    cancel_at_period_end: input.cancelAtPeriodEnd ?? false,
     canceled_at: null,
     cancellation_details: null,
-    collection_method: "charge_automatically",
+    collection_method: input.collectionMethod ?? "charge_automatically",
     created: 1_771_948_800,
     currency: "usd",
     customer: input.customerId ?? "cus_family",
@@ -7669,12 +8244,12 @@ function makeFamilyStripeSubscription(input: {
     next_pending_invoice_item_invoice: null,
     object: "subscription",
     on_behalf_of: null,
-    pause_collection: null,
+    pause_collection: input.pauseCollection ?? null,
     payment_settings: null,
     pending_invoice_item_interval: null,
     pending_setup_intent: null,
-    pending_update: null,
-    schedule: null,
+    pending_update: input.pendingUpdate ?? null,
+    schedule: input.schedule ?? null,
     start_date: 1_771_948_800,
     status: input.status ?? "active",
     test_clock: null,

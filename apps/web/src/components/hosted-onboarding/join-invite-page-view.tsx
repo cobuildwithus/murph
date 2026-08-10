@@ -53,6 +53,7 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
       : null;
   const focusedFamilyBillingRecovery =
     model.familyBillingRecovery === "checkout"
+    || model.familyBillingRecovery === "manage"
     || model.familyBillingRecovery === "syncing";
   const useCenteredShell = model.launchConsent.gateActive
     || model.status.stage === "verify"
@@ -121,6 +122,11 @@ function resolveFamilyBillingRecoveryHeader(
       return {
         subtitle: "Your existing Stripe checkout is ready to resume.",
         title: "Continue Family checkout",
+      };
+    case "manage":
+      return {
+        subtitle: "Resolve the subscription with Stripe to restore Family access.",
+        title: "Resolve Family billing",
       };
     case "syncing":
       return {
