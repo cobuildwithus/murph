@@ -12,9 +12,10 @@ for inputs, derive or save targets, or surface a proposal.
 
 Before using this workflow, read and apply `daily-nutrition-card-safety.md`,
 including its complete canonical memory document, bounded active-condition and
-active-regimen discovery, 45-day body-measurement read, and separate 300-day
-`pregnancy-test` read. The context snapshot is not completeness proof for any
-of these owners. If any required canonical read is saturated or unavailable,
+active-regimen discovery, lifetime procedure-event discovery, 45-day
+body-measurement read, and separate 300-day `pregnancy-test` read. The context
+snapshot is not completeness proof for any of these owners. If any required
+canonical read is saturated or unavailable,
 or the gate suppresses numeric goals, stop here with no Goal or measurement
 mutation and keep the owning non-numeric or clinical path.
 
@@ -225,8 +226,8 @@ Use the existing canonical Goal owner; add no new state surface.
    goal-aware card.
 5. When the member accepts the proposal, first re-run the complete
    current-context gate in `daily-nutrition-card-safety.md`, including its bounded
-   canonical memory, active-condition, active-regimen, body-measurement, and
-   `pregnancy-test` reads. If that gate suppresses numeric guidance, fails, or
+   canonical memory, active-condition, active-regimen, procedure-event,
+   body-measurement, and `pregnancy-test` reads. If that gate suppresses numeric guidance, fails, or
    cannot resolve a saturated read, leave the proposal paused and unchanged,
    surface no target values, use ordinary non-numeric text, and attach no card.
    Only after that gate passes, re-read target authority. If a metric has gained an explicit

@@ -60,7 +60,8 @@ provisional targets. Before every card,
 even when five active goals already exist, read and apply
 `references/daily-nutrition-card-safety.md`. When five usable daily goals are
 missing, also read and follow `references/daily-nutrition-card-goals.md`. The
-safety gate includes its separate bounded `pregnancy-test` read. It
+safety gate includes its bounded canonical procedure-event discovery and
+separate bounded `pregnancy-test` read. It
 owns evidence-grounded default derivation, the single canonical Goal proposal,
 and the explanation-before-card sequence. Do not send a goal-less card, create
 a second goal store, or reuse the workflow as unsolicited diet planning.

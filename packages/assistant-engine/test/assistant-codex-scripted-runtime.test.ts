@@ -1705,6 +1705,8 @@ if (!tool) {
       'measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from 2026-06-15 --to 2026-07-30 --limit 200 --format json'
     const pregnancyMeasurementCommand =
       'measurement entry list --metric pregnancy-test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
+    const procedureListCommand =
+      'event list --kind procedure --limit 200 --format json'
     const totalsCommand =
       'meal totals --from 2026-07-30 --to 2026-07-30 --format json'
 
@@ -1977,6 +1979,69 @@ if (!tool) {
         value: 0,
       })),
     )
+    const procedureListResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        experiment: null,
+        from: null,
+        kind: 'procedure',
+        limit: 200,
+        tag: [],
+        to: null,
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const procedureItem = (
+      id: string,
+      procedure: string,
+      status: string,
+    ) => ({
+      data: { procedure, status },
+      id,
+      kind: 'procedure',
+      occurredAt: '2024-03-14T10:00:00.000Z',
+      title: procedure,
+    })
+    const noProcedures = procedureListResult([])
+    const completedBariatricProcedures = procedureListResult([
+      procedureItem(
+        'event_completed_bariatric_procedure',
+        'Roux-en-Y gastric bypass',
+        'completed',
+      ),
+    ])
+    const plannedBariatricProcedureWithoutListStatus = procedureListResult([{
+      data: { procedure: 'gastric sleeve' },
+      id: 'event_planned_bariatric_procedure',
+      kind: 'procedure',
+      occurredAt: '2026-09-14T10:00:00.000Z',
+      title: 'Planned gastric sleeve',
+    }])
+    const plannedBariatricProcedureDetail = {
+      entity: {
+        data: {
+          procedure: 'gastric sleeve',
+          status: 'planned',
+        },
+        id: 'event_planned_bariatric_procedure',
+        kind: 'procedure',
+        occurredAt: '2026-09-14T10:00:00.000Z',
+        title: 'Planned gastric sleeve',
+      },
+      vault: 'synthetic-vault',
+    }
+    const saturatedProcedures = procedureListResult(
+      Array.from({ length: 200 }, (_, index) =>
+        procedureItem(
+          `event_procedure_${index + 1}`,
+          `Unrelated procedure ${index + 1}`,
+          'completed',
+        )),
+    )
     const canonicalTotals = {
       from: '2026-07-30',
       mealCount: 3,
@@ -2064,6 +2129,7 @@ text(result.output);
                   'condition list --status active --limit 200 --format json',
                   'regimen list --status active --limit 200 --format json',
                   'before activating a paused nutrition proposal',
+                  'event list --kind procedure --limit 200 --format json',
                   'measurement entry list read over the canonical 45-day window',
                   'separate vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json read',
                 ],
@@ -2208,6 +2274,7 @@ text(result.output);
         nextCursor: null,
         vault: 'synthetic-vault',
       }],
+      [procedureListCommand, noProcedures],
       [measurementCommand, safeMeasurements],
       [pregnancyMeasurementCommand, noPregnancyMeasurements],
       [totalsCommand, canonicalTotals],
@@ -2218,6 +2285,7 @@ text(result.output);
       memoryCommand,
       conditionListCommand,
       regimenListCommand,
+      procedureListCommand,
       measurementCommand,
       pregnancyMeasurementCommand,
       totalsCommand,
@@ -2609,6 +2677,105 @@ text(result.output);
       snapshotPrompt: 'The context snapshot does not inject the canonical Preferences memory section.',
     })
 
+    for (const unavailableProcedureRead of [
+      {
+        failed: true,
+        finalMessage: 'I could not complete the current procedure-history safety check, so I left target setup unchanged.',
+        output: noProcedures,
+        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical procedure history is unavailable.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not safely complete the procedure-history check, so I left target setup unchanged.',
+        output: saturatedProcedures,
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical procedure discovery is saturated.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          ...(unavailableProcedureRead.failed
+            ? []
+            : [[procedureListCommand, unavailableProcedureRead.output] as const]),
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+        ],
+        ...(unavailableProcedureRead.failed
+          ? { failedCommands: [procedureListCommand] }
+          : {}),
+        finalMessage: unavailableProcedureRead.finalMessage,
+        prompt: unavailableProcedureRead.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+
+    for (const blockedProcedureCase of [
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I kept this non-numeric because completed bariatric surgery makes self-directed targets inappropriate.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused because completed bariatric surgery requires the qualified-care path.',
+        prompt: 'Yes, accept those nutrition targets.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused and did not attach the pending card because completed bariatric surgery requires the qualified-care path.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [
+          [activeListCommand, completeList],
+          [visibleGoalShowCommand, visibleGoal],
+        ] as const,
+        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
+        finalMessage: 'Closeout saved without numeric feedback because completed bariatric surgery requires the non-numeric path.',
+        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+        scheduled: true,
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          ...blockedProcedureCase.commandPrefix,
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, completedBariatricProcedures],
+        ],
+        expectedCommands: [
+          ...blockedProcedureCase.expectedPrefix,
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+        ],
+        finalMessage: blockedProcedureCase.finalMessage,
+        prompt: blockedProcedureCase.prompt,
+        scheduled: blockedProcedureCase.scheduled,
+        skillReadCommands: blockedProcedureCase.scheduled
+          ? scheduledSkillReads
+          : interactiveSkillReads,
+        skillSlugs: blockedProcedureCase.scheduled
+          ? ['automatic-meal-capture', 'nutrition-strategy']
+          : ['food-journal', 'nutrition-strategy'],
+        ...(!blockedProcedureCase.scheduled && blockedProcedureCase.prompt.startsWith('Yes')
+          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
+          : {}),
+      })
+    }
+
     for (const blockedProposal of [
       {
         finalMessage: 'I kept this non-numeric because your current measurements make self-directed targets inappropriate.',
@@ -2630,11 +2797,13 @@ text(result.output);
         commandOutputs: [
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
           [measurementCommand, blockedProposal.measurements],
         ],
         expectedCommands: [
           memoryCommand,
           ...emptySafetyCommands,
+          procedureListCommand,
           measurementCommand,
         ],
         finalMessage: blockedProposal.finalMessage,
@@ -2648,10 +2817,12 @@ text(result.output);
       commandOutputs: [
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
       ],
       expectedCommands: [
         memoryCommand,
         ...emptySafetyCommands,
+        procedureListCommand,
         measurementCommand,
       ],
       failedCommands: [measurementCommand],
@@ -2680,6 +2851,7 @@ text(result.output);
         commandOutputs: [
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
           [measurementCommand, normalBmiMeasurements],
           ...(unavailablePregnancyRead.failed
             ? []
@@ -2688,6 +2860,7 @@ text(result.output);
         expectedCommands: [
           memoryCommand,
           ...emptySafetyCommands,
+          procedureListCommand,
           measurementCommand,
           pregnancyMeasurementCommand,
         ],
@@ -2706,12 +2879,14 @@ text(result.output);
       commandOutputs: [
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
         [measurementCommand, normalBmiMeasurements],
         [pregnancyMeasurementCommand, laterNegativeAfterPositiveMeasurements],
       ],
       expectedCommands: [
         memoryCommand,
         ...emptySafetyCommands,
+        procedureListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
       ],
@@ -2736,12 +2911,14 @@ text(result.output);
         commandOutputs: [
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
           [measurementCommand, normalBmiMeasurements],
           [pregnancyMeasurementCommand, positivePregnancyMeasurements],
         ],
         expectedCommands: [
           memoryCommand,
           ...emptySafetyCommands,
+          procedureListCommand,
           measurementCommand,
           pregnancyMeasurementCommand,
         ],
@@ -2760,6 +2937,7 @@ text(result.output);
         [visibleGoalShowCommand, visibleGoal],
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
         [measurementCommand, normalBmiMeasurements],
         [pregnancyMeasurementCommand, positivePregnancyMeasurements],
       ],
@@ -2768,6 +2946,7 @@ text(result.output);
         visibleGoalShowCommand,
         memoryCommand,
         ...emptySafetyCommands,
+        procedureListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
       ],
@@ -2792,11 +2971,13 @@ text(result.output);
         commandOutputs: [
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
           [measurementCommand, lowBmiMeasurements],
         ],
         expectedCommands: [
           memoryCommand,
           ...emptySafetyCommands,
+          procedureListCommand,
           measurementCommand,
         ],
         finalMessage: acceptance.finalMessage,
@@ -2812,24 +2993,51 @@ text(result.output);
       {
         measurements: noPregnancyMeasurements,
         prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context; no pregnancy-test rows exist.',
+        procedureCommands: [procedureListCommand],
+        procedureOutputs: [[procedureListCommand, noProcedures]] as const,
       },
       {
         measurements: negativePregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; the only current pregnancy-test row is an exact negative.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a planned gastric sleeve and an exact negative pregnancy test do not prove a current exclusion.',
+        procedureCommands: [
+          procedureListCommand,
+          'event show event_planned_bariatric_procedure --format json',
+        ],
+        procedureOutputs: [
+          [procedureListCommand, plannedBariatricProcedureWithoutListStatus],
+          ['event show event_planned_bariatric_procedure --format json', plannedBariatricProcedureDetail],
+        ] as const,
       },
       {
         measurements: ambiguousPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; the pregnancy-test qualifier and numeric value conflict, so treat that row as unavailable rather than positive.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a cancelled gastric bypass and a conflicting pregnancy-test row do not prove current exclusions.',
+        procedureCommands: [procedureListCommand],
+        procedureOutputs: [[procedureListCommand, procedureListResult([
+          procedureItem('event_cancelled_bariatric_procedure', 'gastric bypass', 'cancelled'),
+        ])]] as const,
       },
       {
         measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an old positive pregnancy test falls before the bounded 300-day read and is stale for this gate.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a completed appendectomy is unrelated and an old positive pregnancy test is stale.',
+        procedureCommands: [procedureListCommand],
+        procedureOutputs: [[procedureListCommand, procedureListResult([
+          procedureItem('event_completed_appendectomy', 'appendectomy', 'completed'),
+        ])]] as const,
+      },
+      {
+        measurements: noPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an ambiguously recorded gastric procedure does not prove completed bariatric surgery.',
+        procedureCommands: [procedureListCommand],
+        procedureOutputs: [[procedureListCommand, procedureListResult([
+          procedureItem('event_ambiguous_gastric_procedure', 'gastric procedure', 'unknown'),
+        ])]] as const,
       },
     ]) {
       await runCase({
         commandOutputs: [
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
+          ...allowedPregnancyEvidence.procedureOutputs,
           [measurementCommand, normalBmiMeasurements],
           [pregnancyMeasurementCommand, allowedPregnancyEvidence.measurements],
           [activeListCommand, noActiveGoalsList],
@@ -2840,6 +3048,7 @@ text(result.output);
         expectedCommands: [
           memoryCommand,
           ...emptySafetyCommands,
+          ...allowedPregnancyEvidence.procedureCommands,
           measurementCommand,
           pregnancyMeasurementCommand,
           activeListCommand,
@@ -2860,6 +3069,7 @@ text(result.output);
       commandOutputs: [
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
         [measurementCommand, normalBmiMeasurements],
         [pregnancyMeasurementCommand, noPregnancyMeasurements],
         [activeListCommand, noActiveGoalsList],
@@ -2871,6 +3081,7 @@ text(result.output);
       expectedCommands: [
         memoryCommand,
         ...emptySafetyCommands,
+        procedureListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
         activeListCommand,
@@ -2894,6 +3105,7 @@ text(result.output);
         [visibleGoalShowCommand, visibleGoal],
         [memoryCommand, adultMemory],
         ...completeSafetyOutputs({}),
+        [procedureListCommand, noProcedures],
         [measurementCommand, safeMeasurements],
         [pregnancyMeasurementCommand, noPregnancyMeasurements],
         [totalsCommand, canonicalTotals],
@@ -2903,6 +3115,7 @@ text(result.output);
         visibleGoalShowCommand,
         memoryCommand,
         ...completeSafetyCommands,
+        procedureListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
         totalsCommand,

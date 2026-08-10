@@ -87,7 +87,7 @@ describe('assistant food journal skill', () => {
       'the five-record context projection is not completeness\nproof',
     )
     expect(skill).toContain(
-      'bounded body-measurement and separate `pregnancy-test` reads are likewise\nmandatory before deriving, saving, or surfacing a proposal and again before\nactivating one',
+      'lifetime canonical procedure-event discovery, bounded body-measurement read,\nand separate `pregnancy-test` read are likewise mandatory before deriving,\nsaving, or surfacing a proposal and again before activating one',
     )
     expect(skill).toContain(
       'complete `vault-cli memory show --format json` read is also mandatory',

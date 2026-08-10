@@ -41,6 +41,28 @@ context.
   read fails or is unreadable, use the same fail-closed behavior. A scheduled
   occurrence asks no question when this read is unavailable or suppresses numeric
   output.
+- Also run `vault-cli event list --kind procedure --limit 200 --format json`
+  and inspect every returned canonical procedure item before numeric setup,
+  proposal presentation, Goal mutation or activation, and every card. Reuse an
+  identical current-turn result. If the list fails, is unreadable, or returns
+  exactly 200 records, discovery may be incomplete: fail closed with ordinary
+  non-numeric text, no Goal or measurement mutation, and no card. Run no
+  procedure detail reads for a saturated list. Otherwise, the list preserves
+  scalar `data.procedure` and `data.status`; when either field is missing or
+  visibly truncated, run `vault-cli event show <event-id> --format json` for
+  that item before deciding. If a required detail read fails or is unreadable,
+  use the same fail-closed behavior. An explicit `completed` status together
+  with an explicit bariatric procedure—such as gastric bypass or Roux-en-Y,
+  sleeve gastrectomy or gastric sleeve, biliopancreatic diversion or duodenal
+  switch, adjustable gastric band or lap band, or bariatric surgery—proves
+  post-bariatric context and suppresses numeric setup, proposal presentation,
+  every Goal write or activation, and every card. `ordered`, `planned`, or
+  `cancelled` status, an unknown or ambiguous status, and an unrelated procedure
+  are not proof of post-bariatric care and do not suppress by themselves.
+  Missing procedure records are unavailable evidence, not proof that no
+  procedure occurred and not a universal block. A scheduled occurrence asks no
+  question and performs no mutation when this read is unavailable or suppresses
+  numeric output.
 - As part of the same pre-numeric and pre-activation gate, run one bounded
   lossless canonical-entry read for the current local date: `vault-cli
   measurement entry list --metric bmi --metric height

@@ -282,7 +282,7 @@ describe('assistant nutrition strategy skill', () => {
       'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactGoals).toContain(
-      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, 45-day body-measurement read, and separate 300-day `pregnancy-test` read.',
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event discovery, 45-day body-measurement read, and separate 300-day `pregnancy-test` read.',
     )
     expect(compactGoals).toContain(
       'The context snapshot is not completeness proof for any of these owners.',
@@ -374,7 +374,7 @@ describe('assistant nutrition strategy skill', () => {
       'after the complete pre-activation safety gate in step 5 passes, activate and read back the Goal, reuse those identical current-turn safety reads, re-read same-date canonical meal totals, and attach exactly one card in that acceptance response',
     )
     expect(compactGoals).toContain(
-      'When the member accepts the proposal, first re-run the complete current-context gate in `daily-nutrition-card-safety.md`, including its bounded canonical memory, active-condition, active-regimen, body-measurement, and `pregnancy-test` reads.',
+      'When the member accepts the proposal, first re-run the complete current-context gate in `daily-nutrition-card-safety.md`, including its bounded canonical memory, active-condition, active-regimen, procedure-event, body-measurement, and `pregnancy-test` reads.',
     )
     expect(compactGoals).toContain(
       'leave the proposal paused and unchanged, surface no target values, use ordinary non-numeric text, and attach no card.',
@@ -471,6 +471,21 @@ describe('assistant nutrition strategy skill', () => {
       'If any required detail read fails or is unreadable, use the same fail-closed behavior.',
     )
     expect(compactSafety).toContain(
+      '`vault-cli event list --kind procedure --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      'when either field is missing or visibly truncated, run `vault-cli event show <event-id> --format json` for that item before deciding.',
+    )
+    expect(compactSafety).toContain(
+      'An explicit `completed` status together with an explicit bariatric procedure',
+    )
+    expect(compactSafety).toContain(
+      '`ordered`, `planned`, or `cancelled` status, an unknown or ambiguous status, and an unrelated procedure are not proof of post-bariatric care and do not suppress by themselves.',
+    )
+    expect(compactSafety).toContain(
+      'If the list fails, is unreadable, or returns exactly 200 records, discovery may be incomplete: fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card.',
+    )
+    expect(compactSafety).toContain(
       '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
     )
     expect(compactSafety).toContain(
@@ -519,10 +534,10 @@ describe('assistant nutrition strategy skill', () => {
       'A scheduled occurrence uses this file only as a card-time safety check.',
     )
     expect(compactGoals).toContain(
-      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, 45-day body-measurement read, and separate 300-day `pregnancy-test` read.',
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event discovery, 45-day body-measurement read, and separate 300-day `pregnancy-test` read.',
     )
     expect(compactGoals).toContain(
-      'including its bounded canonical memory, active-condition, active-regimen, body-measurement, and `pregnancy-test` reads.',
+      'including its bounded canonical memory, active-condition, active-regimen, procedure-event, body-measurement, and `pregnancy-test` reads.',
     )
   })
 

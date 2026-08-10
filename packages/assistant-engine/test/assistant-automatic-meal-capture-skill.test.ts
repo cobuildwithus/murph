@@ -165,7 +165,13 @@ describe('assistant automatic meal capture skill', () => {
       'If any required detail read fails or is unreadable, use the same ordinary-text, no-write, no-question, no-card failure behavior.',
     )
     expect(compactSkill).toContain(
-      'Also run the shared gate\'s bounded body-measurement read and separate `pregnancy-test` read. A failed read, a body-measurement read saturated without resolving usable BMI evidence, or a saturated pregnancy-test read uses the same failure behavior.',
+      'Also run `vault-cli event list --kind procedure --limit 200 --format json` and follow the shared gate\'s procedure-item inspection and conditional detail reads.',
+    )
+    expect(compactSkill).toContain(
+      'A completed bariatric procedure uses the same non-numeric, no-write, no-question, no-card path; failed, unreadable, or saturated procedure discovery uses the failure path.',
+    )
+    expect(compactSkill).toContain(
+      'Then run the shared gate\'s bounded body-measurement read and separate `pregnancy-test` read. A failed read, a body-measurement read saturated without resolving usable BMI evidence, or a saturated pregnancy-test read uses the same failure behavior.',
     )
     expect(compactSkill).toContain(
       'Only when all five qualifying exact point targets resolve from active canonical Goals',
