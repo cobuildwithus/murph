@@ -1,20 +1,20 @@
 name: Direct PR 1405 finalization
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/pr1405-direct-final
+      - main
 
 permissions:
   contents: write
 
 concurrency:
-  group: pr1405-direct-final
+  group: pr1405-direct-final-pr
   cancel-in-progress: true
 
 jobs:
   finalize:
-    if: github.event.head_commit.message == 'chore: run direct PR 1405 finalization'
+    if: github.event.pull_request.head.ref == 'codex/pr1405-direct-final'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -102,7 +102,7 @@ jobs:
             } > .github/pr1405-direct-finalization-failure.md
             git add .github/pr1405-direct-finalization-failure.md
             git commit -m 'chore: record PR 1405 finalization failure' || true
-            git push origin HEAD:codex/pr1405-direct-final
+            git push origin HEAD:codex/pr1405-direct-final || true
             exit 1
           fi
 
