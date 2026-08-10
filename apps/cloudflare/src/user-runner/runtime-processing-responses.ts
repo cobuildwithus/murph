@@ -22,7 +22,8 @@ export const HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA =
 export function readRuntimeProcessingRetryDelayMs(
   reason: RuntimeProcessingRetryReason,
 ): number {
-  return reason === "starting_fence_preserved" ? 3_000 :
+  return reason === "checkpoint_handoff_pending" ? 1_000 :
+    reason === "starting_fence_preserved" ? 3_000 :
     reason === "container_busy" ? 5_000 :
     reason === "command_budget_exhausted" ? 10_000 :
     reason === "container_rpc_timeout" ? 10_000 :

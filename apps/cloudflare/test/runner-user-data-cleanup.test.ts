@@ -391,7 +391,10 @@ describe("hosted runner user data cleanup", () => {
     });
 
     const created = await service.create(session);
-    expect(created).toEqual(session);
+    expect(created).toEqual({
+      ...session,
+      checkpointHandoffHeartbeatAt: expect.any(String),
+    });
     const first = await service.rememberPresignedPut({
       drainUntil: "2026-07-28T12:20:00.000Z",
       expectedSession: session,

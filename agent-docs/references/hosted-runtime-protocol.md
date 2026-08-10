@@ -194,6 +194,25 @@ The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
 runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint.
+When replacement observes an inactive runtime fence, the `UserRunner` checks
+the durable current snapshot-upload session before clearing that fence. An
+exact attempt-and-generation match gets a one-second retry only while its
+runtime-owned heartbeat is less than 10 seconds old and no completion marker is
+present. The snapshot-session handshake has one six-second total deadline; the
+runtime starts its first heartbeat immediately after that response, then keeps
+serialized heartbeat attempts on a two-second start-to-start cadence for the
+full publication. This leaves the two-second heartbeat request inside the
+10-second stale boundary. A successful foreground preemption bypasses handoff
+preservation and stops heartbeat liveness before detached session cleanup.
+After Web accepts the checkpoint, the runtime stops heartbeating and
+best-effort records completion; a failed marker falls back to stale-heartbeat
+expiry. Absent, mismatched, completed, or stale sessions do not delay
+replacement. This
+bridges the shutdown publication race without imposing a fixed snapshot
+deadline or turning the much longer orphan-cleanup lifetime into startup
+liveness. A dead runtime can defer replacement for the 10-second liveness
+window plus at most one additional retry interval (one second) after its final
+heartbeat.
 Plain-text Linq plus
 attachment-free Telegram and WhatsApp input does not initialize or import inbox
 projection. Linq input with link parts retains the existing projection path.

@@ -142,10 +142,22 @@ export class HostedUserRunner {
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
     });
     this.runtimeInvocation = runtimeInvocation;
+    this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
+      bucket,
+      runnerStoreCache: this.runnerStoreCache,
+      state,
+      stateStore: this.stateStore,
+      assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
+        this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
+      },
+      readHostedWorkspaceFromWeb: async (userId) => await this.readHostedWorkspaceFromWeb(userId),
+    });
     const runtimeProcessing = new RuntimeProcessingController({
       env,
       invocationService: runtimeInvocation,
       runnerContainerNamespace,
+      readCheckpointHandoff: async (input) =>
+        await this.workspaceSnapshotSessions.readCurrentOwnerHandoff(input),
       runnerRuntimeEnvSource,
       runtimeRetryAnalytics,
       stateStore: this.stateStore,
@@ -158,16 +170,6 @@ export class HostedUserRunner {
       state,
       stateStore: this.stateStore,
     };
-    this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
-      bucket,
-      runnerStoreCache: this.runnerStoreCache,
-      state,
-      stateStore: this.stateStore,
-      assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
-        this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
-      },
-      readHostedWorkspaceFromWeb: async (userId) => await this.readHostedWorkspaceFromWeb(userId),
-    });
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {
@@ -479,6 +481,24 @@ export class HostedUserRunner {
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession | null> {
     return await this.workspaceSnapshotSessions.create(input);
+  }
+
+  async heartbeatHostedWorkspaceSnapshotUploadSession(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.heartbeatCurrentOwner(input);
+  }
+
+  async completeHostedWorkspaceSnapshotUploadSession(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.completeCurrentOwner(input);
   }
 
   async rememberHostedWorkspaceSnapshotReplacedRef(input: {

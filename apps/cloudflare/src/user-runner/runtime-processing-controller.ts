@@ -19,6 +19,9 @@ import {
   type HostedExecutionContainerNamespaceLike,
 } from "../runner-container.js";
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS,
+} from "../workspace-snapshot-store.ts";
+import {
   readHostedRunnerContainerIdentity,
   resolveHostedExecutionRunnerContainerName,
 } from "../hosted-runner-container-identity.js";
@@ -153,6 +156,14 @@ export class RuntimeProcessingController {
       env: HostedExecutionEnvironment;
       invocationService: RuntimeInvocationService;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
+      readCheckpointHandoff?: (input: {
+        attemptId: string;
+        leaseGeneration: string;
+        userId: string;
+      }) => Promise<{
+        completedAt: string | null;
+        heartbeatAt: string;
+      } | null>;
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
       runtimeRetryAnalytics?: WorkerAnalyticsEngineDatasetLike | null;
       stateStore: RunnerStateStore;
@@ -520,6 +531,7 @@ export class RuntimeProcessingController {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     input: RuntimeProcessingInput;
+    preserveCheckpointHandoff?: boolean;
     preserveStartingFence?: boolean;
     record: RunnerStateRecord;
     replacedStaleFence?: boolean;
@@ -532,6 +544,16 @@ export class RuntimeProcessingController {
     ) {
       return this.createRetryLater({
         reason: "starting_fence_preserved",
+        userId: input.input.userId,
+      });
+    }
+
+    if (
+      input.preserveCheckpointHandoff !== false
+      && await this.hasLiveCheckpointHandoff(activeFence, record.userId)
+    ) {
+      return this.createRetryLater({
+        reason: "checkpoint_handoff_pending",
         userId: input.input.userId,
       });
     }
@@ -606,6 +628,7 @@ export class RuntimeProcessingController {
       activeFence,
       commandBudget: input.commandBudget,
       input: input.input,
+      preserveCheckpointHandoff: false,
       preserveStartingFence: false,
       record,
       replacedStaleFence: false,
@@ -1239,6 +1262,31 @@ export class RuntimeProcessingController {
       return false;
     }
     return Date.now() - startedAtMs < RUNTIME_PROCESSING_STARTUP_GRACE_MS;
+  }
+
+  private async hasLiveCheckpointHandoff(
+    fence: NonNullable<RunnerStateRecord["writeFence"]>,
+    userId: string,
+  ): Promise<boolean> {
+    const readHandoff = this.input.readCheckpointHandoff;
+    if (!readHandoff) {
+      return false;
+    }
+    const handoff = await readHandoff({
+      attemptId: fence.attemptId,
+      leaseGeneration: String(fence.generation),
+      userId,
+    });
+    if (!handoff || handoff.completedAt !== null) {
+      return false;
+    }
+    const heartbeatAtMs = Date.parse(handoff.heartbeatAt);
+    if (!Number.isFinite(heartbeatAtMs)) {
+      return false;
+    }
+    const ageMs = Date.now() - heartbeatAtMs;
+    return ageMs >= 0
+      && ageMs < HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS;
   }
 }
 
