@@ -515,6 +515,7 @@ describe("changelog registry", () => {
       {
         id: "2026-08-09",
         itemIds: [
+          "group-sleep-challenges-use-fresh-data",
           "public-referral-home",
           "murph-max-plan",
           "generated-contact-card-avatar",

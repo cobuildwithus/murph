@@ -205,10 +205,31 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   if (missing.length === 0) {
     return new Map();
   }
-  return new Map(await Promise.all(missing.map(async (domain) => [
-    domain,
-    await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
-  ] as const)));
+  let firstError: unknown;
+  let hasError = false;
+  const settled = await Promise.allSettled(missing.map(async (domain) => {
+    try {
+      return [
+        domain,
+        await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
+      ] as const;
+    } catch (error) {
+      if (!hasError) {
+        firstError = error;
+        hasError = true;
+      }
+      throw error;
+    }
+  }));
+  if (hasError) {
+    throw firstError;
+  }
+  return new Map(settled.map((result) => {
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
+    return result.value;
+  }));
 }
 
 export async function provisionHostedCryptoDomainRootsForUser(input: {
@@ -419,6 +440,17 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
   }
 
   const scopedCache = getHostedDomainRootUnwrapCache();
+  const cachedBeforeMetadata = references.flatMap((reference) => {
+    const cached = scopedCache?.get(createHostedDomainRootReferenceKey(reference));
+    return cached ? [cached] : [];
+  });
+  if (cachedBeforeMetadata.length > 0) {
+    const settledCached = await Promise.allSettled(cachedBeforeMetadata);
+    const failedCached = settledCached.find((result) => result.status === "rejected");
+    if (failedCached) {
+      throw failedCached.reason;
+    }
+  }
   const cachedByKey = new Map(
     references.flatMap((reference) => {
       const key = createHostedDomainRootReferenceKey(reference);
@@ -430,27 +462,48 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
     !cachedByKey.has(createHostedDomainRootReferenceKey(reference))
   );
   const prisma = input.prisma ?? getPrisma();
-  const rows = uncachedReferences.length > 0
-    ? await readDecryptableHostedDomainRootEnvelopeRows({
-        prisma,
-        references: uncachedReferences,
-      })
-    : [];
+  let rows: HostedUserCryptoEnvelopeRow[];
+  try {
+    rows = uncachedReferences.length > 0
+      ? await readDecryptableHostedDomainRootEnvelopeRows({
+          prisma,
+          references: uncachedReferences,
+        })
+      : [];
+  } catch (error) {
+    retainHostedDomainRootReferenceFailure({
+      cache: scopedCache,
+      error,
+      references: uncachedReferences,
+      retain: input.retainFailureInScopedCache === true,
+    });
+    throw error;
+  }
   const rowsByKey = new Map(
     rows.map((row) => [createHostedDomainRootReferenceKey(row), row] as const),
   );
   const verifiedByKey = new Map<string, HostedDomainRootKeyEnvelopeV1>();
   for (const reference of uncachedReferences) {
-    const row = rowsByKey.get(createHostedDomainRootReferenceKey(reference));
-    if (!row) {
-      throw new HostedDomainRootEnvelopeUnavailableError({
-        domain: reference.domain,
+    try {
+      const row = rowsByKey.get(createHostedDomainRootReferenceKey(reference));
+      if (!row) {
+        throw new HostedDomainRootEnvelopeUnavailableError({
+          domain: reference.domain,
+        });
+      }
+      verifiedByKey.set(
+        createHostedDomainRootReferenceKey(reference),
+        await parseAssertAndVerifyEnvelope(row, reference),
+      );
+    } catch (error) {
+      retainHostedDomainRootReferenceFailure({
+        cache: scopedCache,
+        error,
+        references: [reference],
+        retain: input.retainFailureInScopedCache === true,
       });
+      throw error;
     }
-    verifiedByKey.set(
-      createHostedDomainRootReferenceKey(reference),
-      await parseAssertAndVerifyEnvelope(row, reference),
-    );
   }
 
   const unwrapped: UnwrappedHostedDomainRootReference[] = [];
@@ -513,6 +566,25 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
       root.rootKey.fill(0);
     }
     throw error;
+  }
+}
+
+function retainHostedDomainRootReferenceFailure(input: {
+  cache: ReturnType<typeof getHostedDomainRootUnwrapCache>;
+  error: unknown;
+  references: readonly HostedDomainRootReference[];
+  retain: boolean;
+}): void {
+  if (!input.cache || !input.retain || input.references.length === 0) {
+    return;
+  }
+  const rejected = Promise.reject<UnwrappedHostedDomainRoot>(input.error);
+  void rejected.catch(() => undefined);
+  for (const reference of input.references) {
+    const cacheKey = createHostedDomainRootReferenceKey(reference);
+    if (!input.cache.has(cacheKey)) {
+      input.cache.set(cacheKey, rejected);
+    }
   }
 }
 
