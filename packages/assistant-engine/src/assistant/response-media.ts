@@ -157,7 +157,7 @@ function matchesAssistantGeneratedImageDeliveryIntentMedia(
 
 export function hasAssistantOutboxDeliveryEvidence(
   intent: AssistantOutboxIntent,
-  allowRetryable = false,
+  allowAcceptedNonSentMedia = false,
 ): boolean {
   const delivery = intent.delivery
   if (
@@ -170,20 +170,24 @@ export function hasAssistantOutboxDeliveryEvidence(
     return true
   }
   if (
-    !allowRetryable ||
-    intent.status !== 'retryable' ||
+    !allowAcceptedNonSentMedia ||
+    (
+      intent.status !== 'retryable' &&
+      intent.status !== 'sending' &&
+      intent.status !== 'failed'
+    ) ||
     intent.deliveryConfirmationPending ||
     delivery.channel !== 'linq'
   ) {
     return false
   }
-  return (delivery.providerMessageEffects ?? []).some((effect) =>
+  return (delivery.providerMessageEffects ?? []).filter((effect) =>
     effect.carriesIntentMedia === true &&
     (
       effect.providerMessageId === delivery.providerMessageId ||
       delivery.providerMessageIds?.includes(effect.providerMessageId) === true
     )
-  )
+  ).length === 1
 }
 
 export function renderAssistantGeneratedImageDeliveryHistoryText(

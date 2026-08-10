@@ -1234,7 +1234,16 @@ describe('assistant auto-reply event-first path', () => {
     expect(linkPrompt).not.toContain('linq-msg-generated-image-link')
   })
 
-  it('binds an accepted generated image while its rich-link sibling awaits retry', async () => {
+  it.each([
+    {
+      label: 'while its rich-link sibling awaits retry',
+      terminalRetry: false,
+    },
+    {
+      label: 'after its rich-link retry becomes terminal before reply scanning',
+      terminalRetry: true,
+    },
+  ])('binds an accepted generated image $label', async ({ terminalRetry }) => {
     const vault = await createTempVault()
     const media = {
       alt: 'Generated image',
@@ -1335,6 +1344,14 @@ describe('assistant auto-reply event-first path', () => {
         ) === true
         if (carriesMedia) {
           primaryIdempotencyKeys.push(idempotencyKey)
+          if (terminalRetry && primaryIdempotencyKeys.length > 1) {
+            return new Response(JSON.stringify({
+              error: 'Linq credential is no longer authorized',
+            }), {
+              headers: { 'Content-Type': 'application/json' },
+              status: 401,
+            })
+          }
           if (
             !acceptedPrimaryIds.has('linq-msg-retryable-generated-image-primary')
           ) {
@@ -1395,9 +1412,6 @@ describe('assistant auto-reply event-first path', () => {
     if (!nextAttemptAt) {
       throw new Error('expected retryable generated-image delivery wake time')
     }
-    const replyOccurredAt = new Date(
-      Date.parse(nextAttemptAt) - 1_000,
-    ).toISOString()
     const persistedPartial = await readAssistantOutboxIntent(vault, intent.intentId)
     if (!persistedPartial) {
       throw new Error('expected persisted retryable generated-image delivery')
@@ -1426,8 +1440,36 @@ describe('assistant auto-reply event-first path', () => {
       target: 'thread-1',
       turnId: 'turn-other-generated-avatar',
     })
+    let replyIntent = persistedPartial
+    let replyOccurredAt = new Date(
+      Date.parse(nextAttemptAt) - 1_000,
+    ).toISOString()
+    if (terminalRetry) {
+      const terminal = await dispatchAssistantOutboxIntent({
+        dependencies: { sendLinq },
+        intentId: intent.intentId,
+        now: new Date(nextAttemptAt),
+        vault,
+      })
+      expect(terminal.intent).toMatchObject({
+        delivery: {
+          providerMessageEffects: [{
+            carriesIntentMedia: true,
+            message: 'Generated image',
+            providerMessageId: 'linq-msg-retryable-generated-image-primary',
+          }],
+          providerMessageIds: ['linq-msg-retryable-generated-image-primary'],
+        },
+        deliveryConfirmationPending: false,
+        status: 'failed',
+      })
+      replyIntent = terminal.intent
+      replyOccurredAt = new Date(
+        Date.parse(nextAttemptAt) + 1_000,
+      ).toISOString()
+    }
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
-      persistedPartial,
+      replyIntent,
       otherDelivery,
     ])
 
@@ -1457,39 +1499,41 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain(otherMedia.sha256)
     expect(replyEventPathMocks.resolveAssistantSession).toHaveBeenCalled()
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
-
-    const recovered = await dispatchAssistantOutboxIntent({
-      dependencies: { sendLinq },
-      intentId: intent.intentId,
-      now: new Date(nextAttemptAt),
-      vault,
-    })
-    expect(recovered.intent.status).toBe('sent')
-    expect(recovered.intent.delivery).toMatchObject({
-      providerMessageEffects: [
-        {
-          carriesIntentMedia: true,
-          message: 'Generated image',
-          providerMessageId: 'linq-msg-retryable-generated-image-primary',
-        },
-        {
-          message: null,
-          providerMessageId: 'linq-msg-retryable-generated-image-link',
-        },
-      ],
-      providerMessageIds: [
-        'linq-msg-retryable-generated-image-primary',
-        'linq-msg-retryable-generated-image-link',
-      ],
-    })
+    if (!terminalRetry) {
+      const recovered = await dispatchAssistantOutboxIntent({
+        dependencies: { sendLinq },
+        intentId: intent.intentId,
+        now: new Date(nextAttemptAt),
+        vault,
+      })
+      expect(recovered.intent.status).toBe('sent')
+      expect(recovered.intent.delivery).toMatchObject({
+        providerMessageEffects: [
+          {
+            carriesIntentMedia: true,
+            message: 'Generated image',
+            providerMessageId: 'linq-msg-retryable-generated-image-primary',
+          },
+          {
+            message: null,
+            providerMessageId: 'linq-msg-retryable-generated-image-link',
+          },
+        ],
+        providerMessageIds: [
+          'linq-msg-retryable-generated-image-primary',
+          'linq-msg-retryable-generated-image-link',
+        ],
+      })
+    }
     expect(acceptedPrimaryIds).toEqual(
       new Set(['linq-msg-retryable-generated-image-primary']),
     )
     expect(primaryAcceptanceCount).toBe(1)
     expect(primaryIdempotencyKeys).toHaveLength(2)
     expect(new Set(primaryIdempotencyKeys).size).toBe(1)
-    expect(linkIdempotencyKeys).toHaveLength(4)
+    expect(linkIdempotencyKeys).toHaveLength(terminalRetry ? 3 : 4)
     expect(new Set(linkIdempotencyKeys).size).toBe(1)
+    expect(attachmentCount).toBe(2)
     expect(loadVaultImage).toHaveBeenCalledTimes(2)
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
@@ -1498,16 +1542,52 @@ describe('assistant auto-reply event-first path', () => {
     {
       carriesIntentMedia: false,
       deliveryConfirmationPending: false,
+      duplicateEffect: false,
+      effectProviderMessageId: 'linq-msg-unattested-retryable-avatar',
       label: 'has no exact media-owner effect',
+      status: 'retryable' as const,
     },
     {
       carriesIntentMedia: true,
       deliveryConfirmationPending: true,
+      duplicateEffect: false,
+      effectProviderMessageId: 'linq-msg-unattested-retryable-avatar',
       label: 'still awaits ambiguous-delivery confirmation',
+      status: 'retryable' as const,
+    },
+    {
+      carriesIntentMedia: true,
+      deliveryConfirmationPending: false,
+      duplicateEffect: false,
+      effectProviderMessageId: 'linq-msg-unattested-retryable-avatar',
+      label: 'was abandoned',
+      status: 'abandoned' as const,
+    },
+    {
+      carriesIntentMedia: true,
+      deliveryConfirmationPending: false,
+      duplicateEffect: true,
+      effectProviderMessageId: 'linq-msg-unattested-retryable-avatar',
+      label: 'has duplicate media-owner effects',
+      status: 'failed' as const,
+    },
+    {
+      carriesIntentMedia: true,
+      deliveryConfirmationPending: false,
+      duplicateEffect: false,
+      effectProviderMessageId: 'linq-msg-unaccepted-retryable-avatar',
+      label: 'marks an unaccepted provider id',
+      status: 'failed' as const,
     },
   ])(
-    'does not admit a retryable Linq delivery that $label',
-    async ({ carriesIntentMedia, deliveryConfirmationPending }) => {
+    'does not admit a non-sent Linq delivery that $label',
+    async ({
+      carriesIntentMedia,
+      deliveryConfirmationPending,
+      duplicateEffect,
+      effectProviderMessageId,
+      status,
+    }) => {
       const vault = await createTempVault()
       const media = {
         alt: 'Generated image',
@@ -1524,11 +1604,14 @@ describe('assistant auto-reply event-first path', () => {
         intentId: 'intent-unattested-retryable-avatar',
         media: [media],
         message: 'Generated image',
-        providerMessageEffects: [{
-          ...(carriesIntentMedia ? { carriesIntentMedia: true as const } : {}),
-          message: 'Generated image',
-          providerMessageId: 'linq-msg-unattested-retryable-avatar',
-        }],
+        providerMessageEffects: Array.from(
+          { length: duplicateEffect ? 2 : 1 },
+          () => ({
+            ...(carriesIntentMedia ? { carriesIntentMedia: true as const } : {}),
+            message: 'Generated image',
+            providerMessageId: effectProviderMessageId,
+          }),
+        ),
         providerMessageId: 'linq-msg-unattested-retryable-avatar',
         sentAt: '2026-08-07T21:09:00.000Z',
         sessionId: 'session-unattested-retryable-avatar',
@@ -1537,7 +1620,7 @@ describe('assistant auto-reply event-first path', () => {
       replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([{
         ...sentShape,
         deliveryConfirmationPending,
-        status: 'retryable',
+        status,
       }])
 
       await processAssistantAutoReplyGroup({

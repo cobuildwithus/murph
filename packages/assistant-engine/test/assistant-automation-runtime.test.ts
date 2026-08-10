@@ -6865,6 +6865,40 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
+  it('settles due outbox state before refreshing and scanning foreground input', async () => {
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+    const inputSource: AssistantInputSource = {
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: true,
+        reason: 'ingested_input' as const,
+      })),
+    }
+
+    await runLoop.runAssistantAutomationPass({
+      inputSource,
+      requestId: 'request-outbox-before-foreground-scan',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.drainAssistantOutbox).toHaveBeenCalledOnce()
+    expect(runLoopMocks.drainAssistantOutbox.mock.invocationCallOrder[0]!)
+      .toBeLessThan(vi.mocked(inputSource.refresh).mock.invocationCallOrder[0]!)
+    expect(vi.mocked(inputSource.refresh).mock.invocationCallOrder[0]!)
+      .toBeLessThan(
+        runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0]!,
+      )
+  })
+
   it('uses an input-only scan limit without widening the pass work budget', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')

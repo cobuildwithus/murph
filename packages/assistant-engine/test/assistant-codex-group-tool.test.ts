@@ -4297,11 +4297,45 @@ describe("murph.group dynamic tool", () => {
       })).toBe(true);
       expect(resolveAssistantGeneratedImageDelivery({
         imageRef,
+        intents: [{ ...intent, delivery: delivered, status: "sending" }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(true);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
+        intents: [{ ...intent, delivery: delivered, status: "failed" }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(true);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
         intents: [{
           ...intent,
           delivery: delivered,
           deliveryConfirmationPending: true,
           status: "retryable",
+        }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
+        intents: [{ ...intent, delivery: delivered, status: "abandoned" }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: {
+            ...delivered,
+            providerMessageEffects: [
+              ...delivered.providerMessageEffects,
+              ...delivered.providerMessageEffects,
+            ],
+          },
+          status: "failed",
         }],
         sessionId,
         transcriptEntries,

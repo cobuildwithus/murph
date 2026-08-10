@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — ReviewGPT round 7 delivery-eligibility candidate
+Status: active — ReviewGPT round 8 accepted-delivery lifecycle candidate
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -326,3 +326,44 @@ Updated: 2026-08-10
   input is 29,953 / 138,855 versus 30,067 / 139,329 (-114 tokens, -0.3792%;
   -474 bytes, -0.3402%). The delta remains entirely tool/schema/generated
   guidance; assembled authored instructions are unchanged.
+- A fresh round-7 full snapshot was packaged at `a0f8d3044d` before the
+  independently running delivery-eligibility correction advanced the PR to
+  `960c898fb7`. The response therefore does not certify the current head, but
+  it returned one review-induced finding that parent inspection reproduced on
+  the current shared delivery-evidence predicate: an accepted Linq image effect
+  survives while its outbox intent becomes `sending` and then terminal
+  `failed`, yet the explicit native-reply reader and direct generated-ref avatar
+  gate discarded it because they admitted only `retryable` non-sent evidence.
+  The requested model was `gpt-5.6-sol`; wrapper verification observed
+  `gpt-5-6-pro`. The response ended `ROUND_OUTCOME: FINDINGS`.
+- The required repeated-mechanism retrospective was recorded before
+  remediation at https://github.com/cobuildwithus/murph/pull/1533#issuecomment-5240669791.
+  It retains the existing outbox as the sole physical-delivery owner and rejects
+  a new state machine, schema, queue, lifecycle, reconciliation pass,
+  compatibility path, or positional inference.
+- Focused proof failed before the correction in both affected consumers. The
+  production-shaped native-reply case accepted the primary image, exhausted all
+  three transient link attempts, retried at `nextAttemptAt`, received a terminal
+  primary response, persisted `failed` with the original exact provider ID and
+  marked media effect, then lost the ref/hash when the accepted native reply was
+  scanned. Direct generated-ref avatar eligibility likewise rejected the same
+  retained effect in `sending` and `failed`.
+- The correction broadens only the existing opt-in physical-evidence predicate:
+  `retryable`, `sending`, and `failed` qualify when confirmation is not pending,
+  the delivery is Linq, and exactly one accepted provider effect carries intent
+  media. `pending`, `awaiting_approval`, `abandoned`, missing delivery,
+  confirmation-pending, unmarked, duplicate-owner, unknown-ID, and adjacent
+  sibling shapes fail closed. Sent delivery remains unchanged, and generic
+  outbox readers remain sent-only.
+- The image/link regression now retains both pre-retry convergence and the
+  terminal-before-reply-scan ordering. Both reuse the same primary/link
+  idempotency keys, accept the primary only once, keep the link sibling
+  unmarked, select only the replied image when another generated capture exists,
+  and never replay the inbound input. A run-loop assertion proves due outbox
+  work settles before foreground refresh and scan; the group boundary exercises
+  the same shared evidence across `sending`, `failed`, and negative states.
+- Seven affected Assistant Engine files pass 499 tests and package typecheck
+  passes. The 42-test runner bundle-policy file passes. Exact hosted-local
+  assembly passes without a ratchet change at 8,999,924-byte vault CLI total,
+  1,659,616-byte runner entry, 8,019,965-byte static closure, and 9,997,465-byte
+  runner total.
