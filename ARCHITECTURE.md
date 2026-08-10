@@ -896,15 +896,42 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   usage-bearing work is denied only when included capacity and generic usage
   credit are both exhausted; the crossing operation may finish, and accepted
   input remains durable and pending. Included capacity is consumed before
-  carryover credit. Credit entries, their remaining projections, and the
-  compact balance/version projection serialize under the beneficiary member
-  while base allowance stays separate. Purchase and referral producers share
-  that immutable ledger; only purchase-backed entries participate in Stripe
-  refund/dispute reversal, while earned referral rewards are final. Web derives
-  Settings and read-only `murph.plan_usage` from that same owner without
-  persisting a forecast or granting runtime billing authority; synthetic
-  thread containers receive a bounded unavailable result rather than personal
-  plan facts.
+  carryover credit. The beneficiary row lock is the sole serialization point
+  for usage-credit grants, purchase reservations, debits, projection
+  adjustments, the compact balance/version projection, and relevant
+  checkout/refill admission; base allowance remains separate. An admission
+  path that also locks a distinct payer takes the beneficiary lock first. A
+  beneficiary may occupy at most 32 grant slots: a positive active grant
+  projection or an unfulfilled purchase whose provider-final release marker,
+  `grantSlotReleasedAt`, is null. Every shared capacity inspection reads at most
+  33 combined occupied rows; a 33rd fails closed as overflow. Grant projections
+  carry immutable beneficiary/FIFO identity behind a partial active-grant index,
+  and unfulfilled reservations have a matching partial beneficiary index, so
+  those bounded reads do not scan zero-balance or terminal history. At the boundary,
+  purchase fulfillment may replace only its exact reservation; an unreserved
+  grant is rejected. Settlement similarly locks and inspects at most 33
+  positive grants, rejects more than 32, and computes FIFO allocation with
+  window sums. The same data-modifying SQL statement updates affected grant and
+  purchase projections set-wise, updates the beneficiary projection once, and
+  inserts every debit.
+  Replay reads at most 33 debit rows and rejects more than 32 before bounded
+  validation. Refund and dispute convergence performs one final shared capacity
+  inspection after all signed adjustments; crossing the slot boundary rolls the
+  transaction back before the Stripe receipt binds so its existing retry owner
+  can replay. Purchase and referral producers share that immutable ledger; only
+  purchase-backed entries participate in Stripe refund/dispute reversal, while
+  earned referral rewards are final. Web derives Settings and read-only
+  `murph.plan_usage` from that same owner without persisting a forecast or
+  granting runtime billing authority; synthetic thread containers receive a
+  bounded unavailable result rather than personal plan facts.
+
+  A genuinely new personal, Family, or group purchase that reaches the 32-slot
+  boundary returns the distinct `HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT` HTTP 409;
+  true eligibility failures remain 403 and exact purchase replay resolves before
+  capacity admission. Group funding preflights that serialized capacity before
+  Customer preparation, then revalidates after preparation before reserving a
+  slot. The shared top-up dialog maps only that exact code to a truthful temporary
+  block with no alternate-amount suggestion.
 
   Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
   one-time offers. Hosted-group funding keeps the same purchase owner and
@@ -913,8 +940,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   ordinary $5 usage-credit purchase available at any current group-capacity
   state. Later purchases are deterministic exact-$5 `HostedUsageCreditPurchase`
   rows admitted only at the existing beneficiary-serialized
-  settlement/capacity seam when capacity is low or exhausted. The
-  authorization stores status, selected cap, and anchored period only; fulfilled
+  settlement/capacity seam when capacity is low or exhausted. Ordinary
+  automatic refill admission returns no refill at 32 occupied slots; overflow
+  is an invariant failure. The authorization stores status, selected cap, and
+  anchored period only; fulfilled
   plus pending purchases derive the current-period commitment, while
   `HostedUsageCreditEntry` remains the sole balance and carries unused credit
   across sponsorship periods. A partial unique database index permits only one
