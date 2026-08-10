@@ -41,7 +41,7 @@ describe("hosted usage-credit offer catalog", () => {
     ]);
   });
 
-  it("keeps dollar amounts as cost-weighted credit without a message conversion", () => {
+  it("keeps dollar amounts exact without a message conversion", () => {
     const source = String.raw`${getHostedUsageCreditOfferDefinition}`;
     expect(source).not.toContain("message");
     expect(source).not.toContain("0.05");
