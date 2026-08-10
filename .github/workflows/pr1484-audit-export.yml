@@ -82,21 +82,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm -C apps/web exec vitest run --config vitest.config.ts --no-coverage \
-            test/device-provider-application-crypto.test.ts \
-            test/device-provider-application-ingress-store.test.ts \
-            test/device-provider-application-store.test.ts \
-            test/device-provider-application-types.test.ts \
-            test/device-sync-hosted-runtime-authority.test.ts \
-            test/device-sync-internal-runtime.test.ts \
-            test/device-sync-providers.test.ts \
-            test/hosted-account-data-service.test.ts \
-            test/prisma-store-oauth-connection.test.ts \
-            test/prisma-store-oauth-sessions.test.ts
-          pnpm -C packages/device-syncd exec vitest run --config vitest.config.ts --no-coverage \
-            test/config.test.ts test/hosted-runtime.test.ts
-          pnpm -C packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage \
-            test/hosted-runtime-device-sync-provider-configs.test.ts
+          pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage \
+            apps/web/test/device-provider-application-crypto.test.ts \
+            apps/web/test/device-provider-application-ingress-store.test.ts \
+            apps/web/test/device-provider-application-store.test.ts \
+            apps/web/test/device-provider-application-types.test.ts \
+            apps/web/test/device-sync-hosted-runtime-authority.test.ts \
+            apps/web/test/device-sync-internal-runtime.test.ts \
+            apps/web/test/device-sync-providers.test.ts \
+            apps/web/test/hosted-account-data-service.test.ts \
+            apps/web/test/prisma-store-oauth-connection.test.ts \
+            apps/web/test/prisma-store-oauth-sessions.test.ts
+          pnpm exec vitest run --config packages/device-syncd/vitest.config.ts --no-coverage \
+            packages/device-syncd/test/config.test.ts \
+            packages/device-syncd/test/hosted-runtime.test.ts
+          pnpm exec vitest run --config packages/assistant-runtime/vitest.config.ts --no-coverage \
+            packages/assistant-runtime/test/hosted-runtime-device-sync-provider-configs.test.ts
 
       - name: Run repository smoke checks
         working-directory: target
