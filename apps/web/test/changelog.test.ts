@@ -432,6 +432,16 @@ describe("changelog registry", () => {
       sourcePullRequests: [1312],
       details: expect.stringContaining("partial-totals marker"),
     });
+    const healthConsent = items.get("health-consent-actions-clarified");
+    expect(healthConsent).toMatchObject({
+      sourcePullRequests: [1338, 1339, 1350],
+      summary: expect.stringContaining(
+        "Deep sleep and REM sleep now each use one clear permission",
+      ),
+    });
+    expect(healthConsent?.summary).not.toContain(
+      "sleep sharing uses one understandable permission",
+    );
     expect(items.get("maintenance-without-global-pause")).toMatchObject({
       sourcePullRequests: [1318],
       details: expect.stringContaining("Messages already received remain available"),

@@ -65,6 +65,11 @@ retry or reconciliation behavior through their production owners. A tool that
 is available in a current private conversation is not automatically available
 to scheduled work, groups, another channel, or a detached continuation.
 
+For consent claims, trace every independently selectable scope through the
+production consent owner. A simpler choice inside one scope does not merge it
+with another scope. Name separate member-facing permissions explicitly when
+the product still lets a member approve them independently.
+
 ## 3. Shape editions around member outcomes
 
 Use one dated `ChangelogEdition` per release day. Preserve stable edition IDs,
@@ -124,11 +129,12 @@ Visual rules:
 - Show the real interaction contract. Do not create decorative stock art or an
   aspirational screen that the product does not have.
 - Keep route capability, authentication semantics, health-data ownership,
-  reward ownership, and connection status with their existing production
-  owners. A source PR is provenance, not an authority for duplicating live
-  state in a fixture. Reuse canonical product data or components, or add a
-  focused contract assertion against the owner. If neither is simple, delete
-  the visual and let accurate prose carry the release note.
+  consent scope, reward ownership, and connection status with their existing
+  production owners. A source PR is provenance, not an authority for
+  duplicating live state in a fixture. Reuse canonical product data or
+  components, or add a focused contract assertion against the owner. If
+  neither is simple, delete the visual and let accurate prose carry the
+  release note.
 - Never give a guide-only integration a connected, syncing, disconnected, or
   reconnect state. Never use a generic action visual for a channel-specific
   capability unless the action is mechanically limited to that channel.
@@ -203,6 +209,7 @@ reason such as "not needed."
 - Every claim is supported by shipped code, tests, and the owning contract.
 - Scheduled and asynchronous claims match the exact invocation scope, route,
   audience, current-input requirement, destination, and recovery contract.
+- Consent claims preserve every independently selectable production scope.
 - Every source PR is present, with no unmerged or unrelated PRs.
 - Copy describes outcomes, limits, and recovery without internal leakage.
 - Visual facts are derived from or mechanically checked against their existing

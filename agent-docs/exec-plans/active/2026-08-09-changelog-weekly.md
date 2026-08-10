@@ -146,6 +146,12 @@ Updated: 2026-08-10
   route-safe scheduled tools, same-turn bounded group calls, and current-private
   connected email. Focused registry and render assertions reject the old
   scheduled-email claims.
+- Final ReviewGPT round 5 verified every prior correction, then found one
+  separate consent-copy overclaim: the sleep entry said all sleep sharing used
+  one permission even though production keeps Deep sleep and REM sleep
+  independently selectable. Reworded the item to name both permissions and
+  clarify that source details were folded into each stage's own choice. Added
+  focused registry coverage against the collapsed-consent claim.
 
 ## Decisions
 
@@ -192,6 +198,10 @@ Updated: 2026-08-10
   current-input requirement, final destination, and retry or reconciliation
   behavior. Ordinary private-turn tool availability never implies scheduled or
   cross-channel availability.
+- Extended the owner gate after round 5 so a simpler choice inside one consent
+  scope cannot be described as merging independently selectable permissions.
+  Changelog claims must name those member-facing scopes explicitly when the
+  product still lets a member approve them separately.
 
 ## Verification
 
@@ -219,6 +229,6 @@ Updated: 2026-08-10
   referral-beneficiary phrases were absent. The refreshed scheduled-call card
   captures were inspected and uploaded through the lossless design-proof
   variant.
-- Pending: commit and push the round-4 correction, refresh exact-head visual
-  and CI proof, complete final ReviewGPT round 5, confirm merge readiness, and
-  close this plan.
+- Pending: commit and push the round-5 consent correction, complete final
+  ReviewGPT round 6, confirm exact-head CI and merge readiness, and close this
+  plan.

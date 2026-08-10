@@ -632,7 +632,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Health-data choices are easier to distinguish",
         summary:
-          "Settings now gives health-data consent actions a clearer hierarchy, and sleep sharing uses one understandable permission instead of separate stage-specific choices.",
+          "Settings now gives health-data consent actions a clearer hierarchy. Deep sleep and REM sleep now each use one clear permission, with source details included in that stage's choice instead of appearing as a second version.",
         details:
           "Pausing processing remains distinct from export or account deletion. The app keeps the consequence visible before a change and does not hide the recovery action when processing is paused.",
         relevanceTags: ["consent", "health-data", "settings", "sleep"],
