@@ -167,11 +167,18 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Adding the personalized generated contact card puts its request contract,
 // exact-shape parser, direct route resolution, and acknowledgement handling in
 // the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
-// on 2026-08-09; startup entry and static closure are unchanged, so ratchet
-// only the total ceiling and keep both startup baselines and all tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_887_441 + 32_768;
+// on 2026-08-09; startup entry and static closure are unchanged.
+//
+// Restoring the existing local Telegram voice/song descriptor path reuses the
+// previously public ElevenLabs configuration resolver without adding provider
+// I/O or a forbidden boot input. Exact ubuntu assembly measured 9,930,356B on
+// 2026-08-09. The paired private assembly measured a 7,982,854B static closure
+// after composing the public Telegram path with the private Linq adapter.
+// Ratchet those two ceilings and retain the established allowances; entry
+// startup ownership is unchanged.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_930_356 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_982_854;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

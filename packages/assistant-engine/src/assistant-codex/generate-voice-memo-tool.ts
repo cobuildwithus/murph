@@ -5,19 +5,26 @@ import {
   type AssistantVoiceOptionId,
 } from '@murphai/contracts'
 import {
+  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
+} from '@murphai/hosted-execution/runtime-control'
+import {
   assistantVoiceMemoMusicModelId,
   assistantVoiceMemoMusicOutputFormat,
   assistantVoiceMemoSpeechOutputFormat,
   type AssistantResponseMedia,
   type AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  resolveElevenLabsApiKey,
+  resolveElevenLabsModelId,
+  resolveElevenLabsVoiceId,
+} from '@murphai/operator-config/elevenlabs-runtime'
 import { describeVaultCliFailure } from '@murphai/operator-config/vault-cli-errors'
 
 import { normalizeNullableString } from '../assistant/shared.js'
+import { createManagedLinqVoiceMemoRuntimeFromEnv } from './managed-voice-memo-runtime.js'
 
-export {
-  createVoiceMemoToolRuntimeFromEnv,
-} from './managed-voice-memo-runtime.js'
+export { createManagedLinqVoiceMemoRuntimeFromEnv }
 
 export interface GenerateVoiceMemoToolArgs {
   text: string
@@ -88,6 +95,35 @@ export type VoiceMemoToolRuntime =
       }): Promise<VoiceMemoToolRuntimeResult>
       kind: 'linq'
     }
+
+export function createVoiceMemoToolRuntimeFromEnv(input: {
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  preferredVoiceId?: string | null
+  publicFetchImpl?: typeof fetch | null
+  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
+}): VoiceMemoToolRuntime | null {
+  if (input.voiceMemoDeliveryChannel === 'linq') {
+    return createManagedLinqVoiceMemoRuntimeFromEnv(input)
+  }
+  if (input.voiceMemoDeliveryChannel !== 'telegram') {
+    return null
+  }
+
+  const defaultVoiceId = resolveElevenLabsVoiceId(input.env)
+  return {
+    elevenLabs: {
+      apiKeyAvailable: resolveElevenLabsApiKey(input.env) !== null,
+      defaultVoiceId,
+      modelId: normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
+        resolveElevenLabsModelId(input.env),
+      ),
+      voiceId:
+        normalizeNullableString(input.preferredVoiceId) ?? defaultVoiceId,
+    },
+    kind: 'telegram',
+  }
+}
 
 export async function executeGenerateVoiceMemoTool(input: {
   abortSignal?: AbortSignal | null
