@@ -1,0 +1,146 @@
+name: Publish focused device-sync dirty candidate
+
+on:
+  push:
+    branches:
+      - agent/device-sync-dirty-publish-focused
+    paths:
+      - .github/workflows/agent-device-sync-dirty-publish-focused.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Assemble candidate
+        id: candidate
+        shell: bash
+        env:
+          WORKFLOW_HEAD: ${{ github.sha }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          git fetch origin main "$TARGET_BRANCH"
+          expected_target="$(git rev-parse "origin/$TARGET_BRANCH")"
+          echo "expected_target=$expected_target" >> "$GITHUB_OUTPUT"
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+
+          mapfile -t chunks < <(find .agent -maxdepth 1 -type f -name 'device-sync-dirty.patch.b64.*' -print 2>/dev/null | sort)
+          if (( ${#chunks[@]} > 0 )); then
+            cat "${chunks[@]}" | base64 --decode > /tmp/device-sync-dirty.patch
+            test -s /tmp/device-sync-dirty.patch
+            git checkout --detach origin/main
+            git apply --3way --index /tmp/device-sync-dirty.patch
+            git diff --cached --check
+            git commit -m "fix(device-sync): persist dirty payload credential authority"
+          else
+            git checkout --detach "${WORKFLOW_HEAD}^"
+            git rebase origin/main
+          fi
+
+          git diff --check origin/main...HEAD
+          test -z "$(git status --porcelain)"
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git diff --name-status origin/main...HEAD
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Verify focused behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run \
+            --config apps/web/vitest.workspace.ts \
+            --no-coverage \
+            apps/web/test/prisma-store-dirty-connections.test.ts \
+            apps/web/test/prisma-store-oauth-connection.test.ts
+          pnpm --dir apps/web typecheck
+          git diff --check origin/main...HEAD
+          ! git diff --name-only origin/main...HEAD | grep -E '^\.agent/|^\.github/workflows/agent-' >/dev/null
+
+      - name: Publish
+        shell: bash
+        env:
+          EXPECTED_TARGET: ${{ steps.candidate.outputs.expected_target }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          git push \
+            --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_TARGET}" \
+            origin "HEAD:refs/heads/${TARGET_BRANCH}"
+
+      - name: Open pull request
+        id: pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$TARGET_BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+          cat > /tmp/body.md <<'EOF'
+          ## Why
+
+          Reconnect cleanup previously decrypted and dynamically classified retained dirty payloads while holding the dirty-marker row lock. This change moves that work outside the database critical section and persists the server-derived authority needed for later cleanup.
+
+          ## Change
+
+          - Store `credentialIndependent` with each new encrypted dirty payload.
+          - Prepare classification, compression, and encryption before dirty-state transaction admission.
+          - Backfill nullable mixed-version payload rows outside the reconnect marker lock in bounded batches.
+          - Fail closed if any nullable row remains, then perform only database work while holding the marker lock.
+          - Delete only credential-scoped rows on reconnect and preserve credential-independent import carriers.
+          - Bound unique-conflict recovery instead of recursively retrying without a ceiling.
+
+          ## Architecture
+
+          The existing dirty marker and encrypted payload table remain the only durable owners. No new queue, service, state machine, compatibility table, provider-specific persistence path, or cleanup lifecycle is introduced.
+
+          ## Verification
+
+          The publication lane passed the focused dirty-connection and OAuth/reconnect suites, hosted Web typecheck, and diff hygiene on the exact pushed candidate. Full exact-head repository CI runs on this PR.
+
+          Do not merge as part of this task.
+          EOF
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --repo "$GITHUB_REPOSITORY" \
+              --title "Persist device-sync dirty payload credential authority" \
+              --body-file /tmp/body.md
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
+          else
+            url="$(gh pr create --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$TARGET_BRANCH" \
+              --title "Persist device-sync dirty payload credential authority" \
+              --body-file /tmp/body.md)"
+            echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment verification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.candidate.outputs.head }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Published \`$HEAD_SHA\` after focused dirty/reconnect regression tests, hosted Web typecheck, and diff hygiene. Full PR CI is the remaining gate. No merge was performed."
