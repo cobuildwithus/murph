@@ -955,7 +955,6 @@ async function processClaimedHostedStripeEvent(
       await cleanupHostedFamilySponsoredDirectSubscription({
         memberId: processingMemberId,
         prisma,
-        refundCheckoutPayment: stripeEvent.type === "invoice.paid",
         sourceEventId: `${claimed.eventId}:family-sponsored-cleanup`,
         subscriptionId: result.cleanupFamilySponsoredStripeSubscriptionId,
       });
@@ -965,7 +964,6 @@ async function processClaimedHostedStripeEvent(
         checkoutSessionId: result.cleanupFamilySponsoredCheckout.checkoutSessionId,
         memberId: processingMemberId,
         prisma,
-        refundCheckoutPayment: true,
         sourceEventId: `${claimed.eventId}:family-sponsored-checkout-cleanup`,
         subscriptionId: result.cleanupFamilySponsoredCheckout.subscriptionId,
       });

@@ -3098,6 +3098,10 @@ async function callHostedFamilyDirectPaidStripeOperation<T>(
 }
 
 export async function updateHostedFamilyPlanCapacities(input: {
+  autoSeatInviteTarget?: {
+    targetEmail?: string | null;
+    targetPhoneNumber?: string | null;
+  };
   groupId: string;
   now?: Date;
   ownerMemberId: string;
@@ -3112,6 +3116,27 @@ export async function updateHostedFamilyPlanCapacities(input: {
       code: "HOSTED_FAMILY_CAPACITY_INVALID",
       httpStatus: 400,
       message: "Family capacity must contain 2 to 6 total seats.",
+    });
+  }
+  const autoSeatInviteTarget = input.autoSeatInviteTarget
+    ? {
+        emailLookupCandidates: createHostedEmailLookupKeyReadCandidates(
+          normalizeHostedEmailAddress(input.autoSeatInviteTarget.targetEmail),
+        ),
+        phoneLookupCandidates: createHostedPhoneLookupKeyReadCandidates(
+          normalizePhoneNumber(input.autoSeatInviteTarget.targetPhoneNumber),
+        ),
+      }
+    : null;
+  if (
+    autoSeatInviteTarget
+    && autoSeatInviteTarget.emailLookupCandidates.length === 0
+    && autoSeatInviteTarget.phoneLookupCandidates.length === 0
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_TARGET_REQUIRED",
+      httpStatus: 400,
+      message: "A paid automatic seat requires a valid phone number or email target.",
     });
   }
 
@@ -3197,6 +3222,16 @@ export async function updateHostedFamilyPlanCapacities(input: {
           code: "HOSTED_FAMILY_CAPACITY_BELOW_USAGE",
           httpStatus: 409,
           message: "Family capacity cannot be reduced below assigned members and pending invites.",
+        });
+      }
+      if (autoSeatInviteTarget) {
+        // The verified contact is authority for this automatic paid increase,
+        // so repeat its membership proof under the same owner lock immediately
+        // before Stripe. Earlier invite transactions can become stale.
+        await assertHostedFamilyInviteTargetNotActiveMemberTx({
+          ...autoSeatInviteTarget,
+          groupId: group.id,
+          tx,
         });
       }
       await updateHostedFamilyStripeCapacitiesUnderOwnerLock({

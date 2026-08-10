@@ -7337,6 +7337,63 @@ describe("hosted Family plan", () => {
     expect(nextServerMocks.after).not.toHaveBeenCalled();
   });
 
+  it("revalidates an automatic-seat invite target under the capacity owner lock", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+      { memberId: "member_target", planCode: "pulse" },
+    ]);
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "hbagm_target" });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(updateHostedFamilyPlanCapacities({
+      autoSeatInviteTarget: {
+        targetEmail: "target@example.test",
+        targetPhoneNumber: null,
+      },
+      groupId: "hbag_family",
+      now: new Date("2026-08-10T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetCapacities: { edge: 0, max: 0, pulse: 3 },
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_IN_GROUP",
+    });
+
+    expect(tx.hostedAccountGroupMembership.findFirst).toHaveBeenLastCalledWith({
+      select: { id: true },
+      where: {
+        groupId: "hbag_family",
+        member: {
+          OR: [
+            {
+              emailAuthorization: {
+                verifiedEmailLookupKey: {
+                  in: expect.arrayContaining([
+                    expect.stringMatching(/^hbidx:email:/u),
+                  ]),
+                },
+                verifiedEmailVerifiedAt: { not: null },
+              },
+            },
+          ],
+        },
+        status: "active",
+      },
+    });
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+  });
+
   it("lets an active Family owner with a separate direct trial add capacity", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,

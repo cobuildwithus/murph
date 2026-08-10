@@ -477,10 +477,18 @@ it has been explicitly elevated to a cross-cutting invariant.
   canceled or refunded only while holding the Family owner lock before the
   sponsored-member lock and re-proving the exact active membership, paid local
   Family binding, provider-current active Family subscription identity, and
-  direct-subscription ownership. If Family authority changes first or Stripe no
-  longer confirms that exact Family authority, the receipt remains retryable
-  and a pending Checkout attempt remains available for replay as the member's
-  direct subscription.
+  direct-subscription ownership. The first event that proves those facts owns
+  the complete exact loser cleanup: it must inspect the ordinary invoice/payment
+  shape, refund a proven payment or prove zero payment, and only then terminalize
+  local direct billing. It must not split cancellation and refund ownership
+  across event types. If Family authority changes first or Stripe no longer
+  confirms that exact Family authority, the receipt remains retryable and a
+  pending Checkout attempt remains available for replay as the member's direct
+  subscription.
+- A Family invitation may automatically purchase capacity only for a normalized
+  verified phone or email target. The existing Family capacity owner must repeat
+  that target's active-membership check under its owner lock immediately before
+  Stripe; an earlier invite transaction is not purchase authority.
 - A live monthly group sponsorship is a payer authorization, not a Stripe
   subscription and not a message bundle. It stores only payer, beneficiary,
   status, $5/$10/$20 cap, and anchored period. Current-period committed spend is

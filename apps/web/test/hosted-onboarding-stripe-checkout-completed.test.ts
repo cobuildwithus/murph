@@ -925,7 +925,6 @@ describe("applyStripeCheckoutCompleted", () => {
       checkoutSessionId: "cs_123",
       memberId: "member_123",
       prisma: prisma as never,
-      refundCheckoutPayment: true,
       sourceEventId: "evt_checkout_cleanup_123",
       stripe: stripe as never,
       subscriptionId: "sub_superseded",
@@ -954,7 +953,7 @@ describe("applyStripeCheckoutCompleted", () => {
       .toHaveBeenCalledOnce();
   });
 
-  it("refunds once when invoice.paid arrives after Family cleanup canceled direct billing", async () => {
+  it("refunds on the first Family loser cleanup before sponsorship can disappear", async () => {
     const familyClaim = {
       groupId: "hbag_family",
       kind: "active_sponsorship" as const,
@@ -1078,13 +1077,16 @@ describe("applyStripeCheckoutCompleted", () => {
     await cleanupHostedFamilySponsoredDirectSubscription({
       memberId: "member_123",
       prisma: prisma as never,
-      refundCheckoutPayment: false,
       sourceEventId: "evt_subscription_first:family-sponsored-cleanup",
       stripe,
       subscriptionId: "sub_superseded",
     });
     expect(directSubscription.status).toBe("canceled");
-    expect(refundsCreate).not.toHaveBeenCalled();
+    expect(refundsCreate).toHaveBeenCalledOnce();
+
+    // Membership removal can commit after the first cleanup releases its locks.
+    // A delayed invoice event must not own the refund that is already complete.
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
 
     const lateInvoiceOutcome = await applyStripeInvoicePaid(
       paidInvoice,
@@ -1094,17 +1096,7 @@ describe("applyStripeCheckoutCompleted", () => {
       directSubscription,
     );
     expect(lateInvoiceOutcome.cleanupFamilySponsoredStripeSubscriptionId)
-      .toBe("sub_superseded");
-
-    await cleanupHostedFamilySponsoredDirectSubscription({
-      memberId: "member_123",
-      prisma: prisma as never,
-      refundCheckoutPayment: true,
-      sourceEventId: "evt_invoice_late:family-sponsored-cleanup",
-      stripe,
-      subscriptionId: "sub_superseded",
-    });
-    expect(refundsCreate).toHaveBeenCalledOnce();
+      .toBeUndefined();
 
     const replayOutcome = await applyStripeInvoicePaid(
       paidInvoice,
@@ -1113,18 +1105,9 @@ describe("applyStripeCheckoutCompleted", () => {
       HostedBillingStatus.canceled,
       directSubscription,
     );
-    await cleanupHostedFamilySponsoredDirectSubscription({
-      memberId: "member_123",
-      prisma: prisma as never,
-      refundCheckoutPayment: true,
-      sourceEventId: "evt_invoice_late:family-sponsored-cleanup",
-      stripe,
-      subscriptionId:
-        replayOutcome.cleanupFamilySponsoredStripeSubscriptionId ?? "",
-    });
 
     expect(replayOutcome.cleanupFamilySponsoredStripeSubscriptionId)
-      .toBe("sub_superseded");
+      .toBeUndefined();
     expect(refundsCreate).toHaveBeenCalledOnce();
   });
 
@@ -1182,7 +1165,6 @@ describe("applyStripeCheckoutCompleted", () => {
       checkoutSessionId: "cs_123",
       memberId: "member_123",
       prisma: prisma as never,
-      refundCheckoutPayment: true,
       sourceEventId: "evt_checkout_cleanup_after_family_end",
       stripe: stripe as never,
       subscriptionId: "sub_superseded",
@@ -1230,7 +1212,6 @@ describe("applyStripeCheckoutCompleted", () => {
       checkoutSessionId: "cs_123",
       memberId: "member_123",
       prisma: prisma as never,
-      refundCheckoutPayment: true,
       sourceEventId: "evt_checkout_cleanup_missing_family_authority",
       stripe: {
         subscriptions: {

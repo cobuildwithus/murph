@@ -1,8 +1,8 @@
 # stripe-billing-hardening
 
-Status: active — candidate implemented and locally verified; exact-head review gates pending
+Status: active — final edge-case corrections implemented; exact-head review and CI pending
 Created: 2026-08-06
-Updated: 2026-08-07
+Updated: 2026-08-10
 
 ## Goal
 
@@ -90,7 +90,8 @@ Updated: 2026-08-07
    Settings suites.
 8. Run focused proof, typecheck, design evidence, exact-head ReviewGPT gates,
    and CI; resolve every accepted finding before plan closure. Local proof and
-   design evidence are complete; exact-head gates and CI remain pending.
+   prior design evidence are complete; the final rendered proof, exact-head
+   gate, and CI remain pending.
 
 ## Decisions
 
@@ -114,6 +115,15 @@ Updated: 2026-08-07
   customer, plan metadata, group, and owner. A missing, terminal, unpaid, or
   mismatched provider object preserves the direct subscription for receipt
   replay; no new queue or billing state machine is needed.
+- Revalidate an auto-seat invite target inside the existing Family owner lock,
+  immediately before the Stripe capacity mutation, so a concurrently accepted
+  membership cannot be charged as an extra seat and then rejected.
+- Let the first Family-authoritative event own complete direct-checkout loser
+  cleanup. It must cancel and prove an exact refund or zero payment before it
+  terminalizes the receipt; a later invoice cannot be the only refund owner.
+- Expose the same paid-trial conversion terms and explicit-confirmation token
+  through the private Family tool as the website path, so Assistant-driven
+  checkout cannot bypass or dead-end the confirmation invariant.
 
 ## Verification
 
@@ -172,3 +182,9 @@ Updated: 2026-08-07
   cross-member identity fence, and legacy regression were incorporated; the
   optional boolean and third success variant were simplified into the required
   two-state disposition on the existing acceptance owner.
+- The final sweep adds fail-first regressions for the auto-seat target race,
+  first-event refund ownership, and private-tool trial confirmation. The
+  corrected candidate passes 441 focused Web tests, 92 Assistant tests, 64
+  hosted-execution parser tests, all three package typechecks, both hosted
+  billing/provider request guards, and 12/12 real-PostgreSQL Family cleanup and
+  webhook tests against a freshly migrated isolated database.

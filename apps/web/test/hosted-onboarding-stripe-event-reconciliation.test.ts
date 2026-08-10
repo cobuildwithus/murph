@@ -2152,7 +2152,6 @@ describe("hosted Stripe event reconciliation", () => {
       checkoutSessionId: "cs_trial_123",
       memberId: "member_123",
       prisma: prisma.client,
-      refundCheckoutPayment: true,
       sourceEventId: `${event.id}:family-sponsored-checkout-cleanup`,
       subscriptionId: "sub_checkout_123",
     });
@@ -2235,7 +2234,6 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.cleanupHostedFamilySponsoredDirectSubscription).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: prisma.client,
-      refundCheckoutPayment: false,
       sourceEventId: `${event.id}:family-sponsored-cleanup`,
       subscriptionId: "sub_123",
     });
@@ -2282,7 +2280,6 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.cleanupHostedFamilySponsoredDirectSubscription).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: prisma.client,
-      refundCheckoutPayment: true,
       sourceEventId: `${event.id}:family-sponsored-cleanup`,
       subscriptionId: "sub_123",
     });

@@ -1550,6 +1550,10 @@ describe("HostedBillingSettings", () => {
         rendered.window.document.body.textContent ?? "",
         /\$14\/month for 2 Pulse seats/u,
       );
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /choose Pulse, Edge, or Max for each person/u,
+      );
 
       const cancelButton = findButtonByText(
         rendered.window.document,

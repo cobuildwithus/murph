@@ -981,7 +981,6 @@ export async function cleanupHostedFamilySponsoredDirectSubscription(input: {
   checkoutSessionId?: string;
   memberId: string;
   prisma: PrismaClient;
-  refundCheckoutPayment?: boolean;
   sourceEventId: string;
   stripe?: Stripe;
   subscriptionId: string;
@@ -1072,88 +1071,57 @@ export async function cleanupHostedFamilySponsoredDirectSubscription(input: {
           throw new HostedStripeFamilySponsoredCleanupPendingError();
         }
 
-        const requiresLiveFamilyAuthority = input.refundCheckoutPayment
-          || (
-            subscription.status !== "canceled"
-            && subscription.status !== "incomplete_expired"
+        let currentFamilySubscription: Stripe.Subscription;
+        try {
+          currentFamilySubscription = await withHostedStripeFailureLog(
+            "subscription.retrieve.family-sponsored-authority",
+            () => stripe.subscriptions.retrieve(familyStripeSubscriptionId),
           );
-        if (requiresLiveFamilyAuthority) {
-          let currentFamilySubscription: Stripe.Subscription;
-          try {
-            currentFamilySubscription = await withHostedStripeFailureLog(
-              "subscription.retrieve.family-sponsored-authority",
-              () => stripe.subscriptions.retrieve(familyStripeSubscriptionId),
-            );
-          } catch (error) {
-            if (
-              error
-              && typeof error === "object"
-              && Reflect.get(error, "code") === "resource_missing"
-            ) {
-              throw new HostedStripeFamilySponsoredCleanupPendingError();
-            }
-            throw hostedOnboardingError({
-              cause: error,
-              code: "HOSTED_FAMILY_SPONSORED_CHECKOUT_CLEANUP_FAILED",
-              httpStatus: 502,
-              message:
-                "Murph could not verify current Family billing authority. Try again.",
-              retryable: true,
-            });
-          }
-
+        } catch (error) {
           if (
-            currentFamilySubscription.id !== familyStripeSubscriptionId
-            || currentFamilySubscription.status !== "active"
-            || coerceStripeObjectId(currentFamilySubscription.customer)
-              !== familyStripeCustomerId
-            || currentFamilySubscription.metadata?.kind
-              !== HOSTED_FAMILY_STRIPE_METADATA_KIND
-            || currentFamilySubscription.metadata?.billingPlanCode
-              !== HOSTED_FAMILY_BILLING_PLAN_CODE
-            || normalizeNullableString(
-              currentFamilySubscription.metadata?.accountGroupId,
-            ) !== familyClaim.groupId
-            || normalizeNullableString(
-              currentFamilySubscription.metadata?.ownerMemberId,
-            ) !== familyClaim.ownerMemberId
+            error
+            && typeof error === "object"
+            && Reflect.get(error, "code") === "resource_missing"
           ) {
             throw new HostedStripeFamilySponsoredCleanupPendingError();
           }
+          throw hostedOnboardingError({
+            cause: error,
+            code: "HOSTED_FAMILY_SPONSORED_CHECKOUT_CLEANUP_FAILED",
+            httpStatus: 502,
+            message:
+              "Murph could not verify current Family billing authority. Try again.",
+            retryable: true,
+          });
         }
 
-        if (input.refundCheckoutPayment) {
-          await cleanupHostedStandardCheckoutLoser({
-            stripe,
-            stripeSubscriptionId: input.subscriptionId,
-            subscription,
-          });
-        } else if (
-          subscription.status !== "canceled"
-          && subscription.status !== "incomplete_expired"
+        if (
+          currentFamilySubscription.id !== familyStripeSubscriptionId
+          || currentFamilySubscription.status !== "active"
+          || coerceStripeObjectId(currentFamilySubscription.customer)
+            !== familyStripeCustomerId
+          || currentFamilySubscription.metadata?.kind
+            !== HOSTED_FAMILY_STRIPE_METADATA_KIND
+          || currentFamilySubscription.metadata?.billingPlanCode
+            !== HOSTED_FAMILY_BILLING_PLAN_CODE
+          || normalizeNullableString(
+            currentFamilySubscription.metadata?.accountGroupId,
+          ) !== familyClaim.groupId
+          || normalizeNullableString(
+            currentFamilySubscription.metadata?.ownerMemberId,
+          ) !== familyClaim.ownerMemberId
         ) {
-          try {
-            await stripe.subscriptions.cancel(input.subscriptionId);
-          } catch (error) {
-            if (
-              !error
-              || typeof error !== "object"
-              || Reflect.get(error, "code") !== "resource_missing"
-            ) {
-              logHostedStripeFailure({
-                error,
-                operationName: "subscription.cancel.family-sponsored-checkout",
-              });
-              throw hostedOnboardingError({
-                cause: error,
-                code: "HOSTED_FAMILY_SPONSORED_CHECKOUT_CLEANUP_FAILED",
-                httpStatus: 502,
-                message: "Murph could not cancel a superseded Stripe subscription. Try again.",
-                retryable: true,
-              });
-            }
-          }
+          throw new HostedStripeFamilySponsoredCleanupPendingError();
         }
+
+        // The first event that proves Family sponsorship owns the complete
+        // loser cleanup. Splitting cancellation from refund inspection across
+        // later events can strand a payment if Family membership changes.
+        await cleanupHostedStandardCheckoutLoser({
+          stripe,
+          stripeSubscriptionId: input.subscriptionId,
+          subscription,
+        });
       }
 
       if (input.checkoutSessionId) {

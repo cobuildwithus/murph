@@ -249,6 +249,10 @@ test("adds one paid seat and retries when the plan is full", async () => {
 
   expect(response.status).toBe(200);
   expect(mocks.updateHostedFamilyPlanCapacities).toHaveBeenCalledWith({
+    autoSeatInviteTarget: {
+      targetEmail: null,
+      targetPhoneNumber: "+48600000001",
+    },
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),

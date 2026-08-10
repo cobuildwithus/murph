@@ -87,7 +87,13 @@ export const POST = withJsonError(async (request: Request) => {
     if (!canAutoAddSeat || !isSeatLimitError(error)) {
       throw error;
     }
-    const seatResult = await addSeatThenInvite(prisma, auth.member.id, planCode, issueInvite);
+    const seatResult = await addSeatThenInvite(
+      prisma,
+      auth.member.id,
+      planCode,
+      { targetEmail, targetPhoneNumber },
+      issueInvite,
+    );
     if (seatResult === "unavailable") {
       throw error;
     }
@@ -135,6 +141,10 @@ async function addSeatThenInvite<T>(
   prisma: ReturnType<typeof getPrisma>,
   ownerMemberId: string,
   planCode: HostedFamilyPlanCode,
+  autoSeatInviteTarget: {
+    targetEmail: string | null;
+    targetPhoneNumber: string | null;
+  },
   issueInvite: () => Promise<T>,
 ): Promise<{ invite: T } | "syncing" | "unavailable"> {
   // Re-check before buying: a concurrent invite for the same target may have just
@@ -176,6 +186,7 @@ async function addSeatThenInvite<T>(
     [planCode]: snapshot.plans[planCode].billed + 1,
   };
   await updateHostedFamilyPlanCapacities({
+    autoSeatInviteTarget,
     groupId: snapshot.groupId,
     ownerMemberId,
     prisma,

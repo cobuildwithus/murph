@@ -487,7 +487,7 @@ export function HostedBillingSettings(props: {
                             * HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
                         )}/month for ${HOSTED_FAMILY_PLAN_DISPLAY.minSeats} Pulse seats (${formatHostedBillingPrice(
                           HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
-                        )} per person). You can choose Pulse or Edge for each person and add up to ${HOSTED_FAMILY_PLAN_DISPLAY.maxSeats} seats.`,
+                        )} per person). You can choose Pulse, Edge, or Max for each person and add up to ${HOSTED_FAMILY_PLAN_DISPLAY.maxSeats} seats.`,
                         title: "Start paid Family billing?",
                       }
                     : undefined}
