@@ -1540,47 +1540,45 @@ if (!tool) {
     ).toBeGreaterThan(4_000)
   })
 
-  it('preserves both response-card shapes through the real App Server boundary', {
+  it('accepts authorable card shapes and rejects legacy-only nutrition shapes through the real App Server boundary', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
-    const cards = [
-      {
-        kind: 'compact_table',
-        version: 1,
-        title: 'Training sets',
-        subtitle: null,
-        rowHeader: 'Order',
-        columns: ['Set', 'Reps'],
-        rows: [
-          { label: 'First', values: ['1', '8'] },
-          { label: 'Second', values: ['2', '6'] },
-        ],
-        footer: null,
-        tracking: null,
+    const completeNutritionCard = {
+      kind: 'daily_nutrition',
+      version: 2,
+      localDate: '2026-08-08',
+      mealCount: 2,
+      totals: {
+        calories: { total: 900, mealCount: 2 },
+        proteinGrams: { total: 70, mealCount: 2 },
+        carbsGrams: { total: 80, mealCount: 2 },
+        fatGrams: { total: 30, mealCount: 2 },
+        fiberGrams: { total: 15, mealCount: 2 },
       },
-      {
-        kind: 'daily_nutrition',
-        version: 2,
-        localDate: '2026-08-08',
-        mealCount: 2,
-        totals: {
-          calories: { total: 900, mealCount: 2 },
-          proteinGrams: { total: 70, mealCount: 2 },
-          carbsGrams: { total: 80, mealCount: 2 },
-          fatGrams: { total: 30, mealCount: 2 },
-          fiberGrams: { total: 15, mealCount: 2 },
-        },
-        goals: {
-          calories: null,
-          proteinGrams: null,
-          carbsGrams: null,
-          fatGrams: null,
-          fiberGrams: null,
-        },
+      goals: {
+        calories: { target: 1_800, status: 'under_target' },
+        proteinGrams: { target: 100, status: 'under_target' },
+        carbsGrams: { target: 190, status: 'under_target' },
+        fatGrams: { target: 55, status: 'under_target' },
+        fiberGrams: { target: 25, status: 'under_target' },
       },
-    ] as const
+    } as const
+    const authorableCards = [{
+      kind: 'compact_table',
+      version: 1,
+      title: 'Training sets',
+      subtitle: null,
+      rowHeader: 'Order',
+      columns: ['Set', 'Reps'],
+      rows: [
+        { label: 'First', values: ['1', '8'] },
+        { label: 'Second', values: ['2', '6'] },
+      ],
+      footer: null,
+      tracking: null,
+    }, completeNutritionCard] as const
 
-    for (const card of cards) {
+    for (const card of authorableCards) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
@@ -1610,6 +1608,82 @@ if (!tool) {
       })
       expect(result.runtimeIssueInputs).toEqual([])
       expect(result.responseCard).toEqual(card)
+    }
+
+    const incompleteNutritionCards = [
+      {
+        kind: 'daily_nutrition',
+        localDate: '2026-08-08',
+        mealCount: 2,
+        totals: {
+          calories: { total: 900, mealCount: 2 },
+          proteinGrams: { total: 70, mealCount: 2 },
+          carbsGrams: { total: 80, mealCount: 2 },
+          fatGrams: { total: 30, mealCount: 2 },
+        },
+      },
+      {
+        ...completeNutritionCard,
+        goals: {
+          calories: null,
+          proteinGrams: null,
+          carbsGrams: null,
+          fatGrams: null,
+          fiberGrams: null,
+        },
+      },
+      ...([
+        'calories',
+        'proteinGrams',
+        'carbsGrams',
+        'fatGrams',
+        'fiberGrams',
+      ] as const).map((metric) => ({
+        ...completeNutritionCard,
+        goals: {
+          ...completeNutritionCard.goals,
+          [metric]: null,
+        },
+      })),
+    ]
+
+    for (const card of incompleteNutritionCards) {
+      const scenario = await prepareScriptedTurnScenario()
+      scenario.stub.captureProviderRequestDiagnostics()
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: { card },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        },
+        { text: 'INCOMPLETE_CARD_REJECTED' },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        groupConversation: false,
+        prompt: 'Try the requested synthetic response card.',
+      })
+
+      expect(result.responseCard).toBeNull()
+      expect(result.runtimeIssueInputs).toEqual([
+        expect.objectContaining({
+          component: 'assistant.tool-validation',
+          errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+          issueKind: 'schema_rejection',
+          operation: 'murph.attach_response_card',
+        }),
+        expect.objectContaining({
+          component: 'assistant.codex-action',
+          errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+          issueKind: 'tool_error',
+          operation: 'dynamic.tool.call',
+        }),
+      ])
+      expect(result.finalMessage).toBe('INCOMPLETE_CARD_REJECTED')
     }
   })
 

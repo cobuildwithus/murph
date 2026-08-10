@@ -82,7 +82,7 @@ import {
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  assistantResponseCardSchema,
+  assistantResponseCardAuthoringSchema,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -255,7 +255,7 @@ const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
 const attachResponseCardArgumentsSchema = z
   .object({
-    card: assistantResponseCardSchema,
+    card: assistantResponseCardAuthoringSchema,
   })
   .strict()
 

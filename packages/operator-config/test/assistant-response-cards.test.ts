@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
   LINQ_IMESSAGE_APP_CARD_ORIGIN,
+  assistantResponseCardAuthoringSchema,
   assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
   buildLinqIMessageAppCardUrl,
@@ -64,24 +65,22 @@ describe('assistant response cards', () => {
             goals: {
               properties: {
                 calories: {
-                  anyOf: [
-                    {
-                      properties: {
-                        status: {
-                          enum: [
-                            'far_under_target',
-                            'under_target',
-                            'on_target',
-                            'over_target',
-                            'far_over_target',
-                            'unavailable',
-                          ],
-                        },
-                        target: { type: 'number' },
-                      },
+                  additionalProperties: false,
+                  properties: {
+                    status: {
+                      enum: [
+                        'far_under_target',
+                        'under_target',
+                        'on_target',
+                        'over_target',
+                        'far_over_target',
+                        'unavailable',
+                      ],
                     },
-                    { type: 'null' },
-                  ],
+                    target: { type: 'number' },
+                  },
+                  required: ['target', 'status'],
+                  type: 'object',
                 },
               },
             },
@@ -159,6 +158,34 @@ describe('assistant response cards', () => {
     })
     expect(assistantResponseCardJsonSchema).not.toHaveProperty('$defs')
     expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
+    expect(assistantResponseCardAuthoringSchema.parse(COMPLETE_CARD_V2)).toEqual(
+      COMPLETE_CARD_V2,
+    )
+    expect(assistantResponseCardAuthoringSchema.safeParse(COMPLETE_CARD).success)
+      .toBe(false)
+
+    for (const metric of [
+      'calories',
+      'proteinGrams',
+      'carbsGrams',
+      'fatGrams',
+      'fiberGrams',
+    ] as const) {
+      const legacyCompatibleCard = {
+        ...COMPLETE_CARD_V2,
+        goals: {
+          ...COMPLETE_CARD_V2.goals,
+          [metric]: null,
+        },
+      }
+      expect(
+        assistantResponseCardAuthoringSchema.safeParse(legacyCompatibleCard)
+          .success,
+      ).toBe(false)
+      expect(assistantResponseCardSchema.parse(legacyCompatibleCard)).toEqual(
+        legacyCompatibleCard,
+      )
+    }
   })
 
   it('rejects malformed, unknown, and implausible daily nutrition values', () => {

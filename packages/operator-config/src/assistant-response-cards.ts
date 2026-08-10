@@ -6,6 +6,7 @@ import {
   MURPH_PRODUCT_ORIGIN,
   assistantResponseCardSchema,
   compactTableResponseCardV1Schema,
+  dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
   type AssistantResponseCard,
   type CompactTableResponseCardV1,
@@ -79,6 +80,7 @@ export {
   compactTableRowV1Schema,
   compactTableTrackingSourceV1Schema,
   dailyNutritionResponseCardV1Schema,
+  dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
   dailyNutritionResponseCardSchema,
   nutritionCardGoalStatusValues,
@@ -93,6 +95,13 @@ export {
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
 } from '@murphai/contracts'
+
+export const assistantResponseCardAuthoringSchema: z.ZodType<
+  AssistantResponseCard
+> = z.union([
+  dailyNutritionResponseCardV2AuthoringSchema,
+  compactTableResponseCardV1Schema,
+])
 
 export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
@@ -409,16 +418,12 @@ function isDailyNutritionResponseCardV2(
 }
 
 function createAssistantResponseCardJsonSchema() {
-  // Retained nutrition V1 cards remain valid at the runtime boundary. New tool
-  // calls author only the current nutrition version or a compact table.
-  const authoringSchema = z.union([
-    dailyNutritionResponseCardV2Schema,
-    compactTableResponseCardV1Schema,
-  ])
+  // Retained nutrition V1 and nullable V2 cards remain valid for replay and
+  // rendering. New tool calls require a complete V2 or a compact table.
   const {
     $schema: _dialect,
     ...portableSchema
-  } = z.toJSONSchema(authoringSchema)
+  } = z.toJSONSchema(assistantResponseCardAuthoringSchema)
   return {
     ...portableSchema,
     description:

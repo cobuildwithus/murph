@@ -11,7 +11,7 @@ import {
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
-const CARD: AssistantResponseCard = {
+const LEGACY_CARD_V1: AssistantResponseCard = {
   kind: 'daily_nutrition',
   localDate: '2026-07-28',
   mealCount: 3,
@@ -23,7 +23,7 @@ const CARD: AssistantResponseCard = {
   },
 }
 
-const CARD_V2: AssistantResponseCard = {
+const CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',
   version: 2,
   localDate: '2026-07-28',
@@ -38,7 +38,7 @@ const CARD_V2: AssistantResponseCard = {
   goals: {
     calories: { target: 2_100, status: 'under_target' },
     proteinGrams: { target: 100, status: 'on_target' },
-    carbsGrams: null,
+    carbsGrams: { target: 220, status: 'on_target' },
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
@@ -176,6 +176,12 @@ describe('murph.attach_response_card', () => {
       'never calculate or reuse totals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'V2 adds fiber and nullable goal snapshots',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
@@ -308,9 +314,8 @@ describe('murph.attach_response_card', () => {
       card: CARD,
       kind: 'attach-response-card',
     })
-    expect(readCardToolRequest({ card: CARD_V2 })).toEqual({
-      card: CARD_V2,
-      kind: 'attach-response-card',
+    expect(readCardToolRequest({ card: LEGACY_CARD_V1 })).toMatchObject({
+      kind: 'invalid-response-card-arguments',
     })
     expect(readCardToolRequest({ card: CARD, extra: true })).toMatchObject({
       kind: 'invalid-response-card-arguments',
@@ -324,14 +329,44 @@ describe('murph.attach_response_card', () => {
       kind: 'invalid-response-card-arguments',
     })
 
+    for (const metric of [
+      'calories',
+      'proteinGrams',
+      'carbsGrams',
+      'fatGrams',
+      'fiberGrams',
+    ] as const) {
+      expect(readCardToolRequest({
+        card: {
+          ...CARD,
+          goals: {
+            ...CARD.goals,
+            [metric]: null,
+          },
+        },
+      })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    }
+    expect(readCardToolRequest({
+      card: {
+        ...CARD,
+        goals: {
+          calories: null,
+          proteinGrams: null,
+          carbsGrams: null,
+          fatGrams: null,
+          fiberGrams: null,
+        },
+      },
+    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+
     const contradictoryCard = {
-      ...CARD_V2,
+      ...CARD,
       totals: {
-        ...CARD_V2.totals,
+        ...CARD.totals,
         calories: { total: 2_300, mealCount: 3 },
       },
       goals: {
-        ...CARD_V2.goals,
+        ...CARD.goals,
         calories: { target: 2_000, status: 'under_target' },
       },
     }
