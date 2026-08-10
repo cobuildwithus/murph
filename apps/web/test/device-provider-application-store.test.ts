@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/device-sync/provider-applications/crypto", () => ({
   decryptDeviceProviderApplication: mocks.decrypt,
   encryptDeviceProviderApplication: mocks.encrypt,
+  isDeviceProviderApplicationSecretInvalidError: (value: unknown) =>
+    value instanceof Error
+    && value.name === "DeviceProviderApplicationSecretInvalidError",
 }));
 
 import {
@@ -97,7 +100,9 @@ describe("member-owned device provider application store", () => {
   });
 
   it("classifies malformed decrypted config as repairable application state", async () => {
-    mocks.decrypt.mockRejectedValue(new TypeError("invalid secret schema"));
+    const invalid = new Error("invalid secret schema");
+    invalid.name = "DeviceProviderApplicationSecretInvalidError";
+    mocks.decrypt.mockRejectedValue(invalid);
     const prisma = {
       deviceProviderApplication: {
         findUnique: vi.fn(async () => ({
@@ -128,6 +133,165 @@ describe("member-owned device provider application store", () => {
     })).rejects.toMatchObject({
       code: "DEVICE_PROVIDER_APPLICATION_INVALID",
     });
+  });
+
+  it("does not turn transient decryption failures into repair state", async () => {
+    const transient = new TypeError("Hosted KMS configuration is unavailable.");
+    mocks.decrypt.mockRejectedValue(transient);
+    const prisma = {
+      deviceProviderApplication: {
+        findUnique: vi.fn(async () => ({
+          configEncrypted: "sealed",
+          createdAt: new Date("2026-08-10T00:00:00.000Z"),
+          id: "dpa_123",
+          memberId: "member_123",
+          provider: "strava",
+          revision: 4,
+          updatedAt: new Date("2026-08-10T00:00:00.000Z"),
+        })),
+      },
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          hostedGroupRuntime: null,
+          id: "member_123",
+          threadContainer: null,
+        })),
+      },
+    };
+
+    await expect(resolveDeviceProviderApplication({
+      applicationId: "dpa_123",
+      expectedRevision: 4,
+      memberId: "member_123",
+      prisma: prisma as never,
+      provider: "strava",
+    })).rejects.toBe(transient);
+  });
+
+  it("repairs permanently invalid ciphertext after live connections are gone", async () => {
+    const invalid = new Error("ciphertext integrity failure");
+    invalid.name = "DeviceProviderApplicationSecretInvalidError";
+    mocks.decrypt.mockRejectedValue(invalid);
+    const row = {
+      configEncrypted: "corrupted",
+      createdAt: new Date("2026-08-10T00:00:00.000Z"),
+      id: "dpa_123",
+      memberId: "member_123",
+      provider: "strava",
+      revision: 4,
+      updatedAt: new Date("2026-08-10T00:00:00.000Z"),
+    };
+    const updated = {
+      ...row,
+      configEncrypted: "sealed-next",
+      revision: 5,
+      updatedAt: new Date("2026-08-10T00:01:00.000Z"),
+    };
+    const hostedMember = {
+      findUnique: vi.fn(async () => ({
+        hostedGroupRuntime: null,
+        id: "member_123",
+        threadContainer: null,
+      })),
+    };
+    const deviceProviderApplication = {
+      findUnique: vi.fn(async () => row),
+      update: vi.fn(async () => updated),
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      deviceConnection: {
+        findFirst: vi.fn(async () => null),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      deviceOauthSession: {
+        deleteMany: vi.fn(async () => ({ count: 1 })),
+      },
+      deviceProviderApplication,
+      hostedMember,
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) =>
+        callback(tx)),
+      deviceProviderApplication,
+      hostedMember,
+    };
+
+    await expect(saveDeviceProviderApplication({
+      clientId: "replacement-client",
+      clientSecret: "replacement-secret",
+      expectedRevision: 4,
+      memberId: "member_123",
+      prisma: prisma as never,
+      provider: "strava",
+    })).resolves.toEqual({
+      applicationId: "dpa_123",
+      createdAt: "2026-08-10T00:00:00.000Z",
+      provider: "strava",
+      revision: 5,
+      updatedAt: "2026-08-10T00:01:00.000Z",
+    });
+    expect(mocks.encrypt).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 5,
+    }));
+    expect(deviceProviderApplication.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        configEncrypted: "sealed-next",
+        revision: 5,
+      }),
+    }));
+  });
+
+  it("does not replace invalid ciphertext while a live connection still depends on it", async () => {
+    const invalid = new Error("ciphertext integrity failure");
+    invalid.name = "DeviceProviderApplicationSecretInvalidError";
+    mocks.decrypt.mockRejectedValue(invalid);
+    const row = {
+      configEncrypted: "corrupted",
+      createdAt: new Date("2026-08-10T00:00:00.000Z"),
+      id: "dpa_123",
+      memberId: "member_123",
+      provider: "strava",
+      revision: 4,
+      updatedAt: new Date("2026-08-10T00:00:00.000Z"),
+    };
+    const hostedMember = {
+      findUnique: vi.fn(async () => ({
+        hostedGroupRuntime: null,
+        id: "member_123",
+        threadContainer: null,
+      })),
+    };
+    const deviceProviderApplication = {
+      findUnique: vi.fn(async () => row),
+      update: vi.fn(),
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      deviceConnection: {
+        findFirst: vi.fn(async () => ({ id: "dsc_live" })),
+      },
+      deviceProviderApplication,
+      hostedMember,
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) =>
+        callback(tx)),
+      deviceProviderApplication,
+      hostedMember,
+    };
+
+    await expect(saveDeviceProviderApplication({
+      clientId: "replacement-client",
+      clientSecret: "replacement-secret",
+      expectedRevision: 4,
+      memberId: "member_123",
+      prisma: prisma as never,
+      provider: "strava",
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_APPLICATION_CONNECTION_CONFLICT",
+    });
+    expect(deviceProviderApplication.update).not.toHaveBeenCalled();
   });
 
   it("blocks private application creation while a legacy connection is active", async () => {

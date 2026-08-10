@@ -193,6 +193,36 @@ describe("PrismaHostedOAuthSessionStore member-owned provider binding", () => {
 });
 
 describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
+
+  it("refuses to consume state through a different provider application", async () => {
+    const record = buildOAuthSessionRow({
+      provider: "strava",
+      providerApplicationId: "dpa_original",
+      providerApplicationRevision: 4,
+    });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthStateWithProviderApplication(
+        record.state,
+        record.createdAt.toISOString(),
+        {
+          applicationId: "dpa_other",
+          provider: "strava",
+          revision: 4,
+        },
+        "strava",
+        record.userId ?? undefined,
+      ),
+    ).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_STALE",
+      retryable: false,
+    });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("reports an already-consumed unexpired state as a replay with its stored record", async () => {
     const record = buildOAuthSessionRow({
       consumedAt: new Date("2026-04-13T12:01:00.000Z"),
@@ -350,10 +380,9 @@ function createTransaction(input: {
 }
 
 function createStore(tx: ReturnType<typeof createTransaction>) {
-  return {
-    prisma: {
-      $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
-    },
-    consumeOAuthState: PrismaHostedOAuthSessionStore.prototype.consumeOAuthState,
-  };
+  return new PrismaHostedOAuthSessionStore({
+    $transaction: async <TResult>(
+      callback: (transaction: typeof tx) => Promise<TResult>,
+    ) => callback(tx),
+  } as never);
 }

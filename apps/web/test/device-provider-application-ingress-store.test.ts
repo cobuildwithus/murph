@@ -13,11 +13,15 @@ describe("DeviceProviderApplicationIngressStore", () => {
     const createOAuthStateWithProviderApplication = vi.fn(
       async (record: OAuthStateRecord) => record,
     );
+    const consumeOAuthStateWithProviderApplication = vi.fn(async () => ({
+      status: "missing" as const,
+    }));
     const upsertConnectionWithProviderApplication = vi.fn(async () => ({
       account: { id: "dsc_123" },
       previousAccount: null,
     }));
     const delegate = {
+      consumeOAuthStateWithProviderApplication,
       createOAuthStateWithProviderApplication,
       upsertConnectionWithProviderApplication,
     } as never;
@@ -49,11 +53,24 @@ describe("DeviceProviderApplicationIngressStore", () => {
     };
 
     await store.createOAuthState(oauthState);
+    await store.consumeOAuthState(
+      oauthState.state,
+      oauthState.createdAt,
+      oauthState.provider,
+      oauthState.ownerId ?? undefined,
+    );
     await store.upsertConnection(connection);
 
     expect(createOAuthStateWithProviderApplication).toHaveBeenCalledWith(
       oauthState,
       binding,
+    );
+    expect(consumeOAuthStateWithProviderApplication).toHaveBeenCalledWith(
+      oauthState.state,
+      oauthState.createdAt,
+      binding,
+      oauthState.provider,
+      oauthState.ownerId,
     );
     expect(upsertConnectionWithProviderApplication).toHaveBeenCalledWith(
       connection,

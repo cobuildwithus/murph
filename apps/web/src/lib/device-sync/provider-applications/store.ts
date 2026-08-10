@@ -11,6 +11,7 @@ import { generateHostedRandomPrefixedId } from "../shared";
 import {
   decryptDeviceProviderApplication,
   encryptDeviceProviderApplication,
+  isDeviceProviderApplicationSecretInvalidError,
 } from "./crypto";
 import {
   buildDeviceProviderApplicationRuntimeConfigs,
@@ -149,7 +150,7 @@ export async function saveDeviceProviderApplication(input: {
     : 0;
   const targetRevision = initialRevision + 1;
   const initialSecret = initial
-    ? await decryptDeviceProviderApplication({
+    ? await readExistingDeviceProviderApplicationSecret({
         applicationId: initial.id,
         memberId: input.memberId,
         prisma,
@@ -316,7 +317,7 @@ export async function resolveDeviceProviderApplication(input: {
     if (error instanceof DeviceProviderApplicationError) {
       throw error;
     }
-    if (error instanceof TypeError || error instanceof SyntaxError) {
+    if (isDeviceProviderApplicationSecretInvalidError(error)) {
       throw new DeviceProviderApplicationError(
         "DEVICE_PROVIDER_APPLICATION_INVALID",
         "Private provider application credentials are invalid and must be repaired.",
@@ -397,6 +398,24 @@ async function requirePersonalMember(input: {
       "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED",
       "Private provider applications are available only for personal Murph members.",
     );
+  }
+}
+
+async function readExistingDeviceProviderApplicationSecret(input: {
+  applicationId: string;
+  memberId: string;
+  prisma: DeviceProviderApplicationReadClient;
+  provider: MemberOwnedDeviceProviderApplicationProvider;
+  revision: number;
+  value: string;
+}) {
+  try {
+    return await decryptDeviceProviderApplication(input);
+  } catch (error) {
+    if (isDeviceProviderApplicationSecretInvalidError(error)) {
+      return null;
+    }
+    throw error;
   }
 }
 

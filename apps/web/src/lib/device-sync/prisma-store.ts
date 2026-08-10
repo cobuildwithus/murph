@@ -171,6 +171,22 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.oauthSessions.consumeOAuthState(state, now, expectedProvider, expectedOwnerId);
   }
 
+  async consumeOAuthStateWithProviderApplication(
+    state: string,
+    now: string,
+    binding: DeviceProviderApplicationBinding,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): Promise<ConsumeOAuthStateResult> {
+    return this.oauthSessions.consumeOAuthStateWithProviderApplication(
+      state,
+      now,
+      binding,
+      expectedProvider,
+      expectedOwnerId,
+    );
+  }
+
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
     return this.connections.upsertConnection(input);
   }

@@ -44,9 +44,10 @@ export class DeviceProviderApplicationIngressStore
     expectedProvider?: string,
     expectedOwnerId?: string,
   ): Promise<ConsumeOAuthStateResult> {
-    return this.store.consumeOAuthState(
+    return this.store.consumeOAuthStateWithProviderApplication(
       state,
       now,
+      this.binding,
       expectedProvider,
       expectedOwnerId,
     );

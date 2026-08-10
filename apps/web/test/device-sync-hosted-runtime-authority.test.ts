@@ -39,6 +39,8 @@ vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
 vi.mock("@/src/lib/device-sync/provider-applications", () => ({
   isDeviceProviderApplicationError: (value: unknown) =>
     Boolean(value && typeof value === "object" && "code" in value),
+  isMemberOwnedDeviceProviderApplicationProvider: (value: unknown) =>
+    value === "strava",
   resolveDeviceProviderApplication: mocks.resolveDeviceProviderApplication,
 }));
 

@@ -138,16 +138,66 @@ export class PrismaHostedOAuthSessionStore {
     };
   }
 
-  async consumeOAuthState(
+  consumeOAuthState(
     state: string,
     now: string,
     expectedProvider?: string,
     expectedOwnerId?: string,
   ): Promise<ConsumeOAuthStateResult> {
+    return this.consumeOAuthStateInternal({
+      binding: null,
+      expectedOwnerId,
+      expectedProvider,
+      now,
+      state,
+    });
+  }
+
+  consumeOAuthStateWithProviderApplication(
+    state: string,
+    now: string,
+    binding: DeviceProviderApplicationBinding,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): Promise<ConsumeOAuthStateResult> {
+    const provider = requireMemberOwnedDeviceProviderApplicationProvider(
+      binding.provider,
+    );
+    const revision = requireDeviceProviderApplicationRevision(binding.revision);
+    if (!binding.applicationId.trim()) {
+      throw new TypeError(
+        "Member-owned provider application OAuth consume requires an application id.",
+      );
+    }
+    if (expectedProvider && expectedProvider !== provider) {
+      throw new TypeError(
+        "Member-owned provider application OAuth consume provider mismatch.",
+      );
+    }
+    return this.consumeOAuthStateInternal({
+      binding: {
+        applicationId: binding.applicationId,
+        provider,
+        revision,
+      },
+      expectedOwnerId,
+      expectedProvider: provider,
+      now,
+      state,
+    });
+  }
+
+  private async consumeOAuthStateInternal(input: {
+    binding: DeviceProviderApplicationBinding | null;
+    expectedOwnerId?: string;
+    expectedProvider?: string;
+    now: string;
+    state: string;
+  }): Promise<ConsumeOAuthStateResult> {
     return this.prisma.$transaction(async (tx) => {
       const record = await tx.deviceOauthSession.findUnique({
         where: {
-          state,
+          state: input.state,
         },
       });
 
@@ -157,10 +207,10 @@ export class PrismaHostedOAuthSessionStore {
         };
       }
 
-      if (record.expiresAt.getTime() <= Date.parse(now)) {
+      if (record.expiresAt.getTime() <= Date.parse(input.now)) {
         await tx.deviceOauthSession.deleteMany({
           where: {
-            state,
+            state: input.state,
           },
         });
         return {
@@ -168,17 +218,36 @@ export class PrismaHostedOAuthSessionStore {
         };
       }
 
-      if (expectedProvider && record.provider !== expectedProvider) {
+      if (
+        input.expectedProvider
+        && record.provider !== input.expectedProvider
+      ) {
         return {
           status: "provider_mismatch",
           provider: record.provider,
         };
       }
 
-      if (expectedOwnerId && record.userId !== expectedOwnerId) {
+      if (input.expectedOwnerId && record.userId !== input.expectedOwnerId) {
         return {
           status: "owner_mismatch",
         };
+      }
+
+      if (
+        input.binding
+        && (
+          record.provider !== input.binding.provider
+          || record.providerApplicationId !== input.binding.applicationId
+          || record.providerApplicationRevision !== input.binding.revision
+        )
+      ) {
+        throw deviceSyncError({
+          code: "PROVIDER_APPLICATION_STALE",
+          httpStatus: 409,
+          message: "OAuth state does not match the private provider application.",
+          retryable: false,
+        });
       }
 
       const stateRecord = {
@@ -204,10 +273,10 @@ export class PrismaHostedOAuthSessionStore {
       // expiry sweep removes them.
       const consumeResult = await tx.deviceOauthSession.updateMany({
         data: {
-          consumedAt: new Date(now),
+          consumedAt: new Date(input.now),
         },
         where: {
-          state,
+          state: input.state,
           consumedAt: null,
         },
       });

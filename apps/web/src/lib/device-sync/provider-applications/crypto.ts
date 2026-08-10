@@ -20,6 +20,19 @@ const DEVICE_PROVIDER_APPLICATION_SCOPE_PREFIX =
 export type DeviceProviderApplicationCryptoPrismaClient =
   HostedSecureBoxPrismaClient;
 
+export class DeviceProviderApplicationSecretInvalidError extends Error {
+  constructor() {
+    super("Private provider application credentials are invalid.");
+    this.name = "DeviceProviderApplicationSecretInvalidError";
+  }
+}
+
+export function isDeviceProviderApplicationSecretInvalidError(
+  value: unknown,
+): value is DeviceProviderApplicationSecretInvalidError {
+  return value instanceof DeviceProviderApplicationSecretInvalidError;
+}
+
 export async function encryptDeviceProviderApplication(input: {
   applicationId: string;
   clientId: string;
@@ -56,29 +69,68 @@ export async function decryptDeviceProviderApplication(input: {
   revision: number;
   value: string;
 }): Promise<DeviceProviderApplicationSecret> {
-  const decrypted = await openHostedUserSecureBoxString({
-    aad: deviceProviderApplicationAad(input.applicationId),
-    lane: "device-sync-provider-application",
-    prisma: input.prisma,
-    scope: deviceProviderApplicationScope(input),
-    userId: input.memberId,
-    value: input.value,
-  });
+  let decrypted: string | null;
+  try {
+    decrypted = await openHostedUserSecureBoxString({
+      aad: deviceProviderApplicationAad(input.applicationId),
+      lane: "device-sync-provider-application",
+      prisma: input.prisma,
+      scope: deviceProviderApplicationScope(input),
+      userId: input.memberId,
+      value: input.value,
+    });
+  } catch (error) {
+    if (isPermanentHostedSecureBoxOpenFailure(error)) {
+      throw new DeviceProviderApplicationSecretInvalidError();
+    }
+    throw error;
+  }
   if (!decrypted) {
-    throw new Error("Device provider application decryption returned no value.");
+    throw new DeviceProviderApplicationSecretInvalidError();
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(decrypted);
-  } catch {
-    throw new TypeError("Device provider application decrypted JSON is invalid.");
+    return parseDeviceProviderApplicationSecret({
+      expectedProvider: input.provider,
+      value: parsed,
+    });
+  } catch (error) {
+    if (error instanceof SyntaxError || error instanceof TypeError) {
+      throw new DeviceProviderApplicationSecretInvalidError();
+    }
+    throw error;
+  }
+}
+
+function isPermanentHostedSecureBoxOpenFailure(error: unknown): boolean {
+  if (error instanceof SyntaxError) {
+    return true;
+  }
+  if (
+    error instanceof DOMException
+    || (
+      error instanceof Error
+      && ["DataError", "InvalidCharacterError", "OperationError"].includes(
+        error.name,
+      )
+    )
+  ) {
+    return error.name !== "AbortError";
+  }
+  if (!(error instanceof Error)) {
+    return false;
   }
 
-  return parseDeviceProviderApplicationSecret({
-    expectedProvider: input.provider,
-    value: parsed,
-  });
+  return [
+    "Hosted secure-box domain mismatch",
+    "Hosted secure-box envelope",
+    "Hosted secure-box IV",
+    "Hosted secure-box lane mismatch",
+    "Hosted secure-box rootKeyId mismatch",
+    "Hosted secure-box scope mismatch",
+  ].some((prefix) => error.message.startsWith(prefix));
 }
 
 function deviceProviderApplicationAad(

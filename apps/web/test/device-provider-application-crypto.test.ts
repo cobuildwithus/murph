@@ -12,6 +12,7 @@ vi.mock("@/src/lib/hosted-crypto/secure-box", () => ({
 
 import {
   decryptDeviceProviderApplication,
+  DeviceProviderApplicationSecretInvalidError,
   encryptDeviceProviderApplication,
 } from "@/src/lib/device-sync/provider-applications/crypto";
 
@@ -60,4 +61,32 @@ describe("member-owned device provider application crypto", () => {
       scope: "device-sync-provider-application:strava:dpa_123:r8:config",
     }));
   });
+
+  it("classifies permanent envelope integrity failures as repairable", async () => {
+    const integrityError = new Error("The operation failed.");
+    integrityError.name = "OperationError";
+    mocks.open.mockRejectedValue(integrityError);
+
+    await expect(decryptDeviceProviderApplication({
+      applicationId: "dpa_123",
+      memberId: "member_123",
+      provider: "strava",
+      revision: 7,
+      value: "sealed-value",
+    })).rejects.toBeInstanceOf(DeviceProviderApplicationSecretInvalidError);
+  });
+
+  it("does not hide transient root-key or KMS failures", async () => {
+    const transient = new Error("Hosted domain root service unavailable.");
+    mocks.open.mockRejectedValue(transient);
+
+    await expect(decryptDeviceProviderApplication({
+      applicationId: "dpa_123",
+      memberId: "member_123",
+      provider: "strava",
+      revision: 7,
+      value: "sealed-value",
+    })).rejects.toBe(transient);
+  });
+
 });
