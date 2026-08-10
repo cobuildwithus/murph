@@ -1,6 +1,6 @@
 # Simplify workspace checkpointing without breaking atomicity
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -86,3 +86,4 @@ Updated: 2026-08-09
   `completion-specialists`, and final ReviewGPT.
 - Expected outcomes: all pass; concurrency proof shows no dependent mutation
   on CAS loss and no watermark advancement beyond the first eligible gap.
+Completed: 2026-08-09
