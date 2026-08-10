@@ -116,7 +116,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Homepage personas");
   expect(sectionsMarkup).toContain("Homepage footer");
   expect(sectionsMarkup).toContain('data-design-section="homepage-footer"');
-  expect(sectionsMarkup).toContain("Changelog archive edition");
+  expect(sectionsMarkup).toContain("Changelog archive with explanatory visuals");
   expect(sectionsMarkup).toContain('data-design-study="changelog-archive"');
   expect(sectionsMarkup).toContain("A week that closes its own loops");
   expect(sectionsMarkup.match(/Illustrative examples\./g)).toHaveLength(2);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { listAppleHealthRelayConnectSources } from "../app/(dashboard)/connect/apple-health-relay-connect-sources";
 import {
   CHANGELOG_CARD_MAX_ITEMS,
   CHANGELOG_EDITIONS_PER_PAGE,
@@ -275,9 +276,205 @@ describe("changelog registry", () => {
     );
   });
 
+  it("keeps the August 7 through August 9 feature claims bounded", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("public-referral-home")).toMatchObject({
+      sourcePullRequests: [
+        1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
+      ],
+      details: expect.stringContaining(
+        "another member's identity and private data",
+      ),
+      tryIt: { href: "/refer", label: "Explore referrals" },
+    });
+    expect(items.get("generated-contact-card-avatar")).toMatchObject({
+      sourcePullRequests: [1458, 1488],
+      details: expect.stringContaining("bound to the turn that asked for it"),
+    });
+    expect(items.get("generated-contact-card-avatar")?.tryIt).toBeUndefined();
+    expect(items.get("family-setup-from-group")).toMatchObject({
+      sourcePullRequests: [1527],
+      details: expect.stringContaining(
+        "The group never reads Family status or creates billing and invite links",
+      ),
+    });
+    expect(items.get("clearer-health-source-handoffs")).toMatchObject({
+      sourcePullRequests: [1432, 1447, 1506],
+      details: expect.stringContaining("snapshots rather than live sync"),
+    });
+    expect(items.get("first-personal-health-read")).toMatchObject({
+      sourcePullRequests: [1390],
+      details: expect.stringContaining(
+        "does not automatically create a plan, habit, experiment, or reminder",
+      ),
+    });
+    expect(items.get("scheduled-direct-call")).toMatchObject({
+      sourcePullRequests: [1336],
+      summary: expect.stringContaining(
+        "When a saved private conversation supports scheduled calling",
+      ),
+      details: expect.stringContaining(
+        "Email, Telegram, and group conversations are not eligible",
+      ),
+    });
+    expect(items.get("scheduled-tools-follow-the-route")).toMatchObject({
+      sourcePullRequests: [1367],
+      details: expect.stringContaining("Email delivery stays text-only"),
+    });
+    expect(items.get("group-calls-without-redundant-preview")).toMatchObject({
+      sourcePullRequests: [1386],
+      details: expect.stringContaining("a call start never claims the later outcome"),
+    });
+    expect(items.get("connected-email-from-private-chat")).toMatchObject({
+      sourcePullRequests: [1392],
+      summary: expect.stringContaining("current private conversation"),
+      details: expect.stringContaining("scheduled sends are not included"),
+    });
+    expect(items.get("focused-current-research")).toMatchObject({
+      sourcePullRequests: [1393],
+      details: expect.stringContaining(
+        "Names, private notes, arbitrary question prose, and account data never enter",
+      ),
+    });
+    expect(items.get("runtime-replacement-continuity")).toMatchObject({
+      sourcePullRequests: [1472, 1522],
+      details: expect.stringContaining("A faster save"),
+    });
+    expect(items.get("paused-member-retention-cleanup")).toMatchObject({
+      sourcePullRequests: [1493],
+      details: expect.stringContaining("already-approved retention cleanup"),
+    });
+    expect(items.get("background-results-use-less-shared-capacity")).toMatchObject({
+      sourcePullRequests: [1475, 1510],
+      details: expect.stringContaining("duplicate protection"),
+    });
+    const feedbackSummary = items.get("feedback-reproduction-guidance");
+    expect(feedbackSummary).toMatchObject({
+      sourcePullRequests: [1465],
+      summary: expect.stringContaining(
+        "instead of attaching the raw conversation or service response",
+      ),
+      details: expect.stringContaining(
+        "Ordinary feedback remains silent and best-effort",
+      ),
+    });
+    expect(`${feedbackSummary?.summary} ${feedbackSummary?.details}`).not.toMatch(
+      /excludes raw conversation wording|without your private details/iu,
+    );
+
+    const experimentLinks = items.get("custom-experiment-deep-links");
+    expect(experimentLinks).toMatchObject({
+      sourcePullRequests: [1448],
+      summary: expect.stringContaining("direct authenticated link"),
+      details: expect.stringContaining(
+        "Normal sign-in and account access still apply",
+      ),
+    });
+    expect(`${experimentLinks?.summary} ${experimentLinks?.details}`).not.toMatch(
+      /request-bound|signed link/iu,
+    );
+
+    const relaySources = listAppleHealthRelayConnectSources();
+    const relayEntry = items.get("apple-health-relay-wearables");
+    expect(relaySources).toHaveLength(6);
+    for (const source of relaySources) {
+      for (const publicName of source.name.split(" / ")) {
+        expect(relayEntry?.summary).toContain(publicName);
+      }
+    }
+    expect(relayEntry).toMatchObject({
+      sourcePullRequests: [1316],
+      details: expect.stringContaining(
+        "never appear as direct connections or show a false disconnect state",
+      ),
+    });
+    expect(relayEntry?.summary).not.toContain("Polar");
+
+    const augustSevenCopy = listPublishedChangelogItems()
+      .filter((item) => item.publishedOn === "2026-08-07")
+      .map((item) => `${item.summary} ${item.details ?? ""}`)
+      .join(" ");
+    expect(augustSevenCopy).not.toContain(
+      "sending an approved connected-app email",
+    );
+    expect(augustSevenCopy).not.toContain(
+      "same approved tools as an ordinary private conversation",
+    );
+  });
+
+  it("keeps the August 5 through August 9 copy outcome-oriented", () => {
+    const copy = listPublishedChangelogItems()
+      .filter((item) => item.publishedOn >= "2026-08-05")
+      .map((item) => `${item.title} ${item.summary} ${item.details ?? ""}`)
+      .join(" ");
+
+    expect(copy).not.toMatch(
+      /\b(?:Codex|Composio|Linq)\b|approved owners|byte-transfer|database (?:contention|lock)|existing runtime|hosted group container|provider (?:payloads?|work)|server clock/iu,
+    );
+  });
+
+  it("keeps the August 5 and August 6 recovery claims attached to their owners", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("tracked-compact-table-cards")).toMatchObject({
+      sourcePullRequests: [1288, 1293, 1329],
+      details: expect.stringContaining("presentation-only"),
+    });
+    expect(items.get("scheduled-reminder-authority")).toMatchObject({
+      sourcePullRequests: [1317, 1323],
+      details: expect.stringContaining("Each reminder keeps its own audience"),
+    });
+    expect(items.get("late-media-origin-continuity")).toMatchObject({
+      sourcePullRequests: [1334, 1346, 1374, 1389],
+      details: expect.stringContaining("will not make a blind second attempt"),
+    });
+    const supportSummary = items.get("support-escalation-issue-summary");
+    expect(supportSummary).toMatchObject({
+      sourcePullRequests: [1284, 1305],
+      summary: expect.stringContaining(
+        "instead of attaching the raw conversation or service response",
+      ),
+      details: expect.stringContaining(
+        "does not guarantee that every private meaning is removed",
+      ),
+    });
+    expect(`${supportSummary?.summary} ${supportSummary?.details}`).not.toMatch(
+      /excludes (?:raw transcripts|health details)|no .*health details/iu,
+    );
+    expect(items.get("daily-nutrition-card-delivery")).toMatchObject({
+      sourcePullRequests: [1312],
+      details: expect.stringContaining("partial-totals marker"),
+    });
+    const healthConsent = items.get("health-consent-actions-clarified");
+    expect(healthConsent).toMatchObject({
+      sourcePullRequests: [1338, 1339, 1350],
+      summary: expect.stringContaining(
+        "Deep sleep and REM sleep now each use one clear permission",
+      ),
+    });
+    expect(healthConsent?.summary).not.toContain(
+      "sleep sharing uses one understandable permission",
+    );
+    expect(items.get("maintenance-without-global-pause")).toMatchObject({
+      sourcePullRequests: [1318],
+      details: expect.stringContaining("Messages already received remain available"),
+    });
+    expect(items.get("interactive-imessage-cards-restored")).toMatchObject({
+      sourcePullRequests: [1394, 1426],
+    });
+    expect(items.get("first-contact-starts-faster")).toMatchObject({
+      sourcePullRequests: [1333, 1345, 1347, 1436],
+    });
+  });
+
   it("publishes the complete July 20 through August 10 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 19).map((edition) => ({
+      listChangelogEditions().slice(0, 22).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
@@ -287,12 +484,90 @@ describe("changelog registry", () => {
         itemIds: ["personal-patterns"],
       },
       {
+        id: "2026-08-09",
+        itemIds: [
+          "public-referral-home",
+          "murph-max-plan",
+          "generated-contact-card-avatar",
+          "family-setup-from-group",
+          "live-workout-logging",
+          "clearer-health-source-handoffs",
+          "body-composition-guidance",
+          "group-replies-respect-the-room",
+          "sponsorship-creative-opt-in",
+          "response-cards-survive-long-turns",
+          "typing-prewarms-private-chat",
+          "automation-output-variety",
+          "ios-app-footer-link",
+          "runtime-replacement-continuity",
+          "paused-member-retention-cleanup",
+          "background-results-use-less-shared-capacity",
+          "feedback-reproduction-guidance",
+        ],
+      },
+      {
+        id: "2026-08-08",
+        itemIds: [
+          "custom-experiment-deep-links",
+          "homepage-runtime-explainer",
+          "group-funding-one-recovery-owner",
+          "room-memory-status-recovers",
+          "due-automations-drain-cleanly",
+          "shared-pages-unfurl-again",
+          "device-sync-webhook-recovery",
+          "proactive-group-thread-routing",
+        ],
+      },
+      {
+        id: "2026-08-07",
+        itemIds: [
+          "first-personal-health-read",
+          "reusable-referral-links",
+          "scheduled-direct-call",
+          "scheduled-tools-follow-the-route",
+          "group-calls-without-redundant-preview",
+          "connected-email-from-private-chat",
+          "focused-current-research",
+          "repeated-experiment-cadence",
+          "biomarker-reference-bands",
+          "interactive-imessage-cards-restored",
+          "group-room-context-grounding",
+          "billing-access-recovery",
+          "cancel-pending-file-delivery",
+          "meal-capture-toggle-ordering",
+        ],
+      },
+      {
         id: "2026-08-06",
-        itemIds: ["x-post-media-understanding"],
+        itemIds: [
+          "companion-admission-before-device",
+          "turn-local-browser-progress",
+          "recovery-readiness-insight",
+          "x-post-media-understanding",
+          "health-consent-actions-clarified",
+          "first-contact-starts-faster",
+          "late-media-origin-continuity",
+          "support-escalation-issue-summary",
+        ],
       },
       {
         id: "2026-08-05",
-        itemIds: ["official-local-alert-health-context"],
+        itemIds: [
+          "apple-health-relay-wearables",
+          "prepare-next-group",
+          "tracked-compact-table-cards",
+          "connected-app-authorization-preview",
+          "daily-nutrition-card-delivery",
+          "mobile-one-time-contribution",
+          "official-local-alert-health-context",
+          "scheduled-reminder-authority",
+          "onboarding-and-group-activation-recovery",
+          "venice-usage-before-save",
+          "feedback-starts-with-the-problem",
+          "environment-panel-full-width",
+          "public-status-footer-link",
+          "maintenance-without-global-pause",
+        ],
       },
       {
         id: "2026-08-04",
@@ -552,6 +827,22 @@ describe("changelog registry", () => {
     ]);
   });
 
+  it("keeps Personal Patterns historical and non-causal", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "personal-patterns",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1563],
+      tryIt: {
+        href: "/patterns",
+        label: "View your patterns",
+      },
+    });
+    expect(item?.details).toContain("existing history");
+    expect(item?.details).toContain("association rather than cause");
+  });
+
   it("keeps historical one-time sponsorship copy and publishes monthly sponsorship only in the current edition", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
@@ -576,22 +867,6 @@ describe("changelog registry", () => {
       publishedOn: "2026-07-30",
       summary: expect.stringContaining("without converting it into an approximate number of messages"),
     });
-  });
-
-  it("keeps Personal Patterns historical and non-causal", () => {
-    const item = listPublishedChangelogItems().find(
-      (candidate) => candidate.id === "personal-patterns",
-    );
-
-    expect(item).toMatchObject({
-      sourcePullRequests: [1563],
-      tryIt: {
-        href: "/patterns",
-        label: "View your patterns",
-      },
-    });
-    expect(item?.details).toContain("existing history");
-    expect(item?.details).toContain("association rather than cause");
   });
 
   it("keeps internal provider branding out of published changelog copy", () => {
@@ -688,7 +963,7 @@ describe("changelog registry", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
     expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-01");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-04");
   });
 
   it("resolves only known canonical edition cursors", () => {

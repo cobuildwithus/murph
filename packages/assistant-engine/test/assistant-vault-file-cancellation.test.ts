@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -6,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   executeMurphDynamicToolRequest,
   MURPH_PENDING_VAULT_FILES_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
@@ -576,7 +576,7 @@ describe('pending generated vault-file cancellation', () => {
 })
 
 function readPendingVaultFilesRequest(argumentsValue: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     id: 1,
     method: 'item/tool/call',
     params: {
