@@ -32,7 +32,8 @@ Updated: 2026-08-10
   native launch/sync route wiring, contact-card handoff redemption, deterministic
   device-sync system-mailbox consumption, focused tests, and durable companion
   access documentation, plus feature-scoped mapping for paused meal-photo setup
-  denial.
+  denial and the user-requested ReviewGPT dependency refresh required for the
+  final review gate.
 - Out of scope: canonical assistant/runtime entitlement, browser billing
   recovery, Stripe state, native client code, and paid meal-photo capture
   authority.
@@ -135,6 +136,9 @@ Updated: 2026-08-10
   App Store binary to a source commit. Compatibility is therefore based on the
   unchanged HTTP shapes plus inspection of the current native resume/connect
   and error contracts; do not claim exact released-binary/source identity.
+- Run the final gate with the current public npm `latest` release of
+  `@cobuild/review-gpt` (0.5.124), pinned in Murph's manifest, lockfile, and
+  minimum-release-age exception rather than relying on a machine-global CLI.
 
 ## Verification
 
@@ -257,3 +261,7 @@ Updated: 2026-08-10
   eligible.
 - Required after remediation: final ReviewGPT round-5 retry and exact-head
   GitHub Actions.
+- Required after the user-requested review-tool refresh: verify the installed
+  CLI reports 0.5.124, run the directly coupled release coverage test and
+  typecheck, commit the dependency metadata, then restart the final review on
+  that exact head.
