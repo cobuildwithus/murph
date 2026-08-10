@@ -270,9 +270,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Nutrition cards fit Messages cleanly",
         summary:
-          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card.",
+          "Static nutrition cards now avoid mismatched app artwork, use Messages' rounded frame, and keep only the date and meal count beneath the card.",
         details:
-          "Calories and nutrient totals stay visible in the card without a second Murph badge or a long repeat below it. Partial totals and assessed goals keep only their short status labels.",
+          "Installed extensions keep the interactive card. App-absent previews no longer request square App Store artwork for the wider Messages icon slot, while calories, nutrient totals, partial-state warnings, and short goal statuses remain intact.",
         relevanceTags: ["imessage", "cards", "nutrition", "design"],
         sourcePullRequests: [1567],
       },
