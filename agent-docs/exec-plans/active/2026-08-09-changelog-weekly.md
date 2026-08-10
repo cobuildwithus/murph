@@ -104,6 +104,9 @@ Updated: 2026-08-09
 - Uploaded and inspected four desktop/mobile design-proof pairs. The required
   Claude UI double-check was attempted with Fable 5 and ended at explicit usage
   credit exhaustion, so no second-model verdict is claimed.
+- Rebasing onto the latest `main` shifted the archive page boundaries. Updated
+  the visual regression fixture to render the three real seven-day windows
+  containing its assertions, then reran the exact-head checks successfully.
 
 ## Decisions
 
@@ -124,10 +127,11 @@ Updated: 2026-08-09
 
 ## Verification
 
-- Passed: skill quick validation; 23 PR-body guard tests; 40 focused Web
-  Vitest assertions for registry, page, feed/card/API behavior; Web typecheck;
-  scoped ESLint; `pnpm docs:drift`; `git diff --check`; privacy and public-copy
-  punctuation scans.
+- Passed: skill quick validation; eight changelog-disposition guard tests and
+  ten frontend-proof guard tests; 40 focused Web Vitest assertions for
+  registry, page, feed/card/API behavior; Web typecheck; scoped ESLint;
+  `pnpm docs:drift`; `git diff --check`; privacy and public-copy punctuation
+  scans.
 - Passed: desktop/mobile Playwright proof from the latest public archive and
   `/design?tab=sections#changelog-archive`; 70 cards, HTTP 200, zero page
   errors, zero horizontal overflow, and native-resolution inspection of local
