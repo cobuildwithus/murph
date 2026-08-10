@@ -26,8 +26,9 @@ import {
   isAssistantProviderStalledError,
 } from '../provider-failure-diagnostics.js'
 import type { AssistantProviderRequestStartTiming } from '../providers/types.js'
-import type {
-  AssistantProviderStartCriticalPathContext,
+import {
+  stampAssistantProviderStartCriticalPath,
+  type AssistantProviderStartCriticalPathContext,
 } from '../provider-start-critical-path.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
@@ -195,6 +196,7 @@ interface AssistantAutoReplyReplyDecision {
   operatorAuthority: AssistantOperatorAuthority
   primaryInput: AssistantAutoReplyPrimaryInput
   prompt: string
+  providerStartCriticalPath: AssistantProviderStartCriticalPathContext | null
   turnContext: string | null
   userMessageContent: AssistantUserMessageContentPart[] | null
 }
@@ -567,6 +569,9 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     group: context,
     onEvent: input.onEvent,
     historyReader: input.historyReader,
+    ...(input.providerStartCriticalPath
+      ? { providerStartCriticalPath: input.providerStartCriticalPath }
+      : {}),
     receiptFallbackEnabled: shouldUseAssistantAutoReplyReceiptFallback({
       deliveryDispatchMode: input.deliveryDispatchMode,
       executionContext: input.executionContext,
@@ -692,8 +697,8 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     ...(input.beforeProviderAcceptedInputs
       ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
       : {}),
-    ...(input.providerStartCriticalPath
-      ? { providerStartCriticalPath: input.providerStartCriticalPath }
+    ...(decision.providerStartCriticalPath
+      ? { providerStartCriticalPath: decision.providerStartCriticalPath }
       : {}),
     captureIds: context.optionalInboxCaptureIds,
     inputIds: context.inputIds,
@@ -1270,12 +1275,14 @@ async function evaluateAssistantAutoReplyGroup(input: {
   historyReader: AssistantAutoReplyHistoryReader
   group: AssistantAutoReplyGroupContext
   onEvent?: (event: AssistantRunEvent) => void
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   receiptFallbackEnabled: boolean
   requestId: string | null
   sessionMaxAgeMs: number | null
   signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutoReplyDecision> {
+  let providerStartCriticalPath = input.providerStartCriticalPath ?? null
   if (!input.enabledChannels.includes(input.group.firstItem.summary.source)) {
     return createAdvancingSkipDecision(
       'channel not enabled for assistant auto-reply',
@@ -1370,6 +1377,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
       'assistant reply terminal evidence is incomplete; will retry this input after evidence is rebuilt.',
     )
   }
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    'automationTerminalEvidenceDoneAtMonotonicMs',
+  )
 
   let promptInputs = await loadAssistantAutoReplyPromptInputs({
     group: input.group,
@@ -1424,6 +1435,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
     maxSessionAgeMs: input.sessionMaxAgeMs,
     vault: input.vault,
   })
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    'automationSessionPreflightDoneAtMonotonicMs',
+  )
   const bindingDeliveryTarget = readAutoReplyBindingDeliveryTarget(input.group)
   const conversationDeliveryTarget =
     bindingDeliveryTarget ?? readAutoReplyConversationDeliveryTarget(input.group)
@@ -1470,6 +1485,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
           : readPromptInputsCrossSessionReplyToMessageId(promptInputs),
         session: existingSession,
       })
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    'automationCrossSessionContextDoneAtMonotonicMs',
+  )
   const affirmativeReaction =
     primaryReplyInput.sourceMetadata?.kind === 'linq' &&
     primaryReplyInput.sourceMetadata.affirmativeReaction === true
@@ -1506,6 +1525,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
   if (preparedInput.kind === 'skip') {
     return createAdvancingSkipDecision(preparedInput.reason)
   }
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    'automationPromptPreparationDoneAtMonotonicMs',
+  )
 
   return {
     bindingDeliveryTarget,
@@ -1526,6 +1549,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     operatorAuthority: 'direct-operator',
     primaryInput: primaryReplyInput,
     prompt: preparedInput.prompt,
+    providerStartCriticalPath,
     turnContext: buildAssistantAutoReplyTurnContext({
       baseContext: affirmativeReaction
       ? buildAssistantAutoReplyReactionTurnContext(

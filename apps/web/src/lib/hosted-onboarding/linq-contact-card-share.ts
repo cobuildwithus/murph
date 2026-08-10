@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
 import {
   getHostedLinqChatHandles,
+  HOSTED_LINQ_ATTACHMENT_SEND_ATTEMPT_TIMEOUT_MS,
   isHostedLinqAttachmentSendPrepareFailure,
   isHostedLinqIdempotencyKeyReuseFailure,
   isHostedLinqUnconfirmedAcknowledgementFailure,
@@ -72,12 +73,31 @@ type HostedLinqContactCardShareFindManyInput = {
 const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 90 * 1000;
 
 // A personalized send must reach a terminal result inside the runner's
-// web-control hop, or the turn reports something the send owner never decided.
-// Only the phases that provably precede the message POST are bounded by this,
-// so expiring under it always means nothing was sent. It is sized to leave the
-// send and its one reconciliation their full budgets inside that hop, and it is
-// far above the sub-second times these reads actually take.
-const HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS = 8 * 1000;
+// 30-second web-control hop, or the turn reports something the send owner never
+// decided. That hop starts before Web is entered, so callback verification,
+// nonce consumption, transit, and the response return all spend it too. This
+// budget is the handler's share of it and deliberately leaves the rest.
+export const HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_OPERATION_BUDGET_MS = 20 * 1000;
+
+/**
+ * The two deadlines a personalized send runs against, derived from one budget
+ * so they cannot drift apart. Reaching the pre-send deadline *is* the admission
+ * check for the irreversible POST: it is placed so that whatever remains is
+ * enough for the send and its one permitted reconciliation. Everything the
+ * pre-send deadline bounds provably precedes the POST, so expiring under it
+ * always means nothing was sent.
+ */
+export function resolveHostedLinqPersonalizedContactCardDeadlines(
+  startedAtMs: number,
+): { operationDeadlineAt: number; preSendDeadlineAt: number } {
+  const operationDeadlineAt = startedAtMs
+    + HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_OPERATION_BUDGET_MS;
+  return {
+    operationDeadlineAt,
+    preSendDeadlineAt: operationDeadlineAt
+      - 2 * HOSTED_LINQ_ATTACHMENT_SEND_ATTEMPT_TIMEOUT_MS,
+  };
+}
 
 type HostedLinqContactCardShareSkipReason =
   | "missing_chat_id"
@@ -406,6 +426,12 @@ type MurphHostedLinqContactCardVcfShareInput = {
   idempotencyKeyPrefix: string;
   memberId: string;
   now?: Date;
+  /**
+   * Absolute deadline owned by the caller, so it also covers the work that
+   * happens before this function is entered. A personalized send that is not
+   * given one starts its own budget here.
+   */
+  operationDeadlineAt?: number;
   prisma: PrismaClient;
   signal?: AbortSignal;
 } & (
@@ -436,13 +462,20 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
       shareKey: input.shareKey,
     };
   }
-  const preSendSignal = personalized
-    ? (input.signal
-      ? AbortSignal.any([
-        input.signal,
-        AbortSignal.timeout(HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS),
-      ])
-      : AbortSignal.timeout(HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_PRESEND_TIMEOUT_MS))
+  const deadlines = personalized
+    ? resolveHostedLinqPersonalizedContactCardDeadlines(
+      input.operationDeadlineAt
+        === undefined
+        ? Date.now()
+        : input.operationDeadlineAt
+          - HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_OPERATION_BUDGET_MS,
+    )
+    : null;
+  const preSendDeadline = deadlines
+    ? AbortSignal.timeout(Math.max(0, deadlines.preSendDeadlineAt - Date.now()))
+    : null;
+  const preSendSignal = preSendDeadline
+    ? (input.signal ? AbortSignal.any([input.signal, preSendDeadline]) : preSendDeadline)
     : input.signal;
   const preSendSignalOption = preSendSignal ? { signal: preSendSignal } : {};
 
@@ -512,6 +545,11 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
       prisma: input.prisma,
     }),
   ]);
+  // The backup-number read consumes no signal, so the deadline is checked here
+  // rather than assumed. Nothing has reached the chat yet.
+  if (personalized && preSendDeadline?.aborted) {
+    return { status: "skipped", reason: "provider_unavailable" };
+  }
   if (personalized && !photo) {
     return { status: "skipped", reason: "photo_unavailable" };
   }
@@ -538,9 +576,15 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
       fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
       idempotencyKey,
       // The attachment create and upload are still before the message POST, so
-      // they carry the tighter deadline. The POST and its reconciliation keep
-      // the caller signal: the whole point is to let an irreversible send
-      // finish and be reported honestly.
+      // they carry the tighter deadline, including their response bodies. The
+      // POST and its reconciliation keep the caller signal: the whole point is
+      // to let an irreversible send finish and be reported honestly.
+      ...(deadlines
+        ? {
+          prepareDeadlineAt: deadlines.preSendDeadlineAt,
+          sendDeadlineAt: deadlines.operationDeadlineAt,
+        }
+        : {}),
       ...(preSendSignal ? { prepareSignal: preSendSignal } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     });

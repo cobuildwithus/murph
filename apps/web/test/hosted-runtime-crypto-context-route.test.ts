@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   readHostedRuntimeCryptoContextForWorker: vi.fn(),
@@ -18,16 +20,9 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   readHostedRuntimeCryptoContextForWorker: mocks.readHostedRuntimeCryptoContextForWorker,
 }));
 
-import { hostedMemberAccessSelect } from "@/src/lib/hosted-onboarding/member-access";
-
 type RouteModule = typeof import("../app/api/internal/hosted-runtime/crypto-context/route");
 
 let route: RouteModule;
-
-const ACTIVE_SPONSORSHIP = {
-  group: { billingStatus: "active", suspendedAt: null },
-  status: "active",
-};
 
 describe("hosted runtime crypto-context route", () => {
   beforeEach(async () => {
@@ -44,14 +39,8 @@ describe("hosted runtime crypto-context route", () => {
     });
   });
 
-  it("returns signed runtime crypto context for an active member with a provisioned workspace", async () => {
+  it("returns signed workspace-bound crypto context without repeating caller admission", async () => {
     const prisma = createPrisma({
-      member: {
-        accountGroupMemberships: [],
-        billingStatus: "active",
-        suspendedAt: null,
-        threadContainer: null,
-      },
       workspace: { userId: "member_crypto_1" },
     });
     mocks.getPrisma.mockReturnValue(prisma);
@@ -62,10 +51,6 @@ describe("hosted runtime crypto-context route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith({
-      select: hostedMemberAccessSelect,
-      where: { id: "member_crypto_1" },
-    });
     expect(prisma.hostedWorkspace.findUnique).toHaveBeenCalledWith({
       select: { userId: true },
       where: { userId: "member_crypto_1" },
@@ -81,111 +66,8 @@ describe("hosted runtime crypto-context route", () => {
     expect(payload.fetchedAt).toEqual(expect.any(String));
   });
 
-  it("allows family-sponsored members whose direct billing is not started", async () => {
+  it("rejects callbacks that do not have a provisioned hosted workspace", async () => {
     const prisma = createPrisma({
-      member: {
-        accountGroupMemberships: [ACTIVE_SPONSORSHIP],
-        billingStatus: "not_started",
-        suspendedAt: null,
-        threadContainer: null,
-      },
-      workspace: { userId: "member_crypto_1" },
-    });
-    mocks.getPrisma.mockReturnValue(prisma);
-
-    const response = await route.POST(new Request("https://join.example.test/api/internal/hosted-runtime/crypto-context", {
-      method: "POST",
-    }));
-
-    expect(response.status).toBe(200);
-    expect(mocks.readHostedRuntimeCryptoContextForWorker).toHaveBeenCalledWith({
-      prisma,
-      userId: "member_crypto_1",
-    });
-  });
-
-  it("allows thread-container runtime context when an active participant keeps an inactive-owner group alive", async () => {
-    const prisma = createPrisma({
-      member: {
-        accountGroupMemberships: [],
-        billingStatus: "not_started",
-        suspendedAt: null,
-        threadContainer: {
-          owner: {
-            accountGroupMemberships: [],
-            billingStatus: "paused",
-            suspendedAt: null,
-          },
-        },
-      },
-      participantActive: true,
-      workspace: { userId: "member_crypto_1" },
-    });
-    mocks.getPrisma.mockReturnValue(prisma);
-
-    const response = await route.POST(new Request("https://join.example.test/api/internal/hosted-runtime/crypto-context", {
-      method: "POST",
-    }));
-
-    expect(response.status).toBe(200);
-    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
-      select: {
-        participantMemberId: true,
-      },
-      where: expect.objectContaining({
-        containerMemberId: "member_crypto_1",
-        removedAt: null,
-      }),
-    });
-    expect(mocks.readHostedRuntimeCryptoContextForWorker).toHaveBeenCalledWith({
-      prisma,
-      userId: "member_crypto_1",
-    });
-  });
-
-
-  it("rejects missing, inactive, or suspended hosted members before reading crypto roots", async () => {
-    for (const member of [
-      null,
-      {
-        accountGroupMemberships: [],
-        billingStatus: "not_started",
-        suspendedAt: null,
-        threadContainer: null,
-      },
-      {
-        accountGroupMemberships: [ACTIVE_SPONSORSHIP],
-        billingStatus: "active",
-        suspendedAt: new Date("2026-05-01T00:00:00.000Z"),
-        threadContainer: null,
-      },
-    ]) {
-      const prisma = createPrisma({
-        member,
-        workspace: { userId: "member_crypto_1" },
-      });
-      mocks.getPrisma.mockReturnValue(prisma);
-      mocks.readHostedRuntimeCryptoContextForWorker.mockClear();
-
-      const response = await route.POST(new Request("https://join.example.test/api/internal/hosted-runtime/crypto-context", {
-        method: "POST",
-      }));
-
-      expect(response.status).toBe(403);
-      await expect(response.json()).resolves.toEqual({ error: "hosted_member_not_active" });
-      expect(prisma.hostedWorkspace.findUnique).not.toHaveBeenCalled();
-      expect(mocks.readHostedRuntimeCryptoContextForWorker).not.toHaveBeenCalled();
-    }
-  });
-
-  it("rejects active members that do not have a provisioned hosted workspace", async () => {
-    const prisma = createPrisma({
-      member: {
-        accountGroupMemberships: [],
-        billingStatus: "active",
-        suspendedAt: null,
-        threadContainer: null,
-      },
       workspace: null,
     });
     mocks.getPrisma.mockReturnValue(prisma);
@@ -198,32 +80,28 @@ describe("hosted runtime crypto-context route", () => {
     await expect(response.json()).resolves.toEqual({ error: "hosted_workspace_not_provisioned" });
     expect(mocks.readHostedRuntimeCryptoContextForWorker).not.toHaveBeenCalled();
   });
+
+  it("rejects unauthenticated callbacks before reading workspace or crypto state", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+      httpStatus: 401,
+      message: "Unauthorized hosted Cloudflare callback request.",
+      retryable: false,
+    }));
+
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/crypto-context",
+      { method: "POST" },
+    ));
+
+    expect(response.status).toBe(401);
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.readHostedRuntimeCryptoContextForWorker).not.toHaveBeenCalled();
+  });
 });
 
-type HostedMemberAccessFixture = {
-  accountGroupMemberships: Array<{
-    group: { billingStatus: string; suspendedAt: Date | null };
-    status: string;
-  }>;
-  billingStatus: string;
-  suspendedAt: Date | null;
-  threadContainer: null | { owner: unknown };
-};
-
-function createPrisma(input: {
-  member: HostedMemberAccessFixture | null;
-  participantActive?: boolean;
-  workspace: { userId: string } | null;
-}) {
+function createPrisma(input: { workspace: { userId: string } | null }) {
   return {
-    hostedMember: {
-      findUnique: vi.fn().mockResolvedValue(input.member),
-    },
-    hostedThreadContainerParticipant: {
-      findFirst: vi.fn(async () => input.participantActive
-        ? { participantMemberId: "member_active_participant" }
-        : null),
-    },
     hostedWorkspace: {
       findUnique: vi.fn().mockResolvedValue(input.workspace),
     },

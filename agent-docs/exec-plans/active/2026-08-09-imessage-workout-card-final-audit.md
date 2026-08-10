@@ -42,5 +42,6 @@ Success criteria:
 - Assistant tracked-workout skill suite: 2 tests passed, including ambiguity-safe coordinate resolution.
 - `pnpm docs:drift`
 - The coordinated native reader PR passed both repository verification lanes after adding single-flight, failure-safe composer insertion and completed/skipped decoder coverage.
+- After integrating `main`'s targeted live-workout commands, the three affected assistant skill suites passed (9 tests), `@murphai/assistant-engine` typechecked, and `pnpm docs:drift` passed.
 
 The plan remains active until the native V4 reader is released before broad backend V4 emission.

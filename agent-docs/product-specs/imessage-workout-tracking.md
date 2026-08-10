@@ -14,7 +14,7 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 ## Authority boundary
 
 - A saved workout format owns planned exercises, stable exercise identity, planned sets, and target values.
-- One canonical `activity_session` workout event owns session timing and actual completed sets.
+- One canonical `activity_session` workout event owns session timing, unlogged set coordinates, and actual completed-set values. Planned targets are not copied into those placeholders.
 - A response card is an immutable snapshot. It never owns workout state.
 - The Messages extension has no vault credentials, shared authentication state, network client, cache, or persistence.
 - Every card action inserts a command into the Messages composer. The member sends it through the normal Murph conversation path, which remains the sole mutation owner.
@@ -60,7 +60,7 @@ The native app composes explicit one-based commands such as:
 - `Correct workout exercise 2 set 1: `
 - `Finish this tracked workout.`
 
-The assistant resolves the command only when one tracked workout is unambiguous in the same private conversation. It may prefer the latest verified snapshot only when no second session is plausible; the inserted text itself is never identity or write authority. The assistant then re-reads canonical state, preserves unrelated fields, applies the existing guarded workout mutation, re-reads again, and only then sends a refreshed immutable card.
+The assistant resolves the command only when one tracked workout is unambiguous in the same private conversation. It may prefer the latest verified snapshot only when no second session is plausible; the inserted text itself is never identity or write authority. The assistant resolves that exact active event, reads the saved format when a shown target is required, and invokes the targeted `workout set log`, `workout set clear`, or `workout finish` command with the canonical workout id and explicit one-based coordinates. The command owner preserves unrelated state and returns the verified canonical event; only that success permits a refreshed immutable card.
 
 ## Rollout
 

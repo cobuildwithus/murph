@@ -80,6 +80,7 @@ import {
   requireCompactString,
 } from './compact-field-spec.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { registerWorkoutLiveCommands } from './workout-live.js'
 
 const workoutSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const workoutListLimitOptionSchema = z
@@ -395,6 +396,8 @@ export function registerWorkoutCommands(
     description:
       'Workout façade commands over activity sessions, workout-format docs, CSV import, and saved unit preferences.',
   })
+
+  registerWorkoutLiveCommands(workout)
 
   workout.command('add', {
     description:

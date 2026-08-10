@@ -15,6 +15,7 @@ import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   logHostedOnboardingDiagnostic,
+  logHostedOnboardingWarning,
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
 import {
@@ -88,6 +89,28 @@ describe("hosted onboarding timing logging", () => {
         memberEmail: "<redacted-email>",
         responseReason: "ignored-no-active-route",
         unsafeUrl: "<redacted-url>",
+      },
+    );
+  });
+
+  it("emits sanitized searchable warning payloads", () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    logHostedOnboardingWarning("hosted.test-warning", {
+      eventIdSuffix: "abc123",
+      partsKind: "missing",
+      unsafeEmail: "user@example.com",
+      unsafeUrl: "https://example.test/raw",
+    });
+
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Hosted onboarding warning: hosted.test-warning.",
+      {
+        eventIdSuffix: "abc123",
+        partsKind: "missing",
+        unsafeEmail: "<redacted-email>",
+        unsafeUrl: "<redacted-url>",
+        warning: "hosted.test-warning",
       },
     );
   });

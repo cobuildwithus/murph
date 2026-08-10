@@ -61,7 +61,11 @@ describe('assistant live workout card skill', () => {
 
     expect(skill).toContain('A saved workout format owns the plan')
     expect(skill).toContain('One canonical `activity_session` workout event owns what actually happened')
-    expect(skill).toContain('start every exercise with an empty actual `sets` array')
+    expect(skill).toContain(
+      'start every planned set as an unlogged placeholder',
+    )
+    expect(skill).toContain('vault-cli workout set log')
+    expect(skill).toContain('vault-cli workout finish')
     expect(skill).toContain('Never use `workout format log` to start a live workout')
     expect(skill).toContain('A target is not a completed set')
     expect(skill).toContain('Commands inserted by the iMessage card use explicit one-based coordinates')
