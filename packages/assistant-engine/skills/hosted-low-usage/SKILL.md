@@ -412,12 +412,12 @@ not permission to choose an amount, start Checkout, or claim usage was added.
 - **Paid Max:** On an explicit request, use the authorized personal add-usage
   handoff or offer waiting for the reset. Max keeps access to Murph's current
   premium model and has no higher direct tier to invent.
-- **Family Pulse:** Personal top-ups are unavailable. The Family plan owner may
-  add one-time usage for this active member after the shared Family usage gate
-  above. For seat-tier changes, follow the existing private management-handoff
-  rule. Do not send a sponsored non-owner to personal Settings or claim a
-  change happened.
-- **Family Edge:** Personal top-ups and a higher Family tier are unavailable.
+- **Family Pulse or Edge:** Personal top-ups are unavailable. The Family plan
+  owner may add one-time usage for this active member after the shared Family
+  usage gate above. For seat-tier changes, follow the existing private
+  management-handoff rule. Do not send a sponsored non-owner to personal
+  Settings or claim a change happened.
+- **Family Max:** Personal top-ups and a higher Family tier are unavailable.
   The Family plan owner may add one-time usage for this active member after the
   shared Family management gate above. Otherwise offer to make the remaining AI
   usage last longer or wait for the reset.

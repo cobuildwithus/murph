@@ -524,6 +524,44 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the complete Family Max plan-code contract to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260809160000_add_hosted_family_max_plan_code";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_account_group_membership"',
+          '  ALTER COLUMN "plan_code" SET NOT NULL,',
+          '  DROP CONSTRAINT "hosted_account_group_membership_plan_code_check",',
+          '  ADD CONSTRAINT "hosted_account_group_membership_plan_code_check"',
+          '    CHECK ("plan_code" IN (\'pulse\', \'edge\', \'max\')) NOT VALID;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("keeps known post-baseline destructive migration history exempt", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
@@ -875,6 +913,7 @@ describe("hosted web production migration guard", () => {
     const migrations = await listHostedWebContractMigrations();
 
     for (const migrationId of [
+      "20260714150000_require_hosted_family_plan_codes",
       "20260720233000_hosted_group_usage_funding_invariants",
       "20260726123000_allow_hosted_usage_referral_credit_entries",
     ]) {

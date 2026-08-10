@@ -1465,7 +1465,7 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Choose Family/);
-    assert.match(markup, /Choose Pulse or Edge for each person/);
+    assert.match(markup, /Choose Pulse, Edge, or Max for each person/);
     assert.match(markup, /From \$7\/person/);
   });
 

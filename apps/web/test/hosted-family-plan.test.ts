@@ -209,6 +209,8 @@ describe("hosted Family plan", () => {
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY;
   const previousHostedFamilyEdgeStripePriceId =
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY;
+  const previousHostedFamilyMaxStripePriceId =
+    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY;
   const previousLegacyHostedFamilyStripePriceId =
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY;
   const previousHostedPulseStripePriceId =
@@ -228,6 +230,8 @@ describe("hosted Family plan", () => {
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY = "price_family";
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY =
       "price_family_edge";
+    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY =
+      "price_family_max";
     delete process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY;
     clearHostedOnboardingEnvCache();
     encryptionMocks.encryptHostedWebNullableString.mockImplementation(async ({ value }) =>
@@ -294,7 +298,11 @@ describe("hosted Family plan", () => {
     }));
     runtimeMocks.requireHostedStripeFamilyPlanConfig.mockImplementation(({ planCode }) => ({
       planCode,
-      priceId: planCode === "edge" ? "price_family_edge" : "price_family",
+      priceId: planCode === "edge"
+        ? "price_family_edge"
+        : planCode === "max"
+          ? "price_family_max"
+          : "price_family",
       stripe: runtimeMocks.requireHostedStripeApi(),
     }));
     runtimeMocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue(
@@ -326,6 +334,10 @@ describe("hosted Family plan", () => {
     restoreEnvValue(
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
       previousHostedFamilyEdgeStripePriceId,
+    );
+    restoreEnvValue(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY",
+      previousHostedFamilyMaxStripePriceId,
     );
     restoreEnvValue(
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
@@ -2743,7 +2755,7 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("records a pending member tier and atomically swaps Stripe quantities", async () => {
+  it("records and resumes a pending member tier before atomically swapping Stripe quantities", async () => {
     const tx = createTxMock();
     const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
     tx.hostedAccountGroupMembership.findFirst
@@ -2756,18 +2768,18 @@ describe("hosted Family plan", () => {
       .mockResolvedValueOnce(null);
     tx.hostedAccountGroupMembership.update.mockResolvedValueOnce({
       id: "hbagm_mom",
-      pendingPlanCode: "edge",
+      pendingPlanCode: "max",
       planCode: "pulse",
       updatedAt: pendingStartedAt,
     });
     tx.hostedAccountGroupMembership.findUnique.mockResolvedValueOnce({
-      pendingPlanCode: "edge",
+      pendingPlanCode: "max",
       planCode: "pulse",
     });
     tx.hostedAccountGroupMembership.findMany
       .mockResolvedValue([
         { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_mom", planCode: "edge" },
+        { memberId: "member_mom", planCode: "max" },
       ])
       .mockResolvedValueOnce([
         { memberId: "member_owner", planCode: "pulse" },
@@ -2780,7 +2792,7 @@ describe("hosted Family plan", () => {
     const currentCapacities = [{ billedQuantity: 2, planCode: "pulse" }];
     const targetCapacities = [
       { billedQuantity: 1, planCode: "pulse" },
-      { billedQuantity: 1, planCode: "edge" },
+      { billedQuantity: 1, planCode: "max" },
     ];
     tx.hostedAccountGroupPlanCapacity.findMany
       .mockResolvedValue(targetCapacities)
@@ -2790,7 +2802,7 @@ describe("hosted Family plan", () => {
       makeFamilyStripeSubscription({ itemQuantity: 2 }),
     );
     const stripeUpdate = vi.fn().mockResolvedValue(
-      makeFamilyStripeSubscription({ edgeItemQuantity: 1, itemQuantity: 1 }),
+      makeFamilyStripeSubscription({ itemQuantity: 1, maxItemQuantity: 1 }),
     );
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       subscriptions: {
@@ -2807,12 +2819,12 @@ describe("hosted Family plan", () => {
       groupId: "hbag_family",
       memberId: "member_mom",
       ownerMemberId: "member_owner",
-      planCode: "edge",
+      planCode: "max",
       prisma: prisma as never,
     })).resolves.toMatchObject({ syncing: false });
 
     expect(tx.hostedAccountGroupMembership.update).toHaveBeenCalledWith({
-      data: { pendingPlanCode: "edge" },
+      data: { pendingPlanCode: "max" },
       select: { id: true, pendingPlanCode: true, planCode: true, updatedAt: true },
       where: { id: "hbagm_mom" },
     });
@@ -2821,18 +2833,18 @@ describe("hosted Family plan", () => {
       expect.objectContaining({
         items: [
           { id: "si_family", quantity: 1 },
-          { price: "price_family_edge", quantity: 1 },
+          { price: "price_family_max", quantity: 1 },
         ],
         proration_behavior: "create_prorations",
         proration_date: Math.floor(pendingStartedAt.getTime() / 1_000),
       }),
       {
         idempotencyKey:
-          `family-member-plan:hbag_family:hbagm_mom:${pendingStartedAt.getTime()}:edge`,
+          `family-member-plan:hbag_family:hbagm_mom:${pendingStartedAt.getTime()}:max`,
       },
     );
     expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalledWith(
-      expect.objectContaining({ data: { planCode: "edge" } }),
+      expect.objectContaining({ data: { planCode: "max" } }),
     );
     expect(nextServerMocks.after).not.toHaveBeenCalled();
   });
@@ -4165,6 +4177,7 @@ describe("hosted Family plan", () => {
       subscription: makeFamilyStripeSubscription({
         edgeItemQuantity: 1,
         itemQuantity: 2,
+        maxItemQuantity: 1,
       }),
       tx,
     })).resolves.toMatchObject({
@@ -4174,7 +4187,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
-          billedSeatCount: 3,
+          billedSeatCount: 4,
           currentBillingPhase: "paid",
         }),
       }),
@@ -4183,6 +4196,7 @@ describe("hosted Family plan", () => {
       data: [
         { billedQuantity: 2, groupId: "hbag_family", planCode: "pulse" },
         { billedQuantity: 1, groupId: "hbag_family", planCode: "edge" },
+        { billedQuantity: 1, groupId: "hbag_family", planCode: "max" },
       ],
     });
   });
@@ -4199,7 +4213,7 @@ describe("hosted Family plan", () => {
       {
         id: "hbagm_mom",
         memberId: "member_mom",
-        pendingPlanCode: "edge",
+        pendingPlanCode: "max",
         planCode: "pulse",
       },
     ]);
@@ -4212,8 +4226,8 @@ describe("hosted Family plan", () => {
         eventCreatedAt: new Date("2026-07-15T12:30:00.000Z"),
       },
       subscription: makeFamilyStripeSubscription({
-        edgeItemQuantity: 1,
         itemQuantity: 1,
+        maxItemQuantity: 1,
       }),
       tx,
     })).resolves.toMatchObject({
@@ -4224,15 +4238,15 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.updateMany).toHaveBeenCalledWith({
       data: {
         pendingPlanCode: null,
-        planCode: "edge",
+        planCode: "max",
         usagePlanTransitionAt: new Date("2026-07-15T12:30:00.000Z"),
         usagePlanTransitionFromCode: "launch_monthly",
         usagePlanTransitionKind: "plan_upgrade",
-        usagePlanTransitionToCode: "launch_edge_monthly",
+        usagePlanTransitionToCode: "launch_max_monthly",
       },
       where: {
         id: "hbagm_mom",
-        pendingPlanCode: "edge",
+        pendingPlanCode: "max",
         planCode: "pulse",
         status: "active",
       },
@@ -4240,7 +4254,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupPlanCapacity.createMany).toHaveBeenCalledWith({
       data: [
         { billedQuantity: 1, groupId: "hbag_family", planCode: "pulse" },
-        { billedQuantity: 1, groupId: "hbag_family", planCode: "edge" },
+        { billedQuantity: 1, groupId: "hbag_family", planCode: "max" },
       ],
     });
     expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
@@ -7292,7 +7306,7 @@ describe("hosted Family plan", () => {
       now: new Date("2026-06-18T12:00:00.000Z"),
       ownerMemberId: "member_owner",
       prisma: prisma as never,
-      targetCapacities: { edge: 2, pulse: 1 },
+      targetCapacities: { edge: 2, max: 0, pulse: 1 },
     })).resolves.toMatchObject({
       groupId: "hbag_family",
     });
@@ -7313,7 +7327,7 @@ describe("hosted Family plan", () => {
       }),
       {
         idempotencyKey: expect.stringMatching(
-          /^family-capacity:hbag_family:[0-9]+:1:2$/u,
+          /^family-capacity:hbag_family:[0-9]+:1:2:0$/u,
         ),
       },
     );
@@ -7409,7 +7423,7 @@ describe("hosted Family plan", () => {
       now: new Date("2026-06-18T12:00:00.000Z"),
       ownerMemberId: "member_owner",
       prisma: prisma as never,
-      targetCapacities: { edge: 2, pulse: 1 },
+      targetCapacities: { edge: 2, max: 0, pulse: 1 },
     };
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -7463,7 +7477,7 @@ describe("hosted Family plan", () => {
       now: new Date("2026-06-18T12:00:00.000Z"),
       ownerMemberId: "member_owner",
       prisma: prisma as never,
-      targetCapacities: { edge: 2, pulse: 1 },
+      targetCapacities: { edge: 2, max: 0, pulse: 1 },
     })).resolves.toMatchObject({ groupId: "hbag_family" });
 
     expect(stripeSubscriptionUpdate).not.toHaveBeenCalled();
@@ -7510,7 +7524,7 @@ describe("hosted Family plan", () => {
       now: new Date("2026-06-18T12:00:00.000Z"),
       ownerMemberId: "member_owner",
       prisma: prisma as never,
-      targetCapacities: { edge: 1, pulse: 1 },
+      targetCapacities: { edge: 1, max: 0, pulse: 1 },
     });
 
     expect(stripeSubscriptionUpdate).toHaveBeenCalledWith(
@@ -7584,14 +7598,14 @@ describe("hosted Family plan", () => {
         now: new Date("2026-06-18T12:00:00.000Z"),
         ownerMemberId: "member_owner",
         prisma: prisma as never,
-        targetCapacities: { edge: 2, pulse: 4 },
+        targetCapacities: { edge: 2, max: 0, pulse: 4 },
       }),
       updateHostedFamilyPlanCapacities({
         groupId: "hbag_family",
         now: new Date("2026-06-18T12:00:00.000Z"),
         ownerMemberId: "member_owner",
         prisma: prisma as never,
-        targetCapacities: { edge: 3, pulse: 3 },
+        targetCapacities: { edge: 3, max: 0, pulse: 3 },
       }),
     ]);
 
@@ -7630,7 +7644,7 @@ describe("hosted Family plan", () => {
       now: new Date("2026-07-15T12:00:00.000Z"),
       ownerMemberId: "member_owner",
       prisma: prisma as never,
-      targetCapacities: { edge: 1, pulse: 2 },
+      targetCapacities: { edge: 1, max: 0, pulse: 2 },
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_MEMBER_PLAN_SYNCING",
     });
@@ -8046,6 +8060,7 @@ function makeFamilyStripeSubscription(input: {
   duplicateFamilyItems?: boolean;
   edgeItemQuantity?: number;
   itemQuantity?: number;
+  maxItemQuantity?: number;
   metadata?: Stripe.Metadata;
   pauseCollection?: Stripe.Subscription["pause_collection"];
   pendingUpdate?: Stripe.Subscription["pending_update"];
@@ -8087,6 +8102,15 @@ function makeFamilyStripeSubscription(input: {
       id: "price_family_edge",
     },
     quantity: input.edgeItemQuantity,
+  } as Stripe.SubscriptionItem;
+  const maxItem = {
+    ...familyItem,
+    id: "si_family_max",
+    price: {
+      ...familyItem.price,
+      id: "price_family_max",
+    },
+    quantity: input.maxItemQuantity,
   } as Stripe.SubscriptionItem;
   const subscription: Stripe.Subscription & {
     current_period_end?: number;
@@ -8146,6 +8170,7 @@ function makeFamilyStripeSubscription(input: {
         : [
             familyItem,
             ...(input.edgeItemQuantity === undefined ? [] : [edgeItem]),
+            ...(input.maxItemQuantity === undefined ? [] : [maxItem]),
           ],
       has_more: false,
       object: "list",
@@ -8189,7 +8214,7 @@ function createPendingInvite(overrides: Partial<{
   acceptedByMemberId: string | null;
   expiresAt: Date;
   inviteCode: string;
-  planCode: "edge" | "pulse";
+  planCode: "edge" | "max" | "pulse";
   status: string;
   targetLabel: string | null;
   targetEmailEncrypted: string | null;

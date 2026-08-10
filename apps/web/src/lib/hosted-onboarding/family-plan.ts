@@ -70,15 +70,15 @@ import {
 import {
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
-  HOSTED_PLAN_CODES,
-  getHostedBillingPlanCodeForPlan,
+  HOSTED_FAMILY_PLAN_CODES,
+  getHostedFamilyBillingPlanCode,
   getHostedFamilyBillingOfferDefinition,
   isHostedBillingPlanImmediateUpgrade,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
-  parseHostedPlanCode,
+  parseHostedFamilyPlanCode,
   type HostedBillingPlanCode,
-  type HostedPlanCode,
+  type HostedFamilyPlanCode,
 } from "./billing-plans";
 import {
   requireHostedOnboardingPublicBaseUrl,
@@ -354,7 +354,7 @@ export interface HostedAccountGroupInvitePrivateSnapshot
     | "targetPhoneNumberEncrypted"
     | "targetTelegramUsernameEncrypted"
   > {
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   targetEmail: string | null;
   targetPhoneHint: string | null;
   targetPhoneNumber: string | null;
@@ -383,8 +383,8 @@ export interface HostedFamilyOwnerMemberRow {
   joinedAt: Date | null;
   label: string | null;
   memberId: string;
-  pendingPlanCode: HostedPlanCode | null;
-  planCode: HostedPlanCode;
+  pendingPlanCode: HostedFamilyPlanCode | null;
+  planCode: HostedFamilyPlanCode;
   role: string;
   status: string;
 }
@@ -394,7 +394,7 @@ export interface HostedFamilyOwnerInviteRow {
   channel: string;
   expiresAt: Date;
   id: string;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   status: string;
   targetEmail: string | null;
   targetLabel: string | null;
@@ -411,7 +411,7 @@ export interface HostedFamilyOwnerSnapshot {
   invites: HostedFamilyOwnerInviteRow[];
   members: HostedFamilyOwnerMemberRow[];
   ownerMemberId: string;
-  plans: Record<HostedPlanCode, HostedFamilyOwnerPlanStatus>;
+  plans: Record<HostedFamilyPlanCode, HostedFamilyOwnerPlanStatus>;
   seats: HostedFamilyOwnerSeatStatus;
   suspendedAt: Date | null;
 }
@@ -462,7 +462,7 @@ export interface HostedFamilyInviteAcceptanceView {
    * line. Null for brand-new invitees (the page falls back to a configured line).
    */
   messagesRecipientPhone: string | null;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   seatAvailable: boolean;
   status: HostedAccountGroupInviteStatus;
   targetLabel: string | null;
@@ -847,7 +847,7 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
   );
 
   const capacities = paidCapacities ?? createEmptyHostedFamilyPlanCapacities();
-  const plans = Object.fromEntries(HOSTED_PLAN_CODES.map((planCode) => {
+  const plans = Object.fromEntries(HOSTED_FAMILY_PLAN_CODES.map((planCode) => {
     const active = members.filter((member) => member.planCode === planCode).length;
     const invited = inviteRows.filter((invite) => invite.planCode === planCode).length;
     const used = active + invited;
@@ -859,12 +859,12 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
       remaining: Math.max(0, billed - used),
       used,
     } satisfies HostedFamilyOwnerPlanStatus] as const;
-  })) as Record<HostedPlanCode, HostedFamilyOwnerPlanStatus>;
-  const active = HOSTED_PLAN_CODES.reduce(
+  })) as Record<HostedFamilyPlanCode, HostedFamilyOwnerPlanStatus>;
+  const active = HOSTED_FAMILY_PLAN_CODES.reduce(
     (sum, planCode) => sum + plans[planCode].active,
     0,
   );
-  const invited = HOSTED_PLAN_CODES.reduce(
+  const invited = HOSTED_FAMILY_PLAN_CODES.reduce(
     (sum, planCode) => sum + plans[planCode].invited,
     0,
   );
@@ -1993,8 +1993,10 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   let membershipsForCapacity = activeMemberships;
   if (currentCapacities && pendingMemberships.length === 1) {
     const pendingMembership = pendingMemberships[0];
-    const sourcePlanCode = parseHostedPlanCode(pendingMembership?.planCode);
-    const targetPlanCode = parseHostedPlanCode(pendingMembership?.pendingPlanCode);
+    const sourcePlanCode = parseHostedFamilyPlanCode(pendingMembership?.planCode);
+    const targetPlanCode = parseHostedFamilyPlanCode(
+      pendingMembership?.pendingPlanCode,
+    );
     const expectedCapacities = sourcePlanCode && targetPlanCode && sourcePlanCode !== targetPlanCode
       ? parseHostedFamilyPlanCapacities({
           ...currentCapacities,
@@ -2014,16 +2016,16 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
           pendingPlanCode: null,
           planCode: targetPlanCode,
           ...(isHostedBillingPlanImmediateUpgrade({
-            currentPlanCode: getHostedBillingPlanCodeForPlan(sourcePlanCode),
-            targetPlanCode: getHostedBillingPlanCodeForPlan(targetPlanCode),
+            currentPlanCode: getHostedFamilyBillingPlanCode(sourcePlanCode),
+            targetPlanCode: getHostedFamilyBillingPlanCode(targetPlanCode),
           })
             ? {
                 usagePlanTransitionAt: eventCreatedAt,
                 usagePlanTransitionFromCode:
-                  getHostedBillingPlanCodeForPlan(sourcePlanCode),
+                  getHostedFamilyBillingPlanCode(sourcePlanCode),
                 usagePlanTransitionKind: "plan_upgrade",
                 usagePlanTransitionToCode:
-                  getHostedBillingPlanCodeForPlan(targetPlanCode),
+                  getHostedFamilyBillingPlanCode(targetPlanCode),
               }
             : {}),
         },
@@ -2036,8 +2038,8 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       });
       if (completed.count === 1) {
         if (isHostedBillingPlanImmediateUpgrade({
-          currentPlanCode: getHostedBillingPlanCodeForPlan(sourcePlanCode),
-          targetPlanCode: getHostedBillingPlanCodeForPlan(targetPlanCode),
+          currentPlanCode: getHostedFamilyBillingPlanCode(sourcePlanCode),
+          targetPlanCode: getHostedFamilyBillingPlanCode(targetPlanCode),
         })) {
           runtimeRecheckMemberIds.add(pendingMembership.memberId);
         }
@@ -2050,7 +2052,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     }
   }
   const activeCounts = countHostedFamilyAssignmentsByPlan(membershipsForCapacity);
-  const activeMembersFitPaidSeats = HOSTED_PLAN_CODES.every(
+  const activeMembersFitPaidSeats = HOSTED_FAMILY_PLAN_CODES.every(
     (planCode) => activeCounts[planCode] <= familyPlanState.capacities[planCode],
   );
   const billedSeatCount = sumHostedFamilyPlanCapacities(familyPlanState.capacities);
@@ -3109,7 +3111,7 @@ export async function updateHostedFamilyPlanCapacities(input: {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CAPACITY_INVALID",
       httpStatus: 400,
-      message: "Family capacity must contain 2 to 6 total Pulse and Edge seats.",
+      message: "Family capacity must contain 2 to 6 total seats.",
     });
   }
 
@@ -3186,7 +3188,11 @@ export async function updateHostedFamilyPlanCapacities(input: {
         ...memberships,
         ...invites,
       ]);
-      if (HOSTED_PLAN_CODES.some((planCode) => usage[planCode] > target[planCode])) {
+      if (
+        HOSTED_FAMILY_PLAN_CODES.some(
+          (planCode) => usage[planCode] > target[planCode],
+        )
+      ) {
         throw hostedOnboardingError({
           code: "HOSTED_FAMILY_CAPACITY_BELOW_USAGE",
           httpStatus: 409,
@@ -3273,7 +3279,7 @@ async function performHostedFamilyStripeCapacitiesUpdateUnderOwnerLock(input: {
   const priceIdsByPlan = {
     ...readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
   };
-  for (const planCode of HOSTED_PLAN_CODES) {
+  for (const planCode of HOSTED_FAMILY_PLAN_CODES) {
     if (input.target[planCode] > 0) {
       priceIdsByPlan[planCode] = requireHostedStripeFamilyPlanConfig({ planCode }).priceId;
     }
@@ -3351,7 +3357,7 @@ function buildHostedFamilyCapacityUpdateIdempotencyKey(input: {
   groupId: string;
   target: HostedFamilyPlanCapacities;
 }): string {
-  return `family-capacity:${input.groupId}:${input.billingRef.updatedAt.getTime()}:${input.target.pulse}:${input.target.edge}`;
+  return `family-capacity:${input.groupId}:${input.billingRef.updatedAt.getTime()}:${input.target.pulse}:${input.target.edge}:${input.target.max}`;
 }
 
 export async function waitForHostedFamilyPlanCapacities(input: {
@@ -3860,7 +3866,11 @@ export async function issueHostedFamilyInviteTx(input: {
     const projectedUsage = countHostedFamilyAssignmentsByPlan(assignments);
     projectedUsage[existingPlanCode] -= 1;
     projectedUsage[planCode] += 1;
-    if (!HOSTED_PLAN_CODES.every((code) => projectedUsage[code] <= capacities[code])) {
+    if (
+      !HOSTED_FAMILY_PLAN_CODES.every(
+        (code) => projectedUsage[code] <= capacities[code],
+      )
+    ) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_INVITE_PLAN_CAPACITY_REQUIRED",
         httpStatus: 409,
@@ -5339,7 +5349,7 @@ async function replaceHostedFamilyPlanCapacitiesTx(input: {
   await input.tx.hostedAccountGroupPlanCapacity.deleteMany({
     where: { groupId: input.groupId },
   });
-  const rows = HOSTED_PLAN_CODES.flatMap((planCode) => {
+  const rows = HOSTED_FAMILY_PLAN_CODES.flatMap((planCode) => {
     const billedQuantity = input.capacities[planCode];
     return billedQuantity > 0
       ? [{ billedQuantity, groupId: input.groupId, planCode }]
@@ -5410,7 +5420,7 @@ async function revokeNewestHostedFamilyPendingInvitesToFitPlanCapacitiesTx(input
     }),
   ]);
   const activeCounts = countHostedFamilyAssignmentsByPlan(activeMemberships);
-  const revokedInviteIds = HOSTED_PLAN_CODES.flatMap((planCode) => {
+  const revokedInviteIds = HOSTED_FAMILY_PLAN_CODES.flatMap((planCode) => {
     const tierInvites = pendingInvites.filter(
       (invite) => requireHostedFamilyPlanCode(invite.planCode) === planCode,
     );
@@ -5492,7 +5502,7 @@ function hostedFamilyAssignmentsFitCapacities(
   capacities: HostedFamilyPlanCapacities,
 ): boolean {
   const usage = countHostedFamilyAssignmentsByPlan(assignments);
-  return HOSTED_PLAN_CODES.every(
+  return HOSTED_FAMILY_PLAN_CODES.every(
     (planCode) => usage[planCode] <= capacities[planCode],
   );
 }
@@ -5500,7 +5510,7 @@ function hostedFamilyAssignmentsFitCapacities(
 function calculateHostedFamilyMonthlyAmountUsdCents(
   capacities: HostedFamilyPlanCapacities,
 ): number {
-  return HOSTED_PLAN_CODES.reduce(
+  return HOSTED_FAMILY_PLAN_CODES.reduce(
     (sum, planCode) => sum + capacities[planCode] *
       getHostedFamilyBillingOfferDefinition(planCode).recurringAmountUsdCents,
     0,
@@ -5511,7 +5521,7 @@ async function assertHostedFamilySeatAvailableTx(input: {
   capacities?: HostedFamilyPlanCapacities;
   group: Pick<HostedAccountGroupAccessSnapshot, "id">;
   now: Date;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const capacitiesPromise = input.capacities === undefined
@@ -5558,7 +5568,7 @@ async function assertHostedFamilySeatAvailableForInviteAcceptanceTx(input: {
   group: Pick<HostedAccountGroupAccessSnapshot, "id">;
   inviteId: string;
   now: Date;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const [activeMemberships, existingAcceptedMembership, pendingInvites, capacities] =
@@ -5615,8 +5625,8 @@ async function assertHostedFamilySeatAvailableForInviteAcceptanceTx(input: {
   }
 }
 
-function requireHostedFamilyPlanCode(value: unknown): HostedPlanCode {
-  const planCode = parseHostedPlanCode(value);
+function requireHostedFamilyPlanCode(value: unknown): HostedFamilyPlanCode {
+  const planCode = parseHostedFamilyPlanCode(value);
   if (planCode) {
     return planCode;
   }
@@ -5627,15 +5637,15 @@ function requireHostedFamilyPlanCode(value: unknown): HostedPlanCode {
   });
 }
 
-function normalizeHostedFamilyPlanCode(value: unknown): HostedPlanCode {
-  const planCode = parseHostedPlanCode(value);
+function normalizeHostedFamilyPlanCode(value: unknown): HostedFamilyPlanCode {
+  const planCode = parseHostedFamilyPlanCode(value);
   if (planCode) {
     return planCode;
   }
   throw hostedOnboardingError({
     code: "HOSTED_FAMILY_PLAN_CODE_INVALID",
     httpStatus: 400,
-    message: "Choose Pulse or Edge for this Family member.",
+    message: "Choose Pulse, Edge, or Max for this Family member.",
   });
 }
 

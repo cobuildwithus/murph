@@ -2120,7 +2120,7 @@ export function ComponentsContent() {
                   label: null,
                   memberId: "design-owner",
                   pendingPlanCode: null,
-                  planCode: "pulse",
+                  planCode: "max",
                 },
                 {
                   isOwner: false,
@@ -2130,23 +2130,48 @@ export function ComponentsContent() {
                   pendingPlanCode: null,
                   planCode: "edge",
                 },
+                {
+                  isOwner: false,
+                  joinedAtIso: "2026-07-12T00:00:00.000Z",
+                  label: "Sibling",
+                  memberId: "design-pending-member",
+                  pendingPlanCode: "max",
+                  planCode: "pulse",
+                },
               ]}
               plans={{
                 edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+                max: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
                 pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
               }}
               seats={{
-                active: 2,
-                billed: 3,
+                active: 3,
+                billed: 4,
                 invited: 1,
                 max: 6,
                 min: 2,
                 remaining: 0,
-                used: 3,
+                used: 4,
               }}
               tiers={[
-                { name: "Pulse", planCode: "pulse", priceLabel: "$7/mo" },
-                { name: "Edge", planCode: "edge", priceLabel: "$19/mo" },
+                {
+                  name: "Pulse",
+                  planCode: "pulse",
+                  priceLabel: "$7/mo",
+                  recurringAmountUsdCents: 700,
+                },
+                {
+                  name: "Edge",
+                  planCode: "edge",
+                  priceLabel: "$19/mo",
+                  recurringAmountUsdCents: 1_900,
+                },
+                {
+                  name: "Max",
+                  planCode: "max",
+                  priceLabel: "$49/mo",
+                  recurringAmountUsdCents: 4_900,
+                },
               ]}
             />
           </div>
