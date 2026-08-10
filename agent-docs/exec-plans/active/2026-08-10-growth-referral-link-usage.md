@@ -74,6 +74,18 @@ Updated: 2026-08-10
    Mitigation: Define the display as retained-record metrics, disclose the
    deletion behavior in the UI, and cover both deletion owners plus the
    aggregation boundary.
+5. Risk: Recent claim cohorts can look like settled conversion even though they
+   have had less time to activate.
+   Mitigation: Label the rate and series as observed by capture and explicitly
+   identify the cohorts as open.
+6. Risk: Rendering an empty 256-pixel chart creates a large information-free
+   focus target.
+   Mitigation: Keep the summary stats and replace the chart with one compact
+   no-claims sentence when the window has zero claims.
+7. Risk: A pale claims series can disappear against the card background.
+   Mitigation: Use the darker `#8F7551` claims fill, which measures at least
+   4.06:1 against the rendered light card surfaces, and cover its computed
+   browser fill plus forced-colors semantics.
 
 ## Tasks
 
@@ -95,6 +107,10 @@ Updated: 2026-08-10
 - The counts describe retained records: introduced-member deletion removes the
   invite row and referrer deletion clears `referrerMemberId`, so either action
   can reduce historical totals.
+- Activation is an open-cohort snapshot at capture time, not a settled 30-day
+  conversion result; newer claims have less time to activate.
+- A zero-claim window omits the chart and its focus target while retaining the
+  four summary stats and the metric definition.
 
 ## Verification
 
@@ -108,16 +124,23 @@ Updated: 2026-08-10
   `latest` tag (`0.5.124`).
 - Focused Growth Playwright plus repository capture: passed at desktop and
   mobile viewports, 6 tests, including populated and zero-claim states,
-  keyboard tooltip, and focus treatment.
+  keyboard tooltip, focus treatment, computed claims fill, and forced-colors
+  semantics.
 - Four repository Playwright captures against `/design?tab=sections` were
   visually inspected for hierarchy, legibility, overflow, series
-  identification, and absence of development chrome.
+  identification, compact empty-state behavior, and absence of development
+  chrome. Capture dimensions are 2172x1264 and 948x2847 for populated desktop
+  and mobile, plus 1388x656 and 948x1731 for empty desktop and mobile.
 - Claude Code UI double-check: Fable and the required Opus fallback could not
   start because the `claude` executable is unavailable in this environment; no
   second-model UI verdict is claimed.
-- Preliminary specialist review: invalid because the first evidence package
-  omitted the zero-claim rendered state; the missing desktop/mobile evidence is
-  now captured and the same pass must be retried.
+- Preliminary specialist retry reviewed all four rendered states and returned
+  findings. All four were accepted: qualify open cohorts, collapse the empty
+  chart, increase claims-series contrast, and assert the production page owns
+  the section. The fixes and focused coverage are implemented; the corrected
+  pass must now be rerun.
 - Final ReviewGPT round 1: one accepted finding that deletion can rewrite
   historical cohorts. The retained-record disclosure and focused deletion/FK
-  regression coverage are implemented; substantive round 2 remains pending.
+  regression coverage are implemented. A substantive recovery review of that
+  pushed head remains in progress; the corrected production behavior will
+  require the next substantive round on the new head.

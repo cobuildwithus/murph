@@ -73,7 +73,9 @@ const DAILY_SERIES = GROWTH_DATES.map((date, index) => ({
 }));
 
 const REFERRAL_LINK_DAILY_SERIES = GROWTH_DATES.map((date, index) => {
-  const claims = index % 6 === 0
+  const claims = index === GROWTH_DATES.length - 1
+    ? 2
+    : index % 6 === 0
     ? 4
     : index % 4 === 0
       ? 2
@@ -81,7 +83,9 @@ const REFERRAL_LINK_DAILY_SERIES = GROWTH_DATES.map((date, index) => {
         ? 1
         : 0;
   return {
-    activatedClaims: claims === 0 || index % 5 === 0
+    activatedClaims: claims === 0
+      || index % 5 === 0
+      || index === GROWTH_DATES.length - 1
       ? 0
       : Math.max(1, claims - 1),
     claims,

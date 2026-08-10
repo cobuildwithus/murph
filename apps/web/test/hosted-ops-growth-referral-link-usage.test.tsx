@@ -34,6 +34,12 @@ describe("growth referral-link usage", () => {
     expect(markup).toContain(">29<");
     expect(markup).toContain("Activated claims");
     expect(markup).toContain(">18<");
+    expect(markup).toContain("Activated by capture");
+    expect(markup).toContain("Open cohorts; newer claims have less time");
+    expect(markup).toContain(
+      "These cohorts remain open; newer claims have had less time to activate",
+    );
+    expect(markup).toContain("--color-claims: #8F7551");
     expect(markup).toContain("62.1%");
     expect(markup).toContain("Active referrers");
     expect(markup).toContain(">12<");
@@ -56,5 +62,10 @@ describe("growth referral-link usage", () => {
 
     expect(markup).toContain("N/A");
     expect(markup).toContain("No claims in window");
+    expect(markup).toContain(
+      "No retained referral claims were recorded in this 30-day window",
+    );
+    expect(markup).not.toContain("Daily claim cohorts");
+    expect(markup).not.toContain('role="application"');
   });
 });

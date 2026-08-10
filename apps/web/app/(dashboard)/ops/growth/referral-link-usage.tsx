@@ -24,10 +24,10 @@ import type {
 const referralLinkChartConfig = {
   activatedClaims: {
     color: "#7A8C6E",
-    label: "Activated claims",
+    label: "Activated by capture",
   },
   claims: {
-    color: "#D4C4A8",
+    color: "#8F7551",
     label: "Join Murph claims",
   },
 } satisfies ChartConfig;
@@ -68,7 +68,7 @@ export function ReferralLinkUsage(input: {
           />
           <ReferralStat
             className="sm:border-r"
-            detail="Same claim cohort"
+            detail="Observed by capture"
             label="Activated claims"
             value={formatInteger(input.usage.activatedClaims)}
           />
@@ -76,8 +76,8 @@ export function ReferralLinkUsage(input: {
             className="border-r"
             detail={input.usage.activationRatePercent === null
               ? "No claims in window"
-              : "Activated ÷ claims"}
-            label="Claim activation"
+              : "Open cohorts; newer claims have less time"}
+            label="Activated by capture"
             value={formatPercent(input.usage.activationRatePercent)}
           />
           <ReferralStat
@@ -87,78 +87,87 @@ export function ReferralLinkUsage(input: {
           />
         </div>
 
-        <div className="min-w-0 p-5">
-          <div className="flex flex-col gap-1">
-            <h3
-              className="font-serif text-lg font-semibold tracking-tight text-foreground"
-              id={chartTitleId}
-            >
-              Daily claim cohorts
-            </h3>
+        {input.usage.claims === 0 ? (
+          <div className="p-5">
             <p className="text-sm leading-6 text-muted-foreground">
-              Claims and the claims that later reached canonical member
-              activation, grouped by the invite&apos;s UTC claim date.
+              No retained referral claims were recorded in this 30-day window.
             </p>
           </div>
-          <ChartContainer
-            className="mt-4 h-64 w-full rounded-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
-            config={referralLinkChartConfig}
-          >
-            <BarChart
-              accessibilityLayer
-              aria-labelledby={chartTitleId}
-              barGap={2}
-              data={input.usage.dailySeries}
-              margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
+        ) : (
+          <div className="min-w-0 p-5">
+            <div className="flex flex-col gap-1">
+              <h3
+                className="font-serif text-lg font-semibold tracking-tight text-foreground"
+                id={chartTitleId}
+              >
+                Daily claim cohorts
+              </h3>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Claims and the claims activated by capture, grouped by the
+                invite&apos;s UTC claim date. These cohorts remain open; newer
+                claims have had less time to activate.
+              </p>
+            </div>
+            <ChartContainer
+              className="mt-4 h-64 w-full rounded-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
+              config={referralLinkChartConfig}
             >
-              <CartesianGrid
-                stroke="var(--color-border)"
-                strokeDasharray="3 3"
-                strokeOpacity={0.55}
-                vertical={false}
-              />
-              <XAxis
-                axisLine={false}
-                dataKey="date"
-                minTickGap={24}
-                tickFormatter={formatShortDate}
-                tickLine={false}
-              />
-              <YAxis
-                allowDecimals={false}
-                axisLine={false}
-                tickLine={false}
-                width={32}
-              />
-              <ChartTooltip
-                content={(
-                  <ChartTooltipContent
-                    className="min-w-48"
-                    labelFormatter={formatTooltipDate}
-                  />
-                )}
-                cursor={{ fill: "var(--color-muted)", fillOpacity: 0.35 }}
-              />
-              <ChartLegend content={<ChartLegendContent />} />
-              <Bar
-                dataKey="claims"
-                fill="var(--color-claims)"
-                isAnimationActive={false}
-                maxBarSize={24}
-                name="Join Murph claims"
-                radius={[3, 3, 0, 0]}
-              />
-              <Bar
-                dataKey="activatedClaims"
-                fill="var(--color-activatedClaims)"
-                isAnimationActive={false}
-                maxBarSize={24}
-                name="Activated claims"
-                radius={[3, 3, 0, 0]}
-              />
-            </BarChart>
-          </ChartContainer>
-        </div>
+              <BarChart
+                accessibilityLayer
+                aria-labelledby={chartTitleId}
+                barGap={2}
+                data={input.usage.dailySeries}
+                margin={{ bottom: 0, left: 0, right: 8, top: 8 }}
+              >
+                <CartesianGrid
+                  stroke="var(--color-border)"
+                  strokeDasharray="3 3"
+                  strokeOpacity={0.55}
+                  vertical={false}
+                />
+                <XAxis
+                  axisLine={false}
+                  dataKey="date"
+                  minTickGap={24}
+                  tickFormatter={formatShortDate}
+                  tickLine={false}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  axisLine={false}
+                  tickLine={false}
+                  width={32}
+                />
+                <ChartTooltip
+                  content={(
+                    <ChartTooltipContent
+                      className="min-w-48"
+                      labelFormatter={formatTooltipDate}
+                    />
+                  )}
+                  cursor={{ fill: "var(--color-muted)", fillOpacity: 0.35 }}
+                />
+                <ChartLegend content={<ChartLegendContent />} />
+                <Bar
+                  dataKey="claims"
+                  fill="var(--color-claims)"
+                  isAnimationActive={false}
+                  maxBarSize={24}
+                  name="Join Murph claims"
+                  radius={[3, 3, 0, 0]}
+                />
+                <Bar
+                  dataKey="activatedClaims"
+                  fill="var(--color-activatedClaims)"
+                  isAnimationActive={false}
+                  maxBarSize={24}
+                  name="Activated by capture"
+                  radius={[3, 3, 0, 0]}
+                />
+              </BarChart>
+            </ChartContainer>
+          </div>
+        )}
       </div>
     </section>
   );

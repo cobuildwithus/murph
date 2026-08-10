@@ -856,6 +856,7 @@ describe("hosted ops growth metrics", () => {
 
     const markup = renderToStaticMarkup(await growthPage.default());
 
+    expect(markup).toContain("Referral link usage");
     expect(markup).toContain("MRR growth per week");
     expect(markup).toContain("Total messages sent");
     expect(markup).toContain("Messages sent per day");

@@ -92,20 +92,31 @@ for (const viewport of VIEWPORTS) {
     await expect(referralLinkUsage).toContainText(
       "Counts reflect retained records, so account deletion can remove a claim or its referral attribution from this view",
     );
-    await expect(referralLinkUsage).toContainText("Claim activation");
+    await expect(referralLinkUsage).toContainText("Activated by capture");
+    await expect(referralLinkUsage).toContainText(
+      "Open cohorts; newer claims have less time",
+    );
+    await expect(referralLinkUsage).toContainText(
+      "These cohorts remain open; newer claims have had less time to activate",
+    );
     await expect(referralChart).toHaveAccessibleName("Daily claim cohorts");
     await expect(referralLinkUsage.locator(".recharts-bar")).toHaveCount(2);
+    await expect(
+      referralLinkUsage.locator(".recharts-bar").first().locator("path").first(),
+    ).toHaveCSS("fill", "rgb(143, 117, 81)");
 
     const emptyReferralLinkUsage = study.locator(
       "#growth-referral-link-usage-empty",
     );
     await expect(emptyReferralLinkUsage).toContainText("N/A");
     await expect(emptyReferralLinkUsage).toContainText("No claims in window");
+    await expect(emptyReferralLinkUsage).toContainText(
+      "No retained referral claims were recorded in this 30-day window",
+    );
+    await expect(emptyReferralLinkUsage.locator(".recharts-surface")).toHaveCount(0);
     await expect(
-      emptyReferralLinkUsage.locator(
-        '.recharts-surface[role="application"][tabindex="0"]',
-      ),
-    ).toHaveAccessibleName("Daily claim cohorts");
+      emptyReferralLinkUsage.locator('[role="application"][tabindex="0"]'),
+    ).toHaveCount(0);
 
     const activityLines = chartCards.nth(0).locator(".recharts-line-curve");
     await expect(chartCards.nth(0)).toContainText(
@@ -217,7 +228,7 @@ for (const viewport of VIEWPORTS) {
     await expect(referralTooltip).toBeVisible();
     await expect(referralTooltip).toContainText("Jul 7");
     await expect(referralTooltip).toContainText("Join Murph claims");
-    await expect(referralTooltip).toContainText("Activated claims");
+    await expect(referralTooltip).toContainText("Activated by capture");
     const referralFocusStyle = await referralLinkUsage
       .locator('[data-slot="chart"]')
       .evaluate((element) => {
@@ -231,6 +242,10 @@ for (const viewport of VIEWPORTS) {
     expect(referralFocusStyle.outlineWidth).toBeGreaterThanOrEqual(2);
 
     await page.emulateMedia({ forcedColors: "active" });
+    await expect(referralChart).toHaveAccessibleName("Daily claim cohorts");
+    await expect(referralLinkUsage.locator(".recharts-bar")).toHaveCount(2);
+    await expect(referralLinkUsage).toContainText("Join Murph claims");
+    await expect(referralLinkUsage).toContainText("Activated by capture");
     await expect(activityLines.nth(1)).toHaveAttribute("stroke-dasharray", "6 4");
     await chartSurfaces.nth(1).focus();
     await page.keyboard.press("Shift+Tab");
