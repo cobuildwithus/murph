@@ -40,14 +40,14 @@ export function ImessageNutritionCardStudy() {
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The static fallback mirrors the shipping Messages balloon&apos;s default
-          state. Native captions retain the complete snapshot and goal details.
+          state. Messages supplies the outer card chrome and concise date label.
         </p>
       </div>
       <div className="hidden sm:block">
         <ScaledNutritionCard scale={0.72} />
       </div>
       <div className="sm:hidden">
-        <ScaledNutritionCard scale={0.285} />
+        <ScaledNutritionCard scale={0.255} />
       </div>
     </div>
   );

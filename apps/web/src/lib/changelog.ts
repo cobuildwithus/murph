@@ -243,6 +243,18 @@ const RAW_CHANGELOG_EDITIONS = [
         sourcePullRequests: [1473, 1489, 1501],
       },
       {
+        id: "cleaner-imessage-nutrition-cards",
+        kind: "improvement",
+        priority: 4,
+        title: "Nutrition cards fit Messages cleanly",
+        summary:
+          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card.",
+        details:
+          "Calories and nutrient totals stay visible in the card without a second Murph badge or a long repeat of the same values and goals below it.",
+        relevanceTags: ["imessage", "cards", "nutrition", "design"],
+        sourcePullRequests: [1567],
+      },
+      {
         id: "typing-prewarms-private-chat",
         kind: "improvement",
         priority: 4,

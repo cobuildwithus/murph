@@ -464,7 +464,7 @@ describe('assistant response cards', () => {
     }).endsWith('Some calorie and macro estimates were partial.')).toBe(true)
   })
 
-  it('omits unavailable layout metrics while retaining the partial marker', () => {
+  it('keeps the static nutrition layout concise when metrics are unavailable', () => {
     const card: DailyNutritionResponseCardV2 = {
       ...COMPLETE_CARD_V2,
       totals: {
@@ -485,7 +485,6 @@ describe('assistant response cards', () => {
     expect(buildLinqIMessageAppLayout(card)).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(card),
-      subcaption: '1,490.25 cal · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
     })
   })
 
@@ -536,16 +535,12 @@ describe('assistant response cards', () => {
     expect(completeLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD),
-      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat',
     })
     expect(goalLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
-      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · Goals: calories goal 2,100 cal, under target; protein goal 100g, on target; carbs goal unavailable; fat goal 40g, on target; fiber goal 30g, under target',
     })
-    expect(proteinGoalLayout.subcaption).toContain(
-      'protein goal 100g, on target',
-    )
+    expect(proteinGoalLayout).not.toHaveProperty('subcaption')
     expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
       schemaVersion: 2,
       card: {
@@ -564,7 +559,6 @@ describe('assistant response cards', () => {
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
-      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
     })
     expect(buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2).length)
       .toBeLessThan(2_048)
