@@ -42,63 +42,54 @@ jobs:
 
           crypto = Path("apps/web/src/lib/device-sync/provider-applications/crypto.ts")
           source = crypto.read_text()
-          old = '''  if (
-            error instanceof DOMException
-            || (
-              error instanceof Error
-              && ["DataError", "InvalidCharacterError", "OperationError"].includes(
-                error.name,
-              )
-            )
-          ) {
-            return error.name !== "AbortError";
-          }'''
-          new = '''  if (
-            error instanceof Error
-            && ["DataError", "InvalidCharacterError", "OperationError"].includes(
-              error.name,
-            )
-          ) {
-            return true;
-          }'''
-          if source.count(old) != 1:
-              raise SystemExit("expected one secure-box DOMException classifier")
-          crypto.write_text(source.replace(old, new, 1))
+          start_marker = "  if (\n    error instanceof DOMException\n"
+          end_marker = "\n  if (!(error instanceof Error))"
+          start = source.find(start_marker)
+          if start < 0:
+              raise SystemExit("missing secure-box DOMException classifier")
+          end = source.find(end_marker, start)
+          if end < 0:
+              raise SystemExit("missing secure-box classifier boundary")
+          replacement = "\n".join([
+              "  if (",
+              "    error instanceof Error",
+              "    && [\"DataError\", \"InvalidCharacterError\", \"OperationError\"].includes(",
+              "      error.name,",
+              "    )",
+              "  ) {",
+              "    return true;",
+              "  }",
+          ])
+          crypto.write_text(source[:start] + replacement + source[end:])
 
           crypto_test = Path("apps/web/test/device-provider-application-crypto.test.ts")
           source = crypto_test.read_text()
-          marker = '''  it("does not hide transient root-key or KMS failures", async () => {
-            const transient = new Error("Hosted domain root service unavailable.");
-            mocks.open.mockRejectedValue(transient);
-
-            await expect(decryptDeviceProviderApplication({
-              applicationId: "dpa_123",
-              memberId: "member_123",
-              provider: "strava",
-              revision: 7,
-              value: "sealed-value",
-            })).rejects.toBe(transient);
-          });'''
-          addition = marker + '''
-
-          it("does not hide transient DOM exception failures", async () => {
-            const transient = new DOMException(
-              "Timed out while opening the hosted root key.",
-              "TimeoutError",
-            );
-            mocks.open.mockRejectedValue(transient);
-
-            await expect(decryptDeviceProviderApplication({
-              applicationId: "dpa_123",
-              memberId: "member_123",
-              provider: "strava",
-              revision: 7,
-              value: "sealed-value",
-            })).rejects.toBe(transient);
-          });'''
-          if source.count(marker) != 1:
-              raise SystemExit("expected one transient KMS test")
-          crypto_test.write_text(source.replace(marker, addition, 1))
+          test_title = '  it("does not hide transient DOM exception failures", async () => {'
+          if test_title in source:
+              raise SystemExit("transient DOM exception test already exists")
+          close_index = source.rfind("\n\n});")
+          if close_index < 0 or source[close_index:].strip() != "});":
+              raise SystemExit("missing crypto describe closure")
+          addition = "\n".join([
+              test_title,
+              "    const transient = new DOMException(",
+              '      "Timed out while opening the hosted root key.",',
+              '      "TimeoutError",',
+              "    );",
+              "    mocks.open.mockRejectedValue(transient);",
+              "",
+              "    await expect(decryptDeviceProviderApplication({",
+              '      applicationId: "dpa_123",',
+              '      memberId: "member_123",',
+              '      provider: "strava",',
+              "      revision: 7,",
+              '      value: "sealed-value",',
+              "    })).rejects.toBe(transient);",
+              "  });",
+          ])
+          crypto_test.write_text(
+              source[:close_index] + "\n\n" + addition + source[close_index:]
+          )
 
           maintenance_test = Path(
               "packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts"
