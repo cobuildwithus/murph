@@ -2,11 +2,13 @@ import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import os from 'node:os'
@@ -654,6 +656,162 @@ done
     })
     expect(rawCommit.status).toBe(1)
     expect(rawCommit.stderr).toContain('current worktree bypassed scripts/create-worktree')
+  })
+
+  it('retires raw authorization published by the rejected isolation guard before downgrade', () => {
+    const harness = createHarness()
+    expect(
+      runScript(harness, 'install-git-hooks', [], { MURPH_WORKTREE_MAX_LIVE: '4' })
+        .status,
+    ).toBe(0)
+
+    const sanctioned = path.join(harness.root, 'sanctioned-before-retirement')
+    expect(
+      runScript(
+        harness,
+        'create-worktree',
+        ['-b', 'sanctioned-before-retirement', sanctioned],
+        { MURPH_WORKTREE_MAX_LIVE: '4' },
+      ).status,
+    ).toBe(0)
+
+    const raw = path.join(harness.root, 'raw-with-published-authority')
+    runGit(harness.primary, [
+      'worktree',
+      'add',
+      '-b',
+      'raw-with-published-authority',
+      raw,
+    ])
+    const rawAdminDir = runGit(raw, ['rev-parse', '--path-format=absolute', '--git-dir'])
+    const authorizationMarker = path.join(
+      rawAdminDir,
+      'murph-storage-guard-authorized',
+    )
+    const isolationMarker = path.join(rawAdminDir, 'murph-storage-guard-isolated')
+    writeFileSync(authorizationMarker, '')
+    writeFileSync(isolationMarker, '')
+
+    const environment = guardEnvironment(harness, { MURPH_WORKTREE_MAX_LIVE: '4' })
+    const taskScoped = spawnSync(
+      'bash',
+      ['scripts/worktree-storage-guard', '--current-worktree', sanctioned],
+      { cwd: sanctioned, encoding: 'utf8', env: environment },
+    )
+    expect(taskScoped.status, taskScoped.stderr).toBe(0)
+    expect(existsSync(authorizationMarker)).toBe(true)
+    expect(existsSync(isolationMarker)).toBe(true)
+
+    const rawScoped = spawnSync(
+      'bash',
+      ['scripts/worktree-storage-guard', '--current-worktree', raw],
+      { cwd: sanctioned, encoding: 'utf8', env: environment },
+    )
+    expect(rawScoped.status).toBe(1)
+    expect(rawScoped.stderr).toContain('current worktree bypassed scripts/create-worktree')
+    expect(existsSync(authorizationMarker)).toBe(true)
+    expect(existsSync(isolationMarker)).toBe(true)
+
+    const currentAudit = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MAX_LIVE: '4',
+    })
+    expect(currentAudit.status).toBe(1)
+    expect(currentAudit.stderr).toContain('bypassed scripts/create-worktree')
+    expect(existsSync(authorizationMarker)).toBe(false)
+    expect(existsSync(isolationMarker)).toBe(false)
+
+    writeFileSync(path.join(raw, 'tracked.txt'), 'raw after retirement\n')
+    runGit(raw, ['add', 'tracked.txt'])
+    const currentRawCommit = spawnSync('git', ['commit', '-m', 'raw after retirement'], {
+      cwd: raw,
+      encoding: 'utf8',
+      env: environment,
+    })
+    expect(currentRawCommit.status).toBe(1)
+    expect(currentRawCommit.stderr).toContain(
+      'current worktree bypassed scripts/create-worktree',
+    )
+
+    installLegacyWorktreeEntrypoints(harness.primary)
+    const downgradedAudit = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MAX_LIVE: '4',
+    })
+    expect(downgradedAudit.status).toBe(1)
+    expect(downgradedAudit.stderr).toContain('bypassed scripts/create-worktree')
+
+    const downgradedRawCommit = spawnSync(
+      'git',
+      ['commit', '-m', 'raw after retirement downgrade'],
+      { cwd: raw, encoding: 'utf8', env: environment },
+    )
+    expect(downgradedRawCommit.status).toBe(1)
+    expect(downgradedRawCommit.stderr).toContain('bypassed scripts/create-worktree')
+  })
+
+  it('retires published authorization without following malformed isolation nodes', () => {
+    for (const markerKind of ['directory', 'fifo', 'dangling-symlink'] as const) {
+      const harness = createHarness()
+      expect(
+        runScript(harness, 'install-git-hooks', [], { MURPH_WORKTREE_MAX_LIVE: '4' })
+          .status,
+      ).toBe(0)
+      const sanctioned = path.join(harness.root, `sanctioned-${markerKind}`)
+      expect(
+        runScript(
+          harness,
+          'create-worktree',
+          ['-b', `sanctioned-${markerKind}`, sanctioned],
+          { MURPH_WORKTREE_MAX_LIVE: '4' },
+        ).status,
+      ).toBe(0)
+
+      const raw = path.join(harness.root, `raw-${markerKind}`)
+      runGit(harness.primary, ['worktree', 'add', '-b', `raw-${markerKind}`, raw])
+      const rawAdminDir = runGit(raw, ['rev-parse', '--path-format=absolute', '--git-dir'])
+      const authorizationMarker = path.join(
+        rawAdminDir,
+        'murph-storage-guard-authorized',
+      )
+      const isolationMarker = path.join(rawAdminDir, 'murph-storage-guard-isolated')
+      writeFileSync(authorizationMarker, '')
+      if (markerKind === 'directory') {
+        mkdirSync(isolationMarker)
+      } else if (markerKind === 'fifo') {
+        const fifo = spawnSync('mkfifo', [isolationMarker], { encoding: 'utf8' })
+        expect(fifo.status, fifo.stderr).toBe(0)
+      } else {
+        symlinkSync('missing-isolation-target', isolationMarker)
+      }
+
+      const environment = guardEnvironment(harness, { MURPH_WORKTREE_MAX_LIVE: '4' })
+      const taskScoped = spawnSync(
+        'bash',
+        ['scripts/worktree-storage-guard', '--current-worktree', sanctioned],
+        { cwd: sanctioned, encoding: 'utf8', env: environment },
+      )
+      expect(taskScoped.status, taskScoped.stderr).toBe(0)
+      expect(existsSync(authorizationMarker)).toBe(true)
+      expect(lstatSync(isolationMarker).isSymbolicLink()).toBe(
+        markerKind === 'dangling-symlink',
+      )
+
+      const primaryAudit = runScript(harness, 'worktree-storage-guard', [], {
+        MURPH_WORKTREE_MAX_LIVE: '4',
+      })
+      expect(primaryAudit.status).toBe(1)
+      expect(primaryAudit.stderr).toContain('bypassed scripts/create-worktree')
+      expect(existsSync(authorizationMarker)).toBe(false)
+      expect(lstatSync(isolationMarker).isSymbolicLink()).toBe(
+        markerKind === 'dangling-symlink',
+      )
+
+      installLegacyWorktreeEntrypoints(harness.primary)
+      const downgradedAudit = runScript(harness, 'worktree-storage-guard', [], {
+        MURPH_WORKTREE_MAX_LIVE: '4',
+      })
+      expect(downgradedAudit.status).toBe(1)
+      expect(downgradedAudit.stderr).toContain('bypassed scripts/create-worktree')
+    }
   })
 
   it('keeps historical authorized entrypoints usable after the primary checkout upgrades', () => {

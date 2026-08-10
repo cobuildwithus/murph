@@ -141,7 +141,7 @@ record_path=''
 record_locked=''
 
 count_record() {
-  local gitdir_line gitdir_value admin_dir canonical_record_path
+  local gitdir_line gitdir_value admin_dir canonical_record_path authorization_marker isolation_marker
   [[ -n "$record_path" && -d "$record_path" ]] || return 0
   canonical_record_path="$(cd "$record_path" 2>/dev/null && pwd -P)" || return 0
   registered_paths+=("$canonical_record_path")
@@ -163,13 +163,33 @@ count_record() {
   admin_dir="$(cd "$admin_dir" 2>/dev/null && pwd -P)" || return 0
   case "$admin_dir" in
     "$common_dir"/worktrees/*)
-      admin_dirs+=("$admin_dir")
       disk_paths+=("$record_path")
-      if [[ -f "$authorization_initialized" \
-        && ! -f "$admin_dir/murph-storage-guard-authorized" ]]; then
+      authorization_marker="$admin_dir/murph-storage-guard-authorized"
+      isolation_marker="$admin_dir/murph-storage-guard-isolated"
+      if [[ -e "$isolation_marker" || -L "$isolation_marker" ]]; then
         unauthorized_count=$((unauthorized_count + 1))
         if [[ -n "$current_worktree_path" && "$canonical_record_path" == "$current_worktree_path" ]]; then
           current_worktree_unauthorized=1
+        fi
+        if (( guard_is_primary == 1 )); then
+          # Retire the bounded state published by an earlier rejected guard.
+          # Authorization must disappear first so every older guard fails
+          # closed if cleanup is interrupted. Never follow marker symlinks.
+          if [[ -f "$authorization_marker" || -L "$authorization_marker" ]]; then
+            rm -f -- "$authorization_marker"
+          fi
+          if [[ ! -e "$authorization_marker" && ! -L "$authorization_marker" \
+            && -f "$isolation_marker" && ! -L "$isolation_marker" ]]; then
+            rm -f -- "$isolation_marker"
+          fi
+        fi
+      else
+        admin_dirs+=("$admin_dir")
+        if [[ -f "$authorization_initialized" && ! -f "$authorization_marker" ]]; then
+          unauthorized_count=$((unauthorized_count + 1))
+          if [[ -n "$current_worktree_path" && "$canonical_record_path" == "$current_worktree_path" ]]; then
+            current_worktree_unauthorized=1
+          fi
         fi
       fi
       ;;

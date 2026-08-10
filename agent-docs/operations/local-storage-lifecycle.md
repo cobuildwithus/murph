@@ -95,17 +95,24 @@ branch-independent hook supplies the committing checkout, so a raw worktree
 fails its own commit without blocking an authorized sibling. Sanctioned
 creation may also continue while a raw sibling exists because every registered
 worktree still consumes the global numeric and disk budget. No guard publishes
-legacy authorization for a raw checkout. The shared hook and installer pass
-the current checkout through an environment hint while retaining the preceding
-guard's no-argument command surface, so either the primary or task checkout may
-advance first without an argument outage. An authorized historical checkout
-can still install hooks and commit after the primary advances, but its
-preceding-version creator remains globally fail-closed while a raw sibling
-exists. Current-version sanctioned creation remains scoped. Because no durable
-compatibility authority is written, a later primary downgrade also leaves both
-the old global audit and old shared hook fail-closed. Running the primary
-checkout's `scripts/worktree-storage-guard` without a scoped checkout remains
-the explicit global audit and reports every isolated registered worktree.
+legacy authorization for a raw checkout. During upgrade, the current primary
+guard treats any isolation marker from the rejected intermediate guard as
+unauthorized and retires its paired authorization under the existing guard
+lock. It removes a regular-file or symlink authorization node first and removes
+a regular non-symlink isolation marker only after authorization is absent;
+task-local guards never mutate this state. Interruption and malformed marker
+nodes therefore remain fail-closed for both current and preceding guards. The
+shared hook and installer pass the current checkout through an environment hint
+while retaining the preceding guard's no-argument command surface, so either
+the primary or task checkout may advance first without an argument outage. An
+authorized historical checkout can still install hooks and commit after the
+primary advances, but its preceding-version creator remains globally
+fail-closed while a raw sibling exists. Current-version sanctioned creation
+remains scoped. Once the bounded intermediate state is retired, a later primary
+downgrade leaves both the old global audit and old shared hook fail-closed.
+Running the primary checkout's `scripts/worktree-storage-guard` without a
+scoped checkout remains the explicit global audit and reports every isolated
+registered worktree.
 
 The ratchet does not delete a checkout. Preserve active/open-PR or dirty work.
 Retire a clean registered checkout with `scripts/retire-worktree` after its
