@@ -1,6 +1,6 @@
 # Health Commons
 
-Last verified: 2026-07-29
+Last verified: 2026-08-10
 
 ## Current State
 
@@ -171,6 +171,12 @@ Community outcome summaries must never silently rewrite the literature-backed pa
 
 If the contribution pool is too small, too noisy, or too privacy-sensitive, the correct output is no public summary.
 
+## Assistant Skill Boundary
+
+Health Commons owns reusable public health facts, evidence limits, safety guidance, and symptom-sensitive care decisions. This includes knowledge-only topics that have no protocol, experiment, or public UI page.
+
+Assistant skills must not duplicate that topic knowledge. A skill can still own a tool procedure or a stateful product workflow, such as booking care after the Health Commons result establishes the destination. General eye-health and recovery-modality guidance therefore live in Health Commons rather than topic skills.
+
 ## Family Key Style
 
 Prefer user-facing experiment-family keys for modalities people recognize in the product. Use `experiment_family:dry-sauna` and `experiment_family:infrared-sauna` as sibling families under the broader `experiment_family:sauna` parent instead of hiding them under nested keys such as `experiment_family:sauna/finnish-dry`.
@@ -197,10 +203,43 @@ Runtime surfaces should consume scoped generated artifacts instead of a monolith
 web route bundles/projections for public pages, compact protocol index/run-spec/
 family-graph artifacts for CLI and hosted protocol reads, the compact
 `biomarker-desired-directions.json` projection for progress-card sentiment, and
-separate source indexes only for tools that explicitly need source lookup.
-Hosted runner packaging must include that compact direction projection without
-shipping the web artifact tree. A missing direction projection is auxiliary
-availability loss: progress cards remain available with neutral mover sentiment
+separate source indexes only for tools that explicitly need source lookup. The
+generated `knowledge.sqlite` FTS projection gives the assistant a bounded
+claim-level read path for ordinary health questions. Authored Markdown and JSONL
+remain authoritative. The SQLite file is read-only build output, contains no
+user data, and returns at most a small evidence packet instead of loading the
+catalog or source files into a turn. One command accepts the complete health
+question. It resolves a contiguous authored title or alias before using a
+conservative title-and-alias token fallback. A canonical title ranks above an
+alias, and a longer specific phrase ranks above a shorter phrase. Equal owners
+remain ambiguous and return at most three candidates. Evidence text, source
+titles, citations, categories, and stems never admit a topic.
+
+After topic resolution, the reader removes the matched topic phrase and small
+grammar terms. It uses the remaining medical terms only inside that owner. A
+broad question runs a bounded owner-wide lookup without a reserved phrase.
+Evidence and safety use separate internal queries but one assistant call. A
+canonical family title can include typed child families and protocols. A family
+alias stays family-scoped. Child titles and aliases resolve the child directly.
+Unrelated equal aliases fail closed. Source findings use one unambiguous target:
+`related_protocol`, then `parent_family`, then `measures`. Multi-target and
+untargeted findings stay out of the projection until their ownership is
+authored more precisely. Safety comes only from a directly sourced safety claim
+or typed source finding. Page-wide
+`safety` arrays do not enter the source-backed projection. The default packet
+contains three distinct sourced evidence items,
+up to one safety item that matches the question terms, and at most four source
+locators per item. Unsourced overview text and all editorial evidence-appraisal
+rows are not part of the assistant projection. Claims and extracted typed findings are
+the only member-facing evidence shapes. The CLI returns the resolved topic or
+ambiguity candidates, not query internals, `focus`, or catalog-hash merge work.
+The assistant does one lookup and does not create or suggest an experiment
+unless the member asks to try, test, track, or set up one.
+An authored knowledge page can support this lookup without a protocol or UI.
+Hosted runner packaging must include that compact direction projection and the
+knowledge index without shipping the web artifact tree. A missing direction
+projection is auxiliary availability loss: progress cards remain available with
+neutral mover sentiment
 and a visible caveat on the private card itself. Raster delivery preserves the
 same accessible description: when an image channel has no native alt-text
 field, its adapter appends the media description once to the existing reply or

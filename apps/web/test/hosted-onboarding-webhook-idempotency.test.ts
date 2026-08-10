@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
-  lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
+  lookupHostedMemberCoreByPendingLinqParticipantContact: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -98,8 +98,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   countHostedMemberHomeLinqBindingsByRecipientPhone:
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
-  lookupHostedMemberRoutingByPendingLinqParticipantContact:
-    mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+  lookupHostedMemberCoreByPendingLinqParticipantContact:
+    mocks.lookupHostedMemberCoreByPendingLinqParticipantContact,
   readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
   upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
@@ -259,7 +259,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
-    mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact.mockResolvedValue(null);
+    mocks.lookupHostedMemberCoreByPendingLinqParticipantContact.mockResolvedValue(null);
     mocks.readHostedMemberHomeLinqRoute.mockResolvedValue(null);
     mocks.readHostedMemberRoutingState.mockImplementation(async () => {
       const route = await mocks.readHostedMemberHomeLinqRoute();
@@ -1824,7 +1824,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue(null);
-    mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact.mockResolvedValue(null);
+    mocks.lookupHostedMemberCoreByPendingLinqParticipantContact.mockResolvedValue(null);
     mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
       core: {
         billingStatus: HostedBillingStatus.active,

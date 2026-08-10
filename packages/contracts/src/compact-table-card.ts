@@ -23,6 +23,10 @@ export const compactTableCardV1Bounds = {
 export const IMESSAGE_APP_CARD_URL_PREFIX =
   `${MURPH_PRODUCT_ORIGIN}/#murph-card=`;
 export const IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048;
+export const IMESSAGE_NUTRITION_CARD_IMAGE_PATH_PREFIX =
+  "/imessage/card/v1/";
+export const IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX = ".png";
+export const IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH = 1_900;
 const EVENT_ID_PATTERN = new RegExp(idPattern(ID_PREFIXES.event), "u");
 
 function singleLineText(maxLength: number) {

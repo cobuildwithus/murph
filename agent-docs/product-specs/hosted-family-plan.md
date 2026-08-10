@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-28
+Last verified: 2026-08-09
 
 ## Purpose
 
@@ -11,16 +11,16 @@ data and conversations.
 
 Family supports 2-6 sponsored people. The owner counts as one sponsored person.
 One Family subscription can reserve an exact mix of Pulse seats at
-$7/person/month and Edge seats at $19/person/month. Each member and pending
-invite has one assigned tier. Each active member's individual monthly usage
-allowance is 80% of that assigned seat price: $5.60 for Pulse and $15.20 for
-Edge.
+$7/person/month, Edge seats at $19/person/month, and Max seats at
+$49/person/month. Each member and pending invite has one assigned tier. Each
+active member's individual monthly usage allowance is 80% of that assigned
+seat price: $5.60 for Pulse, $15.20 for Edge, and $39.20 for Max.
 
 ## Product Contract
 
 - One owner pays for the hosted Family plan.
 - A Family owner is a real hosted member. A synthetic group-chat thread container cannot own a Family plan, inspect Family account state, begin checkout, or issue invites; those operations belong in a participant's private Murph conversation. This invariant is enforced at canonical group creation and billing authorization and is rechecked before checkout redirects or Stripe reconciliation can bind or activate Family billing state; assistant-tool guards are only an earlier user-facing rejection.
-- The owner buys 2-6 reserved sponsored seats in an exact Pulse/Edge mix.
+- The owner buys 2-6 reserved sponsored seats in an exact Pulse/Edge/Max mix.
   Active members and pending invites consume capacity from their assigned tier.
 - Family members receive sponsored hosted access while the plan and their
   membership are active.
@@ -35,8 +35,9 @@ Edge.
 - The active owner may buy one fixed $5, $10, or $25 usage-credit pack for one
   exact active Family member. The owner pays and that member alone receives the
   credit.
-- An active Family Edge assignment unlocks Edge model choices, including Sol;
-  a Family Pulse assignment does not.
+- Active Family Edge and Max assignments unlock Edge model choices, including
+  Sol; a Family Pulse assignment does not. Max is a billing and allowance tier,
+  not a separate runtime capability.
 - Every family member remains a separate `HostedMember` with their own routing,
   mailbox, workspace/runtime state, legal consent, export, and deletion rights.
 - The owner can see seat and setup status, such as invited, joined, messaging
@@ -90,8 +91,8 @@ Do not introduce generic plan-transition machinery or a second durable billing
 operation owner. Family checkout, invites, and member-level plan changes update
 the exact Stripe item composition. The owner-facing settings surface manages
 people, not seat quantities. Webhook reconciliation remains the only writer of
-the local paid-capacity projection. Direct Pulse and Edge billing continue to
-use the existing member billing path.
+the local paid-capacity projection. Direct Pulse, Edge, and Max billing
+continue to use the existing member billing path.
 
 When an owner converts an existing direct-paid subscription, the request only
 updates Stripe and reports that Family billing is syncing. The Family
@@ -192,10 +193,38 @@ management UI must not receive traffic until the webhook build that understands
 `pendingPlanCode` is live. The post-deploy contract lane adds assignment
 constraints only after the prior web-function window drains.
 
-Configure both Family Stripe price ids before exposing Edge capacity. After
-web deploy, reconcile one Pulse-only subscription and one mixed Pulse/Edge
-subscription, then verify settings quantities, member allowances, and Family
+The Max-aware runner removes invitation context from `start_checkout`. During
+the runner-first window, the old Web build still emits the checkout response's
+legacy `preparedInvite` and `preparedInviteReplyText` keys as null because the
+new runner cannot send invite context. The new parser accepts only that inert
+null shape and does not expose either field; a non-null legacy value fails
+closed. The new Web build omits both keys after the old Web window drains.
+
+Configure all three Family Stripe price ids before exposing Max capacity.
+Deploy the Max-aware hosted-execution parser and runner bundle before Web, then
+apply the Web migration and deploy Web. Do not attach Max items while an old Web
+build can still receive Family subscription events. After deploy, reconcile
+one Pulse-only subscription and one mixed Pulse/Edge/Max subscription, then
+verify settings quantities, member allowances, model eligibility, and Family
 MRR match the Stripe items.
+
+Any durable Max-bearing Web state establishes the Web rollback floor: a Max
+Stripe item, capacity row, current or pending membership tier, or pending invite
+tier. A membership's pending target is durable before the Stripe mutation
+begins, so it can be the earliest such state and can exist without either item
+or capacity evidence; a pre-Max Web build rejects that pending transition and
+cannot complete or clear it through the ordinary Family controls. The pre-Max
+runtime parser ignores the extra `plans.max` aggregate, so capacity alone is not
+its rollback floor; its floor begins when a member or pending invite is
+projected with `planCode: "max"`. After the applicable floor is crossed,
+incident recovery must roll that surface forward to a Max-aware version, with
+both surfaces rolled forward once Max assignments or invitations may exist. A
+pre-Max rollback is safe only before exposure, or after current artifacts have
+completed or explicitly cleared every pending Max transition, moved every
+current Max assignment and Stripe item back to Pulse or Edge, removed Max
+capacity rows, completed webhook reconciliation, and verified that no
+membership has either current or pending Max and no pending Max invite remains.
+Do not add a compatibility state machine for this boundary.
 
 ## Data Ownership
 

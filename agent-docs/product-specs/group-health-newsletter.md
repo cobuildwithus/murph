@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-29
+Last verified: 2026-08-09
 Status: Implemented
 
 ## Current State
@@ -30,7 +30,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Delivery shape | One stable newsletter automation chooses either **one ordinary current-chat update** or **one shared email thread** to all eligible participants. |
 | Email permission | Included in the disclosed newsletter reaction-share scope and on the join page as **"share your email with this group."** The shared thread exposes addresses to co-members by design. |
 | Newsletter content opt-in | Liking the newsletter permission offer opts into the disclosed default snapshot: profile name, email, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV. It grants membership only when needed; the customize link lets a member share more or less. |
-| New-group requested permissions | For email delivery, Murph normally requests email plus the supported health scopes, narrowed by any explicit creator choice. For current-chat delivery, it requests only the chosen one to three health scopes and omits email. Every member may deselect any requested permission. |
+| New-group requested permissions | Murph requests and initially selects every selectable group permission by default, including activity-specific selector scopes, so the consent checkpoint is complete. This does **not** grant access: each member still opts in through the disclosed reaction or join page and may deselect any permission. An explicitly supplied narrower scope list remains narrow. |
 | Setup flow | **Ask before creating.** Murph asks for the name, schedule, and email-versus-chat delivery in one short message, with tone optional. If the group already answered or says "just set it up," Murph uses sensible defaults and confirms the essentials. |
 | Naming | The **group-chosen name** becomes the automation title, the group display name when a group join link is created, and the name in the setup notice. |
 | Individual opt-out | **Revoke email sharing** through settings, an authenticated Linq/iMessage or Telegram group message, or a private Murph chat. Email headers do not prove the sender's self-revocation authority. Leaves challenge/health-sharing intact. Forward-only. |
@@ -39,9 +39,9 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Tone | **Supportive by default, never shaming.** Coach-style roast only on explicit group opt-in ("be hard on us"). Optional custom note. |
 | Access gating | **Free for every group.** No entitlement checks. |
 | Cadence | Weekly default (Sunday morning local), natural-language configurable, per-group jitter. |
-| Chat delivery | The same `group-health-newsletter` automation uses a system-owned delivery tag. Current-chat runs use one bounded `read_shared` for at most three configured scopes plus the ordinary conversation outbox and receive no newsletter email-send authority. |
-| Permission offers | In iMessage/Linq, lead with **Like this message**, state the exact `{{share_scope}}`, and include the customize link. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
-| Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
+| Chat delivery | The same `group-health-newsletter` automation uses a system-owned delivery tag. Current-chat runs use one bounded `read_shared` for at most three configured scopes plus the ordinary conversation outbox and receive no newsletter email-send authority. The default scopes are steps, workout details, and sleep duration so same-week activity context is available when shared. |
+| Permission offers | In iMessage/Linq, Web renders one natural Murph consent message from the frozen server-owned scope description and first-party URL, sends that consent target as one reaction-bound provider message, and treats a freshly posted native offer as Murph's complete reply. Model-authored prose cannot redefine what an affirmative reaction means or add another link. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
+| Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and the Web-owned scope sentence renders from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
 | Projection retention | Each Web-owned encrypted health snapshot can carry **the 8 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. This retains the open local date plus the seven prior completed dates without exposing older history. The signed callback body ceiling is 19 KiB: above the maximum legal eight-record workout payload and below the equivalent nine-record payload. |
 
@@ -57,15 +57,48 @@ There is deliberately **no separate "newsletter" permission.** Email sharing is 
 
 It rides the existing `HostedVaultShare` table (`apps/web/prisma/schema.prisma`) and grant/revoke control plane (`apps/web/src/lib/hosted-vault-share/share-grant-store.ts`). No schema migration is required beyond registering the kind. Grant caps apply as-is.
 
-It is **default-checked at group creation**: the server adds `group-email.v0`
-to the group's `joinPolicyJson` requested set at creation
-(`apps/web/src/lib/hosted-groups/group-store.ts` / `join-policy.ts`). The
-creation-time assistant policy normally adds the reusable core health scopes:
-`steps-days.v0`, `activity-days.v0`, `workout-days.v0`,
-`sleep-duration-days.v0`, `sleep-times.v0`, `resting-heart-rate-days.v0`, and
-`hrv-days.v0`. A member can uncheck any item at join to decline. This gives
-common newsletters and challenges one upfront, customizable consent step while
-avoiding a blanket request for every selectable projection.
+At group creation, every selectable projection is **initially requested and
+selected at the consent checkpoint**, including activity-specific selector
+scopes. This includes workout summaries and workout details so a later weekly
+update can explain a movement number with observed same-period training context
+when available. Nothing is silently granted: the reaction or join page remains
+the consent gate, and each member can deselect any requested permission before
+granting it. A comprehensive checkpoint provides one clear-all action so joining
+without optional health or email sharing does not require dozens of individual
+mutations; members can re-enable exact choices before submitting. When Murph
+supplies an explicit narrower scope list, the server
+preserves that exact narrow request, including an aggregate Deep or REM sleep
+scope. Only the omitted comprehensive default collapses each aggregate and
+source-aware sleep pair to the single source-aware permission. A new consent
+checkpoint replaces the group's prior requested policy instead of unioning it,
+revokes stale unaccepted offers, and reuses an active native offer only when its
+frozen scopes match exactly. This replacement changes requested consent only;
+it does not revoke permissions that members already granted. When an existing
+member reopens the join page, the editable list is the union of the current request and every
+permission that member still actively shares with the group, so a narrower
+future request cannot hide an older grant from the member's revoke controls.
+New invitees see only the current requested checkpoint.
+
+For native reaction offers, Web supplies the only URL and the fixed affirmative
+reaction meaning. The rendered prompt is sent as one reaction-bound provider
+text message, so the stored consent target is the same bubble the member reads
+and reacts to.
+
+Each requested-permission policy carries one opaque offer generation in the
+existing join-policy JSON. Creation, legacy-policy backfill, and every exact
+scope-set replacement mint a new generation; a retry of the same current policy
+keeps it. Native offer preparation freezes both the generation and normalized
+scope set, the provider idempotency key includes the generation, and the later
+binding transaction locks the group row and rechecks both values. Therefore a
+late provider completion from an older policy cannot become the active consent
+target, including an A-to-B-to-A scope sequence. This uses no new table, queue,
+or recovery owner.
+
+Channel fallback adapters preserve whether a projection array was supplied.
+An explicit empty scope or kind array remains empty through Web; only omission
+selects the complete default permission set and canonicalizes its duplicate
+aggregate/source-aware sleep pairs. This distinction applies equally to native
+offers and standalone join links.
 
 ### Newsletter automation — the schedule + config
 
@@ -198,6 +231,24 @@ metrics. Do not rank "healthiest person" or default to raw biomarker
 leaderboards; use HRV, resting heart rate, weight, symptoms, and similar
 context-dependent measures mainly for group-level patterns unless the group
 explicitly chose that challenge metric.
+
+When a standout number has directly observed behavior from the same member and
+period, pair the two: for example, describe high steps alongside the returned
+workout count, duration, or type. Use association language such as "alongside,"
+"with," or "during"; never invent a workout type or claim the behavior caused
+the metric. If the authorized result has no such context, state the number
+plainly instead of guessing.
+
+For group-email preparation, authorized `workouts.v0` days become
+kind-specific count and minute streams in the existing weekly-stat shape. Each
+value is an average across the returned `observedDates`, which include only
+dates inside the seven-completed-day window and no date after the workout
+projection's completion watermark. The reducer aggregates multiple same-kind
+workouts on one date before averaging, omits `startLocalMs`, and never exposes a
+raw workout event list. These values can support truthful phrasing such as
+"alongside running on three observed days"; they do not support multiplying an
+average into a weekly workout or minute total. Current-chat delivery keeps its
+existing compact day-by-day workout representation.
 
 Express durations in human units. Use "about 30 minutes of movement a day"
 instead of raw minute totals when the returned fact's semantic owner identifies

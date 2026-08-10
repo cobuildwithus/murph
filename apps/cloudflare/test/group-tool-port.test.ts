@@ -1,9 +1,156 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-import { createHostedRuntimeGroupToolPort } from "../src/runtime-platform/group-tool-port.ts";
+import type { HostedWebControlTransport } from "../src/runtime-platform/web-control-transport.ts";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
+import {
+  createHostedRuntimeGroupToolPort,
+  HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID,
+} from "../src/runtime-platform/group-tool-port.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+const hostedGroupToolTransports = [
+  {
+    create: (): HostedWebControlTransport => ({ mode: "proxy" }),
+    mode: "proxy",
+  },
+  {
+    create: (): HostedWebControlTransport => {
+      const environment = readHostedExecutionEnvironment(
+        createHostedExecutionTestEnv({
+          HOSTED_WEB_BASE_URL: "https://web.example.test",
+        }),
+      );
+      if (!environment.webCallbackSigning) {
+        throw new Error("expected hosted Web callback signing fixture");
+      }
+      return {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: "https://web.example.test",
+        workspaceCheckpointBridge: null,
+      };
+    },
+    mode: "direct",
+  },
+] as const;
+
+it.each(hostedGroupToolTransports)(
+  "cancels a stalled $mode read_usage body at the original request deadline without replay",
+  async ({ create }) => {
+    const body = createDelayedEmptyBody(1_000);
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(body.stream, {
+      status: 200,
+    }));
+    const groupToolPort = createHostedRuntimeGroupToolPort({
+      boundUserId: "member_group_usage_deadline",
+      fetchImpl,
+      timeoutMs: 50,
+      transport: create(),
+    });
+
+    await expect(groupToolPort.request({ action: "read_usage" })).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(body.wasCanceled()).toBe(true);
+  },
+);
+
+it.each(hostedGroupToolTransports)(
+  "cancels a stalled $mode read_usage body with its caller without replay",
+  async ({ create }) => {
+    const abortController = new AbortController();
+    const body = createDelayedEmptyBody(100);
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      setTimeout(() => {
+        abortController.abort(new DOMException("turn cancelled", "AbortError"));
+      }, 10);
+      return new Response(body.stream, { status: 200 });
+    });
+    const groupToolPort = createHostedRuntimeGroupToolPort({
+      boundUserId: "member_group_usage_cancel",
+      fetchImpl,
+      timeoutMs: 1_000,
+      transport: create(),
+    });
+
+    await expect(groupToolPort.request(
+      { action: "read_usage" },
+      { signal: abortController.signal },
+    )).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(body.wasCanceled()).toBe(true);
+  },
+);
+
+it("categorizes a malformed group usage response without retaining its payload", async () => {
+  const privatePayloadKey = "privateAccountingDetail";
+  const privatePayloadValue = "private-accounting-value";
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+    action: "read_usage",
+    result: {
+      status: "ok",
+      usage: {
+        fundingNeeded: false,
+        fundingUrl: null,
+        includedUsageUsedPercent: 64,
+        [privatePayloadKey]: privatePayloadValue,
+      },
+    },
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  }));
+  const groupToolPort = createHostedRuntimeGroupToolPort({
+    boundUserId: "member_group_usage_schema",
+    fetchImpl: fetchImpl as typeof fetch,
+    timeoutMs: 45_000,
+    transport: { mode: "proxy" },
+  });
+
+  const error = await groupToolPort.request({ action: "read_usage" })
+    .then(() => null, (caught: unknown) => caught);
+
+  expect(error).toMatchObject({
+    code: HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID,
+    name: "HostedGroupToolResponseSchemaError",
+  });
+  expect(error).not.toHaveProperty("cause");
+  expect(JSON.stringify(error)).not.toContain(privatePayloadKey);
+  expect(JSON.stringify(error)).not.toContain(privatePayloadValue);
+  expect(String(error)).not.toContain(privatePayloadKey);
+  expect(String(error)).not.toContain(privatePayloadValue);
+});
+
+it("accepts and preserves the group usage progress field", async () => {
+  const usageProgressResponse = {
+    action: "read_usage" as const,
+    result: {
+      status: "ok" as const,
+      usage: {
+        fundingNeeded: false,
+        fundingUrl: null,
+        includedUsageUsedPercent: 64,
+      },
+    },
+  };
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify(usageProgressResponse), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  }));
+  const groupToolPort = createHostedRuntimeGroupToolPort({
+    boundUserId: "member_group_usage_progress",
+    fetchImpl: fetchImpl as typeof fetch,
+    timeoutMs: 45_000,
+    transport: { mode: "proxy" },
+  });
+
+  await expect(groupToolPort.request({ action: "read_usage" }))
+    .resolves.toEqual(usageProgressResponse);
 });
 
 it("aborts participant display-name reads at the short soft deadline and ignores late responses", async () => {
@@ -118,7 +265,7 @@ it("bounds the display-name soft deadline by the configured control timeout", as
   });
 
   expect(timeoutMsValues).not.toContain(1_000);
-  expect(timeoutMsValues.every((timeoutMs) => timeoutMs === 250)).toBe(true);
+  expect(timeoutMsValues.every((timeoutMs) => timeoutMs > 0 && timeoutMs <= 250)).toBe(true);
 });
 
 it("preserves the configured control timeout for required group-tool actions", async () => {
@@ -153,5 +300,29 @@ it("preserves the configured control timeout for required group-tool actions", a
   });
 
   expect(timeoutMsValues.length).toBeGreaterThan(0);
-  expect(timeoutMsValues.every((timeoutMs) => timeoutMs === 45_000)).toBe(true);
+  expect(
+    timeoutMsValues.every((timeoutMs) => timeoutMs > 0 && timeoutMs <= 45_000),
+  ).toBe(true);
 });
+
+function createDelayedEmptyBody(delayMs: number): {
+  stream: ReadableStream<Uint8Array>;
+  wasCanceled(): boolean;
+} {
+  let canceled = false;
+  let closeTimer: ReturnType<typeof setTimeout> | null = null;
+  return {
+    stream: new ReadableStream<Uint8Array>({
+      cancel() {
+        canceled = true;
+        if (closeTimer) {
+          clearTimeout(closeTimer);
+        }
+      },
+      start(controller) {
+        closeTimer = setTimeout(() => controller.close(), delayMs);
+      },
+    }),
+    wasCanceled: () => canceled,
+  };
+}

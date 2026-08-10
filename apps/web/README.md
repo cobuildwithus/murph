@@ -729,6 +729,8 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD`
@@ -869,10 +871,12 @@ Hosted AI usage metering:
   Murph usage days derived from the persisted grant and policy basis. It is
   never translated into a message count or calendar/trial duration. Exact
   qualification counters remain server-only.
-  Immediate post-commit reconciliation and the bounded minute recovery cron
-  converge on one final referral grant and one atomic source-mailbox
-  celebration fence. Recovery also re-signals bounded oldest unconsumed
-  celebration items after a failed Temporal signal. Personal arming freezes
+  The standalone minute recovery cron is the normal settlement owner for
+  attributed stable-link activations. Conversational referrals also use
+  immediate post-commit reconciliation, and that same cron converges on one
+  final referral grant and one atomic source-mailbox celebration fence.
+  Recovery also re-signals bounded oldest unconsumed celebration items after a
+  failed Temporal signal. Personal arming freezes
   only the source channel, blinded exact-thread locator, and directness fact;
   celebration requires the same direct thread, and personal Linq delivery uses
   an explicit source target that cannot fall back to a newer home route. Group
@@ -942,6 +946,8 @@ To complete either flow without moving real money:
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD=price_...`
@@ -1692,6 +1698,11 @@ Assertion-authenticated browser-to-agent bridge routes:
 
 Public provider-facing routes:
 
+- `GET /imessage/card/v1/:payload.png` renders one bounded immutable nutrition
+  snapshot for Linq's static Messages fallback. It accepts no query string,
+  identity, reference, credential, or authority; it performs no database or
+  remote read and returns private no-store/no-index headers. Deploy this route
+  before any runtime starts producing its URL.
 - `GET /api/device-sync/oauth/:provider/callback`
 - `POST /api/device-sync/webhooks/:provider`
 - `GET /api/device-sync/webhooks/oura`

@@ -164,13 +164,13 @@ describe("hosted usage referral policy", () => {
   it("shares display copy and outstanding semantics with read-only projections", () => {
     expect(getHostedUsageReferralPolicyDisplay("new_person_activation_v1")).toEqual({
       requirementsLabel:
-        "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+        "Bring one new person into a fresh Murph group. Murph handles setup, and the reward is earned once they join the conversation with their own Murph.",
       title: "Bring someone new to Murph",
     });
     expect(getHostedUsageReferralPolicyDisplay("active_group_v1")).toEqual({
       requirementsLabel:
         "Start a fresh group and make it genuinely active, with multiple people actually talking.",
-      title: "Start an active group",
+      title: "Start a group conversation",
     });
 
     const now = new Date("2026-07-29T12:00:00.000Z");
