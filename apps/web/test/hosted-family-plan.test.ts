@@ -2514,7 +2514,7 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("records a pending member tier and atomically swaps Stripe quantities", async () => {
+  it("records and resumes a pending member tier before atomically swapping Stripe quantities", async () => {
     const tx = createTxMock();
     const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
     tx.hostedAccountGroupMembership.findFirst

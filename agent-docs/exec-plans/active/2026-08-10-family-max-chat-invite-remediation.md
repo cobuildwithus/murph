@@ -20,6 +20,8 @@ Updated: 2026-08-10
   existing Family Settings purchase-and-invite flow without claiming success.
 - `start_checkout` establishes inactive Family billing only; it cannot accept,
   create, prepare, or report an invitation.
+- A durable pending Max member transition is documented and tested as the
+  earliest Web rollback floor, even before Max Stripe or capacity state exists.
 - A post-preflight error or ambiguous transport result is described as
   unconfirmed and does not encourage a blind duplicate.
 - Focused Assistant Engine tests and typecheck pass, followed by exact-head
@@ -89,6 +91,13 @@ Updated: 2026-08-10
   `start_checkout` now owns only billing establishment. The runner parser keeps
   one bounded rollout allowance for the old Web build's two null response keys,
   rejects non-null legacy invite results, and exposes neither field.
+- Round 6 returned `PASS` for the pre-ownership-correction head. Round 7 then
+  accepted one review-induced rollout disclosure gap: Web durably records
+  `pendingPlanCode: "max"` before Stripe mutation or Max capacity state. Treat
+  that pending intent as the earliest Web rollback floor, prove the legacy
+  reader rejects it while the current snapshot reader accepts it, and keep the
+  runtime floor distinct because pending transition state is not projected to
+  the runner.
 
 ## Verification
 
@@ -102,9 +111,15 @@ Updated: 2026-08-10
   passed; Assistant Engine typecheck, `git diff --check`, and the private-
   identifier diff scan passed.
 - Duplicate-path correction: 15 Assistant Engine schema/execution/skill tests,
-  64 hosted-execution parser tests, and 6 Web Family tool tests passed.
+  18 tool-description contract tests, 64 hosted-execution parser tests, and 6
+  Web Family tool tests passed in the exact PR worktree.
 - Assistant Engine, Hosted Execution, and Web typechecks passed.
-- Exact head `3049a143ea8d670cc114f51adb374a0c99213120` passed every required
-  GitHub Action before the round-5 corrections.
-- Pending: commit and push the corrections, exact pushed-head final ReviewGPT,
-  and required GitHub Actions.
+- Pending-Max rollback disclosure correction: 188 focused Web owner-snapshot
+  and member-transition tests passed; Web typecheck, `git diff --check`, and
+  the private-identifier diff scan passed.
+- Exact pushed head `4efbb4c1b1b14deed3059b544b085e51ca7008a9` passed every required
+  GitHub Action before the round-7 rollback-disclosure correction.
+- Round 7 inspected that exact head and returned only the pending-Max rollback
+  floor finding recorded above.
+- Pending: focused rollback-floor verification, commit and push, the round-7
+  disclosure-only verification retry, and final-head GitHub Actions.

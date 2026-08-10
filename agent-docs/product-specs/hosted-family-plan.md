@@ -208,18 +208,22 @@ one Pulse-only subscription and one mixed Pulse/Edge/Max subscription, then
 verify settings quantities, member allowances, model eligibility, and Family
 MRR match the Stripe items.
 
-The first Max Stripe item or durable Max capacity row establishes the Web
-rollback floor: a pre-Max Web build can reject the subscription projection and
-revoke the whole Family's sponsored access. The pre-Max runtime parser ignores
-the extra `plans.max` aggregate, so capacity alone is not its rollback floor;
-its floor begins when a member or pending invite is projected with
-`planCode: "max"`. After the applicable floor is crossed, incident recovery
-must roll that surface forward to a Max-aware version, with both surfaces rolled
-forward once Max assignments or invitations may exist. A pre-Max rollback is
-safe only before exposure, or after current artifacts have moved every Max
-assignment and Stripe item back to Pulse or Edge, removed Max capacity rows,
-completed webhook reconciliation, and verified that no Max member or pending
-invite remains. Do not add a compatibility state machine for this boundary.
+The earliest Max Stripe item, durable Max capacity row, or membership with
+`pendingPlanCode: "max"` establishes the Web rollback floor. The pending target
+is durable before the Stripe mutation begins, so it can exist without either
+item or capacity evidence; a pre-Max Web build rejects that pending transition
+and cannot complete or clear it through the ordinary Family controls. The
+pre-Max runtime parser ignores the extra `plans.max` aggregate, so capacity
+alone is not its rollback floor; its floor begins when a member or pending
+invite is projected with `planCode: "max"`. After the applicable floor is
+crossed, incident recovery must roll that surface forward to a Max-aware
+version, with both surfaces rolled forward once Max assignments or invitations
+may exist. A pre-Max rollback is safe only before exposure, or after current
+artifacts have completed or explicitly cleared every pending Max transition,
+moved every current Max assignment and Stripe item back to Pulse or Edge,
+removed Max capacity rows, completed webhook reconciliation, and verified that
+no membership has either current or pending Max and no pending Max invite
+remains. Do not add a compatibility state machine for this boundary.
 
 ## Data Ownership
 
