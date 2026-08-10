@@ -276,11 +276,20 @@ describe("changelog registry", () => {
     );
   });
 
-  it("keeps the August 7 through August 9 feature claims bounded", () => {
+  it("keeps the August 7 through August 10 feature claims bounded", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
 
+    expect(items.get("reminders-keep-requested-timezone")).toMatchObject({
+      sourcePullRequests: [1546],
+      summary: expect.stringContaining("preserves that local time"),
+      details: expect.stringContaining("next deliverable occurrence"),
+      tryIt: {
+        label: "Schedule a local-time reminder",
+        prompt: "Remind me every day at 9 PM Central to wind down.",
+      },
+    });
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -472,13 +481,20 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 9 shipment set", () => {
+  it("publishes the complete July 20 through August 10 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 21).map((edition) => ({
+      listChangelogEditions().slice(0, 22).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-08-10",
+        itemIds: [
+          "personal-patterns",
+          "reminders-keep-requested-timezone",
+        ],
+      },
       {
         id: "2026-08-09",
         itemIds: [
@@ -492,6 +508,7 @@ describe("changelog registry", () => {
           "group-replies-respect-the-room",
           "sponsorship-creative-opt-in",
           "response-cards-survive-long-turns",
+          "cleaner-imessage-nutrition-cards",
           "typing-prewarms-private-chat",
           "automation-output-variety",
           "ios-app-footer-link",
@@ -823,6 +840,22 @@ describe("changelog registry", () => {
     ]);
   });
 
+  it("keeps Personal Patterns historical and non-causal", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "personal-patterns",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1563],
+      tryIt: {
+        href: "/patterns",
+        label: "View your patterns",
+      },
+    });
+    expect(item?.details).toContain("existing history");
+    expect(item?.details).toContain("association rather than cause");
+  });
+
   it("keeps historical one-time sponsorship copy and publishes monthly sponsorship only in the current edition", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
@@ -942,8 +975,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-09");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-03");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-04");
   });
 
   it("resolves only known canonical edition cursors", () => {

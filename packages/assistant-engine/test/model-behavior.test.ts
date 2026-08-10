@@ -3086,6 +3086,36 @@ describe('assistant conversation scope', () => {
       'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
     )
     expect(prompt).toContain(
+      'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
+    )
+    expect(prompt).toContain(
+      'On patch, a replacement recurring wall-clock schedule that omits `schedule.timeZone` preserves the stored explicit timezone',
+    )
+    expect(prompt).toContain(
+      'do not ask the user to repeat it or guess it from current conversation context',
+    )
+    expect(prompt).toContain(
+      'For an active `deviceActivity` schedule, confirm the persisted event trigger directly',
+    )
+    expect(prompt).toContain(
+      'a null `nextOccurrenceAt` means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+    )
+    expect(prompt).toContain(
+      'do not invent a time or offer timing recovery',
+    )
+    expect(prompt).toContain(
+      'For time-based schedules, confirm timing only from a result with `timingVerified: true`',
+    )
+    expect(prompt).toContain(
+      'a verified null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
+    )
+    expect(prompt).toContain(
+      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+    )
+    expect(prompt).toContain(
+      'When a time-based result has `timingVerified: false`, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write.',
+    )
+    expect(prompt).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',
     )
     expect(prompt).toContain('Ordinary patches preserve its stored route.')

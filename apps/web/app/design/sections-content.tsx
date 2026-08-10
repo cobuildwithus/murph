@@ -31,6 +31,7 @@ import { Separator } from "@/src/components/ui/separator";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
+import { ValidationSlide } from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -71,6 +72,7 @@ import {
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
+import { PersonalPatternsStudy } from "./personal-patterns-study";
 
 function StudySection({
   children,
@@ -255,6 +257,12 @@ export function SectionsContent() {
 
       <StudySection title="Private Environment print report">
         <EnvironmentPrintStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Patterns page">
+        <PersonalPatternsStudy />
       </StudySection>
 
       <Separator />
@@ -658,6 +666,19 @@ export function SectionsContent() {
 
       <StudySection title="Private structured-review result">
         <StructuredReviewResultsStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Pitch deck progress slide">
+        <div
+          id="pitch-progress-slide"
+          data-design-section="pitch-progress-slide"
+          className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ValidationSlide />
+        </div>
       </StudySection>
 
       <Separator />
