@@ -238,15 +238,13 @@ describe("POST /api/device-sync/companion/admission", () => {
   });
 
   it.each([
-    "HOSTED_AUTO_PULSE_TRIAL_BLOCKED",
-    "HOSTED_AUTO_PULSE_TRIAL_DISABLED",
-    "HOSTED_PULSE_TRIAL_ALREADY_REDEEMED",
+    "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
   ])("maps %s to the public access recovery", async (code) => {
     mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
       hostedOnboardingError({
         code,
         httpStatus: 409,
-        message: "Internal trial state is not directly actionable here.",
+        message: "Starter usage enrollment is not directly actionable here.",
       }),
     );
 

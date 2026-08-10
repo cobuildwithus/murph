@@ -134,6 +134,15 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     new Set(["ADD CONSTRAINT CHECK", "DROP INDEX"]),
   ],
   [
+    "20260807204000_non_expiring_starter_usage",
+    // The replacement ledger checks are supersets of the existing checks:
+    // every old writer remains valid, while the new Starter grant becomes an
+    // ordinary positive grant. NOT VALID keeps the replacement lock bounded;
+    // PostgreSQL still enforces both checks for every new row before the later
+    // validation scan.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
     "20260809160000_add_hosted_family_max_plan_code",
     // Membership and invite assignments are already required by the Prisma
     // schema and every supported writer. Reasserting that contract here
@@ -145,6 +154,13 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
       "ALTER COLUMN SET NOT NULL",
       "DROP CONSTRAINT",
     ]),
+  ],
+  [
+    "20260810150000_hosted_usage_credit_grant_slot_release",
+    // The insert trigger derives the new immutable grant identity from the
+    // canonical entry before either NOT NULL check runs, so the prior writer
+    // remains valid throughout the Vercel deploy window.
+    new Set(["ALTER COLUMN SET NOT NULL"]),
   ],
 ]);
 

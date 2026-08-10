@@ -8,6 +8,7 @@ import {
 
 const HOSTED_RUNTIME_SIGNAL_NAME = "runtimeSignal";
 const HOSTED_RUNTIME_WORKFLOW_TYPE = "hostedUserRuntimeWorkflow";
+const HOSTED_RUNTIME_SYSTEM_MAILBOX_LANE = "system";
 const CONTROL_REQUEST_TIMEOUT_MS = 35_000;
 
 interface HostedLocalTemporalMailboxSignalFaultConfig {
@@ -129,6 +130,7 @@ function readHostedLocalTemporalMailboxSignalIdentity(
     || typeof workflowInput.userId !== "string"
     || !isRecord(signal)
     || signal.kind !== "mailbox_appended"
+    || signal.lane !== HOSTED_RUNTIME_SYSTEM_MAILBOX_LANE
     || typeof signal.mailboxItemId !== "string"
   ) {
     return null;

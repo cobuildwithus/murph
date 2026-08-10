@@ -547,6 +547,11 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames, "code-mode"),
     ]);
+    // Codex 0.147 wraps the code-mode exec tool in the default functions
+    // namespace inside additional_tools.
+    expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest(baseToolNames, "code-mode-namespaced"),
+    ]);
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest([...baseToolNames, "murph.pending_vault_files"])],
       {
@@ -778,7 +783,11 @@ describe("hosted local e2e scenario registration", () => {
 
 function buildResponsesRequest(
   namespacedToolNames: readonly string[],
-  toolLocation: "additional-tools" | "code-mode" | "top-level" = "top-level",
+  toolLocation:
+    | "additional-tools"
+    | "code-mode"
+    | "code-mode-namespaced"
+    | "top-level" = "top-level",
 ): HostedLocalAssistantProviderStubRequest {
   const tools = [
     {
@@ -789,6 +798,17 @@ function buildResponsesRequest(
       type: "namespace",
     },
   ];
+  const codeModeExecTool = {
+    description: namespacedToolNames
+      .filter((name) =>
+        name !== "murph.automation" && name !== "murph.group"
+      )
+      .map((name) => name.replace(/^murph\./u, "murph__"))
+      .concat("ALL_TOOLS")
+      .join("\n"),
+    name: "exec",
+    type: "custom",
+  };
 
   return {
     body: JSON.stringify(
@@ -804,17 +824,23 @@ function buildResponsesRequest(
           }
         : toolLocation === "code-mode"
         ? {
-            tools: [{
-              description: namespacedToolNames
-                .filter((name) =>
-                  name !== "murph.automation" && name !== "murph.group"
-                )
-                .map((name) => name.replace(/^murph\./u, "murph__"))
-                .concat("ALL_TOOLS")
-                .join("\n"),
-              name: "exec",
-              type: "custom",
-            }],
+            tools: [codeModeExecTool],
+          }
+        : toolLocation === "code-mode-namespaced"
+        ? {
+            input: [
+              {
+                role: "developer",
+                tools: [
+                  {
+                    name: "functions",
+                    tools: [codeModeExecTool],
+                    type: "namespace",
+                  },
+                ],
+                type: "additional_tools",
+              },
+            ],
           }
         : { tools },
     ),
