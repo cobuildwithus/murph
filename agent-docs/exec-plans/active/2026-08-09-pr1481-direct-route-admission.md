@@ -90,11 +90,21 @@ Updated: 2026-08-10
   byte-for-byte unchanged at 1,497 bytes / 268 `o200k_harmony` tokens. Only the
   opt-in `direct_recipient` profile changes, measuring 1,643 bytes / 286 tokens
   (+146 bytes / +18 tokens) so the later private answer is self-contained.
+- After the clean latest-main merge, Assistant Engine passed 21/21, Assistant
+  Runtime passed 2/2, and Web passed 14/14 in the focused suites. All three
+  package typechecks and scoped Web ESLint passed. Rebuilding current
+  hosted-execution, Engine, and Runtime artifacts then passed the production
+  runner assembly and boot probe at a 1,672,934B entry, 8,023,277B static
+  closure, and 10,000,768B total, within every ratcheted allowance.
 - Exact-head CI at `ee06af0e53` passed every required workflow and job before
   the specialist correction. The first final-round-2 attempt reached a managed
   lane request limit before generation, and the cross-profile same-thread
   recovery failed before staging because that thread was not readable there;
-  neither attempt counts as a review round. A fresh exact-snapshot recovery on
-  the healthy lane remains active. The corrected candidate still needs its next
-  final round, exact-head CI, parent final review, plan closure, and clean-merge
-  proof.
+  neither attempt counts as a review round. The fresh-snapshot recovery produced
+  `ROUND_OUTCOME: INVALID` after proving that the guarded source snapshot
+  included the local specialist correction while the PR diff still described
+  pushed head `ee06af0e53`; it issued no code findings and also does not advance
+  the round. The specialist correction is now committed and merged cleanly with
+  current `origin/main`, so the next round-2 retry can package one clean exact
+  pushed head. That candidate still needs exact-head CI, final ReviewGPT, parent
+  final review, plan closure, and clean-merge proof.
