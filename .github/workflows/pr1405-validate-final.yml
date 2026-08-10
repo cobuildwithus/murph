@@ -1,0 +1,167 @@
+name: PR 1405 validate simplified Health Commons bridge
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: pr1405-final-validation
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: >-
+      github.event.pull_request.number == 1405 &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reconstruct the reviewed patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PATCH_B64_SHA256: 82ee56edb1b0167325c73e8f06b3e723ddb41fe97032e0039311091a828a2ab7
+          PATCH_GZIP_SHA256: 6cb7f4791d418bb3c3fb064894b471eee812a92fa04368a62db5bf1914c5141d
+          PATCH_SHA256: 9d728e446b3a9154f8e22a60a87f09f95a788dbc77d47b5feb03bdc15d9acba7
+        run: |
+          set -euo pipefail
+          : > /tmp/pr1405-candidate.patch.gz.b64
+          for part in 00 01 02 03; do
+            marker="PR1405_PATCH_9d728e_PART_${part}"
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/issues/1405/comments?per_page=100" \
+              --jq ".[] | select(.body | contains(\"${marker}\")) | .body" \
+              > "/tmp/pr1405-comment-${part}.txt"
+            test "$(grep -c "${marker}" "/tmp/pr1405-comment-${part}.txt")" -eq 1
+            sed '1d' "/tmp/pr1405-comment-${part}.txt" | tr -d '\r\n' \
+              >> /tmp/pr1405-candidate.patch.gz.b64
+          done
+          echo "${PATCH_B64_SHA256}  /tmp/pr1405-candidate.patch.gz.b64" | sha256sum -c -
+          base64 --decode /tmp/pr1405-candidate.patch.gz.b64 \
+            > /tmp/pr1405-candidate.patch.gz
+          echo "${PATCH_GZIP_SHA256}  /tmp/pr1405-candidate.patch.gz" | sha256sum -c -
+          gzip --decompress --stdout /tmp/pr1405-candidate.patch.gz \
+            > /tmp/pr1405-candidate.patch
+          echo "${PATCH_SHA256}  /tmp/pr1405-candidate.patch" | sha256sum -c -
+
+      - name: Apply the candidate to current main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fdx
+          git apply --binary --index /tmp/pr1405-candidate.patch
+          git diff --cached --check
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate Health Commons and CLI artifacts
+        run: |
+          pnpm --dir packages/health-commons generate
+          pnpm --dir packages/cli gen:config-schema
+
+      - name: Verify Health Commons
+        run: pnpm --dir packages/health-commons verify
+
+      - name: Verify CLI contract and command
+        run: |
+          pnpm --dir packages/cli typecheck
+          pnpm --dir packages/cli exec vitest run \
+            --config vitest.workspace.ts \
+            --no-coverage \
+            test/commons-command-coverage.test.ts
+
+      - name: Verify assistant routing and skill ownership
+        run: |
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/model-behavior.test.ts \
+            test/assistant-skill-assets.test.ts
+
+      - name: Verify hosted packaging
+        run: |
+          pnpm --dir apps/cloudflare typecheck
+          pnpm --dir . exec vitest run \
+            --config apps/cloudflare/vitest.node.workspace.ts \
+            --no-coverage \
+            apps/cloudflare/test/deploy-artifacts.test.ts \
+            apps/cloudflare/test/runner-bundle-workspace-artifacts.test.ts
+
+      - name: Verify web type surface
+        run: pnpm --dir apps/web typecheck
+
+      - name: Complete the execution plan
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          source = Path('agent-docs/exec-plans/active/2026-08-07-health-commons-agent-knowledge.md')
+          target = Path('agent-docs/exec-plans/completed/2026-08-07-health-commons-agent-knowledge.md')
+          text = source.read_text()
+          text = text.replace('Status: active', 'Status: completed', 1)
+          text = text.replace('7. [in progress]', '7. [complete]', 1)
+          text += (
+              '\n## Final verification\n\n'
+              '- Health Commons generation, typecheck, and tests passed.\n'
+              '- CLI generation, typecheck, and focused command coverage passed.\n'
+              '- Assistant typecheck and focused routing/skill ownership tests passed.\n'
+              '- Cloudflare packaging typecheck and focused artifact tests passed.\n'
+              '- Web typecheck and `git diff --check` passed.\n\n'
+              'The opt-in real-Codex harness remains in the suite and now asserts the '
+              'single natural-language search shape; it is not run without model credentials.\n\n'
+              'Completed: 2026-08-10\n'
+          )
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(text)
+          source.unlink()
+          PY
+          git add -A
+          git diff --cached --check
+
+      - name: Publish the validated candidate branch
+        id: publish
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'refactor: simplify Health Commons agent access'
+          candidate_sha="$(git rev-parse HEAD)"
+          candidate_branch="codex/pr1405-validated-${GITHUB_RUN_ID}"
+          git push origin "HEAD:refs/heads/${candidate_branch}"
+          echo "sha=${candidate_sha}" >> "${GITHUB_OUTPUT}"
+          echo "branch=${candidate_branch}" >> "${GITHUB_OUTPUT}"
+          printf '%s\n' "${candidate_sha}" > /tmp/pr1405-candidate-sha.txt
+          printf '%s\n' "${candidate_branch}" > /tmp/pr1405-candidate-branch.txt
+          git status --short > /tmp/pr1405-candidate-status.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr1405-validated-candidate
+          path: |
+            /tmp/pr1405-candidate-sha.txt
+            /tmp/pr1405-candidate-branch.txt
+            /tmp/pr1405-candidate-status.txt
+          if-no-files-found: error
+          retention-days: 1
