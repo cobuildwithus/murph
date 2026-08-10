@@ -37,41 +37,20 @@ export type IncidentState =
   | "monitor_incomplete"
   | "false_positive"
   | "escalated"
-  | "remediation_eligible"
-  | "worktree_ready"
-  | "patched"
-  | "verified"
-  | "reviewgpt_pending"
-  | "pr_drafted"
   | "resolved";
-export type LeaseKind = "triage" | "remediation";
 
 const TERMINAL_INCIDENT_STATES = new Set<IncidentState>([
   "false_positive",
   "resolved",
 ]);
-const REMEDIATION_INCIDENT_STATES = new Set<IncidentState>([
-  "remediation_eligible",
-  "worktree_ready",
-  "patched",
-  "verified",
-  "reviewgpt_pending",
-  "pr_drafted",
-]);
 const INCIDENT_TRANSITIONS: Readonly<Record<IncidentState, ReadonlySet<IncidentState>>> = {
   candidate: new Set(["claimed_triage"]),
   claimed_triage: new Set(["investigating", "confirmed", "monitor_incomplete", "false_positive", "escalated"]),
   investigating: new Set(["confirmed", "monitor_incomplete", "false_positive", "escalated"]),
-  confirmed: new Set(["escalated", "remediation_eligible", "resolved"]),
+  confirmed: new Set(["escalated", "resolved"]),
   monitor_incomplete: new Set(["investigating", "false_positive", "escalated"]),
   false_positive: new Set(),
   escalated: new Set(["investigating", "confirmed", "false_positive", "resolved"]),
-  remediation_eligible: new Set(["worktree_ready", "confirmed", "escalated"]),
-  worktree_ready: new Set(["patched", "confirmed", "escalated"]),
-  patched: new Set(["verified", "confirmed", "escalated"]),
-  verified: new Set(["reviewgpt_pending", "confirmed", "escalated"]),
-  reviewgpt_pending: new Set(["pr_drafted", "confirmed", "escalated"]),
-  pr_drafted: new Set(["resolved", "escalated"]),
   resolved: new Set(),
 };
 const MAX_SOURCE_HEALTH = WATCH_SOURCES.length;
@@ -103,7 +82,6 @@ const NUMERIC_IDENTIFIER_PATTERN = /^\d{8,}$/u;
 const RFC3339_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?([Zz]|[+-]\d{2}:\d{2})$/u;
 const RELEASE_SHA_PATTERN = /^[a-f0-9]{7,64}$/u;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,96}$/u;
-const PR_REF_PATTERN = /^(?:#[0-9]{1,10}|https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[0-9]{1,10})$/u;
 const ALLOWED_DIMENSIONS = new Set([
   "component",
   "error_code",
@@ -348,7 +326,6 @@ export interface ProviderEvidenceEnvelope {
 
 export interface IncidentLease {
   leaseId: string;
-  kind: LeaseKind;
   sessionId: string;
   claimedAt: string;
   heartbeatAt: string;
@@ -360,7 +337,6 @@ export interface IncidentTransition {
   from?: IncidentState;
   to: IncidentState;
   sessionId?: string;
-  prRef?: string;
 }
 
 export interface IncidentRecord {
@@ -386,7 +362,6 @@ export interface IncidentRecord {
   owner?: IncidentLease;
   staleLeaseRecoveries: number;
   handlingSessions: string[];
-  prRef?: string;
   resolvedAt?: string;
   transitions: IncidentTransition[];
 }
@@ -1245,7 +1220,6 @@ export function claimIncident(
   state: ProductionWatchState,
   fingerprint: string,
   sessionId: string,
-  kind: LeaseKind,
   now: Date,
   leaseMinutes: number,
 ): ProductionWatchState {
@@ -1262,31 +1236,11 @@ export function claimIncident(
   if (incident.owner !== undefined && incident.owner.sessionId !== sessionId) {
     throw new Error("incident_already_claimed");
   }
-  if (kind === "remediation") {
-    if (
-      incident.state !== "confirmed"
-      || incident.automationClass !== "remediation_candidate"
-      || incident.category === "sensitive"
-    ) {
-      throw new Error("incident_not_remediation_eligible");
-    }
-    const otherRemediation = next.incidents.find(
-      (candidate) => candidate.fingerprint !== fingerprint
-        && candidate.owner?.kind === "remediation"
-        && Date.parse(candidate.owner.expiresAt) > now.getTime(),
-    );
-    if (otherRemediation !== undefined) {
-      throw new Error("another_remediation_is_active");
-    }
-  }
   const from = incident.state;
-  const nextState: IncidentState = kind === "triage"
-    ? incident.state === "candidate" ? "claimed_triage" : incident.state
-    : "remediation_eligible";
+  const nextState: IncidentState = incident.state === "candidate" ? "claimed_triage" : incident.state;
   incident.state = nextState;
   incident.owner = {
     leaseId: randomUUID(),
-    kind,
     sessionId,
     claimedAt: now.toISOString(),
     heartbeatAt: now.toISOString(),
@@ -1330,12 +1284,8 @@ export function transitionIncident(
   sessionId: string,
   target: IncidentState,
   now: Date,
-  prRef?: string,
 ): ProductionWatchState {
   assertSessionId(sessionId);
-  if (prRef !== undefined && !PR_REF_PATTERN.test(prRef)) {
-    throw new Error("pr_ref_invalid");
-  }
   const next = structuredClone(state) as ProductionWatchState;
   recoverExpiredLeases(next, now);
   const incident = requireIncident(next, fingerprint);
@@ -1346,30 +1296,14 @@ export function transitionIncident(
   if (!INCIDENT_TRANSITIONS[from].has(target)) {
     throw new Error(`incident_transition_invalid_${from}_to_${target}`);
   }
-  if (REMEDIATION_INCIDENT_STATES.has(target) && incident.owner.kind !== "remediation") {
-    throw new Error("remediation_transition_requires_remediation_lease");
-  }
-  if (target === "pr_drafted" && prRef === undefined) {
-    throw new Error("pr_ref_required");
-  }
-  if (target !== "pr_drafted" && prRef !== undefined) {
-    throw new Error("pr_ref_only_allowed_for_pr_drafted");
-  }
-  const ownerKind = incident.owner.kind;
   incident.state = target;
-  if (prRef !== undefined) {
-    incident.prRef = prRef;
-  }
-  if (
-    TERMINAL_INCIDENT_STATES.has(target)
-    || (ownerKind === "remediation" && !REMEDIATION_INCIDENT_STATES.has(target))
-  ) {
+  if (TERMINAL_INCIDENT_STATES.has(target)) {
     incident.owner = undefined;
   }
   if (TERMINAL_INCIDENT_STATES.has(target)) {
     incident.resolvedAt = now.toISOString();
   }
-  appendTransition(incident, { at: now.toISOString(), from, to: target, sessionId, ...(prRef === undefined ? {} : { prRef }) });
+  appendTransition(incident, { at: now.toISOString(), from, to: target, sessionId });
   next.updatedAt = now.toISOString();
   return next;
 }
@@ -1450,8 +1384,8 @@ export function renderIncidentHistory(state: ProductionWatchState): string {
     "",
     `Generated: ${state.updatedAt}`,
     "",
-    "| Fingerprint | Severity | State | Discovered | Last seen | Sessions | PR | Resolved |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Fingerprint | Severity | State | Discovered | Last seen | Sessions | Resolved |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const incident of incidents) {
     lines.push([
@@ -1461,7 +1395,6 @@ export function renderIncidentHistory(state: ProductionWatchState): string {
       incident.firstDetectedAt,
       incident.lastDetectedAt,
       incident.handlingSessions.join(", ") || "—",
-      incident.prRef ?? "—",
       incident.resolvedAt ?? "—",
     ].map(escapeMarkdownCell).join(" | ").replace(/^/u, "| ").replace(/$/u, " |"));
   }
@@ -2043,18 +1976,6 @@ function tightenIncidentPolicy(incident: IncidentRecord, candidate: AnomalyCandi
     incident.automationClass = candidate.automationClass;
   }
 
-  if (incident.owner?.kind === "remediation" && incident.automationClass !== "remediation_candidate") {
-    const from = incident.state;
-    const sessionId = incident.owner.sessionId;
-    incident.owner = undefined;
-    incident.state = "escalated";
-    appendTransition(incident, {
-      at: candidate.observedAt,
-      from,
-      to: "escalated",
-      sessionId,
-    });
-  }
 }
 
 function recoverExpiredLeases(state: ProductionWatchState, now: Date): void {
@@ -2064,15 +1985,9 @@ function recoverExpiredLeases(state: ProductionWatchState, now: Date): void {
     }
     const from = incident.state;
     const sessionId = incident.owner.sessionId;
-    const kind = incident.owner.kind;
     incident.owner = undefined;
     if (incident.state === "claimed_triage" || incident.state === "investigating") {
       incident.state = "candidate";
-    } else if (
-      kind === "remediation"
-      && ["remediation_eligible", "worktree_ready", "patched", "verified", "reviewgpt_pending"].includes(incident.state)
-    ) {
-      incident.state = "confirmed";
     }
     incident.staleLeaseRecoveries += 1;
     appendTransition(incident, { at: now.toISOString(), from, to: incident.state, sessionId });
@@ -2308,7 +2223,6 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
     "occurrenceCount",
     "owner",
     "phase",
-    "prRef",
     "releaseSha",
     "resolvedAt",
     "ruleId",
@@ -2328,12 +2242,6 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
     "monitor_incomplete",
     "false_positive",
     "escalated",
-    "remediation_eligible",
-    "worktree_ready",
-    "patched",
-    "verified",
-    "reviewgpt_pending",
-    "pr_drafted",
     "resolved",
   ] as const, "incident state");
   const owner = object.owner === undefined ? undefined : parseIncidentLease(object.owner);
@@ -2381,7 +2289,6 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
     ...(owner === undefined ? {} : { owner }),
     staleLeaseRecoveries: readNonNegativeInteger(object.staleLeaseRecoveries, "incident staleLeaseRecoveries"),
     handlingSessions,
-    ...(object.prRef === undefined ? {} : { prRef: readPrRef(object.prRef) }),
     ...(resolvedAt === undefined ? {} : { resolvedAt }),
     transitions,
   };
@@ -2411,27 +2318,15 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
   if ((category === "sensitive" || source === "stripe") && automationClass !== "alert_only") {
     throw new Error("sensitive_incident_must_be_alert_only");
   }
-  if (REMEDIATION_INCIDENT_STATES.has(state) && automationClass !== "remediation_candidate") {
-    throw new Error("remediation_state_policy_invalid");
-  }
-  if (owner?.kind === "triage" && REMEDIATION_INCIDENT_STATES.has(state)) {
-    throw new Error("triage_owner_on_remediation_state");
-  }
-  if (owner?.kind === "remediation" && !REMEDIATION_INCIDENT_STATES.has(state)) {
-    throw new Error("remediation_owner_state_invalid");
-  }
   if (owner !== undefined && !handlingSessions.includes(owner.sessionId)) {
     throw new Error("incident_owner_session_unrecorded");
-  }
-  if (state === "pr_drafted" && record.prRef === undefined) {
-    throw new Error("pr_drafted_reference_required");
   }
   return record;
 }
 
 function parseIncidentLease(value: unknown): IncidentLease {
   const object = readObject(value, "incident lease");
-  assertExactKeys(object, ["claimedAt", "expiresAt", "heartbeatAt", "kind", "leaseId", "sessionId"], "incident lease");
+  assertExactKeys(object, ["claimedAt", "expiresAt", "heartbeatAt", "leaseId", "sessionId"], "incident lease");
   const claimedAt = readIsoTimestamp(object.claimedAt, "lease claimedAt");
   const heartbeatAt = readIsoTimestamp(object.heartbeatAt, "lease heartbeatAt");
   const expiresAt = readIsoTimestamp(object.expiresAt, "lease expiresAt");
@@ -2440,7 +2335,6 @@ function parseIncidentLease(value: unknown): IncidentLease {
   }
   return {
     leaseId: readToken(object.leaseId, "lease id", 64),
-    kind: readEnum(object.kind, ["triage", "remediation"] as const, "lease kind"),
     sessionId: readSessionId(object.sessionId),
     claimedAt,
     heartbeatAt,
@@ -2450,7 +2344,7 @@ function parseIncidentLease(value: unknown): IncidentLease {
 
 function parseIncidentTransition(value: unknown): IncidentTransition {
   const object = readObject(value, "incident transition");
-  assertExactKeys(object, ["at", "from", "prRef", "sessionId", "to"], "incident transition", true);
+  assertExactKeys(object, ["at", "from", "sessionId", "to"], "incident transition", true);
   const to = readEnum(object.to, [
     "candidate",
     "claimed_triage",
@@ -2459,12 +2353,6 @@ function parseIncidentTransition(value: unknown): IncidentTransition {
     "monitor_incomplete",
     "false_positive",
     "escalated",
-    "remediation_eligible",
-    "worktree_ready",
-    "patched",
-    "verified",
-    "reviewgpt_pending",
-    "pr_drafted",
     "resolved",
   ] as const, "transition target");
   return {
@@ -2477,17 +2365,10 @@ function parseIncidentTransition(value: unknown): IncidentTransition {
       "monitor_incomplete",
       "false_positive",
       "escalated",
-      "remediation_eligible",
-      "worktree_ready",
-      "patched",
-      "verified",
-      "reviewgpt_pending",
-      "pr_drafted",
       "resolved",
     ] as const, "transition source") }),
     to,
     ...(object.sessionId === undefined ? {} : { sessionId: readSessionId(object.sessionId) }),
-    ...(object.prRef === undefined ? {} : { prRef: readPrRef(object.prRef) }),
   };
 }
 
@@ -2725,13 +2606,6 @@ function readSessionId(value: unknown): string {
 
 function assertSessionId(value: string): void {
   readSessionId(value);
-}
-
-function readPrRef(value: unknown): string {
-  if (typeof value !== "string" || !PR_REF_PATTERN.test(value)) {
-    throw new Error("pr_ref_invalid");
-  }
-  return value;
 }
 
 function assertExactKeys(

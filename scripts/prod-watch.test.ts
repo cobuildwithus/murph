@@ -276,8 +276,8 @@ describe("production-watch incident coordination", () => {
     const incident = promoted.incidents[0];
     expect(incident).toBeDefined();
 
-    const claimed = claimIncident(promoted, incident!.fingerprint, "session-a", "triage", new Date("2026-08-09T20:01:00.000Z"), 15);
-    expect(() => claimIncident(claimed, incident!.fingerprint, "session-b", "triage", new Date("2026-08-09T20:02:00.000Z"), 15))
+    const claimed = claimIncident(promoted, incident!.fingerprint, "session-a", new Date("2026-08-09T20:01:00.000Z"), 15);
+    expect(() => claimIncident(claimed, incident!.fingerprint, "session-b", new Date("2026-08-09T20:02:00.000Z"), 15))
       .toThrow("incident_already_claimed");
 
     const escalated = transitionIncident(
@@ -291,38 +291,20 @@ describe("production-watch incident coordination", () => {
     expect(renderIncidentHistory(escalated)).toContain(incident!.fingerprint.slice(0, 16));
   });
 
-  it("prevents simultaneous remediation leases across incidents", () => {
-    const snapshot = buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:00:00.000Z"));
-    const initial = createInitialState(new Date("2026-08-09T19:55:00.000Z"), ["database"]);
-    const firstPass = updateStateFromSnapshot(initial, snapshot).state;
-    const secondPass = updateStateFromSnapshot(firstPass, buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:05:00.000Z"))).state;
-    expect(secondPass.incidents.length).toBeGreaterThan(1);
-
-    const candidates = secondPass.incidents.filter((incident) => incident.automationClass === "remediation_candidate");
-    expect(candidates.length).toBeGreaterThan(1);
-    let prepared = claimIncident(secondPass, candidates[0]!.fingerprint, "session-a", "triage", new Date("2026-08-09T20:06:00.000Z"), 30);
-    prepared = transitionIncident(prepared, candidates[0]!.fingerprint, "session-a", "confirmed", new Date("2026-08-09T20:06:30.000Z"));
-    prepared = claimIncident(prepared, candidates[0]!.fingerprint, "session-a", "remediation", new Date("2026-08-09T20:07:00.000Z"), 30);
-    prepared = claimIncident(prepared, candidates[1]!.fingerprint, "session-b", "triage", new Date("2026-08-09T20:07:30.000Z"), 30);
-    prepared = transitionIncident(prepared, candidates[1]!.fingerprint, "session-b", "confirmed", new Date("2026-08-09T20:08:00.000Z"));
-    expect(() => claimIncident(prepared, candidates[1]!.fingerprint, "session-b", "remediation", new Date("2026-08-09T20:08:30.000Z"), 30))
-      .toThrow("another_remediation_is_active");
-  });
-
   it("does not downgrade a durable escalation when its triage lease expires", () => {
     const snapshot = buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:00:00.000Z"));
     const initial = createInitialState(new Date("2026-08-09T19:55:00.000Z"), ["database"]);
     const promoted = updateStateFromSnapshot(initial, snapshot).state;
     const incident = promoted.incidents[0]!;
-    let state = claimIncident(promoted, incident.fingerprint, "session-a", "triage", new Date("2026-08-09T20:01:00.000Z"), 5);
+    let state = claimIncident(promoted, incident.fingerprint, "session-a", new Date("2026-08-09T20:01:00.000Z"), 5);
     state = transitionIncident(state, incident.fingerprint, "session-a", "escalated", new Date("2026-08-09T20:02:00.000Z"));
 
     const roundTrip = parseState(JSON.parse(JSON.stringify(state)) as unknown);
-    const afterExpiry = claimIncident(roundTrip, incident.fingerprint, "session-b", "triage", new Date("2026-08-09T20:07:00.000Z"), 5);
+    const afterExpiry = claimIncident(roundTrip, incident.fingerprint, "session-b", new Date("2026-08-09T20:07:00.000Z"), 5);
     const recovered = afterExpiry.incidents.find((candidate) => candidate.fingerprint === incident.fingerprint);
     expect(recovered).toMatchObject({
       state: "escalated",
-      owner: { sessionId: "session-b", kind: "triage" },
+      owner: { sessionId: "session-b" },
     });
     expect(recovered?.transitions.at(-2)).toMatchObject({ from: "escalated", to: "escalated" });
   });
@@ -371,21 +353,20 @@ describe("production-watch incident coordination", () => {
     }
   });
 
-  it("enforces the incident state machine and remediation lease boundary", () => {
+  it("enforces the Phase 1 incident state machine", () => {
     const snapshot = buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:00:00.000Z"));
     const initial = createInitialState(new Date("2026-08-09T19:55:00.000Z"), ["database"]);
     const promoted = updateStateFromSnapshot(initial, snapshot).state;
     const incident = promoted.incidents[0]!;
-    const claimed = claimIncident(promoted, incident.fingerprint, "session-a", "triage", new Date("2026-08-09T20:01:00.000Z"), 15);
+    const claimed = claimIncident(promoted, incident.fingerprint, "session-a", new Date("2026-08-09T20:01:00.000Z"), 15);
 
     expect(() => transitionIncident(
       claimed,
       incident.fingerprint,
       "session-a",
-      "pr_drafted",
+      "resolved",
       new Date("2026-08-09T20:02:00.000Z"),
-      "#1",
-    )).toThrow(/incident_transition_invalid|remediation_transition_requires/u);
+    )).toThrow("incident_transition_invalid_claimed_triage_to_resolved");
 
     const confirmed = transitionIncident(
       claimed,
@@ -394,13 +375,18 @@ describe("production-watch incident coordination", () => {
       "confirmed",
       new Date("2026-08-09T20:02:00.000Z"),
     );
-    expect(() => transitionIncident(
+    const resolved = transitionIncident(
       confirmed,
       incident.fingerprint,
       "session-a",
-      "remediation_eligible",
+      "resolved",
       new Date("2026-08-09T20:03:00.000Z"),
-    )).toThrow("remediation_transition_requires_remediation_lease");
+    );
+    expect(resolved.incidents.find((candidate) => candidate.fingerprint === incident.fingerprint)).toMatchObject({
+      state: "resolved",
+      resolvedAt: "2026-08-09T20:03:00.000Z",
+    });
+    expect(resolved.incidents.find((candidate) => candidate.fingerprint === incident.fingerprint)?.owner).toBeUndefined();
   });
 });
 
@@ -549,8 +535,6 @@ describe("production-watch locking and dry-run behavior", () => {
       incident!.id,
       "--session-id",
       "session-a",
-      "--kind",
-      "triage",
     ], runtimeRoot);
     expect(claim.status).toBe(0);
 
@@ -745,22 +729,9 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(existsSync(path.join(runtimeRoot, "projections", "prod-watch", "ACTIVE_INCIDENTS.md"))).toBe(false);
   });
 
-  it("keeps Phase 1 remediation claims disabled at the CLI boundary", () => {
+  it("keeps the Phase 1 remediation command disabled at the CLI boundary", () => {
     const runtimeRoot = makeTempRoot();
-    expect(runProdWatch(["run", "--fixture", "suspicious", "--settling-delay-seconds", "0"], runtimeRoot).status).toBe(0);
-    expect(runProdWatch(["run", "--fixture", "suspicious", "--settling-delay-seconds", "0"], runtimeRoot).status).toBe(0);
-    const state = JSON.parse(readFileSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json"), "utf8")) as {
-      incidents: Array<{ id: string }>;
-    };
-    const result = runProdWatch([
-      "incident",
-      "claim",
-      state.incidents[0]!.id,
-      "--session-id",
-      "session-a",
-      "--kind",
-      "remediation",
-    ], runtimeRoot);
+    const result = runProdWatch(["remediate"], runtimeRoot);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("automation_disabled_phase_1");
   });
@@ -773,7 +744,7 @@ describe("production-watch locking and dry-run behavior", () => {
     const fixturePath = path.join(fixtureRoot, "healthy.database.json");
     writeFileSync(
       helperPath,
-      `#!/bin/sh\ntr -d '\n' < '${fixturePath}'\nprintf '\nuntrusted helper banner\n'\n`,
+      `#!/bin/sh\ncat >/dev/null\ntr -d '\n' < '${fixturePath}'\nprintf '\nuntrusted helper banner\n'\n`,
       { mode: 0o755 },
     );
     chmodSync(helperPath, 0o755);
