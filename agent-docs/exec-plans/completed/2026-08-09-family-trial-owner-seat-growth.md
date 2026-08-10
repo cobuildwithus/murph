@@ -1,6 +1,6 @@
 # Family trial owner seat growth
 
-Status: active
+Status: completed
 Created: 2026-08-09
 
 ## Goal
@@ -30,7 +30,7 @@ Created: 2026-08-09
 1. Completed: add the failing capacity-growth regression.
 2. Completed: apply the smallest owner-only guard correction.
 3. Completed: run focused proof and inspect the complete diff.
-4. Pending: complete the required ReviewGPT and CI workflow, resolve findings, and close
+4. Completed: complete the required ReviewGPT and CI workflow, resolve findings, and close
    this plan through `scripts/finish-task`.
 
 ## Verification
@@ -45,4 +45,10 @@ Created: 2026-08-09
   `HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED` and passed after the fix.
 - `hosted-family-plan.test.ts`: 173 tests passed.
 - `pnpm --filter @murphai/hosted-web typecheck`: passed.
-- Exact-head ReviewGPT and CI: pending.
+- Preliminary product-experience and coverage ReviewGPT: passed with no
+  findings and no patch artifact.
+- Final sensitive-billing ReviewGPT: passed with no findings.
+- Exact-head required CI: passed; the configured live Stripe browser matrix was
+  skipped by policy while the hermetic billing and Stripe boundary jobs passed.
+Updated: 2026-08-10
+Completed: 2026-08-10
