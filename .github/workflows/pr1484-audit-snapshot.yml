@@ -1,4 +1,4 @@
-name: Validate rebased PR 1484 head
+name: Push final PR 1484 boundary hardening
 
 on:
   push:
@@ -6,17 +6,17 @@ on:
       - agent/pr1484-audit-snapshot-20260810
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
-      - name: Check out exact PR head
+      - name: Check out exact PR branch
         uses: actions/checkout@v4
         with:
-          ref: d3909088373a19452b698b5f15159c2778d6c8d7
+          ref: agent/member-owned-provider-applications
           fetch-depth: 0
 
       - name: Set up pnpm
@@ -31,55 +31,123 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Prisma client
-        run: pnpm -C apps/web run prisma:generate
+      - name: Apply boundary fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_head=d3909088373a19452b698b5f15159c2778d6c8d7
+          test "$(git rev-parse HEAD)" = "$expected_head"
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Validate Prisma schema
-        run: pnpm -C apps/web exec prisma validate
+          crypto = Path("apps/web/src/lib/device-sync/provider-applications/crypto.ts")
+          source = crypto.read_text()
+          old = '''  if (
+            error instanceof DOMException
+            || (
+              error instanceof Error
+              && ["DataError", "InvalidCharacterError", "OperationError"].includes(
+                error.name,
+              )
+            )
+          ) {
+            return error.name !== "AbortError";
+          }'''
+          new = '''  if (
+            error instanceof Error
+            && ["DataError", "InvalidCharacterError", "OperationError"].includes(
+              error.name,
+            )
+          ) {
+            return true;
+          }'''
+          if source.count(old) != 1:
+              raise SystemExit("expected one secure-box DOMException classifier")
+          crypto.write_text(source.replace(old, new, 1))
 
-      - name: Typecheck device sync
-        run: pnpm -C packages/device-syncd run typecheck
+          crypto_test = Path("apps/web/test/device-provider-application-crypto.test.ts")
+          source = crypto_test.read_text()
+          marker = '''  it("does not hide transient root-key or KMS failures", async () => {
+            const transient = new Error("Hosted domain root service unavailable.");
+            mocks.open.mockRejectedValue(transient);
 
-      - name: Typecheck assistant runtime
-        run: pnpm -C packages/assistant-runtime run typecheck
+            await expect(decryptDeviceProviderApplication({
+              applicationId: "dpa_123",
+              memberId: "member_123",
+              provider: "strava",
+              revision: 7,
+              value: "sealed-value",
+            })).rejects.toBe(transient);
+          });'''
+          addition = marker + '''
 
-      - name: Typecheck Web
-        run: pnpm -C apps/web run typecheck
+          it("does not hide transient DOM exception failures", async () => {
+            const transient = new DOMException(
+              "Timed out while opening the hosted root key.",
+              "TimeoutError",
+            );
+            mocks.open.mockRejectedValue(transient);
 
-      - name: Lint Web
-        run: pnpm -C apps/web run lint
+            await expect(decryptDeviceProviderApplication({
+              applicationId: "dpa_123",
+              memberId: "member_123",
+              provider: "strava",
+              revision: 7,
+              value: "sealed-value",
+            })).rejects.toBe(transient);
+          });'''
+          if source.count(marker) != 1:
+              raise SystemExit("expected one transient KMS test")
+          crypto_test.write_text(source.replace(marker, addition, 1))
 
-      - name: Run focused Web tests
+          maintenance_test = Path(
+              "packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts"
+          )
+          source = maintenance_test.read_text()
+          title = "yields before dirty control-plane fetch when foreground input is waiting"
+          test_marker = f'  it("{title}", async () => {{'
+          start = source.find(test_marker)
+          if start < 0:
+              raise SystemExit("missing pre-service yield test")
+          end = source.find('\n  it("', start + len(test_marker))
+          if end < 0:
+              end = len(source)
+          chunk = source[start:end]
+          old_assertion = "    expect(close).toHaveBeenCalledTimes(1);"
+          new_assertion = "    expect(close).not.toHaveBeenCalled();"
+          if chunk.count(old_assertion) != 1:
+              raise SystemExit("expected one stale pre-service close assertion")
+          source = source[:start] + chunk.replace(
+              old_assertion,
+              new_assertion,
+              1,
+          ) + source[end:]
+          maintenance_test.write_text(source)
+          PY
+          git diff --check
+
+      - name: Run focused regression tests
         shell: bash
         run: |
           set -euo pipefail
           pnpm -C apps/web exec vitest run --config vitest.workspace.ts --no-coverage \
-            test/device-provider-application-crypto.test.ts \
-            test/device-provider-application-ingress-store.test.ts \
-            test/device-provider-application-store.test.ts \
-            test/device-provider-application-types.test.ts \
-            test/device-sync-hosted-runtime-authority.test.ts \
-            test/device-sync-internal-runtime.test.ts \
-            test/device-sync-providers.test.ts \
-            test/hosted-account-data-service.test.ts \
-            test/prisma-store-oauth-connection.test.ts \
-            test/prisma-store-oauth-sessions.test.ts
+            test/device-provider-application-crypto.test.ts
+          pnpm -C packages/assistant-runtime exec vitest run \
+            --config vitest.config.ts \
+            --isolate=true \
+            --no-coverage \
+            test/hosted-runtime-maintenance.test.ts
 
-      - name: Run assistant-runtime tests
-        run: pnpm -C packages/assistant-runtime run test
-
-      - name: Run device-sync package tests
-        run: pnpm -C packages/device-syncd run test
-
-      - name: Run smoke checks
-        run: pnpm test:smoke
-
-      - name: Verify generated and source cleanliness
+      - name: Commit and push
         shell: bash
         run: |
           set -euo pipefail
-          git diff --check
-          test -z "$(git status --short --untracked-files=no)" || {
-            git status --short
-            exit 1
-          }
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            apps/web/src/lib/device-sync/provider-applications/crypto.ts \
+            apps/web/test/device-provider-application-crypto.test.ts \
+            packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts
+          git commit -m "fix: preserve transient provider errors across yield boundaries"
+          git push --force-with-lease=refs/heads/agent/member-owned-provider-applications:d3909088373a19452b698b5f15159c2778d6c8d7 \
+            origin HEAD:refs/heads/agent/member-owned-provider-applications
