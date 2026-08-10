@@ -22,6 +22,33 @@
       "counters": [
         {
           "metric": "provider_request_count",
+          "dimensions": {
+            "source": "vercel"
+          },
+          "unit": "count",
+          "current": 240,
+          "previous": 230
+        },
+        {
+          "metric": "provider_error_count",
+          "dimensions": {
+            "source": "vercel"
+          },
+          "unit": "count",
+          "current": 1,
+          "previous": 1
+        },
+        {
+          "metric": "provider_timeout_count",
+          "dimensions": {
+            "source": "vercel"
+          },
+          "unit": "count",
+          "current": 0,
+          "previous": 0
+        },
+        {
+          "metric": "provider_request_count",
           "dimensions": { "source": "vercel", "surface": "hosted_web" },
           "unit": "count",
           "current": 240,
@@ -78,6 +105,33 @@
       "counters": [
         {
           "metric": "provider_request_count",
+          "dimensions": {
+            "source": "cloudflare"
+          },
+          "unit": "count",
+          "current": 210,
+          "previous": 205
+        },
+        {
+          "metric": "provider_error_count",
+          "dimensions": {
+            "source": "cloudflare"
+          },
+          "unit": "count",
+          "current": 0,
+          "previous": 0
+        },
+        {
+          "metric": "provider_timeout_count",
+          "dimensions": {
+            "source": "cloudflare"
+          },
+          "unit": "count",
+          "current": 0,
+          "previous": 1
+        },
+        {
+          "metric": "provider_request_count",
           "dimensions": { "source": "cloudflare", "surface": "hosted_runner" },
           "unit": "count",
           "current": 210,
@@ -123,6 +177,33 @@
       "freshnessSeconds": 0,
       "releaseContext": [],
       "counters": [
+        {
+          "metric": "provider_request_count",
+          "dimensions": {
+            "source": "stripe"
+          },
+          "unit": "count",
+          "current": 80,
+          "previous": 78
+        },
+        {
+          "metric": "provider_error_count",
+          "dimensions": {
+            "source": "stripe"
+          },
+          "unit": "count",
+          "current": 0,
+          "previous": 0
+        },
+        {
+          "metric": "provider_timeout_count",
+          "dimensions": {
+            "source": "stripe"
+          },
+          "unit": "count",
+          "current": 0,
+          "previous": 0
+        },
         {
           "metric": "provider_request_count",
           "dimensions": { "source": "stripe", "surface": "webhook_delivery" },

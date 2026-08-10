@@ -24,7 +24,7 @@ Use this skill only for Murph production-watch runs and incidents.
    ```
 
 2. When provider coverage is part of this session, query only aggregate health, release, count/rate, and latency surfaces from the configured Vercel, Cloudflare Observability, and Stripe MCPs. Do not retrieve individual events, requests, customers, charges, prompts, or payload bodies.
-3. Emit one JSON object conforming to `scripts/prod-watch/schemas/provider-evidence.v1.schema.json` into a current-user-owned `0600` file inside a `0700` temporary directory. Use only the allowed dimensions and metric names. For every exact provider dimension set, an `ok` source requires `auth: ok` plus explicit `provider_request_count`, `provider_error_count`, and `provider_timeout_count` counters. Zero error/timeout counters are required; absence is unknown, not zero. Do not emit `sampleCount` or `previousSampleCount`: the request counter is the sole rate denominator. A provider auth, rate-limit, timeout, schema, or availability problem belongs in `failures`; do not invent zero counts.
+3. Emit one JSON object conforming to `scripts/prod-watch/schemas/provider-evidence.v1.schema.json` into a current-user-owned `0600` file inside a `0700` temporary directory. Use only the allowed dimensions and metric names. An `ok` source requires `auth: ok` plus one provider-wide `provider_request_count`, `provider_error_count`, and `provider_timeout_count` triple whose exact dimensions are only `{source}`. Surface-specific counters are supplementary and every emitted surface triple must also be complete at its exact dimensions. Zero error/timeout counters are required; absence is unknown, not zero. Do not emit `sampleCount` or `previousSampleCount`: the exact-dimension request counter is the sole rate denominator. A provider auth, rate-limit, timeout, schema, or availability problem belongs in `failures`; do not invent zero counts.
 4. Merge and evaluate the evidence with:
 
    ```sh
@@ -32,6 +32,8 @@ Use this skill only for Murph production-watch runs and incidents.
    ```
 
 5. Remove the temporary provider envelope after the merge completes or fails. A `partial` snapshot is not healthy. Missing provider evidence must stay explicit. Only fresh, complete, authenticated, successful source evidence may contribute production counters, latency, fingerprints, or provider release context; degraded, partial, stale, failed, or unauthenticated evidence contributes monitor-health incidents only.
+
+Synthetic fixtures are read-only parser/scorer inputs for `collect` and tests. Never pass `--fixture` to `run` or `drill-down`; both stateful commands reject it before acquiring a lock, extending a lease, or writing state/projections. Provider streaks advance only on a strictly newer scorable observation from that provider. Replaying an envelope or running a database-only tick neither promotes nor resets a provider streak.
 
 ## Incident triage
 

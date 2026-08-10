@@ -269,6 +269,12 @@
         "issueKind": {
           "$ref": "#/$defs/token64"
         },
+        "operation": {
+          "$ref": "#/$defs/token64"
+        },
+        "surface": {
+          "$ref": "#/$defs/token64"
+        },
         "releaseSha": {
           "$ref": "#/$defs/sha"
         }

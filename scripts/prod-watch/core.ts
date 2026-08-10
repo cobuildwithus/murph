@@ -175,7 +175,7 @@ const PROVIDER_LATENCY_METRICS = new Set([
   "edge_request_duration_ms",
   "provider_duration_ms",
 ]);
-const SENSITIVE_SIGNAL_PATTERN = /(?:auth|billing|canonical|clinical|consent|corrupt|credential|delet|erasure|health|hipaa|idempot|medical|patient|payment|privacy|replay|stripe|loss)/iu;
+const SENSITIVE_SIGNAL_PATTERN = /(?:auth|billing|canonical|clinical|consent|corrupt|credential|delet|erasure|health|hipaa|idempot|medical|patient|payment|privacy|replay|stripe|subscription|loss)/iu;
 
 export interface SourceHealth {
   source: WatchSource;
@@ -232,6 +232,8 @@ export interface FingerprintSummary {
   lastSeenAt: string;
   errorCode?: string;
   issueKind?: string;
+  operation?: string;
+  surface?: string;
   releaseSha?: string;
 }
 
@@ -394,7 +396,12 @@ export interface ProductionWatchState {
     lastEvidenceComplete?: boolean;
     lastSourceHealth: SourceHealth[];
   };
-  anomalyStreaks: Record<string, { count: number; lastSeenAt: string }>;
+  anomalyStreaks: Record<string, {
+    count: number;
+    lastSeenAt: string;
+    source: WatchSource;
+    sourceObservedAt: string;
+  }>;
   cumulativeCounters: Record<string, number>;
   incidents: IncidentRecord[];
 }
@@ -1053,7 +1060,9 @@ export function evaluateAnomalies(input: {
       fingerprint.component,
       fingerprint.errorCode,
       fingerprint.issueKind,
+      fingerprint.operation,
       fingerprint.phase,
+      fingerprint.surface,
     ].some((value) => value !== undefined && SENSITIVE_SIGNAL_PATTERN.test(value));
     const critical = fingerprint.severity === "critical";
     const spike = fingerprint.count >= 5
@@ -1256,15 +1265,57 @@ export function updateStateFromSnapshot(
   }
 
   const previousStreaks = next.anomalyStreaks;
-  const newStreaks: ProductionWatchState["anomalyStreaks"] = {};
+  const newStreaks: ProductionWatchState["anomalyStreaks"] = Object.fromEntries(
+    Object.entries(previousStreaks).filter(([, streak]) => (
+      now.getTime() - Date.parse(streak.lastSeenAt) <= STREAK_RETENTION_MS
+    )),
+  );
   const promotedIncidentIds: string[] = [];
   const runWindowMs = snapshot.run.window.lookbackMinutes * 60 * 1_000;
+  const scorableSourceObservations = new Map(snapshot.sourceHealth
+    .filter((health) => (
+      health.status === "ok"
+      && health.coverage === "complete"
+      && (health.auth === "ok" || health.auth === "not_required")
+      && health.collectedAt !== undefined
+      && (health.freshnessSeconds ?? Number.POSITIVE_INFINITY) <= 1_800
+      && !snapshot.collectorFailures.some((failure) => failure.source === health.source)
+    ))
+    .map((health) => [health.source, health.collectedAt!]));
+  for (const [fingerprint, streak] of Object.entries(newStreaks)) {
+    const observedAt = scorableSourceObservations.get(streak.source);
+    if (
+      observedAt !== undefined
+      && Date.parse(observedAt) > Date.parse(streak.sourceObservedAt)
+    ) {
+      delete newStreaks[fingerprint];
+    }
+  }
   for (const candidate of snapshot.anomalyCandidates) {
+    const sourceObservedAt = candidate.category === "monitor"
+      ? snapshot.generatedAt
+      : scorableSourceObservations.get(candidate.source);
+    if (sourceObservedAt === undefined) {
+      continue;
+    }
     const previous = previousStreaks[candidate.fingerprint];
+    if (
+      previous !== undefined
+      && previous.source === candidate.source
+      && Date.parse(sourceObservedAt) <= Date.parse(previous.sourceObservedAt)
+    ) {
+      continue;
+    }
     const previousStillAdjacent = previous !== undefined
-      && now.getTime() - Date.parse(previous.lastSeenAt) <= runWindowMs * 2 + 60_000;
+      && previous.source === candidate.source
+      && Date.parse(sourceObservedAt) - Date.parse(previous.sourceObservedAt) <= runWindowMs * 2 + 60_000;
     const streak = previousStillAdjacent ? previous.count + 1 : 1;
-    newStreaks[candidate.fingerprint] = { count: streak, lastSeenAt: snapshot.generatedAt };
+    newStreaks[candidate.fingerprint] = {
+      count: streak,
+      lastSeenAt: snapshot.generatedAt,
+      source: candidate.source,
+      sourceObservedAt,
+    };
     const existing = next.incidents.find((incident) => incident.fingerprint === candidate.fingerprint);
     if (existing !== undefined && !TERMINAL_INCIDENT_STATES.has(existing.state)) {
       existing.lastDetectedAt = snapshot.generatedAt;
@@ -1303,9 +1354,7 @@ export function updateStateFromSnapshot(
       }
     }
   }
-  next.anomalyStreaks = Object.fromEntries(
-    Object.entries(newStreaks).filter(([, streak]) => now.getTime() - Date.parse(streak.lastSeenAt) <= STREAK_RETENTION_MS),
-  );
+  next.anomalyStreaks = newStreaks;
   next.cumulativeCounters = extractCumulativeCounters(snapshot.counters);
   next.incidents = pruneIncidents(next.incidents, now);
   return { state: next, promotedIncidentIds };
@@ -1467,8 +1516,9 @@ export function filterSnapshotForIncident(
       : summary.metric === metricSignal.metric
         && dimensionsKey(summary.dimensions) === metricSignal.dimensionsKey),
     fingerprints: snapshot.fingerprints.filter(
-      (fingerprint) => fingerprint.fingerprint === incident.sourceFingerprint
-        || (
+      (fingerprint) => incident.sourceFingerprint !== undefined
+        ? fingerprint.fingerprint === incident.sourceFingerprint
+        : (
           fingerprint.source === incident.source
           && (incident.component === undefined || fingerprint.component === incident.component)
           && (incident.phase === undefined || fingerprint.phase === incident.phase)
@@ -2164,6 +2214,18 @@ function providerRateEvidenceComplete(evidence: AdapterEvidence): boolean {
     || counter.metric === "provider_error_count"
     || counter.metric === "provider_timeout_count"
   ));
+  const sourceWideDimensionsKey = dimensionsKey({ source: evidence.source });
+  if (
+    !requestsByDimensions.has(sourceWideDimensionsKey)
+    || REQUIRED_PROVIDER_RATE_NUMERATORS.some((metric) => (
+      !numerators.some((counter) => (
+        counter.metric === metric
+        && dimensionsKey(counter.dimensions) === sourceWideDimensionsKey
+      ))
+    ))
+  ) {
+    return false;
+  }
   for (const request of requests) {
     const key = dimensionsKey(request.dimensions);
     if (REQUIRED_PROVIDER_RATE_NUMERATORS.some((metric) => (
@@ -2424,12 +2486,14 @@ function parseAdapterFingerprint(
     "firstSeenAt",
     "issueKind",
     "lastSeenAt",
+    "operation",
     "phase",
     "previousCount",
     "rawFingerprint",
     "releaseSha",
     "severity",
     "source",
+    "surface",
   ], "fingerprint", true);
   const source = object.source === undefined ? defaultSource : readWatchSource(object.source, "fingerprint source");
   if (source !== defaultSource) {
@@ -2448,6 +2512,8 @@ function parseAdapterFingerprint(
     lastSeenAt: readIsoTimestamp(object.lastSeenAt, "fingerprint lastSeenAt"),
     ...(object.errorCode === undefined || object.errorCode === null ? {} : { errorCode: readEvidenceToken(object.errorCode, "fingerprint errorCode", 64) }),
     ...(object.issueKind === undefined || object.issueKind === null ? {} : { issueKind: readEvidenceToken(object.issueKind, "fingerprint issueKind", 64) }),
+    ...(object.operation === undefined || object.operation === null ? {} : { operation: readEvidenceToken(object.operation, "fingerprint operation", 64) }),
+    ...(object.surface === undefined || object.surface === null ? {} : { surface: readEvidenceToken(object.surface, "fingerprint surface", 64) }),
     ...(object.releaseSha === undefined || object.releaseSha === null
       ? {}
       : { releaseSha: readReleaseSha(object.releaseSha, "fingerprint releaseSha") }),
@@ -2707,10 +2773,12 @@ function parseAnomalyStreaks(value: unknown): ProductionWatchState["anomalyStrea
   }
   return Object.fromEntries(Object.entries(object).map(([fingerprint, raw]) => {
     const streak = readObject(raw, "anomaly streak");
-    assertExactKeys(streak, ["count", "lastSeenAt"], "anomaly streak");
+    assertExactKeys(streak, ["count", "lastSeenAt", "source", "sourceObservedAt"], "anomaly streak");
     return [readHash(fingerprint, "anomaly streak fingerprint"), {
       count: readNonNegativeInteger(streak.count, "anomaly streak count"),
       lastSeenAt: readIsoTimestamp(streak.lastSeenAt, "anomaly streak lastSeenAt"),
+      source: readWatchSource(streak.source, "anomaly streak source"),
+      sourceObservedAt: readIsoTimestamp(streak.sourceObservedAt, "anomaly streak sourceObservedAt"),
     }];
   }));
 }

@@ -34,9 +34,9 @@ The scheduled interval is 300 seconds. One run has a 240-second deadline, leavin
 1. `launchd` invokes the current verified Node executable directly with the repository-local `tsx` entrypoint and `prod-watch.ts run --scheduled`. It exports one fixed, bounded PATH containing `$HOME/.local/bin` plus standard Homebrew/system directories, so the Keychain-backed database helper is reachable without inheriting an interactive shell environment; it does not depend on launchd finding a shell-only pnpm/Corepack shim.
 2. The command creates one contender claim in `.runtime/tmp/prod-watch/run.lock`; the oldest live claim wins. A dead PID is recoverable, and claims older than 10 minutes are stale even if the PID was reused. `launchd` itself skips an interval that fires while the job is still running; the lock additionally protects manual runs, duplicate installations, and other launchers. Any losing invocation records one bounded overlap marker and exits successfully without starting another collector.
 3. The collection window ends 60 seconds before collection time to tolerate ingestion lag. It compares adjacent 15-minute windows, so every event is seen in multiple scheduled runs without becoming duplicate incident state.
-4. The database adapter sends fixed SQL to `murph-prod-psql-ro` on stdin. The helper remains the only PostgreSQL entry point. The child has a 30-second deadline and bounded stdout/stderr capture. Only stdout is parsed; stderr contents are discarded and reduced to a redacted error code.
+4. The database adapter sends fixed SQL to `murph-prod-psql-ro` on stdin. The helper remains the only PostgreSQL entry point. The child has a 30-second deadline and bounded stdout/stderr capture. Only stdout is parsed; stderr contents are discarded and reduced to a redacted error code. A stdin failure enters the same terminate-then-force-terminate lifecycle as timeout or abort, and the parent does not settle until the child exits.
 5. In the target hybrid, a new `codex exec --ephemeral` process receives only the bounded database snapshot, the production-watch skill, and a JSON output schema. It uses read-only sandboxing, queries aggregate MCP surfaces, writes one temporary provider envelope, and exits. The file is validated locally and deleted after merge.
-6. Local code evaluates fixed rules, advances consecutive-run streaks, deduplicates by stable fingerprint, and writes state/projections under a separate state lock. Only fresh, complete, authenticated, successful evidence contributes production counters, latency, fingerprints, or provider release context. Degraded, partial, stale, failed, or unauthenticated evidence contributes monitor-health incidents only.
+6. Local code evaluates fixed rules, advances consecutive-source-observation streaks, deduplicates by stable fingerprint, and writes state/projections under a separate state lock. Only fresh, complete, authenticated, successful evidence contributes production counters, latency, fingerprints, or provider release context. Degraded, partial, stale, failed, or unauthenticated evidence contributes monitor-health incidents only. A provider envelope advances its streaks only once; a database-only tick preserves unobserved provider streaks, and a strictly newer clean provider observation resets them.
 7. Files are written to a same-directory temporary file, synced, chmod `0600`, and renamed. Directories use `0700`.
 8. Healthy scheduled runs produce no terminal output. New incidents, degraded monitor health, manual runs, and dry runs return a small summary.
 9. A normal exit removes its contender claim. If the process crashes or is force-killed, a later tick removes the claim when its recorded PID is no longer alive or when it is older than the 10-minute PID-reuse fence. `launchd` does not use `KeepAlive`, so it does not create a crash loop; the next 300-second tick retries.
@@ -58,9 +58,12 @@ pnpm --silent prod-watch <command>
 # Aggregate-only snapshot to stdout. Does not persist state.
 pnpm --silent prod-watch collect --lookback-minutes 15 --output -
 
-# Exercise scoring, lock, and output behavior without state/projection writes.
-pnpm --silent prod-watch run --dry-run --fixture healthy
-pnpm --silent prod-watch run --dry-run --fixture suspicious
+# Exercise synthetic parsing and scoring without state/projection writes.
+pnpm --silent prod-watch collect --fixture healthy --output -
+pnpm --silent prod-watch collect --fixture suspicious --output -
+
+# Exercise live-helper scoring and locking without state/projection writes.
+pnpm --silent prod-watch run --dry-run
 
 # Merge a schema-validated provider envelope produced by a fresh Codex MCP pass.
 # The file must be current-user-owned, mode 0600, and inside a private temporary directory.
@@ -91,7 +94,7 @@ pnpm --silent prod-watch incident transition "$INCIDENT" \
   --state escalated
 ```
 
-The incident projections show each incident's source. Database incidents support the full list → claim → drill-down → transition journey. Phase 1 provider incidents support list → claim → transition to `escalated`; provider drill-down is not advertised because the temporary provider envelope has already been removed. The CLI rejects a provider incident before heartbeating or persisting its lease, and it rejects an undisclosed provider-envelope input on the drill-down command.
+The incident projections show each incident's source. Database incidents support the full list → claim → drill-down → transition journey. Phase 1 provider incidents support list → claim → transition to `escalated`; provider drill-down is not advertised because the temporary provider envelope has already been removed. The CLI rejects a provider incident before heartbeating or persisting its lease, and it rejects an undisclosed provider-envelope input on the drill-down command. Synthetic fixtures are accepted only by read-only `collect`; `run` and `drill-down` reject `--fixture` before lock acquisition, lease extension, or any state/projection write.
 
 The target MCP command shape is intentionally external to Phase 1:
 
@@ -123,12 +126,12 @@ This command fails with `automation_disabled_phase_1`. Code modification, worktr
 | `releaseContext` | Runtime token, release SHA, observed/deployed time, current marker. |
 | `counters` | Allowlisted metric and dimensions, adjacent-window values, sample counts. |
 | `latency` | Count, p50/p95/p99/max, and previous-window p95/p99. |
-| `fingerprints` | SHA-256 stable fingerprint plus allowlisted component/phase/severity/error tokens and counts. |
+| `fingerprints` | SHA-256 stable fingerprint plus allowlisted component/phase/operation/surface/severity/error tokens and counts. |
 | `anomalyCandidates` | Rule, severity, policy class, canonical redacted metric/dimension signal, threshold evidence, correlation, consecutive-run requirement. |
 | `collectorFailures` | Source, failure class, redacted code, retryability. |
 | `redaction` | Policy version and assertions that raw text/direct identifiers are absent. |
 
-Unknown fields, overlong arrays, arbitrary dimensions, free-form text, invalid timestamps, and malformed tokens fail closed. The local parser also rejects absolute/local paths, URLs, UUIDs, common provider/direct-ID shapes, credential-shaped values, JWTs, and long numeric identifiers before evidence can enter state or a projection. The production source universe is always database, Vercel, Cloudflare, and Stripe; callers cannot narrow it. For every exact provider dimension set, complete `ok` coverage requires `auth: ok` and explicit request, error, and timeout counters. Measured zero numerators are valid, but missing numerators are unknown. Provider producers cannot supply `sampleCount` fields: the matching request counter is the only rate denominator and the local scorer owns that relation. A source failure never becomes a zero counter. Evidence that is degraded, partial, stale, failed, or unauthenticated is excluded from production scoring and provider release correlation; its health/failure metadata still drives monitor incidents.
+Unknown fields, overlong arrays, arbitrary dimensions, free-form text, invalid timestamps, and malformed tokens fail closed. The local parser also rejects absolute/local paths, URLs, UUIDs, common provider/direct-ID shapes, credential-shaped values, JWTs, and long numeric identifiers before evidence can enter state or a projection. The production source universe is always database, Vercel, Cloudflare, and Stripe; callers cannot narrow it. Complete provider `ok` coverage requires `auth: ok` and a provider-wide request/error/timeout triple whose exact dimensions are only `{source}`. Surface-specific counters are supplementary, and every emitted exact-dimension triple must still be complete. Measured zero numerators are valid, but missing numerators are unknown. Provider producers cannot supply `sampleCount` fields: the matching exact-dimension request counter is the only rate denominator and the local scorer owns that relation. A source failure never becomes a zero counter. Evidence that is degraded, partial, stale, failed, or unauthenticated is excluded from production scoring and provider release correlation; its health/failure metadata still drives monitor incidents.
 
 The serialized fingerprint bound is 37: 13 ranked database fingerprints plus eight from each provider. Sensitive and critical fingerprints are ranked before ordinary volume at collection time and are retained before presentation capacity is filled. The anomaly bound is the derived worst-case 245 candidates across failures, source health, counters, latency, and fingerprints, so mandatory sensitive, critical, and alert-only candidates cannot be removed by a display limit.
 
@@ -144,7 +147,7 @@ The serialized fingerprint bound is 37: 13 ranked database fingerprints plus eig
 
 MCP calls are isolated by provider. One failure is represented for that source and does not erase successful evidence from other sources. Provider rate-limit and auth failures are monitor incidents, not production-zero evidence.
 
-The first database query deliberately omits full workspace/checkpoint scans: the relevant workspace fields are not indexed for a five-minute fleet-wide query in the inspected schema. Its assistant-issue scan uses the canonical `hosted` environment persisted by the current writer/importer and intentionally emits no database release context because that writer owns neither runtime name nor release SHA. Its issue and ingress scans are constrained to the repository's finite severity/source domains so the existing `(severity, occurred_at)` and `(source, accepted_at)` indexes are usable. Add a purpose-built indexed aggregate or existing operational summary before monitoring workspace/checkpoint fields at this cadence.
+The first database query deliberately omits full workspace/checkpoint scans: the relevant workspace fields are not indexed for a five-minute fleet-wide query in the inspected schema. Its assistant-issue scan uses the canonical `hosted` environment persisted by the current writer/importer and intentionally emits no database release context because that writer owns neither runtime name nor release SHA. The query carries the writer-owned operation and surface tokens through the importer into the bounded fingerprint identity and sensitivity classifier. Incident drill-down uses exact fingerprint equality whenever the incident owns a source fingerprint; metadata matching is only a fallback for records without one. Its issue and ingress scans are constrained to the repository's finite severity/source domains so the existing `(severity, occurred_at)` and `(source, accepted_at)` indexes are usable. Add a purpose-built indexed aggregate or existing operational summary before monitoring workspace/checkpoint fields at this cadence.
 
 ## Machine state and projections
 
@@ -173,7 +176,7 @@ JSON is sufficient for Phase 1 because state is small, single-host, and serializ
 
 - Incident fingerprint = SHA-256 of source and rule plus the scored metric and canonical exact dimensions for metric/latency candidates, or the bounded source fingerprint for fingerprint candidates.
 - Counts, timestamps, and release SHA do not participate, so one continuing regression survives new windows and release observations.
-- New candidates must satisfy their consecutive-run gate before promotion. Missing a candidate resets its short streak after a bounded retention window.
+- New candidates must satisfy their consecutive-source-observation gate before promotion. A source streak records its source and latest source observation time, advances only for a strictly newer scorable observation, is preserved when that source is unobserved or unscorable, resets on a newer clean observation, and expires after the bounded retention window.
 - Repeated occurrences update `lastSeenAt`, count, evidence, and release context on the same incident.
 - Incidents retain at most 32 transitions. Terminal incidents retain 180 days, with a hard cap of 2,000 records.
 - Triage leases are per incident. Phase 1 has no remediation lease or remediation state owner.
@@ -311,9 +314,13 @@ Alert suppression rules:
 | Anomaly rules | Suspicious fixture proves sensitive escalation, deployment correlation, and two-window promotion for noisy rates. |
 | Deduplication | Same source/rule dimensions stay one incident across windows and release SHA changes. |
 | Lease safety | A second triage owner cannot claim; stale dead-PID/PID-reuse claims are recoverable; live lock is not stolen; malformed incident state fails closed. |
-| Timeout/failure isolation | Fake database helper hangs and emits private stderr; collector terminates it and returns only `helper_timeout`. |
-| Dry run | Produces snapshot without state or Markdown projection files. |
+| Timeout/failure isolation | Fake database helpers hang, close stdin early, and ignore the first termination request; the collector preserves bounded termination ownership, waits for exact child exit, emits only a redacted helper failure/timeout, and recovers for the next collection. |
+| Fixture/read-only boundary | Fixtures exercise `collect` only. `run`, `run --dry-run`, and `drill-down` reject fixtures before state locks or leases and leave state, projections, and the latest snapshot byte-for-byte unchanged. |
+| Provider evidence | A source-wide `{source}` request/error/timeout triple is the sole source-completeness proof; consistent surface-only subsets remain partial. Exact-dimension rate denominators remain mandatory supplementary proof. |
+| Source-aware recurrence | Replaying one provider envelope cannot advance a streak; database-only ticks preserve it; a newer provider observation advances or cleanly resets it; retention expiry resets it. |
+| Dry run | Live-helper dry run produces a snapshot without state or Markdown projection files. |
 | Database boundary | Static proof requires a read-only transaction, bounded timeouts, and no private columns. The opt-in `scripts/prod-watch.database.integration.test.ts` lane runs the exact CLI query through `murph-prod-psql-ro`, retains the aggregate snapshot only in memory, and validates the strict snapshot contract without printing the payload. |
+| Database fingerprint identity | Static writer/importer/SQL proof and behavioral parsing prove allowlisted operation/surface propagation, sensitive classification, and exact source-fingerprint drill-down matching. |
 | Scheduler | Template proof requires a 300-second interval, `KeepAlive=false`, placeholders, a fixed helper PATH, and no machine path. Rendered output retains literal `$HOME` paths and rejects unsafe repository paths. A macOS-only command smoke starts from a minimal launchd environment, makes `murph-prod-psql-ro` available only at `$HOME/.local/bin`, runs the exact rendered Node/tsx chain, and proves complete database collection. A separate disposable-home/fake-`launchctl` lifecycle test proves helper verification before replacement, unmanaged-file refusal, managed replacement, failed-enable cleanup, and uninstall behavior; an operator smoke remains required before activation. |
 | JSON contracts | All checked-in schemas parse; fixture evidence passes the runtime's strict parsers and produces the documented `snapshot.v1` shape. |
 | Repo gates | `pnpm test:repo-tools -- scripts/prod-watch.test.ts`, tools typecheck, `git diff --check`, and relevant docs checks. |
@@ -322,7 +329,7 @@ Alert suppression rules:
 
 ### Stage 0 — local scaffold
 
-- Run fixture dry runs and tests.
+- Run read-only fixture collection and tests; fixtures are never state-writing run or drill-down inputs.
 - Inspect generated Markdown projections.
 - Validate the SQL against a disposable/local production-shaped schema with the read-only role.
 - Do not install the scheduler.

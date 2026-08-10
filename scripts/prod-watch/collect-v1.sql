@@ -30,6 +30,8 @@ issue_fingerprints AS (
     issue.severity,
     issue.issue_kind,
     coalesce(issue.error_code, 'none') AS error_code,
+    coalesce(issue.operation, 'none') AS operation,
+    coalesce(issue.surface, 'none') AS surface,
     count(*) FILTER (WHERE issue.occurred_at >= params.current_start)::integer AS current_count,
     count(*) FILTER (WHERE issue.occurred_at < params.current_start)::integer AS previous_count,
     min(issue.occurred_at) FILTER (WHERE issue.occurred_at >= params.current_start) AS first_seen_at,
@@ -46,11 +48,13 @@ issue_fingerprints AS (
     issue.phase,
     issue.severity,
     issue.issue_kind,
-    coalesce(issue.error_code, 'none')
+    coalesce(issue.error_code, 'none'),
+    coalesce(issue.operation, 'none'),
+    coalesce(issue.surface, 'none')
   ORDER BY
     (
-      concat_ws(' ', issue.component, issue.phase, issue.issue_kind, coalesce(issue.error_code, 'none'))
-      ~* '(auth|billing|canonical|clinical|consent|corrupt|credential|delet|erasure|health|hipaa|idempot|medical|patient|payment|privacy|replay|stripe|loss)'
+      concat_ws(' ', issue.component, issue.phase, issue.issue_kind, coalesce(issue.error_code, 'none'), coalesce(issue.operation, 'none'), coalesce(issue.surface, 'none'))
+      ~* '(auth|billing|canonical|clinical|consent|corrupt|credential|delet|erasure|health|hipaa|idempot|medical|patient|payment|privacy|replay|stripe|subscription|loss)'
     ) DESC,
     current_count DESC,
     previous_count DESC
@@ -323,7 +327,7 @@ counter_rows AS (
 ),
 fingerprint_rows AS (
   SELECT jsonb_build_object(
-    'rawFingerprint', concat('issue:', md5(fingerprint)),
+    'rawFingerprint', concat('issue:', md5(concat_ws(E'\x1f', fingerprint, operation, surface))),
     'source', 'database',
     'component', component,
     'phase', phase,
@@ -335,6 +339,8 @@ fingerprint_rows AS (
     END,
     'issueKind', issue_kind,
     'errorCode', error_code,
+    'operation', operation,
+    'surface', surface,
     'count', current_count,
     'previousCount', previous_count,
     'firstSeenAt', coalesce(first_seen_at, params.current_start) AT TIME ZONE 'UTC',

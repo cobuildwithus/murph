@@ -69,8 +69,8 @@ const LAUNCHD_MANAGED_MARKER = "murph-prod-watch-managed:v1";
 const SCHEDULER_SYSTEM_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] as const;
 const USAGE = `Usage:
   pnpm --silent prod-watch collect [--lookback-minutes 15] [--fixture healthy|suspicious] [--provider-evidence <file>] [--output -|<file>]
-  pnpm --silent prod-watch run [--scheduled] [--dry-run] [--fixture healthy|suspicious] [--provider-evidence <file>]
-  pnpm --silent prod-watch drill-down <database-incident-id-or-fingerprint> --session-id <id> [--lookback-minutes 60] [--fixture healthy|suspicious]
+  pnpm --silent prod-watch run [--scheduled] [--dry-run] [--provider-evidence <file>]
+  pnpm --silent prod-watch drill-down <database-incident-id-or-fingerprint> --session-id <id> [--lookback-minutes 60]
   pnpm --silent prod-watch incident list
   pnpm --silent prod-watch incident claim <incident-id-or-fingerprint> --session-id <id>
   pnpm --silent prod-watch incident heartbeat <incident-id-or-fingerprint> --session-id <id>
@@ -155,6 +155,9 @@ async function runCollectCommand(argv: string[]): Promise<void> {
 
 async function runScheduledCommand(argv: string[]): Promise<void> {
   const parsed = parseCommonOptions(argv, { mode: "scheduled", dryRun: false, scheduled: false });
+  if (parsed.fixture !== undefined) {
+    throw new Error("fixture_stateful_command_forbidden");
+  }
   const runId = randomUUID();
   const runClaim = await acquireDirectoryLock({
     lockPath: runLockPath,
@@ -230,6 +233,9 @@ async function runDrillDownCommand(argv: string[]): Promise<void> {
     scheduled: false,
     lookbackMinutes: 60,
   });
+  if (parsed.fixture !== undefined) {
+    throw new Error("fixture_stateful_command_forbidden");
+  }
   if (parsed.lookbackMinutes > 120) {
     throw new Error("drill_down_lookback_too_large");
   }
@@ -684,7 +690,13 @@ async function spawnCaptured(
       options.signal?.removeEventListener("abort", onAbort);
     };
     child.on("error", fail);
-    child.stdin?.on("error", fail);
+    child.stdin?.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      pendingError ??= error;
+      terminate();
+    });
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
