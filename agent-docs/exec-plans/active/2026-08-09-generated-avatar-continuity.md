@@ -137,8 +137,8 @@ Updated: 2026-08-09
   35 credential-gated live-provider cases skipped; the added finalizer seam
   passed 68 tests, the live-provider file compiled with 6 deterministic tests
   passing and 35 gated cases skipped, and the Assistant Engine typecheck passed.
-- Exact post-remediation runner assembly measured a 1,659,589-byte entry,
-  7,993,075-byte static closure, and 9,970,893-byte total without adding a
+- Exact post-remediation full hosted-local assembly measured a 1,659,616-byte
+  entry, 8,016,324-byte static closure, and 9,994,142-byte total without adding a
   forbidden boot input. The static and total ratchets now use those exact
   measurements with the established cross-platform and 32 KiB reviewed-change
   allowances; the 42-test bundle-policy suite and exact assembly both passed.

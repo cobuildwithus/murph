@@ -173,12 +173,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Generated-image delivery continuity adds runtime-owned transcript provenance,
 // exact sent-media reply binding, and provider-resume fallback handling to the
 // existing assistant chunks without adding a forbidden boot input. Exact macOS
-// assembly measured a 7,993,075B static closure and 9,970,893B total on
-// 2026-08-09. Ratchet both measurements while retaining the established
-// cross-platform tolerances and reviewed-addition allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_970_893 + 32_768;
+// full hosted-local assembly measured a 8,016,324B static closure and
+// 9,994,142B total on 2026-08-09. Ratchet both measurements while retaining
+// the established cross-platform tolerances and reviewed-addition allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_994_142 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_993_075;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_016_324;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
