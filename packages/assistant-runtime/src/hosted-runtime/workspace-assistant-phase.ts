@@ -3835,6 +3835,7 @@ interface DeferredHostedSystemMailboxPostCheckpointRecord {
   >;
   redactedStatus: HostedRuntimeRedactedJson;
   statusCallback: {
+    deviceSyncPending: boolean;
     failed: number;
     nextWakeAt: string | null;
     nextWakeReason?: string | null;
@@ -3923,6 +3924,7 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
       hostedSystemMailboxRecordDeferred: true,
     },
     statusCallback: {
+      deviceSyncPending: false,
       failed: 0,
       nextWakeAt: null,
       recorded: 0,
@@ -5817,7 +5819,11 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       && input.systemMailboxPreparation.item.routeAction === "run-device-sync-wake";
     const pausedCompanionDeviceSyncRetryPending =
       pausedCompanionDeviceSyncRecord
-      && (statusCallback.failed > 0 || statusCallback.stillDirty === true);
+      && (
+        statusCallback.deviceSyncPending === true
+        || statusCallback.failed > 0
+        || statusCallback.stillDirty === true
+      );
     const statusCallbackWakeReason = pausedCompanionDeviceSyncRecord
       && pausedCompanionDeviceSyncRetryPending
       ? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON

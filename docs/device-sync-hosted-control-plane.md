@@ -215,11 +215,15 @@ import-owned durability effects, then executes only `run-device-sync-wake` and
 crosses the ordinary durable checkpoint and dirty-ack boundary. It does not
 execute unrelated pending route actions, conversation, delivery, assistant, or
 model work, and the restricted device-sync run suppresses new device-activity
-automation scheduling. If preparation or post-checkpoint receipt recording
-fails, or a successful receipt reports remaining dirty work, the workspace may
-retain only an exact `device-sync.reconcile` wake paired with the persisted
-paused-companion retry marker. Only a successful clean receipt clears that
-marker. All other workspace wakes stay projected out while billing is paused.
+automation scheduling. Dirty acknowledgement and the following pending-dirty
+query run in the same health-data admission transaction used by companion
+ingress. If an acknowledgement remains dirty, the runtime clears the spent
+post-checkpoint record and requeues that same exact device item for execution.
+Preparation or receipt failure, a still-dirty acknowledgement, or another exact
+local device item retains the `device-sync.reconcile` wake and persisted
+paused-companion retry marker. A successful clean receipt for the last device
+item clears them. All other workspace wakes stay projected out while billing is
+paused.
 
 ### Local runtime
 

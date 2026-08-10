@@ -32,7 +32,6 @@ import {
   mergeHostedSystemMailboxRollbackItems,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
-  resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
   updateHostedSystemMailboxPendingItem,
   updateHostedSystemMailboxState,
@@ -137,6 +136,7 @@ export async function claimHostedSystemMailboxItem(input: {
 }
 
 export async function requeueClaimedHostedSystemMailboxItem(input: {
+  clearPostCheckpointRecord?: boolean;
   error?: unknown;
   item: HostedSystemMailboxPendingItem;
   nextAttemptAt: string | null;
@@ -155,6 +155,7 @@ export async function requeueClaimedHostedSystemMailboxItem(input: {
       lastErrorCode: normalized?.code ?? null,
       lastErrorMessage: normalized?.message ?? null,
       nextAttemptAt: input.nextAttemptAt,
+      ...(input.clearPostCheckpointRecord ? { postCheckpointRecord: null } : {}),
       status: "pending",
     };
     return {
@@ -478,6 +479,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<{
+  deviceSyncPending: boolean;
   failed: number;
   nextWakeAt: string | null;
   nextWakeReason?: string | null;
@@ -485,9 +487,17 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   stillDirty: boolean;
 }> {
   if (!input.item.postCheckpointRecord) {
+    const [nextWake, deviceSyncWake] = await Promise.all([
+      resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot }),
+      resolveHostedSystemMailboxNextWakeCandidate({
+        allowedRouteActions: ["run-device-sync-wake"],
+        vaultRoot: input.vaultRoot,
+      }),
+    ]);
     return {
+      deviceSyncPending: deviceSyncWake.at !== null,
       failed: 0,
-      nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
+      nextWakeAt: nextWake.at,
       recorded: 0,
       stillDirty: false,
     };
@@ -500,18 +510,38 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       runtime: input.runtime,
       signal: input.signal ?? null,
     });
-    await removeHostedSystemMailboxPendingItemIfCurrent({
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-    });
+    if (
+      recordResult.stillDirty
+      && input.item.routeAction === "run-device-sync-wake"
+    ) {
+      await requeueClaimedHostedSystemMailboxItem({
+        clearPostCheckpointRecord: true,
+        item: input.item,
+        nextAttemptAt: recordResult.nextWakeAt,
+        vaultRoot: input.vaultRoot,
+      });
+    } else {
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: input.item,
+        vaultRoot: input.vaultRoot,
+      });
+    }
+    const [pendingWake, deviceSyncWake] = await Promise.all([
+      resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot }),
+      resolveHostedSystemMailboxNextWakeCandidate({
+        allowedRouteActions: ["run-device-sync-wake"],
+        vaultRoot: input.vaultRoot,
+      }),
+    ]);
     const nextWake = selectHostedRuntimeWakeCandidate([
-      await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot }),
+      pendingWake,
       createHostedRuntimeWakeCandidate(
         recordResult.nextWakeAt,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
       ),
     ]);
     return {
+      deviceSyncPending: deviceSyncWake.at !== null,
       failed: 0,
       nextWakeAt: nextWake.at,
       ...(nextWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
@@ -533,7 +563,12 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       },
       vaultRoot: input.vaultRoot,
     });
+    const deviceSyncWake = await resolveHostedSystemMailboxNextWakeCandidate({
+      allowedRouteActions: ["run-device-sync-wake"],
+      vaultRoot: input.vaultRoot,
+    });
     return {
+      deviceSyncPending: deviceSyncWake.at !== null,
       failed: 1,
       nextWakeAt,
       recorded: 0,

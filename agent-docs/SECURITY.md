@@ -576,10 +576,15 @@ Last verified: 2026-08-09
   executing only `run-device-sync-wake`; it cannot execute unrelated pending
   route actions, delivery, assistant/model work, or provider egress while
   paused. The restricted device-sync execution also suppresses new
-  device-activity automation scheduling. A failed preparation or receipt, or a
-  successful receipt that reports remaining dirty work, may preserve only an
-  exact `device-sync.reconcile` wake with the persisted paused-companion retry
-  marker; only a successful clean receipt clears it. Web projects
+  device-activity automation scheduling. Web serializes a dirty acknowledgement
+  and its pending-work check through the same member-then-connection
+  health-data admission lock used by companion ingress. If the acknowledgement
+  reports remaining dirty work, the runtime clears the spent receipt record and
+  requeues that same exact device item as executable local work. A failed
+  preparation or receipt, a still-dirty acknowledgement, or any other exact
+  local device item preserves the `device-sync.reconcile` wake and persisted
+  paused-companion retry marker; only a successful clean receipt for the last
+  device item clears them. Web projects
   `platformAiUsageAllowed: false`, and the write-fence provider-egress guard
   remains the final fail-closed boundary.
 - Automatic meal-photo enrollment, activation, and upload retain active paid

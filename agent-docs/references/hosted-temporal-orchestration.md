@@ -344,10 +344,11 @@ facts only while historically consented companion device-sync system lag remains
 Those facts contain only the system lane and normally project out all workspace
 wake timestamps/reasons, so Temporal can select only `system_mailbox`. The sole
 exception is an exact persisted paused-companion retry marker paired with a
-`device-sync.reconcile` wake after preparation or receipt recording failed, or
-after a successful receipt reported remaining dirty work. That retry is
-admitted even after system lag reaches zero, and only a successful clean
-receipt clears the marker. The runtime preserves lane-contiguous import of
+`device-sync.reconcile` wake after preparation or receipt recording failed,
+after a dirty acknowledgement requeued its exact local device item, or while
+another exact local device item remains. That retry is admitted even after
+system lag reaches zero, and only a successful clean receipt for the last
+device item clears the marker. The runtime preserves lane-contiguous import of
 older accepted system work and its bounded import-time durability effects,
 then executes only `run-device-sync-wake`; the restricted action suppresses
 device-activity automation scheduling and cannot execute unrelated pending

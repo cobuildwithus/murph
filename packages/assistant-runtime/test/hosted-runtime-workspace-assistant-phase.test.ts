@@ -649,9 +649,11 @@ beforeEach(() => {
     return nextWakeAt;
   });
   mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValue({
+    deviceSyncPending: false,
     failed: 0,
     nextWakeAt: null,
     recorded: 1,
+    stillDirty: false,
   });
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
@@ -12160,6 +12162,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "processed",
     });
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: false,
       failed: 0,
       nextWakeAt: null,
       recorded: 1,
@@ -12222,6 +12225,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "processed",
     });
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: false,
       failed: 0,
       nextWakeAt: null,
       recorded: 1,
@@ -12277,6 +12281,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "processed",
     });
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: false,
       failed: 0,
       nextWakeAt: null,
       recorded: 1,
@@ -12321,6 +12326,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "processed",
     });
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: false,
       failed: 0,
       nextWakeAt: null,
       recorded: 1,
@@ -12365,6 +12371,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "processed",
     });
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: false,
       failed: 0,
       nextWakeAt: null,
       recorded: 1,
@@ -12489,11 +12496,68 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "processed",
     });
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: true,
       failed: 0,
       nextWakeAt: retryAt,
       nextWakeReason: "device-sync.reconcile",
       recorded: 1,
       stillDirty: true,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      foregroundCausalOnly: true,
+      now: () => "2026-04-27T00:00:00.000Z",
+      systemMailboxRouteActions: ["run-device-sync-wake"],
+      workspace: createDueAssistantWorkspace(),
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: retryAt,
+      nextWakeReason: "device-sync.reconcile",
+      redactedStatus: expect.objectContaining({
+        hostedPausedCompanionDeviceSyncRetryPending: true,
+        hostedSystemMailboxRecordFailed: 0,
+        hostedSystemMailboxRecorded: 1,
+      }),
+    }));
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
+  });
+
+  it("keeps the paused companion continuation when another device item remains", async () => {
+    const retryAt = "2026-04-27T00:00:01.000Z";
+    const deviceSyncItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "run-device-sync-wake" as const,
+      wake: {
+        eventId: "evt_synthetic_device_sync_next_item",
+        kind: "device-sync.wake" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        reason: "connected" as const,
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: deviceSyncItem,
+      itemId: "system_mailbox_item_device_sync_next_item",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt: null,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: true,
+      failed: 0,
+      nextWakeAt: retryAt,
+      recorded: 1,
+      stillDirty: false,
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -12544,6 +12608,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "processed",
     });
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: false,
       failed: 0,
       nextWakeAt: null,
       recorded: 1,
@@ -12601,6 +12666,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "processed",
     });
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: true,
       failed: 1,
       nextWakeAt: retryAt,
       recorded: 0,
@@ -13160,6 +13226,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "processed",
     });
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: false,
       failed: 0,
       nextWakeAt,
       nextWakeReason: "device-sync.reconcile",
@@ -13292,6 +13359,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValueOnce(null);
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      deviceSyncPending: false,
       failed: 1,
       nextWakeAt: "2026-04-27T00:15:00.000Z",
       recorded: 0,

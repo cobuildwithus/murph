@@ -556,45 +556,55 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
     input.trustedUserId,
   );
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
-  const dirty = await controlPlane.store.markDirtyConnectionProcessed({
-    connectionId: parsed.connectionId,
-    ...(parsed.processedDirtyPayloadIds
-      ? { processedDirtyPayloadIds: parsed.processedDirtyPayloadIds }
-      : {}),
-    processedRevision: BigInt(parsed.processedRevision),
-    userId: input.trustedUserId,
-  });
-  const stillDirty = dirty?.stillDirty ?? false;
-  const hasPendingDirty = stillDirty
-    || await hasPendingHostedDeviceSyncDirtyWorkAfterStagedAcks({
-      stagedDirtyAcks: parsed.stagedDirtyAcks ?? [],
-      store: controlPlane.store,
-      userId: input.trustedUserId,
-    });
+  return await controlPlane.store.withHealthDataAdmissionLock(
+    input.trustedUserId,
+    parsed.connectionId,
+    async (tx) => {
+      const dirty = await controlPlane.store.markDirtyConnectionProcessed({
+        connectionId: parsed.connectionId,
+        ...(parsed.processedDirtyPayloadIds
+          ? { processedDirtyPayloadIds: parsed.processedDirtyPayloadIds }
+          : {}),
+        processedRevision: BigInt(parsed.processedRevision),
+        tx,
+        userId: input.trustedUserId,
+      });
+      const stillDirty = dirty?.stillDirty ?? false;
+      const hasPendingDirty = stillDirty
+        || await hasPendingHostedDeviceSyncDirtyWorkAfterStagedAcks({
+          stagedDirtyAcks: parsed.stagedDirtyAcks ?? [],
+          store: controlPlane.store,
+          tx,
+          userId: input.trustedUserId,
+        });
 
-  return {
-    connectionId: parsed.connectionId,
-    dirtyRevision: dirty?.dirtyRevision.toString() ?? null,
-    nextWakeAt: hasPendingDirty ? new Date().toISOString() : null,
-    processedRevision: dirty?.processedRevision.toString() ?? null,
-    recorded: dirty !== null,
-    stillDirty,
-    userId: input.trustedUserId,
-  };
+      return {
+        connectionId: parsed.connectionId,
+        dirtyRevision: dirty?.dirtyRevision.toString() ?? null,
+        nextWakeAt: hasPendingDirty ? new Date().toISOString() : null,
+        processedRevision: dirty?.processedRevision.toString() ?? null,
+        recorded: dirty !== null,
+        stillDirty,
+        userId: input.trustedUserId,
+      };
+    },
+  );
 }
 
 async function hasPendingHostedDeviceSyncDirtyWorkAfterStagedAcks(input: {
   stagedDirtyAcks: readonly HostedExecutionDeviceSyncStagedDirtyAck[];
   store: ReturnType<typeof createHostedDeviceSyncControlPlane>["store"];
+  tx: HostedPrismaTransactionClient;
   userId: string;
 }): Promise<boolean> {
   if (input.stagedDirtyAcks.length === 0) {
-    return await input.store.hasPendingDirtyConnectionForUser(input.userId);
+    return await input.store.hasPendingDirtyConnectionForUser(input.userId, input.tx);
   }
 
   const pending = await input.store.listPendingDirtyConnectionsForUser({
     limit: 1,
     stagedDirtyAcks: input.stagedDirtyAcks,
+    tx: input.tx,
     userId: input.userId,
   });
   return pending.items.length > 0 || pending.hasMore;

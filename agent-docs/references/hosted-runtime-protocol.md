@@ -498,10 +498,16 @@ work and its bounded import-owned durability effects, then selects and executes
 only `run-device-sync-wake` through the existing checkpoint and dirty-ack path.
 It does not execute unrelated pending route actions, delivery, assistant
 admission, or provider work, and the restricted device-sync action suppresses
-new device-activity automation scheduling. A failed preparation or
-post-checkpoint receipt, or a successful receipt that reports `stillDirty`, may
-retain only an exact persisted paused-companion retry marker paired with a
-`device-sync.reconcile` wake; only a successful clean receipt clears the marker.
+new device-activity automation scheduling. Web records the dirty
+acknowledgement and reads pending dirty work in the same member-then-connection
+health-data admission transaction used by companion ingress, so either ingress
+commits first and the acknowledgement observes it, or the acknowledgement
+commits first and later ingress requests a fresh wake. A `stillDirty` result
+clears the spent post-checkpoint record and requeues the same exact local device
+item as pending executable work. A failed preparation or receipt, a requeued
+still-dirty item, or any other exact local device item retains the persisted
+paused-companion retry marker and `device-sync.reconcile` wake; only a
+successful clean receipt for the last device item clears them.
 The bound fence continues to reject metered provider egress if an unexpected
 path reaches it.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this

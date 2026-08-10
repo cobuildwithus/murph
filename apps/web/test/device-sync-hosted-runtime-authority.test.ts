@@ -300,12 +300,64 @@ function createAuthorityHarness(input: {
   };
 }
 
+function createHealthDataAdmissionLockHarness() {
+  const tx = { scope: "health-data-admission" };
+  const withHealthDataAdmissionLock = vi.fn(async (
+    _userId: string,
+    _connectionId: string,
+    callback: (transaction: typeof tx) => Promise<unknown>,
+  ) => callback(tx));
+  return { tx, withHealthDataAdmissionLock };
+}
+
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function createSerialHealthDataAdmissionLockHarness() {
+  const tx = { scope: "health-data-admission" };
+  let tail = Promise.resolve();
+  const withHealthDataAdmissionLock = vi.fn(async (
+    _userId: string,
+    _connectionId: string,
+    callback: (transaction: typeof tx) => Promise<unknown>,
+  ) => {
+    const previous = tail;
+    const released = createDeferred();
+    tail = released.promise;
+    await previous;
+    try {
+      return await callback(tx);
+    } finally {
+      released.resolve();
+    }
+  });
+  return { tx, withHealthDataAdmissionLock };
+}
+
+function createDirtyAckRequest() {
+  return new Request("https://example.test/device-sync/runtime/dirty-ack", {
+    body: JSON.stringify({
+      connectionId: "conn_dirty_first",
+      processedDirtyPayloadIds: ["dsp_payload_1"],
+      processedRevision: "3",
+      userId: "user_123",
+    }),
+    method: "POST",
+  });
+}
+
 describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("returns an immediate next wake when the acked dirty connection still has work", async () => {
+    const { tx, withHealthDataAdmissionLock } = createHealthDataAdmissionLockHarness();
     const markDirtyConnectionProcessed = vi.fn(async () => ({
       connectionId: "conn_dirty_first",
       dirtyRevision: 3n,
@@ -318,6 +370,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       store: {
         hasPendingDirtyConnectionForUser,
         markDirtyConnectionProcessed,
+        withHealthDataAdmissionLock,
       },
     });
     const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
@@ -341,8 +394,14 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       connectionId: "conn_dirty_first",
       processedDirtyPayloadIds: ["dsp_payload_1"],
       processedRevision: 3n,
+      tx,
       userId: "user_123",
     });
+    expect(withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user_123",
+      "conn_dirty_first",
+      expect.any(Function),
+    );
     expect(hasPendingDirtyConnectionForUser).not.toHaveBeenCalled();
     expect(response.recorded).toBe(true);
     expect(response.stillDirty).toBe(true);
@@ -353,6 +412,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
   });
 
   it("returns an immediate next wake when another dirty row remains after the acked row", async () => {
+    const { tx, withHealthDataAdmissionLock } = createHealthDataAdmissionLockHarness();
     const markDirtyConnectionProcessed = vi.fn(async () => ({
       connectionId: "conn_dirty_first",
       dirtyRevision: 3n,
@@ -365,6 +425,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       store: {
         hasPendingDirtyConnectionForUser,
         markDirtyConnectionProcessed,
+        withHealthDataAdmissionLock,
       },
     });
     const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
@@ -388,9 +449,10 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       connectionId: "conn_dirty_first",
       processedDirtyPayloadIds: ["dsp_payload_1"],
       processedRevision: 3n,
+      tx,
       userId: "user_123",
     });
-    expect(hasPendingDirtyConnectionForUser).toHaveBeenCalledWith("user_123");
+    expect(hasPendingDirtyConnectionForUser).toHaveBeenCalledWith("user_123", tx);
     expect(response.recorded).toBe(true);
     expect(response.stillDirty).toBe(false);
     expect(response.dirtyRevision).toBe("3");
@@ -400,6 +462,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
   });
 
   it("does not return a next wake when an acknowledged payload leaves no dirty work", async () => {
+    const { tx, withHealthDataAdmissionLock } = createHealthDataAdmissionLockHarness();
     const markDirtyConnectionProcessed = vi.fn(async () => ({
       connectionId: "conn_dirty_first",
       dirtyRevision: 3n,
@@ -412,6 +475,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       store: {
         hasPendingDirtyConnectionForUser,
         markDirtyConnectionProcessed,
+        withHealthDataAdmissionLock,
       },
     });
     const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
@@ -435,15 +499,17 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
       connectionId: "conn_dirty_first",
       processedDirtyPayloadIds: ["dsp_payload_1"],
       processedRevision: 3n,
+      tx,
       userId: "user_123",
     });
-    expect(hasPendingDirtyConnectionForUser).toHaveBeenCalledWith("user_123");
+    expect(hasPendingDirtyConnectionForUser).toHaveBeenCalledWith("user_123", tx);
     expect(response.recorded).toBe(true);
     expect(response.stillDirty).toBe(false);
     expect(response.nextWakeAt).toBeNull();
   });
 
   it("does not return a next wake when remaining dirty work is staged later in the same ack batch", async () => {
+    const { tx, withHealthDataAdmissionLock } = createHealthDataAdmissionLockHarness();
     const markDirtyConnectionProcessed = vi.fn(async () => ({
       connectionId: "conn_dirty_first",
       dirtyRevision: 3n,
@@ -463,6 +529,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
         hasPendingDirtyConnectionForUser,
         listPendingDirtyConnectionsForUser,
         markDirtyConnectionProcessed,
+        withHealthDataAdmissionLock,
       },
     });
     const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
@@ -497,6 +564,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
           processedRevision: "4",
         },
       ],
+      tx,
       userId: "user_123",
     });
     expect(response.recorded).toBe(true);
@@ -504,6 +572,103 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
     expect(response.nextWakeAt).toBeNull();
   });
 
+  it("waits for earlier companion ingress before acknowledging dirty state", async () => {
+    const { withHealthDataAdmissionLock } =
+      createSerialHealthDataAdmissionLockHarness();
+    const releaseIngress = createDeferred();
+    const ingressEntered = createDeferred();
+    const markDirtyConnectionProcessed = vi.fn(async () => ({
+      connectionId: "conn_dirty_first",
+      dirtyRevision: 4n,
+      processedRevision: 3n,
+      stillDirty: true,
+      userId: "user_123",
+    }));
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        hasPendingDirtyConnectionForUser: vi.fn(async () => false),
+        markDirtyConnectionProcessed,
+        withHealthDataAdmissionLock,
+      },
+    });
+    const ingress = withHealthDataAdmissionLock(
+      "user_123",
+      "conn_dirty_first",
+      async () => {
+        ingressEntered.resolve();
+        await releaseIngress.promise;
+      },
+    );
+    await ingressEntered.promise;
+    const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const ack = ackHostedDeviceSyncDirtyStateProcessed({
+      request: createDirtyAckRequest(),
+      trustedUserId: "user_123",
+    });
+    await Promise.resolve();
+    expect(markDirtyConnectionProcessed).not.toHaveBeenCalled();
+
+    releaseIngress.resolve();
+    await ingress;
+    await expect(ack).resolves.toMatchObject({
+      dirtyRevision: "4",
+      nextWakeAt: expect.any(String),
+      stillDirty: true,
+    });
+  });
+
+  it("keeps later companion ingress behind the dirty acknowledgement transaction", async () => {
+    const { withHealthDataAdmissionLock } =
+      createSerialHealthDataAdmissionLockHarness();
+    const ackEntered = createDeferred();
+    const releaseAck = createDeferred();
+    const ingressCallback = vi.fn(async () => undefined);
+    const markDirtyConnectionProcessed = vi.fn(async () => {
+      ackEntered.resolve();
+      await releaseAck.promise;
+      return {
+        connectionId: "conn_dirty_first",
+        dirtyRevision: 3n,
+        processedRevision: 3n,
+        stillDirty: false,
+        userId: "user_123",
+      };
+    });
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        hasPendingDirtyConnectionForUser: vi.fn(async () => false),
+        markDirtyConnectionProcessed,
+        withHealthDataAdmissionLock,
+      },
+    });
+    const { ackHostedDeviceSyncDirtyStateProcessed } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    const ack = ackHostedDeviceSyncDirtyStateProcessed({
+      request: createDirtyAckRequest(),
+      trustedUserId: "user_123",
+    });
+    await ackEntered.promise;
+
+    const ingress = withHealthDataAdmissionLock(
+      "user_123",
+      "conn_dirty_first",
+      ingressCallback,
+    );
+    await Promise.resolve();
+    expect(ingressCallback).not.toHaveBeenCalled();
+
+    releaseAck.resolve();
+    await expect(ack).resolves.toMatchObject({
+      nextWakeAt: null,
+      stillDirty: false,
+    });
+    await ingress;
+    expect(ingressCallback).toHaveBeenCalledOnce();
+  });
 });
 
 describe("applyHostedDeviceSyncRuntimeResult", () => {

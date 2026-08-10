@@ -816,6 +816,7 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncPending: false,
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
@@ -972,6 +973,7 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncPending: false,
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
@@ -1200,6 +1202,7 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncPending: false,
         failed: 0,
         nextWakeAt: null,
         recorded: 2,
@@ -1335,12 +1338,258 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncPending: false,
         failed: 0,
         nextWakeAt: "2026-04-05T00:03:00.000Z",
         nextWakeReason: "device-sync.reconcile",
         recorded: 2,
         stillDirty: true,
       });
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("keeps a paused device-sync item executable until its dirty ack is clean", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const ackDirtyStateProcessed = vi.fn()
+      .mockResolvedValueOnce({
+        connectionId: "dsc_dirty_requeue",
+        dirtyRevision: "52",
+        nextWakeAt: "2026-04-27T00:03:00.000Z",
+        processedRevision: "51",
+        recorded: true,
+        stillDirty: true,
+        userId: "member_123",
+      })
+      .mockResolvedValueOnce({
+        connectionId: "dsc_dirty_requeue",
+        dirtyRevision: "52",
+        nextWakeAt: null,
+        processedRevision: "52",
+        recorded: true,
+        stillDirty: false,
+        userId: "member_123",
+      });
+    const wake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync.wake:yield",
+      occurredAt: FIXED_NOW,
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    mocks.executeHostedMailboxEvent.mockResolvedValue({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "device-sync",
+      nextWakeAt: null,
+      postCheckpointRecord: {
+        connectionId: "dsc_dirty_requeue",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_payload_51"],
+        processedRevision: "51",
+      },
+      redactedLogEntries: [],
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const runtime = createRuntime({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called");
+          },
+          ackDirtyStateProcessed,
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            throw new Error("fetchSnapshot should not be called");
+          },
+        },
+      });
+
+      const firstPrepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(firstPrepared?.status, "processed");
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: firstPrepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        deviceSyncPending: true,
+        failed: 0,
+        nextWakeAt: "2026-04-27T00:03:00.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 1,
+        stillDirty: true,
+      });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([
+          expect.objectContaining({
+            itemId: "mailbox_item_system_device_sync",
+            nextAttemptAt: "2026-04-27T00:03:00.000Z",
+            postCheckpointRecord: null,
+            routeAction: "run-device-sync-wake",
+            status: "pending",
+          }),
+        ]);
+
+      const secondPrepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => "2026-04-27T00:03:00.000Z",
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(secondPrepared?.status, "processed");
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: secondPrepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        deviceSyncPending: false,
+        failed: 0,
+        nextWakeAt: null,
+        recorded: 1,
+        stillDirty: false,
+      });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([]);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(2);
+      expect(ackDirtyStateProcessed).toHaveBeenCalledTimes(2);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("reports a pending paused device-sync item after recording an earlier item", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const firstWake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync.wake:first",
+      occurredAt: FIXED_NOW,
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    const secondWake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync.wake:second",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "device-sync",
+      nextWakeAt: null,
+      postCheckpointRecord: {
+        connectionId: "dsc_dirty_first",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_payload_first"],
+        processedRevision: "61",
+      },
+      redactedLogEntries: [],
+    });
+    const ackDirtyStateProcessed = vi.fn(async () => ({
+      connectionId: "dsc_dirty_first",
+      dirtyRevision: "61",
+      nextWakeAt: null,
+      processedRevision: "61",
+      recorded: true,
+      stillDirty: false,
+      userId: "member_123",
+    }));
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          dedupeKey: firstWake.eventId,
+          id: "mailbox_item_system_device_sync_first",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: firstWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          dedupeKey: secondWake.eventId,
+          id: "mailbox_item_system_device_sync_second",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: secondWake,
+      });
+      const runtime = createRuntime({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called");
+          },
+          ackDirtyStateProcessed,
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            throw new Error("fetchSnapshot should not be called");
+          },
+        },
+      });
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(prepared?.status, "processed");
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        deviceSyncPending: true,
+        failed: 0,
+        nextWakeAt: expect.any(String),
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 1,
+        stillDirty: false,
+      });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([
+          expect.objectContaining({
+            itemId: "mailbox_item_system_device_sync_second",
+            routeAction: "run-device-sync-wake",
+          }),
+        ]);
     } finally {
       await workspace.cleanup();
     }
@@ -1484,6 +1733,7 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncPending: false,
         failed: 0,
         nextWakeAt: null,
         recorded: 2,
@@ -1732,6 +1982,7 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncPending: false,
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
@@ -1805,6 +2056,7 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncPending: false,
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
@@ -1879,6 +2131,7 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncPending: false,
         failed: 0,
         nextWakeAt: null,
         recorded: 0,
@@ -1951,6 +2204,7 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncPending: false,
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
@@ -3375,12 +3629,13 @@ function createResolvedCodexAuthRuntimeControlItem(): HostedMailboxResolvedImpor
 }
 
 function createResolvedDeviceSyncItem(overrides: Partial<{
+  dedupeKey: string;
   id: string;
   laneSeq: string;
 }> = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
     createdAt: FIXED_NOW,
-    dedupeKey: "device-sync.wake:yield",
+    dedupeKey: overrides.dedupeKey ?? "device-sync.wake:yield",
     expiresAt: null,
     id: overrides.id ?? "mailbox_item_system_device_sync",
     kind: "device-sync.wake",

@@ -68,7 +68,10 @@ Updated: 2026-08-10
    mode; suppress device-activity automation scheduling in that restricted
    invocation; and retain the provider-egress fence. An exact persisted retry
    marker may retain only that device-sync route's `device-sync.reconcile` wake
-   after failure or while a successful receipt still reports dirty work.
+   after failure, while a dirty receipt requeues the same executable local
+   item, or while another exact local device item remains. Serialize companion
+   ingress and dirty acknowledgement with the existing health-data admission
+   lock so either commit order produces another executable pass.
 5. Risk: a native signed contact-card handoff still fails at the browser
    redemption boundary.
    Mitigation: bind companion redemption to the exact HMAC-signed, server-owned
@@ -111,9 +114,13 @@ Updated: 2026-08-10
   execute unrelated pending route actions, assistant automation, conversation
   work, delivery, or model admission, and the restricted device-sync action
   suppresses device-activity automation scheduling. A failed preparation or
-  post-checkpoint receipt, or a successful receipt that reports `stillDirty`,
-  may persist one exact device-sync retry marker and `device-sync.reconcile`
-  wake. Only a successful clean receipt clears it.
+  post-checkpoint receipt, a successful receipt that reports `stillDirty`, or
+  another exact local device item may persist one exact device-sync retry
+  marker and `device-sync.reconcile` wake. A still-dirty receipt clears its
+  spent receipt record and requeues the same item as executable work. Web holds
+  its existing health-data admission lock across the dirty acknowledgement and
+  pending-dirty query, serializing both commit orders with companion ingress.
+  Only a successful clean receipt for the last device item clears the marker.
 - The native repository has no release tag or other durable mapping from the
   App Store binary to a source commit. Compatibility is therefore based on the
   unchanged HTTP shapes plus inspection of the current native resume/connect
@@ -127,18 +134,22 @@ Updated: 2026-08-10
   and reconciliation (8 files, 371 tests).
 - Passed after the final reconciliation tightening: focused reconciliation
   facts suite (1 file, 48 tests).
-- Passed after the round-3 corrections: focused runtime event, system-mailbox,
-  assistant-phase, and entrypoint suites (4 files, 600 tests), including dirty
+- Passed after the round-4 corrections: focused runtime event, system-mailbox,
+  assistant-phase, and entrypoint suites (4 files, 603 tests), including dirty
   continuation after a successful receipt, clean marker clearing, restricted
-  automation suppression, device-only route execution, and preservation of
-  unrelated accepted system work without executing its pending route actions.
+  automation suppression, exact-item re-execution, remaining-item marker
+  retention, device-only route execution, and preservation of unrelated
+  accepted system work without executing its pending route actions.
+- Passed after the round-4 corrections: hosted dirty-ack authority suite (1
+  file, 48 tests), including shared-transaction pending queries and both
+  serialized ingress/acknowledgement commit orders.
 - Passed: `pnpm --dir apps/web typecheck:prepared`, assistant-runtime
   typecheck, and Cloudflare typecheck.
 - Passed: ESLint over every changed Web TypeScript file.
 - Passed: focused Cloudflare runner identity/egress-fence proof (2 files,
   3 selected tests).
 - Passed: hosted runner bundle assembly and parity probes; measured total
-  9,949,170 bytes under the 9,981,938-byte ratcheted ceiling.
+  9,950,458 bytes under the 9,983,226-byte ratcheted ceiling.
 - Authored: a production-path hosted local E2E that cold-restores a paused
   member, submits 17 distinct companion observations without waiting for each
   one to drain, crosses the dirty-ack boundary, and asserts zero
@@ -162,5 +173,12 @@ Updated: 2026-08-10
   the existing retry marker, suppressing automation scheduling only for the
   exact restricted action, bursting the hosted-local backlog test, and
   documenting lane-contiguous import-time effects for already accepted work.
-- Required after remediation: final ReviewGPT round 4 and exact-head GitHub
+- Final ReviewGPT round 4 found that the runtime deleted an executable local
+  device item when its acknowledgement remained dirty, the Web acknowledgement
+  could interleave with companion ingress, and the retry marker did not include
+  a second exact local device item. The accepted findings are remediated by
+  requeuing the same item without its spent receipt, sharing the existing
+  health-data admission lock, and deriving marker retention from exact local
+  device work.
+- Required after remediation: final ReviewGPT round 5 and exact-head GitHub
   Actions.
