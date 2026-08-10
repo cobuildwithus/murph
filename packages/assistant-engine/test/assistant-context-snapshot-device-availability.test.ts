@@ -480,6 +480,30 @@ describe('assistant context snapshot device availability', () => {
         vaultRoot,
         relativePath: toMonthlyShardRelativePath(
           VAULT_LAYOUT.eventLedgerDirectory,
+          '2026-08-08T12:01:30.000Z',
+          'occurredAt',
+        ),
+        record: {
+          dayKey: '2026-08-08',
+          externalRef: {
+            system: 'oura',
+          },
+          id: 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F7',
+          kind: 'observation',
+          metric: 'waist-circumference',
+          occurredAt: '2026-08-08T12:01:30.000Z',
+          recordedAt: '2026-08-08T12:02:30.000Z',
+          schemaVersion: 'murph.event.v1',
+          source: 'device',
+          title: 'Legacy provider waist measurement',
+          unit: 'cm',
+          value: 81,
+        },
+      })
+      await appendJsonlRecord({
+        vaultRoot,
+        relativePath: toMonthlyShardRelativePath(
+          VAULT_LAYOUT.eventLedgerDirectory,
           '2026-08-08T12:02:00.000Z',
           'occurredAt',
         ),
@@ -536,11 +560,24 @@ describe('assistant context snapshot device availability', () => {
       expect(prompt).toContain('Blood-pressure measurement history is present')
       expect(prompt).not.toContain('Legacy context snapshot.')
       expect(prompt).not.toContain('47')
+      expect(prompt).not.toContain('81')
       await expect(
         isAssistantContextSnapshotRefreshPending({ vaultRoot }),
       ).resolves.toBe(false)
       await expect(access(queryProjectionPath)).rejects.toMatchObject({
         code: 'ENOENT',
+      })
+      await expect(
+        createIntegratedVaultServices().query.listWearableBodyState({
+          from: '2026-08-08',
+          limit: 30,
+          requestId: null,
+          to: '2026-08-08',
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        count: 1,
+        items: [{ date: '2026-08-08' }],
       })
       await expect(createIntegratedVaultServices().query.listWearableRecovery({
         from: '2026-08-08',

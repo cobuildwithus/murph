@@ -111,6 +111,15 @@ type StoredHistoryEventEntry = {
   relativePath: string;
   record: HistoryEventRecord;
 };
+type StoredAvailabilitySpineRecord = Pick<
+  EventRecord,
+  "id" | "occurredAt" | "recordedAt" | "lifecycle"
+>;
+type StoredAvailabilityEventEntry = {
+  relativePath: string;
+  record: StoredAvailabilitySpineRecord;
+  value: unknown;
+};
 
 export interface ReadCanonicalEventAvailabilityInput {
   vaultRoot: string;
@@ -1338,10 +1347,7 @@ export async function readCanonicalEventAvailabilityInterruptible(
     return interruptedCanonicalEventAvailability();
   }
 
-  const latestByEventId = new Map<
-    string,
-    { relativePath: string; record: EventRecord }
-  >();
+  const latestByEventId = new Map<string, StoredAvailabilityEventEntry>();
   for (const relativePath of walked.relativePaths) {
     const read = await visitJsonlRecordsInterruptible({
       relativePath,
@@ -1349,36 +1355,33 @@ export async function readCanonicalEventAvailabilityInterruptible(
       signal: input.signal,
       vaultRoot: input.vaultRoot,
       visit: (shardRecord) => {
-        const storedHistoryRecord = parseStoredHistoryEvent(shardRecord);
-        let record: EventRecord;
-        if (storedHistoryRecord) {
-          record = storedHistoryRecord;
-        } else {
-          const normalizedShardRecord =
-            normalizeStoredAvailabilityEvent(shardRecord);
-          const parsed = safeParseContract(
-            eventRecordSchema,
-            normalizedShardRecord,
-          );
-          if (!parsed.success) {
-            if (storedEventMayContributeToCanonicalAvailability(
-              normalizedShardRecord,
-            )) {
-              throw new VaultError(
-                "EVENT_CONTRACT_INVALID",
-                "Stored availability event record is invalid.",
-                { errors: parsed.errors },
-              );
-            }
-            return;
+        let spineRecord: StoredAvailabilitySpineRecord | null;
+        try {
+          spineRecord = parseStoredAvailabilitySpineRecord(shardRecord);
+        } catch (error) {
+          if (storedEventMayContributeToCanonicalAvailability(shardRecord)) {
+            throw error;
           }
-          record = parsed.data;
+          return;
+        }
+        if (!spineRecord) {
+          if (storedEventMayContributeToCanonicalAvailability(shardRecord)) {
+            throw new VaultError(
+              "EVENT_CONTRACT_INVALID",
+              "Stored availability event record has an invalid event spine.",
+            );
+          }
+          return;
         }
 
-        const candidate = { relativePath, record };
-        const current = latestByEventId.get(record.id);
+        const candidate = {
+          relativePath,
+          record: spineRecord,
+          value: shardRecord,
+        };
+        const current = latestByEventId.get(spineRecord.id);
         if (!current || compareEventSpineEntries(current, candidate) < 0) {
-          latestByEventId.set(record.id, candidate);
+          latestByEventId.set(spineRecord.id, candidate);
         }
       },
     });
@@ -1392,12 +1395,46 @@ export async function readCanonicalEventAvailabilityInterruptible(
   let latestBloodTestOccurredAt: string | null = null;
   let latestBodyMeasurementDayKey: string | null = null;
   let latestBodyMeasurementOccurredAt: string | null = null;
-  for (const { record } of latestByEventId.values()) {
+  for (const candidate of latestByEventId.values()) {
     if (!shouldContinue()) {
       return interruptedCanonicalEventAvailability();
     }
-    if (isDeletedEventSpineRecord(record)) {
+    if (isDeletedEventSpineRecord(candidate.record)) {
       continue;
+    }
+
+    const storedHistoryRecord = parseStoredHistoryEvent(candidate.value);
+    let record: EventRecord;
+    let providerBodyObservation = false;
+    if (storedHistoryRecord) {
+      record = storedHistoryRecord;
+    } else {
+      const normalizedStoredRecord = normalizeStoredAvailabilityEvent(
+        candidate.value,
+      );
+      const parsed = safeParseContract(eventRecordSchema, normalizedStoredRecord);
+      if (parsed.success) {
+        record = parsed.data;
+        providerBodyObservation = record.kind === "observation"
+          && record.externalRef !== undefined;
+      } else {
+        const legacyBodyObservation =
+          parseStoredProviderBodyAvailabilityEvent(normalizedStoredRecord);
+        if (!legacyBodyObservation) {
+          if (storedEventMayContributeToCanonicalAvailability(
+            normalizedStoredRecord,
+          )) {
+            throw new VaultError(
+              "EVENT_CONTRACT_INVALID",
+              "Stored availability event record is invalid.",
+              { errors: parsed.errors },
+            );
+          }
+          continue;
+        }
+        record = legacyBodyObservation;
+        providerBodyObservation = true;
+      }
     }
 
     if (
@@ -1411,7 +1448,7 @@ export async function readCanonicalEventAvailabilityInterruptible(
       latestBloodTestOccurredAt = record.occurredAt;
     }
     if (
-      canonicalEventContainsBodyMeasurement(record)
+      canonicalEventContainsBodyMeasurement(record, providerBodyObservation)
       && (
         latestBodyMeasurementOccurredAt === null
         || record.occurredAt > latestBodyMeasurementOccurredAt
@@ -1442,10 +1479,13 @@ export async function readCanonicalEventAvailabilityInterruptible(
   };
 }
 
-function canonicalEventContainsBodyMeasurement(record: EventRecord): boolean {
+function canonicalEventContainsBodyMeasurement(
+  record: EventRecord,
+  providerBodyObservation = false,
+): boolean {
   if (record.kind === "observation") {
     return isCanonicalBodyMeasurementMetric(record.metric)
-      && record.externalRef !== undefined
+      && (providerBodyObservation || record.externalRef !== undefined)
       && (
         record.observationGrain === undefined
         || record.observationGrain === "summary"
@@ -1462,6 +1502,30 @@ function canonicalEventContainsBodyMeasurement(record: EventRecord): boolean {
     );
   }
   return false;
+}
+
+function parseStoredAvailabilitySpineRecord(
+  value: unknown,
+): StoredAvailabilitySpineRecord | null {
+  if (
+    !isPlainRecord(value)
+    || typeof value.id !== "string"
+    || typeof value.occurredAt !== "string"
+    || typeof value.recordedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    occurredAt: value.occurredAt,
+    recordedAt: value.recordedAt,
+    lifecycle: parseStoredEventSpineLifecycle(
+      value.lifecycle,
+      "EVENT_CONTRACT_INVALID",
+      "Stored availability event record has an invalid lifecycle.",
+    ),
+  };
 }
 
 function isCanonicalBodyMeasurementMetric(metric: string): boolean {
@@ -1499,6 +1563,36 @@ function normalizeStoredAvailabilityEvent(value: unknown): unknown {
     ...value,
     observationGrain: "summary",
   };
+}
+
+function parseStoredProviderBodyAvailabilityEvent(
+  value: unknown,
+): EventRecord | null {
+  if (
+    !isPlainRecord(value)
+    || value.kind !== "observation"
+    || typeof value.metric !== "string"
+    || !isCanonicalBodyMeasurementMetric(value.metric)
+    || !isPlainRecord(value.externalRef)
+    || typeof value.externalRef.system !== "string"
+    || value.externalRef.system.trim().length === 0
+    || !isNullableStoredProvenanceText(value.externalRef.resourceType)
+    || !isNullableStoredProvenanceText(value.externalRef.resourceId)
+  ) {
+    return null;
+  }
+
+  const { externalRef: _legacyExternalRef, ...withoutExternalRef } = value;
+  const parsed = safeParseContract(eventRecordSchema, withoutExternalRef);
+  return parsed.success && parsed.data.kind === "observation"
+    ? parsed.data
+    : null;
+}
+
+function isNullableStoredProvenanceText(value: unknown): boolean {
+  return value === undefined
+    || value === null
+    || (typeof value === "string" && value.trim().length > 0);
 }
 
 function storedEventMayContributeToCanonicalAvailability(
