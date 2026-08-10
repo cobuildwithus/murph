@@ -3,7 +3,6 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import {
-  acquireHostedLinqInventoryApplyLockTx,
   prepareHostedLinqLinePhones,
   type PreparedHostedLinqLinePhone,
 } from "./linq-line-store";
@@ -112,21 +111,19 @@ async function applyHostedLinqPhoneNumberInventorySnapshot(input: {
   observedAt: Date;
   prisma: HostedLinqInventoryClient;
 }): Promise<{ syncedCount: number }> {
-  await acquireHostedLinqInventoryApplyLockTx({ prisma: input.prisma });
-  await input.prisma.$queryRaw<Array<{ releasedCount: bigint }>>(
-    buildHostedLinqPhoneNumberInventoryReleaseQuery(input),
-  );
   const rows = await input.prisma.$queryRaw<Array<{ syncedCount: bigint }>>(
-    buildHostedLinqPhoneNumberInventoryUpsertQuery(input),
+    buildHostedLinqPhoneNumberInventorySnapshotQuery(input),
   );
   return { syncedCount: Number(rows[0]?.syncedCount ?? 0) };
 }
 
-function buildHostedLinqPhoneNumberInventoryInputRows(
-  lines: readonly PreparedHostedLinqProviderInventoryLine[],
-): Prisma.Sql {
-  return lines.length > 0
-    ? Prisma.sql`VALUES ${Prisma.join(lines.map((line) => Prisma.sql`(
+function buildHostedLinqPhoneNumberInventorySnapshotQuery(input: {
+  lines: readonly PreparedHostedLinqProviderInventoryLine[];
+  observedAt: Date;
+}): Prisma.Sql {
+  const observedAt = Prisma.sql`${input.observedAt}::timestamp`;
+  const inputRows = input.lines.length > 0
+    ? Prisma.sql`VALUES ${Prisma.join(input.lines.map((line) => Prisma.sql`(
         ${line.currentLookupKey}::text,
         ARRAY[${Prisma.join(line.lookupKeyReadCandidates)}]::text[],
         ${line.phoneNumberEncrypted}::text,
@@ -146,13 +143,9 @@ function buildHostedLinqPhoneNumberInventoryInputRows(
           NULL::text
         WHERE FALSE
       `;
-}
 
-function buildHostedLinqPhoneNumberInventoryResolvedLineCtes(
-  inputRows: Prisma.Sql,
-): Prisma.Sql {
   return Prisma.sql`
-    input_line (
+    WITH input_line (
       current_lookup_key,
       lookup_key_candidates,
       phone_number_encrypted,
@@ -162,23 +155,6 @@ function buildHostedLinqPhoneNumberInventoryResolvedLineCtes(
       provider_service_status
     ) AS (
       ${inputRows}
-    ),
-    locked_line AS MATERIALIZED (
-      SELECT line.phone_number_lookup_key
-      FROM hosted_linq_line AS line
-      WHERE line.provider_phone_number_id IS NOT NULL
-        OR line.phone_number_lookup_key IN (
-          SELECT candidate.lookup_key
-          FROM input_line AS input
-          CROSS JOIN LATERAL unnest(input.lookup_key_candidates)
-            AS candidate(lookup_key)
-        )
-      ORDER BY line.phone_number_lookup_key
-      FOR UPDATE
-    ),
-    lock_barrier AS MATERIALIZED (
-      SELECT count(*) AS locked_count
-      FROM locked_line
     ),
     resolved_line AS MATERIALIZED (
       SELECT
@@ -191,7 +167,6 @@ function buildHostedLinqPhoneNumberInventoryResolvedLineCtes(
         input.provider_reputation_status,
         input.provider_service_status
       FROM input_line AS input
-      CROSS JOIN lock_barrier
       LEFT JOIN LATERAL (
         SELECT line.phone_number_lookup_key
         FROM unnest(input.lookup_key_candidates) WITH ORDINALITY
@@ -203,46 +178,27 @@ function buildHostedLinqPhoneNumberInventoryResolvedLineCtes(
           candidate.candidate_ordinal
         LIMIT 1
       ) AS existing ON TRUE
-    )
-  `;
-}
-
-function buildHostedLinqPhoneNumberInventoryReleaseQuery(input: {
-  lines: readonly PreparedHostedLinqProviderInventoryLine[];
-}): Prisma.Sql {
-  const inputRows = buildHostedLinqPhoneNumberInventoryInputRows(input.lines);
-  return Prisma.sql`
-    WITH ${buildHostedLinqPhoneNumberInventoryResolvedLineCtes(inputRows)},
+    ),
+    -- Only non-target owners are cleared here. Target rows replace stale ids
+    -- in the upsert, so no physical row is modified twice in one statement.
     released_line AS (
       UPDATE hosted_linq_line AS line
       SET
         provider_inventory_confirmed_at = NULL,
         provider_phone_number_id = NULL,
         updated_at = CURRENT_TIMESTAMP
-      FROM lock_barrier
       WHERE line.provider_phone_number_id IS NOT NULL
         AND NOT EXISTS (
           SELECT 1
           FROM resolved_line AS resolved
           WHERE resolved.target_lookup_key = line.phone_number_lookup_key
-            AND resolved.provider_phone_number_id = line.provider_phone_number_id
         )
       RETURNING line.phone_number_lookup_key
-    )
-    SELECT count(*)::bigint AS "releasedCount"
-    FROM released_line
-  `;
-}
-
-function buildHostedLinqPhoneNumberInventoryUpsertQuery(input: {
-  lines: readonly PreparedHostedLinqProviderInventoryLine[];
-  observedAt: Date;
-}): Prisma.Sql {
-  const observedAt = Prisma.sql`${input.observedAt}::timestamp`;
-  const inputRows = buildHostedLinqPhoneNumberInventoryInputRows(input.lines);
-
-  return Prisma.sql`
-    WITH ${buildHostedLinqPhoneNumberInventoryResolvedLineCtes(inputRows)},
+    ),
+    release_barrier AS MATERIALIZED (
+      SELECT count(*) AS released_count
+      FROM released_line
+    ),
     upserted_line AS (
       INSERT INTO hosted_linq_line (
         phone_number_lookup_key,
@@ -296,7 +252,7 @@ function buildHostedLinqPhoneNumberInventoryUpsertQuery(input: {
         CURRENT_TIMESTAMP,
         CURRENT_TIMESTAMP
       FROM resolved_line AS resolved
-      CROSS JOIN lock_barrier
+      CROSS JOIN release_barrier
       ORDER BY resolved.current_lookup_key
       ON CONFLICT (phone_number_lookup_key) DO UPDATE SET
         phone_number_encrypted = EXCLUDED.phone_number_encrypted,

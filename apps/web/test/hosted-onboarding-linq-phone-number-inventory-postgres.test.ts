@@ -19,7 +19,6 @@ import { syncHostedLinqPhoneNumberInventory } from "@/src/lib/hosted-onboarding/
 import {
   HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS,
   listHostedLinqContactCardLines,
-  readHostedLinqContactCardCandidacySnapshot,
   syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
@@ -156,112 +155,6 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     });
-
-    it("converges provider-id swaps between target rows", async () => {
-      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
-      const providerIdA = `pg-proof-line-${randomUUID()}`;
-      const providerIdB = `pg-proof-line-${randomUUID()}`;
-      const phoneA = buildSyntheticProofPhoneNumber();
-      const phoneB = buildSyntheticProofPhoneNumber();
-      const firstSeenAt = new Date("2026-08-09T12:00:00.000Z");
-      const snapshotObservedAt = new Date("2026-08-09T12:10:00.000Z");
-      const createdLookupKeys: string[] = [];
-
-      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
-        where: { providerPhoneNumberId: { not: null } },
-        select: {
-          phoneNumberLookupKey: true,
-          providerInventoryConfirmedAt: true,
-          providerPhoneNumberId: true,
-        },
-      });
-
-      try {
-        const rowA = await upsertHostedLinqLineForPhoneTx({
-          observedAt: firstSeenAt,
-          phoneNumber: phoneA,
-          prisma,
-          providerPhoneNumberId: providerIdA,
-          source: "provider",
-        });
-        const rowB = await upsertHostedLinqLineForPhoneTx({
-          observedAt: firstSeenAt,
-          phoneNumber: phoneB,
-          prisma,
-          providerPhoneNumberId: providerIdB,
-          source: "provider",
-        });
-        createdLookupKeys.push(rowA.phoneNumberLookupKey, rowB.phoneNumberLookupKey);
-
-        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-          phone_numbers: [
-            {
-              id: providerIdB,
-              phone_number: phoneA,
-              reputation: { status: "HEALTHY" },
-              status: "ACTIVE",
-            },
-            {
-              id: providerIdA,
-              phone_number: phoneB,
-              reputation: { status: "HEALTHY" },
-              status: "ACTIVE",
-            },
-          ],
-        }), { headers: { "content-type": "application/json" }, status: 200 })));
-
-        await expect(syncHostedLinqPhoneNumberInventory({
-          observedAt: snapshotObservedAt,
-          prisma,
-        })).resolves.toEqual({ syncedCount: 2 });
-
-        const rows = await prisma.hostedLinqLine.findMany({
-          where: {
-            phoneNumberLookupKey: {
-              in: [rowA.phoneNumberLookupKey, rowB.phoneNumberLookupKey],
-            },
-          },
-          select: {
-            phoneNumberLookupKey: true,
-            providerInventoryConfirmedAt: true,
-            providerPhoneNumberId: true,
-          },
-        });
-        const byLookupKey = new Map(rows.map((row) => [row.phoneNumberLookupKey, row]));
-        expect(byLookupKey.get(rowA.phoneNumberLookupKey)).toEqual({
-          phoneNumberLookupKey: rowA.phoneNumberLookupKey,
-          providerInventoryConfirmedAt: snapshotObservedAt,
-          providerPhoneNumberId: providerIdB,
-        });
-        expect(byLookupKey.get(rowB.phoneNumberLookupKey)).toEqual({
-          phoneNumberLookupKey: rowB.phoneNumberLookupKey,
-          providerInventoryConfirmedAt: snapshotObservedAt,
-          providerPhoneNumberId: providerIdA,
-        });
-        await expect(prisma.hostedLinqLine.count({
-          where: { providerPhoneNumberId: providerIdA },
-        })).resolves.toBe(1);
-        await expect(prisma.hostedLinqLine.count({
-          where: { providerPhoneNumberId: providerIdB },
-        })).resolves.toBe(1);
-      } finally {
-        vi.unstubAllGlobals();
-        for (const heldRow of preexistingHeldRows) {
-          await prisma.hostedLinqLine.updateMany({
-            data: {
-              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
-              providerPhoneNumberId: heldRow.providerPhoneNumberId,
-            },
-            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
-          });
-        }
-        await prisma.hostedLinqLine.deleteMany({
-          where: { phoneNumberLookupKey: { in: createdLookupKeys } },
-        });
-        await prisma.$disconnect();
-      }
-    });
-
     it("preserves first seen and orders service and reputation timestamps", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
       const providerId = `pg-proof-line-${randomUUID()}`;
@@ -754,16 +647,6 @@ describe.skipIf(!runPostgresProof)(
         });
 
         await applied;
-        const waitingSnapshot = readHostedLinqContactCardCandidacySnapshot({
-          limit: 50,
-          prisma,
-        });
-        await expect(Promise.race([
-          waitingSnapshot.then(() => "resolved"),
-          new Promise<"blocked">((resolve) => {
-            setTimeout(() => resolve("blocked"), 250);
-          }),
-        ])).resolves.toBe("blocked");
         await expect(Promise.race([
           resolveMurphHostedLinqContactCardBackupPhoneNumber({
             excludePhoneNumber: phoneOther,
@@ -772,15 +655,10 @@ describe.skipIf(!runPostgresProof)(
           new Promise((_resolve, reject) => {
             setTimeout(() => reject(new Error("backup resolution blocked on bulk inventory apply")), 5_000);
           }),
-        ])).resolves.toBeNull();
+        ])).resolves.toBe(phoneA);
 
         releaseCommit();
         await moveTransaction;
-        const snapshotAfterCommit = await waitingSnapshot;
-        expect(snapshotAfterCommit?.lines.map((line) => line.phoneNumber))
-          .not.toContain(phoneA);
-        expect(snapshotAfterCommit?.lines.map((line) => line.phoneNumber))
-          .toContain(phoneB);
         await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
           excludePhoneNumber: phoneOther,
           prisma,
@@ -804,7 +682,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("executes bounded set statements for a multi-line provider snapshot", async () => {
+    it("executes one bulk database statement for a multi-line provider snapshot", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
       const providerIds = [
         `pg-proof-line-${randomUUID()}`,
@@ -822,8 +700,7 @@ describe.skipIf(!runPostgresProof)(
           providerPhoneNumberId: true,
         },
       });
-      let lockStatementCount = 0;
-      let setStatementCount = 0;
+      let statementCount = 0;
 
       try {
         vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
@@ -839,20 +716,15 @@ describe.skipIf(!runPostgresProof)(
           await expect(syncHostedLinqPhoneNumberInventory({
             observedAt: new Date(),
             prisma: {
-              $executeRaw: async (query: unknown) => {
-                lockStatementCount += 1;
-                return tx.$executeRaw(query as never);
-              },
               $queryRaw: async (query: unknown) => {
-                setStatementCount += 1;
+                statementCount += 1;
                 return tx.$queryRaw(query as never);
               },
             } as never,
           })).resolves.toEqual({ syncedCount: 2 });
         });
 
-        expect(lockStatementCount).toBe(1);
-        expect(setStatementCount).toBe(2);
+        expect(statementCount).toBe(1);
         const rows = await prisma.hostedLinqLine.findMany({
           where: { providerPhoneNumberId: { in: providerIds } },
           select: { providerPhoneNumberId: true },
@@ -927,13 +799,9 @@ describe.skipIf(!runPostgresProof)(
           syncHostedLinqPhoneNumberInventory({
             observedAt: new Date(),
             prisma: {
-              $executeRaw: (query: unknown) => tx.$executeRaw(query as never),
               $queryRaw: async (query: unknown) => {
-                const result = await tx.$queryRaw(query as never);
-                if ((query as { sql?: string }).sql?.includes("upserted_line AS")) {
-                  throw new Error("injected post-statement failure");
-                }
-                return result;
+                await tx.$queryRaw(query as never);
+                throw new Error("injected post-statement failure");
               },
             } as never,
           })

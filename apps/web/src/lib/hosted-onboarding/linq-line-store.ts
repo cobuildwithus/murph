@@ -307,17 +307,6 @@ function chooseHostedLinqLineWriteLookupKey(
   return lookupKeyReadCandidates.find((candidate) => existingLookupKeys.has(candidate)) ?? null;
 }
 
-export async function acquireHostedLinqInventoryApplyLockTx(input: {
-  prisma: HostedLinqLineClient;
-}): Promise<void> {
-  await input.prisma.$executeRaw`
-    SELECT pg_advisory_xact_lock(
-      hashtext('hosted_linq_phone_number_inventory'),
-      hashtext('snapshot')
-    )
-  `;
-}
-
 export async function syncHostedLinqConfiguredLinesTx(input: {
   /**
    * Additive-rollout compatibility for previous application builds only.
@@ -338,16 +327,14 @@ export async function syncHostedLinqConfiguredLinesTx(input: {
     return;
   }
 
-  const apply = async (prisma: HostedLinqLineClient) => {
-    await acquireHostedLinqInventoryApplyLockTx({ prisma });
-    await prisma.$queryRaw<Array<{ syncedCount: bigint }>>(
+  const apply = (prisma: HostedLinqLineClient) =>
+    prisma.$queryRaw<Array<{ syncedCount: bigint }>>(
       buildHostedLinqConfiguredLineSnapshotQuery({
         activeMemberLimit: input.activeMemberLimit,
         lines,
         observedAt,
       }),
     );
-  };
 
   if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
     const prisma = input.prisma;
@@ -380,22 +367,6 @@ function buildHostedLinqConfiguredLineSnapshotQuery(input: {
     ) AS (
       VALUES ${values}
     ),
-    locked_line AS MATERIALIZED (
-      SELECT line.phone_number_lookup_key
-      FROM hosted_linq_line AS line
-      WHERE line.phone_number_lookup_key IN (
-        SELECT candidate.lookup_key
-        FROM input_line AS input
-        CROSS JOIN LATERAL unnest(input.lookup_key_candidates)
-          AS candidate(lookup_key)
-      )
-      ORDER BY line.phone_number_lookup_key
-      FOR UPDATE
-    ),
-    lock_barrier AS MATERIALIZED (
-      SELECT count(*) AS locked_count
-      FROM locked_line
-    ),
     resolved_line AS MATERIALIZED (
       SELECT
         input.current_lookup_key,
@@ -404,7 +375,6 @@ function buildHostedLinqConfiguredLineSnapshotQuery(input: {
         input.phone_number_encrypted,
         input.phone_number_hint
       FROM input_line AS input
-      CROSS JOIN lock_barrier
       LEFT JOIN LATERAL (
         SELECT line.phone_number_lookup_key
         FROM unnest(input.lookup_key_candidates) WITH ORDINALITY
@@ -952,28 +922,13 @@ export function buildHostedLinqInventoryFreshnessCutoff(observedAt: Date): Date 
 
 export async function readHostedLinqContactCardCandidacySnapshot(input: {
   limit?: number;
-  lockMode?: "skip" | "wait";
   observedAt?: Date;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<{
   configuredLineCount: number;
   lines: HostedLinqContactCardLine[];
-} | null> {
+}> {
   const read = async (tx: HostedLinqLineClient) => {
-    if (input.lockMode === "skip") {
-      const acquired = await tx.$queryRaw<Array<{ locked: boolean }>>`
-        SELECT pg_try_advisory_xact_lock(
-          hashtext('hosted_linq_phone_number_inventory'),
-          hashtext('snapshot')
-        ) AS locked
-      `;
-      if (acquired[0]?.locked !== true) {
-        return null;
-      }
-    } else {
-      await acquireHostedLinqInventoryApplyLockTx({ prisma: tx });
-    }
-
     const configuredLineCount = await tx.hostedLinqLine.count({
       where: {
         configuredAt: { not: null },
@@ -990,7 +945,10 @@ export async function readHostedLinqContactCardCandidacySnapshot(input: {
 
   if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
     const prisma = input.prisma;
-    return prisma.$transaction((tx) => read(tx));
+    return prisma.$transaction(
+      (tx) => read(tx),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   return read(input.prisma);

@@ -242,10 +242,7 @@ describe("listHostedLinqChatHealthInventory", () => {
 describe("Linq provider health inventory synchronization", () => {
   it("projects independent provider state for every inventoried line", async () => {
     const observedAt = new Date("2026-07-29T16:08:00.000Z");
-    const executeRaw = vi.fn().mockResolvedValue(1);
-    const queryRaw = vi.fn()
-      .mockResolvedValueOnce([{ releasedCount: 0n }])
-      .mockResolvedValueOnce([{ syncedCount: 1n }]);
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
     inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
       phone_numbers: [{
         id: "line-1",
@@ -257,12 +254,11 @@ describe("Linq provider health inventory synchronization", () => {
 
     await expect(syncHostedLinqPhoneNumberInventory({
       observedAt,
-      prisma: { $executeRaw: executeRaw, $queryRaw: queryRaw } as never,
+      prisma: { $queryRaw: queryRaw } as never,
     })).resolves.toEqual({ syncedCount: 1 });
 
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(queryRaw).toHaveBeenCalledTimes(2);
-    const query = queryRaw.mock.calls[1]?.[0] as { values: unknown[] };
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const query = queryRaw.mock.calls[0]?.[0] as { values: unknown[] };
     expect(query.values).toEqual(expect.arrayContaining([
       "line-1",
       "AT_RISK",
@@ -272,10 +268,7 @@ describe("Linq provider health inventory synchronization", () => {
   });
 
   it("does not clear stored provider state from unknown inventory values", async () => {
-    const executeRaw = vi.fn().mockResolvedValue(1);
-    const queryRaw = vi.fn()
-      .mockResolvedValueOnce([{ releasedCount: 0n }])
-      .mockResolvedValueOnce([{ syncedCount: 1n }]);
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
     inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
       phone_numbers: [{
         id: "line-future",
@@ -287,12 +280,10 @@ describe("Linq provider health inventory synchronization", () => {
 
     await expect(syncHostedLinqPhoneNumberInventory({
       observedAt: new Date("2026-07-29T16:08:00.000Z"),
-      prisma: { $executeRaw: executeRaw, $queryRaw: queryRaw } as never,
+      prisma: { $queryRaw: queryRaw } as never,
     })).resolves.toEqual({ syncedCount: 1 });
 
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(queryRaw).toHaveBeenCalledTimes(2);
-    const query = queryRaw.mock.calls[1]?.[0] as { values: unknown[] };
+    const query = queryRaw.mock.calls[0]?.[0] as { values: unknown[] };
     expect(query.values).not.toContain("FUTURE_REPUTATION");
     expect(query.values).not.toContain("FUTURE_SERVICE");
   });

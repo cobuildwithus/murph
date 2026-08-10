@@ -42,21 +42,13 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     )));
   };
 
-  it("prepares the bounded snapshot before transaction entry and applies set-based release then upsert", async () => {
+  it("prepares the bounded snapshot before transaction entry and applies one bulk statement", async () => {
     const events: string[] = [];
-    const executeRaw = vi.fn().mockImplementation(() => {
-      events.push("publication-lock");
-      return Promise.resolve(1);
-    });
-    const queryRaw = vi.fn().mockImplementation((query: { sql: string }) => {
-      if (query.sql.includes("released_line AS")) {
-        events.push("release-statement");
-        return Promise.resolve([{ releasedCount: 0n }]);
-      }
-      events.push("upsert-statement");
+    const queryRaw = vi.fn().mockImplementation(() => {
+      events.push("bulk-statement");
       return Promise.resolve([{ syncedCount: 2n }]);
     });
-    const tx = { $executeRaw: executeRaw, $queryRaw: queryRaw };
+    const tx = { $queryRaw: queryRaw };
     const transaction = vi.fn(async (
       callback: (client: typeof tx) => Promise<unknown>,
       options: unknown,
@@ -95,30 +87,21 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
 
     expect(events).toEqual([
       "transaction:start",
-      "publication-lock",
-      "release-statement",
-      "upsert-statement",
+      "bulk-statement",
       "transaction:commit",
     ]);
     expect(transaction).toHaveBeenCalledTimes(1);
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(queryRaw).toHaveBeenCalledTimes(2);
-    const releaseQuery = queryRaw.mock.calls[0]?.[0] as {
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const query = queryRaw.mock.calls[0]?.[0] as {
       sql: string;
       values: unknown[];
     };
-    const upsertQuery = queryRaw.mock.calls[1]?.[0] as {
-      sql: string;
-      values: unknown[];
-    };
-    expect((executeRaw.mock.calls[0]?.[0] as string[]).join(""))
-      .toContain("pg_advisory_xact_lock");
-    expect(releaseQuery.sql).toContain("released_line AS");
-    expect(releaseQuery.sql)
-      .toContain("resolved.provider_phone_number_id = line.provider_phone_number_id");
-    expect(upsertQuery.sql).toContain("upserted_line AS");
-    expect(upsertQuery.sql).toContain("ON CONFLICT (phone_number_lookup_key)");
-    expect(upsertQuery.values).toEqual(expect.arrayContaining([
+    expect(query.sql).toContain("released_line AS");
+    expect(query.sql).toContain("upserted_line AS");
+    expect(query.sql).toContain("ON CONFLICT (phone_number_lookup_key)");
+    expect(query.sql).not.toContain("pg_advisory_xact_lock");
+    expect(query.sql).not.toContain("FOR UPDATE");
+    expect(query.values).toEqual(expect.arrayContaining([
       "line_1",
       "line_2",
       "*** 0001",
@@ -128,35 +111,26 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
       "AT_RISK",
       "FLAGGED",
     ]));
-    expect(JSON.stringify(upsertQuery.values)).not.toContain("+1555000000");
+    expect(JSON.stringify(query.values)).not.toContain("+1555000000");
   });
 
-  it("uses bounded set statements for an explicitly empty inventory", async () => {
-    const executeRaw = vi.fn().mockResolvedValue(1);
-    const queryRaw = vi.fn()
-      .mockResolvedValueOnce([{ releasedCount: 0n }])
-      .mockResolvedValueOnce([{ syncedCount: 0n }]);
+  it("uses one authoritative bulk statement for an explicitly empty inventory", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 0n }]);
     stubInventoryFetch({ phone_numbers: [] });
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { $executeRaw: executeRaw, $queryRaw: queryRaw } as never,
+      prisma: { $queryRaw: queryRaw } as never,
     })).resolves.toEqual({ syncedCount: 0 });
 
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(queryRaw).toHaveBeenCalledTimes(2);
-    const releaseQuery = queryRaw.mock.calls[0]?.[0] as { sql: string };
-    const upsertQuery = queryRaw.mock.calls[1]?.[0] as { sql: string };
-    expect(releaseQuery.sql).toContain("WHERE FALSE");
-    expect(releaseQuery.sql).toContain("provider_phone_number_id = NULL");
-    expect(upsertQuery.sql).toContain("WHERE FALSE");
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const query = queryRaw.mock.calls[0]?.[0] as { sql: string };
+    expect(query.sql).toContain("WHERE FALSE");
+    expect(query.sql).toContain("provider_phone_number_id = NULL");
   });
 
   it("retries unique-key convergence without repeating preprocessing", async () => {
-    const executeRaw = vi.fn().mockResolvedValue(1);
-    const queryRaw = vi.fn()
-      .mockResolvedValueOnce([{ releasedCount: 0n }])
-      .mockResolvedValueOnce([{ syncedCount: 1n }]);
-    const tx = { $executeRaw: executeRaw, $queryRaw: queryRaw };
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
+    const tx = { $queryRaw: queryRaw };
     let attempts = 0;
     const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => {
       attempts += 1;
@@ -181,8 +155,7 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     })).resolves.toEqual({ syncedCount: 1 });
 
     expect(transaction).toHaveBeenCalledTimes(2);
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it("does not enter a transaction when the provider read fails", async () => {

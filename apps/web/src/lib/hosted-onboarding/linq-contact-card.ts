@@ -274,9 +274,6 @@ async function listHostedLinqConfiguredContactCardLines(input: {
     observedAt: input.observedAt,
     prisma: input.prisma,
   });
-  if (!snapshot) {
-    return { configuredLineCount: 0, lines: [] };
-  }
   return {
     configuredLineCount: snapshot.configuredLineCount,
     lines: snapshot.lines.map((line) => ({
@@ -537,17 +534,13 @@ export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: 
 }): Promise<string | null> {
   const excludePhoneNumber = normalizePhoneNumber(input.excludePhoneNumber);
   try {
-    // Same publication boundary the reconciler uses, but non-blocking: a
-    // member should get the primary card without a backup instead of waiting
-    // on, or publishing from, an in-flight ownership move.
+    // Same repeatable-read snapshot the reconciler uses, so the two-query read
+    // cannot straddle a committing ownership move and return a just-revoked
+    // line for a member's saved vCard.
     const snapshot = await readHostedLinqContactCardCandidacySnapshot({
       limit: HOSTED_LINQ_CONTACT_CARD_LINE_LIMIT,
-      lockMode: "skip",
       prisma: input.prisma,
     });
-    if (!snapshot) {
-      return null;
-    }
     const { lines } = snapshot;
     return lines.find((line) =>
       line.phoneNumber !== excludePhoneNumber
