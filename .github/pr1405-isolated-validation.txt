@@ -1,4 +1,4 @@
-Removed the final red-light device-seed test mirror
+Reused the existing child_family graph for broad Health Commons topic expansion
 
 apply outcome: success
 install outcome: success
@@ -8,10 +8,10 @@ install outcome: success
 > @murphai/health-commons@1.0.0 generate /home/runner/work/murph/murph/packages/health-commons
 > pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts
 
-Invalid Health Commons protocol family graph relation experiment_family:dry-sauna parent_family experiment_family:sauna.
- ELIFECYCLE  Command failed with exit code 1.
+(node:2235) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
 
-exit: 1
+exit: 0
 
 ===== pnpm --dir packages/health-commons typecheck =====
 
@@ -22,11 +22,11 @@ exit: 1
 > @murphai/health-commons@1.0.0 generate /home/runner/work/murph/murph/packages/health-commons
 > pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts
 
-Invalid Health Commons protocol family graph relation experiment_family:dry-sauna parent_family experiment_family:sauna.
- ELIFECYCLE  Command failed with exit code 1.
- ELIFECYCLE  Command failed with exit code 1.
+(node:2324) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[typescript] lane=package profile=default mode=checkers checkers=default builders=default
 
-exit: 1
+exit: 0
 
 ===== pnpm --dir packages/health-commons test:vitest =====
 
@@ -37,8 +37,127 @@ exit: 1
 > @murphai/health-commons@1.0.0 generate /home/runner/work/murph/murph/packages/health-commons
 > pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts
 
-Invalid Health Commons protocol family graph relation experiment_family:dry-sauna parent_family experiment_family:sauna.
- ELIFECYCLE  Command failed with exit code 1.
+(node:2430) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/murph/murph/packages/health-commons[39m
+
+ [32m✓[39m [30m[42m health-commons [49m[39m test/runtime.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 3649[2mms[22m[39m
+     [33m[2m✓[22m[39m does not publish any explicit draft, deprecated, or hidden protocol route or bundle [33m 3416[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog-coverage.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/requested-biomarker-content.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 2151[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/build-determinism.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.experiment-onboarding.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 3373[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps psyllium lab defaults out of daily LDL-C run-in windows [33m 3364[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3429[2mms[22m[39m
+     [33m[2m✓[22m[39m builds a deterministic catalog with protocol revisions and artifact manifests [33m 3428[2mms[22m[39m
+ [31m❯[39m [30m[42m health-commons [49m[39m test/knowledge-index-full-catalog.test.ts [2m([22m[2m39 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 296[2mms[22m[39m
+[31m     [31m×[31m answers a normal sauna question without requiring an exact catalog title[39m[32m 11[2mms[22m[39m
+     [32m✓[39m answers red-light questions through Health Commons without a topic-specific skill[32m 6[2mms[22m[39m
+     [32m✓[39m returns a safety-only hard stop for sauna and fentanyl patches[32m 3[2mms[22m[39m
+     [32m✓[39m keeps caffeine pregnancy safety separate from unrelated safety[32m 3[2mms[22m[39m
+     [32m✓[39m returns the core dry-sauna systematic review[32m 7[2mms[22m[39m
+     [32m✓[39m does not substitute nearby topics for unsupported queries[32m 9[2mms[22m[39m
+     [32m✓[39m preserves the qualifier for Daily Vitamin D3 Supplementation[32m 4[2mms[22m[39m
+     [32m✓[39m preserves the qualifier for Walking After Every Meal[32m 6[2mms[22m[39m
+     [32m✓[39m preserves the qualifier for Omega-3 Supplementation[32m 8[2mms[22m[39m
+     [32m✓[39m does not route vitamin C through a compound collagen alias[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias UC-II[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias native type-II collagen[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias gelatin plus vitamin C[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias bone broth[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias cold shower[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias winter swimming[32m 2[2mms[22m[39m
+     [32m✓[39m keeps broad canonical family retrieval and direct child retrieval[32m 24[2mms[22m[39m
+     [32m✓[39m normalizes combining-mark aliases without changing their topic[32m 3[2mms[22m[39m
+     [32m✓[39m does not compose a topic from unrelated sauna citations[32m 4[2mms[22m[39m
+     [32m✓[39m keeps water-fasting evidence and safety on the fasting topic[32m 12[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for recent fainting[32m 2[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for unstable cardiovascular disease[32m 4[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for fever[32m 2[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for trying to conceive[32m 2[2mms[22m[39m
+     [32m✓[39m returns dry-sauna immunity evidence from the resolved owner[32m 2[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Finnish Dry Sauna[32m 7[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Caffeine Curfew[32m 7[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Creatine Monohydrate[32m 7[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Omega-3 Supplementation[32m 6[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Collagen Supplementation[32m 6[2mms[22m[39m
+     [32m✓[39m routes typed source findings to their related protocol[32m 4[2mms[22m[39m
+     [32m✓[39m omits ambiguous multi-target source findings instead of broadcasting them[32m 7[2mms[22m[39m
+     [32m✓[39m routes measurement findings to REM Sleep[32m 3[2mms[22m[39m
+     [32m✓[39m routes measurement findings to HRV / RMSSD[32m 3[2mms[22m[39m
+     [32m✓[39m routes directly sourced SpO2 safety to its measurement owner[32m 7[2mms[22m[39m
+     [32m✓[39m resolves canonical family and protocol title collisions to the family owner[32m 22[2mms[22m[39m
+     [32m✓[39m does not attach page-wide efficacy citations to aggregate safety text[32m 4[2mms[22m[39m
+[31m     [31m×[31m never returns an unsourced ordinary item or an overview row[39m[32m 82[2mms[22m[39m
+     [32m✓[39m does not return reducer bookkeeping as IT band guidance[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/cli-coverage.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/sleep-workflow-content.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 3398[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/biomarker-fallback-ranges.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 2100[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/knowledge-index.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 116[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/protocol-artifacts.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/sleep-complaint-publishing-journeys.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 6072[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.measurement-plan.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/biomarker-web-artifacts.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/pre-sleep-silent-meditation-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3455[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the expected signal metadata aligned with the protocol page [33m 3454[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog-baseline-policy.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 6435[2mms[22m[39m
+     [33m[2m✓[22m[39m uses two-week baselines by default and composes total durations from each plan [33m 3370[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Daily Step Floor timing exclusively on its fixed two-week test plan [33m 3064[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/load.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/tabata-20-10-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3365[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the expected signal metadata aligned with the protocol page [33m 3364[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/itbs-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3374[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the catalog focused on lateral-knee pain and running tolerance [33m 3373[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/bryan-johnson-onboarding.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3367[2mms[22m[39m
+     [33m[2m✓[22m[39m materializes the structured onboarding contract in the catalog [33m 3366[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/hash-artifact.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 6[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m health-commons [49m[39m test/knowledge-index-full-catalog.test.ts[2m > [22mHealth Commons full-catalog knowledge retrieval[2m > [22manswers a normal sauna question without requiring an exact catalog title
+[31m[1mAssertionError[22m: expected 0 to be greater than 0[39m
+[36m [2m❯[22m test/knowledge-index-full-catalog.test.ts:[2m44:33[22m[39m
+    [90m 42|[39m
+    [90m 43|[39m     [34mexpect[39m(result[33m.[39mtopicResolved)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m 44|[39m     [34mexpect[39m(result[33m.[39mitems[33m.[39mlength)[33m.[39m[34mtoBeGreaterThan[39m([34m0[39m)[33m;[39m
+    [90m   |[39m                                 [31m^[39m
+    [90m 45|[39m     [34mexpect[39m([34mpacketText[39m(result))[33m.[39m[34mtoMatch[39m([36m/immun/iu[39m)[33m;[39m
+    [90m 46|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m health-commons [49m[39m test/knowledge-index-full-catalog.test.ts[2m > [22mHealth Commons full-catalog knowledge retrieval[2m > [22mnever returns an unsourced ordinary item or an overview row
+[31m[1mAssertionError[22m: expected { count: 6 } to match object { count: +0 }[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "count": 0,[39m
+[31m+   "count": 6,[39m
+[2m  }[22m
+
+[36m [2m❯[22m test/knowledge-index-full-catalog.test.ts:[2m339:17[22m[39m
+    [90m337|[39m         WHERE child_owner.entity_key <> child_owner.owner_key
+    [90m338|[39m           AND child_owner.match_priority > 0
+    [90m339|[39m       `[39m)[33m.[39m[35mget[39m())[33m.[39m[34mtoMatchObject[39m({ count[33m:[39m [34m0[39m })[33m;[39m
+    [90m   |[39m                 [31m^[39m
+    [90m340|[39m     } [35mfinally[39m {
+    [90m341|[39m       database[33m.[39m[34mclose[39m()[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m21 passed[39m[22m[90m (22)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m139 passed[39m[22m[90m (141)[39m
+[2m   Start at [22m 12:01:04
+[2m   Duration [22m 53.04s[2m (transform 679ms, setup 99ms, import 5.84s, tests 44.76s, environment 2ms)[22m
+
+
+::error file=/home/runner/work/murph/murph/packages/health-commons/test/knowledge-index-full-catalog.test.ts,title=[health-commons] test/knowledge-index-full-catalog.test.ts > Health Commons full-catalog knowledge retrieval > answers a normal sauna question without requiring an exact catalog title,line=44,column=33::AssertionError: expected 0 to be greater than 0%0A ❯ test/knowledge-index-full-catalog.test.ts:44:33%0A%0A
+
+::error file=/home/runner/work/murph/murph/packages/health-commons/test/knowledge-index-full-catalog.test.ts,title=[health-commons] test/knowledge-index-full-catalog.test.ts > Health Commons full-catalog knowledge retrieval > never returns an unsourced ordinary item or an overview row,line=339,column=17::AssertionError: expected { count: 6 } to match object { count: +0 }%0A%0A- Expected%0A+ Received%0A%0A  {%0A-   "count": 0,%0A+   "count": 6,%0A  }%0A%0A ❯ test/knowledge-index-full-catalog.test.ts:339:17%0A%0A
  ELIFECYCLE  Command failed with exit code 1.
 
 exit: 1
@@ -53,21 +172,21 @@ packages/contracts build$ node ../../scripts/rm-paths.mjs dist tsconfig.build.ts
 packages/exercise-library build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false && node dist/build.js
 packages/gateway-core build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/health-metrics build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false
+packages/contracts build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/exercise-library build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/gateway-core build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
-packages/contracts build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/health-metrics build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/gateway-core build: Done
 packages/messaging-ingress build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/health-metrics build: Done
 packages/openclaw-plugin build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
-packages/messaging-ingress build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/openclaw-plugin build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
-packages/messaging-ingress build: Done
-packages/runtime-state build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
-packages/exercise-library build: Done
+packages/messaging-ingress build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/openclaw-plugin build: Done
+packages/runtime-state build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/messaging-ingress build: Done
 packages/runtime-state build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/exercise-library build: Done
 packages/runtime-state build: Done
 packages/contracts build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/contracts build: Done
@@ -75,125 +194,77 @@ packages/clinical-records build$ node ../../scripts/rm-paths.mjs dist .tsbuildin
 packages/core build$ node ../../scripts/rm-paths.mjs dist tsconfig.build.tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json
 packages/health-commons build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false && node dist/build.js
 packages/query build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
-packages/health-commons build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/clinical-records build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
-packages/core build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/query build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/core build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/health-commons build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/clinical-records build: Done
 packages/query build: Done
 packages/core build: Done
-packages/health-commons build: Invalid Health Commons protocol family graph relation experiment_family:dry-sauna parent_family experiment_family:sauna.
-packages/health-commons build: Failed
-/home/runner/work/murph/murph/packages/health-commons:
- ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @murphai/health-commons@1.0.0 build: `node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false && node dist/build.js`
-Exit status 1
- ELIFECYCLE  Command failed with exit code 1.
+packages/health-commons build: (node:3174) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+packages/health-commons build: (Use `node --trace-warnings ...` to show where the warning was created)
+packages/health-commons build: Done
+packages/importers build$ pnpm --dir ../.. exec tsx --tsconfig tsconfig.base.json packages/importers/scripts/safe-build.ts
+packages/parsers build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/parsers build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/parsers build: Done
+packages/importers build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/importers build: Done
+packages/device-syncd build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/inboxd build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/device-syncd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/inboxd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/inboxd build: Done
+packages/device-syncd build: Done
+packages/operator-config build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/hosted-execution build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/hosted-execution build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/operator-config build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/hosted-execution build: Done
+packages/operator-config build: Done
+packages/cloudflare-hosted-control build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/hosted-local-harness build$ node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false
+packages/vault-usecases build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/hosted-local-harness build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/cloudflare-hosted-control build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/vault-usecases build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/cloudflare-hosted-control build: Done
+packages/vault-usecases build: Done
+packages/hosted-local-harness build: Done
+packages/inbox-services build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/inbox-services build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/inbox-services build: Done
+packages/assistant-engine build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json && node dist/assistant/generate-cli-surface-contract.js
+packages/assistant-engine build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistant-engine build: Done
+packages/assistant-runtime build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/assistantd build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/setup-cli build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/assistantd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistant-runtime build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/setup-cli build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistantd build: Done
+packages/setup-cli build: Done
+packages/assistant-runtime build: Done
+packages/assistant-cli build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/assistant-cli build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistant-cli build: Done
+packages/cli build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json
+packages/cli build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/cli build: Done
 
-exit: 1
+exit: 0
 
 ===== pnpm --dir packages/cli gen:config-schema =====
 
 > @murphai/murph@1.3.0 gen:config-schema /home/runner/work/murph/murph/packages/cli
 > tsx ./scripts/generate-incur-config-schema.ts
 
-node:internal/errors:985
-  const err = new Error(message);
-              ^
+config.schema.json
+src/incur.generated.ts
+src/vault-cli-skill-hash.generated.ts
 
-Error: Command failed: pnpm build
-[typescript] lane=package profile=default mode=checkers checkers=default builders=default
-
-    at genericNodeError (node:internal/errors:985:15)
-    at wrappedFn (node:internal/errors:539:14)
-    at ChildProcess.exithandler (node:child_process:417:12)
-    at ChildProcess.emit (node:events:508:28)
-    at maybeClose (node:internal/child_process:1100:16)
-    at ChildProcess._handle.onexit (node:internal/child_process:305:5) {
-  code: 2,
-  killed: false,
-  signal: null,
-  cmd: 'pnpm build',
-  stdout: '\n' +
-    '> @murphai/murph@1.3.0 build /home/runner/work/murph/murph/packages/cli\n' +
-    '> node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json\n' +
-    '\n' +
-    "src/cli-entry.ts(6,46): error TS2307: Cannot find module '@murphai/operator-config/text/shared' or its corresponding type declarations.\n" +
-    "src/cli-entry.ts(7,31): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-errors' or its corresponding type declarations.\n" +
-    "src/cli-entry.ts(24,38): error TS2307: Cannot find module '@murphai/setup-cli/setup-cli' or its corresponding type declarations.\n" +
-    "src/cli-entry.ts(116,45): error TS2307: Cannot find module '@murphai/operator-config/operator-config' or its corresponding type declarations.\n" +
-    "src/cli-entry.ts(173,45): error TS2307: Cannot find module '@murphai/operator-config/operator-config' or its corresponding type declarations.\n" +
-    "src/cli-entry.ts(174,39): error TS2307: Cannot find module '@murphai/setup-cli/setup-cli' or its corresponding type declarations.\n" +
-    "src/cli-entry.ts(175,46): error TS2307: Cannot find module '@murphai/operator-config/setup-runtime-env' or its corresponding type declarations.\n" +
-    "src/cli-entry.ts(204,20): error TS7006: Parameter 'context' implicitly has an 'any' type.\n" +
-    "src/cli-entry.ts(229,10): error TS7006: Parameter 'wearable' implicitly has an 'any' type.\n" +
-    "src/cli-entry.ts(379,51): error TS2307: Cannot find module '@murphai/assistant-engine/codex-lifecycle' or its corresponding type declarations.\n" +
-    "src/cli-entry.ts(385,7): error TS18046: 'error' is of type 'unknown'.\n" +
-    "src/commands/audit-command-helpers.ts(1,31): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-errors' or its corresponding type declarations.\n" +
-    "src/commands/audit-command-helpers.ts(13,8): error TS2307: Cannot find module '@murphai/vault-usecases/helpers' or its corresponding type declarations.\n" +
-    "src/commands/audit-command-helpers.ts(16,43): error TS2307: Cannot find module '@murphai/vault-usecases/helpers' or its corresponding type declarations.\n" +
-    "src/commands/audit.ts(5,8): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/audit.ts(11,8): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-contracts' or its corresponding type declarations.\n" +
-    "src/commands/audit.ts(18,36): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/automation.ts(3,43): error TS2307: Cannot find module '@murphai/hosted-execution/env' or its corresponding type declarations.\n" +
-    "src/commands/automation.ts(33,8): error TS2307: Cannot find module '@murphai/operator-config/assistant/current-delivery-route' or its corresponding type declarations.\n" +
-    "src/commands/automation.ts(36,8): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/automation.ts(37,31): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-errors' or its corresponding type declarations.\n" +
-    "src/commands/automation.ts(42,8): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/automation.ts(45,8): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-contracts' or its corresponding type declarations.\n" +
-    "src/commands/automation.ts(433,25): error TS7006: Parameter 'tag' implicitly has an 'any' type.\n" +
-    'src/commands/automation.ts(979,5): error TS2769: No overload matches this call.\n' +
-    '  The last overload gave the following error.\n' +
-    "    Object literal may only specify known properties, and 'args' does not exist in type '{ basePath?: string | undefined; description?: string | undefined; fetch: FetchHandler; openapi?: OpenAPISpec | undefined; outputPolicy?: OutputPolicy | undefined; }'.\n" +
-    "src/commands/automation.ts(1001,32): error TS18046: 'left' is of type 'unknown'.\n" +
-    "src/commands/automation.ts(1003,9): error TS2322: Type 'unknown[]' is not assignable to type 'readonly string[]'.\n" +
-    "  Type 'unknown' is not assignable to type 'string'.\n" +
-    "src/commands/batch.ts(7,8): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/batch.ts(11,8): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-contracts' or its corresponding type declarations.\n" +
-    "src/commands/capture.ts(3,33): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/capture.ts(11,8): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-contracts' or its corresponding type declarations.\n" +
-    "src/commands/capture.ts(16,8): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/capture.ts(25,8): error TS2307: Cannot find module '@murphai/vault-usecases/captures' or its corresponding type declarations.\n" +
-    "src/commands/capture.ts(26,36): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/clinical-imports.ts(9,33): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/clinical-imports.ts(14,8): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-contracts' or its corresponding type declarations.\n" +
-    "src/commands/clinical-imports.ts(39,8): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/clinical-imports.ts(40,31): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-errors' or its corresponding type declarations.\n" +
-    "src/commands/command-factory-primitives.ts(9,8): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/command-factory-primitives.ts(13,8): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/command-factory-primitives.ts(18,8): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/commons.ts(13,33): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/commons.ts(14,31): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-errors' or its corresponding type declarations.\n" +
-    "src/commands/device.ts(2,50): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/device.ts(18,8): error TS2307: Cannot find module '@murphai/operator-config/device-cli-contracts' or its corresponding type declarations.\n" +
-    "src/commands/document.ts(9,8): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-contracts' or its corresponding type declarations.\n" +
-    "src/commands/document.ts(10,36): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/document.ts(16,8): error TS2307: Cannot find module '@murphai/vault-usecases/records' or its corresponding type declarations.\n" +
-    "src/commands/encounter.ts(2,33): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/encounter.ts(3,28): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-contracts' or its corresponding type declarations.\n" +
-    "src/commands/encounter.ts(7,8): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/encounter.ts(12,8): error TS2307: Cannot find module '@murphai/vault-usecases/encounters' or its corresponding type declarations.\n" +
-    "src/commands/entity-command-groups.ts(2,33): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/entity-command-groups.ts(6,8): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/event.ts(13,33): error TS2307: Cannot find module '@murphai/operator-config/command-helpers' or its corresponding type declarations.\n" +
-    "src/commands/event.ts(21,8): error TS2307: Cannot find module '@murphai/operator-config/vault-cli-contracts' or its corresponding type declarations.\n" +
-    "src/commands/event.ts(26,8): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/event.ts(33,8): error TS2307: Cannot find module '@murphai/vault-usecases/records' or its corresponding type declarations.\n" +
-    "src/commands/event.ts(37,8): error TS2307: Cannot find module '@murphai/vault-usecases/records' or its corresponding type declarations.\n" +
-    "src/commands/event.ts(38,36): error TS2307: Cannot find module '@murphai/vault-usecases' or its corresponding type declarations.\n" +
-    "src/commands/event.ts(403,24): error TS2339: Property 'vault' does not exist on type 'LedgerEventListCommandContext'.\n" +
-    "src/commands/event.ts(404,28): error TS2339: Property 'requestId' does not exist on type 'LedgerEventListCommandContext'.\n" +
-    "src/commands/event.ts(405,23): error TS2339: Property 'kind' does not exist on type 'LedgerEventListCommandContext'.\n" +
-    "src/commands/event.ts(406,23): error TS2339: Property 'from' does not exist on type 'LedgerEventListCommandContext'.\n" +
-    "src/commands/event.ts(407,21): error TS2339: Property 'to' does not exist on type 'LedgerEventListCommandContext'.\n" +
-    "src/commands/event.ts(410,24): error TS2339: Property 'limit' does not exist on type 'LedgerEventListCommandContext'.\n" +
-    "src/commands/event.ts(999,24): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Readonly<{ symptom: ZodObject<{ occurredAt: ZodUnion<readonly [ZodType<string, unknown, $ZodTypeInternals<string, unknown>>, ZodType<string, unknown, $ZodTypeInternals<string, unknown>>]>; ... 15 more ...; bodySite: ZodOptional<...>; }, $strict>; ... 12 more ...; experiment_context: ZodObject<."... 38537 more characters,
-  stderr: '[typescript] lane=package profile=default mode=checkers checkers=default builders=default\n'
-}
-
-Node.js v24.14.1
- ELIFECYCLE  Command failed with exit code 1.
-
-exit: 1
+exit: 0
 
 ===== pnpm --dir packages/cli typecheck =====
 
@@ -208,268 +279,15 @@ exit: 0
 
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/murph/murph/packages/cli[39m
 
- [31m❯[39m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts [2m([22m[2m13 tests[22m[2m | [22m[31m10 failed[39m[2m)[22m[32m 43[2mms[22m[39m
-   [32m✓[39m deleted generic Commons commands are no longer registered[32m 6[2mms[22m[39m
-[31m   [31m×[31m commons knowledge search returns a bounded source-backed sauna packet[39m[32m 11[2mms[22m[39m
-[31m   [31m×[31m commons knowledge search returns a safety-only sauna hard stop[39m[32m 2[2mms[22m[39m
-[31m   [31m×[31m commons knowledge search reports no match without leaking internal resolver state[39m[32m 2[2mms[22m[39m
-   [32m✓[39m commons knowledge search exposes no result-size tuning[32m 1[2mms[22m[39m
-   [32m✓[39m commons knowledge search stays non-blocking when its generated index is missing[32m 3[2mms[22m[39m
-[31m   [31m×[31m commons protocol list and show expose protocol revisions distinctly from private protocol commands[39m[32m 4[2mms[22m[39m
-[31m   [31m×[31m commons protocol explore expands sauna matches into family variants and a starter candidate[39m[32m 2[2mms[22m[39m
-[31m   [31m×[31m commons protocol explore accepts an experiment family and includes inverse parent-family variants[39m[32m 2[2mms[22m[39m
-[31m   [31m×[31m commons protocol explore distinguishes direct protocol lookup from query fallback[39m[32m 2[2mms[22m[39m
-[31m   [31m×[31m commons protocol explore query fallback keeps the starter candidate on the top query match[39m[32m 2[2mms[22m[39m
-[31m   [31m×[31m commons protocol list treats wildcard categories as unfiltered[39m[32m 2[2mms[22m[39m
-[31m   [31m×[31m commons protocol filters reject invalid public corpus status values[39m[32m 2[2mms[22m[39m
+ [32m✓[39m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 63[2mms[22m[39m
 
-[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 10 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m13 passed[39m[22m[90m (13)[39m
+[2m   Start at [22m 12:02:47
+[2m   Duration [22m 981ms[2m (transform 467ms, setup 11ms, import 763ms, tests 63ms, environment 0ms)[22m
 
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons knowledge search returns a bounded source-backed sauna packet
-[31m[1mAssertionError[22m: Expected values to be strictly equal:
-+ actual - expected
 
-+ 'unavailable'
-- 'ok'
-[39m
-
-Expected: [32m"ok"[39m
-Received: [31m"unavailable"[39m
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m58:10[22m[39m
-    [90m 56|[39m   assert[33m.[39m[34mequal[39m(result[33m.[39menvelope[33m.[39mok[33m,[39m [35mtrue[39m)[33m;[39m
-    [90m 57|[39m   [35mconst[39m data [33m=[39m [34mrequireData[39m(result[33m.[39menvelope)[33m;[39m
-    [90m 58|[39m   assert[33m.[39m[34mequal[39m(data[33m.[39mstatus[33m,[39m [32m"ok"[39m)[33m;[39m
-    [90m   |[39m          [31m^[39m
-    [90m 59|[39m   assert[33m.[39m[34mequal[39m([32m"catalogHash"[39m [35min[39m data[33m,[39m [35mfalse[39m)[33m;[39m
-    [90m 60|[39m   assert[33m.[39m[34mequal[39m([32m"topicResolved"[39m [35min[39m data[33m,[39m [35mfalse[39m)[33m;[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/10]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons knowledge search returns a safety-only sauna hard stop
-[31m[1mAssertionError[22m: Expected values to be strictly equal:
-+ actual - expected
-
-+ 'unavailable'
-- 'ok'
-[39m
-
-Expected: [32m"ok"[39m
-Received: [31m"unavailable"[39m
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m84:10[22m[39m
-    [90m 82|[39m   assert[33m.[39m[34mequal[39m(result[33m.[39menvelope[33m.[39mok[33m,[39m [35mtrue[39m)[33m;[39m
-    [90m 83|[39m   [35mconst[39m data [33m=[39m [34mrequireData[39m(result[33m.[39menvelope)[33m;[39m
-    [90m 84|[39m   assert[33m.[39m[34mequal[39m(data[33m.[39mstatus[33m,[39m [32m"ok"[39m)[33m;[39m
-    [90m   |[39m          [31m^[39m
-    [90m 85|[39m   assert[33m.[39m[34mdeepEqual[39m(data[33m.[39mitems[33m,[39m [])[33m;[39m
-    [90m 86|[39m   assert.match(data.safety?.text ?? "", /opioid|fentanyl|life-threaten…
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/10]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons knowledge search reports no match without leaking internal resolver state
-[31m[1mAssertionError[22m: Expected values to be strictly equal:
-+ actual - expected
-
-+ 'unavailable'
-- 'no_match'
-[39m
-
-Expected: [32m"no_match"[39m
-Received: [31m"unavailable"[39m
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m107:10[22m[39m
-    [90m105|[39m   assert[33m.[39m[34mequal[39m(result[33m.[39menvelope[33m.[39mok[33m,[39m [35mtrue[39m)[33m;[39m
-    [90m106|[39m   [35mconst[39m data [33m=[39m [34mrequireData[39m(result[33m.[39menvelope)[33m;[39m
-    [90m107|[39m   assert[33m.[39m[34mequal[39m(data[33m.[39mstatus[33m,[39m [32m"no_match"[39m)[33m;[39m
-    [90m   |[39m          [31m^[39m
-    [90m108|[39m   assert[33m.[39m[34mdeepEqual[39m(data[33m.[39mitems[33m,[39m [])[33m;[39m
-    [90m109|[39m   assert[33m.[39m[34mequal[39m(data[33m.[39msafety[33m,[39m [35mnull[39m)[33m;[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/10]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons protocol list and show expose protocol revisions distinctly from private protocol commands
-[31m[1mAssertionError[22m: Expected values to be strictly equal:
-
-false !== true
-[39m
-
-[32m- Expected[39m
-[31m+ Received[39m
-
-[32m- true[39m
-[31m+ false[39m
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m183:10[22m[39m
-    [90m181|[39m   ])[33m;[39m
-    [90m182|[39m
-    [90m183|[39m   assert[33m.[39m[34mequal[39m(listResult[33m.[39menvelope[33m.[39mok[33m,[39m [35mtrue[39m)[33m;[39m
-    [90m   |[39m          [31m^[39m
-    [90m184|[39m   [35mconst[39m listData [33m=[39m [34mrequireData[39m(listResult[33m.[39menvelope)[33m;[39m
-    [90m185|[39m   assert[33m.[39m[34mok[39m(listData[33m.[39mtotal [33m>[39m [34m0[39m)[33m;[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/10]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons protocol explore expands sauna matches into family variants and a starter candidate
-[31m[1mAssertionError[22m: Expected values to be strictly equal:
-
-false !== true
-[39m
-
-[32m- Expected[39m
-[31m+ Received[39m
-
-[32m- true[39m
-[31m+ false[39m
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m366:10[22m[39m
-    [90m364|[39m   ])[33m;[39m
-    [90m365|[39m
-    [90m366|[39m   assert[33m.[39m[34mequal[39m(result[33m.[39menvelope[33m.[39mok[33m,[39m [35mtrue[39m)[33m;[39m
-    [90m   |[39m          [31m^[39m
-    [90m367|[39m   [35mconst[39m data [33m=[39m [34mrequireData[39m(result[33m.[39menvelope)[33m;[39m
-    [90m368|[39m   assert[33m.[39m[34mequal[39m(data[33m.[39mfilters[33m.[39mquery[33m,[39m [35mnull[39m)[33m;[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/10]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons protocol explore accepts an experiment family and includes inverse parent-family variants
-[31m[1mAssertionError[22m: Expected values to be strictly equal:
-
-false !== true
-[39m
-
-[32m- Expected[39m
-[31m+ Received[39m
-
-[32m- true[39m
-[31m+ false[39m
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m430:10[22m[39m
-    [90m428|[39m   ])[33m;[39m
-    [90m429|[39m
-    [90m430|[39m   assert[33m.[39m[34mequal[39m(result[33m.[39menvelope[33m.[39mok[33m,[39m [35mtrue[39m)[33m;[39m
-    [90m   |[39m          [31m^[39m
-    [90m431|[39m   [35mconst[39m data [33m=[39m [34mrequireData[39m(result[33m.[39menvelope)[33m;[39m
-    [90m432|[39m   assert[33m.[39m[34mequal[39m(data[33m.[39mfilters[33m.[39mlimit[33m,[39m [34m5[39m)[33m;[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/10]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons protocol explore distinguishes direct protocol lookup from query fallback
-[31m[1mAssertionError[22m: Expected values to be strictly equal:
-
-false !== true
-[39m
-
-[32m- Expected[39m
-[31m+ Received[39m
-
-[32m- true[39m
-[31m+ false[39m
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m482:10[22m[39m
-    [90m480|[39m   ])[33m;[39m
-    [90m481|[39m
-    [90m482|[39m   assert[33m.[39m[34mequal[39m(directResult[33m.[39menvelope[33m.[39mok[33m,[39m [35mtrue[39m)[33m;[39m
-    [90m   |[39m          [31m^[39m
-    [90m483|[39m   [35mconst[39m directData [33m=[39m [34mrequireData[39m(directResult[33m.[39menvelope)[33m;[39m
-    [90m484|[39m   assert[33m.[39m[34mequal[39m(directData[33m.[39mfilters[33m.[39mquery[33m,[39m [35mnull[39m)[33m;[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/10]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons protocol explore query fallback keeps the starter candidate on the top query match
-[31m[1mAssertionError[22m: Expected values to be strictly equal:
-
-false !== true
-[39m
-
-[32m- Expected[39m
-[31m+ Received[39m
-
-[32m- true[39m
-[31m+ false[39m
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m611:10[22m[39m
-    [90m609|[39m   ])[33m;[39m
-    [90m610|[39m
-    [90m611|[39m   assert[33m.[39m[34mequal[39m(result[33m.[39menvelope[33m.[39mok[33m,[39m [35mtrue[39m)[33m;[39m
-    [90m   |[39m          [31m^[39m
-    [90m612|[39m   [35mconst[39m data [33m=[39m [34mrequireData[39m(result[33m.[39menvelope)[33m;[39m
-    [90m613|[39m   assert.equal(data.filters.query, "physical therapy low back hip glut…
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/10]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons protocol list treats wildcard categories as unfiltered
-[31m[1mAssertionError[22m: Expected values to be strictly equal:
-
-false !== true
-[39m
-
-[32m- Expected[39m
-[31m+ Received[39m
-
-[32m- true[39m
-[31m+ false[39m
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m654:10[22m[39m
-    [90m652|[39m   ])[33m;[39m
-    [90m653|[39m
-    [90m654|[39m   assert[33m.[39m[34mequal[39m(result[33m.[39menvelope[33m.[39mok[33m,[39m [35mtrue[39m)[33m;[39m
-    [90m   |[39m          [31m^[39m
-    [90m655|[39m   [35mconst[39m data [33m=[39m [34mrequireData[39m(result[33m.[39menvelope)[33m;[39m
-    [90m656|[39m   assert[33m.[39m[34mequal[39m(data[33m.[39mfilters[33m.[39mquery[33m,[39m [32m"sauna"[39m)[33m;[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/10]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts[2m > [22mcommons protocol filters reject invalid public corpus status values
-[31m[1mAssertionError[22m: The input did not match the regular expression /Unknown Health Commons status filter\. Expected one of:/u. Input:
-
-"ENOENT: no such file or directory, open '/home/runner/work/murph/murph/packages/health-commons/generated/protocol-index.json'"
-[39m
-
-[32m- Expected:[39m
-/Unknown Health Commons status filter\. Expected one of:/u
-
-[31m+ Received:[39m
-"ENOENT: no such file or directory, open '/home/runner/work/murph/murph/packages/health-commons/generated/protocol-index.json'"
-
-[36m [2m❯[22m test/commons-command-coverage.test.ts:[2m682:12[22m[39m
-    [90m680|[39m   assert[33m.[39m[34mequal[39m(invalidStatus[33m.[39menvelope[33m.[39mok[33m,[39m [35mfalse[39m)[33m;[39m
-    [90m681|[39m   [35mif[39m ([33m![39minvalidStatus[33m.[39menvelope[33m.[39mok) {
-    [90m682|[39m     assert[33m.[39m[34mmatch[39m(
-    [90m   |[39m            [31m^[39m
-    [90m683|[39m       invalidStatus[33m.[39menvelope[33m.[39merror[33m.[39mmessage [33m??[39m [32m""[39m[33m,[39m
-    [90m684|[39m       [36m/Unknown Health Commons status filter\. Expected one of:/u[39m[33m,[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/10]⎯[22m[39m
-
-
-[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
-[2m      Tests [22m [1m[31m10 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (13)[39m
-[2m   Start at [22m 11:52:53
-[2m   Duration [22m 1.27s[2m (transform 606ms, setup 14ms, import 1.00s, tests 43ms, environment 0ms)[22m
-
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons knowledge search returns a bounded source-backed sauna packet,line=58,column=10::AssertionError: Expected values to be strictly equal:%0A+ actual - expected%0A%0A+ 'unavailable'%0A- 'ok'%0A%0A%0AExpected: "ok"%0AReceived: "unavailable"%0A%0A ❯ test/commons-command-coverage.test.ts:58:10%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons knowledge search returns a safety-only sauna hard stop,line=84,column=10::AssertionError: Expected values to be strictly equal:%0A+ actual - expected%0A%0A+ 'unavailable'%0A- 'ok'%0A%0A%0AExpected: "ok"%0AReceived: "unavailable"%0A%0A ❯ test/commons-command-coverage.test.ts:84:10%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons knowledge search reports no match without leaking internal resolver state,line=107,column=10::AssertionError: Expected values to be strictly equal:%0A+ actual - expected%0A%0A+ 'unavailable'%0A- 'no_match'%0A%0A%0AExpected: "no_match"%0AReceived: "unavailable"%0A%0A ❯ test/commons-command-coverage.test.ts:107:10%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons protocol list and show expose protocol revisions distinctly from private protocol commands,line=183,column=10::AssertionError: Expected values to be strictly equal:%0A%0Afalse !== true%0A%0A%0A- Expected%0A+ Received%0A%0A- true%0A+ false%0A%0A ❯ test/commons-command-coverage.test.ts:183:10%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons protocol explore expands sauna matches into family variants and a starter candidate,line=366,column=10::AssertionError: Expected values to be strictly equal:%0A%0Afalse !== true%0A%0A%0A- Expected%0A+ Received%0A%0A- true%0A+ false%0A%0A ❯ test/commons-command-coverage.test.ts:366:10%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons protocol explore accepts an experiment family and includes inverse parent-family variants,line=430,column=10::AssertionError: Expected values to be strictly equal:%0A%0Afalse !== true%0A%0A%0A- Expected%0A+ Received%0A%0A- true%0A+ false%0A%0A ❯ test/commons-command-coverage.test.ts:430:10%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons protocol explore distinguishes direct protocol lookup from query fallback,line=482,column=10::AssertionError: Expected values to be strictly equal:%0A%0Afalse !== true%0A%0A%0A- Expected%0A+ Received%0A%0A- true%0A+ false%0A%0A ❯ test/commons-command-coverage.test.ts:482:10%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons protocol explore query fallback keeps the starter candidate on the top query match,line=611,column=10::AssertionError: Expected values to be strictly equal:%0A%0Afalse !== true%0A%0A%0A- Expected%0A+ Received%0A%0A- true%0A+ false%0A%0A ❯ test/commons-command-coverage.test.ts:611:10%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons protocol list treats wildcard categories as unfiltered,line=654,column=10::AssertionError: Expected values to be strictly equal:%0A%0Afalse !== true%0A%0A%0A- Expected%0A+ Received%0A%0A- true%0A+ false%0A%0A ❯ test/commons-command-coverage.test.ts:654:10%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/cli/test/commons-command-coverage.test.ts,title=[cli-read-model] test/commons-command-coverage.test.ts > commons protocol filters reject invalid public corpus status values,line=682,column=12::AssertionError: The input did not match the regular expression /Unknown Health Commons status filter\. Expected one of:/u. Input:%0A%0A"ENOENT: no such file or directory, open '/home/runner/work/murph/murph/packages/health-commons/generated/protocol-index.json'"%0A%0A%0A- Expected:%0A/Unknown Health Commons status filter\. Expected one of:/u%0A%0A+ Received:%0A"ENOENT: no such file or directory, open '/home/runner/work/murph/murph/packages/health-commons/generated/protocol-index.json'"%0A%0A ❯ test/commons-command-coverage.test.ts:682:12%0A%0A
-
-exit: 1
+exit: 0
 
 ===== pnpm --dir packages/assistant-engine typecheck =====
 
@@ -486,13 +304,13 @@ exit: 1
 
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/murph/murph/packages/assistant-engine[39m
 
- [32m✓[39m [30m[46m assistant-engine [49m[39m test/model-behavior.test.ts [2m([22m[2m73 tests[22m[2m)[22m[32m 144[2mms[22m[39m
- [32m✓[39m [30m[46m assistant-engine [49m[39m test/assistant-skill-assets.test.ts [2m([22m[2m31 tests[22m[2m | [22m[33m6 skipped[39m[2m)[22m[32m 109[2mms[22m[39m
+ [32m✓[39m [30m[46m assistant-engine [49m[39m test/model-behavior.test.ts [2m([22m[2m73 tests[22m[2m)[22m[32m 121[2mms[22m[39m
+ [32m✓[39m [30m[46m assistant-engine [49m[39m test/assistant-skill-assets.test.ts [2m([22m[2m31 tests[22m[2m | [22m[33m6 skipped[39m[2m)[22m[32m 82[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
 [2m      Tests [22m [1m[32m98 passed[39m[22m[2m | [22m[33m6 skipped[39m[90m (104)[39m
-[2m   Start at [22m 11:53:00
-[2m   Duration [22m 2.61s[2m (transform 1.05s, setup 18ms, import 2.03s, tests 252ms, environment 0ms)[22m
+[2m   Start at [22m 12:02:52
+[2m   Duration [22m 2.03s[2m (transform 831ms, setup 14ms, import 1.57s, tests 204ms, environment 0ms)[22m
 
 
 exit: 0
@@ -503,4 +321,6 @@ exit: 0
 
 ===== changed files =====
  M .github/pr1405-isolated-validation.txt
- M packages/assistant-engine/test/assistant-skill-assets.test.ts
+ M packages/health-commons/content/families/dry-sauna.md
+ M packages/health-commons/content/families/infrared-sauna.md
+ M packages/health-commons/src/knowledge-index.ts

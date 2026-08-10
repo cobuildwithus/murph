@@ -23,9 +23,6 @@ canonicalModality: "finnish_dry_sauna"
 relations:
 
   -
-    type: "parent_family"
-    target: "experiment_family:sauna"
-  -
     type: "related_protocol"
     target: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
   -

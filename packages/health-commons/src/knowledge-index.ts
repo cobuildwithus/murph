@@ -227,23 +227,42 @@ export function writeHealthCommonsKnowledgeIndex(
         continue;
       }
       for (const relation of entity.relations ?? []) {
-        if (relation.type !== "parent_family") {
-          continue;
-        }
-        const parent = entitiesByKey.get(relation.target);
-        if (!parent) {
-          continue;
-        }
-        insertTopicOwner.run(normalizeTopicPhrase(parent.title), parent.key, entity.key, 0);
-        if (entity.entityType === "experiment_family") {
-          for (const alias of parent.aliases ?? []) {
-            insertTopicOwner.run(
-              normalizeTopicPhrase(alias),
-              parent.key,
-              entity.key,
-              1,
-            );
+        if (relation.type === "parent_family") {
+          const parent = entitiesByKey.get(relation.target);
+          if (!parent) {
+            continue;
           }
+          insertTopicOwner.run(
+            normalizeTopicPhrase(parent.title),
+            parent.key,
+            entity.key,
+            0,
+          );
+          continue;
+        }
+        if (
+          relation.type !== "child_family"
+          || entity.entityType !== "experiment_family"
+        ) {
+          continue;
+        }
+        const child = entitiesByKey.get(relation.target);
+        if (child?.entityType !== "experiment_family") {
+          continue;
+        }
+        insertTopicOwner.run(
+          normalizeTopicPhrase(entity.title),
+          entity.key,
+          child.key,
+          0,
+        );
+        for (const alias of entity.aliases ?? []) {
+          insertTopicOwner.run(
+            normalizeTopicPhrase(alias),
+            entity.key,
+            child.key,
+            1,
+          );
         }
       }
     }
