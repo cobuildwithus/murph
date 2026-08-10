@@ -166,17 +166,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Adding the personalized generated contact card puts its request contract,
 // exact-shape parser, direct route resolution, and acknowledgement handling in
-// the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
-// on 2026-08-09; startup entry and static closure are unchanged.
-//
-// Restoring the existing local Telegram voice/song descriptor path reuses the
-// previously public ElevenLabs configuration resolver without adding provider
-// I/O or a forbidden boot input. Exact ubuntu assembly measured 9,930,356B on
-// 2026-08-09. The paired private assembly measured a 7,982,854B static closure
-// after composing the public Telegram path with the private Linq adapter.
-// Ratchet those two ceilings and retain the established allowances; entry
-// startup ownership is unchanged.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_930_356 + 32_768;
+// the runner's lazy output. The subsequent reviewed biomarker ranges, hosted
+// runtime-control compaction, and named-diet guidance moved exact ubuntu total
+// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
+// before this branch's local Telegram restoration. That restoration previously
+// measured 42,915B of total growth, while the paired private assembly measured
+// a 7,982,854B static closure after composing Telegram with the Linq adapter.
+// Carry both reviewed measurements across the merge while retaining the
+// established allowances; entry startup ownership remains unchanged.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_976_762 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_982_854;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
