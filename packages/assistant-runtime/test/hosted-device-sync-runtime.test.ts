@@ -1153,7 +1153,7 @@ describe("hosted device-sync runtime", () => {
   test.each([
     {
       initialTargetStatus: "missing",
-      label: "account summary with an absent runner source",
+      label: "account summary whose source appears disconnected before projection",
       resource: "activity",
       resourceCategory: "summary",
       windowEnd: "2026-07-29T00:00:00.000Z",
@@ -1382,6 +1382,10 @@ describe("hosted device-sync runtime", () => {
         });
         const localAccountId = initialState.hostedToLocalAccountIds.get(hostedConnectionId);
         assert.ok(localAccountId);
+        assert.equal(
+          getStore(service).listConnectionSources({ connectionId: localAccountId }).length,
+          testCase.initialTargetStatus === "missing" ? 1 : 2,
+        );
         getStore(service).enqueueJob({
           accountId: localAccountId,
           availableAt: "2026-07-30T00:00:00.000Z",
@@ -1408,9 +1412,13 @@ describe("hosted device-sync runtime", () => {
           deniedImport,
           /garmin|provider-garmin-1|garmin-activity-1|4321|"value":97/u,
         );
+        const deniedSources = getStore(service).listConnectionSources({
+          connectionId: localAccountId,
+        });
+        assert.equal(deniedSources.length, 2);
         assert.equal(
-          getStore(service).listConnectionSources({ connectionId: localAccountId }).length,
-          testCase.initialTargetStatus === "missing" ? 1 : 2,
+          deniedSources.find((source) => source.sourceProviderSlug === "garmin")?.status,
+          "connected",
         );
 
         hostedSnapshot = buildSnapshot("connected");
