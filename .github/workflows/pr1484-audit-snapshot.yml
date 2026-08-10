@@ -32,25 +32,25 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Generate Prisma client
-        run: pnpm --dir apps/web prisma generate
+        run: pnpm -C apps/web run prisma:generate
 
       - name: Validate Prisma schema
-        run: pnpm --dir apps/web prisma validate
+        run: pnpm -C apps/web exec prisma validate
 
       - name: Typecheck device sync
-        run: pnpm --dir packages/device-syncd typecheck
+        run: pnpm -C packages/device-syncd run typecheck
 
       - name: Typecheck assistant runtime
-        run: pnpm --dir packages/assistant-runtime typecheck
+        run: pnpm -C packages/assistant-runtime run typecheck
 
       - name: Typecheck Web
-        run: pnpm --dir apps/web typecheck
+        run: pnpm -C apps/web run typecheck
 
       - name: Run focused Web tests
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --dir apps/web exec vitest run --config vitest.config.ts --no-coverage \
+          pnpm -C apps/web exec vitest run --config vitest.workspace.ts --no-coverage \
             test/device-provider-application-crypto.test.ts \
             test/device-provider-application-ingress-store.test.ts \
             test/device-provider-application-store.test.ts \
@@ -66,13 +66,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage \
+          pnpm -C packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage \
             test/hosted-runtime-device-sync-provider-configs.test.ts \
             test/hosted-runtime-device-sync-maintenance.test.ts \
             test/hosted-device-sync-runtime.test.ts
 
       - name: Run device-sync package tests
-        run: pnpm --dir packages/device-syncd test
+        run: pnpm -C packages/device-syncd run test
 
       - name: Run smoke checks
         run: pnpm test:smoke
