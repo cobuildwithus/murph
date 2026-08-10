@@ -49,7 +49,8 @@ because the snapshot does not inject the canonical Identity, Preferences,
 Instructions, and Context memory document; a failed or unreadable memory read
 fails closed, while missing or ambiguous age alone is not a universal block.
 Its lifetime canonical procedure-event and encounter-diagnosis discovery,
-bounded body-measurement read, and separate `pregnancy-test` read are likewise
+bounded body-measurement read, separate `pregnancy-test` measurement read, and
+bounded canonical test-event list plus required detail reads are likewise
 mandatory before deriving, saving, or surfacing a proposal and again before
 activating one. Also read and follow the
 target-authority and complete active-Goal discovery contract in

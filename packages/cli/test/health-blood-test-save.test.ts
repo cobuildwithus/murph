@@ -11,6 +11,7 @@ import { bloodTestImportPayloadSchema as bloodTestImportPayloadJsonSchema } from
 import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 
 import { registerBloodTestCommands } from "../src/commands/health-blood-test-save.js";
+import { registerEventCommands } from "../src/commands/event.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import {
   createTempVaultContext,
@@ -51,6 +52,29 @@ interface BloodTestScaffoldResult {
       flag?: string;
       unit?: string;
     }>;
+  };
+}
+
+interface EventListResult {
+  count: number;
+  filters: {
+    from: string | null;
+    kind: string | null;
+    limit: number;
+    to: string | null;
+  };
+  items: Array<{
+    id: string;
+    kind: string;
+    data: Record<string, unknown>;
+  }>;
+}
+
+interface EventShowResult {
+  entity: {
+    id: string;
+    kind: string;
+    data: Record<string, unknown>;
   };
 }
 
@@ -101,7 +125,9 @@ function createBloodTestCli() {
   });
   cli.use(incurErrorBridge);
 
-  registerBloodTestCommands(cli, createIntegratedVaultServices());
+  const services = createIntegratedVaultServices();
+  registerBloodTestCommands(cli, services);
+  registerEventCommands(cli, services);
   return cli;
 }
 
@@ -600,6 +626,107 @@ test("blood-test import-json preserves core-normalized nullable fields, tags, an
     assert.equal(event?.results?.[0]?.textValue, "not tested");
     assert.equal(event?.results?.[0]?.slug, "apo-b");
     assert.equal(event?.results?.[0]?.biomarkerSlug, "cardio-apo-b");
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test import-json exposes explicit pregnancy evidence through compact list and full detail reads", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-pregnancy-evidence-",
+  );
+  const payloadPath = path.join(parentRoot, "pregnancy-test.json");
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: "2026-07-28T12:00:00.000Z",
+        title: "Recent serum result",
+        testName: "serum_hcg_qualitative",
+        resultStatus: "abnormal",
+        summary: "Pregnancy test: positive",
+        specimenType: "serum",
+        results: [
+          {
+            analyte: "hCG qualitative",
+            textValue: "Positive",
+            flag: "abnormal",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const imported = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.exitCode, null, JSON.stringify(imported.envelope));
+    const saved = requireData(imported.envelope);
+
+    const listed = await runInProcessJsonCli<EventListResult>(cli, [
+      "event",
+      "list",
+      "--kind",
+      "test",
+      "--from",
+      "2025-10-03",
+      "--to",
+      "2026-07-30",
+      "--limit",
+      "200",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(listed.exitCode, null, JSON.stringify(listed.envelope));
+    const list = requireData(listed.envelope);
+    assert.deepEqual(list.filters, {
+      experiment: null,
+      from: "2025-10-03",
+      kind: "test",
+      limit: 200,
+      tag: [],
+      to: "2026-07-30",
+    });
+    assert.equal(list.count, 1);
+    assert.equal(list.items[0]?.id, saved.eventId);
+    assert.equal(list.items[0]?.kind, "test");
+    assert.equal(list.items[0]?.data.testName, "serum_hcg_qualitative");
+    assert.equal(list.items[0]?.data.resultStatus, "abnormal");
+    assert.equal(list.items[0]?.data.resultsCount, 1);
+    assert.equal("results" in (list.items[0]?.data ?? {}), false);
+
+    const shown = await runInProcessJsonCli<EventShowResult>(cli, [
+      "event",
+      "show",
+      saved.eventId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null, JSON.stringify(shown.envelope));
+    const detail = requireData(shown.envelope);
+    assert.equal(detail.entity.id, saved.eventId);
+    assert.equal(detail.entity.kind, "test");
+    assert.equal(detail.entity.data.testName, "serum_hcg_qualitative");
+    assert.equal(detail.entity.data.resultStatus, "abnormal");
+    assert.equal(detail.entity.data.summary, "Pregnancy test: positive");
+    assert.deepEqual(detail.entity.data.results, [
+      {
+        analyte: "hCG qualitative",
+        textValue: "Positive",
+        flag: "abnormal",
+      },
+    ]);
   } finally {
     await rm(parentRoot, {
       force: true,

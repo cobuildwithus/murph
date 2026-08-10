@@ -177,7 +177,7 @@ describe('assistant automatic meal capture skill', () => {
       'A relevant active documented or suspected diagnosis uses the same non-numeric path; failed, unreadable, saturated, required-detail, or unresolved safety-relevant diagnosis discovery uses the failure path.',
     )
     expect(compactSkill).toContain(
-      'Then run the shared gate\'s bounded body-measurement read and separate `pregnancy-test` read. A failed read, a body-measurement read saturated without resolving usable BMI evidence, or a saturated pregnancy-test read uses the same failure behavior.',
+      'Then run the shared gate\'s bounded body-measurement read, separate `pregnancy-test` measurement read, and bounded canonical test-event list plus every required test detail read. A failed read, a body-measurement read saturated without resolving usable BMI evidence, or a saturated pregnancy-evidence read uses the same failure behavior.',
     )
     expect(compactSkill).toContain(
       'Only when all five qualifying exact point targets resolve from active canonical Goals',
@@ -264,11 +264,20 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain(
       '`vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json`',
     )
-    expect(compactSkill).toContain(
-      'An explicit positive pregnancy-test result uses the same non-numeric, no-write, no-question, no-card path.',
+    expect(compactSafety).toContain(
+      '`vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json`',
     )
     expect(compactSafety).toContain(
-      'It takes precedence over negative rows in the same window, including a later negative',
+      'Otherwise run `vault-cli event show <event-id> --format json` for every returned test',
+    )
+    expect(compactSkill).toContain(
+      'An explicit positive pregnancy-test result from either canonical owner uses the same non-numeric, no-write, no-question, no-card path.',
+    )
+    expect(compactSafety).toContain(
+      'It takes precedence over negative evidence in the same window, including a later negative from either pregnancy-evidence owner',
+    )
+    expect(compactSafety).toContain(
+      'Do not infer pregnancy from a numeric hCG value, reference range, `abnormal` flag/status, test title, or non-result note alone.',
     )
     expect(compactSafety).toContain(
       '`vault-cli memory show --format json`',

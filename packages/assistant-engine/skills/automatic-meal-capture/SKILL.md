@@ -217,10 +217,12 @@ On a scheduled run:
    diagnosis rules. A relevant active documented or suspected diagnosis uses
    the same non-numeric path; failed, unreadable, saturated, required-detail,
    or unresolved safety-relevant diagnosis discovery uses the failure path.
-   Then run the shared gate's bounded body-measurement read and separate
-   `pregnancy-test` read. A failed read, a body-measurement read saturated
-   without resolving usable BMI evidence, or a saturated pregnancy-test read
-   uses the same failure behavior. An explicit positive pregnancy-test result
+   Then run the shared gate's bounded body-measurement read, separate
+   `pregnancy-test` measurement read, and bounded canonical test-event list plus
+   every required test detail read. A failed read, a body-measurement read
+   saturated without resolving usable BMI evidence, or a saturated
+   pregnancy-evidence read uses the same failure behavior. An explicit positive
+   pregnancy-test result from either canonical owner
    uses the same non-numeric, no-write, no-question, no-card path. Reuse all
    complete gate reads for the current turn. This
    scheduled closeout uses only that card-time safety gate and does not provide

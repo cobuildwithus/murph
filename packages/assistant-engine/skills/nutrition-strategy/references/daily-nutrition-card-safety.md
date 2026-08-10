@@ -116,15 +116,49 @@ context.
   numeric value is exactly `1`, and its `qualifiers.result` string is `positive`
   after case and surrounding-whitespace normalization. Any explicit positive in the
   window suppresses numeric setup, proposal presentation, every Goal write or
-  activation, and every card. It takes precedence over negative rows in the
-  same window, including a later negative; a negative home test is not strong
-  enough to erase the positive safety signal. Missing, negative, stale,
+  activation, and every card. It takes precedence over negative evidence in the
+  same window, including a later negative from either pregnancy-evidence owner;
+  a negative test is not strong enough to erase the positive safety signal.
+  Missing, negative, stale,
   indeterminate, malformed, or qualifier/value-conflicting rows are unavailable
   evidence, not proof that the member is not pregnant and not a universal
   block. If this read fails, is unreadable, or returns exactly 200 records, fail
   closed with ordinary non-numeric text, no Goal or measurement mutation, and
   no card; leave an existing paused proposal unchanged. Never ask a scheduled
   occurrence about the result, and never diagnose pregnancy from this gate.
+- Also run `vault-cli event list --kind test --from
+  <300-days-before-today> --to <today> --limit 200 --format json` before numeric
+  setup, proposal presentation, Goal mutation or activation, and every card.
+  Reuse an identical current-turn result. If the list fails, is unreadable, or
+  returns exactly 200 records, fail closed with ordinary non-numeric text, no
+  Goal or measurement mutation, and no card; run no detail reads for a
+  saturated list. Otherwise run `vault-cli event show <event-id> --format json`
+  for every returned test, because generic list output compacts structured
+  `results` to `resultsCount` and can truncate summaries. If any required detail
+  read fails or is unreadable, use the same fail-closed behavior. Never select
+  tests by title, context-snapshot visibility, `resultsCount`, or the default
+  list prefix.
+  Inspect the complete `testName`, `resultStatus`, optional `summary`, and every
+  structured result's `analyte` and optional `textValue`. Treat a test event as
+  explicit positive pregnancy evidence only when all of these are true: its
+  result status is final (`normal`, `abnormal`, or `mixed`, never `pending` or
+  `unknown`); either the test name identifies a urine/serum pregnancy or hCG
+  test, or a structured result analyte identifies pregnancy, hCG, beta-hCG, or
+  human chorionic gonadotropin; and the matching result `textValue` or an
+  unambiguously test-level summary explicitly says `positive`, `detected`, or
+  `pregnant` after case, punctuation, and surrounding-whitespace normalization.
+  A simple labeled phrase such as `Pregnancy test: positive` is explicit; a
+  negated, qualified, or otherwise ambiguous phrase is not. Do not infer
+  pregnancy from a numeric hCG value, reference range, `abnormal` flag/status,
+  test title, or non-result note alone. Any explicit positive within the window
+  suppresses numeric setup, proposal presentation, every Goal write or
+  activation, and every card, and wins over negative evidence from either
+  pregnancy-evidence owner in the same window. Missing, negative, pending,
+  indeterminate, numeric-only, stale, unrelated, or ambiguous test evidence is
+  unavailable rather than proof of non-pregnancy and is not a universal block.
+  Leave an existing paused proposal unchanged. A scheduled occurrence asks no
+  question, performs no mutation, attaches no card, and never diagnoses
+  pregnancy from this gate.
 - Do not derive, save, or surface numeric goals, and do not attach a goal-aware
   card, for clearly current intuitive-eating or number-sensitive contexts;
   known or suspected

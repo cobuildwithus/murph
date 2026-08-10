@@ -280,6 +280,9 @@ describe('murph.attach_response_card', () => {
       'vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'vault-cli event list --kind procedure --limit 200 --format json',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
@@ -304,10 +307,16 @@ describe('murph.attach_response_card', () => {
       'A failed, unreadable, or exactly 200-record procedure read, or a failed required detail read, fails closed with no Goal or measurement mutation and no card',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'any such positive wins over later negative rows in the window and suppresses numeric output without diagnosing pregnancy',
+      'any such positive wins over negative evidence from either pregnancy-evidence owner in the window and suppresses numeric output without diagnosing pregnancy',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A failed, unreadable, or exactly 200-record pregnancy-test read fails closed with no Goal or measurement mutation and no card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Otherwise event show every returned test because list output compacts results and can truncate summaries',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Do not infer pregnancy from numeric hCG, reference ranges, abnormal status/flags, titles, notes, pending/unknown results, or ambiguous text.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A failed or unreadable memory read fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged',

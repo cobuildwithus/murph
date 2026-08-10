@@ -282,7 +282,7 @@ describe('assistant nutrition strategy skill', () => {
       'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactGoals).toContain(
-      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, and separate 300-day `pregnancy-test` read.',
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, separate 300-day `pregnancy-test` measurement read, and 300-day canonical test-event list plus required detail reads.',
     )
     expect(compactGoals).toContain(
       'The context snapshot is not completeness proof for any of these owners.',
@@ -374,7 +374,7 @@ describe('assistant nutrition strategy skill', () => {
       'after the complete pre-activation safety gate in step 5 passes, activate and read back the Goal, reuse those identical current-turn safety reads, re-read same-date canonical meal totals, and attach exactly one card in that acceptance response',
     )
     expect(compactGoals).toContain(
-      'When the member accepts the proposal, first re-run the complete current-context gate in `daily-nutrition-card-safety.md`, including its bounded canonical memory, active-condition, active-regimen, procedure-event, encounter-diagnosis, body-measurement, and `pregnancy-test` reads.',
+      'When the member accepts the proposal, first re-run the complete current-context gate in `daily-nutrition-card-safety.md`, including its bounded canonical memory, active-condition, active-regimen, procedure-event, encounter-diagnosis, body-measurement, `pregnancy-test` measurement, and canonical test-event reads.',
     )
     expect(compactGoals).toContain(
       'leave the proposal paused and unchanged, surface no target values, use ordinary non-numeric text, and attach no card.',
@@ -507,10 +507,19 @@ describe('assistant nutrition strategy skill', () => {
       '`vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json`',
     )
     expect(compactSafety).toContain(
+      '`vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      'Otherwise run `vault-cli event show <event-id> --format json` for every returned test',
+    )
+    expect(compactSafety).toContain(
       'Any explicit positive in the window suppresses numeric setup, proposal presentation, every Goal write or activation, and every card.',
     )
     expect(compactSafety).toContain(
-      'It takes precedence over negative rows in the same window, including a later negative',
+      'Do not infer pregnancy from a numeric hCG value, reference range, `abnormal` flag/status, test title, or non-result note alone.',
+    )
+    expect(compactSafety).toContain(
+      'It takes precedence over negative evidence in the same window, including a later negative from either pregnancy-evidence owner',
     )
     expect(compactSafety).toContain(
       'Missing, negative, stale, indeterminate, malformed, or qualifier/value-conflicting rows are unavailable evidence, not proof that the member is not pregnant and not a universal block.',
@@ -549,10 +558,10 @@ describe('assistant nutrition strategy skill', () => {
       'A scheduled occurrence uses this file only as a card-time safety check.',
     )
     expect(compactGoals).toContain(
-      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, and separate 300-day `pregnancy-test` read.',
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, separate 300-day `pregnancy-test` measurement read, and 300-day canonical test-event list plus required detail reads.',
     )
     expect(compactGoals).toContain(
-      'including its bounded canonical memory, active-condition, active-regimen, procedure-event, encounter-diagnosis, body-measurement, and `pregnancy-test` reads.',
+      'including its bounded canonical memory, active-condition, active-regimen, procedure-event, encounter-diagnosis, body-measurement, `pregnancy-test` measurement, and canonical test-event reads.',
     )
   })
 

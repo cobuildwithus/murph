@@ -2050,6 +2050,8 @@ if (!tool) {
       'measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from 2026-06-15 --to 2026-07-30 --limit 200 --format json'
     const pregnancyMeasurementCommand =
       'measurement entry list --metric pregnancy-test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
+    const testEventListCommand =
+      'event list --kind test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
     const procedureListCommand =
       'event list --kind procedure --limit 200 --format json'
     const encounterListCommand =
@@ -2325,6 +2327,157 @@ if (!tool) {
         unit: 'result',
         value: 0,
       })),
+    )
+    const testEventListResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        experiment: null,
+        from: '2025-10-03',
+        kind: 'test',
+        limit: 200,
+        tag: [],
+        to: '2026-07-30',
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const testEventItem = (
+      id: string,
+      testName: string,
+      resultStatus: string,
+      resultsCount: number,
+    ) => ({
+      data: {
+        resultStatus,
+        ...(resultsCount === 0 ? {} : { resultsCount }),
+        testName,
+      },
+      id,
+      kind: 'blood_test',
+      occurredAt: '2026-07-28T12:00:00.000Z',
+      title: 'Structured clinical result',
+    })
+    const testEventDetail = (input: {
+      id: string
+      resultStatus: string
+      results?: readonly Record<string, unknown>[]
+      summary?: string
+      testName: string
+    }) => ({
+      entity: {
+        data: {
+          resultStatus: input.resultStatus,
+          ...(input.results ? { results: input.results } : {}),
+          ...(input.summary ? { summary: input.summary } : {}),
+          testName: input.testName,
+        },
+        id: input.id,
+        kind: 'blood_test',
+        occurredAt: '2026-07-28T12:00:00.000Z',
+        title: 'Structured clinical result',
+      },
+      vault: 'synthetic-vault',
+    })
+    const noTestEvents = testEventListResult([])
+    const positivePregnancyTestEventId =
+      'event_positive_structured_pregnancy_test'
+    const positivePregnancyTestEvents = testEventListResult([
+      testEventItem(
+        positivePregnancyTestEventId,
+        'serum_hcg_qualitative',
+        'abnormal',
+        1,
+      ),
+    ])
+    const positivePregnancyTestEventDetail = testEventDetail({
+      id: positivePregnancyTestEventId,
+      resultStatus: 'abnormal',
+      results: [{
+        analyte: 'hCG qualitative',
+        flag: 'abnormal',
+        textValue: 'Positive',
+      }],
+      summary: 'Pregnancy test: positive',
+      testName: 'serum_hcg_qualitative',
+    })
+    const negativePregnancyTestEventId =
+      'event_negative_structured_pregnancy_test'
+    const negativePregnancyTestEvents = testEventListResult([
+      testEventItem(
+        negativePregnancyTestEventId,
+        'urine_pregnancy_test',
+        'normal',
+        1,
+      ),
+    ])
+    const negativePregnancyTestEventDetail = testEventDetail({
+      id: negativePregnancyTestEventId,
+      resultStatus: 'normal',
+      results: [{ analyte: 'Pregnancy test', textValue: 'Negative' }],
+      summary: 'Pregnancy test: negative',
+      testName: 'urine_pregnancy_test',
+    })
+    const pendingPregnancyTestEventId =
+      'event_pending_structured_pregnancy_test'
+    const pendingPregnancyTestEvents = testEventListResult([
+      testEventItem(
+        pendingPregnancyTestEventId,
+        'urine_pregnancy_test',
+        'pending',
+        0,
+      ),
+    ])
+    const pendingPregnancyTestEventDetail = testEventDetail({
+      id: pendingPregnancyTestEventId,
+      resultStatus: 'pending',
+      testName: 'urine_pregnancy_test',
+    })
+    const numericHcgTestEventId = 'event_numeric_hcg_result'
+    const unrelatedTestEventId = 'event_unrelated_strep_result'
+    const numericAndUnrelatedTestEvents = testEventListResult([
+      testEventItem(
+        numericHcgTestEventId,
+        'quantitative_hcg',
+        'abnormal',
+        1,
+      ),
+      testEventItem(
+        unrelatedTestEventId,
+        'rapid_strep_test',
+        'normal',
+        1,
+      ),
+    ])
+    const numericHcgTestEventDetail = testEventDetail({
+      id: numericHcgTestEventId,
+      resultStatus: 'abnormal',
+      results: [{
+        analyte: 'beta hCG',
+        flag: 'abnormal',
+        unit: 'mIU/mL',
+        value: 86,
+      }],
+      summary: 'Quantitative result available',
+      testName: 'quantitative_hcg',
+    })
+    const unrelatedTestEventDetail = testEventDetail({
+      id: unrelatedTestEventId,
+      resultStatus: 'normal',
+      results: [{ analyte: 'Strep A', textValue: 'Negative' }],
+      summary: 'No strep detected',
+      testName: 'rapid_strep_test',
+    })
+    const saturatedTestEvents = testEventListResult(
+      Array.from({ length: 200 }, (_, index) =>
+        testEventItem(
+          `event_unrelated_test_${index + 1}`,
+          `unrelated_test_${index + 1}`,
+          'normal',
+          0,
+        )),
     )
     const procedureListResult = (
       items: readonly Record<string, unknown>[],
@@ -2747,6 +2900,7 @@ text(result.output);
       [encounterListCommand, noEncounters],
       [measurementCommand, safeMeasurements],
       [pregnancyMeasurementCommand, noPregnancyMeasurements],
+      [testEventListCommand, noTestEvents],
       [totalsCommand, canonicalTotals],
     ] as const
     const controlCommands = [
@@ -2759,6 +2913,7 @@ text(result.output);
       encounterListCommand,
       measurementCommand,
       pregnancyMeasurementCommand,
+      testEventListCommand,
       totalsCommand,
     ]
     for (const control of [
@@ -3507,6 +3662,159 @@ text(result.output);
       })
     }
 
+    for (const unavailableTestEventRead of [
+      {
+        failed: true,
+        finalMessage: 'I could not complete the current structured pregnancy-result safety check, so I left target setup unchanged.',
+        output: noTestEvents,
+        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical test-event discovery fails.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not safely complete the structured pregnancy-result check, so I left target setup unchanged.',
+        output: saturatedTestEvents,
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical test-event discovery is saturated.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not read the canonical structured test result, so I left target setup unchanged.',
+        output: { unexpected: 'unreadable test-event list' },
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical test-event discovery is unreadable.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
+          [measurementCommand, normalBmiMeasurements],
+          [pregnancyMeasurementCommand, noPregnancyMeasurements],
+          ...(unavailableTestEventRead.failed
+            ? []
+            : [[testEventListCommand, unavailableTestEventRead.output] as const]),
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+          testEventListCommand,
+        ],
+        ...(unavailableTestEventRead.failed
+          ? { failedCommands: [testEventListCommand] }
+          : {}),
+        finalMessage: unavailableTestEventRead.finalMessage,
+        prompt: unavailableTestEventRead.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, positivePregnancyTestEvents],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+        testEventListCommand,
+        `event show ${positivePregnancyTestEventId} --format json`,
+      ],
+      failedCommands: [
+        `event show ${positivePregnancyTestEventId} --format json`,
+      ],
+      finalMessage: 'I could not complete the structured pregnancy-result detail check, so I left target setup unchanged.',
+      prompt: 'Set daily nutrition targets for me, but do not proceed if a required test-event detail read fails.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    for (const blockedTestEventCase of [
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I kept this non-numeric because a recent explicit positive structured pregnancy result keeps self-directed targets outside this path.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused because of a recent explicit positive structured pregnancy result.',
+        prompt: 'Yes, accept those nutrition targets.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused and did not attach the pending card because of a recent explicit positive structured pregnancy result.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [
+          [activeListCommand, completeList],
+          [visibleGoalShowCommand, visibleGoal],
+        ] as const,
+        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
+        finalMessage: 'Closeout saved without numeric feedback because a recent explicit positive structured pregnancy result requires the non-numeric path.',
+        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+        scheduled: true,
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          ...blockedTestEventCase.commandPrefix,
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
+          [measurementCommand, normalBmiMeasurements],
+          [pregnancyMeasurementCommand, noPregnancyMeasurements],
+          [testEventListCommand, positivePregnancyTestEvents],
+          [`event show ${positivePregnancyTestEventId} --format json`, positivePregnancyTestEventDetail],
+        ],
+        expectedCommands: [
+          ...blockedTestEventCase.expectedPrefix,
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+          testEventListCommand,
+          `event show ${positivePregnancyTestEventId} --format json`,
+        ],
+        finalMessage: blockedTestEventCase.finalMessage,
+        prompt: blockedTestEventCase.prompt,
+        scheduled: blockedTestEventCase.scheduled,
+        skillReadCommands: blockedTestEventCase.scheduled
+          ? scheduledSkillReads
+          : interactiveSkillReads,
+        skillSlugs: blockedTestEventCase.scheduled
+          ? ['automatic-meal-capture', 'nutrition-strategy']
+          : ['food-journal', 'nutrition-strategy'],
+        ...(!blockedTestEventCase.scheduled && blockedTestEventCase.prompt.startsWith('Yes')
+          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
+          : {}),
+      })
+    }
+
     await runCase({
       commandOutputs: [
         [memoryCommand, adultMemory],
@@ -3634,9 +3942,11 @@ text(result.output);
         encounterCommands: [encounterListCommand],
         encounterOutputs: [[encounterListCommand, encountersWithoutDiagnoses]] as const,
         measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context; no pregnancy-test rows exist.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context; no pregnancy measurements or structured test events exist.',
         procedureCommands: [procedureListCommand],
         procedureOutputs: [[procedureListCommand, noProcedures]] as const,
+        testEventCommands: [testEventListCommand],
+        testEventOutputs: [[testEventListCommand, noTestEvents]] as const,
       },
       {
         encounterCommands: [
@@ -3648,7 +3958,7 @@ text(result.output);
           [`event show ${nonCurrentEncounterId} --format json`, nonCurrentEncounterDetail],
         ] as const,
         measurements: negativePregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a planned gastric sleeve and an exact negative pregnancy test do not prove a current exclusion.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a planned gastric sleeve plus exact negative measurement and structured pregnancy tests do not prove a current exclusion.',
         procedureCommands: [
           procedureListCommand,
           'event show event_planned_bariatric_procedure --format json',
@@ -3657,16 +3967,32 @@ text(result.output);
           [procedureListCommand, plannedBariatricProcedureWithoutListStatus],
           ['event show event_planned_bariatric_procedure --format json', plannedBariatricProcedureDetail],
         ] as const,
+        testEventCommands: [
+          testEventListCommand,
+          `event show ${negativePregnancyTestEventId} --format json`,
+        ],
+        testEventOutputs: [
+          [testEventListCommand, negativePregnancyTestEvents],
+          [`event show ${negativePregnancyTestEventId} --format json`, negativePregnancyTestEventDetail],
+        ] as const,
       },
       {
         encounterCommands: [encounterListCommand],
         encounterOutputs: [[encounterListCommand, noEncounters]] as const,
         measurements: ambiguousPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a cancelled gastric bypass and a conflicting pregnancy-test row do not prove current exclusions.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a cancelled gastric bypass, conflicting pregnancy-test measurement, and pending structured test do not prove current exclusions.',
         procedureCommands: [procedureListCommand],
         procedureOutputs: [[procedureListCommand, procedureListResult([
           procedureItem('event_cancelled_bariatric_procedure', 'gastric bypass', 'cancelled'),
         ])]] as const,
+        testEventCommands: [
+          testEventListCommand,
+          `event show ${pendingPregnancyTestEventId} --format json`,
+        ],
+        testEventOutputs: [
+          [testEventListCommand, pendingPregnancyTestEvents],
+          [`event show ${pendingPregnancyTestEventId} --format json`, pendingPregnancyTestEventDetail],
+        ] as const,
       },
       {
         encounterCommands: [encounterListCommand],
@@ -3677,16 +4003,28 @@ text(result.output);
         procedureOutputs: [[procedureListCommand, procedureListResult([
           procedureItem('event_completed_appendectomy', 'appendectomy', 'completed'),
         ])]] as const,
+        testEventCommands: [testEventListCommand],
+        testEventOutputs: [[testEventListCommand, noTestEvents]] as const,
       },
       {
         encounterCommands: [encounterListCommand],
         encounterOutputs: [[encounterListCommand, noEncounters]] as const,
         measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an ambiguously recorded gastric procedure does not prove completed bariatric surgery.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an ambiguous gastric procedure, numeric-only hCG result, and unrelated test do not prove current exclusions.',
         procedureCommands: [procedureListCommand],
         procedureOutputs: [[procedureListCommand, procedureListResult([
           procedureItem('event_ambiguous_gastric_procedure', 'gastric procedure', 'unknown'),
         ])]] as const,
+        testEventCommands: [
+          testEventListCommand,
+          `event show ${numericHcgTestEventId} --format json`,
+          `event show ${unrelatedTestEventId} --format json`,
+        ],
+        testEventOutputs: [
+          [testEventListCommand, numericAndUnrelatedTestEvents],
+          [`event show ${numericHcgTestEventId} --format json`, numericHcgTestEventDetail],
+          [`event show ${unrelatedTestEventId} --format json`, unrelatedTestEventDetail],
+        ] as const,
       },
     ]) {
       await runCase({
@@ -3697,6 +4035,7 @@ text(result.output);
           ...allowedPregnancyEvidence.encounterOutputs,
           [measurementCommand, normalBmiMeasurements],
           [pregnancyMeasurementCommand, allowedPregnancyEvidence.measurements],
+          ...allowedPregnancyEvidence.testEventOutputs,
           [activeListCommand, noActiveGoalsList],
           [allStatusGoalListCommand, noManagedGoalsList],
           [proposalImportCommand, pausedGoal],
@@ -3709,6 +4048,7 @@ text(result.output);
           ...allowedPregnancyEvidence.encounterCommands,
           measurementCommand,
           pregnancyMeasurementCommand,
+          ...allowedPregnancyEvidence.testEventCommands,
           activeListCommand,
           allStatusGoalListCommand,
           proposalImportCommand,
@@ -3731,6 +4071,7 @@ text(result.output);
         [encounterListCommand, noEncounters],
         [measurementCommand, normalBmiMeasurements],
         [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, noTestEvents],
         [activeListCommand, noActiveGoalsList],
         [allStatusGoalListCommand, pausedManagedGoalList],
         [activateGoalCommand, activeManagedGoal],
@@ -3744,6 +4085,7 @@ text(result.output);
         encounterListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
+        testEventListCommand,
         activeListCommand,
         allStatusGoalListCommand,
         activateGoalCommand,
@@ -3769,6 +4111,7 @@ text(result.output);
         [encounterListCommand, noEncounters],
         [measurementCommand, safeMeasurements],
         [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, noTestEvents],
         [totalsCommand, canonicalTotals],
       ],
       expectedCommands: [
@@ -3780,6 +4123,7 @@ text(result.output);
         encounterListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
+        testEventListCommand,
         totalsCommand,
       ],
       finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_SAFETY_READ',
