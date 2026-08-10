@@ -3366,44 +3366,6 @@ describe("hosted Family plan", () => {
     },
   );
 
-  it("keeps a paused direct owner blocked from Family capacity management", async () => {
-    const tx = createTxMock({
-      activeMembershipCount: 1,
-      billedSeatCount: 2,
-      pendingInviteCount: 0,
-    });
-    tx.hostedMember.findUnique.mockResolvedValueOnce({
-      billingRef: {
-        stripeSubscriptionIdEncrypted: "encrypted:sub_paused_direct",
-      },
-      billingStatus: HostedBillingStatus.paused,
-    });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
-    const stripeSubscriptionRetrieve = vi.fn();
-    runtimeMocks.requireHostedStripeApi.mockReturnValue({
-      subscriptions: {
-        retrieve: stripeSubscriptionRetrieve,
-        update: vi.fn(),
-      },
-    });
-
-    await expect(updateHostedFamilyPlanCapacities({
-      groupId: "hbag_family",
-      now: new Date("2026-06-18T12:00:00.000Z"),
-      ownerMemberId: "member_owner",
-      prisma: prisma as never,
-      targetCapacities: { edge: 0, pulse: 2 },
-    })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
-      httpStatus: 409,
-    });
-
-    expect(stripeSubscriptionRetrieve).not.toHaveBeenCalled();
-  });
-
   it.each([
     ["canceled", HostedBillingStatus.canceled],
     ["paused", HostedBillingStatus.paused],
@@ -6856,6 +6818,64 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupPlanCapacity.deleteMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
     expect(nextServerMocks.after).not.toHaveBeenCalled();
+  });
+
+  it("lets an active Family owner with a separate direct trial add capacity", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 1,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingRef: {
+        currentBillingPhase: "trial",
+        stripeSubscriptionIdEncrypted: "encrypted:sub_direct_trial",
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+    ]);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const stripeSubscriptionRetrieve = vi.fn().mockResolvedValue(
+      makeFamilyStripeSubscription({ itemQuantity: 2 }),
+    );
+    const stripeSubscriptionUpdate = vi.fn().mockResolvedValue(
+      makeFamilyStripeSubscription({ itemQuantity: 3 }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: stripeSubscriptionRetrieve,
+        update: stripeSubscriptionUpdate,
+      },
+    });
+
+    await expect(updateHostedFamilyPlanCapacities({
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetCapacities: { edge: 0, pulse: 3 },
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+    });
+
+    expect(stripeSubscriptionRetrieve).toHaveBeenCalledWith("sub_family", {
+      expand: ["items.data.price"],
+    });
+    expect(stripeSubscriptionUpdate).toHaveBeenCalledWith(
+      "sub_family",
+      expect.objectContaining({
+        items: [{ id: "si_family", quantity: 3 }],
+        payment_behavior: "error_if_incomplete",
+        proration_behavior: "always_invoice",
+      }),
+      expect.any(Object),
+    );
   });
 
   it("alerts for request-id-free Family capacity failures with stable effect identity", async () => {

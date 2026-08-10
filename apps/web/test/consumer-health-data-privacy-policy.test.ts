@@ -131,6 +131,17 @@ test("SiteFooter exposes the public status page in the product nav column", () =
   assert.match(markup, /href="https:\/\/status\.withmurph\.ai" target="_blank" rel="noreferrer"/u);
 });
 
+test("SiteFooter links to the Murph iOS app in the product nav column", () => {
+  const markup = renderToStaticMarkup(createElement(SiteFooter));
+
+  assert.match(markup, /aria-label="Product links"/u);
+  assert.match(
+    markup,
+    /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859" target="_blank" rel="noreferrer"/u,
+  );
+  assert.match(markup, />iOS app<\/a>/u);
+});
+
 test("SiteFooter exposes referrals only while a reward path is available", () => {
   const availableMarkup = renderToStaticMarkup(
     createElement(SiteFooter, { referralsAvailable: true }),

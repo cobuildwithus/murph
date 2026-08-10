@@ -287,10 +287,10 @@ as live or ambiguous unless own-billing status is explicitly `paused` or
 `canceled`. Those two statuses are lapsed, do not add a manual cancellation step
 to Family acceptance, and keep the provider reference only as historical and
 reconciliation evidence. This lapsed-status exception belongs only to invite
-acceptance; Family owner activation, capacity changes, and member-tier
-management retain the stricter direct-subscription guard. If that provider
-object later changes, the existing Family-sponsored Stripe event and
-exact-subscription cleanup owners remain authoritative. If Family sponsorship
+acceptance; it does not broaden the explicit owner-only allowances used by
+Family activation and capacity changes, or the stricter member-tier management
+guard. If that provider object later changes, the existing Family-sponsored
+Stripe event and exact-subscription cleanup owners remain authoritative. If Family sponsorship
 and direct Checkout race, the locked Family claim wins without disabling
 sponsored access, and every Checkout, subscription, and invoice replay for the
 different personal subscription remains in the existing receipt-owned

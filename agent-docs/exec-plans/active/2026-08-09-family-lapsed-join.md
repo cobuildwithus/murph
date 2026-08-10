@@ -21,8 +21,9 @@ Updated: 2026-08-09
   lapsed `paused` or `canceled` remain blocked by the recoverable transfer
   guard, including a Checkout binding whose status projection is still
   `not_started`.
-- The lapsed-status exception applies only to invite acceptance; Family owner
-  activation and management keep their existing stricter guard.
+- The lapsed-status exception applies only to invite acceptance; it does not
+  broaden the separately authorized Family-owner activation/capacity paths or
+  member-tier management.
 - Family sponsorship and a stale paused-plan resume serialize on the member
   lock: Family-first performs no Stripe mutation, while resume-first commits
   an `incomplete` own-billing fence before any Stripe mutation.
@@ -85,8 +86,9 @@ Updated: 2026-08-09
    exact-subscription cleanup owners; do not add a second cleanup lifecycle.
 3. Risk: A shared liveness helper changes adjacent Family owner or management
    behavior.
-   Mitigation: Pass the paused exception only from invite acceptance and prove
-   that a paused direct owner remains blocked from capacity management.
+   Mitigation: Pass the paused exception only from invite acceptance, keep
+   owner-only allowances explicit at their existing call sites, and prove that
+   live or ambiguous non-owner invitees remain blocked.
 4. Risk: A stale Settings or assistant resume action restarts direct billing
    after Family sponsorship.
    Mitigation: Re-read the Family claim under the existing member mutation lock,
@@ -123,9 +125,10 @@ Updated: 2026-08-09
   itself requires no new state or provider call.
 - The final ReviewGPT gate identified that the shared predicate also governs
   Family owner operations and that a stale paused-plan resume could race Family
-  sponsorship. The exception is now invite-only. Resume and invite acceptance
-  share the member lock, and paid-invoice reconciliation delegates any Family
-  loser cleanup to the existing cleanup owner.
+  sponsorship. The exception is now invite-only and remains distinct from
+  explicit owner-only allowances. Resume and invite acceptance share the member
+  lock, and paid-invoice reconciliation delegates any Family loser cleanup to
+  the existing cleanup owner.
 - Final ReviewGPT round 2 found that the first resume remediation still placed
   the fence and provider call in one rollbackable transaction. A successful
   Stripe resume could therefore survive while both local writes rolled back to
@@ -166,7 +169,8 @@ Updated: 2026-08-09
   - `git diff --check` and secret-safe final diff inspection
 - Expected outcomes:
   - Paused/lapsed invite acceptance passes; live or ambiguous direct statuses
-    and paused direct Family owners remain blocked.
+    for non-owner invitees remain blocked, without changing explicit
+    Family-owner allowances.
   - Family-first blocks stale resume without Stripe mutation; resume-first
     commits `incomplete` before Stripe and never request-projects `active`;
     a paused receipt cannot erase the fence; paid-invoice cleanup is not
