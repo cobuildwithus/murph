@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Patterns and reminders that keep their local time",
+      "Patterns, personality, and reminders that keep their local time",
     );
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(

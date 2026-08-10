@@ -290,6 +290,18 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("personality-settings-and-chat")).toMatchObject({
+      sourcePullRequests: [1589],
+      summary: expect.stringContaining("main and optional supporting personality"),
+      details: expect.stringContaining("same saved personality"),
+      tryIt: {
+        href: "/settings",
+        label: "Edit Murph's personality",
+      },
+    });
+    expect(items.get("personality-settings-and-chat")?.details).toContain(
+      "changes only that room's Murph",
+    );
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -492,6 +504,7 @@ describe("changelog registry", () => {
         id: "2026-08-10",
         itemIds: [
           "personal-patterns",
+          "personality-settings-and-chat",
           "reminders-keep-requested-timezone",
         ],
       },

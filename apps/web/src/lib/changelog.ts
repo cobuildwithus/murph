@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Patterns, personality, and reminders that keep their local time",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "Patterns can now compare repeated actions with next-day sleep and recovery, Murph's personality is editable in Settings or chat, and recurring reminders keep the local time and timezone you asked for.",
     items: [
       {
         id: "personal-patterns",
@@ -89,6 +89,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/patterns",
           label: "View your patterns",
+        },
+      },
+      {
+        id: "personality-settings-and-chat",
+        kind: "feature",
+        priority: 4,
+        title: "Choose how Murph shows up",
+        summary:
+          "Choose Murph's main and optional supporting personality in Settings, or ask Murph to change them in chat.",
+        details:
+          "Both paths update the same saved personality. Settings leaves your chosen tone and voice unchanged, and a group request changes only that room's Murph rather than anyone's private settings.",
+        relevanceTags: ["personality", "settings", "chat", "groups"],
+        sourcePullRequests: [1589],
+        tryIt: {
+          href: "/settings",
+          label: "Edit Murph's personality",
         },
       },
       {
