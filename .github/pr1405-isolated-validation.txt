@@ -1,0 +1,6 @@
+
+apply outcome: skipped
+install outcome: skipped
+
+===== changed files =====
+?? .github/pr1405-isolated-validation.txt
