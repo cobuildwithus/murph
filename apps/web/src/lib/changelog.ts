@@ -63,6 +63,31 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-10",
+    publishedOn: "2026-08-10",
+    title: "Reminders that keep their local time",
+    summary:
+      "Recurring reminders now keep the local time and timezone you asked for, even after later edits, and confirm only a time the scheduler can actually deliver.",
+    items: [
+      {
+        id: "reminders-keep-requested-timezone",
+        kind: "improvement",
+        priority: 4,
+        title: "Reminders keep the time you asked for",
+        summary:
+          "When you schedule a recurring reminder in a named timezone, Murph now preserves that local time through saving and later edits.",
+        details:
+          "The confirmation comes from the saved schedule and scheduler's next deliverable occurrence. If timing cannot be verified, or an old one-time reminder can no longer fire, Murph says so and offers a bounded recovery instead of inventing a time.",
+        relevanceTags: ["reminders", "automations", "timezones", "reliability"],
+        sourcePullRequests: [1546],
+        tryIt: {
+          label: "Schedule a local-time reminder",
+          prompt: "Remind me every day at 9 PM Central to wind down.",
+        },
+      },
+    ],
+  },
+  {
     id: "2026-08-09",
     publishedOn: "2026-08-09",
     title: "Referrals, Max, and a more capable Murph",
