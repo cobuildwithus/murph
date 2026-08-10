@@ -94,7 +94,7 @@ Updated: 2026-08-10
 - Axe color-contrast checks reported zero violations at both 1440px desktop and
   390px mobile. Native-resolution catalog crops preserved the existing layout
   and avatar framing.
-- Focused Vitest passed 87 tests across 12 files; scoped ESLint passed; the
+- Focused Vitest passed 88 tests across 12 files; scoped ESLint passed; the
   official Web production build, including Web typechecking and trace checks,
   passed.
 - ReviewGPT final round 1 identified the open-session replacement and import-
@@ -125,6 +125,10 @@ Updated: 2026-08-10
   isolated fail, close, successful preload, then reopen regression proves the
   recovered panel appears without a fallback and retains phone autofocus. The
   correction is pending final round 6.
+- Current `main` was merged before round 6 so GitHub can construct the PR merge
+  commit. The three changelog conflicts retained every upstream Aug 10 item and
+  added the homepage improvement last in the same edition; focused tests,
+  typechecking, and the production build pass on the reconciled head.
 - The required Claude UI double-check could not start because the `claude`
   executable is absent; both prescribed model commands failed with `command not
   found`, so no Claude verdict is claimed.
