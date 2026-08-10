@@ -428,25 +428,36 @@ fallback when an older supported runner omits it.
 
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 
-The group-tool `read_usage` parser temporarily accepts the exact current
-privacy-safe response and the immediately preceding exact response. This
-read-side tolerance is only the first deployment step.
+The current group-tool `read_usage` response is
+`{fundingNeeded,fundingUrl,includedUsageUsedPercent}`. The parser requires and
+preserves the bounded included-usage aggregate on that current successful shape
+and remains strict about unknown or private fields. It rejects the newer
+funding-only shape instead of retaining a field-specific rollout compatibility
+path. The existing sponsorship-era response branches remain legacy-facing only.
 
 1. Deploy the Cloudflare Worker and runner bundle first with
    `container_rollout=immediate`. Require managed-container smoke to report the
    new bundle fingerprint and drain older warm runners. The compatible runtime
-   accepts the current `{fundingNeeded,fundingUrl}` response, strips the
-   immediately preceding optional `sponsorshipStatus` field, and still accepts
+   accepts the current response, strips the immediately preceding optional
+   `sponsorshipStatus` field, and still accepts
    the older `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response.
    It derives only whether funding is needed from that oldest shape and
    discards period, percentage, and funding-setup fields.
 2. Apply the additive capped-sponsorship migration, then deploy the compatible
    Web release. Confirm both the migration and new Web have converged before
-   enabling monthly authorization creation or automatic refill admission. Web
-   now emits only `{fundingNeeded,fundingUrl}`.
-3. Smoke group reads with and without an active automatic sponsor. The runtime
-   and assistant may learn only funding urgency and the first-party capability;
-   funding setup and quantitative fields must not reappear.
+   enabling monthly authorization creation or automatic refill admission.
+3. Smoke group reads with and without an active automatic sponsor and confirm
+   the runtime learns only funding urgency, the first-party capability, and the
+   bounded included-usage aggregate. Funding setup and other quantitative
+   fields must not reappear.
+
+The `includedUsageUsedPercent` producer, strict reader, and assistant policy
+ship as one product change. There is no strip-only reader phase or rollout-only
+feature flag. A mixed-version Web/runner window may temporarily make the strict
+read fail; that availability tradeoff is accepted. Deploy Web and Cloudflare as
+close together as practical, require managed-container smoke to prove the new
+runner fingerprint, then run a controlled explicit group usage-status question.
+Roll back both sides to a schema-compatible pair if rollback is required.
 
 The first monthly authorization is the old-Web rollback floor. The preceding
 Web reconciliation code cannot activate that authorization, so after the first
@@ -456,12 +467,14 @@ that schema and compatible Web/runtime bundle. Before the first authorization,
 Web may be rolled back only while monthly creation and refill admission remain
 disabled and the additive schema is retained.
 
-The legacy reader exists only for the bounded cutover window. Remove it after
+The legacy-shape reader branches exist only for their bounded cutover windows.
+Remove them after
 old Web is neither routable nor rollback-eligible, all pre-reader warm runners
 have drained, and production evidence shows no preceding-shape responses. This
 is a narrow read-side seam, not a permanent rollout framework, and it must never
-restore group percentages, period boundaries, or other quantitative accounting
-to runtime or assistant policy.
+restore legacy remaining percentages, period boundaries, or other quantitative
+accounting to runtime or assistant policy outside the reviewed included-usage
+aggregate.
 
 The current projection separates urgency from capability: `fundingNeeded`
 controls assistant-initiated depletion messaging, while a non-null `fundingUrl`
@@ -1209,7 +1222,7 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.145.0`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.147.0`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.

@@ -12,8 +12,8 @@ import {
   waitForHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
-  parseHostedPlanCode,
-  type HostedPlanCode,
+  parseHostedFamilyPlanCode,
+  type HostedFamilyPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { hostedOnboardingError, isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -34,12 +34,12 @@ export const POST = withJsonError(async (request: Request) => {
     typeof body.targetPhoneNumber === "string" ? body.targetPhoneNumber : null;
   const targetTelegramUsername =
     typeof body.targetTelegramUsername === "string" ? body.targetTelegramUsername : null;
-  const planCode = parseHostedPlanCode(body.planCode ?? "pulse");
+  const planCode = parseHostedFamilyPlanCode(body.planCode ?? "pulse");
   if (!planCode) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_PLAN_CODE_INVALID",
       httpStatus: 400,
-      message: "Choose Pulse or Edge for this Family member.",
+      message: "Choose Pulse, Edge, or Max for this Family member.",
     });
   }
 
@@ -51,12 +51,14 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  // Auto-adding a seat only happens for invites the issuer can dedup on retry
-  // (a normalized phone/email/Telegram). Label-only or invalid-contact invites
-  // have no reuse key, so a lost-response retry could otherwise buy a second seat.
+  // Auto-adding a seat requires a contact channel that can be compared with an
+  // already-active member's verified identity before purchase. Telegram
+  // usernames dedup invites, but members are bound by Telegram user id, so a
+  // username cannot prove the target is not already in this Family.
   const canAutoAddSeat =
     body.addSeatIfNeeded === true &&
-    hostedFamilyInviteHasReusableTarget({ targetEmail, targetPhoneNumber, targetTelegramUsername });
+    Boolean(targetPhoneNumber || targetEmail) &&
+    hostedFamilyInviteHasReusableTarget({ targetEmail, targetPhoneNumber });
 
   const issueInvite = () =>
     prisma.$transaction(async (tx) => {
@@ -85,7 +87,13 @@ export const POST = withJsonError(async (request: Request) => {
     if (!canAutoAddSeat || !isSeatLimitError(error)) {
       throw error;
     }
-    const seatResult = await addSeatThenInvite(prisma, auth.member.id, planCode, issueInvite);
+    const seatResult = await addSeatThenInvite(
+      prisma,
+      auth.member.id,
+      planCode,
+      { targetEmail, targetPhoneNumber },
+      issueInvite,
+    );
     if (seatResult === "unavailable") {
       throw error;
     }
@@ -132,7 +140,11 @@ function isSeatLimitError(error: unknown): boolean {
 async function addSeatThenInvite<T>(
   prisma: ReturnType<typeof getPrisma>,
   ownerMemberId: string,
-  planCode: HostedPlanCode,
+  planCode: HostedFamilyPlanCode,
+  autoSeatInviteTarget: {
+    targetEmail: string | null;
+    targetPhoneNumber: string | null;
+  },
   issueInvite: () => Promise<T>,
 ): Promise<{ invite: T } | "syncing" | "unavailable"> {
   // Re-check before buying: a concurrent invite for the same target may have just
@@ -169,10 +181,12 @@ async function addSeatThenInvite<T>(
   }
   const targetCapacities = {
     edge: snapshot.plans.edge.billed,
+    max: snapshot.plans.max.billed,
     pulse: snapshot.plans.pulse.billed,
     [planCode]: snapshot.plans[planCode].billed + 1,
   };
   await updateHostedFamilyPlanCapacities({
+    autoSeatInviteTarget,
     groupId: snapshot.groupId,
     ownerMemberId,
     prisma,

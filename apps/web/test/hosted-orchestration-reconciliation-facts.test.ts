@@ -687,7 +687,7 @@ describe("hosted orchestration reconciliation facts", () => {
       revision: 3,
       supportsImages: false,
       verificationProfile:
-        "murph-codex-0.145.0-portable-responses-v1",
+        "murph-codex-0.147.0-portable-responses-v1",
     });
 
     const response = await reconciliationRoute.GET(

@@ -70,8 +70,9 @@ export function HostedAiUsageActivity(props: {
         ) : (
           <div className="border-t border-border/70 py-5">
             <p className="text-sm leading-6 text-muted-foreground">
-              Invite friends to Murph or ask about referral missions.
-              Qualifying rewards are added automatically.
+              {canStartMissions
+                ? "Your personal link is ready to share. Ask Murph if you want to explore a group referral option."
+                : "Your personal link is ready to share."}
             </p>
           </div>
         )}
@@ -162,7 +163,7 @@ function MissionRow(props: {
             </summary>
             <div className="mt-3 max-w-2xl space-y-1.5 text-xs leading-5 text-muted-foreground">
               <p>{mission.requirementsLabel}</p>
-              <p>Selected {mission.selectedLabel}</p>
+              <p>Started {mission.selectedLabel}</p>
             </div>
           </details>
         </div>

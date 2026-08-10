@@ -36,6 +36,17 @@ export function BillingPortalButton(props: {
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const variant = props.variant ?? "ghost";
   const label = props.label ?? "Billing and invoices";
+  const errorAlert = errorMessage ? (
+    <p
+      role="alert"
+      className={cn(
+        "text-xs text-destructive [overflow-wrap:anywhere]",
+        props.block ? null : "max-w-xs text-right",
+      )}
+    >
+      {errorMessage}
+    </p>
+  ) : null;
 
   async function openPortal() {
     setErrorMessage(null);
@@ -109,20 +120,11 @@ export function BillingPortalButton(props: {
                 Cancel
               </Button>
             </div>
+            {errorAlert}
           </DialogContent>
         </Dialog>
       ) : null}
-      {errorMessage ? (
-        <p
-          role="alert"
-          className={cn(
-            "text-xs text-destructive [overflow-wrap:anywhere]",
-            props.block ? null : "max-w-xs text-right",
-          )}
-        >
-          {errorMessage}
-        </p>
-      ) : null}
+      {props.confirmation ? null : errorAlert}
     </div>
   );
 }

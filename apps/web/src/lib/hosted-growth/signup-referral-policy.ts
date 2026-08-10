@@ -15,7 +15,7 @@ export const HOSTED_SIGNUP_REFERRAL_POLICY_VERSIONS = [
 export const HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY = {
   requirementsLabel:
     "A new member completed Murph setup through your referral link.",
-  title: "Invite someone to Murph",
+  title: "Share your referral link",
 } as const;
 
 export function isHostedSignupReferralPolicyVersion(

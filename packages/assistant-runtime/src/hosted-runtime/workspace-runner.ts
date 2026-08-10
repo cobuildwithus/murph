@@ -830,12 +830,18 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       result: initialMailboxImport,
     });
   const selectedInitialAssistantInputIds = acceptedInitialAssistantInputBatch
-    ? (await selectHostedAssistantInputIds({
-        freshAssistantInputIds: acceptedInitialAssistantInputBatch.assistantInputIds,
-        mode: "foreground",
-        vaultRoot: input.vaultRoot,
-      })).inputIds
+      ? (await selectHostedAssistantInputIds({
+          freshAssistantInputIds: acceptedInitialAssistantInputBatch.assistantInputIds,
+          mode: "foreground",
+          vaultRoot: input.vaultRoot,
+        })).inputIds
     : [];
+  const selectedInitialAssistantInputBatch = acceptedInitialAssistantInputBatch
+    ? includeHostedWorkspaceRunnerAssistantInputBatch(
+        acceptedInitialAssistantInputBatch,
+        new Set(selectedInitialAssistantInputIds),
+      )
+    : null;
   checkpointRequestSession.seedAssistantInputSelection(
     selectedInitialAssistantInputIds.length,
     acceptedInitialAssistantInputBatch
@@ -1044,7 +1050,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     clearAssistantAutomationScheduleChanged: () => {
       assistantAutomationScheduleChanged = false;
     },
-    initialAssistantInputBatch,
+    initialAssistantInputBatch: selectedInitialAssistantInputBatch,
     initialMailboxImport,
     latestAssistantInputBatch: () =>
       checkpointRequestSession.latestAssistantInputBatch(),
@@ -1834,6 +1840,17 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
   ]);
 }
 
+function includeHostedWorkspaceRunnerAssistantInputBatch(
+  batch: HostedWorkspaceRunnerAssistantInputBatch,
+  includedInputIds: ReadonlySet<string>,
+): HostedWorkspaceRunnerAssistantInputBatch | null {
+  return buildHostedWorkspaceRunnerAssistantInputBatch(
+    readHostedWorkspaceRunnerAssistantInputBatchRecords(batch).filter((record) =>
+      includedInputIds.has(record.assistantInputId)
+    ),
+  );
+}
+
 function filterHostedWorkspaceRunnerAssistantInputBatch(
   batch: HostedWorkspaceRunnerAssistantInputBatch,
   excludedInputIds: ReadonlySet<string>,
@@ -1969,8 +1986,12 @@ function readHostedWorkspaceRunnerAssistantInputBatchRecords(
 function buildHostedWorkspaceRunnerAssistantInputBatch(
   records: readonly HostedMailboxAssistantInputRecord[],
 ): HostedWorkspaceRunnerAssistantInputBatch | null {
-  return records.length === 0 ? null : {
-    assistantInputIds: records.map((record) => record.assistantInputId),
+  if (records.length === 0) {
+    return null;
+  }
+  const assistantInputIds = records.map((record) => record.assistantInputId);
+  return {
+    assistantInputIds,
     assistantInputRecords: records,
     emailDeliveryContexts: records.flatMap((record) =>
       record.emailDeliveryContext ? [record.emailDeliveryContext] : []

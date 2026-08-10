@@ -47,6 +47,7 @@ const DIRECT_EDGE_ALLOWANCE_USD_MICROS = 16_000_000n;
 const DIRECT_MAX_ALLOWANCE_USD_MICROS = 40_000_000n;
 const FAMILY_PULSE_ALLOWANCE_USD_MICROS = 5_600_000n;
 const FAMILY_EDGE_ALLOWANCE_USD_MICROS = 15_200_000n;
+const FAMILY_MAX_ALLOWANCE_USD_MICROS = 39_200_000n;
 
 beforeEach(() => {
   usageCreditMocks.admitHostedGroupSponsorshipRefillTx.mockReset();
@@ -462,6 +463,38 @@ describe("hosted AI usage allowance pricing", () => {
         tokenPricingBasis: "openai-flex",
       },
       pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex",
+    });
+  });
+
+  it("prices canonical model reroutes from the served model", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-5.6-luna",
+      servedModel: "gpt-5.6-sol",
+    })).toMatchObject({
+      costUsdMicros: 1_896n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-sol",
+        modelSource: "served",
+        requestedModel: "gpt-5.6-luna",
+        servedModel: "gpt-5.6-sol",
+      },
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-5.6-sol",
+      servedModel: "gpt-5.6-luna",
+    })).toMatchObject({
+      costUsdMicros: 77n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-luna",
+        modelSource: "served",
+        requestedModel: "gpt-5.6-sol",
+        servedModel: "gpt-5.6-luna",
+      },
     });
   });
 
@@ -2912,6 +2945,29 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
+  it("uses the sponsored member's exact Max allowance", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      familyAccessActive: true,
+      familyPlanCode: "max",
+      findUniquePeriod: null,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      spentUsdMicros: 0n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-09T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_max_monthly",
+      limitUsdMicros: FAMILY_MAX_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: FAMILY_MAX_ALLOWANCE_USD_MICROS,
+    });
+  });
+
   it("uses a calendar period for Family-sponsored members when the group period is missing", async () => {
     const prisma = createGatePrisma({
       billingStatus: HostedBillingStatus.not_started,
@@ -4672,7 +4728,7 @@ function createAllowanceTx(input: {
   executeRaw: AllowanceExecuteRawMock;
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
-  familyPlanCode?: "edge" | "pulse";
+  familyPlanCode?: "edge" | "max" | "pulse";
   familyPeriodEnd?: Date | null;
   familyPeriodStart?: Date | null;
   familyUpdatedAt?: Date;
@@ -4873,7 +4929,7 @@ function createGatePrisma(input: {
   executeRaw?: ReturnType<typeof vi.fn>;
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
-  familyPlanCode?: "edge" | "pulse";
+  familyPlanCode?: "edge" | "max" | "pulse";
   familyPeriodEnd?: Date | null;
   familyPeriodStart?: Date | null;
   familyUpdatedAt?: Date;

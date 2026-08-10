@@ -48,13 +48,16 @@ describe("assistant plan usage call contracts", () => {
 
   it("keeps Family operations and result truth in the call contract", () => {
     const contract = MURPH_FAMILY_PLAN_TOOL.description;
+    const actionSchemas = MURPH_FAMILY_PLAN_TOOL.inputSchema.oneOf;
 
     expect(contract.length).toBeLessThanOrEqual(330);
-    expect(MURPH_FAMILY_PLAN_TOOL.inputSchema.properties.action.enum).toEqual([
+    expect(actionSchemas.map((schema) => schema.properties.action.enum[0])).toEqual([
       "read_status",
       "start_checkout",
       "create_invite",
     ]);
+    expect(actionSchemas[1]?.properties).not.toHaveProperty("invite");
+    expect(actionSchemas[2]?.required).toEqual(["action", "invite"]);
     expect(contract).toContain(
       "Allow `read_status` for an explicit Family request",
     );
