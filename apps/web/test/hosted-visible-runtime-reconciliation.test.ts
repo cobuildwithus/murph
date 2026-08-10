@@ -90,7 +90,7 @@ describe("visible runtime access reconciliation", () => {
     );
   });
 
-  it("delivers an expired-trial notice on the pending Telegram thread", async () => {
+  it("delivers an inactive-billing notice on the pending Telegram thread", async () => {
     const facts = blockedFacts("ai_usage_denied");
     mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
@@ -108,9 +108,9 @@ describe("visible runtime access reconciliation", () => {
     });
     mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
       kind: "access_notice",
-      message: "Your trial ended.",
-      noticeCode: "trial_conversion_pending",
-      responseReason: "sent-trial-conversion-notice",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
     });
     mocks.sendHostedTelegramAccessNotice.mockResolvedValue({ status: "sent" });
 
@@ -120,8 +120,8 @@ describe("visible runtime access reconciliation", () => {
 
     expect(mocks.sendHostedTelegramAccessNotice).toHaveBeenCalledWith({
       memberId: "member_123",
-      message: "Your trial ended.",
-      noticeCode: "trial_conversion_pending",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
       prisma,
       replyToMessageId: "7",
       sourceEventId: "telegram:update:321",
@@ -143,14 +143,14 @@ describe("visible runtime access reconciliation", () => {
           threadIsDirect: true,
         },
       },
-      // Admitted while the trial was still valid; reconciled after it ended.
+      // Admitted while access was valid; reconciled after billing became inactive.
       occurredAt: "2020-01-01T00:00:00.000Z",
     });
     mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
       kind: "access_notice",
-      message: "Your trial ended.",
-      noticeCode: "trial_conversion_pending",
-      responseReason: "sent-trial-conversion-notice",
+      message: "Your billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
     });
     mocks.sendHostedTelegramAccessNotice.mockResolvedValue({ status: "sent" });
 

@@ -33,13 +33,6 @@ export type HostedPublicBillingPlanCode =
   (typeof HOSTED_PUBLIC_BILLING_PLAN_CODES)[number];
 export type HostedBillingPlanInterval = "month";
 
-export const HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS = [
-  "pulse_trial_7d",
-] as const;
-
-export type HostedPublicBillingCheckoutOffer =
-  (typeof HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS)[number];
-
 export const HOSTED_INTERNAL_BILLING_CHECKOUT_OFFERS = [
   "standard",
   "pulse_trial_7d",
@@ -57,10 +50,6 @@ export type HostedBillingPhase = (typeof HOSTED_BILLING_PHASES)[number];
 
 export const HOSTED_STANDARD_CHECKOUT_OFFER = "standard" as const;
 export const HOSTED_PULSE_TRIAL_OFFER = "pulse_trial_7d" as const;
-export const HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED_ENV =
-  "HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED";
-export const HOSTED_AUTO_PULSE_TRIAL_ENABLED_ENV =
-  "HOSTED_AUTO_PULSE_TRIAL_ENABLED";
 export const HOSTED_PULSE_TRIAL_DAYS = 14;
 export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 4_500_000n;
 export const HOSTED_PULSE_TRIAL_STARTED_AT_OVERRIDE_METADATA_KEY =
@@ -405,20 +394,6 @@ export function canUpgradeHostedBillingPlan(input: {
     });
 }
 
-export function isHostedPulseTrialCheckoutEnabled(
-  source: Record<string, string | undefined> = process.env,
-): boolean {
-  return source[HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED_ENV] === "1";
-}
-
-export function isHostedAutoPulseTrialEnabled(
-  source: Record<string, string | undefined> = process.env,
-): boolean {
-  const value = source[HOSTED_AUTO_PULSE_TRIAL_ENABLED_ENV]?.trim().toLowerCase();
-
-  return value !== "0" && value !== "false";
-}
-
 export function parseHostedBillingPlanCode(
   value: unknown
 ): HostedBillingPlanCode | null {
@@ -435,15 +410,6 @@ export function parseHostedPublicBillingPlanCode(
         value as HostedPublicBillingPlanCode,
       )
     ? value as HostedPublicBillingPlanCode
-    : null;
-}
-
-export function parseHostedPublicBillingCheckoutOffer(
-  value: unknown,
-): HostedPublicBillingCheckoutOffer | null {
-  return typeof value === "string" &&
-    HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS.includes(value as HostedPublicBillingCheckoutOffer)
-    ? value as HostedPublicBillingCheckoutOffer
     : null;
 }
 
@@ -512,19 +478,11 @@ export function canScheduleHostedBillingPlanChange(input: {
     return false;
   }
 
-  if (
-    parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
+  return parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
     isHostedBillingPlanScheduledDowngrade({
       currentPlanCode,
       targetPlanCode,
-    })
-  ) {
-    return true;
-  }
-
-  return currentPlanCode === "launch_monthly" &&
-    targetPlanCode === "launch_group_monthly" &&
-    isHostedPulseTrialBillingState(input);
+    });
 }
 
 export function canSwitchHostedBillingPlanToPulse(input: {
@@ -539,31 +497,6 @@ export function canSwitchHostedBillingPlanToPulse(input: {
     ...input,
     targetPlanCode: "launch_monthly",
   });
-}
-
-export function canStartHostedPulseTrialPaidPlan(input: {
-  billingStatus?: unknown;
-  currentBillingPhase?: unknown;
-  currentBillingPlanCode?: unknown;
-  currentCheckoutOffer?: unknown;
-  hasStripeCustomerId?: unknown;
-  hasStripeSubscriptionId?: unknown;
-  suspendedAt?: unknown;
-}): boolean {
-  const phase = parseHostedBillingPhase(input.currentBillingPhase);
-  const canStartActiveTrial =
-    input.billingStatus === "active" &&
-    phase === "trial";
-  const canRecoverPausedTrial =
-    input.billingStatus === "paused" &&
-    isHostedPulseTrialBillingState(input);
-
-  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
-    parseHostedBillingCheckoutOffer(input.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER &&
-    (canStartActiveTrial || canRecoverPausedTrial) &&
-    !(input.suspendedAt instanceof Date) &&
-    input.hasStripeCustomerId === true &&
-    input.hasStripeSubscriptionId === true;
 }
 
 export function requireHostedPulseTrialPolicy(
