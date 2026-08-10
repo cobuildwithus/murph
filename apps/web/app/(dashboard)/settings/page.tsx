@@ -470,7 +470,7 @@ export default async function SettingsPage({
             text: Boolean(account.phone.number),
           },
           message: {
-            body: "Hey Murph, what usage missions can I choose from?",
+            body: "Hey Murph, what referral options can I choose from?",
           },
           murphEmailAddress: account.email.murphEmailAddress ?? null,
           murphPhoneNumber: routing?.linqRecipientPhone ?? null,

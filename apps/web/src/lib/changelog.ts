@@ -586,9 +586,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-06",
     publishedOn: "2026-08-06",
-    title: "Faster starts and better continuity",
+    title: "Faster starts, richer X answers, better continuity",
     summary:
-      "The companion can start before a device is connected, browser work reports progress in the current turn, health-data choices read more clearly, and late cards, images, support escalations, and first-contact messages stay attached to the right place.",
+      "The companion can start before a device is connected, X answers can use images and video, browser work reports progress in the current turn, health-data choices read more clearly, and late cards, images, support escalations, and first-contact messages stay attached to the right place.",
     items: [
       {
         id: "companion-admission-before-device",
@@ -625,6 +625,23 @@ const RAW_CHANGELOG_EDITIONS = [
           "One proprietary score is never enough. When the evidence clears the bar, Murph offers at most one reversible low-burden adjustment with a guardrail and reassessment trigger.",
         relevanceTags: ["recovery", "wearables", "insights", "safety"],
         sourcePullRequests: [1353],
+      },
+      {
+        id: "x-post-media-understanding",
+        kind: "feature",
+        priority: 4,
+        title: "Ask about images and video on X",
+        summary:
+          "Murph can inspect the images and video in a relevant X post, instead of relying only on its text.",
+        details:
+          "The existing live X search now asks Grok to inspect relevant media. Murph keeps the source link, separates the post text from what the media shows or says, and treats the result as unverified third-party content.",
+        relevanceTags: ["assistant", "x-search", "images", "video"],
+        sourcePullRequests: [1399],
+        tryIt: {
+          label: "Ask about an X post",
+          prompt:
+            "Look at the images or video in this X post and tell me what they show: [paste X post URL]",
+        },
       },
       {
         id: "health-consent-actions-clarified",
@@ -1522,10 +1539,10 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "See every way to get more usage",
         summary:
-          "Ask Murph how to get more usage and it now checks the available plan, top-up, group funding, and ways to earn usage together. Settings also shows recent credits and each current or completed mission.",
+          "Ask Murph how to get more usage and it now checks the available plan, top-up, group funding, and referral options together. Settings also shows recent credits and each current or completed group referral.",
         details:
-          "Choosing one or both missions remains explicit. Each tracks and can be cancelled independently, and a mission past its action deadline reads as final activity being checked rather than still actionable.",
-        relevanceTags: ["usage", "credits", "missions", "settings"],
+          "Choosing one or both group referral options remains explicit. Each tracks and can be cancelled independently, and an option past its action deadline reads as final activity being checked rather than still actionable.",
+        relevanceTags: ["usage", "credits", "referrals", "settings"],
         sourcePullRequests: [1120, 1136, 1138, 1157],
         tryIt: {
           label: "Ask about more usage",

@@ -539,6 +539,7 @@ describe("changelog registry", () => {
           "companion-admission-before-device",
           "turn-local-browser-progress",
           "recovery-readiness-insight",
+          "x-post-media-understanding",
           "health-consent-actions-clarified",
           "first-contact-starts-faster",
           "late-media-origin-continuity",

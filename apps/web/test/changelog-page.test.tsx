@@ -66,8 +66,11 @@ describe("ChangelogPage", () => {
     expect(markup).toContain(
       "A personal first read, richer automations, clearer trends",
     );
-    expect(markup).toContain("Faster starts and better continuity");
+    expect(markup).toContain(
+      "Faster starts, richer X answers, better continuity",
+    );
     expect(markup).toContain("More ways to connect, prepare, and finish");
+    expect(markup).toContain("Ask about images and video on X");
     expect(markup).toContain("More control over data, models, and connections");
     expect(markup).toContain(
       "Connected apps recover with a clearer next step",
@@ -100,6 +103,9 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('href="/changelog?edition=2026-08-02"');
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',
+    );
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-06#x-post-media-understanding"',
     );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-05#official-local-alert-health-context"',
@@ -138,6 +144,12 @@ describe("ChangelogPage", () => {
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(
       expect.arrayContaining([
+        {
+          message: {
+            body: "Look at the images or video in this X post and tell me what they show: [paste X post URL]",
+            subject: "Try it: Ask about images and video on X",
+          },
+        },
         {
           message: {
             body: "I feel more tired than usual and planned an outdoor workout today. Check whether an official local alert should change my plan.",
