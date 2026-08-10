@@ -1,9 +1,11 @@
 # Daily nutrition-card safety
 
-Read and apply this gate before every `daily_nutrition` attachment, including
-when five accepted active goals already exist and during a scheduled closeout.
-An active goal records prior acceptance; it does not prove that numeric guidance
-is still safe in the member's current context.
+Read and apply this complete gate before deriving, saving, or surfacing numeric
+nutrition goals, before activating a paused nutrition proposal, and before every
+`daily_nutrition` attachment, including when five accepted active goals already
+exist and during a scheduled closeout. An active goal records prior acceptance;
+it does not prove that numeric guidance is still safe in the member's current
+context.
 
 - Reuse already-known conversation and vault context. Do not turn a routine card
   into a universal medical screening checklist, but do not ignore a safety fact
@@ -25,8 +27,9 @@ is still safe in the member's current context.
   read fails or is unreadable, use the same fail-closed behavior. A scheduled
   occurrence asks no question when this read is unavailable or suppresses numeric
   output.
-- Before any card, run one bounded lossless canonical-entry read for the current
-  local date: `vault-cli measurement entry list --metric bmi --metric height
+- As part of the same pre-numeric and pre-activation gate, run one bounded
+  lossless canonical-entry read for the current local date: `vault-cli
+  measurement entry list --metric bmi --metric height
   --metric weight --metric body-weight --from <45-days-before-today> --to
   <today> --limit 200 --format json`. Reuse an identical current-turn result
   instead of repeating it. Resolve only the newest unambiguous evidence inside
@@ -35,9 +38,12 @@ is still safe in the member's current context.
   the same `eventId` and have units that can be converted unambiguously. Do not
   combine height and weight from different events or dates, and do not use
   stale, malformed, conflicting, or unit-ambiguous values.
-  A usable adult BMI below 18.5 suppresses numeric goals and the card. If the
-  200-record result is saturated without resolving whether usable BMI evidence
-  is present, suppress the card; otherwise missing measurements are unavailable
+  A usable adult BMI below 18.5 suppresses numeric goals, every Goal write or
+  activation, and the card. If the read fails, or a 200-record result is
+  saturated without resolving whether usable BMI evidence is present, fail
+  closed for numeric setup, proposal presentation, Goal mutation, activation,
+  and card presentation. Leave an existing paused proposal unchanged and use
+  ordinary non-numeric text. Otherwise missing measurements are unavailable
   evidence, not a universal block. Never ask a scheduled occurrence for these
   measurements and never mutate measurement records during this check.
 - Do not derive, save, or surface numeric goals, and do not attach a goal-aware

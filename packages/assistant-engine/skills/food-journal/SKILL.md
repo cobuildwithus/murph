@@ -44,15 +44,18 @@ Before every requested daily nutrition card, read and apply
 even when all five goals already appear to exist. Its complete active-condition
 and active-regimen discovery is mandatory before numeric target derivation as
 well as before a card; the five-record context projection is not completeness
-proof. Also read and follow the
+proof. Its canonical measurement read is likewise mandatory before deriving,
+saving, or surfacing a proposal and again before activating one. Also read and
+follow the
 target-authority and complete active-Goal discovery contract in
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
 before deciding that the five canonical daily goals are complete. Use its
 proposal workflow only if a target is genuinely missing after that read.
 The first setup response explains a paused canonical proposal in ordinary text;
 it does not attach a goal-less card. An unambiguous acceptance may complete the
-pending explicit card request in that next response after activation, safety
-recheck, and a fresh same-date totals read. Other later eligible responses may
+pending explicit card request in that next response after the complete safety
+recheck passes, activation and readback succeed, and a fresh same-date totals
+read completes. Other later eligible responses may
 use the accepted active goals in a card.
 
 ## Ground numeric estimates in label and USDA data

@@ -165,6 +165,9 @@ describe('assistant automatic meal capture skill', () => {
       'If any required detail read fails or is unreadable, use the same ordinary-text, no-write, no-question, no-card failure behavior.',
     )
     expect(compactSkill).toContain(
+      'Also run the shared gate\'s bounded canonical measurement-entry read. A failed read, or a saturated read that cannot resolve usable BMI evidence, uses the same failure behavior.',
+    )
+    expect(compactSkill).toContain(
       'Only when all five qualifying exact point targets resolve from active canonical Goals',
     )
     expect(compactSkill).toContain(
@@ -238,7 +241,7 @@ describe('assistant automatic meal capture skill', () => {
       '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
     )
     expect(compactSafety).toContain(
-      'A usable adult BMI below 18.5 suppresses numeric goals and the card.',
+      'A usable adult BMI below 18.5 suppresses numeric goals, every Goal write or activation, and the card.',
     )
     expect(compactSafety).toContain(
       'Do not combine height and weight from different events or dates',

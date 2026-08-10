@@ -224,7 +224,7 @@ describe('murph.attach_response_card', () => {
       'before every daily_nutrition attachment, even with five active goals or on a scheduled closeout',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Before deriving, saving, or surfacing numeric nutrition goals and before every daily_nutrition attachment',
+      'Before deriving, saving, or surfacing numeric nutrition goals, before activating a paused nutrition proposal, and before every daily_nutrition attachment',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Run both vault-cli condition list --status active --limit 200 --format json and vault-cli regimen list --status active --limit 200 --format json',
@@ -242,7 +242,13 @@ describe('murph.attach_response_card', () => {
       'If any required detail read fails or is unreadable, use the same fail-closed behavior',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      "run the gate's bounded lossless vault-cli measurement entry list read over the canonical 45-day window and suppress the card for a usable adult BMI below 18.5, including height and weight rows sharing one eventId",
+      'As part of that same pre-numeric and pre-activation gate, also run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A usable adult BMI below 18.5, including height and weight rows sharing one eventId, suppresses numeric proposal derivation or presentation, every Goal write or activation, and the card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A failed read, or a saturated read that cannot resolve usable BMI evidence, fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'known underweight, frailty, malnutrition risk, glucose-lowering medication, safety-relevant disease or clinician-managed nutrition context, and calorie targets below 1,200 kcal/day without flooring them upward',
@@ -278,7 +284,7 @@ describe('murph.attach_response_card', () => {
       'Any derived target addition or change atomically pauses the complete managed bundle until acceptance',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'its next unambiguous acceptance may complete that pending request after activation, safety recheck, and a fresh same-date totals read',
+      'its next unambiguous acceptance may complete that pending request only after the complete safety recheck passes, then activation and readback, and a fresh same-date totals read',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A scheduled closeout must not ask for inputs or create, change, or explain a proposal',

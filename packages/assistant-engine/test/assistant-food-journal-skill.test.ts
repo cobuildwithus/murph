@@ -87,6 +87,9 @@ describe('assistant food journal skill', () => {
       'the five-record context projection is not completeness\nproof',
     )
     expect(skill).toContain(
+      'canonical measurement read is likewise mandatory before deriving,\nsaving, or surfacing a proposal and again before activating one',
+    )
+    expect(skill).toContain(
       'target-authority and complete active-Goal discovery contract',
     )
     expect(skill).toContain(
@@ -100,10 +103,10 @@ describe('assistant food journal skill', () => {
     )
     expect(skill).toContain('does not attach a goal-less card')
     expect(skill).toContain(
-      'An unambiguous acceptance may complete the\npending explicit card request in that next response after activation, safety',
+      'An unambiguous acceptance may complete the\npending explicit card request in that next response after the complete safety',
     )
     expect(skill).toContain(
-      'recheck, and a fresh same-date totals read.',
+      'recheck passes, activation and readback succeed, and a fresh same-date totals\nread completes.',
     )
     expect(skill).toContain('vault-cli food search-labels`')
     expect(skill).toContain('vault-cli food search-labels-batch`')

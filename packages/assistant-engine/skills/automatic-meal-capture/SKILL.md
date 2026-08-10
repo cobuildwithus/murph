@@ -200,8 +200,10 @@ On a scheduled run:
    context projection, a title, substance, severity, or the default list prefix
    to select the safety set. If any required detail read fails or is unreadable,
    use the same ordinary-text, no-write, no-question, no-card failure behavior.
-   Reuse these complete reads for the current turn. This scheduled closeout uses
-   only that card-time safety gate and does not provide
+   Also run the shared gate's bounded canonical measurement-entry read. A failed
+   read, or a saturated read that cannot resolve usable BMI evidence, uses the
+   same failure behavior. Reuse these complete reads for the current turn. This
+   scheduled closeout uses only that card-time safety gate and does not provide
    target-setting intent: do not ask for profile inputs, call `goal import-json`,
    create or change a paused proposal, or surface a numeric target proposal.
    If numeric presentation is suppressed, or the active target bundle is

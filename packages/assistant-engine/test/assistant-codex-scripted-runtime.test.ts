@@ -178,10 +178,17 @@ function quotePosixShellLiteral(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
-function buildReadOnlyVaultCliScript(input: {
+function buildScriptedVaultCli(input: {
   commandLog: string
   commandOutputs: readonly (readonly [string, unknown])[]
+  failedCommands?: readonly string[]
 }): string {
+  const failureBranches = (input.failedCommands ?? []).map((command) => [
+    `if [ "$*" = ${quotePosixShellLiteral(command)} ]; then`,
+    `  printf '%s\\n' ${quotePosixShellLiteral('{"error":"scripted command failure"}')} >&2`,
+    '  exit 1',
+    'fi',
+  ].join('\n'))
   const branches = input.commandOutputs.map(([command, output]) => {
     const payload = JSON.stringify(output)
     if (payload === undefined) {
@@ -198,6 +205,7 @@ function buildReadOnlyVaultCliScript(input: {
   return [
     '#!/bin/sh',
     `printf '%s\\n' "$*" >> ${quotePosixShellLiteral(input.commandLog)}`,
+    ...failureBranches,
     ...branches,
     `printf '%s\\n' '{"error":"unexpected scripted command"}' >&2`,
     'exit 1',
@@ -1739,6 +1747,59 @@ if (!tool) {
       nextCursor: null,
       vault: 'synthetic-vault',
     }
+    const measurementResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        from: '2026-06-15',
+        limit: 200,
+        metrics: ['bmi', 'height', 'weight', 'body-weight'],
+        to: '2026-07-30',
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const lowBmiMeasurements = measurementResult([{
+      eventId: 'event_low_bmi',
+      metric: 'bmi',
+      observedAt: '2026-07-29T12:00:00.000Z',
+      unit: 'kg/m^2',
+      value: 16.8,
+    }])
+    const lowSameEventMeasurements = measurementResult([
+      {
+        eventId: 'event_low_pair',
+        metric: 'height',
+        observedAt: '2026-07-29T12:00:00.000Z',
+        unit: 'cm',
+        value: 180,
+      },
+      {
+        eventId: 'event_low_pair',
+        metric: 'weight',
+        observedAt: '2026-07-29T12:00:00.000Z',
+        unit: 'kg',
+        value: 54,
+      },
+    ])
+    const normalBmiMeasurements = measurementResult([{
+      eventId: 'event_normal_bmi',
+      metric: 'bmi',
+      observedAt: '2026-07-29T12:00:00.000Z',
+      unit: 'kg/m^2',
+      value: 22.1,
+    }])
+    const saturatedMeasurements = measurementResult(
+      Array.from({ length: 200 }, (_, index) => ({
+        eventId: `event_height_only_${index + 1}`,
+        metric: 'height',
+        observedAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
+        unit: 'cm',
+        value: 180,
+      })),
+    )
     const canonicalTotals = {
       from: '2026-07-30',
       mealCount: 3,
@@ -1771,6 +1832,7 @@ if (!tool) {
       card?: Record<string, unknown>
       commandOutputs: readonly (readonly [string, unknown])[]
       expectedCommands: readonly string[]
+      failedCommands?: readonly string[]
       finalMessage: string
       prompt: string
       scheduled: boolean
@@ -1796,9 +1858,10 @@ if (!tool) {
       )
       await writeFile(
         path.join(scenario.turnInput.workingDirectory, 'vault-cli'),
-        buildReadOnlyVaultCliScript({
+        buildScriptedVaultCli({
           commandLog,
           commandOutputs: input.commandOutputs,
+          failedCommands: input.failedCommands,
         }),
         { encoding: 'utf8', mode: 0o755 },
       )
@@ -1821,6 +1884,8 @@ text(result.output);
                   'nonzero data.metricTargetsCount',
                   'condition list --status active --limit 200 --format json',
                   'regimen list --status active --limit 200 --format json',
+                  'before activating a paused nutrition proposal',
+                  'measurement entry list read over the canonical 45-day window',
                 ],
               }
             : {}),
@@ -2084,6 +2149,11 @@ text(result.output);
       ...conditionIds.map((id) => `condition show ${id} --format json`),
       ...regimenIds.map((id) => `regimen show ${id} --format json`),
     ]
+    const emptySafetyOutputs = [
+      [conditionListCommand, listResult('condition', [])],
+      [regimenListCommand, listResult('regimen', [])],
+    ] as const
+    const emptySafetyCommands = [conditionListCommand, regimenListCommand]
     const hiddenSnapshot = (kind: 'condition' | 'regimen') => [
       'Current canonical context snapshot (current and readable):',
       kind === 'condition'
@@ -2193,6 +2263,181 @@ text(result.output);
         skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
       })
     }
+
+    const noActiveGoalsList = {
+      count: 0,
+      filters: { limit: 200, status: 'active' },
+      items: [],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const allStatusGoalListCommand = 'goal list --limit 200 --format json'
+    const proposalImportCommand = 'goal import-json --input - --format json'
+    const pausedGoalShowCommand = 'goal show goal_paused_bundle --format json'
+    const activateGoalCommand =
+      'goal save Daily nutrition targets --id goal_paused_bundle --status active --format json'
+    const pausedGoal = {
+      entity: {
+        data: {
+          metricTargets: completeTargets,
+          slug: 'murph-daily-nutrition-starting-targets',
+          status: 'paused',
+          windowStartAt: '2026-07-30',
+        },
+        id: 'goal_paused_bundle',
+        kind: 'goal',
+        title: 'Daily nutrition targets',
+      },
+      vault: 'synthetic-vault',
+    }
+    const activeManagedGoal = {
+      ...pausedGoal,
+      entity: {
+        ...pausedGoal.entity,
+        data: { ...pausedGoal.entity.data, status: 'active' },
+      },
+    }
+    const noManagedGoalsList = {
+      count: 0,
+      filters: { limit: 200 },
+      items: [],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const pausedManagedGoalList = {
+      count: 1,
+      filters: { limit: 200 },
+      items: [{
+        data: {
+          metricTargetsCount: 5,
+          slug: 'murph-daily-nutrition-starting-targets',
+          status: 'paused',
+        },
+        id: 'goal_paused_bundle',
+        kind: 'goal',
+        title: 'Daily nutrition targets',
+      }],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+
+    for (const blockedProposal of [
+      {
+        finalMessage: 'I kept this non-numeric because your current measurements make self-directed targets inappropriate.',
+        measurements: lowBmiMeasurements,
+        prompt: 'Set daily nutrition targets for me using the context I already provided.',
+      },
+      {
+        finalMessage: 'I kept this non-numeric because the current same-event measurements make self-directed targets inappropriate.',
+        measurements: lowSameEventMeasurements,
+        prompt: 'Set daily nutrition targets for me using the context I already provided.',
+      },
+      {
+        finalMessage: 'I could not safely complete the measurement check, so I left target setup unchanged.',
+        measurements: saturatedMeasurements,
+        prompt: 'Set daily nutrition targets for me, but fail closed if the canonical measurement read is saturated.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          ...emptySafetyOutputs,
+          [measurementCommand, blockedProposal.measurements],
+        ],
+        expectedCommands: [...emptySafetyCommands, measurementCommand],
+        finalMessage: blockedProposal.finalMessage,
+        prompt: blockedProposal.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+    await runCase({
+      commandOutputs: emptySafetyOutputs,
+      expectedCommands: [...emptySafetyCommands, measurementCommand],
+      failedCommands: [measurementCommand],
+      finalMessage: 'I could not complete the current measurement safety check, so I left target setup unchanged.',
+      prompt: 'Set daily nutrition targets for me, but do not proceed if the canonical measurement read fails.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    for (const acceptance of [
+      {
+        finalMessage: 'I left the proposal paused and kept this non-numeric because your current measurements make these targets inappropriate.',
+        prompt: 'Yes, accept those nutrition targets.',
+      },
+      {
+        finalMessage: 'I left the proposal paused and did not attach the pending card because your current measurements make numeric guidance inappropriate.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          ...emptySafetyOutputs,
+          [measurementCommand, lowBmiMeasurements],
+        ],
+        expectedCommands: [...emptySafetyCommands, measurementCommand],
+        finalMessage: acceptance.finalMessage,
+        prompt: acceptance.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+        snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        ...emptySafetyOutputs,
+        [measurementCommand, normalBmiMeasurements],
+        [activeListCommand, noActiveGoalsList],
+        [allStatusGoalListCommand, noManagedGoalsList],
+        [proposalImportCommand, pausedGoal],
+        [pausedGoalShowCommand, pausedGoal],
+      ],
+      expectedCommands: [
+        ...emptySafetyCommands,
+        measurementCommand,
+        activeListCommand,
+        allStatusGoalListCommand,
+        proposalImportCommand,
+        pausedGoalShowCommand,
+      ],
+      finalMessage: 'Proposed for 2026-07-30: 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber. These are paused until you accept them.',
+      prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    await runCase({
+      card: eligibleCard,
+      commandOutputs: [
+        ...emptySafetyOutputs,
+        [measurementCommand, normalBmiMeasurements],
+        [activeListCommand, noActiveGoalsList],
+        [allStatusGoalListCommand, pausedManagedGoalList],
+        [activateGoalCommand, activeManagedGoal],
+        [pausedGoalShowCommand, activeManagedGoal],
+        [totalsCommand, canonicalTotals],
+      ],
+      expectedCommands: [
+        ...emptySafetyCommands,
+        measurementCommand,
+        activeListCommand,
+        allStatusGoalListCommand,
+        activateGoalCommand,
+        pausedGoalShowCommand,
+        totalsCommand,
+      ],
+      finalMessage: 'CARD_ATTACHED_AFTER_PRE_ACTIVATION_SAFETY',
+      prompt: 'Yes, accept the paused nutrition proposal and show the daily card I requested.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+      snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting acceptance for the pending 2026-07-30 card request.',
+    })
 
     await runCase({
       card: eligibleCard,
