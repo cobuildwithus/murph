@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -234,6 +234,119 @@ test.each([
       expect(bodyRead.items[0]).toMatchObject({
         date: '2026-08-09',
       })
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  },
+)
+
+test.each([
+  ['older first', ['2026-08-07', '2026-08-09']],
+  ['newer first', ['2026-08-09', '2026-08-07']],
+] as const)(
+  'floating Junction blood-pressure readings select the latest canonical day when imported %s',
+  async (_label, orderedDays) => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), 'junction-floating-pressure-days-'),
+    )
+    const vaultRoot = path.join(parentRoot, 'vault')
+    const queryProjectionPath = path.join(
+      vaultRoot,
+      '.runtime/projections/query.sqlite',
+    )
+    const sharedOccurredAt = '2026-08-10T00:00:00.000Z'
+
+    try {
+      await coreRuntime.initializeVault({
+        createdAt: '2026-08-01T00:00:00.000Z',
+        timezone: 'UTC',
+        vaultRoot,
+      })
+
+      await importDeviceProviderSnapshot(
+        {
+          provider: 'junction',
+          sourceKind: 'poll',
+          deliveryMode: 'scheduled_reconcile',
+          vaultRoot,
+          snapshot: {
+            accountId: 'junction-floating-pressure-account',
+            importedAt: sharedOccurredAt,
+            windowEnd: sharedOccurredAt,
+            summaries: {},
+            timeseries: {
+              blood_pressure: orderedDays.map((day) => ({
+                id: `omron-pressure-${day}`,
+                sourceProviderSlug: 'omron',
+                localDate: day,
+                timestamp: `${day} 08:00:00`,
+                timestampSemantics: 'floating',
+                systolic: day === '2026-08-09' ? 129 : 117,
+                diastolic: day === '2026-08-09' ? 84 : 75,
+              })),
+            },
+          },
+        },
+        { corePort: coreRuntime },
+      )
+
+      const canonicalRecords = await coreRuntime.readJsonlRecords({
+        vaultRoot,
+        relativePath: 'ledger/events/2026/2026-08.jsonl',
+      })
+      const pressureRecords = canonicalRecords.filter((record) =>
+        record.kind === 'measurement'
+        && record.title === 'Junction blood pressure'
+      )
+      expect(pressureRecords).toHaveLength(2)
+      expect(pressureRecords.map((record) => record.occurredAt))
+        .toEqual([sharedOccurredAt, sharedOccurredAt])
+
+      const availability = await coreRuntime
+        .readCanonicalEventAvailabilityInterruptible({ vaultRoot })
+      expect(availability).toMatchObject({
+        latestBloodPressureMeasurementDayKey: '2026-08-09',
+        latestBloodPressureMeasurementOccurredAt: sharedOccurredAt,
+      })
+      await expect(access(queryProjectionPath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+
+      const measurementRead = await listMeasurementRecords({
+        from: availability.latestBloodPressureMeasurementDayKey ?? undefined,
+        limit: 100,
+        to: availability.latestBloodPressureMeasurementDayKey ?? undefined,
+        vault: vaultRoot,
+      })
+      expect(measurementRead).toMatchObject({
+        count: 1,
+        items: [{ data: { dayKey: '2026-08-09' } }],
+      })
+      const selected = measurementRead.items[0]
+      expect(selected).toBeDefined()
+      if (!selected) {
+        throw new Error('Expected the latest canonical pressure event.')
+      }
+      await expect(showMeasurementRecord(vaultRoot, selected.id))
+        .resolves.toMatchObject({
+          entity: {
+            data: {
+              measurements: expect.arrayContaining([
+                expect.objectContaining({
+                  metric: 'systolic-blood-pressure',
+                  value: 129,
+                }),
+                expect.objectContaining({
+                  metric: 'diastolic-blood-pressure',
+                  value: 84,
+                }),
+              ]),
+            },
+          },
+        })
     } finally {
       await rm(parentRoot, {
         force: true,

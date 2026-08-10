@@ -146,11 +146,6 @@ const CANONICAL_BODY_MEASUREMENT_METRIC_KEYS = new Set([
   "waistCircumference",
   "weightKg",
 ]);
-const CANONICAL_BODY_MEASUREMENT_TYPES = new Set([
-  "body_fat_pct",
-  "waist",
-  "weight",
-]);
 const STORED_DAY_GRAIN_OBSERVATION_ALIASES = new Set([
   "day",
   "daily-summary",
@@ -1452,16 +1447,11 @@ export async function readCanonicalEventAvailabilityInterruptible(
     }
     if (
       canonicalEventContainsBodyMeasurement(record, providerBodyObservation)
-      && (
-        latestBodyMeasurementOccurredAt === null
-        || record.occurredAt > latestBodyMeasurementOccurredAt
-        || (
-          record.occurredAt === latestBodyMeasurementOccurredAt
-          && (
-            latestBodyMeasurementDayKey === null
-            || record.dayKey > latestBodyMeasurementDayKey
-          )
-        )
+      && isLaterCanonicalAvailabilityEvent(
+        record.occurredAt,
+        record.dayKey,
+        latestBodyMeasurementOccurredAt,
+        latestBodyMeasurementDayKey,
       )
     ) {
       latestBodyMeasurementOccurredAt = record.occurredAt;
@@ -1469,9 +1459,11 @@ export async function readCanonicalEventAvailabilityInterruptible(
     }
     if (
       canonicalEventContainsPairedBloodPressure(record)
-      && (
-        latestBloodPressureMeasurementOccurredAt === null
-        || record.occurredAt > latestBloodPressureMeasurementOccurredAt
+      && isLaterCanonicalAvailabilityEvent(
+        record.occurredAt,
+        record.dayKey,
+        latestBloodPressureMeasurementOccurredAt,
+        latestBloodPressureMeasurementDayKey,
       )
     ) {
       latestBloodPressureMeasurementOccurredAt = record.occurredAt;
@@ -1494,13 +1486,11 @@ function canonicalEventContainsBodyMeasurement(
   providerBodyObservation = false,
 ): boolean {
   if (record.kind === "observation") {
-    const normalizedMetric = normalizeWearableMetricValue(
+    return isReadableCanonicalBodyMeasurement(
       record.metric,
       record.value,
       record.unit,
-    );
-    return normalizedMetric !== null
-      && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(normalizedMetric.key)
+    )
       && (providerBodyObservation || record.externalRef !== undefined)
       && (
         record.observationGrain === undefined
@@ -1509,15 +1499,47 @@ function canonicalEventContainsBodyMeasurement(
   }
   if (record.kind === "measurement") {
     return record.measurements.some((measurement) =>
-      isCanonicalBodyMeasurementMetric(measurement.metric)
+      isReadableCanonicalBodyMeasurement(
+        measurement.metric,
+        measurement.value,
+        measurement.unit,
+      )
     );
   }
   if (record.kind === "body_measurement") {
     return record.measurements.some((measurement) =>
-      CANONICAL_BODY_MEASUREMENT_TYPES.has(measurement.type)
+      isReadableCanonicalBodyMeasurement(
+        measurement.type.replace(/_/gu, "-"),
+        measurement.value,
+        measurement.unit,
+      )
     );
   }
   return false;
+}
+
+function isReadableCanonicalBodyMeasurement(
+  metric: string,
+  value: number,
+  unit: string | null | undefined,
+): boolean {
+  const normalizedMetric = normalizeWearableMetricValue(metric, value, unit);
+  return normalizedMetric !== null
+    && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(normalizedMetric.key);
+}
+
+function isLaterCanonicalAvailabilityEvent(
+  occurredAt: string,
+  dayKey: string,
+  latestOccurredAt: string | null,
+  latestDayKey: string | null,
+): boolean {
+  return latestOccurredAt === null
+    || occurredAt > latestOccurredAt
+    || (
+      occurredAt === latestOccurredAt
+      && (latestDayKey === null || dayKey > latestDayKey)
+    );
 }
 
 function parseStoredAvailabilitySpineRecord(

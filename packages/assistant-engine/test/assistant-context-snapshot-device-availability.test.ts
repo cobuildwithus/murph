@@ -209,6 +209,126 @@ describe('assistant context snapshot device availability', () => {
     ['older first', ['2026-08-07', '2026-08-09']],
     ['newer first', ['2026-08-09', '2026-08-07']],
   ] as const)(
+    'uses the latest canonical blood-pressure day when equal timestamps are stored %s',
+    async (_label, orderedDays) => {
+      const parentRoot = await mkdtemp(
+        path.join(tmpdir(), 'assistant-device-context-floating-pressure-'),
+      )
+      const vaultRoot = path.join(parentRoot, 'vault')
+      const queryProjectionPath = path.join(
+        vaultRoot,
+        '.runtime/projections/query.sqlite',
+      )
+
+      try {
+        await initializeVault({
+          createdAt: '2026-08-01T00:00:00.000Z',
+          vaultRoot,
+        })
+        for (const [index, dayKey] of orderedDays.entries()) {
+          const newerDay = dayKey === '2026-08-09'
+          await appendJsonlRecord({
+            vaultRoot,
+            relativePath: toMonthlyShardRelativePath(
+              VAULT_LAYOUT.eventLedgerDirectory,
+              '2026-08-10T00:00:00.000Z',
+              'occurredAt',
+            ),
+            record: {
+              dayKey,
+              externalRef: {
+                resourceId: `omron-pressure-${dayKey}`,
+                resourceType: 'junction-omron-blood-pressure',
+                system: 'junction',
+              },
+              id: index === 0
+                ? 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z4F1'
+                : 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z4F2',
+              kind: 'measurement',
+              measurements: [
+                {
+                  metric: 'systolic-blood-pressure',
+                  unit: 'mmHg',
+                  value: newerDay ? 129 : 117,
+                },
+                {
+                  metric: 'diastolic-blood-pressure',
+                  unit: 'mmHg',
+                  value: newerDay ? 84 : 75,
+                },
+              ],
+              occurredAt: '2026-08-10T00:00:00.000Z',
+              recordedAt: '2026-08-10T00:01:00.000Z',
+              schemaVersion: 'murph.event.v1',
+              source: 'device',
+              title: 'Junction blood pressure',
+            },
+          })
+        }
+        await markAssistantContextSnapshotDirty({
+          domains: ['blood_tests'],
+          vaultRoot,
+        })
+
+        await refreshAssistantContextSnapshot({ vaultRoot })
+        const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+        expect(prompt).toContain(
+          'Blood-pressure measurement history is present (latest 2026-08-09)',
+        )
+        expect(prompt).toContain(
+          'measurement list --from 2026-08-09 --to 2026-08-09',
+        )
+        expect(prompt).not.toContain('129')
+        expect(prompt).not.toContain('84')
+        await expect(access(queryProjectionPath)).rejects.toMatchObject({
+          code: 'ENOENT',
+        })
+
+        const measurementRead = await listMeasurementRecords({
+          from: '2026-08-09',
+          limit: 100,
+          to: '2026-08-09',
+          vault: vaultRoot,
+        })
+        expect(measurementRead).toMatchObject({
+          count: 1,
+          items: [{ data: { dayKey: '2026-08-09' } }],
+        })
+        const selected = measurementRead.items[0]
+        expect(selected).toBeDefined()
+        if (!selected) {
+          throw new Error('Expected the latest canonical pressure event.')
+        }
+        await expect(showMeasurementRecord(vaultRoot, selected.id))
+          .resolves.toMatchObject({
+            entity: {
+              data: {
+                measurements: expect.arrayContaining([
+                  expect.objectContaining({
+                    metric: 'systolic-blood-pressure',
+                    value: 129,
+                  }),
+                  expect.objectContaining({
+                    metric: 'diastolic-blood-pressure',
+                    value: 84,
+                  }),
+                ]),
+              },
+            },
+          })
+      } finally {
+        await rm(parentRoot, {
+          force: true,
+          recursive: true,
+        })
+      }
+    },
+  )
+
+  it.each([
+    ['older first', ['2026-08-07', '2026-08-09']],
+    ['newer first', ['2026-08-09', '2026-08-07']],
+  ] as const)(
     'uses the latest canonical body day when equal timestamps are stored %s',
     async (_label, orderedDays) => {
       const parentRoot = await mkdtemp(
@@ -393,6 +513,20 @@ describe('assistant context snapshot device availability', () => {
           }),
         })
       }
+      await addMeasurement({
+        vaultRoot,
+        draft: {
+          externalRef: {
+            resourceId: 'measurement-weight-stone',
+            resourceType: 'summary',
+            system: 'test-device',
+          },
+          occurredAt: '2026-08-10T09:00:00.000Z',
+          source: 'device',
+          title: 'Connected body weight',
+          measurements: [{ metric: 'weight', unit: 'stone', value: 12 }],
+        },
+      })
       await markAssistantContextSnapshotDirty({
         domains: ['blood_tests'],
         vaultRoot,
