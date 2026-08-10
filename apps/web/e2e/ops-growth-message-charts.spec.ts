@@ -89,9 +89,23 @@ for (const viewport of VIEWPORTS) {
     await expect(referralLinkUsage).toContainText(
       "Page views, copied links, and shares are not tracked here",
     );
+    await expect(referralLinkUsage).toContainText(
+      "Counts reflect retained records, so account deletion can remove a claim or its referral attribution from this view",
+    );
     await expect(referralLinkUsage).toContainText("Claim activation");
     await expect(referralChart).toHaveAccessibleName("Daily claim cohorts");
     await expect(referralLinkUsage.locator(".recharts-bar")).toHaveCount(2);
+
+    const emptyReferralLinkUsage = study.locator(
+      "#growth-referral-link-usage-empty",
+    );
+    await expect(emptyReferralLinkUsage).toContainText("N/A");
+    await expect(emptyReferralLinkUsage).toContainText("No claims in window");
+    await expect(
+      emptyReferralLinkUsage.locator(
+        '.recharts-surface[role="application"][tabindex="0"]',
+      ),
+    ).toHaveAccessibleName("Daily claim cohorts");
 
     const activityLines = chartCards.nth(0).locator(".recharts-line-curve");
     await expect(chartCards.nth(0)).toContainText(

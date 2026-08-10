@@ -52,7 +52,9 @@ export function ReferralLinkUsage(input: {
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           Last 30 UTC dates through capture. A use is counted when a recipient
           selects Join Murph and an attributed invite is created. Page views,
-          copied links, and shares are not tracked here.
+          copied links, and shares are not tracked here. Counts reflect retained
+          records, so account deletion can remove a claim or its referral
+          attribution from this view.
         </p>
       </div>
 

@@ -491,6 +491,55 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("counts only retained invite rows with retained referral attribution", () => {
+    const windowEnd = new Date("2026-07-31T12:00:00.000Z");
+    const retainedClaim = {
+      createdAt: new Date("2026-07-30T10:00:00.000Z"),
+      member: {
+        hostedMailboxItems: [{
+          occurredAt: new Date("2026-07-31T09:00:00.000Z"),
+        }],
+      },
+      referrerMemberId: "referrer_retained",
+    };
+
+    expect(buildHostedGrowthReferralLinkUsage({
+      claimRows: [retainedClaim],
+      dayCount: 2,
+      windowEnd,
+    })).toMatchObject({
+      activatedClaims: 1,
+      activationRatePercent: 100,
+      activeReferrers: 1,
+      claims: 1,
+    });
+
+    expect(buildHostedGrowthReferralLinkUsage({
+      claimRows: [],
+      dayCount: 2,
+      windowEnd,
+    })).toMatchObject({
+      activatedClaims: 0,
+      activationRatePercent: null,
+      activeReferrers: 0,
+      claims: 0,
+    });
+
+    expect(buildHostedGrowthReferralLinkUsage({
+      claimRows: [{
+        ...retainedClaim,
+        referrerMemberId: null,
+      }],
+      dayCount: 2,
+      windowEnd,
+    })).toMatchObject({
+      activatedClaims: 0,
+      activationRatePercent: null,
+      activeReferrers: 0,
+      claims: 0,
+    });
+  });
+
   it("reads referral claims by durable attribution rather than invite channel", async () => {
     const now = new Date("2026-07-31T12:00:00.000Z");
     queueCurrentMetricMocks();

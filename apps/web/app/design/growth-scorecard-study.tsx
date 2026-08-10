@@ -104,6 +104,17 @@ const REFERRAL_LINK_USAGE = {
   claims: REFERRAL_LINK_CLAIMS,
   dailySeries: REFERRAL_LINK_DAILY_SERIES,
 } satisfies HostedGrowthDashboard["referralLinkUsage"];
+const EMPTY_REFERRAL_LINK_USAGE = {
+  activatedClaims: 0,
+  activationRatePercent: null,
+  activeReferrers: 0,
+  claims: 0,
+  dailySeries: GROWTH_DATES.map((date) => ({
+    activatedClaims: 0,
+    claims: 0,
+    date,
+  })),
+} satisfies HostedGrowthDashboard["referralLinkUsage"];
 
 const SNAPSHOT_SERIES = GROWTH_DATES.map((date, index) => ({
   coveredMembers: 82 + index * 3,
@@ -390,6 +401,15 @@ export function GrowthScorecardStudy() {
         <ReferralLinkUsage
           titleId="design-growth-referral-link-usage-title"
           usage={REFERRAL_LINK_USAGE}
+        />
+      </div>
+      <div id="growth-referral-link-usage-empty">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Signup referral funnel · empty
+        </div>
+        <ReferralLinkUsage
+          titleId="design-growth-referral-link-usage-empty-title"
+          usage={EMPTY_REFERRAL_LINK_USAGE}
         />
       </div>
       <div id="growth-trial-start-attribution">

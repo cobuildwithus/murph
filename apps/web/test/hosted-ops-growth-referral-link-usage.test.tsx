@@ -27,6 +27,9 @@ describe("growth referral-link usage", () => {
     expect(markup).toContain(
       "Page views, copied links, and shares are not tracked here",
     );
+    expect(markup).toContain(
+      "Counts reflect retained records, so account deletion can remove a claim or its referral attribution from this view",
+    );
     expect(markup).toContain("Join Murph claims");
     expect(markup).toContain(">29<");
     expect(markup).toContain("Activated claims");

@@ -69,6 +69,11 @@ Updated: 2026-08-10
 3. Risk: The dashboard could expose member-level evidence.
    Mitigation: Return only aggregate counts and date buckets from the server
    read model.
+4. Risk: Account deletion can make a historical claim disappear or clear its
+   referral attribution, so the window is not an immutable event ledger.
+   Mitigation: Define the display as retained-record metrics, disclose the
+   deletion behavior in the UI, and cover both deletion owners plus the
+   aggregation boundary.
 
 ## Tasks
 
@@ -87,19 +92,30 @@ Updated: 2026-08-10
   coherent.
 - No persistence is added because the existing referral and activation owners
   already contain the required facts.
+- The counts describe retained records: introduced-member deletion removes the
+  invite row and referrer deletion clears `referrerMemberId`, so either action
+  can reduce historical totals.
 
 ## Verification
 
-- Focused Growth metrics and component Vitest suites: passed, 52 tests.
+- Focused Growth metrics, component, account-deletion, and referral-migration
+  Vitest suites: passed, 151 tests.
 - `pnpm --dir apps/web lint`: passed with 37 pre-existing warnings in unrelated
   files and no errors.
 - `pnpm --dir apps/web typecheck`: passed.
 - `pnpm test:frontend-design-proof`: passed, 10 tests.
-- Focused Growth Playwright suite: passed at desktop and mobile viewports, 2
-  tests, including keyboard tooltip and focus treatment.
-- Repository Playwright capture against `/design?tab=sections`: passed at
-  desktop and mobile viewports; both captures were visually inspected for
-  hierarchy, legibility, overflow, and series identification.
+- Focused Growth Playwright plus repository capture: passed at desktop and
+  mobile viewports, 6 tests, including populated and zero-claim states,
+  keyboard tooltip, and focus treatment.
+- Four repository Playwright captures against `/design?tab=sections` were
+  visually inspected for hierarchy, legibility, overflow, series
+  identification, and absence of development chrome.
 - Claude Code UI double-check: Fable and the required Opus fallback could not
   start because the `claude` executable is unavailable in this environment; no
   second-model UI verdict is claimed.
+- Preliminary specialist review: invalid because the first evidence package
+  omitted the zero-claim rendered state; the missing desktop/mobile evidence is
+  now captured and the same pass must be retried.
+- Final ReviewGPT round 1: one accepted finding that deletion can rewrite
+  historical cohorts. The retained-record disclosure and focused deletion/FK
+  regression coverage are implemented; substantive round 2 remains pending.
