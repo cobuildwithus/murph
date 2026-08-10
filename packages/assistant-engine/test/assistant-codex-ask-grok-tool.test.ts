@@ -96,11 +96,16 @@ describe('murph.ask_grok availability and framing', () => {
   })
 
   it('tells the model the answer is untrusted, unverified, and must be attributed', () => {
+    expect(MURPH_ASK_GROK_TOOL.description).toContain('images or videos')
     expect(MURPH_ASK_GROK_TOOL.description)
       .toContain('untrusted third-party content')
     expect(MURPH_ASK_GROK_TOOL.description).toContain('not independently verified')
     expect(MURPH_ASK_GROK_TOOL.description)
       .toContain('attribute what it reports to a live X search')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('those URLs are part of the requested deliverable')
+    expect(MURPH_ASK_GROK_TOOL.description)
+      .toContain('keep post text separate from media observations')
     expect(MURPH_ASK_GROK_TOOL.description).toContain('never claim a search happened')
   })
 })
@@ -117,9 +122,14 @@ describe('executeAskGrokTool', () => {
         model: 'grok-4.5',
         max_output_tokens: 2500,
         store: false,
-        tools: [{ type: 'x_search' }],
+        tools: [{
+          type: 'x_search',
+          enable_image_understanding: true,
+          enable_video_understanding: true,
+        }],
       })
       expect(body.input[0].role).toBe('developer')
+      expect(body.input[0].content).toContain('Inspect images and videos')
       expect(body.input[1]).toEqual({
         role: 'user',
         content: 'what is @acme posting about?',
@@ -153,6 +163,58 @@ describe('executeAskGrokTool', () => {
     expect(result.rpcText).toContain('First line\nSecond line')
     expect(result.rpcText).not.toContain('')
     expect(result.rpcText).not.toContain('‮')
+  })
+
+  it('keeps bounded X post citations when the answer prose omits them', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      citations: [
+        'https://x.com/i/status/2000000000000000002',
+        'https://example.com/not-an-x-post',
+      ],
+      output: [{
+        type: 'message',
+        role: 'assistant',
+        content: [{
+          type: 'output_text',
+          text: 'The video shows a runner crossing the finish line.',
+          annotations: [
+            { type: 'url_citation', url: 'https://x.com/example/status/2000000000000000001' },
+            { type: 'url_citation', url: 'https://x.com/example/status/2000000000000000001' },
+          ],
+        }],
+      }],
+      status: 'completed',
+    })))
+
+    const result = await executeAskGrokTool({
+      args: { question: 'what does the video show?' },
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText).toContain('X posts Grok inspected:')
+    expect(result.rpcText).toContain('https://x.com/example/status/2000000000000000001')
+    expect(result.rpcText).toContain('https://x.com/i/status/2000000000000000002')
+    expect(result.rpcText).not.toContain('https://example.com/not-an-x-post')
+    expect(result.rpcText.match(/2000000000000000001/gu)).toHaveLength(1)
+  })
+
+  it('does not promote a requested X post URL into provider evidence', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerPayload('I could not inspect that post.'),
+    )
+
+    const result = await executeAskGrokTool({
+      args: {
+        question: 'inspect https://x.com/example/status/2000000000000000003',
+      },
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText).toContain('I could not inspect that post.')
+    expect(result.rpcText).not.toContain('X posts Grok inspected:')
+    expect(result.rpcText).not.toContain('https://x.com/example/status/2000000000000000003')
   })
 
   it('bounds a long answer so one call cannot flood thread context', async () => {
@@ -318,7 +380,11 @@ describe('executeAskGrokTool', () => {
       { expected: 'unavailable', response: () => new Response('', { status: 503 }) },
       {
         expected: 'no answer',
-        response: () => new Response(JSON.stringify({ status: 'completed', output: [] }), {
+        response: () => new Response(JSON.stringify({
+          citations: ['https://x.com/example/status/2000000000000000004'],
+          status: 'completed',
+          output: [],
+        }), {
           headers: { 'content-type': 'application/json' },
         }),
       },
