@@ -8,6 +8,10 @@ import { readOptionalJsonObject } from "@/src/lib/http";
 import {
   requireHostedCompanionMemberIdFromRequest,
 } from "@/src/lib/hosted-onboarding/companion-member-access";
+import {
+  assertActiveHostedMemberAccessAllowed,
+  readActiveHostedMemberAccess,
+} from "@/src/lib/hosted-onboarding/member-access";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -36,11 +40,16 @@ export const POST = withJsonError(async (request: Request) => {
     request,
     ...(timeZone ? { timeZone } : {}),
   });
+  const activeAccess = await readActiveHostedMemberAccess({ memberId, prisma });
+  if (connectionIntent === "connect") {
+    await assertActiveHostedMemberAccessAllowed({ memberId, prisma });
+  }
   const publicIngress = createHostedDeviceSyncPublicIngressService(request);
   const session = await publicIngress.createSdkSignInSession(
     memberId,
     COMPANION_DEVICE_SYNC_PROVIDER,
     connectionIntent,
+    { allowConnectionMutation: activeAccess },
   );
 
   return jsonOk({

@@ -1654,6 +1654,88 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
   });
 
+  it("admits only paused companion system lag and suppresses model-capable work", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "paused",
+    }));
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
+      billingStatus: "paused",
+    }));
+    mocks.hostedConsentGrantFindUnique.mockResolvedValue({
+      scope: "launch.health-data",
+      status: "granted",
+    });
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: FIXED_NOW,
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant_due",
+      redactedStatusJson: {
+        conversationImportedSeq: "0",
+        systemImportedSeq: "16",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "33" },
+    ]);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts).toEqual({
+      blocked: null,
+      mailboxLag: [{
+        importedSeq: "16",
+        lag: "17",
+        lane: "system",
+        maxSeq: "33",
+      }],
+      workspace: {
+        inboxMediaRetentionWakeAt: null,
+        nextWakeAt: null,
+        nextWakeReason: null,
+        version: "4",
+      },
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxConsumedSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).not.toHaveBeenCalled();
+  });
+
+  it("keeps paused companion conversation-only lag behind active access", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "paused",
+    }));
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
+      billingStatus: "paused",
+    }));
+    mocks.hostedConsentGrantFindUnique.mockResolvedValue({
+      scope: "launch.health-data",
+      status: "granted",
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "1" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "user_not_active",
+      retryAt: null,
+    });
+    expect(facts.mailboxLag).toEqual([]);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
   it("blocks inactive members while preserving workspace facts", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "paused",

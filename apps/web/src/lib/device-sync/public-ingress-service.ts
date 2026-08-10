@@ -289,8 +289,12 @@ export class HostedDeviceSyncPublicIngressService {
     userId: string,
     provider: string,
     connectionIntent: CompanionConnectionIntent | null,
+    options: { allowConnectionMutation?: boolean } = {},
   ): Promise<SdkSignInSessionResult> {
     if (connectionIntent === "connect") {
+      if (options.allowConnectionMutation === false) {
+        throw companionSdkReconnectRequiredError();
+      }
       const providerConnections = (await this.context.store.listConnectionsForUser(userId))
         .filter((connection) =>
           connection.provider === provider
@@ -370,19 +374,18 @@ export class HostedDeviceSyncPublicIngressService {
     // Older clients did not send an intent. Preserve their first connection,
     // but never interpret missing local state as authority to clear a durable
     // disconnect or other terminal server state.
-    if (connectionIntent === null && providerConnections.length === 0) {
+    if (
+      connectionIntent === null
+      && providerConnections.length === 0
+      && options.allowConnectionMutation !== false
+    ) {
       return this.ingress.createSdkSignInSession({
         provider,
         ownerId: userId,
       });
     }
 
-    throw deviceSyncError({
-      code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
-      message: "Reconnect the device-sync provider before resuming SDK sign-in.",
-      retryable: false,
-      httpStatus: 409,
-    });
+    throw companionSdkReconnectRequiredError();
   }
 
   async discardConnectionCallback(provider: string): Promise<void> {
@@ -648,6 +651,15 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+}
+
+function companionSdkReconnectRequiredError(): Error {
+  return deviceSyncError({
+    code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+    message: "Reconnect the device-sync provider before resuming SDK sign-in.",
+    retryable: false,
+    httpStatus: 409,
+  });
 }
 
 function buildPreparedSourceLifecycleKey(

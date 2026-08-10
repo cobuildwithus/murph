@@ -32,6 +32,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-card-handoff", () => ({
+  MURPH_CONTACT_CARD_NATIVE_COMPANION_SESSION_ID: "native-companion",
   issueMurphContactCardHandoffClaim: mocks.issueMurphContactCardHandoffClaim,
 }));
 

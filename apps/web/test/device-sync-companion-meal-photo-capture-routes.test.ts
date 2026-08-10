@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   appendHostedMealPhotoMailboxEnvelopeTx: vi.fn(),
   assertCurrentMealPhotoCaptureEnrollmentTx: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
+  assertMealPhotoCaptureActiveHostedMemberAccessAllowed: vi.fn(),
   assertMealPhotoCaptureRequestHasNoBody: vi.fn(),
   buildHostedExecutionMealPhotoCapturedWake: vi.fn(),
   deleteMealPhoto: vi.fn(),
@@ -24,7 +25,6 @@ const mocks = vi.hoisted(() => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readHostedMailboxWakeAfterDedupeLockTx: vi.fn(),
   requireActiveMealPhotoCaptureEnrollment: vi.fn(),
-  requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
   requireMealPhotoCaptureScopedToken: vi.fn(),
   requirePrivyMemberAuthFromBearerToken: vi.fn(),
   revokeMealPhotoCaptureEnrollmentForMember: vi.fn(),
@@ -44,6 +44,8 @@ vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
     mocks.activateMealPhotoCaptureEnrollmentForScopedToken,
   assertCurrentMealPhotoCaptureEnrollmentTx:
     mocks.assertCurrentMealPhotoCaptureEnrollmentTx,
+  assertMealPhotoCaptureActiveHostedMemberAccessAllowed:
+    mocks.assertMealPhotoCaptureActiveHostedMemberAccessAllowed,
   assertMealPhotoCaptureRequestHasNoBody: mocks.assertMealPhotoCaptureRequestHasNoBody,
   isMealPhotoCaptureScopedAuthorization: mocks.isMealPhotoCaptureScopedAuthorization,
   issueMealPhotoCaptureEnrollment: mocks.issueMealPhotoCaptureEnrollment,
@@ -59,8 +61,6 @@ vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuthFromBearerToken:
-    mocks.requireActivePrivyMemberAuthFromBearerToken,
   requirePrivyMemberAuthFromBearerToken: mocks.requirePrivyMemberAuthFromBearerToken,
 }));
 
@@ -129,12 +129,10 @@ describe("meal photo companion routes", () => {
     mocks.transaction.mockImplementation(
       async (operation: (tx: { label: string }) => unknown) => operation({ label: "tx" }),
     );
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
-      member: { id: MEMBER_ID },
-    });
     mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: MEMBER_ID },
     });
+    mocks.assertMealPhotoCaptureActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.readCurrentHostedMemberDirectRoute.mockResolvedValue({
       channel: "linq",
@@ -210,7 +208,7 @@ describe("meal photo companion routes", () => {
     };
   }
 
-  it("enrolls after active Privy auth and historical launch consent", async () => {
+  it("enrolls after Privy auth, active feature access, and historical launch consent", async () => {
     const request = jsonRequest("https://app.example.test/enrollment", ENROLLMENT_REQUEST);
     const response = await enrollmentRoute.POST(request);
 
@@ -220,10 +218,14 @@ describe("meal photo companion routes", () => {
       idempotencySecret: "idempotency-secret",
       uploadToken: "scoped-upload-token",
     });
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       expect.anything(),
     );
+    expect(mocks.assertMealPhotoCaptureActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.anything(),
+    });
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.anything(),
@@ -321,11 +323,11 @@ describe("meal photo companion routes", () => {
   });
 
   it("keeps paid enrollment denial feature-scoped for paused companion sessions", async () => {
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockRejectedValueOnce(
+    mocks.assertMealPhotoCaptureActiveHostedMemberAccessAllowed.mockRejectedValueOnce(
       hostedOnboardingError({
-        code: "HOSTED_ACCESS_REQUIRED",
-        httpStatus: 403,
-        message: "Your subscription is paused. Resume billing before continuing.",
+        code: "MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED",
+        httpStatus: 409,
+        message: "Active Murph access is required for automatic meal capture.",
       }),
     );
 
@@ -343,6 +345,25 @@ describe("meal photo companion routes", () => {
     });
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
     expect(mocks.issueMealPhotoCaptureEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("preserves canonical inactive-access denial for non-paused billing", async () => {
+    mocks.assertMealPhotoCaptureActiveHostedMemberAccessAllowed.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_ACCESS_REQUIRED",
+        httpStatus: 403,
+        message: "Start or resume Murph access before continuing.",
+      }),
+    );
+
+    const response = await enrollmentRoute.POST(
+      jsonRequest("https://app.example.test/enrollment", ENROLLMENT_REQUEST),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "HOSTED_ACCESS_REQUIRED" },
+    });
   });
 
   it("requires an existing private Murph delivery route before enrollment", async () => {
@@ -430,9 +451,9 @@ describe("meal photo companion routes", () => {
   it("keeps paid activation denial feature-scoped for paused companion sessions", async () => {
     mocks.activateMealPhotoCaptureEnrollmentForScopedToken.mockRejectedValueOnce(
       hostedOnboardingError({
-        code: "HOSTED_ACCESS_REQUIRED",
-        httpStatus: 403,
-        message: "Your subscription is paused. Resume billing before continuing.",
+        code: "MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED",
+        httpStatus: 409,
+        message: "Active Murph access is required for automatic meal capture.",
       }),
     );
     const request = new Request("https://app.example.test/enrollment", {
@@ -464,7 +485,6 @@ describe("meal photo companion routes", () => {
       request,
       expect.anything(),
     );
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.revokeMealPhotoCaptureEnrollmentForMember).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.anything(),

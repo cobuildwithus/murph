@@ -38,6 +38,15 @@ Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
 
+Native companion access remains available to a non-suspended member while their
+own billing is paused, but it does not grant connection lifecycle mutation or
+assistant work. Existing Junction sessions may resume only when exactly one
+established connection exists. Accepted companion health ingress wakes only the
+deterministic system-mailbox lane; reconciliation hides conversation/default
+work and blocks again when that system backlog is empty. This is a Web contract
+consumed by current native clients and uses the existing Cloudflare/runtime
+processing mode, so it does not require a native or Cloudflare release.
+
 Accessible auth completion routes to `/home`, which reads the member-owned
 onboarding completion state on every load. Pending members with a resolved text
 contact see the contact-card picker first and then the production four-step Murph

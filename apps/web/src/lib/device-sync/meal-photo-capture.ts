@@ -10,8 +10,14 @@ import {
   openHostedUserSecureBoxString,
   sealHostedUserSecureBoxString,
 } from "../hosted-crypto/secure-box";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
+import {
+  assertActiveHostedMemberAccessAllowed,
+  readHostedCompanionMemberAccess,
+} from "../hosted-onboarding/member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
@@ -164,6 +170,28 @@ export interface ValidatedMealPhotoUpload {
   height: number;
   sha256: string;
   width: number;
+}
+
+export async function assertMealPhotoCaptureActiveHostedMemberAccessAllowed(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<void> {
+  try {
+    await assertActiveHostedMemberAccessAllowed(input);
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_ACCESS_REQUIRED"
+      && await readHostedCompanionMemberAccess(input)
+    ) {
+      throw hostedOnboardingError({
+        code: "MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED",
+        httpStatus: 409,
+        message: "Active Murph access is required for automatic meal capture.",
+      });
+    }
+    throw error;
+  }
 }
 
 export function parseMealPhotoCaptureEnrollmentRequest(
@@ -508,7 +536,7 @@ export async function activateMealPhotoCaptureEnrollmentForScopedToken(input: {
       memberId: current.memberId,
       prisma: tx,
     });
-    await assertActiveHostedMemberAccessAllowed({
+    await assertMealPhotoCaptureActiveHostedMemberAccessAllowed({
       memberId: current.memberId,
       prisma: tx,
     });

@@ -1,5 +1,6 @@
 import {
   issueMurphContactCardHandoffClaim,
+  MURPH_CONTACT_CARD_NATIVE_COMPANION_SESSION_ID,
 } from "@/src/lib/hosted-onboarding/contact-card-handoff";
 import { hostedOnboardingError } from
   "@/src/lib/hosted-onboarding/errors";
@@ -33,7 +34,7 @@ export const POST = withJsonError(async (request: Request) => {
   const handoff = issueMurphContactCardHandoffClaim({
     avatarId,
     memberId: auth.member.id,
-    sessionId: "native-companion",
+    sessionId: MURPH_CONTACT_CARD_NATIVE_COMPANION_SESSION_ID,
   });
   const url = new URL(
     "/api/murph-contact-card",

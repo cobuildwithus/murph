@@ -1,6 +1,7 @@
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import {
   issueMurphContactCardHandoffClaim,
+  MURPH_CONTACT_CARD_NATIVE_COMPANION_SESSION_ID,
   requireMurphContactCardHandoffClaim,
 } from "@/src/lib/hosted-onboarding/contact-card-handoff";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -26,7 +27,10 @@ import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "@/src/lib/hosted-onboarding/logging";
-import { assertActiveHostedMemberAccessAllowed } from "@/src/lib/hosted-onboarding/member-access";
+import {
+  assertActiveHostedMemberAccessAllowed,
+  assertHostedCompanionMemberAccessAllowed,
+} from "@/src/lib/hosted-onboarding/member-access";
 import { detectInAppBrowser } from "@/src/lib/in-app-browser";
 import {
   DEFAULT_MURPH_CONTACT_AVATAR_ID,
@@ -160,7 +164,11 @@ async function requireMurphContactCardAuthority(input: {
   const handoff = input.url.searchParams.get("handoff");
   if (handoff !== null) {
     const claim = requireMurphContactCardHandoffClaim(handoff);
-    await assertActiveHostedMemberAccessAllowed({ memberId: claim.memberId });
+    if (claim.sessionId === MURPH_CONTACT_CARD_NATIVE_COMPANION_SESSION_ID) {
+      await assertHostedCompanionMemberAccessAllowed({ memberId: claim.memberId });
+    } else {
+      await assertActiveHostedMemberAccessAllowed({ memberId: claim.memberId });
+    }
     return {
       avatar: findMurphContactAvatarOption(claim.avatarId),
       memberId: claim.memberId,

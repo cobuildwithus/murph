@@ -559,11 +559,26 @@ Last verified: 2026-08-09
   meal-photo capture authority, browser billing authority, or any other paid
   product access. Administrative suspension, identity binding, historical
   launch consent, and device lifecycle authority remain independent fail-closed
-  checks.
+  checks. Paused companion access may resume exactly one established Junction
+  connection, but it may not run explicit `connect`, create a missing provider
+  row for a legacy omitted-intent request, reconnect terminal state, or otherwise
+  mutate connection lifecycle. A signed contact-card handoff carries the exact
+  server-owned native-companion session marker; only that HMAC-bound claim may
+  redeem through companion access, while Web-session handoffs and ambient app
+  sessions retain active access.
+- Paused companion device-sync ingress may wake the existing hosted runtime only
+  through a system-lane mailbox pointer after companion access and historical
+  launch consent are rechecked. Reconciliation exposes only pending system lag,
+  removes conversation lag and workspace wake authority, and blocks again once
+  that deterministic backlog drains. The existing `system_mailbox` invocation
+  remains model-free, Web projects `platformAiUsageAllowed: false`, and the
+  write-fence provider-egress guard remains the final fail-closed boundary.
 - Automatic meal-photo enrollment, activation, and upload retain active paid
-  access. Enrollment and activation translate only the canonical inactive-
-  access failure into the feature-scoped
-  `MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED` conflict, preventing an optional
+  access. Enrollment and activation translate the canonical inactive-access
+  failure into the feature-scoped error only when the same member still
+  satisfies paused companion access. Canceled, unpaid, suspended, and other
+  inactive states keep their canonical account errors. The paused-only
+  `MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED` conflict prevents an optional
   paid feature from masquerading as whole-account loss in released companion
   clients without issuing a credential or weakening upload admission.
 - Native iOS and Android device-sync routes under `/api/device-sync/companion/**` normally authenticate with a Privy identity token in `Authorization: Bearer` (no cookie fallback, so no browser ambient authority or CSRF surface). The sign-in contract accepts only `platform: "ios" | "android"` when supplied. The Messages enrollment route follows the bearer rule, then mints a 24-hour Messages-only bearer; the revoke and proof-action routes are the only companion exceptions that accept that derived scope. The one pre-login exception, `POST /api/device-sync/companion/auth-diagnostics`, accepts only an allowlisted, size-bounded failure envelope containing app-owned categories, an optional closed platform value that defaults to iOS for legacy clients, and an optional Murph-recognized Privy auth machine code; unsupported provider codes become `null`. It writes one structured hosted warning, has no database or object-storage sink, and must never retain or log raw provider prose, email, phone, OTP, tokens, authorization headers, member/user ids, or health data. Treat its telemetry as spoofable rather than audit evidence; a bundled mobile secret is not an attestation boundary because it can be extracted and replayed. Production keeps this route hidden unless `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`, and the production build must use explicit Vercel API credentials to prove the enabled WAF rule is the first active custom rule, matches only this exact path, and caps requests at 30 per minute per IP with a fixed window. The Junction SDK sign-in token authenticated routes mint is short-lived, returned exactly once, and must never be logged or persisted. Only a visible Android Connect Health Connect action or explicit hosted reconnect may send `connect` and run the account-ensure step, which must reuse the shared device-sync `upsertConnection` external-account identity discipline so SDK and Junction Link flows always share one `device_connection`; passive `resume`, omitted-intent reconciliation, foreground return, and data ingress may not ensure or reactivate a row. Source-scoped status accepts only a normalized Junction provider slug and filters both connected-source availability and durable webhook receipts. A receipt may store `sourceProviderSlug` only when the provider-owned webhook parser identifies an actual data-bearing source; data-less historical completions, lifecycle events, and legacy rows keep it null and cannot satisfy a source-scoped read. The junction client's API-key-prefix/environment validation is the sandbox/production separation authority, and the response surfaces the active environment.

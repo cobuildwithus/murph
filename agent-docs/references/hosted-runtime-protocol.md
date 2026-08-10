@@ -489,6 +489,12 @@ replacement path. It must start a default-mode child rather than coalescing the
 wake because system-mailbox mode imports only system work and returns before
 assistant admission. A system-mailbox request behind an active default runtime
 remains deferred and cannot broaden that child's admission authority.
+The Web-owned paused-companion exception can select this mode only from pending
+device-sync system-lane lag after companion access and historical consent are
+rechecked. Its reconciliation projection omits conversation lag and every
+workspace wake, and the workspace read projects managed AI usage denied. The
+mode therefore cannot enter assistant admission, and the bound fence continues
+to reject metered provider egress if an unexpected path reaches it.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because

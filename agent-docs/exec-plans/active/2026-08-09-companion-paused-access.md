@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -29,8 +29,10 @@ Updated: 2026-08-09
 ## Scope
 
 - In scope: the companion-specific member-access predicate, bearer-auth helper,
-  native launch/sync route wiring, focused tests, and durable companion access
-  documentation, plus feature-scoped mapping for paid meal-photo setup denial.
+  native launch/sync route wiring, contact-card handoff redemption, deterministic
+  device-sync system-mailbox consumption, focused tests, and durable companion
+  access documentation, plus feature-scoped mapping for paused meal-photo setup
+  denial.
 - Out of scope: canonical assistant/runtime entitlement, browser billing
   recovery, Stripe state, native client code, and paid meal-photo capture
   authority.
@@ -56,14 +58,27 @@ Updated: 2026-08-09
 3. Risk: paused access bypasses suspension or health-data consent.
    Mitigation: preserve the existing suspension assertion and route-local
    consent checks, with negative regression cases.
+4. Risk: accepted health ingress remains staged because the hosted runtime is
+   active-access gated, or relaxing that gate admits model-capable work.
+   Mitigation: admit only pending system-lane lag after companion access,
+   historical launch consent, and health-data consent checks; remove
+   conversation and workspace wake authority and retain the existing model-free
+   system-mailbox mode and provider-egress fence.
+5. Risk: a native signed contact-card handoff still fails at the browser
+   redemption boundary.
+   Mitigation: bind companion redemption to the exact HMAC-signed, server-owned
+   native session marker; retain active access for every other handoff and
+   ambient browser session.
 
 ## Tasks
 
 1. Add the narrow paused-companion access derivation and bearer-auth wrapper.
 2. Route mandatory companion launch and health-sync endpoints through it.
-3. Add focused access and route regressions; update the durable companion
+3. Preserve connection lifecycle, contact-card, meal-photo, and hosted-runtime
+   boundaries while completing the released-client journey.
+4. Add focused access and route regressions; update the durable companion
    architecture/security contract.
-4. Run focused verification, commit and push the exact candidate, open the PR,
+5. Run focused verification, commit and push the exact candidate, open the PR,
    and complete preliminary specialist ReviewGPT, final ReviewGPT, and CI.
 
 ## Decisions
@@ -73,13 +88,40 @@ Updated: 2026-08-09
 - Keep meal-photo capture enrollment and upload on active paid access because
   they can authorize assistant/model processing and are not required to open
   or sync the companion.
+- A paused member may resume exactly one established Junction connection. An
+  explicit connect and a legacy omitted-intent request with no provider row
+  remain lifecycle mutations and fail closed.
+- Map inactive meal-photo enrollment/activation to the feature-scoped conflict
+  only when that member independently satisfies paused companion access.
+  Canceled, unpaid, suspended, and other inactive states retain the canonical
+  account-level access response.
+- Process accepted paused health ingress only through the existing
+  `system_mailbox` runtime mode. Reconciliation exposes system lag alone and
+  removes conversation/default/workspace wake authority, so no assistant or
+  model admission is opened.
+- The native repository has no release tag or other durable mapping from the
+  App Store binary to a source commit. Compatibility is therefore based on the
+  unchanged HTTP shapes plus inspection of the current native resume/connect
+  and error contracts; do not claim exact released-binary/source identity.
 
 ## Verification
 
-- Passed: focused Vitest suites for companion member access, bearer auth,
-  admission, sign-in token, onboarding, status, health-data ingress, and
-  meal-photo paid-boundary mapping (5 files, 172 tests).
-- Passed: `pnpm --dir apps/web typecheck`.
+- Passed: focused Vitest suites for companion access, bearer auth, admission,
+  sign-in token, onboarding, status, health ingress, connection lifecycle,
+  contact-card redemption, meal-photo paid-boundary mapping, runtime signal,
+  and reconciliation (8 files, 371 tests).
+- Passed after the final reconciliation tightening: focused reconciliation
+  facts suite (1 file, 46 tests).
+- Passed: `pnpm --dir apps/web typecheck:prepared`.
+- Passed: ESLint over every changed Web TypeScript file.
+- Passed: focused Cloudflare runner identity/egress-fence proof (2 files,
+  3 selected tests) and assistant-runtime system-mailbox proof (1 selected
+  test).
 - Passed: `git diff --check` and changed-line direct-identifier review; only
   pre-existing synthetic fixtures appeared in whole-file scanning.
-- Required exact-head GitHub Actions and both ReviewGPT stages.
+- Passed on the first reviewed head: exact-head GitHub Actions, preliminary
+  specialist ReviewGPT, and final ReviewGPT round 1. Accepted round-1 findings
+  produced the lifecycle, contact-card, meal mapping, and deterministic runtime
+  remediations above.
+- Required after remediation: final ReviewGPT round 2 and exact-head GitHub
+  Actions.

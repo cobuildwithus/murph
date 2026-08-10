@@ -967,6 +967,46 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
   });
 
+  it("does not create a first connection when the caller lacks lifecycle-mutation access", async () => {
+    mocks.listConnectionsForUser.mockResolvedValueOnce([]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", null, {
+        allowConnectionMutation: false,
+      }),
+    ).rejects.toMatchObject({
+      code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects explicit connect before reading or changing lifecycle state when mutation is denied", async () => {
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", "connect", {
+        allowConnectionMutation: false,
+      }),
+    ).rejects.toMatchObject({
+      code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+  });
+
   it("rejects explicit resume when no provider row exists without ensuring one", async () => {
     mocks.listConnectionsForUser.mockResolvedValueOnce([]);
     const ingress = createHostedDeviceSyncPublicIngressService(

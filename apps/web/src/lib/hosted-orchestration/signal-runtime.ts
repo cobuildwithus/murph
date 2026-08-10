@@ -29,9 +29,14 @@ import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
+  assertHostedCompanionMemberAccessAllowed,
+  readActiveHostedMemberAccess,
+} from "../hosted-onboarding/member-access";
+import {
   ensureHostedWorkspace,
   type HostedWorkspaceRecord,
 } from "../hosted-workspace/store";
+import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
 import {
   getPrisma,
 } from "../prisma";
@@ -303,12 +308,21 @@ export async function signalHostedDeviceSyncMailboxRuntime(
   if (!mailboxItem) {
     throw new Error("Hosted device-sync mailbox item is missing for runtime signal.");
   }
+  if (mailboxItem.lane !== "system") {
+    throw new Error("Hosted device-sync runtime signals require a system mailbox item.");
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  await ensureHostedRuntimeWorkspaceForDeviceSyncSystemMailboxUser(
+    mailboxItem.userId,
+    prisma,
+  );
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
     environment: input.environment,
-    ensureWorkspace: true,
-    prisma: input.prisma,
+    ensureWorkspace: false,
+    prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
       lane: mailboxItem.lane,
@@ -317,6 +331,18 @@ export async function signalHostedDeviceSyncMailboxRuntime(
     }),
     userId: mailboxItem.userId,
   });
+}
+
+async function ensureHostedRuntimeWorkspaceForDeviceSyncSystemMailboxUser(
+  userId: string,
+  prisma: PrismaClient,
+): Promise<HostedWorkspaceRecord> {
+  if (!(await readActiveHostedMemberAccess({ memberId: userId, prisma }))) {
+    await assertHostedCompanionMemberAccessAllowed({ memberId: userId, prisma });
+    await assertHostedHistoricalLaunchConsentGranted({ memberId: userId, prisma });
+  }
+
+  return await ensureHostedWorkspace({ prisma, userId });
 }
 
 async function assertHostedManualRunAiUsageAllowed(input: {

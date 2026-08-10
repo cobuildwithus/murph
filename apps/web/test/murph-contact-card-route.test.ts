@@ -1,6 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { issueMurphContactCardHandoffClaim } from "@/src/lib/hosted-onboarding/contact-card-handoff";
+import {
+  issueMurphContactCardHandoffClaim,
+  MURPH_CONTACT_CARD_NATIVE_COMPANION_SESSION_ID,
+} from "@/src/lib/hosted-onboarding/contact-card-handoff";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { isRecord } from "@/src/lib/primitives";
 
@@ -24,6 +27,7 @@ interface TestMurphContactCardHandoffPayload {
 
 const mocks = vi.hoisted(() => ({
   assertActiveHostedMemberAccessAllowed: vi.fn(),
+  assertHostedCompanionMemberAccessAllowed: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getPrisma: vi.fn(),
@@ -62,6 +66,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", async (importOriginal) 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed:
     mocks.assertActiveHostedMemberAccessAllowed,
+  assertHostedCompanionMemberAccessAllowed:
+    mocks.assertHostedCompanionMemberAccessAllowed,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -152,6 +158,7 @@ describe("murph contact card route", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.getPrisma.mockReturnValue({});
     mocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
+    mocks.assertHostedCompanionMemberAccessAllowed.mockResolvedValue(undefined);
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: INITIATING_MEMBER_ID },
       sessionId: INITIATING_SESSION_ID,
@@ -275,6 +282,25 @@ describe("murph contact card route", () => {
     expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
       imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-03-sm.png",
     });
+  });
+
+  it("redeems a signed native companion handoff through companion access", async () => {
+    const claim = issueMurphContactCardHandoffClaim({
+      avatarId: "gremlin",
+      memberId: INITIATING_MEMBER_ID,
+      sessionId: MURPH_CONTACT_CARD_NATIVE_COMPANION_SESSION_ID,
+    });
+
+    const response = await route.GET(buildRequest(
+      `?handoff=${encodeURIComponent(claim)}`,
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertHostedCompanionMemberAccessAllowed).toHaveBeenCalledWith({
+      memberId: INITIATING_MEMBER_ID,
+    });
+    expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
   });
 
   it("rejects a missing handoff claim without falling back to a Safari session", async () => {

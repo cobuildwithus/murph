@@ -339,6 +339,13 @@ wake selects `inbox_media_retention` processing when foreground/default work is
 not runnable; future or absent wakes wait. These modes are invocation input, not
 new scheduler state. Foreground/default work must replace an active
 system-mailbox or retention owner instead of waiting for its idle checkpoint.
+For a non-suspended member whose own billing is paused, Web may return unblocked
+facts only while historically consented companion device-sync system lag remains.
+Those facts contain only the system lane and a workspace projection with all
+wake timestamps/reasons removed, so Temporal can select only `system_mailbox`.
+Conversation/default work and an idle paused workflow remain blocked by canonical
+active access; each bounded system pass re-reads facts until the durable lag is
+drained.
 
 Usage and product policy blocks are successful reconciliation reads with a
 non-null `blocked` object, never Temporal activity failures. Transport, auth,

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     appendHostedMailboxEnvelopeTx: vi.fn(),
+    assertHostedHistoricalLaunchConsentGranted: vi.fn(),
     ensureHostedWorkspace: vi.fn(),
     getPrisma: vi.fn(),
     hostedMemberFindUnique,
@@ -66,6 +67,17 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
+vi.mock("@/src/lib/legal/consent", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/legal/consent")
+  >();
+  return {
+    ...actual,
+    assertHostedHistoricalLaunchConsentGranted:
+      mocks.assertHostedHistoricalLaunchConsentGranted,
+  };
+});
+
 import {
   signalHostedBrowserVaultRefreshRuntime,
   signalHostedDeviceSyncMailboxRuntime,
@@ -81,6 +93,7 @@ describe("hosted runtime Temporal signaling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.ensureHostedWorkspace.mockResolvedValue(buildHostedWorkspaceRecord());
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord());
     mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
@@ -446,6 +459,54 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
     expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+  });
+
+  it("signals paused companion device-sync work only through the system mailbox lane", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "paused",
+    }));
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValueOnce({
+      id: "mailbox_123",
+      lane: "system",
+      laneSeq: "42",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      userId: "member_123",
+    });
+
+    await signalHostedDeviceSyncMailboxRuntime({
+      client: buildClient(),
+      mailboxItemId: "mailbox_123",
+    });
+
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
+      prisma: mocks.prisma,
+      userId: "member_123",
+    });
+    expect(mocks.signalWithStart).toHaveBeenCalledOnce();
+  });
+
+  it("does not signal non-system work through the device-sync companion exception", async () => {
+    mocks.readHostedMailboxItemCheckpointById.mockResolvedValueOnce({
+      id: "mailbox_123",
+      lane: "conversation",
+      laneSeq: "42",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      userId: "member_123",
+    });
+
+    await expect(signalHostedDeviceSyncMailboxRuntime({
+      client: buildClient(),
+      mailboxItemId: "mailbox_123",
+    })).rejects.toThrow(
+      "Hosted device-sync runtime signals require a system mailbox item.",
+    );
+
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
   it("persists browser-vault refresh as durable control mailbox work before signaling", async () => {

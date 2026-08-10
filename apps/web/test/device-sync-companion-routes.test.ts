@@ -783,7 +783,22 @@ describe("device sync companion routes", () => {
         PAUSED_MEMBER.id,
         "junction",
         "resume",
+        { allowConnectionMutation: false },
       );
+    });
+
+    it("does not let paused companion access create or reconnect a device connection", async () => {
+      mockPausedPrivyUser();
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({
+        connectionIntent: "connect",
+      }));
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "HOSTED_ACCESS_REQUIRED" },
+      });
+      expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
     it("rejects a device sign-in token without both historical launch grants", async () => {
@@ -824,6 +839,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         "connect",
+        { allowConnectionMutation: true },
       );
     });
 
@@ -882,6 +898,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         "connect",
+        { allowConnectionMutation: true },
       );
       expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
         memberId: "member_1",
@@ -902,6 +919,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         "resume",
+        { allowConnectionMutation: true },
       );
     });
 
@@ -944,6 +962,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         null,
+        { allowConnectionMutation: true },
       );
     });
 

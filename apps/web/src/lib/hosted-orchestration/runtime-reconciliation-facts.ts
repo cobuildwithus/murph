@@ -44,7 +44,10 @@ import {
   sendHostedTrialConversionNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
 import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import {
+  readActiveHostedMemberAccess,
+  readHostedCompanionMemberAccess,
+} from "../hosted-onboarding/member-access";
 import {
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
@@ -145,11 +148,20 @@ export async function readHostedRuntimeReconciliationFacts(
     readHostedWorkspace({ prisma, userId: input.userId }),
   ]);
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
+  const activeAccess = member
+    ? await readActiveHostedMemberAccess({
+        memberId: input.userId,
+        prisma,
+      })
+    : false;
+  const companionAccess = member && !activeAccess
+    ? await readHostedCompanionMemberAccess({
+        memberId: input.userId,
+        prisma,
+      })
+    : false;
 
-  if (!member || !(await readActiveHostedMemberAccess({
-    memberId: input.userId,
-    prisma,
-  }))) {
+  if (!member || (!activeAccess && !companionAccess)) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag: [],
       reason: "user_not_active",
@@ -167,10 +179,11 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
-  if (await readHostedHealthDataConsentState({
+  const healthDataConsentState = await readHostedHealthDataConsentState({
     memberId: input.userId,
     prisma,
-  }) === "revoked") {
+  });
+  if (healthDataConsentState === "revoked") {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag: [],
       reason: "health_data_consent_withdrawn",
@@ -186,13 +199,31 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
+  if (!activeAccess && healthDataConsentState !== "granted") {
+    const facts = buildHostedRuntimeBlockedFacts({
+      mailboxLag: [],
+      reason: "user_not_active",
+      retryAt: null,
+      workspace: projectedWorkspace,
+    });
+    emitHostedRuntimeReconciliationFacts({
+      facts,
+      request: input,
+      usageGateRequired: false,
+      usageGateStatus: "not_required",
+    });
+    return facts;
+  }
+
   const [maxSeqByLane, consumedSeqByLane] = await Promise.all([
     readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
-    readHostedMailboxConsumedSeqByLane({
-      lanes: ["conversation"],
-      prisma,
-      userId: input.userId,
-    }),
+    activeAccess
+      ? readHostedMailboxConsumedSeqByLane({
+          lanes: ["conversation"],
+          prisma,
+          userId: input.userId,
+        })
+      : Promise.resolve([]),
   ]);
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
@@ -203,14 +234,42 @@ export async function readHostedRuntimeReconciliationFacts(
       redactedStatusJson: redactedStatus,
     })
   );
+  const admittedMailboxLag = activeAccess
+    ? mailboxLag
+    : mailboxLag.filter((laneLag) => laneLag.lane === "system");
 
   if (!projectedWorkspace) {
     const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag,
+      mailboxLag: admittedMailboxLag,
       reason: "hosted_runtime_not_configured",
       retryAt: null,
       workspace: null,
     });
+    emitHostedRuntimeReconciliationFacts({
+      facts,
+      request: input,
+      usageGateRequired: false,
+      usageGateStatus: "not_required",
+    });
+    return facts;
+  }
+
+  if (!activeAccess) {
+    const companionWorkspace = projectHostedCompanionSystemMailboxWorkspace(
+      projectedWorkspace,
+    );
+    const facts = hasHostedMailboxLag(admittedMailboxLag, "system")
+      ? parseHostedRuntimeReconciliationFacts({
+          blocked: null,
+          mailboxLag: admittedMailboxLag,
+          workspace: companionWorkspace,
+        })
+      : buildHostedRuntimeBlockedFacts({
+          mailboxLag: [],
+          reason: "user_not_active",
+          retryAt: null,
+          workspace: projectedWorkspace,
+        });
     emitHostedRuntimeReconciliationFacts({
       facts,
       request: input,
@@ -776,6 +835,17 @@ function projectHostedRuntimeReconciliationWorkspace(
         version: workspace.version,
       }
     : null;
+}
+
+function projectHostedCompanionSystemMailboxWorkspace(
+  workspace: HostedRuntimeReconciliationFactsWorkspace,
+): HostedRuntimeReconciliationFactsWorkspace {
+  return {
+    inboxMediaRetentionWakeAt: null,
+    nextWakeAt: null,
+    nextWakeReason: null,
+    version: workspace.version,
+  };
 }
 
 function normalizeHostedRuntimeReconciliationDate(

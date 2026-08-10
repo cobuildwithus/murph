@@ -2,8 +2,11 @@ import { createHash } from "node:crypto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+
 import {
   activateMealPhotoCaptureEnrollmentForScopedToken,
+  assertMealPhotoCaptureActiveHostedMemberAccessAllowed,
   assertCurrentMealPhotoCaptureEnrollmentTx,
   issueMealPhotoCaptureEnrollment,
   requireActiveMealPhotoCaptureEnrollment,
@@ -18,11 +21,13 @@ const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   lockHostedMemberSponsoredAccessRows: vi.fn(),
+  readHostedCompanionMemberAccess: vi.fn(),
   readHostedHealthDataConsentState: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveHostedMemberAccessAllowed,
+  readHostedCompanionMemberAccess: mocks.readHostedCompanionMemberAccess,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -74,7 +79,43 @@ describe("meal photo capture enrollment credentials", () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
+    mocks.readHostedCompanionMemberAccess.mockResolvedValue(false);
     mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+  });
+
+  it("maps only paused companion access to the feature-scoped paid denial", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_ACCESS_REQUIRED",
+        httpStatus: 403,
+        message: "Your subscription is paused. Resume billing before continuing.",
+      }),
+    );
+    mocks.readHostedCompanionMemberAccess.mockResolvedValueOnce(true);
+
+    await expect(assertMealPhotoCaptureActiveHostedMemberAccessAllowed({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+    })).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED",
+      httpStatus: 409,
+    });
+  });
+
+  it("preserves canonical inactive-access errors outside paused companion billing", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const accessError = hostedOnboardingError({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "Start or resume Murph access before continuing.",
+    });
+    mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValueOnce(accessError);
+
+    await expect(assertMealPhotoCaptureActiveHostedMemberAccessAllowed({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+    })).rejects.toBe(accessError);
   });
 
   it("persists only hashed bearer/installation values and an encrypted secret", async () => {
