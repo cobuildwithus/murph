@@ -3337,7 +3337,9 @@ describe("hosted Family plan", () => {
   it.each([
     ["paid", HostedBillingStatus.active],
     ["trial", HostedBillingStatus.active],
+    ["incomplete", HostedBillingStatus.incomplete],
     ["past due", HostedBillingStatus.past_due],
+    ["unpaid", HostedBillingStatus.unpaid],
   ])(
     "does not silently sponsor a member with a live direct %s subscription",
     async (_label, billingStatus) => {
@@ -3363,28 +3365,34 @@ describe("hosted Family plan", () => {
     },
   );
 
-  it("admits a member only after the bound direct subscription is canceled", async () => {
-    const tx = createTxMock();
-    tx.hostedMember.findUnique.mockResolvedValueOnce({
-      billingRef: {
-        stripeSubscriptionIdEncrypted: "encrypted:sub_canceled",
-      },
-      billingStatus: HostedBillingStatus.canceled,
-    });
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
+  it.each([
+    ["canceled", HostedBillingStatus.canceled],
+    ["paused", HostedBillingStatus.paused],
+  ])(
+    "admits a member whose bound direct subscription is %s and no longer live",
+    async (_label, billingStatus) => {
+      const tx = createTxMock();
+      tx.hostedMember.findUnique.mockResolvedValueOnce({
+        billingRef: {
+          stripeSubscriptionIdEncrypted: "encrypted:sub_lapsed",
+        },
+        billingStatus,
+      });
+      tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
 
-    await expect(acceptHostedFamilyInviteTx({
-      acceptedMemberId: "member_mom",
-      inviteCode: "invite_phone",
-      tx,
-    })).resolves.toMatchObject({
-      groupId: "hbag_family",
-      memberId: "member_mom",
-      status: "active",
-    });
+      await expect(acceptHostedFamilyInviteTx({
+        acceptedMemberId: "member_mom",
+        inviteCode: "invite_phone",
+        tx,
+      })).resolves.toMatchObject({
+        groupId: "hbag_family",
+        memberId: "member_mom",
+        status: "active",
+      });
 
-    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledOnce();
-  });
+      expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledOnce();
+    },
+  );
 
   it("removes sponsored access without deleting the member", async () => {
     const tx = createTxMock();
