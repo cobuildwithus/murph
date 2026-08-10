@@ -94,7 +94,7 @@ Updated: 2026-08-10
 - Axe color-contrast checks reported zero violations at both 1440px desktop and
   390px mobile. Native-resolution catalog crops preserved the existing layout
   and avatar framing.
-- Focused Vitest passed 85 tests across 11 files; scoped ESLint passed; the
+- Focused Vitest passed 86 tests across 11 files; scoped ESLint passed; the
   official Web production build, including Web typechecking and trace checks,
   passed.
 - ReviewGPT final round 1 identified the open-session replacement and import-
@@ -110,8 +110,15 @@ Updated: 2026-08-10
   delayed mount; ready-before-open dialogs retain their existing phone-input
   autofocus. Production-browser proof passes on desktop and mobile for
   untouched focus restoration, deliberate Close focus preservation, Tab,
-  Shift+Tab, Escape, and shared-runtime reopen. The correction is pending its
-  required next final round.
+  Shift+Tab, Escape, and shared-runtime reopen.
+- Final round 4 in canonical Brave then found the ready-before-open test covered
+  preload before component mount but not the ordinary `/knowledge` and
+  `/search` order where a closed dialog mounts before idle preload completes.
+  The dialog now reads the existing module cache during each opening render, so
+  that preloaded panel skips the fallback and retains phone autofocus. A direct
+  mounted-closed, preload, then open regression passes, and production-browser
+  proof reports no loading fallback plus telephone-input focus on desktop and
+  mobile. The correction is pending final round 5.
 - The required Claude UI double-check could not start because the `claude`
   executable is absent; both prescribed model commands failed with `command not
   found`, so no Claude verdict is claimed.

@@ -198,9 +198,10 @@ export function AuthDialog({
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
   const loadedPanelRef = useRef<HTMLDivElement | null>(null);
   const restorePanelFocusRef = useRef(false);
+  const readyAuthPanelModule = AuthPanelModule ?? hostedAuthPanelModule;
 
   useEffect(() => {
-    if (!open || privyRuntime !== undefined || AuthPanelModule) {
+    if (!open || privyRuntime !== undefined || readyAuthPanelModule) {
       return;
     }
 
@@ -237,10 +238,10 @@ export function AuthDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, privyRuntime, AuthPanelModule]);
+  }, [open, privyRuntime, readyAuthPanelModule]);
 
   useEffect(() => {
-    if (!open || !AuthPanelModule || !restorePanelFocusRef.current) {
+    if (!open || !readyAuthPanelModule || !restorePanelFocusRef.current) {
       return;
     }
 
@@ -285,7 +286,7 @@ export function AuthDialog({
     });
     observer.observe(panel, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [open, AuthPanelModule]);
+  }, [open, readyAuthPanelModule]);
 
   const dismissLocked = panelView !== "auth";
   const consentPresentation = panelView === "consent";
@@ -323,7 +324,7 @@ export function AuthDialog({
       <DialogContent
         ref={dialogContentRef}
         initialFocus={
-          privyRuntime === undefined && !AuthPanelModule
+          privyRuntime === undefined && !readyAuthPanelModule
             ? dialogContentRef
             : undefined
         }
@@ -353,9 +354,9 @@ export function AuthDialog({
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
             {loadError}
           </div>
-        ) : AuthPanelModule ? (
+        ) : readyAuthPanelModule ? (
           <div ref={loadedPanelRef} data-auth-dialog-panel="loaded">
-            <AuthPanelModule.HostedAuthPanelIsland {...authPanelProps} />
+            <readyAuthPanelModule.HostedAuthPanelIsland {...authPanelProps} />
           </div>
         ) : open ? (
           <AuthPanelSkeleton />
