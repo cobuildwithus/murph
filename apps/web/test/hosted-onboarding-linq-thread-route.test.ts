@@ -222,7 +222,7 @@ vi.mock("../src/lib/hosted-onboarding/hosted-member-routing-store", async (impor
   return {
     ...actual,
     demoteHostedMemberLinqGroupChatBindingsTx: vi.fn(),
-    lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
+    lookupHostedMemberCoreByPendingLinqParticipantContact: vi.fn(),
     readHostedMemberRoutingState: vi.fn(),
   };
 });
@@ -318,10 +318,10 @@ beforeEach(() => {
   });
   vi.mocked(memberRoutingStore.readHostedMemberRoutingState).mockReset();
   vi.mocked(
-    memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
   ).mockReset();
   vi.mocked(
-    memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
   ).mockResolvedValue(null);
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
     handles: [],
@@ -5562,14 +5562,8 @@ describe("Linq group chat auto-provision", () => {
   it("provisions normally after private email recovery links the sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     vi.mocked(
-      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
-    ).mockResolvedValue({
-      core: senderCore,
-      matchedBy: "pendingLinqParticipantContactLookupKey",
-      routing: {
-        memberId: senderCore.id,
-      },
-    } as never);
+      memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
+    ).mockResolvedValue(senderCore);
     mockSuccessfulGroupProvision({ prisma, senderCore });
 
     const plan = await planHostedOnboardingLinqWebhook({
@@ -5586,7 +5580,7 @@ describe("Linq group chat auto-provision", () => {
     });
     expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
     expect(
-      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+      memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
     ).toHaveBeenCalledWith({
       contact: expect.objectContaining({
         kind: "email",
@@ -5602,14 +5596,8 @@ describe("Linq group chat auto-provision", () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
     vi.mocked(
-      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
-    ).mockResolvedValue({
-      core: senderCore,
-      matchedBy: "pendingLinqParticipantContactLookupKey",
-      routing: {
-        memberId: senderCore.id,
-      },
-    } as never);
+      memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
+    ).mockResolvedValue(senderCore);
 
     await expect(shouldPrepareHostedLinqThreadContainerCrypto({
       event: buildLinqMessageReceivedEvent({
@@ -5620,7 +5608,7 @@ describe("Linq group chat auto-provision", () => {
     })).resolves.toBe(true);
 
     expect(
-      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+      memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
     ).toHaveBeenCalledExactlyOnceWith({
       contact: expect.objectContaining({
         kind: "email",
@@ -5634,17 +5622,10 @@ describe("Linq group chat auto-provision", () => {
 
   it("does not let stale pending-contact preparation grant container authority", async () => {
     const prisma = createStatefulThreadRoutePrisma();
-    const pendingSenderLookup = {
-      core: senderCore,
-      matchedBy: "pendingLinqParticipantContactLookupKey",
-      routing: {
-        memberId: senderCore.id,
-      },
-    } as never;
     vi.mocked(
-      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+      memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
     )
-      .mockResolvedValueOnce(pendingSenderLookup)
+      .mockResolvedValueOnce(senderCore)
       .mockResolvedValue(null);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     const event = buildLinqMessageReceivedEvent({
@@ -5684,7 +5665,7 @@ describe("Linq group chat auto-provision", () => {
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(
-      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+      memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
     ).toHaveBeenCalledTimes(2);
   });
 
@@ -5698,17 +5679,11 @@ describe("Linq group chat auto-provision", () => {
       threadContainer: null,
     });
     vi.mocked(
-      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+      memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
     ).mockResolvedValue({
-      core: {
-        ...senderCore,
-        billingStatus: HostedBillingStatus.canceled,
-      },
-      matchedBy: "pendingLinqParticipantContactLookupKey",
-      routing: {
-        memberId: senderCore.id,
-      },
-    } as never);
+      ...senderCore,
+      billingStatus: HostedBillingStatus.canceled,
+    });
 
     await expect(shouldPrepareHostedLinqThreadContainerCrypto({
       event: buildLinqMessageReceivedEvent({
@@ -5911,6 +5886,12 @@ describe("Linq group chat auto-provision", () => {
       participantMemberIds: ["member_roster_setup"],
       prisma: prisma as never,
     })).resolves.toBe(true);
+
+    expect(memberRoutingStore.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_roster_setup",
+      prisma,
+      retainFailureInScopedCache: true,
+    });
   });
 
   it("does not prepare new-container crypto on a hard-blocked incoming line", async () => {
@@ -5948,6 +5929,39 @@ describe("Linq group chat auto-provision", () => {
       participantMemberIds: [],
       prisma: prisma as never,
     })).resolves.toBe(true);
+
+    expect(memberRoutingStore.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: senderCore.id,
+      prisma,
+      retainFailureInScopedCache: true,
+    });
+  });
+
+  it("prewarms recovered pending-setup authority for an active sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
+      { memberId: senderCore.id },
+    ]);
+    pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
+      .mockResolvedValue([{
+        armedAt: new Date("2026-06-24T00:00:00.000Z"),
+        id: "hpgs_active_sender",
+        ownerMemberId: senderCore.id,
+        recipientPhoneLookupKey: requireTestPhoneLookupKey("+15550000000"),
+      }]);
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({}),
+      participantMemberIds: [],
+      prisma: prisma as never,
+    })).resolves.toBe(true);
+
+    expect(memberRoutingStore.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: senderCore.id,
+      prisma,
+      retainFailureInScopedCache: true,
+    });
   });
 
   it.each([
@@ -7286,14 +7300,8 @@ describe("Linq group chat auto-provision", () => {
         sender: "pending-sender@example.test",
       }) as never);
     vi.mocked(
-      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
-    ).mockResolvedValue({
-      core: senderCore,
-      matchedBy: "pendingLinqParticipantContactLookupKey",
-      routing: {
-        memberId: senderCore.id,
-      },
-    } as never);
+      memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
+    ).mockResolvedValue(senderCore);
     vi.mocked(domainRootStore.prepareHostedCryptoDomainRootCandidates)
       .mockImplementationOnce(async () => {
         expect(transactionOpen).toBe(false);
@@ -7336,7 +7344,7 @@ describe("Linq group chat auto-provision", () => {
       tx: prisma,
     });
     expect(
-      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+      memberRoutingStore.lookupHostedMemberCoreByPendingLinqParticipantContact,
     ).toHaveBeenCalledTimes(2);
   });
 

@@ -232,6 +232,28 @@ Updated: 2026-08-09
   lint, and `git diff --check` passed.
 - The combined round-7 affected slice passed 505 tests across nine files, and
   the real PostgreSQL route-concurrency lane remained green at 9 tests.
+- Final ReviewGPT round 7 verified the Telegram correction, then returned
+  `RETROSPECTIVE_REQUIRED` for the same replay mechanism in Linq. Pending
+  contact preparation unnecessarily projected full private routing state;
+  AT_RISK home-line and recovered-setup preparation genuinely needed private
+  state but evicted a failed batch unwrap, allowing the planner to repeat the
+  envelope/KMS request after `BEGIN`.
+- The round-7 finding was accepted after the cross-provider retrospective.
+  Pending-contact admission now resolves its existing scoped blind indexes
+  directly to member core without encrypted columns. Exact private Linq
+  authority opts into failure retention in the existing request-scoped cache,
+  and the batch unwrap checks that cache before reading envelope rows, so the
+  authoritative repeat reuses the same local rejection without database or
+  provider replay. Recovered-setup candidates use the same retained boundary.
+- Hard-cap round-7 remediation proof: the nine affected non-PostgreSQL files
+  passed 508 tests together; the real PostgreSQL route-concurrency lane passed
+  9 tests and the pending-setup PostgreSQL lane passed 3 tests; app-local
+  typecheck, scoped lint, and `git diff --check` passed.
+  Focused slices passed 105 tests across crypto/member-store coverage and 143
+  tests in the real Linq route suite. The correction may be pushed, but the
+  seven-round cap requires explicit continuation before another substantive
+  ReviewGPT run and the PR remains non-merge-ready until a later exact-head
+  round returns `PASS`.
 
 ## Round 4 anomaly retrospective
 
@@ -332,3 +354,55 @@ Updated: 2026-08-09
   hosted-member-private-field KMS dependency before or after `BEGIN`; only
   route and mailbox cryptography that the accepted flow actually consumes is
   prepared, while identity authority remains transactionally repeated.
+
+## Round 7 anomaly retrospective
+
+- Trigger: final round 7 returned `RETROSPECTIVE_REQUIRED` because the same
+  failed-preflight replay mechanism fixed for Telegram remained in Linq
+  pending-contact, AT_RISK home-line, and recovered pending-setup admission.
+  The hard cap is now reached, so remediation may be proved and pushed, but an
+  eighth substantive ReviewGPT round requires an explicit continuation
+  decision and the PR cannot be merge-ready without its later `PASS`.
+- Original requirement: every KMS-capable input needed by thread-container
+  creation, route refresh, or mailbox ingress must be prepared before
+  `BEGIN`; deliberately suppressing speculative work must never let the
+  authoritative transaction repeat that provider operation while holding a
+  connection or route/authority lock.
+- Cross-provider inventory: Telegram sender authority and Linq pending-contact
+  authority consume only blind-index identity plus member core state and must
+  use narrow projections with no encrypted routing columns. Linq exact
+  AT_RISK home-line and recovered-setup authority genuinely consume private
+  home-line plaintext; those reads may be repeated for transaction authority,
+  but a failed preflight unwrap must remain in the existing request-scoped
+  cache so the repeat cannot issue another envelope/KMS operation. Route and
+  mailbox roots remain explicitly prewarmed by container id, while pending
+  setup metadata itself remains transaction-owned.
+- Shape comparison: authored-source churn is 767 lines at the immutable
+  first-reviewed head and 1,394 lines on the round-7 remediation worktree,
+  below the 2,000-line threshold. The correction reuses the existing narrow
+  core projection and request-scoped unwrap cache; it adds no schema, durable
+  state, cache lifecycle owner, queue, service, lock, retry class, migration,
+  or reconciliation path.
+- Root cause: the round-4 eligibility expansion reused general private-routing
+  projections for three Linq authority paths. The round-6 correction narrowed
+  only Telegram and did not inventory sibling speculative reads. Batch unwrap
+  failures were therefore evicted normally; warm-error suppression then let
+  matching planner reads issue the same KMS request after `BEGIN`.
+- Decision: delete the private-state dependency from pending-contact
+  admission by resolving its existing scoped blind indexes directly to member
+  core. Where exact home-line plaintext remains necessary, retain only the
+  failed unwrap promise for the lifetime of the already-existing request
+  cache, so an authoritative repeat fails locally without provider work.
+  Preserve privacy-rotation ambiguity, pending-contact chat/line scope,
+  post-lock authority checks, and safe non-admission outcomes. Do not add a
+  second planner, persistent preparation record, queue, or reconciliation.
+- Required proof: production-faithful pending-contact-only, exact AT_RISK
+  home-line, and recovered pending-setup paths show zero envelope/KMS requests
+  after `BEGIN` when the private root fails; healthy crypto still creates the
+  container and atomically appends the activation/message wakes; existing
+  ambiguity, line ownership, ignored-path, route-race, and PostgreSQL
+  concurrency coverage remains green.
+- Expected architecture result: all sender authority that needs only member
+  core is KMS-free across providers, and genuinely private Linq authority can
+  never replay an external unwrap under the transaction after a suppressible
+  preflight failure.

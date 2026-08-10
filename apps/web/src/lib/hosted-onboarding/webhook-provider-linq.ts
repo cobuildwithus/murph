@@ -41,7 +41,7 @@ import {
   acquireHostedMemberHomeLinqRouteLockTx,
   demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
-  lookupHostedMemberRoutingByPendingLinqParticipantContact,
+  lookupHostedMemberCoreByPendingLinqParticipantContact,
   readHostedMemberRoutingState,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
@@ -370,7 +370,7 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
   });
   const pendingSenderLookup = senderCandidate || !recipientPhone
     ? null
-    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+    : await lookupHostedMemberCoreByPendingLinqParticipantContact({
         contact: participantContact,
         linqChatId: summary.chatId,
         prisma: input.prisma,
@@ -378,8 +378,8 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
       });
   const candidateSender = senderCandidate ?? (pendingSenderLookup
     ? {
-        memberId: pendingSenderLookup.core.id,
-        suspendedAt: pendingSenderLookup.core.suspendedAt,
+        memberId: pendingSenderLookup.id,
+        suspendedAt: pendingSenderLookup.suspendedAt,
       }
     : null);
   if (candidateSender?.suspendedAt) {
@@ -411,12 +411,24 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
       await readHostedMemberRoutingState({
         memberId: activeSenderMemberId,
         prisma: input.prisma,
+        retainFailureInScopedCache: true,
       }),
     );
     return senderAuthority.kind !== "none"
       && normalizePhoneNumber(senderAuthority.recipientPhone) === recipientPhone;
   }
   if (activeSenderMemberId) {
+    await resolveHostedLinqRecoveredPendingGroupSetup({
+      occurredAt: new Date(context.occurredAt),
+      participantMemberIds: [
+        ...new Set([...input.participantMemberIds, activeSenderMemberId]),
+      ],
+      recoveredRecipientPhoneLookupKey: lineState.phoneNumberLookupKey,
+      retainFailureInScopedCache: true,
+      senderMemberId: activeSenderMemberId,
+      threadId: summary.chatId,
+      tx: input.prisma,
+    });
     return true;
   }
   const firstContactContentDisposition =
@@ -440,6 +452,7 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
     occurredAt,
     participantMemberIds: input.participantMemberIds,
     recoveredRecipientPhoneLookupKey: lineState.phoneNumberLookupKey,
+    retainFailureInScopedCache: true,
     senderMemberId: null,
     threadId: summary.chatId,
     tx: input.prisma,
@@ -1155,14 +1168,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
     : incomingHomeLinqChatOwnerLookup;
   const existingPendingLinqContactLookup = existingMemberLookup || existingHomeLinqChatLookup
     ? null
-    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+    : await lookupHostedMemberCoreByPendingLinqParticipantContact({
         contact: participantContact,
         prisma: input.prisma,
       });
   const existingMember =
     existingMemberLookup?.core
     ?? existingHomeLinqChatLookup?.core
-    ?? existingPendingLinqContactLookup?.core
+    ?? existingPendingLinqContactLookup
     ?? null;
   const existingMemberMatch = resolveHostedLinqExistingMemberMatch({
     existingHomeLinqChatLookupPresent: Boolean(existingHomeLinqChatLookup),
@@ -3001,13 +3014,13 @@ async function planHostedLinqGroupChatWebhook(input: {
       });
   const pendingSenderLookup = senderLookup
     ? null
-    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+    : await lookupHostedMemberCoreByPendingLinqParticipantContact({
         contact: participantContact,
         linqChatId: summary.chatId,
         prisma: input.prisma,
         recipientPhone: incomingRecipientPhone,
       });
-  const sender = senderLookup?.core ?? pendingSenderLookup?.core ?? null;
+  const sender = senderLookup?.core ?? pendingSenderLookup ?? null;
   if (sender) {
     await lockHostedMemberRow(input.prisma, sender.id);
   }
@@ -4119,6 +4132,7 @@ export async function resolveHostedLinqRecoveredPendingGroupSetup(input: {
   occurredAt: Date;
   participantMemberIds: readonly string[];
   recoveredRecipientPhoneLookupKey: string;
+  retainFailureInScopedCache?: boolean;
   senderMemberId?: string | null;
   threadId: string;
   tx: Prisma.TransactionClient;
@@ -4139,6 +4153,12 @@ export async function resolveHostedLinqRecoveredPendingGroupSetup(input: {
       await readHostedMemberRoutingState({
         memberId: candidate.ownerMemberId,
         prisma: input.tx,
+        ...(input.retainFailureInScopedCache === undefined
+          ? {}
+          : {
+              retainFailureInScopedCache:
+                input.retainFailureInScopedCache,
+            }),
       }),
     );
     if (authority.kind === "none") {

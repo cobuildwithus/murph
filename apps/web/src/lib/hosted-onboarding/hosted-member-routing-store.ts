@@ -58,7 +58,7 @@ export type HostedMemberRoutingByTelegramUserIdResolution =
       status: "missing";
     };
 
-export type HostedMemberCoreByTelegramUserIdResolution =
+export type HostedMemberCoreLookupResolution =
   | {
       core: HostedMemberRoutingLookup["core"];
       status: "found";
@@ -71,7 +71,7 @@ export type HostedMemberCoreByTelegramUserIdResolution =
       status: "missing";
     };
 
-const hostedMemberTelegramCoreLookupSelect =
+const hostedMemberRoutingCoreLookupSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
     memberId: true,
     member: {
@@ -84,6 +84,11 @@ const hostedMemberTelegramCoreLookupSelect =
       },
     },
   });
+
+type HostedMemberRoutingCoreLookupRecord =
+  Prisma.HostedMemberRoutingGetPayload<{
+    select: typeof hostedMemberRoutingCoreLookupSelect;
+  }>;
 
 export async function readHostedMemberIdByReplyAliasLookupKey(input: {
   prisma: HostedOnboardingReadClient;
@@ -244,6 +249,80 @@ export async function lookupHostedMemberRoutingByPendingLinqParticipantContact(i
   });
 }
 
+/**
+ * Resolves pending-contact authority without decrypting unrelated routing
+ * state. Linq webhook admission consumes only member core fields here.
+ */
+export async function lookupHostedMemberCoreByPendingLinqParticipantContact(input: {
+  contact: HostedLinqParticipantContact;
+  linqChatId?: string | null;
+  prisma: HostedOnboardingReadClient;
+  recipientPhone?: string | null;
+}): Promise<HostedMemberRoutingLookup["core"] | null> {
+  const contactLookupKeys =
+    createHostedLinqParticipantContactLookupKeyReadCandidates({
+      kind: input.contact.kind,
+      value: input.contact.value,
+    });
+  const scopedToGroup =
+    input.linqChatId !== undefined || input.recipientPhone !== undefined;
+  if (
+    scopedToGroup
+    && (input.linqChatId === undefined || input.recipientPhone === undefined)
+  ) {
+    throw new TypeError(
+      "Pending Linq group contact lookup requires both chat and recipient line.",
+    );
+  }
+  const chatLookupKeys = scopedToGroup
+    ? createHostedLinqChatLookupKeyReadCandidates(input.linqChatId)
+    : [];
+  const recipientLookupKeys = scopedToGroup
+    ? createHostedPhoneLookupKeyReadCandidates(input.recipientPhone)
+    : [];
+  if (
+    contactLookupKeys.length === 0
+    || (scopedToGroup
+      && (chatLookupKeys.length === 0 || recipientLookupKeys.length === 0))
+  ) {
+    return null;
+  }
+
+  const resolution = resolveHostedMemberCoreLookup(
+    await input.prisma.hostedMemberRouting.findMany({
+      where: {
+        pendingLinqParticipantContactLookupKey: {
+          in: contactLookupKeys,
+        },
+        ...(scopedToGroup
+          ? {
+              pendingLinqChatLookupKey: {
+                in: chatLookupKeys,
+              },
+              pendingLinqRecipientPhoneLookupKey: {
+                in: recipientLookupKeys,
+              },
+            }
+          : {}),
+      },
+      select: hostedMemberRoutingCoreLookupSelect,
+    }),
+  );
+  if (resolution.status === "ambiguous") {
+    throw hostedOnboardingError({
+      code: "LINQ_PENDING_CONTACT_ROUTING_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: resolution.memberIds.length,
+        matchedBy: "pendingLinqParticipantContactLookupKey",
+      },
+      httpStatus: 500,
+      message: "Hosted member routing lookup matched multiple members.",
+      retryable: true,
+    });
+  }
+  return resolution.status === "found" ? resolution.core : null;
+}
+
 export async function lookupHostedMemberRoutingByHomeLinqChatId(input: {
   linqChatId: string | null | undefined;
   prisma: HostedOnboardingReadClient;
@@ -328,7 +407,7 @@ export async function resolveHostedMemberRoutingByTelegramUserId(input: {
 export async function resolveHostedMemberCoreByTelegramUserId(input: {
   prisma: HostedOnboardingReadClient;
   telegramUserId: string;
-}): Promise<HostedMemberCoreByTelegramUserIdResolution> {
+}): Promise<HostedMemberCoreLookupResolution> {
   const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
     input.telegramUserId,
   );
@@ -342,13 +421,17 @@ export async function resolveHostedMemberCoreByTelegramUserId(input: {
         in: telegramUserLookupKeys,
       },
     },
-    select: hostedMemberTelegramCoreLookupSelect,
+    select: hostedMemberRoutingCoreLookupSelect,
   });
+  return resolveHostedMemberCoreLookup(records);
+}
+
+function resolveHostedMemberCoreLookup(
+  records: readonly HostedMemberRoutingCoreLookupRecord[],
+): HostedMemberCoreLookupResolution {
   const coreByMemberId = new Map<string, HostedMemberRoutingLookup["core"]>();
   for (const record of records) {
-    if (!coreByMemberId.has(record.memberId)) {
-      coreByMemberId.set(record.memberId, record.member);
-    }
+    coreByMemberId.set(record.memberId, record.member);
   }
   if (coreByMemberId.size === 0) {
     return { status: "missing" };
@@ -441,6 +524,7 @@ async function resolveUniqueHostedMemberRoutingLookup(input: {
 export async function readHostedMemberRoutingState(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
+  retainFailureInScopedCache?: boolean;
 }) {
   const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
     where: {
@@ -449,7 +533,13 @@ export async function readHostedMemberRoutingState(input: {
     select: hostedMemberRoutingStateSelect,
   });
 
-  return routingRecord ? await projectHostedMemberRoutingState(routingRecord, input.prisma) : null;
+  return routingRecord
+    ? await projectHostedMemberRoutingState(
+        routingRecord,
+        input.prisma,
+        input.retainFailureInScopedCache,
+      )
+    : null;
 }
 
 export async function lockHostedMemberRoutingStateTx(input: {

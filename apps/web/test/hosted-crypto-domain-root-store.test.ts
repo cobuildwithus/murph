@@ -16,6 +16,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 
 import {
+  decryptHostedWebNullableFields,
   decryptHostedWebNullableString,
   decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
@@ -926,6 +927,44 @@ test("batch private-field decrypt zeroizes successful roots when a bounded KMS c
   expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
     plaintext.every((byte) => byte === 0)
   )).toBe(true);
+});
+
+test("Linq authority batch preflight retains failure for its authoritative repeat", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const [record] = (await createBatchPrivateFieldRecords({
+    memberIds: ["member-batch-retained-failure"],
+    tx,
+  })).identityRecords;
+  if (!record) {
+    throw new Error("Expected one private-field fixture.");
+  }
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const decrypt = () => decryptHostedWebNullableFields({
+    entries: [{
+      field: "hosted-member-identity.phone-number",
+      memberId: record.memberId,
+      value: record.phoneNumberEncrypted,
+    }],
+    prisma,
+    retainFailureInScopedCache: true,
+  });
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(decrypt()).rejects.toThrow("Test KMS decrypt failure.");
+    const callsBeforeAuthoritativeRepeat = decryptMetrics.calls.length;
+    await expect(decrypt()).rejects.toThrow("Test KMS decrypt failure.");
+    expect(decryptMetrics.calls).toHaveLength(callsBeforeAuthoritativeRepeat);
+  });
+
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(1);
 });
 
 test("batch private-field decrypt zeroizes invalid KMS plaintext and stops before the next chunk", async () => {
