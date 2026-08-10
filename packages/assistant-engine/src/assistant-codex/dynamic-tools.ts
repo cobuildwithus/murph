@@ -3499,6 +3499,21 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
+    response.action === 'message_current_sender'
+    && response.result.status === 'unavailable'
+    && response.result.unavailableReason
+      === 'same_channel_direct_route_unavailable'
+  ) {
+    return {
+      ...response,
+      result: {
+        ...response.result,
+        recovery:
+          'Ask the sender to open a direct Murph chat on the same channel, then retry.',
+      },
+    }
+  }
+  if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
   ) {

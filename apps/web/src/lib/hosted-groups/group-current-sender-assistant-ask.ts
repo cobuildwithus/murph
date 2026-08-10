@@ -313,6 +313,15 @@ export async function requestHostedGroupCurrentSenderPrivateAssistantAsk(input: 
         "current_sender_unavailable",
       );
     }
+    const destination = await resolveHostedGroupCurrentSenderPrivateDestination({
+      authority,
+      tx,
+    });
+    if (!destination) {
+      return unavailableHostedCurrentSenderPrivateAdmission(
+        "same_channel_direct_route_unavailable",
+      );
+    }
 
     const occurredAt = now.toISOString();
     const expiresAt = new Date(
@@ -600,6 +609,15 @@ async function replayHostedGroupCurrentSenderPrivateAssistantAskTx(input: {
   if (!authority || authority.question !== wake.ask.question) {
     return unavailableHostedCurrentSenderPrivateAdmission(
       "current_sender_unavailable",
+    );
+  }
+  const destination = await resolveHostedGroupCurrentSenderPrivateDestination({
+    authority,
+    tx: input.tx,
+  });
+  if (!destination) {
+    return unavailableHostedCurrentSenderPrivateAdmission(
+      "same_channel_direct_route_unavailable",
     );
   }
   return {

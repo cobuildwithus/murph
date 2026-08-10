@@ -214,6 +214,32 @@ describe("murph.group message_current_sender", () => {
     );
   });
 
+  it("returns a missing direct route as a model-visible recovery result", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "message_current_sender" as const,
+      result: {
+        status: "unavailable" as const,
+        unavailableReason: "same_channel_direct_route_unavailable",
+      },
+    }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parsePrivateMessageRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"unavailableReason":"same_channel_direct_route_unavailable"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"recovery":"Ask the sender to open a direct Murph chat on the same channel, then retry."',
+    );
+  });
+
   it("fails closed for a foreign Message ref, private chat, or schedule", async () => {
     for (const hostedToolContext of [
       createHostedToolContext({ acceptedInputIds: [OTHER_INPUT_ID] }),

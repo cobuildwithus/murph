@@ -524,6 +524,20 @@ describe("hosted current-sender Assistant Ask authority", () => {
     })).resolves.toEqual(admission);
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
 
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValueOnce(null);
+    await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "same_channel_direct_route_unavailable",
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
+
     await expect(handleHostedRuntimeAssistantAskControl({
       boundRuntimeMemberId: SENDER_MEMBER_ID,
       now: NOW,
@@ -725,6 +739,34 @@ describe("hosted current-sender Assistant Ask authority", () => {
       },
     });
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a Telegram group sender without a direct chat before personal work", async () => {
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+      createTelegramSourceWake(),
+    );
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(null);
+
+    await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "same_channel_direct_route_unavailable",
+      },
+    });
+
+    expect(
+      mocks.resolveHostedAssistantNotificationDestination,
+    ).toHaveBeenCalledWith({
+      directChannel: "telegram",
+      memberId: SENDER_MEMBER_ID,
+      prisma: fakeTx,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
   it("rejects replay at the exact expiry boundary without another wake", async () => {
