@@ -1428,7 +1428,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-nutrition-card"
-          title="iMessage nutrition card"
+          title="iMessage nutrition card preview"
         >
           <ImessageNutritionCardStudy />
         </Section>

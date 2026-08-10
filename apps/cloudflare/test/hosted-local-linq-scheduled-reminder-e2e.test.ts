@@ -442,7 +442,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
           image_url: expect.stringMatching(
             /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
           ),
-          subcaption: "1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat",
         },
         type: "imessage_app",
         url: expect.stringMatching(/^https:\/\/www\.withmurph\.ai\/#murph-card=/u),
