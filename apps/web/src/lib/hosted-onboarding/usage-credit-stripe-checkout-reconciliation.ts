@@ -29,6 +29,10 @@ import {
   type HostedUsageCreditStripePreparationContext,
   type HostedUsageCreditStripePrivateReferences,
 } from "./usage-credit-stripe-reconciliation-context";
+import {
+  lockHostedUsageCreditPurchaseReservationOwnersTx,
+} from "./usage-credit-purchase-reservation-lock";
+import { requireHostedUsageCreditPurchasePayerMemberId } from "./usage-credit-purchase-stripe";
 
 export type HostedUsageCreditPreparedCheckoutEvent = {
   chargeId: string | null;
@@ -202,6 +206,18 @@ export async function reconcileHostedUsageCreditCheckoutEventTx(input: {
   });
 
   const reconciledAt = new Date();
+  if (input.purchase.grantSlotReleasedAt !== null) {
+    if (
+      input.purchase.status !== HostedUsageCreditPurchaseStatus.expired ||
+      session.status !== "expired" ||
+      session.payment_status !== "unpaid"
+    ) {
+      throw new Error(
+        "Provider-final usage-credit Checkout release contradicted live Stripe state.",
+      );
+    }
+    return { granted: false, wakeRequired: false };
+  }
 
   if (session.payment_status === "paid") {
     if (!paymentIntent || paymentIntent.status !== "succeeded" || !chargeId) {
@@ -242,19 +258,6 @@ export async function reconcileHostedUsageCreditCheckoutEventTx(input: {
       "Stripe reported asynchronous payment success before live Checkout became paid.",
     );
   }
-  if (
-    input.purchase.status === HostedUsageCreditPurchaseStatus.payment_failed ||
-    input.purchase.status === HostedUsageCreditPurchaseStatus.expired
-  ) {
-    await bindHostedUsageCreditStripeReferencesTx({
-      expectedReconciliationVersion: input.expectedReconciliationVersion,
-      lastReconciledAt: reconciledAt,
-      privateReferences,
-      purchaseId: input.purchase.id,
-      tx: input.tx,
-    });
-    return { granted: false, wakeRequired: false };
-  }
   if (input.purchase.status === HostedUsageCreditPurchaseStatus.fulfilled) {
     throw new Error(
       "A fulfilled usage-credit purchase no longer has paid Checkout state.",
@@ -262,18 +265,43 @@ export async function reconcileHostedUsageCreditCheckoutEventTx(input: {
   }
 
   if (input.event.type === "checkout.session.expired") {
-    if (session.status !== "expired") {
+    // Stripe's live `expired` Session state is terminal for this exact Checkout
+    // authority. Payment failure alone is recoverable and never writes release.
+    if (
+      session.status !== "expired" ||
+      session.payment_status !== "unpaid"
+    ) {
       throw new Error(
-        "Stripe reported Checkout expiry before the live Session expired.",
+        "Stripe reported Checkout expiry without provider-final unpaid state.",
       );
     }
+    await lockHostedUsageCreditPurchaseReservationOwnersTx({
+      beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+      payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(
+        input.purchase,
+      ),
+      tx: input.tx,
+    });
     await transitionHostedUsageCreditCheckoutTx({
       expectedReconciliationVersion: input.expectedReconciliationVersion,
+      grantSlotReleasedAt: reconciledAt,
       lastReconciledAt: reconciledAt,
       privateReferences,
       purchaseId: input.purchase.id,
       status: HostedUsageCreditPurchaseStatus.expired,
       terminalAt: deriveStripeEventAt(input.event),
+      tx: input.tx,
+    });
+    return { granted: false, wakeRequired: false };
+  }
+  if (
+    input.purchase.status === HostedUsageCreditPurchaseStatus.payment_failed
+  ) {
+    await bindHostedUsageCreditStripeReferencesTx({
+      expectedReconciliationVersion: input.expectedReconciliationVersion,
+      lastReconciledAt: reconciledAt,
+      privateReferences,
+      purchaseId: input.purchase.id,
       tx: input.tx,
     });
     return { granted: false, wakeRequired: false };
@@ -311,6 +339,7 @@ export async function reconcileHostedUsageCreditCheckoutEventTx(input: {
 
 async function transitionHostedUsageCreditCheckoutTx(input: {
   expectedReconciliationVersion: bigint;
+  grantSlotReleasedAt?: Date;
   lastReconciledAt: Date;
   privateReferences: HostedUsageCreditStripePrivateReferences;
   purchaseId: string;
@@ -321,6 +350,9 @@ async function transitionHostedUsageCreditCheckoutTx(input: {
   const updated = await runHostedUsageCreditDatabaseOperation({
     read: () => input.tx.hostedUsageCreditPurchase.updateMany({
       data: {
+        ...(input.grantSlotReleasedAt
+          ? { grantSlotReleasedAt: input.grantSlotReleasedAt }
+          : {}),
         lastReconciledAt: input.lastReconciledAt,
         reconciliationVersion: {
           increment: 1n,
@@ -331,6 +363,9 @@ async function transitionHostedUsageCreditCheckoutTx(input: {
       },
       where: {
         id: input.purchaseId,
+        ...(input.grantSlotReleasedAt
+          ? { grantSlotReleasedAt: null, paidAt: null }
+          : {}),
         reconciliationVersion: input.expectedReconciliationVersion,
         status: {
           in: [

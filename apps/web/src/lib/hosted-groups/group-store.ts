@@ -850,6 +850,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
         : await tx.deviceConnection.findMany({
             orderBy: [
               { userId: "asc" },
+              { connectedAt: "asc" },
               { createdAt: "asc" },
               { id: "asc" },
             ],
@@ -860,9 +861,10 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
               setupPhase: true,
               sources: {
                 orderBy: [
-                  { sourceProviderSlug: "asc" },
+                  { lastSeenAt: "asc" },
                   { createdAt: "asc" },
                   { id: "asc" },
+                  { sourceProviderSlug: "asc" },
                 ],
                 select: {
                   sourceProviderSlug: true,
@@ -1169,11 +1171,9 @@ function buildHostedGroupSharedDeviceSyncSources(
           now,
         ),
       };
-      const existing = sourcesByLabel.get(key);
-      sourcesByLabel.set(
-        key,
-        existing ? mergeHostedGroupSharedDeviceSources(existing, candidate) : candidate,
-      );
+      // The query orders connection and source generations oldest-to-newest.
+      // Keep the later complete observation for a repeated public label.
+      sourcesByLabel.set(key, candidate);
     }
   }
   const sources = [...sourcesByLabel.values()].sort((left, right) =>
@@ -1223,44 +1223,8 @@ function resolveHostedGroupSharedSourceStatus(
   return "needs-attention";
 }
 
-function mergeHostedGroupSharedDeviceSources(
-  left: HostedVaultShareDeviceSyncSource,
-  right: HostedVaultShareDeviceSyncSource,
-): HostedVaultShareDeviceSyncSource {
-  return {
-    connectionSyncJobCompletedAt: latestTimestamp(
-      left.connectionSyncJobCompletedAt,
-      right.connectionSyncJobCompletedAt,
-    ),
-    label: left.label,
-    status: deviceSyncStatusSeverity(right.status) > deviceSyncStatusSeverity(left.status)
-      ? right.status
-      : left.status,
-    statusObservedAt: latestTimestamp(left.statusObservedAt, right.statusObservedAt)
-      ?? left.statusObservedAt,
-  };
-}
-
-function deviceSyncStatusSeverity(
-  status: HostedVaultShareDeviceSyncSourceStatus,
-): number {
-  switch (status) {
-    case "connected": return 0;
-    case "setting-up": return 1;
-    case "disconnected": return 2;
-    case "needs-attention": return 3;
-    case "needs-reconnect": return 4;
-  }
-}
-
 function latestDate(left: Date, right: Date): Date {
   return left > right ? left : right;
-}
-
-function latestTimestamp(left: string | null, right: string | null): string | null {
-  if (!left) return right;
-  if (!right) return left;
-  return Date.parse(left) >= Date.parse(right) ? left : right;
 }
 
 function toHostedGroupSharedNonFutureTimestamp(

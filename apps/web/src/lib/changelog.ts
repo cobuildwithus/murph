@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Patterns, reliable reminders, and managed OpenAI web search",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "Patterns compares repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "personal-patterns",
@@ -107,6 +107,18 @@ const RAW_CHANGELOG_EDITIONS = [
           prompt: "Remind me every day at 9 PM Central to wind down.",
         },
       },
+      {
+        id: "web-search-restored",
+        kind: "improvement",
+        priority: 5,
+        title: "Managed OpenAI web search works again",
+        summary:
+          "When Murph uses managed OpenAI, its built-in web search can reach current information again instead of stopping with a forbidden-request error.",
+        details:
+          "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
+        relevanceTags: ["assistant", "search", "research", "reliability"],
+        sourcePullRequests: [1583],
+      },
     ],
   },
   {
@@ -116,6 +128,18 @@ const RAW_CHANGELOG_EDITIONS = [
     summary:
       "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, clearer connection paths, and stronger conversation recovery all landed together.",
     items: [
+      {
+        id: "group-sleep-challenges-use-fresh-data",
+        kind: "improvement",
+        priority: 4,
+        title: "Group sleep checks use fresh shared data",
+        summary:
+          "Murph now checks the current shared sleep record before answering and counts reported Deep and REM sleep as soon as those values are shared.",
+        details:
+          "Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
+        relevanceTags: ["groups", "sleep", "health-data", "connections"],
+        sourcePullRequests: [1565],
+      },
       {
         id: "public-referral-home",
         kind: "feature",
