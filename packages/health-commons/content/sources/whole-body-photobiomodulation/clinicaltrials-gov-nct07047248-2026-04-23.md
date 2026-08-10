@@ -9,7 +9,6 @@ status: draft
 quality: usable
 aliases:
   - NCT07047248
-  - PBM
 categories:
   - whole-body-photobiomodulation
 relations:

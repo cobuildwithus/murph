@@ -152,6 +152,7 @@ describe("hosted thread route store", () => {
       container,
       containerMemberId: "member_container_123",
       deliveryRouteState: {
+        deliveryRouteEncrypted: "sealed-route",
         deliveryRouteEncryptedPresent: true,
         threadIdentityLookupKey,
         threadLookupKey,
@@ -196,6 +197,7 @@ describe("hosted thread route store", () => {
       container: memberState,
       containerMemberId: memberState.id,
       deliveryRouteState: {
+        deliveryRouteEncrypted: "sealed-route",
         deliveryRouteEncryptedPresent: true,
         threadIdentityLookupKey,
         threadLookupKey,

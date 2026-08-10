@@ -88,7 +88,6 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
         activationOutcome.cleanupFamilySponsoredCheckout.checkoutSessionId,
       memberId: invite.memberId,
       prisma,
-      refundCheckoutPayment: true,
       sourceEventId:
         `checkout-success:${session.id}:family-sponsored-checkout-cleanup`,
       subscriptionId:
