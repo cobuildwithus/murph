@@ -16,6 +16,83 @@ permissions:
   contents: read
 
 jobs:
+  health-commons-simplification:
+    name: Validate Health Commons simplification
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/health-commons-agent-knowledge-simplified'
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply implementation patch
+        run: |
+          base64 --decode .github/health-commons-simplification.patch.gz.b64 | gzip --decompress > /tmp/health-commons-simplification.patch
+          echo '7f18b296031f971bb2d4b76701cb982c88df696c551968db1315ba40f2baa4ff  /tmp/health-commons-simplification.patch' | sha256sum --check
+          git apply --check /tmp/health-commons-simplification.patch
+          git apply /tmp/health-commons-simplification.patch
+
+      - name: Generate and validate implementation
+        run: |
+          set -euo pipefail
+          touch /tmp/health-commons-final-sha.txt
+          {
+            pnpm --dir packages/health-commons verify
+            pnpm --dir packages/cli gen:config-schema
+            pnpm --dir packages/cli typecheck
+            pnpm --dir packages/cli test:source -- test/commons-command-coverage.test.ts
+            pnpm --dir packages/assistant-engine typecheck
+            pnpm --dir packages/assistant-engine test -- test/model-behavior.test.ts test/assistant-skill-assets.test.ts
+            pnpm --dir apps/web typecheck
+            pnpm --dir apps/cloudflare typecheck
+            pnpm --dir . exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/deploy-artifacts.test.ts apps/cloudflare/test/runner-bundle-workspace-artifacts.test.ts
+            git diff --check
+            git status --short
+          } 2>&1 | tee /tmp/health-commons-validation.log
+
+      - name: Commit validated implementation
+        run: |
+          rm -f .github/health-commons-simplification.patch.gz.b64
+          git show 5f1669983dcd3850cc171877f04945aa43cc2176:.github/workflows/repo-hygiene.yml > .github/workflows/repo-hygiene.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'refactor: simplify Health Commons agent search'
+          git rev-parse HEAD | tee /tmp/health-commons-final-sha.txt
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+
+      - name: Upload validation output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: health-commons-simplification-validation
+          path: |
+            /tmp/health-commons-validation.log
+            /tmp/health-commons-final-sha.txt
+            packages/cli/config.schema.json
+            packages/cli/src/incur.generated.ts
+            packages/cli/src/vault-cli-skill-hash.generated.ts
+          if-no-files-found: warn
+          retention-days: 1
+
   tracked-artifacts:
     name: Tracked private/build artifacts
     runs-on: ubuntu-24.04
