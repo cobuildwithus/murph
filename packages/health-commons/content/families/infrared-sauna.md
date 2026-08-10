@@ -17,6 +17,9 @@ parentFamilyKey: experiment_family:sauna
 relations:
 
   -
+    type: parent_family
+    target: experiment_family:sauna
+  -
     type: cites
     target: source_artifact:doi-10.1152-ajpregu.00012.2025
   -
