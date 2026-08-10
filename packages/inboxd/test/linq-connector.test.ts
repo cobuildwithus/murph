@@ -79,6 +79,34 @@ test("normalizeLinqWebhookEvent builds direct chat captures and hydrates downloa
   });
 });
 
+test("normalizeLinqWebhookEvent uses iMessage app fallback text without retaining card metadata", async () => {
+  const capture = await normalizeLinqWebhookEvent({
+    event: buildV2026LinqWebhookEvent({
+      data: {
+        parts: [{
+          app: {
+            bundle_id: "com.example.private",
+            name: "Private app name",
+          },
+          fallback_text: "Completed the check-in",
+          layout: {
+            caption: "Private layout metadata",
+          },
+          type: "imessage_app",
+          url: "https://example.test/private-capability",
+        }],
+        service: "iMessage",
+      },
+      eventId: "evt_imessage_app",
+    }),
+  });
+
+  assert.equal(capture.text, "Completed the check-in");
+  assert.deepEqual(capture.attachments, []);
+  assert.equal(capture.raw.imessage_app_part_count, 1);
+  assert.doesNotMatch(JSON.stringify(capture.raw), /private-capability|Private app name|Private layout metadata/u);
+});
+
 test("normalizeLinqWebhookEvent falls back to created_at when received_at is missing", async () => {
   const capture = await normalizeLinqWebhookEvent({
     event: buildV2026LinqWebhookEvent({

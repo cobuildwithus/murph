@@ -51,6 +51,7 @@ import {
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
+  inspectHostedRuntimeAutomationLaneTimingSubdivision,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
@@ -5702,6 +5703,54 @@ function requireOptionalBoolean(
   return { [key]: requireBoolean(record[key], `${label}.${key}`) };
 }
 
+function requireOptionalShellPrewarmOutcome(
+  record: Record<string, unknown>,
+  label: string,
+): {
+  shellPrewarmOutcome?:
+    | "cold_start_observed"
+    | "failed"
+    | "start_issued_warm"
+    | "superseded";
+} {
+  const value = record.shellPrewarmOutcome;
+  if (value === undefined) {
+    return {};
+  }
+  if (
+    value !== "cold_start_observed"
+    && value !== "failed"
+    && value !== "start_issued_warm"
+    && value !== "superseded"
+  ) {
+    throw new TypeError(`${label}.shellPrewarmOutcome is invalid.`);
+  }
+  return { shellPrewarmOutcome: value };
+}
+
+function requireOptionalShellPrewarmSource(
+  record: Record<string, unknown>,
+  label: string,
+): {
+  shellPrewarmSource?:
+    | "linq-instant-start"
+    | "linq-typing-started"
+    | "unknown";
+} {
+  const value = record.shellPrewarmSource;
+  if (value === undefined) {
+    return {};
+  }
+  if (
+    value !== "linq-instant-start"
+    && value !== "linq-typing-started"
+    && value !== "unknown"
+  ) {
+    throw new TypeError(`${label}.shellPrewarmSource is invalid.`);
+  }
+  return { shellPrewarmSource: value };
+}
+
 // phaseBreakdown is best-effort diagnostic telemetry, not a core milestone. Parse
 // it leniently: if it is malformed (unknown key, non-number/boolean leaf, or an
 // older/newer shape during web/runtime deploy skew) drop only the breakdown rather
@@ -5792,6 +5841,12 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerReadyAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationPreparedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationAcceptedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmFirstHintAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmOperationElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmHintCount", orchestrationLabel),
+      ...requireOptionalShellPrewarmOutcome(orchestration, orchestrationLabel),
+      ...requireOptionalShellPrewarmSource(orchestration, orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "workspaceReadElapsedMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeStoreEnsureElapsedMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeInvocationPreparationElapsedMs", orchestrationLabel),
@@ -5901,10 +5956,20 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.preProvider,
       preProviderLabel,
     );
-    breakdown.preProvider = {
+    const parsedPreProvider = {
       ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToAssistantPhaseMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationLaneToAssistantServiceMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationReadinessMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationInputSelectionMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationPassSetupMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationCandidateScanMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationGroupAndOperationScopeMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationTerminalEvidenceMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationSessionPreflightMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationCrossSessionContextMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationPromptPreparationMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationServiceHandoffMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "executionTargetHydrateMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
@@ -5919,6 +5984,15 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanLockWaitMs", preProviderLabel),
       ...requireOptionalBoolean(preProvider, "receiptScanPerformed", preProviderLabel),
     };
+    if (
+      inspectHostedRuntimeAutomationLaneTimingSubdivision(parsedPreProvider).kind
+        === "invalid"
+    ) {
+      throw new TypeError(
+        `${preProviderLabel} automation lane timing subdivision must be absent or contain all ten leaves summing to automationLaneToAssistantServiceMs`,
+      );
+    }
+    breakdown.preProvider = parsedPreProvider;
   }
 
   if (record.assistant !== undefined) {

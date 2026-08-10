@@ -307,8 +307,8 @@ importers:
         version: 4.2.4(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.19(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.1(@swc/core@1.15.3(@swc/helpers@0.5.21))(chokidar@5.0.0))(@swc/core@1.15.3(@swc/helpers@0.5.21))(@swc/helpers@0.5.21)(magicast@0.5.2)(next@16.3.0(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.59.1)(@types/node@25.6.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(typescript@5.9.3)
     devDependencies:
       '@linqapp/sdk':
-        specifier: 0.28.0
-        version: 0.28.0
+        specifier: 0.34.0
+        version: 0.34.0
       '@murphai/hosted-local-harness':
         specifier: workspace:*
         version: link:../../packages/hosted-local-harness
@@ -932,8 +932,8 @@ importers:
         version: link:../runtime-state
     devDependencies:
       '@linqapp/sdk':
-        specifier: 0.28.0
-        version: 0.28.0
+        specifier: 0.34.0
+        version: 0.34.0
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -2172,8 +2172,8 @@ packages:
   '@kurkle/color@0.3.4':
     resolution: {integrity: sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w==}
 
-  '@linqapp/sdk@0.28.0':
-    resolution: {integrity: sha512-Hd6FligxpH3G9Dq0HV6dSjE5hBwI/NanyXVlsZlETKdAtdcRLhXDYI9gJPkqDLfFdWjaAYvCndnaF4lD7DU8eA==}
+  '@linqapp/sdk@0.34.0':
+    resolution: {integrity: sha512-ABuFPWZkwBaQY5C0tU2RYWp1KXKGeENBFQKsmDu73SjpYgObRxwFzALtDDWkhhVIjMYCiR9TI4/Y3K+1jh9dCQ==}
 
   '@lit-labs/ssr-dom-shim@1.5.1':
     resolution: {integrity: sha512-Aou5UdlSpr5whQe8AA/bZG0jMj96CoJIWbGfZ91qieWu5AWUMKw8VR/pAkQkJYvBNhmCcWnZlyyk5oze8JIqYA==}
@@ -11200,7 +11200,7 @@ snapshots:
 
   '@kurkle/color@0.3.4': {}
 
-  '@linqapp/sdk@0.28.0':
+  '@linqapp/sdk@0.34.0':
     dependencies:
       standardwebhooks: 1.0.0
 

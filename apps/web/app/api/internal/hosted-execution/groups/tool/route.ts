@@ -35,6 +35,11 @@ export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
 export const POST = withJsonError(async (request: Request) => {
+  // The runner's web-control hop is already running when this handler is
+  // entered, so the clock has to start here — before the body read, signature
+  // verification, and nonce consumption below — or none of that time is
+  // charged to the operation that has to finish inside it.
+  const requestStartedAtMs = Date.now();
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
@@ -47,6 +52,7 @@ export const POST = withJsonError(async (request: Request) => {
     await handleHostedRuntimeGroupTool({
       memberId,
       request: body,
+      requestStartedAtMs,
       scheduleMailboxWake: (wake) =>
         handoffHostedMailboxWake({
           ...wake,

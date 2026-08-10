@@ -79,6 +79,7 @@ import { Client } from "pg";
 import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject-key";
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
+import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
 
 const hostedRuntimeLogTestMigrationTable = "_murph_e2e_runtime_log_migration";
 const hostedRuntimeLogTestMigrationsRoot = new URL(
@@ -183,6 +184,7 @@ interface HostedTestPrismaFactoryClient {
   };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
+    update(args: unknown): Promise<{ id: string }>;
   };
 }
 
@@ -576,6 +578,15 @@ interface HostedRuntimeSignalModule {
     workflowId: string;
   }>;
   signalHostedRuntimeRecheckRuntime(input: {
+    client?: HostedRuntimeTemporalSignalClient | null;
+    environment?: NodeJS.ProcessEnv;
+    prisma?: HostedTestPrismaClient;
+    userId: string;
+  }): Promise<{
+    signalAccepted: true;
+    workflowId: string;
+  }>;
+  signalHostedRetentionRuntimeRecheck(input: {
     client?: HostedRuntimeTemporalSignalClient | null;
     environment?: NodeJS.ProcessEnv;
     prisma?: HostedTestPrismaClient;
@@ -1190,6 +1201,23 @@ export async function seedHostedWorkspaceInboxMediaRetentionWakeForTest(input: {
   });
 }
 
+export async function updateHostedMemberBillingStatusForTest(input: {
+  billingStatus: HostedBillingStatusForTest;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    await deps.prisma.hostedMember.update({
+      data: {
+        billingStatus: input.billingStatus,
+      },
+      where: {
+        id: input.memberId,
+      },
+    });
+  });
+}
+
 export async function readLatestHostedSensitiveActionChallengeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   memberId: string;
@@ -1771,6 +1799,24 @@ export async function signalHostedRuntimeRecheckRuntimeForTest(input: {
   return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
     const signalModule = await loadHostedRuntimeSignalModule();
     return await signalModule.signalHostedRuntimeRecheckRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      prisma: deps.prisma,
+      userId: input.userId,
+    });
+  });
+}
+
+export async function signalHostedRetentionRuntimeRecheckForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+}): Promise<{
+  signalAccepted: true;
+  workflowId: string;
+}> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const signalModule = await loadHostedRuntimeSignalModule();
+    return await signalModule.signalHostedRetentionRuntimeRecheck({
       client: deps.temporalSignalClient,
       environment: deps.environment,
       prisma: deps.prisma,
