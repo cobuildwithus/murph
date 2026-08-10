@@ -145,6 +145,152 @@ describe('assistant context snapshot device availability', () => {
     }
   })
 
+  it('resolves generic measurement aliases without pairing separate blood-pressure events', async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), 'assistant-device-context-measurement-aliases-'),
+    )
+    const vaultRoot = path.join(parentRoot, 'vault')
+    const queryProjectionPath = path.join(
+      vaultRoot,
+      '.runtime/projections/query.sqlite',
+    )
+
+    try {
+      await initializeVault({
+        createdAt: '2026-08-07T00:00:00.000Z',
+        vaultRoot,
+      })
+      for (const body of [
+        {
+          metric: 'waist',
+          occurredAt: '2026-08-07T09:00:00.000Z',
+          unit: 'cm',
+          value: 81,
+        },
+        {
+          metric: 'bodyweight',
+          occurredAt: '2026-08-08T09:00:00.000Z',
+          unit: 'kg',
+          value: 74,
+        },
+      ] as const) {
+        await addMeasurement({
+          vaultRoot,
+          draft: {
+            occurredAt: body.occurredAt,
+            source: 'manual',
+            title: 'Canonical body measurement',
+            measurements: [{
+              metric: body.metric,
+              unit: body.unit,
+              value: body.value,
+            }],
+          },
+        })
+      }
+      await addMeasurement({
+        vaultRoot,
+        draft: {
+          occurredAt: '2026-08-09T09:00:00.000Z',
+          source: 'manual',
+          title: 'Canonical blood pressure measurement',
+          measurements: [
+            { metric: 'sbp', unit: 'mmHg', value: 118 },
+            { metric: 'dbp', unit: 'mmHg', value: 76 },
+          ],
+        },
+      })
+      for (const pressure of [
+        { metric: 'systolic', value: 119 },
+        { metric: 'diastolic', value: 77 },
+      ] as const) {
+        await addMeasurement({
+          vaultRoot,
+          draft: {
+            occurredAt: '2026-08-10T09:00:00.000Z',
+            source: 'manual',
+            title: 'Unpaired blood pressure measurement',
+            measurements: [{
+              metric: pressure.metric,
+              unit: 'mmHg',
+              value: pressure.value,
+            }],
+          },
+        })
+      }
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({ vaultRoot })
+
+      const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+      expect(prompt).toContain(
+        'Body/scale measurement history is present (latest 2026-08-08)',
+      )
+      expect(prompt).toContain(
+        'Blood-pressure measurement history is present (latest 2026-08-09)',
+      )
+      expect(prompt).toContain('`sbp` / `dbp`')
+      for (const value of ['81', '74', '118', '76', '119', '77']) {
+        expect(prompt).not.toContain(value)
+      }
+      await expect(access(queryProjectionPath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+
+      const bodyCandidates = await listMeasurementRecords({
+        from: '2026-08-08',
+        limit: 100,
+        to: '2026-08-08',
+        vault: vaultRoot,
+      })
+      const bodyCandidate = bodyCandidates.items[0]
+      expect(bodyCandidate).toMatchObject({ data: { dayKey: '2026-08-08' } })
+      if (!bodyCandidate) {
+        throw new Error('Expected a generic body measurement candidate.')
+      }
+      await expect(showMeasurementRecord(vaultRoot, bodyCandidate.id))
+        .resolves.toMatchObject({
+          entity: {
+            data: {
+              measurements: [expect.objectContaining({ metric: 'bodyweight' })],
+            },
+          },
+        })
+
+      const bloodPressureCandidates = await listMeasurementRecords({
+        from: '2026-08-09',
+        limit: 100,
+        to: '2026-08-09',
+        vault: vaultRoot,
+      })
+      const bloodPressureCandidate = bloodPressureCandidates.items[0]
+      expect(bloodPressureCandidate).toMatchObject({
+        data: { dayKey: '2026-08-09', measurementsCount: 2 },
+      })
+      if (!bloodPressureCandidate) {
+        throw new Error('Expected a paired blood-pressure alias candidate.')
+      }
+      await expect(showMeasurementRecord(vaultRoot, bloodPressureCandidate.id))
+        .resolves.toMatchObject({
+          entity: {
+            data: {
+              measurements: expect.arrayContaining([
+                expect.objectContaining({ metric: 'sbp' }),
+                expect.objectContaining({ metric: 'dbp' }),
+              ]),
+            },
+          },
+        })
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  })
+
   it.each([
     { metric: 'bmi', unit: 'kg/m2', value: 21.7 },
     { metric: 'body-fat-pct', unit: '%', value: 18.4 },

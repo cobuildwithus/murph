@@ -732,7 +732,7 @@ function renderAssistantSnapshotBloodPressureMeasurementsLine(
     return null
   }
 
-  return `- Blood-pressure measurement history is present (latest ${latestDate}). List canonical candidates with \`vault-cli measurement list --from ${latestDate} --to ${latestDate} --limit 100 --format json\`, then read each candidate with \`vault-cli measurement show <event-id> --format json\`. Inspect \`systolic-blood-pressure\` and \`diastolic-blood-pressure\` entries, treating values as paired only inside the same shown event; widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
+  return `- Blood-pressure measurement history is present (latest ${latestDate}). List canonical candidates with \`vault-cli measurement list --from ${latestDate} --to ${latestDate} --limit 100 --format json\`, then read each candidate with \`vault-cli measurement show <event-id> --format json\`. Inspect systolic and diastolic entries by their general metric-catalog identity (for example \`systolic-blood-pressure\` / \`diastolic-blood-pressure\` or \`sbp\` / \`dbp\`), treating values as paired only inside the same shown event; widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
 }
 
 async function collectAssistantSnapshotCanonicalEventCoverage(input: {

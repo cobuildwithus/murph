@@ -9,6 +9,7 @@ import {
 } from "@murphai/contracts";
 import {
   normalizeWearableMetricValue,
+  resolveMetricDefinition,
   resolveWearableCanonicalMetricKey,
 } from "@murphai/health-metrics";
 
@@ -146,6 +147,16 @@ const CANONICAL_BODY_MEASUREMENT_METRIC_KEYS = new Set([
   "waistCircumference",
   "weightKg",
 ]);
+const CANONICAL_GENERIC_BODY_MEASUREMENT_METRIC_KEYS = new Set([
+  "bmi",
+  "body-fat-percentage",
+  "body-weight",
+  "waist-circumference",
+]);
+const CANONICAL_SYSTOLIC_BLOOD_PRESSURE_METRIC_KEY =
+  "systolic-blood-pressure";
+const CANONICAL_DIASTOLIC_BLOOD_PRESSURE_METRIC_KEY =
+  "diastolic-blood-pressure";
 const CANONICAL_BODY_MEASUREMENT_TYPES = new Set([
   "body_fat_pct",
   "waist",
@@ -1504,7 +1515,7 @@ function canonicalEventContainsBodyMeasurement(
   }
   if (record.kind === "measurement") {
     return record.measurements.some((measurement) =>
-      isCanonicalBodyMeasurementMetric(measurement.metric)
+      isCanonicalGenericBodyMeasurementMetric(measurement.metric)
     );
   }
   if (record.kind === "body_measurement") {
@@ -1563,10 +1574,33 @@ function parseStoredAvailabilitySpineRecord(
   };
 }
 
-function isCanonicalBodyMeasurementMetric(metric: string): boolean {
+function isCanonicalProviderBodyObservationMetric(metric: string): boolean {
   const canonicalMetricKey = resolveWearableCanonicalMetricKey(metric);
   return canonicalMetricKey !== null
     && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(canonicalMetricKey);
+}
+
+function resolveCanonicalGenericMeasurementMetricKey(
+  metric: string,
+): string | null {
+  return resolveMetricDefinition(metric)?.key
+    ?? resolveWearableCanonicalMetricKey(metric);
+}
+
+function isCanonicalGenericBodyMeasurementMetric(metric: string): boolean {
+  return isCanonicalGenericBodyMeasurementMetricKey(
+    resolveCanonicalGenericMeasurementMetricKey(metric),
+  );
+}
+
+function isCanonicalGenericBodyMeasurementMetricKey(
+  canonicalMetricKey: string | null,
+): boolean {
+  return canonicalMetricKey !== null
+    && (
+      CANONICAL_GENERIC_BODY_MEASUREMENT_METRIC_KEYS.has(canonicalMetricKey)
+      || CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(canonicalMetricKey)
+    );
 }
 
 function normalizeStoredAvailabilityEvent(value: unknown): unknown {
@@ -1575,7 +1609,7 @@ function normalizeStoredAvailabilityEvent(value: unknown): unknown {
     || value.kind !== "observation"
     || typeof value.observationGrain !== "string"
     || typeof value.metric !== "string"
-    || !isCanonicalBodyMeasurementMetric(value.metric)
+    || !isCanonicalProviderBodyObservationMetric(value.metric)
     || !isPlainRecord(value.externalRef)
     || typeof value.externalRef.system !== "string"
   ) {
@@ -1607,7 +1641,7 @@ function parseStoredProviderBodyAvailabilityEvent(
     !isPlainRecord(value)
     || value.kind !== "observation"
     || typeof value.metric !== "string"
-    || !isCanonicalBodyMeasurementMetric(value.metric)
+    || !isCanonicalProviderBodyObservationMetric(value.metric)
     || !isPlainRecord(value.externalRef)
     || typeof value.externalRef.system !== "string"
     || value.externalRef.system.trim().length === 0
@@ -1642,7 +1676,7 @@ function storedEventMayContributeToCanonicalAvailability(
   }
   if (value.kind === "observation") {
     return typeof value.metric === "string"
-      && isCanonicalBodyMeasurementMetric(value.metric);
+      && isCanonicalProviderBodyObservationMetric(value.metric);
   }
   if (value.kind === "test") {
     return value.testCategory === BLOOD_TEST_CATEGORY
@@ -1659,9 +1693,12 @@ function storedEventMayContributeToCanonicalAvailability(
     if (!isPlainRecord(measurement) || typeof measurement.metric !== "string") {
       return false;
     }
-    return isCanonicalBodyMeasurementMetric(measurement.metric)
-      || measurement.metric === "systolic-blood-pressure"
-      || measurement.metric === "diastolic-blood-pressure";
+    const canonicalMetricKey = resolveCanonicalGenericMeasurementMetricKey(
+      measurement.metric,
+    );
+    return isCanonicalGenericBodyMeasurementMetricKey(canonicalMetricKey)
+      || canonicalMetricKey === CANONICAL_SYSTOLIC_BLOOD_PRESSURE_METRIC_KEY
+      || canonicalMetricKey === CANONICAL_DIASTOLIC_BLOOD_PRESSURE_METRIC_KEY;
   });
 }
 
@@ -1669,9 +1706,11 @@ function canonicalEventContainsPairedBloodPressure(record: EventRecord): boolean
   if (record.kind !== "measurement") {
     return false;
   }
-  const metrics = new Set(record.measurements.map((measurement) => measurement.metric));
-  return metrics.has("systolic-blood-pressure")
-    && metrics.has("diastolic-blood-pressure");
+  const metrics = new Set(record.measurements.map((measurement) =>
+    resolveCanonicalGenericMeasurementMetricKey(measurement.metric)
+  ));
+  return metrics.has(CANONICAL_SYSTOLIC_BLOOD_PRESSURE_METRIC_KEY)
+    && metrics.has(CANONICAL_DIASTOLIC_BLOOD_PRESSURE_METRIC_KEY);
 }
 
 function interruptedCanonicalEventAvailability(): CanonicalEventAvailabilitySummary {
