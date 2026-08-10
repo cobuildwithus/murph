@@ -20,5 +20,6 @@ jobs:
         with:
           name: device-sync-pr2-chunks
           path: .agent/device-sync-pr2.patch.*
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
