@@ -514,6 +514,95 @@ test("legacy transaction provisioning prepares every candidate before its first 
   assert.equal(recorder.persistedEnvelopes.length, 4);
 });
 
+test("legacy Family transaction provisioning drains candidate failures before rollback", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  const baseClient = createLocalKmsClient({
+    encryptCalls,
+    signCalls,
+    signer: signer.privateKey,
+  });
+  const firstError = new Error("First observed Family activation KMS failure.");
+  const laterError = new Error("Later Family activation KMS failure.");
+  let encryptCallCount = 0;
+  let releaseSlowEncrypt: (() => void) | undefined;
+  const slowEncrypt = new Promise<void>((resolve) => {
+    releaseSlowEncrypt = resolve;
+  });
+  gcpKmsMock.client = {
+    ...baseClient,
+    async encrypt(input) {
+      encryptCallCount += 1;
+      if (encryptCallCount === 1) {
+        await slowEncrypt;
+        throw laterError;
+      }
+      if (encryptCallCount === 2) {
+        throw firstError;
+      }
+      return baseClient.encrypt(input);
+    },
+  };
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+  const { provisionHostedCryptoDomainRootsForUserTx } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const steps: string[] = [];
+  const recorder = createStepRecordingTransaction(steps);
+  const transactionSteps: string[] = ["transaction.begin"];
+  const transaction = provisionHostedCryptoDomainRootsForUserTx({
+    reason: "test.family-activation-legacy-bridge",
+    tx: recorder.prisma,
+    userId: "member-test-family-activation-drain",
+  }).then(
+    () => {
+      transactionSteps.push("transaction.commit");
+    },
+    (error: unknown) => {
+      transactionSteps.push("transaction.rollback");
+      throw error;
+    },
+  );
+  let transactionSettled = false;
+  void transaction.then(
+    () => {
+      transactionSettled = true;
+    },
+    () => {
+      transactionSettled = true;
+    },
+  );
+
+  await vi.waitFor(() => expect(encryptCallCount).toBeGreaterThanOrEqual(2));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(transactionSettled).toBe(false);
+  expect(transactionSteps).toEqual(["transaction.begin"]);
+  expect(steps).not.toContain("db.advisory-lock");
+  expect(recorder.persistedEnvelopes).toHaveLength(0);
+  if (!releaseSlowEncrypt) {
+    throw new Error("Expected the slow Family activation KMS gate.");
+  }
+  releaseSlowEncrypt();
+
+  await expect(transaction).rejects.toBe(firstError);
+  expect(transactionSteps).toEqual(["transaction.begin", "transaction.rollback"]);
+  expect(steps).not.toContain("db.advisory-lock");
+  expect(recorder.persistedEnvelopes).toHaveLength(0);
+
+  gcpKmsMock.client = baseClient;
+  await expect(provisionHostedCryptoDomainRootsForUserTx({
+    reason: "test.family-activation-legacy-bridge-retry",
+    tx: recorder.prisma,
+    userId: "member-test-family-activation-drain",
+  })).resolves.toBeUndefined();
+  expect(recorder.persistedEnvelopes).toHaveLength(4);
+});
+
 test("prepared-only provisioning fails closed without signing inside the transaction", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
