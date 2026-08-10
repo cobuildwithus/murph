@@ -119,7 +119,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'body-composition',
     name: 'body-composition',
     triggerHint:
-      'Use for fat loss, muscle gain, recomposition, waist or weight trends, plateaus, calorie/protein tradeoffs, body composition measurement noise, and sustainable change. Route eating-disorder risk, aggressive cuts, or medication decisions to clinician support.',
+      'Use for intentional fat loss or weight loss, muscle or weight gain, cutting, bulking, recomposition, maintenance, waist or weight trends, plateaus, calorie/protein tradeoffs, body-composition measurement noise, and sustainable change. Route unintentional change, eating-disorder risk, aggressive cuts, underweight, pregnancy, or medication decisions through the skill’s safety and qualified-care boundaries.',
   },
   {
     slug: 'cycle-hormonal-health',
