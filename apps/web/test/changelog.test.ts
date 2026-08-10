@@ -306,6 +306,12 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("workout-card-status-rendering")).toMatchObject({
+      sourcePullRequests: [1599],
+      summary: expect.stringContaining("including their static previews"),
+      details: expect.stringContaining("part of the card image itself"),
+    });
+    expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -512,6 +518,7 @@ describe("changelog registry", () => {
           "reminders-keep-requested-timezone",
           "web-search-restored",
           "appointment-reminders-by-default",
+          "workout-card-status-rendering",
         ],
       },
       {
