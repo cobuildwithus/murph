@@ -2238,6 +2238,80 @@ test("a source absent from listed-only authority cannot trigger pressure egress"
   assert.equal(result.metadataPatch, undefined);
 });
 
+test("listed-only authority can project a non-fenced disconnected source without same-attempt pressure egress", async () => {
+  const providerListRequests = { count: 0 };
+  const projectedSources: Array<{
+    resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
+    status: string;
+  }> = [];
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ providerListRequests, requests });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const disconnectedSource = createSourceSummary(
+    "omron",
+    NOW,
+    "disconnected",
+  );
+
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({ sources: [disconnectedSource] }),
+      connectionSourceAdmissionMode: "listed_only",
+      listConnectionSources: async () => [disconnectedSource],
+      projectedSources,
+    }),
+    toJobRecord(bloodPressure, 82),
+  );
+
+  assert.equal(providerListRequests.count, 1);
+  assert.deepEqual(projectedSources, [{
+    resourceAvailabilitySummary: {
+      activity: true,
+      blood_pressure: true,
+      stress_level: true,
+    },
+    status: "connected",
+  }]);
+  assert.equal(requests.length, 0);
+  assert.equal(result.metadataPatch, undefined);
+});
+
+test.each(SOURCE_DISCONNECT_FENCE_CODES)(
+  "a listed-only disconnected %s fence blocks provider recovery projection",
+  async (lastErrorCode) => {
+    const providerListRequests = { count: 0 };
+    const projectedSources: Array<{
+      resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
+      status: string;
+    }> = [];
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({ providerListRequests, requests });
+    const bloodPressure = createScheduledBloodPressureJob(provider);
+    const disconnectedSource = createSourceSummary(
+      "omron",
+      NOW,
+      "disconnected",
+    );
+    disconnectedSource.lastErrorCode = lastErrorCode;
+
+    const result = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({
+        account: createAccount({ sources: [disconnectedSource] }),
+        connectionSourceAdmissionMode: "listed_only",
+        listConnectionSources: async () => [disconnectedSource],
+        projectedSources,
+      }),
+      toJobRecord(bloodPressure, 83),
+    );
+
+    assert.equal(providerListRequests.count, 0);
+    assert.equal(projectedSources.length, 0);
+    assert.equal(requests.length, 0);
+    assert.equal(result.scheduledJobs, undefined);
+    assert.equal(result.metadataPatch, undefined);
+  },
+);
+
 test.each(SOURCE_DISCONNECT_FENCE_CODES)(
   "a pre-existing connected %s fence blocks provider discovery and pressure egress",
   async (lastErrorCode) => {

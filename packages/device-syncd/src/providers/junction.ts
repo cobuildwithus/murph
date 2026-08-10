@@ -7090,16 +7090,17 @@ async function projectJunctionSources(
         : context.account.sources ?? [];
     const listedOnly = context.connectionSourceAdmissionMode === "listed_only";
     if (
-      listedOnly
-        ? !isJunctionSourceAdmittedForImport(
-            admissionSources,
-            source.sourceProviderSlug,
-            false,
-          )
-        : isJunctionSourceProjectionFenced(
-            admissionSources,
-            source.sourceProviderSlug,
-          )
+      (
+        listedOnly
+        && !hasJunctionSourceListing(
+          admissionSources,
+          source.sourceProviderSlug,
+        )
+      )
+      || isJunctionSourceProjectionFenced(
+        admissionSources,
+        source.sourceProviderSlug,
+      )
     ) {
       continue;
     }
@@ -7184,6 +7185,20 @@ function isJunctionSourceProjectionFenced(
   return sources.some((source) =>
     normalizeProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
     && isDeviceSyncSourceDisconnectFenced(source)
+  );
+}
+
+function hasJunctionSourceListing(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string | null | undefined,
+): boolean {
+  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  if (!normalizedSourceProviderSlug) {
+    return true;
+  }
+
+  return sources.some((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
   );
 }
 
