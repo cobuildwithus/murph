@@ -2102,6 +2102,45 @@ test("reports empty, insufficient, and warning-rich semantic series states", () 
   );
 });
 
+test("uses canonical recording order before opaque identity for otherwise equal facts", () => {
+  const olderCorrection = metricPoint({
+    effectiveDate: "2026-04-29",
+    id: "metric-point:opaque-sort-last",
+    metricKey: "deep-sleep-minutes",
+    observedAt: "2026-04-29T12:00:00.000Z",
+    recordedAt: "2026-04-30T08:00:00.000Z",
+    recordId: "evt_older_correction",
+    sourceKind: "observation",
+    unit: "minutes",
+    value: 60,
+  });
+  const newerCorrection = metricPoint({
+    effectiveDate: "2026-04-29",
+    id: "metric-point:opaque-sort-first",
+    metricKey: "deep-sleep-minutes",
+    observedAt: "2026-04-29T12:00:00.000Z",
+    recordedAt: "2026-04-30T09:00:00.000Z",
+    recordId: "evt_newer_correction",
+    sourceKind: "observation",
+    unit: "minutes",
+    value: 90,
+  });
+
+  const selected = selectMetricSeries({
+    duplicatePolicy: "selection-policy",
+    metricKey: "deep-sleep-minutes",
+    points: [olderCorrection, newerCorrection],
+  });
+
+  assert.deepEqual(selected.rows.map((row) => row.pointIds), [[newerCorrection.id]]);
+  const selectedValue = selectMetricValue({
+    metricKey: "deep-sleep-minutes",
+    points: [olderCorrection, newerCorrection],
+  });
+  assert.equal(selectedValue.value, 90);
+  assert.equal(selectedValue.point?.id, newerCorrection.id);
+});
+
 test("formats text-only metric values and missing numeric values", () => {
   const textOnly = {
     ...metricPoint({
@@ -9470,6 +9509,7 @@ function metricPoint(input: {
   id: string;
   metricKey?: string;
   observedAt: string;
+  recordedAt?: string | null;
   recordId: string;
   sourceKind: MetricPoint["source"]["kind"];
   unit?: string | null;
@@ -9502,7 +9542,7 @@ function metricPoint(input: {
       rawRefs: [],
       sourceLabel: "Fixture",
     },
-    recordedAt: null,
+    recordedAt: input.recordedAt ?? null,
     reportedAt: null,
     schemaVersion: METRIC_POINT_SCHEMA_VERSION,
     source: {

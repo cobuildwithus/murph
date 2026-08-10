@@ -942,7 +942,7 @@ describe("selectProjectableDailyMetricDays", () => {
       stage: "rem" as const,
       title: "REM sleep",
     },
-  ])("makes a manual $stage correction authoritative with and without wearable evidence", async ({
+  ])("makes the newest manual $stage correction authoritative with and without wearable evidence", async ({
     legacyProjectionKind,
     metric,
     metricKey,
@@ -965,11 +965,10 @@ describe("selectProjectableDailyMetricDays", () => {
           "2026-07.jsonl",
         );
         const existingRecords = await readFile(eventsPath, "utf8");
-        await writeFile(
-          eventsPath,
-          `${existingRecords}${JSON.stringify({
+        const manualCorrections = [
+          {
             schemaVersion: "murph.event.v1",
-            id: `evt_manual_${stage}_sleep`,
+            id: `evt_manual_${stage}_sleep_older`,
             kind: "observation",
             occurredAt: "2026-07-03T07:00:00.000Z",
             recordedAt: "2026-07-03T12:00:00.000Z",
@@ -977,9 +976,26 @@ describe("selectProjectableDailyMetricDays", () => {
             source: "manual",
             title,
             metric,
+            value: 60,
+            unit: "minutes",
+          },
+          {
+            schemaVersion: "murph.event.v1",
+            id: `evt_manual_${stage}_sleep_newer`,
+            kind: "observation",
+            occurredAt: "2026-07-03T07:00:00.000Z",
+            recordedAt: "2026-07-03T13:00:00.000Z",
+            dayKey: ACTIVITY_DAY.date,
+            source: "manual",
+            title,
+            metric,
             value: 91,
             unit: "minutes",
-          })}\n`,
+          },
+        ];
+        await writeFile(
+          eventsPath,
+          `${existingRecords}${manualCorrections.map((record) => JSON.stringify(record)).join("\n")}\n`,
           "utf8",
         );
 
@@ -1017,7 +1033,7 @@ describe("selectProjectableDailyMetricDays", () => {
                     }),
                     {
                       label: "Manual",
-                      recordedAt: "2026-07-03T12:00:00.000Z",
+                      recordedAt: "2026-07-03T13:00:00.000Z",
                       selected: true,
                       source: "manual",
                       unit: "minutes",
@@ -1026,7 +1042,7 @@ describe("selectProjectableDailyMetricDays", () => {
                   ]
                 : [{
                     label: "Manual",
-                    recordedAt: "2026-07-03T12:00:00.000Z",
+                    recordedAt: "2026-07-03T13:00:00.000Z",
                     selected: true,
                     source: "manual",
                     unit: "minutes",
@@ -1067,11 +1083,10 @@ describe("selectProjectableDailyMetricDays", () => {
           "2026-07.jsonl",
         );
         const existingRecords = await readFile(eventsPath, "utf8");
-        await writeFile(
-          eventsPath,
-          `${existingRecords}${JSON.stringify({
+        const manualCorrections = [
+          {
             schemaVersion: "murph.event.v1",
-            id: "evt_invalid_manual_deep_sleep",
+            id: "evt_valid_manual_deep_sleep_older",
             kind: "observation",
             occurredAt: "2026-07-03T07:00:00.000Z",
             recordedAt: "2026-07-03T12:00:00.000Z",
@@ -1079,9 +1094,26 @@ describe("selectProjectableDailyMetricDays", () => {
             source: "manual",
             title: "Deep sleep",
             metric: "sleep-deep-minutes",
+            value: 90,
+            unit: "minutes",
+          },
+          {
+            schemaVersion: "murph.event.v1",
+            id: "evt_invalid_manual_deep_sleep_newer",
+            kind: "observation",
+            occurredAt: "2026-07-03T07:00:00.000Z",
+            recordedAt: "2026-07-03T13:00:00.000Z",
+            dayKey: ACTIVITY_DAY.date,
+            source: "manual",
+            title: "Deep sleep",
+            metric: "sleep-deep-minutes",
             value: 1_500,
             unit: "minutes",
-          })}\n`,
+          },
+        ];
+        await writeFile(
+          eventsPath,
+          `${existingRecords}${manualCorrections.map((record) => JSON.stringify(record)).join("\n")}\n`,
           "utf8",
         );
 
@@ -1102,6 +1134,107 @@ describe("selectProjectableDailyMetricDays", () => {
       }
     },
   );
+
+  it.each([
+    {
+      legacyProjectionKind: "deep-sleep-days.v0" as const,
+      metric: "sleep-deep-minutes",
+      sourceProjectionKind: "deep-sleep-sources-days.v1" as const,
+      stage: "deep" as const,
+      title: "Deep sleep",
+    },
+    {
+      legacyProjectionKind: "rem-sleep-days.v0" as const,
+      metric: "sleep-rem-minutes",
+      sourceProjectionKind: "rem-sleep-sources-days.v1" as const,
+      stage: "rem" as const,
+      title: "REM sleep",
+    },
+  ])("falls back to the newest live manual $stage correction after deletion", async ({
+    legacyProjectionKind,
+    metric,
+    sourceProjectionKind,
+    stage,
+    title,
+  }) => {
+    const vaultRoot = await createSleepSourceProjectionVault([
+      { date: ACTIVITY_DAY.date, providers: ["garmin"], stage },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const eventsPath = join(
+        vaultRoot,
+        "ledger",
+        "events",
+        "2026",
+        "2026-07.jsonl",
+      );
+      const existingRecords = await readFile(eventsPath, "utf8");
+      const olderCorrection = {
+        schemaVersion: "murph.event.v1",
+        id: `evt_manual_${stage}_sleep_live`,
+        kind: "observation",
+        occurredAt: "2026-07-03T07:00:00.000Z",
+        recordedAt: "2026-07-03T12:00:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        source: "manual",
+        title,
+        metric,
+        value: 60,
+        unit: "minutes",
+      };
+      const deletedCorrection = {
+        ...olderCorrection,
+        id: `evt_manual_${stage}_sleep_deleted`,
+        recordedAt: "2026-07-03T13:00:00.000Z",
+        value: 91,
+        lifecycle: { revision: 1 },
+      };
+      const tombstone = {
+        ...deletedCorrection,
+        recordedAt: "2026-07-03T14:00:00.000Z",
+        lifecycle: { revision: 2, state: "deleted" },
+      };
+      await writeFile(
+        eventsPath,
+        `${existingRecords}${[olderCorrection, deletedCorrection, tombstone]
+          .map((record) => JSON.stringify(record))
+          .join("\n")}\n`,
+        "utf8",
+      );
+
+      const sourceAware = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec(sourceProjectionKind),
+      );
+      const legacy = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec(legacyProjectionKind),
+      );
+
+      expect(legacy[0]?.data).toMatchObject({ value: 60 });
+      expect(sourceAware[0]?.data).toMatchObject({
+        sources: expect.arrayContaining([
+          expect.objectContaining({ selected: true, source: "manual", value: 60 }),
+          expect.objectContaining({ source: "garmin" }),
+        ]),
+        value: 60,
+      });
+      const sourceAwareData = sourceAware[0]?.data;
+      if (!sourceAwareData || !("sources" in sourceAwareData) || !Array.isArray(sourceAwareData.sources)) {
+        throw new Error("Expected source-aware sleep-stage projection data.");
+      }
+      expect(sourceAwareData.sources.filter((source) =>
+        "selected" in source && source.selected
+      )).toEqual([
+        expect.objectContaining({ source: "manual", value: 60 }),
+      ]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
 
   it("keeps valid dates when more than four providers appear across the window", async () => {
     const vaultRoot = await createSleepSourceProjectionVault([

@@ -141,9 +141,14 @@ truncating when the source bound is exceeded or the selected source cannot be
 proved. A canonical manually entered sleep-stage event is projected onto its
 member-local day and disclosed as the explicit `manual` / `Manual` source; it is
 never attributed to a connected wearable or aggregator, and it is authoritative
-for that day while wearable values remain visible as disagreeing sources. An
-invalid manual sleep-stage value omits only its affected day instead of erasing
-other valid shared days. The legacy
+for that day while wearable values remain visible as disagreeing sources. When
+multiple live manual facts target the same stage and member-local day, canonical
+recording order decides the correction: the newest recorded fact wins after the
+shared metric date, source, and observation-time rules. An invalid newest fact
+omits only its affected day instead of silently reviving an older value or
+erasing other valid shared days. A canonically deleted fact no longer
+participates, so the next newest live manual fact wins; wearable selection
+resumes only when no live manual fact remains. The legacy
 provider-neutral `deep-sleep-days.v0` and
 `rem-sleep-days.v0` scopes remain read-only compatibility contracts for
 existing policies and grants, disclosing one canonical daily value only. A new

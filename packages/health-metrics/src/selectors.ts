@@ -320,6 +320,11 @@ function compareMetricPointsForSelection(
   if (priorityDelta !== 0) return priorityDelta;
 
   if (left.observedAt !== right.observedAt) return right.observedAt.localeCompare(left.observedAt);
+  if (left.recordedAt !== right.recordedAt) {
+    if (left.recordedAt === null) return 1;
+    if (right.recordedAt === null) return -1;
+    return right.recordedAt.localeCompare(left.recordedAt);
+  }
   return left.id.localeCompare(right.id);
 }
 

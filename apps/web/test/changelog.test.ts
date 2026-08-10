@@ -310,7 +310,7 @@ describe("changelog registry", () => {
       sourcePullRequests: [1565, 1593],
       summary: expect.stringContaining("explicit manual corrections"),
       details: expect.stringContaining(
-        "labeled Manual instead of a connected source",
+        "latest manual correction for a sleep date wins",
       ),
     });
     expect(items.get("public-referral-home")).toMatchObject({
