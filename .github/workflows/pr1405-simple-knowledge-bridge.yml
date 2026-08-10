@@ -24,13 +24,13 @@ jobs:
         with:
           node-version: 24.14.1
           cache: pnpm
-      - name: Reuse existing typed family graph
+      - name: Expand authored broad family closure
         id: apply
         continue-on-error: true
         shell: bash
         run: |
           report=.github/pr1405-isolated-validation.txt
-          python .github/scripts/pr1405-use-existing-family-graph.py > "$report" 2>&1
+          python .github/scripts/pr1405-expand-broad-family-closure.py > "$report" 2>&1
       - name: Install dependencies
         id: install
         if: steps.apply.outcome == 'success'
@@ -75,5 +75,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m 'fix(health-commons): reuse typed child-family graph' || exit 0
+          git commit -m 'fix(health-commons): expand authored broad family closure' || exit 0
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
