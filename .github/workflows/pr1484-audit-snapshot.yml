@@ -1,4 +1,4 @@
-name: Push PR 1484 stale-binding projection fix
+name: Validate corrected PR 1484 head
 
 on:
   push:
@@ -6,60 +6,80 @@ on:
       - agent/pr1484-audit-snapshot-20260810
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
     steps:
-      - name: Check out exact PR branch
+      - name: Check out exact PR head
         uses: actions/checkout@v4
         with:
-          ref: agent/member-owned-provider-applications
+          ref: 30d8c425f433cacfefa330a54a74e733cdd267ae
           fetch-depth: 0
 
-      - name: Apply projection fix
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm -C apps/web run prisma:generate
+
+      - name: Validate Prisma schema
+        run: pnpm -C apps/web exec prisma validate
+
+      - name: Typecheck device sync
+        run: pnpm -C packages/device-syncd run typecheck
+
+      - name: Typecheck assistant runtime
+        run: pnpm -C packages/assistant-runtime run typecheck
+
+      - name: Typecheck Web
+        run: pnpm -C apps/web run typecheck
+
+      - name: Lint Web
+        run: pnpm -C apps/web run lint
+
+      - name: Run focused Web tests
         shell: bash
         run: |
           set -euo pipefail
-          expected_head=8176acf2207337f3249ba5f88aaf8da00d3954a6
-          test "$(git rev-parse HEAD)" = "$expected_head"
-          python - <<'PY'
-          from pathlib import Path
+          pnpm -C apps/web exec vitest run --config vitest.workspace.ts --no-coverage \
+            test/device-provider-application-crypto.test.ts \
+            test/device-provider-application-ingress-store.test.ts \
+            test/device-provider-application-store.test.ts \
+            test/device-provider-application-types.test.ts \
+            test/device-sync-hosted-runtime-authority.test.ts \
+            test/device-sync-internal-runtime.test.ts \
+            test/device-sync-providers.test.ts \
+            test/hosted-account-data-service.test.ts \
+            test/prisma-store-oauth-connection.test.ts \
+            test/prisma-store-oauth-sessions.test.ts
 
-          path = Path("apps/web/src/lib/device-sync/hosted-runtime-authority.ts")
-          lines = path.read_text().splitlines(keepends=True)
-          matches = []
-          for index, line in enumerate(lines[:-1]):
-              if (
-                  line.strip() == "refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),"
-                  and lines[index + 1].strip() == ").connection"
-              ):
-                  matches.append(index)
-          if len(matches) != 1:
-              raise SystemExit(f"expected one runtime apply response projection, found {len(matches)}")
+      - name: Run assistant-runtime tests
+        run: pnpm -C packages/assistant-runtime run test
 
-          index = matches[0]
-          closing_indent = lines[index + 1][:-len(lines[index + 1].lstrip())]
-          lines[index + 1:index + 1] = [
-              f"{closing_indent}  {{\n",
-              f"{closing_indent}    forceReauthorizationRequired:\n",
-              f"{closing_indent}      !providerApplicationBindingCurrent,\n",
-              f"{closing_indent}    includeCredentialMaterial: false,\n",
-              f"{closing_indent}  }},\n",
-          ]
-          path.write_text("".join(lines))
-          PY
+      - name: Run device-sync package tests
+        run: pnpm -C packages/device-syncd run test
+
+      - name: Run smoke checks
+        run: pnpm test:smoke
+
+      - name: Verify generated and source cleanliness
+        shell: bash
+        run: |
+          set -euo pipefail
           git diff --check
-
-      - name: Commit and push WIP fix
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add apps/web/src/lib/device-sync/hosted-runtime-authority.ts
-          git commit -m "fix: project stale provider bindings as repair-required"
-          git push --force-with-lease=refs/heads/agent/member-owned-provider-applications:8176acf2207337f3249ba5f88aaf8da00d3954a6 \
-            origin HEAD:refs/heads/agent/member-owned-provider-applications
+          test -z "$(git status --short --untracked-files=no)" || {
+            git status --short
+            exit 1
+          }
