@@ -12,9 +12,7 @@ const mocks = vi.hoisted(() => ({
   imageResponse: vi.fn(),
   readFile: vi.fn(async (path: string | URL) => {
     const value = String(path);
-    if (value.includes("Fraunces-600.ttf")) return Buffer.from([1, 2, 3]);
     if (value.includes("DMSans-400.ttf")) return Buffer.from([4, 5, 6]);
-    if (value.endsWith("public/logo.svg")) return Buffer.from("<svg />");
     throw new Error("Unexpected nutrition card asset read.");
   }),
 }));
@@ -97,44 +95,43 @@ test("nutrition card image route renders the bounded V2 snapshot without caching
   assert.equal(response.headers.get("Content-Type"), "image/png");
   assert.equal(response.headers.get("Cache-Control"), "private, no-store");
   assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow, noarchive");
-  expect(mocks.readFile).toHaveBeenCalledTimes(3);
+  expect(mocks.readFile).toHaveBeenCalledTimes(1);
   expect(mocks.imageResponse).toHaveBeenCalledTimes(1);
 
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 1_200);
+  assert.equal(init.height, 568);
   assert.deepEqual(
     init.fonts?.map((font) => [font.name, font.weight]),
-    [["Fraunces", 600], ["DM Sans", 400]],
+    [["DM Sans", 400]],
   );
   assert.match(JSON.stringify(imageTree), /2026-06-18/u);
   assert.match(JSON.stringify(imageTree), /1840/u);
 });
 
-test("nutrition card image component renders totals, partial support, and goals", async () => {
+test("nutrition card image mirrors the native default-state composition", async () => {
   const { NutritionCardImage } = await import(
     "@/src/components/imessage/nutrition-card-image"
   );
   const serialized = renderToStaticMarkup(
-    <NutritionCardImage
-      card={CARD}
-      logoDataUri="data:image/svg+xml;base64,PHN2Zy8+"
-    />,
+    <NutritionCardImage card={CARD} />,
   );
 
-  assert.match(serialized, /Jun 18, 2026/u);
+  assert.match(serialized, /imessage-native-nutrition-card/u);
   assert.match(serialized, /1,840/u);
   assert.match(serialized, /112/u);
   assert.match(serialized, /206/u);
   assert.match(serialized, /61/u);
   assert.match(serialized, /24/u);
-  assert.match(serialized, /PARTIAL TOTALS/u);
-  assert.match(serialized, /2 of 3 meals/u);
-  assert.match(serialized, /2,200/u);
-  assert.match(serialized, /Under target/u);
-  assert.match(serialized, /Status unavailable/u);
-  assert.match(serialized, /Goal unavailable/u);
-  assert.doesNotMatch(serialized, /No goal/u);
+  assert.match(serialized, /data-calorie-progress="0\.8364"/u);
+  assert.match(serialized, /data-goal-status="under_target"/u);
+  assert.match(serialized, /color:#995E08/u);
+  assert.match(serialized, /data-goal-status="unavailable"/u);
+  assert.match(serialized, /color:#666163/u);
+  assert.doesNotMatch(
+    serialized,
+    /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Under target|Goal unavailable|Complete total/u,
+  );
 });
 
 test("nutrition card image route and component retain truthful V1 compatibility", async () => {
@@ -153,17 +150,15 @@ test("nutrition card image route and component retain truthful V1 compatibility"
   expect(mocks.imageResponse).toHaveBeenCalledTimes(1);
 
   const serialized = renderToStaticMarkup(
-    <NutritionCardImage
-      card={CARD_V1}
-      logoDataUri="data:image/svg+xml;base64,PHN2Zy8+"
-    />,
+    <NutritionCardImage card={CARD_V1} />,
   );
-  assert.match(serialized, /Jun 17, 2026/u);
   assert.match(serialized, /1,420/u);
   assert.match(serialized, /98/u);
   assert.match(serialized, /164/u);
   assert.match(serialized, /52/u);
-  assert.doesNotMatch(serialized, /Fiber|No goal|Goal unavailable/u);
+  assert.match(serialized, /FIBER/u);
+  assert.match(serialized, />—</u);
+  assert.doesNotMatch(serialized, /Jun 17|No goal|Goal unavailable/u);
 });
 
 test("nutrition card image route rejects malformed, non-nutrition, and query-bearing URLs before asset reads", async () => {

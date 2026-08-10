@@ -10,11 +10,7 @@ import {
 } from "@murphai/contracts";
 import { ImageResponse } from "next/og";
 
-import {
-  dmSans400FontPath,
-  fraunces600FontPath,
-  logoSvgPath,
-} from "../../../../font-files";
+import { dmSans400FontPath } from "../../../../font-files";
 import {
   IMESSAGE_NUTRITION_CARD_IMAGE_SIZE,
   NutritionCardImage,
@@ -49,20 +45,13 @@ export async function GET(
     return invalidPayloadResponse();
   }
 
-  const [fraunces600, dmSans400, logoDataUri] = await Promise.all([
-    readFile(fraunces600FontPath).then(toArrayBuffer),
-    readFile(dmSans400FontPath).then(toArrayBuffer),
-    readFile(logoSvgPath).then(
-      (buffer) => `data:image/svg+xml;base64,${buffer.toString("base64")}`,
-    ),
-  ]);
+  const dmSans400 = await readFile(dmSans400FontPath).then(toArrayBuffer);
 
   return new ImageResponse(
-    <NutritionCardImage card={card} logoDataUri={logoDataUri} />,
+    <NutritionCardImage card={card} />,
     {
       ...IMESSAGE_NUTRITION_CARD_IMAGE_SIZE,
       fonts: [
-        { name: "Fraunces", data: fraunces600, weight: 600 },
         { name: "DM Sans", data: dmSans400, weight: 400 },
       ],
       headers: PRIVATE_IMAGE_HEADERS,

@@ -206,16 +206,16 @@ on larger screens it centers at no more than 540px wide.
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
 ### iMessage Nutrition Card Image
-Render the macOS and app-absent fallback at 1200×1200 as one flat warm-paper
-composition, not as a screenshot of the SwiftUI balloon. Lead with the date and
-calorie total in Fraunces, keep protein, carbohydrates, fat, and V2 fiber in an
-even two-row metric ledger, and pair every target status with readable text. Use DM Sans for
-labels, the sage/sienna semantic palette, warm hairline borders, rounded cards,
-and no shadows or nested containers. Partial support must be explicit, and a
-missing or untrusted target must remain neutral as `Goal unavailable`. The
-provider captions beneath the image use one text column to repeat every
-available total, the partial state, and each V2 goal status for assistive
-technology and image-failure recovery.
+Render the macOS and app-absent fallback as the compact default state of the
+shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
+cream balloon, small system-style badge, large calorie value, calorie progress
+ring, and one-row protein, carbohydrates, fat, and fiber readings visually
+aligned with the Messages extension. Status color may tint nutrient values, but
+the static image does not expose the native card's tap-to-reveal target state.
+The provider captions beneath the image use one text column to retain the date,
+meal count, every available total, partial state, and each V2 target/status for
+assistive technology and image-failure recovery. V1 renders an unavailable
+fiber dash in the image while its caption correctly omits a fiber claim.
 
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
@@ -547,7 +547,7 @@ View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Moti
 - Logo (dark): `apps/web/public/logo-dark.svg`
 - Favicon (auto dark mode): `apps/web/app/icon.svg`
 - Dynamic OG image: `apps/web/app/opengraph-image.tsx` (1200×630, Fraunces + DM Sans, hero.jpg background)
-- Static iMessage nutrition image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200×1200, Fraunces + DM Sans, immutable bounded snapshot)
+- Static iMessage nutrition image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200×568, DM Sans, immutable bounded snapshot)
 - Canonical hero image: `apps/web/public/hero.jpg` (3583×2000)
 - Supporting texture: `apps/web/public/warmglow.png` (1376×768)
 - Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`)

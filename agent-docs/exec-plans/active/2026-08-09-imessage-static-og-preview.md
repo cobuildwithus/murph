@@ -8,7 +8,7 @@ Updated: 2026-08-09
 
 - Keep the shipping Messages extension as the live nutrition-card renderer for
   installed iPhones while giving macOS and iPhones without the extension a
-  legible generated image instead of an overloaded caption grid.
+  generated image that mirrors the native card instead of a separate dashboard.
 - Preserve the existing App Store affordance, one-send outbox ownership, and
   immutable offline card snapshot.
 
@@ -46,10 +46,11 @@ Updated: 2026-08-09
    Mitigation: strict bounded parsing, bundled-asset trace checks, focused
    production-route rendering proof, and physical Mac/iPhone verification
    before rollout completion.
-4. Risk: a wide OG composition makes support and goal text unreadable at phone
-   balloon width, while raster content has no Linq alt-text field.
-   Mitigation: use a square two-row ledger with larger semantic type and repeat
-   the complete available snapshot in Linq's supported native caption fields.
+4. Risk: an independently styled static renderer can drift from the shipping
+   Messages extension, while raster content has no Linq alt-text field.
+   Mitigation: mirror the SwiftUI card's default cream balloon, calorie ring,
+   and four-metric row; keep the complete immutable snapshot in Linq's supported
+   native caption fields because the static image has no tap-to-reveal state.
 
 ## Tasks
 
@@ -57,7 +58,7 @@ Updated: 2026-08-09
 2. [x] Implement the Vercel image route and production image component.
 3. [x] Add catalog, route, provider, egress, and asset-trace proof.
 4. [x] Update security, reliability, architecture, UX, and deploy guidance.
-5. [x] Push the stacked PR candidate and complete ReviewGPT plus exact-head CI.
+5. [ ] Push the updated PR candidate and complete ReviewGPT plus exact-head CI.
 6. [ ] Capture one macOS static card and one no-app iPhone static card, then
    close the plan.
 

@@ -8,7 +8,7 @@ import type {
 
 export const IMESSAGE_NUTRITION_CARD_IMAGE_SIZE = {
   width: 1200,
-  height: 1200,
+  height: 568,
 } as const;
 
 const NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
@@ -16,333 +16,348 @@ const NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
   useGrouping: true,
 });
 
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
-
-const STATUS_LABELS = {
-  far_over_target: "Far over target",
-  far_under_target: "Far under target",
-  on_target: "On target",
-  over_target: "Over target",
-  unavailable: "Status unavailable",
-  under_target: "Under target",
-} as const satisfies Record<NutritionCardGoalStatus, string>;
-
 const COLOR = {
-  background: "#F5F0E8",
-  border: "rgba(196,168,130,0.32)",
-  card: "rgba(255,252,246,0.88)",
-  foreground: "#2D3436",
-  muted: "#625D52",
-  primary: "#5A6E32",
-  warning: "#8B5D3F",
-};
+  balloon: "#FFF5E6",
+  badge: "#FCFAF5",
+  badgeBorder: "rgba(20,18,23,0.08)",
+  badgeMark: "rgba(186,130,74,0.55)",
+  primary: "#141217",
+  secondary: "#666163",
+  progressTrack: "rgba(102,97,99,0.12)",
+  farFromTarget: "#B3332B",
+  offTarget: "#995E08",
+  onTarget: "#337338",
+} as const;
 
 type NutritionMetricPresentation = {
   goal: NutritionCardGoalSnapshot | null | undefined;
   label: string;
   metric: NutritionCardMetric;
-  unit: string;
 };
 
+const EMPTY_METRIC: NutritionCardMetric = {
+  total: null,
+  mealCount: 0,
+};
+
+/**
+ * Static counterpart to the shipping SwiftUI nutrition balloon's default
+ * state. Detailed dates, completeness, goals, and statuses remain in Linq's
+ * native captions so the visual can stay aligned with the compact card.
+ */
 export function NutritionCardImage({
   card,
-  logoDataUri,
 }: {
   card: DailyNutritionResponseCard;
-  logoDataUri: string;
 }) {
   const v2 = isNutritionCardV2(card) ? card : null;
   const metrics: NutritionMetricPresentation[] = [
     {
-      goal: v2 === null ? undefined : v2.goals.proteinGrams,
-      label: "Protein",
+      goal: v2?.goals.proteinGrams,
+      label: "PROTEIN",
       metric: card.totals.proteinGrams,
-      unit: "g",
     },
     {
-      goal: v2 === null ? undefined : v2.goals.carbsGrams,
-      label: "Carbs",
+      goal: v2?.goals.carbsGrams,
+      label: "CARBS",
       metric: card.totals.carbsGrams,
-      unit: "g",
     },
     {
-      goal: v2 === null ? undefined : v2.goals.fatGrams,
-      label: "Fat",
+      goal: v2?.goals.fatGrams,
+      label: "FAT",
       metric: card.totals.fatGrams,
-      unit: "g",
     },
-    ...(v2 === null
-      ? []
-      : [{
-          goal: v2.goals.fiberGrams,
-          label: "Fiber",
-          metric: v2.totals.fiberGrams,
-          unit: "g",
-        }]),
+    {
+      goal: v2?.goals.fiberGrams,
+      label: "FIBER",
+      metric: v2?.totals.fiberGrams ?? EMPTY_METRIC,
+    },
   ];
-  const metricRows = v2 === null
-    ? [metrics]
-    : [metrics.slice(0, 2), metrics.slice(2)];
-  const partial = [card.totals.calories, ...metrics.map(({ metric }) => metric)]
-    .some((metric) => metric.total === null || metric.mealCount < card.mealCount);
   const calories = card.totals.calories.total;
-  const calorieGoal = v2 === null ? undefined : v2.goals.calories;
-  const mealLabel = card.mealCount === 1 ? "meal" : "meals";
+  const calorieGoal = v2?.goals.calories;
 
   return (
     <div
+      data-design-contract="imessage-native-nutrition-card"
       style={{
+        position: "relative",
+        display: "flex",
         width: "100%",
         height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        backgroundColor: COLOR.background,
-        color: COLOR.foreground,
-        padding: "58px 64px 52px",
+        overflow: "hidden",
+        borderRadius: 105,
+        backgroundColor: COLOR.balloon,
+        color: COLOR.primary,
         fontFamily: "DM Sans",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element -- Satori requires a raw image element */}
-        <img src={logoDataUri} width={152} height={34} alt="" />
-        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-          <div
-            style={{
-              display: "flex",
-              fontSize: 30,
-              letterSpacing: "0.14em",
-              color: COLOR.muted,
-            }}
-          >
-            DAILY NUTRITION
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              borderRadius: 999,
-              padding: "8px 15px",
-              backgroundColor: partial
-                ? "rgba(139,93,63,0.12)"
-                : "rgba(90,110,50,0.12)",
-              color: partial ? COLOR.warning : COLOR.primary,
-              fontSize: 28,
-              letterSpacing: "0.08em",
-            }}
-          >
-            {partial ? "PARTIAL TOTALS" : `${card.mealCount} ${mealLabel}`.toUpperCase()}
-          </div>
-        </div>
-      </div>
+      <SystemBadge />
 
       <div
         style={{
+          position: "absolute",
+          top: 146,
+          left: 45,
           display: "flex",
-          alignItems: "flex-end",
-          justifyContent: "space-between",
-          borderBottom: `1px solid ${COLOR.border}`,
-          paddingBottom: 42,
+          alignItems: "baseline",
+          gap: 18,
+          maxWidth: 800,
+          whiteSpace: "nowrap",
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div
-            style={{
-              display: "flex",
-              fontFamily: "Fraunces",
-              fontWeight: 600,
-              fontSize: 68,
-              lineHeight: 1,
-              letterSpacing: "-0.025em",
-            }}
-          >
-            {formatDate(card.localDate)}
-          </div>
-          <div style={{ display: "flex", fontSize: 34, color: COLOR.muted }}>
-            {card.mealCount} logged {mealLabel}
-          </div>
+        <div
+          style={{
+            display: "flex",
+            fontSize: 143,
+            fontWeight: 600,
+            lineHeight: 1,
+            letterSpacing: "-0.045em",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {calories === null ? "—" : formatNumber(calories)}
         </div>
         <div
           style={{
             display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-end",
-            gap: 8,
+            color: COLOR.secondary,
+            fontSize: 56,
+            fontWeight: 500,
+            lineHeight: 1,
           }}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <div
-              style={{
-                display: "flex",
-                fontFamily: "Fraunces",
-                fontWeight: 600,
-                fontSize: 108,
-                lineHeight: 0.9,
-                letterSpacing: "-0.035em",
-              }}
-            >
-              {calories === null ? "—" : formatNumber(calories)}
-            </div>
-            <div style={{ display: "flex", fontSize: 36, color: COLOR.muted }}>
-              cal
-            </div>
-          </div>
-          <GoalLine goal={calorieGoal} unit=" cal" />
+          cal
         </div>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-        {metricRows.map((row, rowIndex) => (
-          <div key={rowIndex} style={{ display: "flex", gap: 22 }}>
-            {row.map((metric) => (
-              <MetricCard
-                key={metric.label}
-                cardMealCount={card.mealCount}
-                presentation={metric}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
+      <CalorieRing total={calories} goal={calorieGoal} />
 
       <div
         style={{
+          position: "absolute",
+          right: 45,
+          bottom: 36,
+          left: 45,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          color: COLOR.muted,
-          fontSize: 28,
+          alignItems: "flex-start",
+          gap: 30,
         }}
       >
-        <div style={{ display: "flex" }}>Private nutrition snapshot</div>
-        <div style={{ display: "flex", color: COLOR.primary }}>withmurph.ai</div>
+        {metrics.map((presentation) => (
+          <Metric key={presentation.label} presentation={presentation} />
+        ))}
       </div>
     </div>
   );
 }
 
-function MetricCard({
-  cardMealCount,
-  presentation,
-}: {
-  cardMealCount: number;
-  presentation: NutritionMetricPresentation;
-}) {
-  const { goal, label, metric, unit } = presentation;
-  const supportLabel = metric.total === null
-    ? "Not available"
-    : metric.mealCount < cardMealCount
-      ? `${metric.mealCount} of ${cardMealCount} meals`
-      : "Complete total";
+function SystemBadge() {
+  const dotOffsets = [
+    [0, -23],
+    [23, 0],
+    [0, 23],
+    [-23, 0],
+  ] as const;
 
   return (
     <div
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        top: 30,
+        left: 30,
+        display: "flex",
+        width: 135,
+        height: 101,
+        border: `2px solid ${COLOR.badgeBorder}`,
+        borderRadius: 999,
+        backgroundColor: COLOR.badge,
+        boxShadow: "0 2px 4px rgba(20,18,23,0.08)",
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: 43,
+          left: 60,
+          display: "flex",
+          width: 15,
+          height: 15,
+          borderRadius: 999,
+          backgroundColor: COLOR.badgeMark,
+        }}
+      />
+      {dotOffsets.map(([x, y]) => (
+        <span
+          key={`${x}:${y}`}
+          style={{
+            position: "absolute",
+            top: 46 + y,
+            left: 63 + x,
+            display: "flex",
+            width: 10,
+            height: 10,
+            borderRadius: 999,
+            backgroundColor: COLOR.badgeMark,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function CalorieRing({
+  total,
+  goal,
+}: {
+  total: number | null;
+  goal: NutritionCardGoalSnapshot | null | undefined;
+}) {
+  const size = 203;
+  const strokeWidth = 19;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const progress = getCalorieProgress(total, goal);
+
+  return (
+    <div
+      aria-hidden="true"
+      data-calorie-progress={progress.toFixed(4)}
+      style={{
+        position: "absolute",
+        top: 75,
+        right: 38,
+        display: "flex",
+        width: size,
+        height: size,
+        alignItems: "center",
+        justifyContent: "center",
+        color: COLOR.primary,
+      }}
+    >
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        style={{ position: "absolute", inset: 0 }}
+      >
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={COLOR.progressTrack}
+          strokeWidth={strokeWidth}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={COLOR.primary}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={`${circumference * progress} ${circumference}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <svg width={75} height={75} viewBox="0 0 24 24">
+        <path
+          d="M12 22c4.97 0 9-3.58 9-8 0-4.5-4-8-6-10.5C14 6 13 7 12 7c-2 0-3.5-1.5-3-4C6.5 4.5 3 8 3 14c0 4.42 4.03 8 9 8Z"
+          fill="currentColor"
+        />
+        <path
+          d="M12 19c1.5 0 2.7-1.1 2.7-2.5 0-1.5-1.3-2.7-2.2-3.6-.3 1-.9 1.8-1.7 2.3-.5-.8-.4-1.7.1-2.5-1.1.8-1.7 2.1-1.7 3.6 0 1.5 1.3 2.7 2.8 2.7Z"
+          fill={COLOR.balloon}
+        />
+      </svg>
+    </div>
+  );
+}
+
+function Metric({
+  presentation,
+}: {
+  presentation: NutritionMetricPresentation;
+}) {
+  const { goal, label, metric } = presentation;
+  const color = getStatusColor(goal);
+
+  return (
+    <div
+      data-goal-status={goal?.status ?? "no-goal"}
       style={{
         display: "flex",
         flexDirection: "column",
         flexBasis: 0,
         flexGrow: 1,
         minWidth: 0,
-        gap: 16,
-        border: `1px solid ${COLOR.border}`,
-        borderRadius: 24,
-        backgroundColor: COLOR.card,
-        padding: "28px 30px",
+        minHeight: 165,
+        alignItems: "flex-start",
+        gap: 7,
       }}
     >
       <div
         style={{
           display: "flex",
-          fontSize: 28,
-          letterSpacing: "0.12em",
-          color: COLOR.muted,
+          color: COLOR.secondary,
+          fontSize: 40,
+          fontWeight: 600,
+          lineHeight: 1,
+          letterSpacing: "0.06em",
         }}
       >
-        {label.toUpperCase()}
+        {label}
       </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <div
-          style={{
-            display: "flex",
-            fontFamily: "Fraunces",
-            fontWeight: 600,
-            fontSize: 78,
-            lineHeight: 1,
-            letterSpacing: "-0.025em",
-          }}
-        >
-          {metric.total === null ? "—" : formatNumber(metric.total)}
-        </div>
-        {metric.total === null ? null : (
-          <div style={{ display: "flex", fontSize: 34, color: COLOR.muted }}>
-            {unit}
-          </div>
-        )}
+      <div
+        style={{
+          display: "flex",
+          color,
+          fontSize: 57,
+          fontWeight: 600,
+          lineHeight: 1.15,
+          letterSpacing: "-0.02em",
+          fontVariantNumeric: "tabular-nums",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {metric.total === null ? "—" : `${formatNumber(metric.total)}g`}
       </div>
-      <div style={{ display: "flex", fontSize: 38, color: COLOR.muted }}>
-        {supportLabel}
-      </div>
-      <GoalLine goal={goal} unit={unit} />
     </div>
   );
 }
 
-function GoalLine({
-  goal,
-  unit,
-}: {
-  goal: NutritionCardGoalSnapshot | null | undefined;
-  unit: string;
-}) {
-  if (goal === undefined) {
-    return null;
+function getCalorieProgress(
+  total: number | null,
+  goal: NutritionCardGoalSnapshot | null | undefined,
+): number {
+  if (total === null || goal === null || goal === undefined) {
+    return 1;
   }
-  if (goal === null) {
-    return (
-      <div style={{ display: "flex", fontSize: 40, color: COLOR.muted }}>
-        Goal unavailable
-      </div>
-    );
+  return Math.min(1, Math.max(0, total / goal.target));
+}
+
+function getStatusColor(
+  goal: NutritionCardGoalSnapshot | null | undefined,
+): string {
+  if (goal === null || goal === undefined) {
+    return COLOR.primary;
   }
-  return (
-    <div style={{ display: "flex", fontSize: 40, color: COLOR.muted }}>
-      {formatNumber(goal.target)}{unit} goal · {STATUS_LABELS[goal.status]}
-    </div>
-  );
+  const colors = {
+    far_over_target: COLOR.farFromTarget,
+    far_under_target: COLOR.farFromTarget,
+    on_target: COLOR.onTarget,
+    over_target: COLOR.offTarget,
+    unavailable: COLOR.secondary,
+    under_target: COLOR.offTarget,
+  } as const satisfies Record<NutritionCardGoalStatus, string>;
+  return colors[goal.status];
 }
 
 function isNutritionCardV2(
   card: DailyNutritionResponseCard,
 ): card is DailyNutritionResponseCardV2 {
   return "version" in card && card.version === 2;
-}
-
-function formatDate(localDate: string): string {
-  const [yearText, monthText, dayText] = localDate.split("-");
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  const monthLabel = MONTHS[month - 1];
-  return monthLabel === undefined ? localDate : `${monthLabel} ${day}, ${year}`;
 }
 
 function formatNumber(value: number): string {

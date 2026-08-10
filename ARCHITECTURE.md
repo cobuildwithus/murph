@@ -1480,9 +1480,10 @@ not recreate the explicit-target override or replace the turn's thread binding.
 Linq explicitly requests interactive transcript rendering. A recipient with
 the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
-layout with a generated nutrition image plus native captions that repeat the
-date, meal count, every available total, the partial state, and each available
-V2 goal target and status. The extension URL keeps the immutable V1 or V2
+layout with a generated nutrition image that mirrors the compact balloon's
+default visual state plus native captions that repeat the date, meal count,
+every available total, the partial state, and each available V2 goal target and
+status. The extension URL keeps the immutable V1 or V2
 snapshot in a bounded Base64URL fragment that the extension decodes offline.
 The static image URL carries that same bounded presentation envelope in one
 queryless path so the Web image route can render it and Linq can rehost it.

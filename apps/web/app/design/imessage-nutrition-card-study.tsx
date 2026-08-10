@@ -28,12 +28,6 @@ const SYNTHETIC_CARD: DailyNutritionResponseCardV2 = {
   },
 };
 
-const SYNTHETIC_LOGO_DATA_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 197 44">
-    <text x="0" y="35" fill="#2D3436" font-family="Georgia,serif" font-size="42" font-weight="600">murph</text>
-  </svg>
-`)}`;
-
 export function ImessageNutritionCardStudy() {
   return (
     <div className="rounded-2xl border border-border bg-card p-4 sm:p-8" inert>
@@ -45,8 +39,8 @@ export function ImessageNutritionCardStudy() {
           Daily nutrition card
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-          The same immutable nutrition snapshot renders as an image when the
-          Messages extension is unavailable.
+          The static fallback mirrors the shipping Messages balloon&apos;s default
+          state. Native captions retain the complete snapshot and goal details.
         </p>
       </div>
       <div className="hidden sm:block">
@@ -76,10 +70,7 @@ function ScaledNutritionCard({ scale }: { scale: number }) {
           transformOrigin: "top left",
         }}
       >
-        <NutritionCardImage
-          card={SYNTHETIC_CARD}
-          logoDataUri={SYNTHETIC_LOGO_DATA_URI}
-        />
+        <NutritionCardImage card={SYNTHETIC_CARD} />
       </div>
     </div>
   );
