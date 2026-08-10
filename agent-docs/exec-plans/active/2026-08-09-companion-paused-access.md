@@ -327,3 +327,8 @@ Updated: 2026-08-10
   Junction. The corrected test plus the related companion auth/access suites
   pass (4 files, 150 tests), along with Web typecheck and scoped lint. Fresh
   exact-head CI remains required.
+- The following current-main reconciliation contained only WHOOP-canary CI,
+  test, and documentation ownership changes and merged without conflict. Its
+  directly coupled CLI release-audit suite passes 42 tests with one intentional
+  skip, the canary workflow suite passes 4 tests, and agent-docs drift remains
+  clean. Fresh exact-head CI remains required after push.
