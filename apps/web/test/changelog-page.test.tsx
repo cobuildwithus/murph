@@ -60,8 +60,10 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Patterns and reminders that keep their local time",
+      "Patterns, reliable reminders, and managed OpenAI web search",
     );
+    expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(
       "Exact experiment links and steadier background work",
@@ -234,10 +236,13 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Live storage maintenance");
   });
 
-  it("renders the real archive section against synthetic design data", () => {
+  it("renders the latest production edition and synthetic archive studies", () => {
     const markup = renderToStaticMarkup(<ChangelogArchiveStudy />);
 
     expect(markup).toContain('data-design-study="changelog-archive"');
+    expect(markup).toContain('data-design-state="latest-production-edition"');
+    expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");
     expect(markup).toContain("Recovery explains what to do next");
