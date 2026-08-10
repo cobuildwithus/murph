@@ -1746,6 +1746,37 @@ describe("startHostedPulseTrialPaidPlan", () => {
       ));
   });
 
+  test("fails closed before Stripe when an incomplete claim has no bound price", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: HostedBillingStatus.incomplete,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:01.000Z"),
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_group_monthly",
+      pulseTrialPaidClaimPriceId: null,
+    }));
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
+      httpStatus: 409,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+  });
+
   test("rejects a conflicting paused-plan choice before another resume", async () => {
     mocks.readHostedMemberCoreState
       .mockResolvedValueOnce({
