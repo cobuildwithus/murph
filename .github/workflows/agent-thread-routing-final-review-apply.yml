@@ -1,0 +1,74 @@
+name: Agent thread routing final review apply
+
+on:
+  push:
+    branches:
+      - agent/thread-routing-final-review-apply
+    paths:
+      - .github/workflows/agent-thread-routing-final-review-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/thread-routing-db-critical-section
+          fetch-depth: 0
+      - name: Verify reviewed PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "2979b39874ea4b2f27feedfdad5954af8003c22c"
+      - name: Reconstruct reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin agent/thread-routing-final-review-apply
+          : > /tmp/thread-routing-final.patch.b64
+          for part in 00 01 02 03 04 05; do
+            git show "FETCH_HEAD:.github/agent-patches/thread-routing-final.patch.b64.${part}" \
+              >> /tmp/thread-routing-final.patch.b64
+          done
+          echo "1a4d272318cc13e4e2c61cd43cc9e6643e7d4080c867d719d7d4b05d87f86e11  /tmp/thread-routing-final.patch.b64" \
+            | sha256sum --check --strict
+          base64 --decode /tmp/thread-routing-final.patch.b64 > /tmp/thread-routing-final.patch
+          echo "ab4060bc4e11b0a7b7b135364b1a7bded118748d220b4c474780c94171ca740c  /tmp/thread-routing-final.patch" \
+            | sha256sum --check --strict
+      - name: Apply and inspect remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check /tmp/thread-routing-final.patch
+          git apply /tmp/thread-routing-final.patch
+          git diff --check
+          actual="$(git diff --name-only | sort)"
+          expected="$(cat <<'EOF' | sort
+          apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts
+          apps/web/src/lib/hosted-onboarding/webhook-service.ts
+          apps/web/src/lib/hosted-routing/thread-container-service.ts
+          apps/web/test/hosted-onboarding-linq-mailbox-root-prewarm.test.ts
+          apps/web/test/hosted-onboarding-linq-participant-addition-concurrency.test.ts
+          apps/web/test/hosted-onboarding-linq-thread-route.test.ts
+          EOF
+          )"
+          test "$actual" = "$expected"
+          git diff --stat
+      - name: Commit and push PR fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts \
+            apps/web/src/lib/hosted-onboarding/webhook-service.ts \
+            apps/web/src/lib/hosted-routing/thread-container-service.ts \
+            apps/web/test/hosted-onboarding-linq-mailbox-root-prewarm.test.ts \
+            apps/web/test/hosted-onboarding-linq-participant-addition-concurrency.test.ts \
+            apps/web/test/hosted-onboarding-linq-thread-route.test.ts
+          git commit -m "fix: close thread routing preparation races"
+          git push origin HEAD:agent/thread-routing-db-critical-section
