@@ -8,6 +8,7 @@ summary: The broad passive-heat intervention family. User-facing families such a
 status: field-testing
 quality: usable
 aliases:
+  - sauna
   - passive heat
   - heat exposure
 categories:

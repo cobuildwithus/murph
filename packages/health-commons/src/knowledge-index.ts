@@ -419,112 +419,20 @@ function resolveKnowledgeTopic(
   if (!best) {
     return null;
   }
-  const topMatches = [...new Map(matches
+  const equallyRankedOwners = new Set(matches
     .filter((match) =>
       match.tokenCount === best.tokenCount
       && match.phrase.length === best.phrase.length
       && match.matchPriority === best.matchPriority
     )
-    .map((match) => [match.ownerKey, match])).values()];
-  if (topMatches.length === 1) {
-    return {
-      ownerKey: best.ownerKey,
-      phrase: best.phrase,
-    };
-  }
-  if (best.tokenCount > 1) {
-    return null;
-  }
-  const focusTokens = questionFocusTokens(normalizedQuestion, best.phrase);
-  const contentQuery = focusTokens.length > 0 ? toFtsQuery(focusTokens) : null;
-  const scores = topMatches
-    .map((match) => scoreKnowledgeTopicOwner(database, match, contentQuery))
-    .filter((score) => score.count > 0)
-    .sort((left, right) =>
-      right.count - left.count
-      || left.rank - right.rank
-      || topicOwnerTypePriority(left.ownerKey) - topicOwnerTypePriority(right.ownerKey)
-      || left.ownerKey.localeCompare(right.ownerKey)
-    );
-  const selected = scores[0];
-  if (!selected) {
-    return null;
-  }
-  const runnerUp = scores[1];
-  if (
-    runnerUp
-    && selected.count === runnerUp.count
-    && Math.abs(selected.rank - runnerUp.rank) < 1e-9
-    && topicOwnerTypePriority(selected.ownerKey)
-      === topicOwnerTypePriority(runnerUp.ownerKey)
-  ) {
+    .map((match) => match.ownerKey));
+  if (equallyRankedOwners.size !== 1) {
     return null;
   }
   return {
-    ownerKey: selected.ownerKey,
-    phrase: selected.phrase,
+    ownerKey: best.ownerKey,
+    phrase: best.phrase,
   };
-}
-
-function scoreKnowledgeTopicOwner(
-  database: DatabaseSync,
-  match: {
-    ownerKey: string;
-    phrase: string;
-  },
-  contentQuery: string | null,
-): {
-  count: number;
-  ownerKey: string;
-  phrase: string;
-  rank: number;
-} {
-  const topicRows = database.prepare(`
-    SELECT entity_key
-    FROM topic_owners
-    WHERE phrase = ? AND owner_key = ?
-    ORDER BY entity_key ASC
-    LIMIT ?
-  `).all(match.phrase, match.ownerKey, HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS + 1);
-  const entityKeys = topicRows.map((row) => String(row["entity_key"]));
-  if (entityKeys.length === 0 || entityKeys.length > HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS) {
-    return { ...match, count: 0, rank: Number.POSITIVE_INFINITY };
-  }
-  const placeholders = entityKeys.map(() => "?").join(", ");
-  const rows = contentQuery === null
-    ? database.prepare(`
-        SELECT c.priority AS rank
-        FROM chunks c
-        WHERE c.entity_key IN (${placeholders})
-          AND c.sources_json <> '[]'
-        ORDER BY c.priority ASC, c.id ASC
-        LIMIT 16
-      `).all(...entityKeys)
-    : database.prepare(`
-        SELECT bm25(chunks_fts) AS rank
-        FROM chunks_fts
-        JOIN chunks c ON c.rowid = chunks_fts.rowid
-        WHERE chunks_fts MATCH ?
-          AND c.entity_key IN (${placeholders})
-          AND c.sources_json <> '[]'
-        ORDER BY rank ASC, c.priority ASC, c.id ASC
-        LIMIT 16
-      `).all(contentQuery, ...entityKeys);
-  return {
-    ...match,
-    count: rows.length,
-    rank: Number(rows[0]?.["rank"] ?? Number.POSITIVE_INFINITY),
-  };
-}
-
-function topicOwnerTypePriority(ownerKey: string): number {
-  if (ownerKey.startsWith("experiment_family:")) {
-    return 0;
-  }
-  if (ownerKey.startsWith("protocol_variant:")) {
-    return 1;
-  }
-  return 2;
 }
 
 function questionFocusTokens(
