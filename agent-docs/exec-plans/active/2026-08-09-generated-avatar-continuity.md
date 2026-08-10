@@ -157,3 +157,8 @@ Updated: 2026-08-10
   bounded visible text. The focused regression, full 68-test event-path file,
   seven-file affected suite (317 passed, 35 credential-gated skipped), and
   Assistant Engine typecheck pass.
+- After merging the latest `main`, the only conflicts were the independently
+  updated runner-bundle ratchets. The combined exact hosted-local assembly
+  passed at 1,659,616-byte entry, 8,018,416-byte static closure, and
+  9,996,234-byte total; the 42-test bundle-policy suite, focused reply
+  regression, and affected typecheck also passed on the merged candidate.
