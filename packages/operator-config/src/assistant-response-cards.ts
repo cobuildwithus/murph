@@ -3,14 +3,21 @@ import { Buffer } from 'node:buffer'
 import {
   IMESSAGE_APP_CARD_URL_MAX_LENGTH,
   IMESSAGE_APP_CARD_URL_PREFIX,
-  IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
-  IMESSAGE_NUTRITION_CARD_IMAGE_PATH_PREFIX,
-  IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX,
+  IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
+  IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX,
+  IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX,
   MURPH_PRODUCT_ORIGIN,
+  assistantResponseCardV1Bounds,
   assistantResponseCardSchema,
+  buildWorkoutSessionAppCardEnvelopeV4,
+  compactTableCardV1Bounds,
   compactTableResponseCardV1Schema,
-  dailyNutritionResponseCardV2Schema,
+  nutritionCardGoalStatusValues,
+  workoutSessionCardStateValues,
+  workoutSessionCardV1Bounds,
+  workoutSessionSetStatusValues,
   type AssistantResponseCard,
+  type CompactTableGenericResponseCardV1,
   type CompactTableResponseCardV1,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
@@ -18,8 +25,8 @@ import {
   type NutritionCardGoalSnapshot,
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
+  type WorkoutSessionDetailV1,
 } from '@murphai/contracts'
-import * as z from '@murphai/contracts/zod-runtime'
 
 const NUTRITION_CARD_MONTHS = [
   'Jan',
@@ -63,7 +70,7 @@ export type AppCardEnvelopeV2 = {
 
 export type AppCardEnvelopeV3 = {
   schemaVersion: 3
-  card: Omit<CompactTableResponseCardV1, 'tracking'>
+  card: Omit<CompactTableGenericResponseCardV1, 'tracking'>
 }
 
 export type LinqIMessageAppLayout = {
@@ -77,6 +84,7 @@ export type LinqIMessageAppLayout = {
 export {
   assistantResponseCardSchema,
   assistantResponseCardV1Bounds,
+  buildWorkoutSessionAppCardEnvelopeV4,
   compactTableCardV1Bounds,
   compactTableResponseCardV1Schema,
   compactTableRowV1Schema,
@@ -85,8 +93,16 @@ export {
   dailyNutritionResponseCardV2Schema,
   dailyNutritionResponseCardSchema,
   nutritionCardGoalStatusValues,
+  workoutSessionCardStateValues,
+  workoutSessionCardV1Bounds,
+  workoutSessionDetailV1Schema,
+  workoutSessionExerciseV1Schema,
+  workoutSessionSetStatusValues,
+  workoutSessionSetV1Schema,
   type AssistantResponseCard,
+  type CompactTableGenericResponseCardV1,
   type CompactTableResponseCardV1,
+  type CompactTableWorkoutResponseCardV1,
   type CompactTableRowV1,
   type CompactTableTrackingSourceV1,
   type DailyNutritionResponseCard,
@@ -95,6 +111,12 @@ export {
   type NutritionCardGoalSnapshot,
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
+  type WorkoutSessionAppCardEnvelopeV4,
+  type WorkoutSessionCardState,
+  type WorkoutSessionDetailV1,
+  type WorkoutSessionExerciseV1,
+  type WorkoutSessionSetStatus,
+  type WorkoutSessionSetV1,
 } from '@murphai/contracts'
 
 export const assistantResponseCardJsonSchema =
@@ -117,7 +139,7 @@ export function renderAssistantResponseCardText(
 }
 
 /**
- * Durable model-context representation. A tracked table keeps its exact
+ * Durable model-context representation. A tracked card keeps its exact
  * canonical source here so a later turn can reopen the workout without making
  * the user-facing text fallback expose an internal id.
  */
@@ -138,10 +160,14 @@ export function buildLinqIMessageAppLayout(
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind === 'compact_table') {
+    const semantic = renderCompactTableSemanticPresentation(parsed)
     return {
-      caption: 'Murph',
-      subcaption: parsed.tracking === null ? 'Table' : 'Workout table',
-      trailing_caption: 'OPEN',
+      caption: semantic.heading,
+      image_url: buildLinqIMessageAppCardImageUrl(parsed),
+      subcaption: semantic.detailLines.join('\n'),
+      ...(semantic.footer === null
+        ? {}
+        : { trailing_caption: semantic.footer }),
     }
   }
 
@@ -158,19 +184,18 @@ export function buildLinqIMessageAppLayout(
 }
 
 export function buildLinqIMessageAppCardImageUrl(
-  card: DailyNutritionResponseCard,
+  card: AssistantResponseCard,
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
-  if (parsed.kind !== 'daily_nutrition') {
-    throw new TypeError('Expected a daily nutrition response card.')
-  }
-  const encoded = encodeDailyNutritionAppCardPayload(parsed)
-  if (encoded.length > IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
+  const encoded = parsed.kind === 'daily_nutrition'
+    ? encodeDailyNutritionAppCardPayload(parsed)
+    : encodeCompactTableAppCardPayload(parsed)
+  if (encoded.length > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
     throw new TypeError('The encoded app card image payload is too large.')
   }
   const url = `${MURPH_PRODUCT_ORIGIN}${
-    IMESSAGE_NUTRITION_CARD_IMAGE_PATH_PREFIX
-  }${encoded}${IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX}`
+    IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX
+  }${encoded}${IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX}`
   if (url.length >= IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
     throw new TypeError('The encoded app card image exceeds the inline size limit.')
   }
@@ -181,9 +206,12 @@ export function buildLinqIMessageAppCardUrl(
   card: AssistantResponseCard,
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
-  return parsed.kind === 'compact_table'
-    ? encodeCompactTableAppCardUrl(parsed)
-    : encodeDailyNutritionAppCardUrl(parsed)
+  switch (parsed.kind) {
+    case 'daily_nutrition':
+      return encodeDailyNutritionAppCardUrl(parsed)
+    case 'compact_table':
+      return encodeCompactTableAppCardUrl(parsed)
+  }
 }
 
 export function encodeDailyNutritionAppCardUrl(
@@ -209,20 +237,56 @@ function encodeDailyNutritionAppCardPayload(
 export function encodeCompactTableAppCardUrl(
   card: CompactTableResponseCardV1,
 ): string {
-  const parsed = assistantResponseCardSchema.parse(card)
-  if (parsed.kind !== 'compact_table') {
-    throw new TypeError('Expected a compact table response card.')
+  return encodeAppCardEnvelopeUrl(encodeCompactTableAppCardPayload(card))
+}
+
+export function encodeWorkoutSessionAppCardUrl(
+  card: CompactTableResponseCardV1,
+): string {
+  const parsed = compactTableResponseCardV1Schema.parse(card)
+  if (!('workout' in parsed)) {
+    throw new TypeError(
+      'Expected a compact table with workout session detail.',
+    )
   }
+  return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed))
+}
+
+function encodeCompactTableAppCardPayload(
+  card: CompactTableResponseCardV1,
+): string {
+  const parsed = compactTableResponseCardV1Schema.parse(card)
+  if ('workout' in parsed) {
+    return encodeWorkoutSessionAppCardPayload(parsed)
+  }
+
   const { tracking: _tracking, ...presentationCard } = parsed
   const envelope: AppCardEnvelopeV3 = {
     schemaVersion: 3,
     card: presentationCard,
   }
-  return encodeAppCardEnvelopeUrl(encodeAppCardEnvelopePayload(envelope))
+  return encodeAppCardEnvelopePayload(envelope)
+}
+
+function encodeWorkoutSessionAppCardPayload(
+  card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
+): string {
+  return encodeAppCardEnvelopePayload(
+    buildWorkoutSessionAppCardEnvelopeV4({
+      title: card.title,
+      subtitle: card.subtitle,
+      footer: card.footer,
+      workout: card.workout,
+    }),
+  )
 }
 
 function encodeAppCardEnvelopePayload(
-  envelope: AppCardEnvelopeV1 | AppCardEnvelopeV2 | AppCardEnvelopeV3,
+  envelope:
+    | AppCardEnvelopeV1
+    | AppCardEnvelopeV2
+    | AppCardEnvelopeV3
+    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>,
 ): string {
   return Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')
@@ -240,23 +304,103 @@ function renderCompactTableResponseCardText(
   card: CompactTableResponseCardV1,
   includeTracking: boolean,
 ): string {
+  const semantic = renderCompactTableSemanticPresentation(card)
+  const tracking = renderWorkoutTrackingMarker(
+    card.tracking,
+    includeTracking,
+  )
+  const details = 'workout' in card
+    ? semantic.detailLines.flatMap((line, index) =>
+        index === 1 ? ['', line] : [line]
+      )
+    : ['', ...semantic.detailLines]
+  return [
+    semantic.heading,
+    ...details,
+    ...(semantic.footer === null ? [] : ['', semantic.footer]),
+    ...tracking,
+  ].join('\n')
+}
+
+function renderCompactTableSemanticPresentation(
+  card: CompactTableResponseCardV1,
+): {
+  heading: string
+  detailLines: string[]
+  footer: string | null
+} {
   const heading = card.subtitle === null
     ? card.title
     : `${card.title} — ${card.subtitle}`
-  const rows = card.rows.map((row) => {
-    const values = row.values.map((value, index) =>
-      `${card.columns[index]}: ${value}`
-    )
-    return `${row.label}: ${values.join(' · ')}`
+  if (!('workout' in card)) {
+    return {
+      heading,
+      detailLines: card.rows.map((row) => {
+        const values = row.values.map((value, index) =>
+          `${card.columns[index]}: ${value}`
+        )
+        return `${row.label}: ${values.join(' · ')}`
+      }),
+      footer: card.footer,
+    }
+  }
+
+  const progress = countWorkoutSessionSets(card.workout)
+  const state = card.workout.state === 'active'
+    ? 'Active workout'
+    : 'Completed workout'
+  const exercises = card.workout.exercises.map((exercise) => {
+    const sets = exercise.sets.map((set, index) => {
+      const label = `set ${index + 1}`
+      switch (set.status) {
+        case 'completed':
+          return `${label}: ${set.actual}`
+        case 'pending':
+          return set.target === null
+            ? `${label}: pending`
+            : `${label}: target ${set.target}`
+        case 'skipped':
+          return set.target === null
+            ? `${label}: skipped`
+            : `${label}: skipped (target ${set.target})`
+      }
+    })
+    return `${exercise.name}: ${sets.join(' · ')}`
   })
-  const footer = card.footer === null ? [] : ['', card.footer]
-  const tracking = !includeTracking || card.tracking === null
+  return {
+    heading,
+    detailLines: [
+      `${state} · ${progress.completed}/${progress.total} sets complete`,
+      ...exercises,
+    ],
+    footer: card.footer,
+  }
+}
+
+function renderWorkoutTrackingMarker(
+  tracking: CompactTableResponseCardV1['tracking'],
+  includeTracking: boolean,
+): string[] {
+  return !includeTracking || tracking === null
     ? []
     : [
         '',
-        `[Murph tracked workout source: ${card.tracking.entityId}; snapshot: ${card.tracking.snapshotAt}]`,
+        `[Murph tracked workout source: ${tracking.entityId}; snapshot: ${tracking.snapshotAt}]`,
       ]
-  return [heading, '', ...rows, ...footer, ...tracking].join('\n')
+}
+
+function countWorkoutSessionSets(
+  workout: WorkoutSessionDetailV1,
+): { completed: number; total: number } {
+  return workout.exercises.reduce(
+    (counts, exercise) => ({
+      completed:
+        counts.completed +
+        exercise.sets.filter((set) => set.status === 'completed').length,
+      total: counts.total + exercise.sets.length,
+    }),
+    { completed: 0, total: 0 },
+  )
 }
 
 function renderDailyNutritionResponseCardText(
@@ -397,20 +541,283 @@ function isDailyNutritionResponseCardV2(
   return 'version' in card && card.version === 2
 }
 
-function createAssistantResponseCardJsonSchema() {
-  // Retained nutrition V1 cards remain valid at the runtime boundary. New tool
-  // calls author only the current nutrition version or a compact table.
-  const authoringSchema = z.union([
-    dailyNutritionResponseCardV2Schema,
-    compactTableResponseCardV1Schema,
-  ])
-  const {
-    $schema: _dialect,
-    ...portableSchema
-  } = z.toJSONSchema(authoringSchema)
+function responseCardTextSchema(maxLength: number) {
   return {
-    ...portableSchema,
+    type: 'string',
+    minLength: 1,
+    maxLength,
+    pattern: '^\\S(?:.*\\S)?$',
+  } as const
+}
+
+function responseCardNullableTextSchema(maxLength: number) {
+  return {
+    ...responseCardTextSchema(maxLength),
+    type: ['string', 'null'],
+  } as const
+}
+
+function createAssistantResponseCardJsonSchema() {
+  // Runtime Zod schemas remain authoritative. This deliberately compact
+  // authoring schema keeps the dynamic-tool prompt bounded and exposes only
+  // current card versions without duplicating every refinement.
+  const nutritionMealCount = {
+    type: 'integer',
+    minimum: 1,
+    maximum: assistantResponseCardV1Bounds.mealCount,
+  } as const
+  const metricTotal = (maximum: number) => ({
+    type: 'number',
+    minimum: 0,
+    maximum,
+  } as const)
+  const metric = (maximum: number, totalRequired: boolean) => ({
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      total: totalRequired
+        ? metricTotal(maximum)
+        : { ...metricTotal(maximum), type: ['number', 'null'] },
+      mealCount: {
+        ...nutritionMealCount,
+        minimum: totalRequired ? 1 : 0,
+      },
+    },
+    required: ['total', 'mealCount'],
+  } as const)
+  const goal = (maximum: number) => ({
+    type: ['object', 'null'],
+    additionalProperties: false,
+    properties: {
+      target: {
+        type: 'number',
+        exclusiveMinimum: 0,
+        maximum,
+      },
+      status: { enum: nutritionCardGoalStatusValues },
+    },
+    required: ['target', 'status'],
+  } as const)
+  const tracking = {
+    type: ['object', 'null'],
+    additionalProperties: false,
+    properties: {
+      kind: { const: 'workout' },
+      entityId: {
+        type: 'string',
+        maxLength: 30,
+        pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
+      },
+      snapshotAt: {
+        type: 'string',
+        minLength: 24,
+        maxLength: 24,
+        pattern:
+          '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$',
+      },
+    },
+    required: ['kind', 'entityId', 'snapshotAt'],
+  } as const
+  const workoutSet = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      status: { enum: workoutSessionSetStatusValues },
+      target: responseCardNullableTextSchema(
+        workoutSessionCardV1Bounds.setValue,
+      ),
+      actual: responseCardNullableTextSchema(
+        workoutSessionCardV1Bounds.setValue,
+      ),
+    },
+    required: ['status', 'target', 'actual'],
+  } as const
+  const workoutExercise = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      name: responseCardTextSchema(
+        workoutSessionCardV1Bounds.exerciseName,
+      ),
+      sets: {
+        type: 'array',
+        minItems: 1,
+        maxItems: workoutSessionCardV1Bounds.setsPerExercise,
+        items: workoutSet,
+      },
+    },
+    required: ['name', 'sets'],
+  } as const
+  const workout = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      version: { const: 1 },
+      state: { enum: workoutSessionCardStateValues },
+      exercises: {
+        type: 'array',
+        minItems: 1,
+        maxItems: workoutSessionCardV1Bounds.exercises,
+        items: workoutExercise,
+      },
+    },
+    required: ['version', 'state', 'exercises'],
+  } as const
+  const row = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      label: responseCardTextSchema(
+        compactTableCardV1Bounds.rowLabel,
+      ),
+      values: {
+        type: 'array',
+        minItems: 1,
+        maxItems: compactTableCardV1Bounds.columns,
+        items: responseCardTextSchema(
+          compactTableCardV1Bounds.cellValue,
+        ),
+      },
+    },
+    required: ['label', 'values'],
+  } as const
+  const nutrition = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      kind: { const: 'daily_nutrition' },
+      version: { const: 2 },
+      localDate: {
+        type: 'string',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+      },
+      mealCount: nutritionMealCount,
+      totals: {
+        type: 'object',
+        additionalProperties: false,
+        patternProperties: {
+          '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': metric(
+            assistantResponseCardV1Bounds.macroGrams,
+            false,
+          ),
+        },
+        properties: {
+          calories: metric(assistantResponseCardV1Bounds.calories, true),
+          proteinGrams: metric(
+            assistantResponseCardV1Bounds.macroGrams,
+            false,
+          ),
+          carbsGrams: {},
+          fatGrams: {},
+          fiberGrams: {},
+        },
+        required: [
+          'calories',
+          'proteinGrams',
+          'carbsGrams',
+          'fatGrams',
+          'fiberGrams',
+        ],
+      },
+      goals: {
+        type: 'object',
+        additionalProperties: false,
+        patternProperties: {
+          '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': goal(
+            assistantResponseCardV1Bounds.macroGrams,
+          ),
+        },
+        properties: {
+          calories: goal(assistantResponseCardV1Bounds.calories),
+          proteinGrams: goal(assistantResponseCardV1Bounds.macroGrams),
+          carbsGrams: {},
+          fatGrams: {},
+          fiberGrams: {},
+        },
+        required: [
+          'calories',
+          'proteinGrams',
+          'carbsGrams',
+          'fatGrams',
+          'fiberGrams',
+        ],
+      },
+    },
+    required: [
+      'kind',
+      'version',
+      'localDate',
+      'mealCount',
+      'totals',
+      'goals',
+    ],
+  } as const
+  const compactTableFields = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      kind: { const: 'compact_table' },
+      version: { const: 1 },
+      title: responseCardTextSchema(
+        compactTableCardV1Bounds.title,
+      ),
+      subtitle: responseCardNullableTextSchema(
+        compactTableCardV1Bounds.subtitle,
+      ),
+      rowHeader: responseCardTextSchema(
+        compactTableCardV1Bounds.rowHeader,
+      ),
+      columns: {
+        type: 'array',
+        minItems: 1,
+        maxItems: compactTableCardV1Bounds.columns,
+        items: responseCardTextSchema(
+          compactTableCardV1Bounds.columnHeader,
+        ),
+      },
+      rows: {
+        type: 'array',
+        minItems: 1,
+        maxItems: compactTableCardV1Bounds.rows,
+        items: row,
+      },
+      footer: responseCardNullableTextSchema(
+        compactTableCardV1Bounds.footer,
+      ),
+      tracking,
+      workout,
+    },
+    required: [
+      'kind',
+      'version',
+      'title',
+      'subtitle',
+      'footer',
+      'tracking',
+    ],
+  } as const
+  const compactTable = {
+    allOf: [
+      compactTableFields,
+      {
+        oneOf: [
+          {
+            required: ['rowHeader', 'columns', 'rows'],
+          },
+          {
+            properties: {
+              tracking: { type: 'object' },
+            },
+            required: ['workout'],
+          },
+        ],
+      },
+    ],
+  } as const
+
+  return {
     description:
-      'Current card authoring contract: daily_nutrition V2 or compact_table V1.',
-  }
+      'Author daily_nutrition V2, generic compact_table V1, or compact_table workout V1.',
+    anyOf: [nutrition, compactTable],
+  } as const
 }
