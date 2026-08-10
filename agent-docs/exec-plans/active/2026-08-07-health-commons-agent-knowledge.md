@@ -92,8 +92,8 @@ Updated: 2026-08-10
   new final round without explicit user approval.
 - Temporary PR application, checkout-export, and validation workflows were
   removed after their failed runs. They are not part of the product design.
-- PR #1555 replaces #1405 because GitHub blocks reopening a pull request after
-  its branch was recreated.
+- PR #1556 replaces #1405 and #1555. GitHub blocked reopening the first PR, and
+  an old external process closed the second PR on the original branch name.
 
 ## Verification
 
