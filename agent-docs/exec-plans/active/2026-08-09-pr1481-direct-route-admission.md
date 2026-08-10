@@ -94,8 +94,11 @@ Updated: 2026-08-10
   Runtime passed 2/2, and Web passed 14/14 in the focused suites. All three
   package typechecks and scoped Web ESLint passed. Rebuilding current
   hosted-execution, Engine, and Runtime artifacts then passed the production
-  runner assembly and boot probe at a 1,672,934B entry, 8,023,277B static
-  closure, and 10,000,768B total, within every ratcheted allowance.
+  runner assembly and boot probe. A second conflict-free latest-main merge
+  changed only unrelated Family and Assistant skill surfaces; the focused
+  Engine suite still passed 21/21, both Engine/Runtime builds passed, and the
+  final probe measured a 1,672,934B entry, 8,023,354B static closure, and
+  10,000,845B total, within every ratcheted allowance.
 - Exact-head CI at `ee06af0e53` passed every required workflow and job before
   the specialist correction. The first final-round-2 attempt reached a managed
   lane request limit before generation, and the cross-profile same-thread
