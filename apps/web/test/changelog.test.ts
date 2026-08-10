@@ -507,6 +507,7 @@ describe("changelog registry", () => {
       {
         id: "2026-08-10",
         itemIds: [
+          "non-expiring-starter-access",
           "personal-patterns",
           "reminders-keep-requested-timezone",
           "wearable-sync-recovers-model-free",

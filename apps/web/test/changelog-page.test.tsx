@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Patterns, reliable reminders, wearable recovery, and web search",
+      "Starter access, patterns, wearable recovery, reminders, and web search",
     );
     expect(markup).toContain(
       "Wearable sync can recover without waking the assistant",

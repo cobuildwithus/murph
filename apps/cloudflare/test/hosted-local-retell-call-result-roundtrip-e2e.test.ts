@@ -200,6 +200,7 @@ describe("hosted local Retell result roundtrip e2e", () => {
       consumedAt: null,
       dedupeKey: notificationDedupeKey,
       kind: "assistant.notification.requested",
+      lane: "system",
     });
     expect(countAssistantProviderRequests()).toBe(baselineProviderRequests);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(baselineSends);

@@ -13,8 +13,24 @@ import {
 } from "./usage-credit-ledger";
 
 export type HostedUsageCreditGrantSource =
-  | { kind: "purchase"; purchaseId: string; referralId?: never }
-  | { kind: "referral"; referralId: string; purchaseId?: never };
+  | {
+      kind: "starter";
+      purchaseId?: never;
+      referralId?: never;
+      sourceReferenceLookupKey: string;
+    }
+  | {
+      kind: "purchase";
+      purchaseId: string;
+      referralId?: never;
+      sourceReferenceLookupKey?: never;
+    }
+  | {
+      kind: "referral";
+      referralId: string;
+      purchaseId?: never;
+      sourceReferenceLookupKey?: never;
+    };
 
 export interface HostedUsageCreditGrantAppendResult
   extends HostedUsageCreditProjection {
@@ -63,12 +79,15 @@ export async function appendHostedUsageCreditGrantTx(input: {
       parentGrantEntryId: true,
       purchaseId: true,
       referralId: true,
+      sourceReferenceLookupKey: true,
     },
   });
   if (existing) {
-    const expectedKind = input.source.kind === "purchase"
-      ? "purchase_grant"
-      : "referral_grant";
+    const expectedKind = input.source.kind === "starter"
+      ? "starter_grant"
+      : input.source.kind === "purchase"
+        ? "purchase_grant"
+        : "referral_grant";
     if (
       existing.amountUsdMicros !== input.grantUsdMicros
       || existing.beneficiaryMemberId
@@ -83,6 +102,10 @@ export async function appendHostedUsageCreditGrantTx(input: {
         !== (input.source.kind === "purchase" ? input.source.purchaseId : null)
       || existing.referralId
         !== (input.source.kind === "referral" ? input.source.referralId : null)
+      || existing.sourceReferenceLookupKey
+        !== (input.source.kind === "starter"
+          ? input.source.sourceReferenceLookupKey
+          : null)
       || existing.grant.remainingUsdMicros < 0n
       || existing.grant.remainingUsdMicros > existing.amountUsdMicros
     ) {
@@ -133,12 +156,19 @@ export async function appendHostedUsageCreditGrantTx(input: {
       beneficiarySequence: projection.ledgerVersion,
       effectiveAt: input.effectiveAt,
       id: entryId,
-      kind: input.source.kind === "purchase"
-        ? "purchase_grant"
-        : "referral_grant",
+      kind: input.source.kind === "starter"
+        ? "starter_grant"
+        : input.source.kind === "purchase"
+          ? "purchase_grant"
+          : "referral_grant",
       ...(input.source.kind === "purchase"
         ? { purchaseId: input.source.purchaseId }
-        : { referralId: input.source.referralId }),
+        : input.source.kind === "referral"
+          ? { referralId: input.source.referralId }
+          : {
+              sourceReferenceLookupKey:
+                input.source.sourceReferenceLookupKey,
+            }),
       semanticSourceKey,
     },
   });
