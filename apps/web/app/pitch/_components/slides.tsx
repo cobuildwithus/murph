@@ -1014,7 +1014,7 @@ export function ValidationSlide() {
       <SlideHeading>
         The product is live.
         <br />
-        MRR doubled in the last 30 days.
+        MRR grew 103% in the last 30 days.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
         We shipped the personal experiment loop first. The wedge became
@@ -1025,16 +1025,16 @@ export function ValidationSlide() {
       <div className="mt-9 grid gap-3 sm:grid-cols-3">
         {[
           {
-            value: "18% w/w MRR growth",
-            note: "Five-week average, and up every single week. MRR doubled in the last 30 days.",
+            value: "+103% MRR growth",
+            note: "In 30 days, with revenue up every week.",
           },
           {
-            value: "+80% paying customers",
+            value: "+82% paying customers",
             note: "In 30 days, with zero paid acquisition.",
           },
           {
-            value: "8 msgs / day / active user",
-            note: "2,400 messages exchanged last week — engagement per user up 2.5x since June.",
+            value: "10 msgs / day / active user",
+            note: "3,003 messages exchanged last week — 73 per weekly active user.",
           },
         ].map((card) => (
           <div
@@ -1064,8 +1064,8 @@ export function ValidationSlide() {
         <PivotCard
           highlight
           items={[
-            "Six group chats live, up from one in June",
-            "The most active: an eight-person group text, 107 messages to Murph last week",
+            "12 group chats active last week, up from one in June",
+            "The most active group sent 255 messages to Murph last week",
             "Laughs, reactions, trash talk at the referee",
             "Voice memos back and forth with Murph",
           ]}
