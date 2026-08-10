@@ -66,23 +66,23 @@ jobs:
 
       - name: Generate Prisma client
         working-directory: target
-        run: pnpm --dir apps/web prisma generate
+        run: pnpm -C apps/web exec prisma generate
 
       - name: Typecheck affected packages
         working-directory: target
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --dir packages/device-syncd typecheck
-          pnpm --dir packages/assistant-runtime typecheck
-          pnpm --dir apps/web typecheck
+          pnpm -C packages/device-syncd typecheck
+          pnpm -C packages/assistant-runtime typecheck
+          pnpm -C apps/web typecheck
 
       - name: Run focused tests
         working-directory: target
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --dir apps/web exec vitest run --config vitest.config.ts --no-coverage \
+          pnpm -C apps/web exec vitest run --config vitest.config.ts --no-coverage \
             test/device-provider-application-crypto.test.ts \
             test/device-provider-application-ingress-store.test.ts \
             test/device-provider-application-store.test.ts \
@@ -93,9 +93,9 @@ jobs:
             test/hosted-account-data-service.test.ts \
             test/prisma-store-oauth-connection.test.ts \
             test/prisma-store-oauth-sessions.test.ts
-          pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts --no-coverage \
+          pnpm -C packages/device-syncd exec vitest run --config vitest.config.ts --no-coverage \
             test/config.test.ts test/hosted-runtime.test.ts
-          pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage \
+          pnpm -C packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage \
             test/hosted-runtime-device-sync-provider-configs.test.ts
 
       - name: Run repository smoke checks
