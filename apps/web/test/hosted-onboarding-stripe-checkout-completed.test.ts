@@ -1,4 +1,5 @@
 import { HostedBillingStatus } from "@prisma/client";
+import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   clearHostedMemberStripeCheckoutAttemptForSessionTx: vi.fn(),
   cleanupHostedStandardCheckoutLoser: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
+  findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   lockHostedMemberRow: vi.fn(),
@@ -111,6 +113,7 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   return {
     ...actual,
     findMemberForStripeCheckoutSession: mocks.findMemberForStripeCheckoutSession,
+    findMemberForStripeInvoice: mocks.findMemberForStripeInvoice,
     findMemberForStripeSubscription: mocks.findMemberForStripeSubscription,
     listHostedStripeCheckoutSessionMemberIds: mocks.listHostedStripeCheckoutSessionMemberIds,
   };
@@ -152,6 +155,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 import {
   applyStripeCheckoutCompleted as applyStripeCheckoutCompletedImpl,
+  applyStripeInvoicePaid,
   applyStripeSubscriptionUpdated,
   cleanupHostedFamilySponsoredDirectSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
@@ -237,6 +241,7 @@ describe("applyStripeCheckoutCompleted", () => {
     );
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue(makeMemberSnapshot());
+    mocks.findMemberForStripeInvoice.mockResolvedValue(makeMemberSnapshot());
     mocks.findMemberForStripeSubscription.mockResolvedValue(null);
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.lookupHostedAccountGroupIdByStripeSubscriptionId.mockResolvedValue(
@@ -947,6 +952,180 @@ describe("applyStripeCheckoutCompleted", () => {
       });
     expect(mocks.terminalizeHostedFamilySponsoredDirectBillingTx)
       .toHaveBeenCalledOnce();
+  });
+
+  it("refunds once when invoice.paid arrives after Family cleanup canceled direct billing", async () => {
+    const familyClaim = {
+      groupId: "hbag_family",
+      kind: "active_sponsorship" as const,
+      ownerMemberId: "member_owner",
+    };
+    const member = makeMemberSnapshot({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_direct",
+        stripeSubscriptionId: "sub_superseded",
+      },
+      billingStatus: HostedBillingStatus.active,
+    });
+    const paidInvoice = {
+      amount_due: 2_000,
+      amount_paid: 2_000,
+      amount_remaining: 0,
+      customer: "cus_direct",
+      id: "in_late_paid",
+      post_payment_credit_notes_amount: 0,
+      pre_payment_credit_notes_amount: 0,
+      starting_balance: 0,
+      status: "paid",
+      subscription: "sub_superseded",
+    } as unknown as Stripe.Invoice;
+    const directSubscription = {
+      ...makePulseTrialSubscription(),
+      customer: "cus_direct",
+      id: "sub_superseded",
+      latest_invoice: paidInvoice,
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    } as unknown as Stripe.Subscription;
+    const familySubscription = makeActiveFamilySubscription() as unknown as Stripe.Subscription;
+    let refundCreated = false;
+    const refundsCreate = vi.fn(async () => {
+      refundCreated = true;
+      return { amount: 2_000, status: "succeeded" };
+    });
+    const stripe = {
+      invoicePayments: {
+        list: vi.fn(async () => ({
+          data: [{
+            amount_paid: 2_000,
+            amount_requested: 2_000,
+            payment: {
+              payment_intent: {
+                amount_received: 2_000,
+                id: "pi_late_paid",
+                status: "succeeded",
+              },
+              type: "payment_intent",
+            },
+          }],
+          has_more: false,
+        })),
+      },
+      invoices: {
+        list: vi.fn(async () => ({ data: [paidInvoice], has_more: false })),
+      },
+      refunds: {
+        create: refundsCreate,
+        list: vi.fn(async () => ({
+          data: refundCreated
+            ? [{ amount: 2_000, status: "succeeded" }]
+            : [],
+          has_more: false,
+        })),
+      },
+      subscriptions: {
+        cancel: vi.fn(async () => {
+          directSubscription.status = "canceled";
+          return directSubscription;
+        }),
+        retrieve: vi.fn(async (subscriptionId: string) =>
+          subscriptionId === familySubscription.id
+            ? familySubscription
+            : directSubscription),
+      },
+    } as unknown as Stripe;
+    const prisma = {
+      $transaction: vi.fn(async (
+        run: (transaction: Record<string, never>) => Promise<unknown>,
+      ) => run({})),
+    };
+    const subscriptionContext = {
+      eventCreatedAt: new Date("2026-08-10T00:00:00.000Z"),
+      occurredAt: "2026-08-10T00:00:00.000Z",
+      sourceEventId: "evt_subscription_first",
+      sourceType: "stripe.customer.subscription.updated" as const,
+    };
+    const invoiceContext = {
+      eventCreatedAt: new Date("2026-08-10T00:00:05.000Z"),
+      occurredAt: "2026-08-10T00:00:05.000Z",
+      sourceEventId: "evt_invoice_late",
+      sourceType: "stripe.invoice.paid" as const,
+    };
+    const { cleanupHostedStandardCheckoutLoser: realCleanup } =
+      await vi.importActual<
+        typeof import("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup")
+      >("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup");
+
+    mocks.findMemberForStripeInvoice.mockResolvedValue(member);
+    mocks.findMemberForStripeSubscription.mockResolvedValue(member);
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(familyClaim);
+    mocks.cleanupHostedStandardCheckoutLoser.mockImplementation(realCleanup);
+    mocks.terminalizeHostedFamilySponsoredDirectBillingTx.mockResolvedValue(true);
+
+    const subscriptionOutcome = await applyStripeSubscriptionUpdated(
+      directSubscription,
+      subscriptionContext,
+      {} as never,
+    );
+    expect(subscriptionOutcome.cleanupFamilySponsoredStripeSubscriptionId)
+      .toBe("sub_superseded");
+
+    await cleanupHostedFamilySponsoredDirectSubscription({
+      memberId: "member_123",
+      prisma: prisma as never,
+      refundCheckoutPayment: false,
+      sourceEventId: "evt_subscription_first:family-sponsored-cleanup",
+      stripe,
+      subscriptionId: "sub_superseded",
+    });
+    expect(directSubscription.status).toBe("canceled");
+    expect(refundsCreate).not.toHaveBeenCalled();
+
+    const lateInvoiceOutcome = await applyStripeInvoicePaid(
+      paidInvoice,
+      invoiceContext,
+      {} as never,
+      HostedBillingStatus.canceled,
+      directSubscription,
+    );
+    expect(lateInvoiceOutcome.cleanupFamilySponsoredStripeSubscriptionId)
+      .toBe("sub_superseded");
+
+    await cleanupHostedFamilySponsoredDirectSubscription({
+      memberId: "member_123",
+      prisma: prisma as never,
+      refundCheckoutPayment: true,
+      sourceEventId: "evt_invoice_late:family-sponsored-cleanup",
+      stripe,
+      subscriptionId: "sub_superseded",
+    });
+    expect(refundsCreate).toHaveBeenCalledOnce();
+
+    const replayOutcome = await applyStripeInvoicePaid(
+      paidInvoice,
+      invoiceContext,
+      {} as never,
+      HostedBillingStatus.canceled,
+      directSubscription,
+    );
+    await cleanupHostedFamilySponsoredDirectSubscription({
+      memberId: "member_123",
+      prisma: prisma as never,
+      refundCheckoutPayment: true,
+      sourceEventId: "evt_invoice_late:family-sponsored-cleanup",
+      stripe,
+      subscriptionId:
+        replayOutcome.cleanupFamilySponsoredStripeSubscriptionId ?? "",
+    });
+
+    expect(replayOutcome.cleanupFamilySponsoredStripeSubscriptionId)
+      .toBe("sub_superseded");
+    expect(refundsCreate).toHaveBeenCalledOnce();
   });
 
   it.each([

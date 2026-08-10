@@ -1385,11 +1385,9 @@ export async function applyStripeInvoicePaid(
       ...buildEmptyHostedStripeActivationOutcome(),
       ...(familyClaimDisposition === "conflicting_family_subscription"
         ? {
-            cleanupFamilySponsoredStripeSubscriptionId:
-              canonicalSubscription?.status === "canceled" ||
-                canonicalSubscription?.status === "incomplete_expired"
-                ? null
-                : subscriptionId,
+            // A late invoice.paid still owns exact refund inspection after an
+            // earlier subscription event has already canceled the loser.
+            cleanupFamilySponsoredStripeSubscriptionId: subscriptionId,
           }
         : {}),
     };

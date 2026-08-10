@@ -180,3 +180,23 @@ function-state matrix and verification ledger. The accepted defects are:
   portal without claiming current access or offering a fresh start. Ten focused
   suites pass 398/398, typecheck/lint and both billing guards pass, and the new
   desktop/mobile Settings recovery state was inspected at native resolution.
+- Final ReviewGPT round 2 accepted the prior corrections and found one missing
+  delivery ordering inside finding 16: a subscription event could cancel the
+  paid direct loser before `invoice.paid`, causing the later invoice handler to
+  suppress exact refund inspection solely because Stripe now reported the
+  subscription as terminal. A production-shaped fail-first sequence reproduced
+  the null cleanup result. Paid invoice reconciliation now forwards every
+  conflicting Family-sponsored subscription, including `canceled` and
+  `incomplete_expired`, to the existing exact, idempotent refund owner. The
+  sequence proves cancellation first, one full refund on the late invoice, and
+  no duplicate refund on replay.
+- Current `main` was merged normally after round 2. The two manual conflicts
+  preserved the newer verification date and both ordered migrations; all other
+  shared billing owners auto-merged. Combined proof covers Pulse, Edge, and the
+  new Family Max tier. It also repaired the hosted-local aggregate-runner test's
+  stale 20-batch assertion so it matches the current 22 batches, 23 Vitest
+  child invocations, and 25 cleanup boundaries.
+- Post-integration proof passes 897 affected Web tests with 23 opt-in tests
+  skipped, 107 hosted-local harness tests, 64 hosted-execution parser tests, 28
+  assistant Family tests, Web typecheck, full Web lint with zero errors, the
+  provider-request guard, and the hosted billing CI contract.

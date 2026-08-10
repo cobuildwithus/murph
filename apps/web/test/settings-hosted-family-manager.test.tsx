@@ -979,6 +979,7 @@ test("HostedFamilyManager keeps Telegram invites from authorizing an automatic p
       },
       plans: {
         edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+        max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
         pulse: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
       },
     }),
