@@ -2609,7 +2609,10 @@ export function createJunctionDeviceSyncProvider(
   resource: string;
   sourceProviderSlug: string | null;
 }): DeviceSyncJobInput {
-  const windowStart = subtractDays(input.now, extendedTimeseriesBackfillDays);
+  const windowEnd = floorUtcDayTimestamp(input.now);
+  const windowStart = floorUtcDayTimestamp(
+    subtractDays(input.now, extendedTimeseriesBackfillDays),
+  );
   const payload = {
     resource: input.resource,
     resourceCategory: "timeseries",
@@ -2617,12 +2620,13 @@ export function createJunctionDeviceSyncProvider(
       ? { sourceProviderSlug: input.sourceProviderSlug }
       : {}),
     windowStart,
-    windowEnd: input.now,
+    windowEnd,
   } satisfies JunctionDeviceSyncJobPayloads["resource"];
 
   return {
     kind: "resource",
     payload,
+    availableAt: input.now,
     priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
     dedupeKey: sha256Text(JSON.stringify([
       "junction",
@@ -2630,7 +2634,7 @@ export function createJunctionDeviceSyncProvider(
       input.sourceProviderSlug,
       input.resource,
       windowStart,
-      input.now,
+      windowEnd,
     ])),
   };
 }

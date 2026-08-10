@@ -12,6 +12,8 @@ import type {
 } from "../src/types.ts";
 
 const NOW = "2026-06-11T12:00:00.000Z";
+const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
+const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
 
 interface TimeseriesRequest {
   end: string | null;
@@ -142,7 +144,9 @@ providers: [{
       if (url.pathname.startsWith(timeseriesPrefix)) {
         input.requests.push({
 end: url.searchParams.get("end_date"),
-resource: url.pathname.slice(timeseriesPrefix.length).replace(/\/grouped$/u, ""),
+resource: url.pathname
+  .slice(timeseriesPrefix.length)
+  .replace(/\/grouped$/u, ""),
 start: url.searchParams.get("start_date"),
         });
         return createJsonResponse({ groups: {} });
@@ -151,6 +155,13 @@ start: url.searchParams.get("start_date"),
       throw new Error(`Unexpected request: ${url.toString()}`);
     },
   });
+}
+
+function findBloodPressureJob(jobs: readonly DeviceSyncJobInput[]): DeviceSyncJobInput {
+  return requireValue(jobs.find((job) =>
+    job.kind === "resource"
+    && job.payload?.resource === "blood_pressure"
+  ));
 }
 
 test("Junction gives sparse blood pressure its own full-history resumable job", async () => {
@@ -162,16 +173,14 @@ test("Junction gives sparse blood pressure its own full-history resumable job", 
   });
   const jobs = connection.initialJobs ?? [];
   const backfill = requireValue(jobs.find((job) => job.kind === "backfill"));
-  const bloodPressure = requireValue(jobs.find((job) =>
-    job.kind === "resource"
-    && job.payload?.resource === "blood_pressure"
-  ));
+  const bloodPressure = findBloodPressureJob(jobs);
 
+  assert.equal(bloodPressure.availableAt, NOW);
   assert.deepEqual(bloodPressure.payload, {
     resource: "blood_pressure",
     resourceCategory: "timeseries",
-    windowStart: "2026-05-12T12:00:00.000Z",
-    windowEnd: NOW,
+    windowStart: "2026-05-12T00:00:00.000Z",
+    windowEnd: BACKFILL_WINDOW_END,
   });
 
   const executor = requireValue(provider.jobExecutor);
@@ -192,8 +201,28 @@ test("Junction gives sparse blood pressure its own full-history resumable job", 
     (request) => request.resource === "blood_pressure",
   );
   assert.equal(bloodPressureRequests.length, 30);
-  assert.equal(bloodPressureRequests[0]?.start, "2026-05-12T12:00:00.000Z");
-  assert.equal(bloodPressureRequests.at(-1)?.end, NOW);
+  assert.equal(bloodPressureRequests[0]?.start, "2026-05-12T00:00:00.000Z");
+  assert.equal(bloodPressureRequests.at(-1)?.end, BACKFILL_WINDOW_END);
+});
+
+test("same-day SDK ensures coalesce to one blood-pressure history identity", async () => {
+  const provider = createProvider({ requests: [] });
+  const sdk = requireValue(provider.sdkConnectionHandler);
+  const first = await sdk.ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const second = await sdk.ensureConnection({
+    ownerId: "member-1",
+    now: SAME_DAY_LATER,
+  });
+  const firstBloodPressure = findBloodPressureJob(first.initialJobs ?? []);
+  const secondBloodPressure = findBloodPressureJob(second.initialJobs ?? []);
+
+  assert.equal(firstBloodPressure.dedupeKey, secondBloodPressure.dedupeKey);
+  assert.deepEqual(firstBloodPressure.payload, secondBloodPressure.payload);
+  assert.equal(firstBloodPressure.availableAt, NOW);
+  assert.equal(secondBloodPressure.availableAt, SAME_DAY_LATER);
 });
 
 test("an explicit Junction timeseries backfill window still governs blood pressure", async () => {
@@ -205,11 +234,8 @@ test("an explicit Junction timeseries backfill window still governs blood pressu
     ownerId: "member-1",
     now: NOW,
   });
-  const bloodPressure = requireValue((connection.initialJobs ?? []).find((job) =>
-    job.kind === "resource"
-    && job.payload?.resource === "blood_pressure"
-  ));
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
 
-  assert.equal(bloodPressure.payload?.windowStart, "2026-06-06T12:00:00.000Z");
-  assert.equal(bloodPressure.payload?.windowEnd, NOW);
+  assert.equal(bloodPressure.payload?.windowStart, "2026-06-06T00:00:00.000Z");
+  assert.equal(bloodPressure.payload?.windowEnd, BACKFILL_WINDOW_END);
 });
