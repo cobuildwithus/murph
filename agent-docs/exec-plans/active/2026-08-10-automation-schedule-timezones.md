@@ -18,7 +18,7 @@ Key decisions:
 - Update the existing schedule-owner documentation and focused contract/core/assistant/runtime tests rather than adding a new service or state owner.
 
 State:
-- ReviewGPT round four verified every prior automation and event-trigger correction, then found one shared scheduled-log retry regression caused by removing the union-wide source revision input. The scheduled-log-only restoration is implemented with a production-shaped failing-then-passing real-vault regression.
+- ReviewGPT round five verified every prior correction, then found that a partial recurring schedule patch could silently remove the stored explicit timezone. The failure is reproduced through core, typed CLI, and hosted-runtime paths; the core-owned preservation fix and separate-turn assistant proof are implemented.
 
 Done:
 - Proved the production failure mechanism: a UTC-converted cron hour was persisted and then evaluated in the vault timezone.
@@ -53,12 +53,18 @@ Done:
 - The real-vault proof now skips the retired 8:00 retry, projects and writes only 9:00, while a summary-only edit preserves and writes the valid 8:00 retry and an already-running 8:00 occurrence remains owned by its writer. The complete 217-test shared cron and scheduled-log set passes.
 - The expanded 361-test scheduler, mutation, outbox-authority, managed-reconciliation, availability, and scheduled-log set passes, as does the complete 30-project workspace typecheck.
 - Rebuilt the complete hosted runner closure after the scheduled-log correction. The runner entrypoint remains 1,661,608 bytes, its static boot closure is 8,018,488 bytes, and total output is 9,993,619 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed.
+- ReviewGPT round five proved that changing only an explicitly zoned reminder's wall-clock time could remove its stored timezone and return a confidently verified vault-relative schedule. Failing core, typed CLI, and hosted-runtime regressions reproduced the same destructive replacement path.
+- Centralized patch preservation in core, where the existing automation and replacement schedule are already held under the registry lock. A recurring-to-recurring patch with no replacement timezone carries forward the stored explicit timezone; explicit replacements still win, new saves remain vault-relative when omitted, and non-wall-clock schedule changes remain unchanged.
+- Updated prompt/deferred-tool guidance plus scripted and opt-in actual-model coverage so a separate later turn can move the reminder without repeating or guessing its timezone; the authoritative result remains the confirmation source.
+- Passed the complete core markdown suite (23), typed automation CLI suite (21), hosted assistant phase (280), and prompt/tool/scripted/opt-in model set (120 with 37 provider-gated skips), plus all four affected package typechecks and the complete 30-project workspace typecheck.
+- The patch-preservation guidance adds 41 `o200k_harmony` tokens and 214 UTF-8 bytes to both initial runtimes relative to round five: direct is now 23,988 tokens / 110,899 bytes versus base 23,701 / 109,497 (+287, +1.2109%, +1,402 bytes); group is 20,460 / 95,348 versus base 20,173 / 93,946 (+287, +1.4227%, +1,402 bytes). Prompt content is now 14,849 tokens / 72,811 bytes direct and 11,421 / 57,391 group. The deferred automation tool serialization is 4,570 tokens / 15,643 bytes when loaded.
+- Rebuilt the complete hosted runner closure after patch preservation. The runner entrypoint remains 1,661,608 bytes, its static boot closure is 8,019,500 bytes, and total output is 9,994,631 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed.
 
 Now:
-- Correct PR intent wording for shared scheduled-log coverage, stale claimed work, and old-runner rewrite skew, then review and push the exact remediation head.
+- Complete candidate diff/privacy review, then commit and push the timezone-preserving patch.
 
 Next:
-- Commit and push the scheduled-log restoration, update PR #1546's exact-head evidence, and run sensitive full-snapshot ReviewGPT round five concurrently with CI until the latest substantive round passes.
+- Commit and push the exact remediation head, update PR #1546's evidence, and run sensitive full-snapshot ReviewGPT round six concurrently with CI until the latest substantive round passes.
 
 Open questions (UNCONFIRMED if needed):
 - None. The timing result now reuses the canonical scheduler owners through an exact-file projection instead of the broad public job lookup.

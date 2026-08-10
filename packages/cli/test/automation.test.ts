@@ -735,6 +735,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
         schedule: {
           kind: string;
           localTime?: string;
+          timeZone?: string;
         };
         tags: string[];
       } | null;
@@ -753,6 +754,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
     assert.equal(shown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(shown.envelope.data?.automation?.schedule.localTime, "08:30");
+    assert.equal(shown.envelope.data?.automation?.schedule.timeZone, undefined);
     assert.deepEqual(shown.envelope.data?.automation?.tags, ["assistant"]);
 
     const routeShown = await runInProcessJsonCli<{
@@ -849,6 +851,71 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(tagShown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(tagShown.envelope.data?.automation?.schedule.localTime, "08:30");
     assert.deepEqual(tagShown.envelope.data?.automation?.tags, ["scheduled", "experiment"]);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation edit preserves an explicit timezone when changing wall-clock time", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-edit-timezone-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    await upsertAutomation({
+      vaultRoot,
+      ...createAutomationScaffoldPayload(),
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "21:00",
+        timeZone: "America/Chicago",
+      },
+      slug: "central-evening-reminder",
+      status: "paused",
+      title: "Central evening reminder",
+    });
+
+    const edited = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "central-evening-reminder",
+      "--trigger-kind",
+      "dailyLocal",
+      "--trigger-local-time",
+      "22:00",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(edited.exitCode, null);
+    assert.equal(edited.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        schedule: {
+          kind: string;
+          localTime?: string;
+          timeZone?: string;
+        };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "central-evening-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.schedule, {
+      kind: "dailyLocal",
+      localTime: "22:00",
+      timeZone: "America/Chicago",
+    });
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
   }

@@ -329,6 +329,70 @@ describe("markdown document primitives", () => {
       });
   });
 
+  it("preserves an explicit recurring timezone across a partial schedule patch", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
+      }),
+    });
+
+    const patched = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      schedule: { kind: "dailyLocal", localTime: "22:00" },
+    });
+    expect(patched.record.schedule).toEqual({
+      kind: "dailyLocal",
+      localTime: "22:00",
+      timeZone: "America/Chicago",
+    });
+
+    const changedKind = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      schedule: { kind: "cron", expression: "0 23 * * *" },
+    });
+    expect(changedKind.record.schedule).toEqual({
+      kind: "cron",
+      expression: "0 23 * * *",
+      timeZone: "America/Chicago",
+    });
+
+    const changedZone = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      schedule: {
+        kind: "cron",
+        expression: "0 23 * * *",
+        timeZone: "America/Denver",
+      },
+    });
+    expect(changedZone.record.schedule).toEqual({
+      kind: "cron",
+      expression: "0 23 * * *",
+      timeZone: "America/Denver",
+    });
+
+    const vaultRelative = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        slug: "vault-relative-check-in",
+        schedule: { kind: "dailyLocal", localTime: "08:00" },
+        title: "Vault relative check-in",
+      }),
+    });
+    expect(vaultRelative.record.schedule).toEqual({
+      kind: "dailyLocal",
+      localTime: "08:00",
+    });
+  });
+
   it("round-trips activeUntil and archives only the current elapsed definition", async () => {
     const vaultRoot = await makeVaultRoot();
     const created = await upsertAutomation({

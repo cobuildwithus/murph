@@ -519,6 +519,26 @@ function normalizeAutomationRouteChannel(value: unknown): string {
   }
 }
 
+function resolveAutomationPatchSchedule(input: {
+  existing: AutomationSchedule;
+  replacement: AutomationSchedule;
+}): AutomationSchedule {
+  const replacement = normalizeAutomationSchedule(input.replacement);
+  if (
+    (replacement.kind !== "cron" && replacement.kind !== "dailyLocal")
+    || replacement.timeZone !== undefined
+    || (input.existing.kind !== "cron" && input.existing.kind !== "dailyLocal")
+    || input.existing.timeZone === undefined
+  ) {
+    return replacement;
+  }
+
+  return {
+    ...replacement,
+    timeZone: input.existing.timeZone,
+  };
+}
+
 function normalizeAutomationAssistantTargetOverride(
   value: unknown,
 ): AutomationAssistantTargetOverride | null {
@@ -1070,7 +1090,12 @@ export async function patchAutomation(
         input.supportKind === undefined
           ? existingRecord.supportKind
           : normalizeAutomationSupportKind(input.supportKind),
-      schedule: input.schedule ?? existingRecord.schedule,
+      schedule: input.schedule === undefined
+        ? existingRecord.schedule
+        : resolveAutomationPatchSchedule({
+            existing: existingRecord.schedule,
+            replacement: input.schedule,
+          }),
       slug: input.slug ?? existingRecord.slug,
       status: input.status ?? existingRecord.status,
       summary: input.summary === undefined ? existingRecord.summary : input.summary,

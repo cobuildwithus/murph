@@ -1515,6 +1515,83 @@ if (!tool) {
     ).toBeGreaterThan(4_000)
   })
 
+  it('preserves the stored timezone through a separate schedule-patch turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  lookup: "evening-reminder",
+  schedule: { kind: "dailyLocal", localTime: "22:00" },
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'Updated your evening reminder to 10 PM Central.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'patch',
+              automationId: 'automation-central-evening',
+              created: false,
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: 'evening-reminder',
+              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              routeBinding: 'preserved',
+              schedule: {
+                kind: 'dailyLocal',
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Move my evening reminder to 10 PM. Save the change now.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'patch',
+      lookup: 'evening-reminder',
+      schedule: { kind: 'dailyLocal', localTime: '22:00' },
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('America/Chicago')
+    expect(toolOutputs).toContain('2026-08-11T03:00:00.000Z')
+    expect(result.finalMessage).toBe(
+      'Updated your evening reminder to 10 PM Central.',
+    )
+  })
+
   it('keeps active device-triggered saves distinct from exhausted clock schedules', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

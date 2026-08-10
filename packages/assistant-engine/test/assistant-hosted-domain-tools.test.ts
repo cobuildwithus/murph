@@ -40,6 +40,9 @@ describe('hosted domain dynamic tools', () => {
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
     )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'On patch, a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
+    )
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {

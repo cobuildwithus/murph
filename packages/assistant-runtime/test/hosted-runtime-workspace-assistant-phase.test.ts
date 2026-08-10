@@ -5398,13 +5398,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
       })).resolves.toEqual(expect.objectContaining({
         action: "patch",
-        effectiveTimeZone: "America/New_York",
-        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        effectiveTimeZone: "America/Chicago",
+        nextOccurrenceAt: "2026-08-10T04:00:00.000Z",
         schedule: {
           kind: "dailyLocal",
           localTime: "23:00",
+          timeZone: "America/Chicago",
         },
-        timingVerified: false,
+        timingVerified: true,
       }));
 
       await expect(requestAutomation({

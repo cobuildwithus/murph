@@ -3963,6 +3963,114 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
+    'preserves a stored foreign timezone when moving an existing reminder',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-move-central-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'patch' || !request.schedule) {
+                  throw new Error('Expected an automation schedule patch.')
+                }
+                automationRequests.push(request)
+                const schedule = request.schedule.kind === 'dailyLocal'
+                  ? {
+                      ...request.schedule,
+                      timeZone: 'America/Chicago' as const,
+                    }
+                  : request.schedule.kind === 'cron'
+                    ? {
+                        ...request.schedule,
+                        timeZone: 'America/Chicago' as const,
+                      }
+                    : null
+                if (!schedule) {
+                  throw new Error('Expected a recurring wall-clock schedule.')
+                }
+                return {
+                  action: 'patch',
+                  automationId: 'automation-central-evening',
+                  created: false,
+                  effectiveTimeZone: 'America/Chicago',
+                  lookupId: 'evening-reminder',
+                  nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                  routeBinding: 'preserved',
+                  schedule,
+                  status: 'active',
+                  timingVerified: true,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: 'Move my evening reminder to 10 PM. Save the change now.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        const request = automationRequests[0]
+        expect(request).toMatchObject({ action: 'patch' })
+        if (request?.action !== 'patch' || !request.schedule) {
+          throw new Error('Expected a patched automation schedule.')
+        }
+        expect(request.schedule.kind === 'dailyLocal'
+          ? request.schedule.localTime
+          : request.schedule.kind === 'cron'
+            ? request.schedule.expression
+            : null).toMatch(/22(?::00)?/u)
+        if (
+          request.schedule.kind !== 'dailyLocal'
+          && request.schedule.kind !== 'cron'
+        ) {
+          throw new Error('Expected a recurring wall-clock schedule.')
+        }
+        expect(request.schedule.timeZone).toBeUndefined()
+        expect(result.finalMessage).toMatch(
+          /10\s*(?::00)?\s*p\.?m\.?|22:00/iu,
+        )
+        expect(result.finalMessage).toMatch(/central|america\/chicago/iu)
+        expect(result.finalMessage).not.toMatch(
+          /which time\s*zone|what time\s*zone|repeat.*time\s*zone/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'confirms an active device trigger without claiming future delivery is exhausted',
     async () => {
       const config = await resolveRealCodexE2eConfig()

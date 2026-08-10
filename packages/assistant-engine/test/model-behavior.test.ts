@@ -3056,6 +3056,12 @@ describe('assistant conversation scope', () => {
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
     )
     expect(prompt).toContain(
+      'On patch, a replacement recurring wall-clock schedule that omits `schedule.timeZone` preserves the stored explicit timezone',
+    )
+    expect(prompt).toContain(
+      'do not ask the user to repeat it or guess it from current conversation context',
+    )
+    expect(prompt).toContain(
       'For an active `deviceActivity` schedule, confirm the persisted event trigger directly',
     )
     expect(prompt).toContain(
