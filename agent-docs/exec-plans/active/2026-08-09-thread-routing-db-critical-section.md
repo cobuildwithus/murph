@@ -210,6 +210,28 @@ Updated: 2026-08-09
   route lock; a stale-ciphertext case exits before demotion or route mutation.
   The combined slice also caught and corrected two stale narrow-query
   assertions after sender suspension state became part of the preflight read.
+- Final ReviewGPT round 6 verified the decrypt-only route-root correction, then
+  found a distinct Telegram admission path that still repeated KMS after
+  `BEGIN`: speculative sender lookup projected full encrypted routing state;
+  if that batch unwrap failed and its cache entry was evicted, the suppressed
+  warm failure let the authoritative planner repeat the same broad resolver
+  inside its transaction.
+- The round-6 finding was accepted. Telegram group preparation and both planner
+  authority reads now use a blind-index-to-core resolver that preserves all
+  contact-privacy read candidates, distinct-member ambiguity, and the existing
+  post-lock recheck without selecting encrypted routing columns. Existing full
+  routing projection remains unchanged for its other call sites. No cache
+  retention or retry mechanism was added.
+- Focused round-6 remediation proof: the member-store and Telegram dispatch
+  files passed 110 tests together; an eligible group sender succeeds with the
+  private-root batch unwrap configured to fail because the core resolver never
+  calls it; exact query assertions exclude every encrypted routing column.
+  Existing dispatch coverage retains rotated ambiguity, binding changes after
+  the member lock, suspended and inactive senders, fresh creation, route
+  refresh, and the bounded late-winner retry. App prepared typecheck, scoped
+  lint, and `git diff --check` passed.
+- The combined round-7 affected slice passed 505 tests across nine files, and
+  the real PostgreSQL route-concurrency lane remained green at 9 tests.
 
 ## Round 4 anomaly retrospective
 
@@ -275,3 +297,38 @@ Updated: 2026-08-09
 - Expected architecture result: established-route validation remains
   fail-closed and repairable, but supported control-root rotation cannot place
   a KMS call inside the route transaction.
+
+## Round 6 anomaly retrospective
+
+- Trigger: final round 6 returned `FINDINGS`; the next run is substantive round
+  7. The finding identified a speculative Telegram sender read that projected
+  private routing fields even though preparation and planner authority consumed
+  only core member state.
+- Original requirement: move variable route/container KMS work before `BEGIN`
+  without causing a failed preflight to repeat provider work while holding the
+  planner transaction, and keep sender identity/authority fail-closed across
+  privacy-key rotation and binding races.
+- Shape comparison: authored-source churn is 767 lines at the immutable
+  first-reviewed head and 1,197 lines on the round-7 worktree, below the
+  2,000-line threshold. The remediation adds one narrow read projection and no
+  schema, durable state, cache lifecycle, queue, service, lock owner, retry
+  class, or compatibility path.
+- Root cause: the Telegram identity boundary reused a general routing lookup
+  whose projection decrypted every private routing field. That projection was
+  unnecessary for all three webhook admission calls. A failed batch unwrap was
+  evicted normally, and warm-error suppression then allowed the transaction to
+  repeat the same KMS work.
+- Decision: delete the private-state dependency from Telegram webhook admission.
+  Resolve all blind-index read candidates to one member's core state, preserve
+  the existing ambiguous result, and repeat that same narrow read after
+  `lockHostedMemberRow`. Do not retain unrelated failed crypto, add retry state,
+  or weaken the authoritative binding recheck.
+- Required proof: an eligible linked group sender reaches creation with private
+  routing KMS configured to fail because no private-field unwrap is requested;
+  narrow selects contain only member id and core fields; rotated candidates
+  remain ambiguous; relinking after the member lock, suspension, inactive
+  access, creation, refresh, and late-winner behavior remain unchanged.
+- Expected architecture result: Telegram sender admission has no
+  hosted-member-private-field KMS dependency before or after `BEGIN`; only
+  route and mailbox cryptography that the accepted flow actually consumes is
+  prepared, while identity authority remains transactionally repeated.

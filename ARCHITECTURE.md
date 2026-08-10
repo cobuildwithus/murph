@@ -1607,6 +1607,9 @@ acknowledgement, entitlement, or reconciliation state.
 
 Hosted thread routing prepares thread-container domain envelopes, delivery-route
 ciphertext, and mailbox ingress roots before the planner transaction.
+Telegram thread-routing preparation and its transaction authority checks
+resolve contact-privacy rotation candidates through the blind routing index to
+core member state only; they do not select or decrypt private routing fields.
 Established Linq direct messages resolve only a narrow blind-index/member-id
 target and unwrap the mailbox-payload ingress root; established Linq and
 Telegram group routes also retain the exact observed delivery-route ciphertext,
