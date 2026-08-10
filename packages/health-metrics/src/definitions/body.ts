@@ -45,4 +45,22 @@ export const BODY_METRICS = [
     selectionPolicy: { kind: "latest-valid", staleAfterDays: 45 },
     valuePrecision: 1,
   },
+  {
+    aliases: [
+      "leanBodyMassKg",
+      "lean_body_mass",
+      "lean_body_mass_kg",
+      "lean_body_mass_kilogram",
+      "lean_mass",
+      "lean_mass_kg",
+    ],
+    biomarkerKey: null,
+    canonicalUnit: "kg",
+    category: "body",
+    displayName: "Lean body mass",
+    displayUnit: "kg",
+    key: "lean-body-mass",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 45 },
+    valuePrecision: 1,
+  },
 ] satisfies readonly MetricDefinition[];

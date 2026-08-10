@@ -159,6 +159,30 @@ describe('assistant context snapshot device availability', () => {
       unit: 'kg/m2',
       value: 22.1,
     },
+    {
+      metric: 'leanBodyMass',
+      storedMetric: 'lean-body-mass',
+      unit: 'kg',
+      value: 61.4,
+    },
+    {
+      metric: 'leanBodyMassKilogram',
+      storedMetric: 'lean-body-mass',
+      unit: 'kg',
+      value: 61.5,
+    },
+    {
+      metric: 'leanMass',
+      storedMetric: 'lean-body-mass',
+      unit: 'kg',
+      value: 61.6,
+    },
+    {
+      metric: 'leanMassKg',
+      storedMetric: 'lean-body-mass',
+      unit: 'kg',
+      value: 61.7,
+    },
   ] as const)(
     'advertises writer-canonicalized $metric measurement history',
     async ({ metric, storedMetric, unit, value }) => {

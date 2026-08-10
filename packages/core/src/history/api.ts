@@ -147,12 +147,6 @@ const CANONICAL_BODY_MEASUREMENT_METRIC_KEYS = new Set([
   "waistCircumference",
   "weightKg",
 ]);
-const CANONICAL_GENERIC_BODY_MEASUREMENT_METRIC_KEYS = new Set([
-  "bmi",
-  "body-fat-percentage",
-  "body-weight",
-  "waist-circumference",
-]);
 const CANONICAL_SYSTOLIC_BLOOD_PRESSURE_METRIC_KEY =
   "systolic-blood-pressure";
 const CANONICAL_DIASTOLIC_BLOOD_PRESSURE_METRIC_KEY =
@@ -1598,7 +1592,7 @@ function isCanonicalGenericBodyMeasurementMetricKey(
 ): boolean {
   return canonicalMetricKey !== null
     && (
-      CANONICAL_GENERIC_BODY_MEASUREMENT_METRIC_KEYS.has(canonicalMetricKey)
+      resolveMetricDefinition(canonicalMetricKey)?.category === "body"
       || CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(canonicalMetricKey)
     );
 }
