@@ -1475,6 +1475,10 @@ function normalizeStoredAvailabilityEvent(value: unknown): unknown {
     !isPlainRecord(value)
     || value.kind !== "observation"
     || typeof value.observationGrain !== "string"
+    || typeof value.metric !== "string"
+    || !isCanonicalBodyMeasurementMetric(value.metric)
+    || !isPlainRecord(value.externalRef)
+    || typeof value.externalRef.system !== "string"
   ) {
     return value;
   }
@@ -1488,8 +1492,9 @@ function normalizeStoredAvailabilityEvent(value: unknown): unknown {
   }
 
   // The query read model has always treated these persisted provider-day
-  // spellings as summary grain. Normalize only at this stored-read boundary;
-  // current writes remain constrained by the current event contract.
+  // spellings as summary grain. Normalize only relevant provider body rows at
+  // this stored-read boundary; current writes remain constrained by the
+  // current event contract.
   return {
     ...value,
     observationGrain: "summary",
