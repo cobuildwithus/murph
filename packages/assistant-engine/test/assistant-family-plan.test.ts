@@ -264,6 +264,38 @@ describe("assistant family plan tool", () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain("checkout.stripe.test/family");
   });
 
+  it("preserves explicit active-trial conversion consent for Family checkout", () => {
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "start_checkout",
+          confirmedTrialConversion: true,
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    })).toEqual({
+      kind: "family-plan",
+      request: {
+        action: "start_checkout",
+        confirmedTrialConversion: true,
+      },
+    });
+
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "start_checkout",
+          confirmedTrialConversion: false,
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    })?.kind).toBe("invalid-family-plan-arguments");
+  });
+
   it("rejects invitation context on Family checkout", () => {
     expect(readMurphDynamicToolRequest({
       method: "item/tool/call",

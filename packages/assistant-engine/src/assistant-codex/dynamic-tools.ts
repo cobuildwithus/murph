@@ -227,6 +227,7 @@ import {
   asRecord,
   ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION,
+  GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -659,6 +660,7 @@ const familyPlanArgumentsSchema = z
     }).strict(),
     z.object({
       action: z.literal('start_checkout'),
+      confirmedTrialConversion: z.literal(true).optional(),
     }).strict(),
     z.object({
       action: z.literal('create_invite'),
@@ -3577,6 +3579,7 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
         ? {
             offeredAt: response.result.offeredAt,
             recencyEvidence: 'eligible' as const,
+            responseHandling: GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
           }
         : { recencyEvidence: 'unavailable' as const }),
       presentation: 'native' as const,
@@ -4096,6 +4099,11 @@ async function executeGroupTool(input: {
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch (error) {
+    const runtimeIssueInput = buildGroupToolFailureRuntimeIssueInput({
+      action: input.request.action,
+      callerSignalAborted: input.abortSignal?.aborted === true,
+      error,
+    })
     return {
       ...toolTextResult(
         false,
@@ -4103,9 +4111,139 @@ async function executeGroupTool(input: {
           ? buildGroupAskRequestFailureText(error)
           : 'group tool request failed',
       ),
+      ...(runtimeIssueInput ? { runtimeIssueInputs: [runtimeIssueInput] } : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   }
+}
+
+type GroupToolFailureCategory =
+  | 'http_4xx'
+  | 'http_5xx'
+  | 'response_schema_invalid'
+  | 'timeout'
+  | 'transport'
+  | 'unknown'
+
+function buildGroupToolFailureRuntimeIssueInput(input: {
+  action: MurphGroupToolRequest['action']
+  callerSignalAborted: boolean
+  error: unknown
+}): AssistantRuntimeIssueInput | null {
+  if (input.callerSignalAborted) {
+    return null
+  }
+  const classification = classifyGroupToolFailure(input.error)
+  return {
+    component: 'assistant.group-tool',
+    operation: input.action,
+    phase: classification.category === 'response_schema_invalid'
+      ? 'tool_result_parse'
+      : 'tool_call',
+    issueKind: classification.category === 'response_schema_invalid'
+      ? 'schema_rejection'
+      : classification.category === 'timeout'
+        ? 'timeout'
+        : 'tool_error',
+    severity: 'warning',
+    errorCode: classification.errorCode,
+    summary: 'Hosted group tool request failed.',
+    details: {
+      action: input.action,
+      failureCategory: classification.category,
+      ...(classification.retryable === null
+        ? {}
+        : { retryable: classification.retryable }),
+      ...(classification.statusClass === null
+        ? {}
+        : { statusClass: classification.statusClass }),
+    },
+  }
+}
+
+function classifyGroupToolFailure(error: unknown): {
+  category: GroupToolFailureCategory
+  errorCode: string
+  retryable: boolean | null
+  statusClass: '4xx' | '5xx' | null
+} {
+  const record = error && typeof error === 'object' && !Array.isArray(error)
+    ? error as Record<string, unknown>
+    : null
+  const retryable = typeof record?.retryable === 'boolean'
+    ? record.retryable
+    : null
+  if (
+    record?.code === 'HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID'
+    && record.name === 'HostedGroupToolResponseSchemaError'
+  ) {
+    return {
+      category: 'response_schema_invalid',
+      errorCode: 'HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID',
+      retryable,
+      statusClass: null,
+    }
+  }
+
+  const statusCode = readGroupToolFailureStatusCode(record)
+  if (statusCode !== null && statusCode >= 400 && statusCode <= 499) {
+    return {
+      category: 'http_4xx',
+      errorCode: 'HOSTED_GROUP_TOOL_HTTP_4XX',
+      retryable,
+      statusClass: '4xx',
+    }
+  }
+  if (statusCode !== null && statusCode >= 500 && statusCode <= 599) {
+    return {
+      category: 'http_5xx',
+      errorCode: 'HOSTED_GROUP_TOOL_HTTP_5XX',
+      retryable,
+      statusClass: '5xx',
+    }
+  }
+
+  const fetchCauseKind = typeof record?.hostedRuntimeFetchCauseKind === 'string'
+    ? record.hostedRuntimeFetchCauseKind
+    : null
+  const errorName = error instanceof Error ? error.name : null
+  if (
+    fetchCauseKind === 'timeout'
+    || errorName === 'TimeoutError'
+  ) {
+    return {
+      category: 'timeout',
+      errorCode: 'HOSTED_GROUP_TOOL_TIMEOUT',
+      retryable,
+      statusClass: null,
+    }
+  }
+  if (fetchCauseKind !== null || errorName === 'AbortError') {
+    return {
+      category: 'transport',
+      errorCode: 'HOSTED_GROUP_TOOL_TRANSPORT_FAILED',
+      retryable,
+      statusClass: null,
+    }
+  }
+  return {
+    category: 'unknown',
+    errorCode: 'HOSTED_GROUP_TOOL_FAILED',
+    retryable,
+    statusClass: null,
+  }
+}
+
+function readGroupToolFailureStatusCode(
+  record: Record<string, unknown> | null,
+): number | null {
+  const candidate = record?.statusCode ?? record?.status
+  return typeof candidate === 'number'
+      && Number.isInteger(candidate)
+      && candidate >= 100
+      && candidate <= 599
+    ? candidate
+    : null
 }
 
 function buildGroupAskRequestFailureText(error: unknown): string {
@@ -5387,6 +5525,9 @@ function parseFamilyPlanArguments(
       ok: true,
       request: {
         action: 'start_checkout',
+        ...(parsed.data.confirmedTrialConversion
+          ? { confirmedTrialConversion: true as const }
+          : {}),
       },
     }
   }

@@ -772,10 +772,10 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "See every way to get more usage",
         summary:
-          "Ask Murph how to get more usage and it now checks the available plan, top-up, group funding, and ways to earn usage together. Settings also shows recent credits and each current or completed mission.",
+          "Ask Murph how to get more usage and it now checks the available plan, top-up, group funding, and referral options together. Settings also shows recent credits and each current or completed group referral.",
         details:
-          "Choosing one or both missions remains explicit. Each tracks and can be cancelled independently, and a mission past its action deadline reads as final activity being checked rather than still actionable.",
-        relevanceTags: ["usage", "credits", "missions", "settings"],
+          "Choosing one or both group referral options remains explicit. Each tracks and can be cancelled independently, and an option past its action deadline reads as final activity being checked rather than still actionable.",
+        relevanceTags: ["usage", "credits", "referrals", "settings"],
         sourcePullRequests: [1120, 1136, 1138, 1157],
         tryIt: {
           label: "Ask about more usage",
