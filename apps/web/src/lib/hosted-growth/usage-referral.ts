@@ -98,7 +98,7 @@ const POLICIES = {
   new_person_activation_v1: {
     code: "new_person_activation_v1",
     requirementsLabel:
-      "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+      "Bring one new person into a fresh Murph group. Murph handles setup, and the reward is earned once they join the conversation with their own Murph.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     title: "Bring someone new to Murph",
   },
@@ -107,7 +107,7 @@ const POLICIES = {
     requirementsLabel:
       "Start a fresh group and make it genuinely active, with multiple people actually talking.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
-    title: "Start an active group",
+    title: "Start a group conversation",
   },
 } as const satisfies Record<
   HostedUsageReferralPolicyCode,

@@ -24,9 +24,9 @@ test("ReferralSection presents every available referral path on the homepage", (
   assert.match(markup, /Murph referrals/);
   assert.match(markup, /Bring your people\. Earn more Murph time\./);
   assert.match(markup, /Share your link or start a group with Murph/);
-  assert.match(markup, /Invite someone to Murph/);
+  assert.match(markup, /Share your referral link/);
   assert.match(markup, /Bring someone new to Murph/);
-  assert.match(markup, /Start an active group/);
+  assert.match(markup, /Start a group conversation/);
   assert.match(markup, /About 10 more days of Murph usage/);
   assert.match(markup, /About 14 more days of Murph usage/);
   assert.match(markup, /href="\/refer"/);
@@ -47,10 +47,10 @@ test("ReferralSection keeps disabled referral paths out of its copy and rewards"
   );
 
   assert.match(signupMarkup, /Share your personal link with someone new\./);
-  assert.match(signupMarkup, /Invite someone to Murph/);
+  assert.match(signupMarkup, /Share your referral link/);
   assert.doesNotMatch(signupMarkup, /group mission/i);
   assert.doesNotMatch(signupMarkup, /Bring someone new to Murph/);
-  assert.doesNotMatch(signupMarkup, /Start an active group/);
+  assert.doesNotMatch(signupMarkup, /Start a group conversation/);
 
   const groupRewards = HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
     ({ id }) => id !== "signup-link",
@@ -61,7 +61,7 @@ test("ReferralSection keeps disabled referral paths out of its copy and rewards"
 
   assert.match(groupMarkup, /Start a fresh group with Murph\./);
   assert.match(groupMarkup, /Bring someone new to Murph/);
-  assert.match(groupMarkup, /Start an active group/);
+  assert.match(groupMarkup, /Start a group conversation/);
   assert.match(groupMarkup, /About 10 more days of Murph usage/);
   assert.match(groupMarkup, /About 14 more days of Murph usage/);
   assert.doesNotMatch(
@@ -73,7 +73,7 @@ test("ReferralSection keeps disabled referral paths out of its copy and rewards"
     RETIRED_USAGE_TERM_PATTERN,
   );
   assert.doesNotMatch(groupMarkup, /personal link/i);
-  assert.doesNotMatch(groupMarkup, /Invite someone to Murph/);
+  assert.doesNotMatch(groupMarkup, /Share your referral link/);
 
   assert.equal(
     renderToStaticMarkup(createElement(ReferralSection, { rewards: [] })),

@@ -1165,6 +1165,13 @@ export async function hasHostedGroupSponsorshipPaymentAuthorityTx(input: {
     return false;
   }
   await lockHostedMemberRow(input.tx, input.payerMemberId);
+  const payer = await input.tx.hostedMember.findUnique({
+    select: { suspendedAt: true },
+    where: { id: input.payerMemberId },
+  });
+  if (!payer || payer.suspendedAt) {
+    return false;
+  }
   const purchase = await input.tx.hostedUsageCreditPurchase.findUnique({
     select: {
       beneficiaryMemberId: true,

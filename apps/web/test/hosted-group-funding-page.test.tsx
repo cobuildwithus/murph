@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
   readHostedGroupSponsorshipDraftForCreator: vi.fn(),
   readHostedGroupSponsorshipManagementProjection: vi.fn(),
+  readHostedGroupUsageFundingManagementTargetByLocator: vi.fn(),
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedUsageCreditPurchaseStatus: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("next/link", () => ({
 
 vi.mock("@/src/components/hosted-groups/group-funding-sign-in-button", () => ({
   GroupFundingSignInButton: () => React.createElement("button", null, "Sign in"),
+  GroupFundingSignInRequired: () => React.createElement("button", null, "Sign in"),
 }));
 
 vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
@@ -72,6 +74,8 @@ vi.mock("@/src/components/ui/card", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  readHostedGroupUsageFundingManagementTargetByLocator:
+    mocks.readHostedGroupUsageFundingManagementTargetByLocator,
   readHostedGroupUsageFundingTargetByJoinCode:
     mocks.readHostedGroupUsageFundingTargetByJoinCode,
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
@@ -127,6 +131,9 @@ describe("hosted group funding page", () => {
       kind: "friends",
       runtimeMemberId: "member_group_runtime",
     });
+    mocks.readHostedGroupUsageFundingManagementTargetByLocator.mockResolvedValue(
+      null,
+    );
     mocks.readHostedGroupUsageStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
@@ -423,6 +430,86 @@ describe("hosted group funding page", () => {
     }
     expect(JSON.stringify(mocks.GroupSponsorshipManagementCard.mock.calls))
       .not.toContain("group_join_code_1234");
+  });
+
+  it("keeps cancellation available after the payer and beneficiary become inactive", async () => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticatedMember: {
+        id: "member_payer",
+        suspendedAt: new Date("2026-08-10T00:00:00.000Z"),
+      },
+    });
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce(null);
+    mocks.readHostedGroupUsageFundingManagementTargetByLocator.mockResolvedValueOnce({
+      displayName: "Sunday sleep crew",
+      joinCode: "group_join_code_1234",
+      kind: "friends",
+      runtimeMemberId: "member_group_runtime",
+    });
+    mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValueOnce({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargedThisPeriodMinor: 500,
+      monthlyCapMinor: 1_000,
+      pendingThisPeriodMinor: 0,
+      pendingMonthlyCapMinor: null,
+      periodEnd: "2026-08-30T12:00:00.000Z",
+      status: "active",
+    });
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, /management:active:500:0:1000/u);
+    expect(mocks.GroupSponsorshipManagementCard).toHaveBeenCalledWith(
+      expect.objectContaining({ cancelOnly: true }),
+      undefined,
+    );
+    expect(mocks.readHostedGroupUsageStatus).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).not.toHaveBeenCalled();
+    expect(mocks.HostedUsageTopUpDialog).not.toHaveBeenCalled();
+  });
+
+  it("offers a private sign-in handoff before resolving inactive sponsorship management", async () => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticatedMember: null,
+    });
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce(null);
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, /Sign in/u);
+    assert.doesNotMatch(markup, /This group funding link isn&#x27;t available/u);
+    expect(mocks.readHostedGroupUsageFundingManagementTargetByLocator)
+      .not.toHaveBeenCalled();
+    expect(mocks.readHostedGroupSponsorshipManagementProjection)
+      .not.toHaveBeenCalled();
+  });
+
+  it("keeps inactive sponsorship management unavailable to an authenticated non-payer", async () => {
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce(null);
+    mocks.readHostedGroupUsageFundingManagementTargetByLocator.mockResolvedValueOnce({
+      displayName: "Sunday sleep crew",
+      joinCode: "group_join_code_1234",
+      kind: "friends",
+      runtimeMemberId: "member_group_runtime",
+    });
+    mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValueOnce(null);
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, /This group funding link isn&#x27;t available/u);
+    assert.doesNotMatch(markup, /management:/u);
+    expect(mocks.readHostedGroupSponsorshipManagementProjection)
+      .toHaveBeenCalledWith({
+        beneficiaryMemberId: "member_group_runtime",
+        payerMemberId: "member_payer",
+        prisma: { label: "test-prisma" },
+      });
   });
 
   it("shows sponsored status with a secondary one-time contribution to a non-sponsor", async () => {

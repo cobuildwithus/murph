@@ -670,53 +670,73 @@ describe("hosted Linq proactive-conversation capacity", () => {
 });
 
 describe("syncHostedLinqConfiguredLinesTx", () => {
-  it("takes the inventory-wide lock before any per-phone lock, read, or write", async () => {
+  it("prepares every line before opening one transaction and issuing one bulk statement", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: TEST_KEYRING_ENTRIES,
+    });
     const events: string[] = [];
-    const transactionClient = {
-      $executeRaw: vi.fn().mockImplementation((strings: TemplateStringsArray) => {
-        events.push(
-          strings.join("?").includes("hosted_linq_phone_number_inventory")
-            ? "inventory-lock"
-            : "phone-lock",
-        );
-        return Promise.resolve([]);
-      }),
-      hostedLinqLine: {
-        findMany: vi.fn().mockImplementation(() => {
-          events.push("candidate-read");
-          return Promise.resolve([]);
-        }),
-        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) => {
-          events.push("write");
-          return Promise.resolve({
-            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
-          });
-        }),
-      },
-    };
+    const queryRaw = vi.fn().mockImplementation(() => {
+      events.push("bulk-statement");
+      return Promise.resolve([{ syncedCount: 2n }]);
+    });
+    const transactionClient = { $queryRaw: queryRaw };
+    const transaction = vi.fn(async (
+      callback: (tx: typeof transactionClient) => Promise<unknown>,
+    ) => {
+      events.push("transaction:start");
+      restoreContactPrivacyKeyring?.();
+      restoreContactPrivacyKeyring = null;
+      const result = await callback(transactionClient);
+      events.push("transaction:commit");
+      return result;
+    });
+    const phoneNumbers = ["+15550100002", "+1 (555) 010-0001"];
 
     await syncHostedLinqConfiguredLinesTx({
-      activeMemberLimit: null,
+      activeMemberLimit: 250,
       observedAt: new Date("2026-06-30T12:00:00.000Z"),
-      phoneNumbers: ["+15550100001", "+15550100002"],
-      prisma: transactionClient as never,
+      phoneNumbers,
+      prisma: { $transaction: transaction } as never,
     });
 
-    // Every multi-phone writer must serialize on the shared inventory lock
-    // before touching any per-phone lock, so lock acquisition can never
-    // invert against the provider-inventory writer.
-    expect(events[0]).toBe("inventory-lock");
-    expect(events.filter((event) => event === "inventory-lock")).toHaveLength(1);
-    expect(events.filter((event) => event === "phone-lock")).toHaveLength(2);
     expect(events).toEqual([
-      "inventory-lock",
-      "phone-lock",
-      "candidate-read",
-      "write",
-      "phone-lock",
-      "candidate-read",
-      "write",
+      "transaction:start",
+      "bulk-statement",
+      "transaction:commit",
     ]);
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(query.sql).toContain("WITH input_line");
+    expect(query.sql).toContain("ON CONFLICT (phone_number_lookup_key)");
+    expect(query.sql).not.toContain("pg_advisory_xact_lock");
+    expect(query.sql).not.toContain("FOR UPDATE");
+    expect(query.values).toEqual(expect.arrayContaining([
+      "*** 0001",
+      "*** 0002",
+      250,
+    ]));
+    expect(JSON.stringify(query.values)).not.toContain("+1555010000");
+  });
+
+  it("rejects invalid preparation before transaction entry", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: TEST_KEYRING_ENTRIES,
+    });
+    const transaction = vi.fn();
+
+    await expect(syncHostedLinqConfiguredLinesTx({
+      activeMemberLimit: null,
+      phoneNumbers: ["not-a-phone"],
+      prisma: { $transaction: transaction } as never,
+    })).rejects.toThrow(/valid phone number/u);
+
+    expect(transaction).not.toHaveBeenCalled();
   });
 });
 

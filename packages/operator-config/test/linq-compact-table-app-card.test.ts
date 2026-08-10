@@ -19,7 +19,7 @@ const CARD: CompactTableResponseCardV1 = {
   rows: Array.from({ length: 8 }, (_, rowIndex) => ({
     label: `Exercise ${rowIndex + 1} movement pattern`,
     values: Array.from({ length: 4 }, (_, columnIndex) => {
-      const cellLength = rowIndex === 7 && columnIndex === 3 ? 24 : 22
+      const cellLength = rowIndex === 7 && columnIndex === 3 ? 17 : 22
       return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, 'x')
     }),
   })),
@@ -59,7 +59,7 @@ describe('Linq compact-table app cards', () => {
       fetchImplementation,
     })
 
-    expect(encodeCompactTableAppCardUrl(CARD)).toHaveLength(2_047)
+    expect(encodeCompactTableAppCardUrl(CARD)).toHaveLength(2_037)
     expect(requests).toHaveLength(1)
     expect(requests[0]?.url).toContain('/chats/chat_1/messages')
     expect(requests[0]?.body).toMatchObject({
@@ -70,9 +70,16 @@ describe('Linq compact-table app cards', () => {
             fallback_text: 'Ask Murph for this card in text',
             interactive: true,
             layout: {
-              caption: 'Murph',
-              subcaption: 'Workout table',
-              trailing_caption: 'OPEN',
+              caption:
+                'Eight-exercise workout — Verified canonical workout snapshot for today',
+              image_url: expect.stringMatching(
+                /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+              ),
+              subcaption: expect.stringContaining(
+                'Exercise 1 movement pattern: Set 1: 1xxxxxxxxxxxxxxxxxxxxx',
+              ),
+              trailing_caption:
+                'Assists and spotted reps remain on the exact set note.',
             },
             type: 'imessage_app',
             url: encodeCompactTableAppCardUrl(CARD),

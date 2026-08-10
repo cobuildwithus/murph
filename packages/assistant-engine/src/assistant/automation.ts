@@ -33,6 +33,7 @@ export {
   writeAssistantAutoReplySuppressionEvidence,
 } from './automation/evidence.js'
 export {
+  isSameAuthenticatedAssistantGroupRoute,
   shouldGroupAdjacentAssistantInputCandidates,
 } from './automation/grouping.js'
 export {
