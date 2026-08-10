@@ -1,0 +1,26 @@
+name: PR 1405 candidate checkout
+
+on:
+  push:
+    branches:
+      - codex/pr1405-simple-knowledge-bridge
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    if: github.event.head_commit.message == 'chore: export PR 1405 candidate checkout'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+      - name: Archive checkout and git metadata
+        run: tar --exclude='./node_modules' --exclude='./.pnpm-store' -czf /tmp/murph-pr1405-candidate.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murph-pr1405-candidate
+          path: /tmp/murph-pr1405-candidate.tgz
+          if-no-files-found: error
+          retention-days: 1
