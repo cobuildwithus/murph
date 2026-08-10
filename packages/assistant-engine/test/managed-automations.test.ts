@@ -1388,6 +1388,8 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
     expect(insightRecord?.instructions).toContain('vault-cli wearables patterns --date YYYY-MM-DD --format json')
+    expect(insightRecord?.instructions).toContain('continue with the existing bounded manual candidate search')
+    expect(insightRecord?.instructions).toContain('Do not treat command failure as evidence')
     expect(insightRecord?.instructions).toContain('stages of repeated association, not proof')
     expect(insightRecord?.instructions).toContain('pattern report narrows the search')
     expect(insightRecord?.instructions).toContain('do not create per-week insight pages')

@@ -7,6 +7,9 @@ import {
   reconcileHostedUsageCreditRefundNetReversalTx,
 } from "../hosted-execution/usage-credits";
 import {
+  readHostedUsageCreditGrantCapacityTx,
+} from "../hosted-execution/usage-credit-grant-capacity";
+import {
   activateHostedGroupSponsorshipAuthorizationForPurchaseTx,
   pauseHostedGroupSponsorshipForFinancialReversalTx,
 } from "../hosted-groups/group-sponsorship-authorization";
@@ -34,6 +37,7 @@ import {
 } from "./usage-credit-stripe-payment-proof";
 import {
   bindHostedUsageCreditStripeReferencesTx,
+  buildHostedUsageCreditStripeRetryableError,
   buildHostedUsageCreditStripePrivateReferences,
   type HostedUsageCreditPurchaseForReconciliation,
   type HostedUsageCreditPurchaseReadClient,
@@ -762,6 +766,7 @@ export async function reconcileHostedUsageCreditFinancialSnapshotTx(input: {
     tx: input.tx,
   });
   let balanceUsdMicros = grant.balanceUsdMicros;
+  let ledgerVersion = grant.ledgerVersion;
 
   // Pass one applies every target, including all decreases. Pass two consumes
   // capacity that a later source in pass one may have restored, so overlapping
@@ -786,6 +791,7 @@ export async function reconcileHostedUsageCreditFinancialSnapshotTx(input: {
         }),
       });
       balanceUsdMicros = refund.balanceUsdMicros;
+      ledgerVersion = refund.ledgerVersion;
     }
     for (const dispute of input.snapshot.disputes) {
       const disputeReconciliation = await runHostedUsageCreditDatabaseOperation({
@@ -808,7 +814,28 @@ export async function reconcileHostedUsageCreditFinancialSnapshotTx(input: {
         }),
       });
       balanceUsdMicros = disputeReconciliation.balanceUsdMicros;
+      ledgerVersion = disputeReconciliation.ledgerVersion;
     }
+  }
+
+  // Capacity is a final-state invariant: pass two may reverse a temporary
+  // restoration from pass one, so do not reject an intermediate projection.
+  const finalCapacity = await runHostedUsageCreditDatabaseOperation({
+    read: () => readHostedUsageCreditGrantCapacityTx({
+      lockedBeneficiary: {
+        balanceUsdMicros,
+        beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        ledgerVersion,
+      },
+      tx: input.tx,
+    }),
+  });
+  if (finalCapacity.state === "overflow") {
+    throw buildHostedUsageCreditStripeRetryableError(
+      new Error(
+        "Usage-credit financial restoration exceeds occupied grant capacity.",
+      ),
+    );
   }
 
   if (
