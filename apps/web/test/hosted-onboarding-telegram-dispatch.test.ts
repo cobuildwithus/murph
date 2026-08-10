@@ -1122,6 +1122,21 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("keeps a delayed Telegram group message active past a retained trial timestamp", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const activeOwnerRouting = {
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_telegram_owner",
+        suspendedAt: null,
+      },
+      memberId: "member_telegram_owner",
+    };
+    mocks.ensureHostedThreadContainerRouteTx.mockResolvedValueOnce({
+      activationEventId: null,
+      activationMailboxItemId: null,
+      containerMemberId: "member_telegram_group_container",
+      created: true,
+      demotedMailboxConsumedAt: null,
+    });
     const prisma = withPrismaTransaction({
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -1142,14 +1157,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       },
       hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          member: {
-            billingStatus: HostedBillingStatus.active,
-            id: "member_telegram_owner",
-            suspendedAt: null,
-          },
-          memberId: "member_telegram_owner",
-        }),
+        findMany: vi.fn().mockResolvedValue([activeOwnerRouting]),
+        findUnique: vi.fn().mockResolvedValue(activeOwnerRouting),
       },
     });
 

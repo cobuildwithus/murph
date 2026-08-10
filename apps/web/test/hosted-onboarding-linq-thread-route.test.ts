@@ -2623,13 +2623,22 @@ describe("Linq explicit external-thread routing", () => {
       threadContainer: null,
     });
     assertThreadContainerRouteTransactionClient(prisma);
+    const accountLookupKey = requireTestPhoneLookupKey("+15550000000");
+    const preparedCreation = await prepareThreadContainerCreationForTest({
+      accountLookupKey,
+      channel: "linq",
+      containerMemberId: "member_thread_container_expired_trial",
+      prisma,
+      threadId: "chat_expired_trial_123",
+    });
 
     await expect(
       ensureHostedThreadContainerRouteTx({
-        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        accountLookupKey,
         channel: "linq",
         occurredAt: new Date("2026-06-24T12:00:00.000Z"),
         ownerMemberId: "member_owner_123",
+        preparedCreation,
         prisma,
         threadId: "chat_expired_trial_123",
       }),
