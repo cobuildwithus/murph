@@ -352,7 +352,7 @@ export function SectionsContent() {
 
           <div className="space-y-5" data-referral-reward-state="group-only">
             <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
-              Group missions only
+              Group referral options only
             </h3>
             <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
               <ReferralRewardReceiptPreview
@@ -362,6 +362,7 @@ export function SectionsContent() {
               />
             </div>
             <ReferralRewardCards
+              includeShareLink
               rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
                 ({ id }) => id !== "signup-link",
               )}
@@ -370,10 +371,49 @@ export function SectionsContent() {
 
           <div className="space-y-5" data-referral-reward-state="all-rewards">
             <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
-              Signup link and group missions
+              Signup link and group referral options
             </h3>
             <ReferralRewardCards rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
           </div>
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Referral rewards page · group referrals and share link">
+        <div
+          id="referral-rewards-page"
+          data-design-section="referral-rewards-page"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated={false}
+            identityKey={null}
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Referral rewards page · member share action">
+        <div
+          id="referral-rewards-page-member"
+          data-design-section="referral-rewards-page-member"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated
+            identityKey="referral-design-member"
+            referralSignupUrl="https://example.com/r/referral-design-member"
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
         </div>
       </StudySection>
 

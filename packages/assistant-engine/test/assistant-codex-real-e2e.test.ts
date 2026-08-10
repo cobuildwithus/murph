@@ -3089,6 +3089,8 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(second.finalMessage.toLowerCase()).not.toContain(
           RETIRED_USAGE_TERM,
         )
+        expect(second.finalMessage).not.toMatch(/\bmissions?\b/iu)
+        expect(second.finalMessage).not.toMatch(/\b(?:arm|armed|arming)\b/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

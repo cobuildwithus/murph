@@ -11,15 +11,18 @@ const PRIMARY_ACTION_CLASSES =
 export function ReferralShareAction({
   authenticated,
   identityKey,
+  signupUrl,
 }: {
   authenticated: boolean;
   identityKey: string | null;
+  signupUrl?: string;
 }) {
   if (authenticated && identityKey) {
     return (
       <ReferralLinkAction
         appearance="marketing"
         identityKey={identityKey}
+        signupUrl={signupUrl}
       />
     );
   }

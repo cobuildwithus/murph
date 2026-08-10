@@ -28,14 +28,14 @@ export interface HostedPublicReferralReward {
 
 /**
  * Public referral-program projection. Runtime accounting remains authoritative;
- * the focused contract test keeps these exact reward values and mission
+ * the focused contract test keeps these exact reward values and referral
  * thresholds aligned with the durable referral policy.
  */
 export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
   {
     availabilityLabel: "Personal referral link",
     description:
-      "Share your stable link. A genuinely new completed signup can earn more days of Murph usage after Murph’s eligibility and rolling-limit checks pass.",
+      "Share your personal link with someone new to Murph. If they finish setup and the referral meets the rules, Murph adds more usage to your personal Murph.",
     id: "signup-link",
     policyCode: "new_person_activation_v1",
     policyVersion: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
@@ -43,9 +43,9 @@ export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
     title: HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY.title,
   },
   {
-    availabilityLabel: "Fresh iMessage group",
+    availabilityLabel: "New iMessage group",
     description:
-      "Tell Murph first, then make a fresh group with someone new. It completes after they set up their own Murph and join the conversation.",
+      "Tell Murph first, then create a new iMessage group with someone new to Murph. The reward comes after they finish setup and join the conversation.",
     id: "new-person-group",
     policyCode: "new_person_activation_v1",
     policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
@@ -53,14 +53,14 @@ export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
     title: "Bring someone new to Murph",
   },
   {
-    availabilityLabel: "Supported group chats",
+    availabilityLabel: "New group conversation",
     description:
-      "Tell Murph first, then make the fresh group genuinely active: 15 human messages, including 8 from at least 2 other people, across at least 10 minutes.",
+      "Tell Murph first, then start a new group. It needs 15 messages over at least 10 minutes, with at least 8 from two or more people besides you.",
     id: "active-group",
     policyCode: "active_group_v1",
     policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
     rewardUsdMicros: 3_500_000n,
-    title: "Start an active group",
+    title: "Start a group conversation",
   },
 ] as const satisfies readonly HostedPublicReferralReward[];
 
