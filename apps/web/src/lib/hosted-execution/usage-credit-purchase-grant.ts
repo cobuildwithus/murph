@@ -50,6 +50,11 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
   if (purchase.beneficiaryMemberId !== lockedBeneficiary.beneficiaryMemberId) {
     throw new TypeError("Hosted usage-credit purchase beneficiary changed during fulfillment.");
   }
+  if (purchase.grantSlotReleasedAt !== null) {
+    throw new TypeError(
+      "Hosted usage-credit purchase has provider-final no-payment release.",
+    );
+  }
   if (purchase.grantUsdMicros <= 0n) {
     throw new TypeError("Hosted usage-credit purchase grant must be positive.");
   }

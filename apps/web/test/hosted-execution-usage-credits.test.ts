@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  appendHostedUsageCreditGrantTx,
   grantHostedUsageCreditForPurchaseTx,
   lockHostedUsageCreditBeneficiaryTx,
   readHostedUsageCreditProjection,
@@ -8,6 +9,9 @@ import {
   reconcileHostedUsageCreditRefundNetReversalTx,
   settleHostedUsageCreditForUsageTx,
 } from "@/src/lib/hosted-execution/usage-credits";
+import {
+  readHostedUsageCreditGrantCapacityTx,
+} from "@/src/lib/hosted-execution/usage-credit-grant-capacity";
 
 const BENEFICIARY_ID = "member_beneficiary";
 const EFFECTIVE_AT = new Date("2026-07-16T15:00:00.000Z");
@@ -52,7 +56,382 @@ describe("hosted usage credits", () => {
     });
   });
 
-  it("grants a paid purchase under beneficiary-before-purchase locking", async () => {
+  it("counts active grants and ambiguous expired purchases in one combined bound", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      expectCombinedUsageCreditCapacityQuery({
+        expectedPurchaseId: "purchase_ambiguous_expired",
+        sql,
+        values,
+      });
+      return [{
+        expectedPurchaseOwnsReservation: true,
+        grantInvariantFailureCount: 0,
+        occupiedSlotCount: 32,
+      }];
+    });
+
+    await expect(readHostedUsageCreditGrantCapacityTx({
+      expectedPurchaseId: "purchase_ambiguous_expired",
+      lockedBeneficiary: {
+        balanceUsdMicros: 31_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 31n,
+      },
+      tx: { $queryRaw: queryRaw } as never,
+    })).resolves.toEqual({
+      expectedPurchaseOwnsReservation: true,
+      state: "at_capacity",
+    });
+  });
+
+  it("excludes provider-final released purchases from combined capacity", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      expectCombinedUsageCreditCapacityQuery({
+        expectedPurchaseId: "purchase_provider_released",
+        sql,
+        values,
+      });
+      return [{
+        expectedPurchaseOwnsReservation: false,
+        grantInvariantFailureCount: 0,
+        occupiedSlotCount: 31,
+      }];
+    });
+
+    await expect(readHostedUsageCreditGrantCapacityTx({
+      expectedPurchaseId: "purchase_provider_released",
+      lockedBeneficiary: {
+        balanceUsdMicros: 31_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 31n,
+      },
+      tx: { $queryRaw: queryRaw } as never,
+    })).resolves.toEqual({
+      expectedPurchaseOwnsReservation: false,
+      state: "available",
+    });
+  });
+
+  it("fails closed when bounded active projection identity diverges from its entry", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      expectCombinedUsageCreditCapacityQuery({ sql, values });
+      return [{
+        expectedPurchaseOwnsReservation: false,
+        grantInvariantFailureCount: 1,
+        occupiedSlotCount: 1,
+      }];
+    });
+
+    await expect(readHostedUsageCreditGrantCapacityTx({
+      lockedBeneficiary: {
+        balanceUsdMicros: 1_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 1n,
+      },
+      tx: { $queryRaw: queryRaw } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit active grant canonical identity diverged.",
+    );
+  });
+
+  it("admits an unreserved grant when exactly 31 combined slots are occupied", async () => {
+    const events: string[] = [];
+    const entryCreate = vi.fn(async (input: unknown) => {
+      events.push("entry-create");
+      return input;
+    });
+    const grantCreate = vi.fn(async (input: unknown) => {
+      events.push("grant-create");
+      return input;
+    });
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      if (sql.includes("bounded_occupied_slots")) {
+        events.push("capacity-read");
+        expectCombinedUsageCreditCapacityQuery({ sql, values });
+        return [{
+          expectedPurchaseOwnsReservation: false,
+          grantInvariantFailureCount: 0,
+          occupiedSlotCount: 31,
+        }];
+      }
+      if (sql.includes('UPDATE "hosted_member"')) {
+        events.push("projection-update");
+        return [{
+          balanceUsdMicros: 32_000_000n,
+          beneficiaryMemberId: BENEFICIARY_ID,
+          ledgerVersion: 32n,
+        }];
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+    const executeRaw = createTaggedSqlMock(({ sql }) => {
+      events.push("period-unblock");
+      expect(sql).toContain('UPDATE "hosted_ai_usage_period"');
+      return 1;
+    });
+    const entryFindUnique = vi.fn(async () => {
+      events.push("replay-lookup");
+      return null;
+    });
+
+    await expect(appendHostedUsageCreditGrantTx({
+      effectiveAt: EFFECTIVE_AT,
+      grantUsdMicros: 1_000_000n,
+      lockedBeneficiary: {
+        balanceUsdMicros: 31_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 31n,
+      },
+      semanticSourceKey:
+        "hosted-usage-credit:referral:referral_32:grant:v1",
+      source: { kind: "referral", referralId: "referral_32" },
+      tx: {
+        $executeRaw: executeRaw,
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          create: entryCreate,
+          findUnique: entryFindUnique,
+        },
+        hostedUsageCreditGrant: {
+          create: grantCreate,
+        },
+      } as never,
+    })).resolves.toMatchObject({
+      balanceUsdMicros: 32_000_000n,
+      entryId: expect.stringMatching(/^huce_/u),
+      granted: true,
+      ledgerVersion: 32n,
+    });
+
+    expect(events).toEqual([
+      "replay-lookup",
+      "capacity-read",
+      "projection-update",
+      "entry-create",
+      "grant-create",
+      "period-unblock",
+    ]);
+    expect(entryCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        amountUsdMicros: 1_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        beneficiarySequence: 32n,
+        effectiveAt: EFFECTIVE_AT,
+        kind: "referral_grant",
+        referralId: "referral_32",
+        semanticSourceKey:
+          "hosted-usage-credit:referral:referral_32:grant:v1",
+      }),
+    });
+    expect(grantCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        beneficiaryMemberId: BENEFICIARY_ID,
+        beneficiarySequence: 32n,
+        entryId: expect.stringMatching(/^huce_/u),
+        remainingUsdMicros: 1_000_000n,
+      }),
+    });
+  });
+
+  it("rejects a new unreserved grant at exactly 32 occupied slots", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      expectCombinedUsageCreditCapacityQuery({ sql, values });
+      return [{
+        expectedPurchaseOwnsReservation: false,
+        grantInvariantFailureCount: 0,
+        occupiedSlotCount: 32,
+      }];
+    });
+    const entryCreate = vi.fn();
+    const grantCreate = vi.fn();
+    const executeRaw = vi.fn();
+
+    await expect(appendHostedUsageCreditGrantTx({
+      effectiveAt: EFFECTIVE_AT,
+      grantUsdMicros: 1_000_000n,
+      lockedBeneficiary: {
+        balanceUsdMicros: 32_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 32n,
+      },
+      semanticSourceKey:
+        "hosted-usage-credit:referral:referral_33:grant:v1",
+      source: { kind: "referral", referralId: "referral_33" },
+      tx: {
+        $executeRaw: executeRaw,
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          create: entryCreate,
+          findUnique: vi.fn().mockResolvedValue(null),
+        },
+        hostedUsageCreditGrant: {
+          create: grantCreate,
+        },
+      } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit active grant capacity is full.",
+    );
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(entryCreate).not.toHaveBeenCalled();
+    expect(grantCreate).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the bounded read finds a 33rd occupied slot", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      expectCombinedUsageCreditCapacityQuery({ sql, values });
+      return [{
+        expectedPurchaseOwnsReservation: false,
+        grantInvariantFailureCount: 0,
+        occupiedSlotCount: 33,
+      }];
+    });
+    const entryCreate = vi.fn();
+    const grantCreate = vi.fn();
+    const executeRaw = vi.fn();
+
+    await expect(appendHostedUsageCreditGrantTx({
+      effectiveAt: EFFECTIVE_AT,
+      grantUsdMicros: 1_000_000n,
+      lockedBeneficiary: {
+        balanceUsdMicros: 33_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 33n,
+      },
+      semanticSourceKey:
+        "hosted-usage-credit:referral:referral_overflow:grant:v1",
+      source: { kind: "referral", referralId: "referral_overflow" },
+      tx: {
+        $executeRaw: executeRaw,
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          create: entryCreate,
+          findUnique: vi.fn().mockResolvedValue(null),
+        },
+        hostedUsageCreditGrant: {
+          create: grantCreate,
+        },
+      } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit active grant capacity exceeds its contract.",
+    );
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(entryCreate).not.toHaveBeenCalled();
+    expect(grantCreate).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("rejects purchase conversion on 33 combined slots even when its reservation is present", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      expectCombinedUsageCreditCapacityQuery({
+        expectedPurchaseId: "purchase_overflow",
+        sql,
+        values,
+      });
+      return [{
+        expectedPurchaseOwnsReservation: true,
+        grantInvariantFailureCount: 0,
+        occupiedSlotCount: 33,
+      }];
+    });
+    const entryCreate = vi.fn();
+    const grantCreate = vi.fn();
+    const executeRaw = vi.fn();
+
+    await expect(appendHostedUsageCreditGrantTx({
+      effectiveAt: EFFECTIVE_AT,
+      grantUsdMicros: 1_000_000n,
+      lockedBeneficiary: {
+        balanceUsdMicros: 32_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 32n,
+      },
+      semanticSourceKey:
+        "hosted-usage-credit:purchase:purchase_overflow:grant:v1",
+      source: { kind: "purchase", purchaseId: "purchase_overflow" },
+      tx: {
+        $executeRaw: executeRaw,
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          create: entryCreate,
+          findUnique: vi.fn().mockResolvedValue(null),
+        },
+        hostedUsageCreditGrant: { create: grantCreate },
+      } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit active grant capacity exceeds its contract.",
+    );
+
+    expect(entryCreate).not.toHaveBeenCalled();
+    expect(grantCreate).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("replays an unreserved grant at capacity without another query", async () => {
+    const queryRaw = createTaggedSqlMock(() => [{
+      expectedPurchaseOwnsReservation: false,
+      grantInvariantFailureCount: 0,
+      occupiedSlotCount: 32,
+    }]);
+    const entryCreate = vi.fn();
+    const grantCreate = vi.fn();
+    const executeRaw = vi.fn();
+    const entryFindUnique = vi.fn().mockResolvedValue({
+      amountUsdMicros: 1_000_000n,
+      beneficiaryMemberId: BENEFICIARY_ID,
+      beneficiarySequence: 32n,
+      effectiveAt: EFFECTIVE_AT,
+      grant: {
+        beneficiaryMemberId: BENEFICIARY_ID,
+        beneficiarySequence: 32n,
+        remainingUsdMicros: 1_000_000n,
+      },
+      id: "grant_replay",
+      kind: "referral_grant",
+      parentGrantEntryId: null,
+      purchaseId: null,
+      referralId: "referral_replay",
+    });
+
+    await expect(appendHostedUsageCreditGrantTx({
+      effectiveAt: EFFECTIVE_AT,
+      grantUsdMicros: 1_000_000n,
+      lockedBeneficiary: {
+        balanceUsdMicros: 32_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 32n,
+      },
+      semanticSourceKey:
+        "hosted-usage-credit:referral:referral_replay:grant:v1",
+      source: { kind: "referral", referralId: "referral_replay" },
+      tx: {
+        $executeRaw: executeRaw,
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          create: entryCreate,
+          findUnique: entryFindUnique,
+        },
+        hostedUsageCreditGrant: {
+          create: grantCreate,
+        },
+      } as never,
+    })).resolves.toEqual({
+      balanceUsdMicros: 32_000_000n,
+      entryId: "grant_replay",
+      granted: false,
+      ledgerVersion: 32n,
+    });
+
+    expect(entryFindUnique).toHaveBeenCalledOnce();
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(entryCreate).not.toHaveBeenCalled();
+    expect(grantCreate).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("converts a paid purchase at exactly 32 combined slots using its reservation", async () => {
     const events: string[] = [];
     const grantCreate = vi.fn(async (input: unknown) => {
       events.push("grant-create");
@@ -66,7 +445,7 @@ describe("hosted usage credits", () => {
       events.push("purchase-update");
       return { count: 1 };
     });
-    const queryRaw = createTaggedSqlMock(({ sql }) => {
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
       if (sql.includes('FROM "hosted_member"')) {
         events.push("beneficiary-lock");
         return [{
@@ -75,8 +454,24 @@ describe("hosted usage credits", () => {
           ledgerVersion: 0n,
         }];
       }
+      if (sql.includes("bounded_occupied_slots")) {
+        events.push("capacity-read");
+        expectCombinedUsageCreditCapacityQuery({
+          expectedPurchaseId: "purchase_1",
+          sql,
+          values,
+        });
+        return [{
+          expectedPurchaseOwnsReservation: true,
+          grantInvariantFailureCount: 0,
+          occupiedSlotCount: 32,
+        }];
+      }
       if (sql.includes('FROM "hosted_usage_credit_purchase"')) {
         events.push("purchase-lock");
+        expect(sql).toContain(
+          '"grant_slot_released_at" AS "grantSlotReleasedAt"',
+        );
         return [buildLockedPurchase()];
       }
       if (sql.includes('UPDATE "hosted_member"')) {
@@ -133,6 +528,7 @@ describe("hosted usage credits", () => {
       "purchase-discovery",
       "beneficiary-lock",
       "purchase-lock",
+      "capacity-read",
       "projection-update",
       "entry-create",
       "grant-create",
@@ -153,6 +549,8 @@ describe("hosted usage credits", () => {
     });
     expect(grantCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
+        beneficiaryMemberId: BENEFICIARY_ID,
+        beneficiarySequence: 1n,
         entryId: expect.stringMatching(/^huce_/u),
         remainingUsdMicros: 5_000_000n,
       }),
@@ -170,6 +568,112 @@ describe("hosted usage credits", () => {
         remainingCreditUsdMicros: 0n,
       },
     });
+  });
+
+  it("fails closed before projection mutations when a purchase reservation is missing", async () => {
+    const entryCreate = vi.fn();
+    const grantCreate = vi.fn();
+    const purchaseUpdateMany = vi.fn();
+    const executeRaw = vi.fn();
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      if (sql.includes('FROM "hosted_member"')) {
+        return [{
+          balanceUsdMicros: 0n,
+          beneficiaryMemberId: BENEFICIARY_ID,
+          ledgerVersion: 0n,
+        }];
+      }
+      if (sql.includes("bounded_occupied_slots")) {
+        expectCombinedUsageCreditCapacityQuery({
+          expectedPurchaseId: "purchase_1",
+          sql,
+          values,
+        });
+        return [{
+          expectedPurchaseOwnsReservation: false,
+          grantInvariantFailureCount: 0,
+          occupiedSlotCount: 31,
+        }];
+      }
+      if (sql.includes('FROM "hosted_usage_credit_purchase"')) {
+        return [buildLockedPurchase()];
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    await expect(grantHostedUsageCreditForPurchaseTx({
+      paidAt: PAID_AT,
+      purchaseId: "purchase_1",
+      tx: {
+        $executeRaw: executeRaw,
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          create: entryCreate,
+          findFirst: vi.fn().mockResolvedValue(null),
+          findUnique: vi.fn().mockResolvedValue(null),
+        },
+        hostedUsageCreditGrant: { create: grantCreate },
+        hostedUsageCreditPurchase: {
+          findUnique: vi.fn().mockResolvedValue({
+            beneficiaryMemberId: BENEFICIARY_ID,
+          }),
+          updateMany: purchaseUpdateMany,
+        },
+      } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit purchase grant reservation is missing.",
+    );
+
+    expect(entryCreate).not.toHaveBeenCalled();
+    expect(grantCreate).not.toHaveBeenCalled();
+    expect(purchaseUpdateMany).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before granting a provider-final released purchase", async () => {
+    const entryFindFirst = vi.fn();
+    const entryCreate = vi.fn();
+    const purchaseUpdateMany = vi.fn();
+    const queryRaw = createTaggedSqlMock(({ sql }) => {
+      if (sql.includes('FROM "hosted_member"')) {
+        return [{
+          balanceUsdMicros: 0n,
+          beneficiaryMemberId: BENEFICIARY_ID,
+          ledgerVersion: 0n,
+        }];
+      }
+      if (sql.includes('FROM "hosted_usage_credit_purchase"')) {
+        return [buildLockedPurchase({
+          grantSlotReleasedAt: new Date("2026-07-16T14:58:00.000Z"),
+          status: "expired",
+        })];
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    await expect(grantHostedUsageCreditForPurchaseTx({
+      paidAt: PAID_AT,
+      purchaseId: "purchase_1",
+      tx: {
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          create: entryCreate,
+          findFirst: entryFindFirst,
+        },
+        hostedUsageCreditPurchase: {
+          findUnique: vi.fn().mockResolvedValue({
+            beneficiaryMemberId: BENEFICIARY_ID,
+          }),
+          updateMany: purchaseUpdateMany,
+        },
+      } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit purchase has provider-final no-payment release.",
+    );
+
+    expect(entryFindFirst).not.toHaveBeenCalled();
+    expect(entryCreate).not.toHaveBeenCalled();
+    expect(purchaseUpdateMany).not.toHaveBeenCalled();
   });
 
   it("returns an existing purchase grant without mutating the ledger", async () => {
@@ -231,21 +735,9 @@ describe("hosted usage credits", () => {
     expect(executeRaw).not.toHaveBeenCalled();
   });
 
-  it("debits eligible grants FIFO, caps at available credit, and absorbs overrun", async () => {
-    const createdEntries: Array<{ data: Record<string, unknown> }> = [];
-    const projectionRows = [
-      {
-        balanceUsdMicros: 7_000_000n,
-        beneficiaryMemberId: BENEFICIARY_ID,
-        ledgerVersion: 3n,
-      },
-      {
-        balanceUsdMicros: 0n,
-        beneficiaryMemberId: BENEFICIARY_ID,
-        ledgerVersion: 4n,
-      },
-    ];
-    const queryRaw = createTaggedSqlMock(({ sql }) => {
+  it("settles eligible grants FIFO with one bounded set-based statement", async () => {
+    const settlementQueries: Array<{ sql: string; values: unknown[] }> = [];
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
       if (sql.includes('FROM "hosted_member"')) {
         return [{
           balanceUsdMicros: 12_000_000n,
@@ -253,36 +745,128 @@ describe("hosted usage credits", () => {
           ledgerVersion: 2n,
         }];
       }
-      if (sql.includes('FROM "hosted_usage_credit_entry" AS entry')) {
-        expect(sql).toContain('ORDER BY entry."beneficiary_sequence" ASC');
-        expect(sql).toContain("FOR UPDATE OF entry, grant_projection");
-        return [
-          {
-            entryId: "grant_1",
-            purchaseId: "purchase_1",
-            referralId: null,
-            remainingUsdMicros: 5_000_000n,
-          },
-          {
-            entryId: "grant_2",
-            purchaseId: null,
-            referralId: "referral_1",
-            remainingUsdMicros: 7_000_000n,
-          },
-        ];
-      }
-      if (sql.includes('UPDATE "hosted_member"')) {
-        const row = projectionRows.shift();
-        if (!row) throw new Error("Unexpected projection update.");
-        return [row];
+      if (sql.includes("settlement_input AS MATERIALIZED")) {
+        settlementQueries.push({ sql, values });
+        const normalizedSql = sql.replace(/\s+/gu, " ");
+
+        expect(normalizedSql).toContain(
+          'WHERE grant_projection."beneficiary_member_id" '
+            + '= settlement_input."beneficiaryMemberId" '
+            + 'AND grant_projection."remaining_usd_micros" > 0 '
+            + 'ORDER BY grant_projection."beneficiary_sequence" ASC LIMIT ?',
+        );
+        expect(normalizedSql).toContain(
+          'FROM bounded_active_grants AS active_grant INNER JOIN '
+            + '"hosted_usage_credit_grant" AS grant_projection ON '
+            + 'grant_projection."entry_id" = active_grant."entryId"',
+        );
+        expect(normalizedSql).toContain(
+          'ORDER BY grant_projection."beneficiary_sequence" ASC '
+            + "FOR UPDATE OF entry, grant_projection",
+        );
+        expect(normalizedSql).toContain(
+          'entry."beneficiary_member_id" AS '
+            + '"canonicalBeneficiaryMemberId"',
+        );
+        expect(normalizedSql).toContain(
+          '"canonicalBeneficiarySequence" IS DISTINCT FROM '
+            + '"beneficiarySequence"',
+        );
+        expect(normalizedSql).toContain(
+          '?::timestamp(3) AS "effectiveAt"',
+        );
+        expect(normalizedSql).toContain(
+          "ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING",
+        );
+        expect(normalizedSql).toContain(
+          'ROW_NUMBER() OVER ( ORDER BY '
+            + 'allocation_candidates."beneficiarySequence" ASC ) '
+            + 'AS "allocationOrdinal"',
+        );
+        expect(normalizedSql).toContain(
+          'WHERE allocation_candidates."allocationUsdMicros" > 0',
+        );
+        expect(normalizedSql).toContain(
+          'settlement_gate."lockedLedgerVersion" '
+            + '+ allocation."allocationOrdinal"',
+        );
+        expect(normalizedSql).toContain(
+          'allocation."purchaseId", allocation."referralId", '
+            + 'allocation."entryId", settlement_gate."sourceUsageId"',
+        );
+        expect(normalizedSql).toContain(
+          "\"entryKind\" = 'purchase_grant' AND \"purchaseId\" IS NOT NULL "
+            + 'AND "referralId" IS NULL',
+        );
+        expect(normalizedSql).toContain(
+          "\"entryKind\" = 'referral_grant' AND \"purchaseId\" IS NULL "
+            + 'AND "referralId" IS NOT NULL',
+        );
+        expect(normalizedSql).toContain(
+          '"purchaseGrantUsdMicros" IS DISTINCT FROM "grantAmountUsdMicros"',
+        );
+        expect(normalizedSql).toContain(
+          "\"purchaseStatus\" IS DISTINCT FROM 'fulfilled'",
+        );
+        expect(normalizedSql).toContain(
+          "'hosted-usage-credit:usage:' "
+            + '|| settlement_gate."sourceUsageId" '
+            + "|| ':grant:' || allocation.\"entryId\" || ':debit:' || ?",
+        );
+        expect(normalizedSql).toContain("jsonb_array_elements_text");
+        expect(normalizedSql).toContain(
+          '"remaining_usd_micros" = allocation."remainingUsdMicros" '
+            + '- allocation."allocationUsdMicros"',
+        );
+        expect(normalizedSql).toContain(
+          '"remaining_credit_usd_micros" = '
+            + 'allocation."remainingUsdMicros" '
+            + '- allocation."allocationUsdMicros"',
+        );
+        expect(normalizedSql).toContain(
+          '"usage_credit_balance_usd_micros" = '
+            + 'settlement_gate."lockedBalanceUsdMicros" '
+            + '- allocation_totals."debitedUsdMicros"',
+        );
+        expect(normalizedSql).toContain(
+          '"usage_credit_ledger_version" = '
+            + 'settlement_gate."lockedLedgerVersion" '
+            + '+ allocation_totals."allocationCount"',
+        );
+        expect(sql.match(
+          /UPDATE "hosted_usage_credit_grant" AS grant_projection/gu,
+        ) ?? []).toHaveLength(1);
+        expect(sql.match(
+          /UPDATE "hosted_usage_credit_purchase" AS purchase_projection/gu,
+        ) ?? []).toHaveLength(1);
+        expect(sql.match(/UPDATE "hosted_member" AS beneficiary/gu) ?? [])
+          .toHaveLength(1);
+        expect(sql.match(/INSERT INTO "hosted_usage_credit_entry"/gu) ?? [])
+          .toHaveLength(1);
+        expect(values.filter((value) => value === 33)).toHaveLength(1);
+        expect(values.filter((value) => value === 32)).toHaveLength(2);
+        expect(values).toContain("usage_1");
+        expect(values).toContain("v1");
+
+        const preparedEntryIdsJson = values.find((value) =>
+          typeof value === "string" && value.startsWith('["huce_'));
+        expect(preparedEntryIdsJson).toBeTypeOf("string");
+        if (typeof preparedEntryIdsJson !== "string") {
+          throw new TypeError("Missing prepared usage-credit entry ids.");
+        }
+        const preparedEntryIds: unknown = JSON.parse(preparedEntryIdsJson);
+        expect(Array.isArray(preparedEntryIds)).toBe(true);
+        if (!Array.isArray(preparedEntryIds)) {
+          throw new TypeError("Invalid prepared usage-credit entry ids.");
+        }
+        expect(preparedEntryIds).toHaveLength(32);
+        expect(preparedEntryIds.every((value) =>
+          typeof value === "string" && /^huce_[A-Za-z0-9_-]+$/u.test(value)))
+          .toBe(true);
+
+        return [buildUsageSettlementMutationRow()];
       }
       throw new Error(`Unexpected SQL: ${sql}`);
-    });
-    const grantUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const purchaseUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const entryCreate = vi.fn(async (input: { data: Record<string, unknown> }) => {
-      createdEntries.push(input);
-      return input;
     });
 
     await expect(settleHostedUsageCreditForUsageTx({
@@ -293,14 +877,7 @@ describe("hosted usage credits", () => {
       tx: {
         $queryRaw: queryRaw,
         hostedUsageCreditEntry: {
-          create: entryCreate,
           findMany: vi.fn().mockResolvedValue([]),
-        },
-        hostedUsageCreditGrant: {
-          updateMany: grantUpdateMany,
-        },
-        hostedUsageCreditPurchase: {
-          updateMany: purchaseUpdateMany,
         },
       } as never,
     })).resolves.toEqual({
@@ -310,51 +887,232 @@ describe("hosted usage credits", () => {
       ledgerVersion: 4n,
     });
 
-    expect(purchaseUpdateMany).toHaveBeenNthCalledWith(1, {
-      data: { remainingCreditUsdMicros: 0n },
-      where: {
+    expect(settlementQueries).toHaveLength(1);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a zero debit as a beneficiary-lock-only no-op", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql }) => {
+      expect(sql).toContain('FROM "hosted_member"');
+      expect(sql).not.toContain("settlement_input AS MATERIALIZED");
+      return [{
+        balanceUsdMicros: 12_000_000n,
         beneficiaryMemberId: BENEFICIARY_ID,
-        id: "purchase_1",
-        remainingCreditUsdMicros: 5_000_000n,
-      },
+        ledgerVersion: 2n,
+      }];
     });
-    expect(purchaseUpdateMany).toHaveBeenCalledTimes(1);
-    expect(grantUpdateMany).toHaveBeenNthCalledWith(1, {
-      data: { remainingUsdMicros: 0n },
-      where: {
-        entryId: "grant_1",
-        remainingUsdMicros: 5_000_000n,
-      },
+
+    await expect(settleHostedUsageCreditForUsageTx({
+      beneficiaryMemberId: BENEFICIARY_ID,
+      debitUsdMicros: 0n,
+      effectiveAt: EFFECTIVE_AT,
+      sourceUsageId: "usage_zero",
+      tx: {
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      } as never,
+    })).resolves.toEqual({
+      absorbedUsdMicros: 0n,
+      balanceUsdMicros: 12_000_000n,
+      debitedUsdMicros: 0n,
+      ledgerVersion: 2n,
     });
-    expect(grantUpdateMany).toHaveBeenNthCalledWith(2, {
-      data: { remainingUsdMicros: 0n },
-      where: {
-        entryId: "grant_2",
-        remainingUsdMicros: 7_000_000n,
-      },
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it("absorbs a positive debit without mutations when no credit remains", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql }) => {
+      if (sql.includes('FROM "hosted_member"')) {
+        return [{
+          balanceUsdMicros: 0n,
+          beneficiaryMemberId: BENEFICIARY_ID,
+          ledgerVersion: 4n,
+        }];
+      }
+      if (sql.includes("settlement_input AS MATERIALIZED")) {
+        return [buildUsageSettlementMutationRow({
+          allocationCount: 0,
+          balanceUsdMicros: null,
+          beneficiaryMemberId: null,
+          debitedUsdMicros: 0n,
+          eligibleGrantCount: 0,
+          eligibleGrantTotalUsdMicros: 0n,
+          grantUpdatedCount: 0,
+          insertedDebitUsdMicros: 0n,
+          ledgerEntryInsertedCount: 0,
+          ledgerVersion: null,
+          memberUpdatedCount: 0,
+          purchaseAllocationCount: 0,
+          purchaseUpdatedCount: 0,
+        })];
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
     });
-    expect(createdEntries.map((entry) => entry.data)).toEqual([
-      expect.objectContaining({
-        amountUsdMicros: -5_000_000n,
-        beneficiarySequence: 3n,
-        kind: "usage_debit",
-        parentGrantEntryId: "grant_1",
-        purchaseId: "purchase_1",
-        semanticSourceKey:
-          "hosted-usage-credit:usage:usage_1:grant:grant_1:debit:v1",
-        sourceUsageId: "usage_1",
-      }),
-      expect.objectContaining({
-        amountUsdMicros: -7_000_000n,
-        beneficiarySequence: 4n,
-        kind: "usage_debit",
-        parentGrantEntryId: "grant_2",
-        referralId: "referral_1",
-        semanticSourceKey:
-          "hosted-usage-credit:usage:usage_1:grant:grant_2:debit:v1",
-        sourceUsageId: "usage_1",
-      }),
-    ]);
+
+    await expect(settleHostedUsageCreditForUsageTx({
+      beneficiaryMemberId: BENEFICIARY_ID,
+      debitUsdMicros: 2_000_000n,
+      effectiveAt: EFFECTIVE_AT,
+      sourceUsageId: "usage_no_credit",
+      tx: {
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      } as never,
+    })).resolves.toEqual({
+      absorbedUsdMicros: 2_000_000n,
+      balanceUsdMicros: 0n,
+      debitedUsdMicros: 0n,
+      ledgerVersion: 4n,
+    });
+
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed before settlement mutations when a 33rd grant is eligible", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      if (sql.includes('FROM "hosted_member"')) {
+        return [{
+          balanceUsdMicros: 33_000_000n,
+          beneficiaryMemberId: BENEFICIARY_ID,
+          ledgerVersion: 40n,
+        }];
+      }
+      if (sql.includes("settlement_input AS MATERIALIZED")) {
+        const normalizedSql = sql.replace(/\s+/gu, " ");
+        expect(values.filter((value) => value === 33)).toHaveLength(1);
+        expect(normalizedSql).toContain(
+          'WHEN COUNT(*) <= ? THEN COALESCE('
+            + 'SUM("remainingUsdMicros"), 0)::bigint ELSE 0::bigint',
+        );
+        expect(normalizedSql).toContain(
+          'grant_capacity."eligibleGrantCount" <= ?',
+        );
+        expect(normalizedSql).toContain(
+          'FROM locked_grants CROSS JOIN settlement_gate '
+            + 'WHERE settlement_gate."settlementReady"',
+        );
+        expect(normalizedSql).toContain(
+          'FROM settlement_gate CROSS JOIN allocation_totals '
+            + 'WHERE settlement_gate."settlementReady"',
+        );
+        return [buildUsageSettlementMutationRow({
+          allocationCount: 0,
+          balanceUsdMicros: null,
+          beneficiaryMemberId: null,
+          debitedUsdMicros: 0n,
+          eligibleGrantCount: 33,
+          eligibleGrantTotalUsdMicros: 0n,
+          grantUpdatedCount: 0,
+          insertedDebitUsdMicros: 0n,
+          ledgerEntryInsertedCount: 0,
+          ledgerVersion: null,
+          memberUpdatedCount: 0,
+          purchaseAllocationCount: 0,
+          purchaseUpdatedCount: 0,
+        })];
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    await expect(settleHostedUsageCreditForUsageTx({
+      beneficiaryMemberId: BENEFICIARY_ID,
+      debitUsdMicros: 1_000_000n,
+      effectiveAt: EFFECTIVE_AT,
+      sourceUsageId: "usage_overflow",
+      tx: {
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit settlement exceeds the temporary active grant limit.",
+    );
+  });
+
+  it.each([
+    [
+      "grant source",
+      { grantInvariantFailureCount: 1 },
+      "Hosted usage-credit eligible grant invariant failed.",
+    ],
+    [
+      "purchase pre-projection",
+      { purchaseProjectionMismatchCount: 1 },
+      "Hosted usage-credit purchase projection diverged from its grant.",
+    ],
+    [
+      "member/grant conservation",
+      { eligibleGrantTotalUsdMicros: 11_000_000n },
+      "Hosted usage-credit member and grant projections diverged.",
+    ],
+    [
+      "grant update count",
+      { grantUpdatedCount: 1 },
+      "Hosted usage-credit debit lost a locked grant projection.",
+    ],
+    [
+      "purchase update count",
+      { purchaseUpdatedCount: 0 },
+      "Hosted usage-credit debit lost a purchase projection.",
+    ],
+    [
+      "allocation total",
+      { debitedUsdMicros: 11_000_000n },
+      "Hosted usage-credit FIFO allocation invariant failed.",
+    ],
+    [
+      "member update count",
+      {
+        balanceUsdMicros: null,
+        beneficiaryMemberId: null,
+        ledgerVersion: null,
+        memberUpdatedCount: 0,
+      },
+      "Hosted usage-credit beneficiary projection update invariant failed.",
+    ],
+    [
+      "ledger insert count",
+      { ledgerEntryInsertedCount: 1 },
+      "Hosted usage-credit usage-debit ledger insert invariant failed.",
+    ],
+    [
+      "ledger debit total",
+      { insertedDebitUsdMicros: 11_000_000n },
+      "Hosted usage-credit usage-debit ledger insert invariant failed.",
+    ],
+  ] as const)("rejects a %s mismatch", async (_label, overrides, message) => {
+    const queryRaw = createTaggedSqlMock(({ sql }) => {
+      if (sql.includes('FROM "hosted_member"')) {
+        return [{
+          balanceUsdMicros: 12_000_000n,
+          beneficiaryMemberId: BENEFICIARY_ID,
+          ledgerVersion: 2n,
+        }];
+      }
+      if (sql.includes("settlement_input AS MATERIALIZED")) {
+        return [buildUsageSettlementMutationRow(overrides)];
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    await expect(settleHostedUsageCreditForUsageTx({
+      beneficiaryMemberId: BENEFICIARY_ID,
+      debitUsdMicros: 15_000_000n,
+      effectiveAt: EFFECTIVE_AT,
+      sourceUsageId: "usage_mismatch",
+      tx: {
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      } as never,
+    })).rejects.toThrow(message);
   });
 
   it("replays existing per-grant usage allocations without another debit", async () => {
@@ -369,6 +1127,18 @@ describe("hosted usage credits", () => {
       throw new Error(`Unexpected SQL: ${sql}`);
     });
     const entryCreate = vi.fn();
+    const entryFindMany = vi.fn().mockResolvedValue([
+      {
+        amountUsdMicros: -5_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        parentGrantEntryId: "grant_1",
+      },
+      {
+        amountUsdMicros: -2_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        parentGrantEntryId: "grant_2",
+      },
+    ]);
     const purchaseUpdateMany = vi.fn();
 
     await expect(settleHostedUsageCreditForUsageTx({
@@ -380,18 +1150,7 @@ describe("hosted usage credits", () => {
         $queryRaw: queryRaw,
         hostedUsageCreditEntry: {
           create: entryCreate,
-          findMany: vi.fn().mockResolvedValue([
-            {
-              amountUsdMicros: -5_000_000n,
-              beneficiaryMemberId: BENEFICIARY_ID,
-              parentGrantEntryId: "grant_1",
-            },
-            {
-              amountUsdMicros: -2_000_000n,
-              beneficiaryMemberId: BENEFICIARY_ID,
-              parentGrantEntryId: "grant_2",
-            },
-          ]),
+          findMany: entryFindMany,
         },
         hostedUsageCreditGrant: {
           updateMany: vi.fn(),
@@ -407,8 +1166,60 @@ describe("hosted usage credits", () => {
       ledgerVersion: 8n,
     });
 
+    expect(entryFindMany).toHaveBeenCalledExactlyOnceWith({
+      orderBy: { beneficiarySequence: "asc" },
+      select: {
+        amountUsdMicros: true,
+        beneficiaryMemberId: true,
+        parentGrantEntryId: true,
+      },
+      take: 33,
+      where: {
+        kind: "usage_debit",
+        sourceUsageId: "usage_replay",
+      },
+    });
     expect(entryCreate).not.toHaveBeenCalled();
     expect(purchaseUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before inspecting a corrupt 33-row usage replay", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql }) => {
+      expect(sql).toContain('FROM "hosted_member"');
+      return [{
+        balanceUsdMicros: 9_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 35n,
+      }];
+    });
+    const entryFindMany = vi.fn().mockResolvedValue(Array.from(
+      { length: 33 },
+      () => ({
+        amountUsdMicros: 0n,
+        beneficiaryMemberId: "corrupt-beneficiary",
+        parentGrantEntryId: null,
+      }),
+    ));
+
+    await expect(settleHostedUsageCreditForUsageTx({
+      beneficiaryMemberId: BENEFICIARY_ID,
+      debitUsdMicros: 7_000_000n,
+      effectiveAt: EFFECTIVE_AT,
+      sourceUsageId: "usage_replay_overflow",
+      tx: {
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          findMany: entryFindMany,
+        },
+      } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit replay exceeds the temporary active grant limit.",
+    );
+
+    expect(entryFindMany).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ take: 33 }),
+    );
+    expect(queryRaw).toHaveBeenCalledOnce();
   });
 
   it("converges a refund net reversal and reports credit it could not recover", async () => {
@@ -1014,9 +1825,51 @@ describe("hosted usage credits", () => {
   });
 });
 
+interface UsageSettlementMutationRowFixture {
+  allocationCount: number;
+  balanceUsdMicros: bigint | null;
+  beneficiaryMemberId: string | null;
+  debitedUsdMicros: bigint;
+  eligibleGrantCount: number;
+  eligibleGrantTotalUsdMicros: bigint;
+  grantInvariantFailureCount: number;
+  grantUpdatedCount: number;
+  insertedDebitUsdMicros: bigint;
+  ledgerEntryInsertedCount: number;
+  ledgerVersion: bigint | null;
+  memberUpdatedCount: number;
+  purchaseAllocationCount: number;
+  purchaseProjectionMismatchCount: number;
+  purchaseUpdatedCount: number;
+}
+
+function buildUsageSettlementMutationRow(
+  overrides: Partial<UsageSettlementMutationRowFixture> = {},
+): UsageSettlementMutationRowFixture {
+  return {
+    allocationCount: 2,
+    balanceUsdMicros: 0n,
+    beneficiaryMemberId: BENEFICIARY_ID,
+    debitedUsdMicros: 12_000_000n,
+    eligibleGrantCount: 2,
+    eligibleGrantTotalUsdMicros: 12_000_000n,
+    grantInvariantFailureCount: 0,
+    grantUpdatedCount: 2,
+    insertedDebitUsdMicros: 12_000_000n,
+    ledgerEntryInsertedCount: 2,
+    ledgerVersion: 4n,
+    memberUpdatedCount: 1,
+    purchaseAllocationCount: 1,
+    purchaseProjectionMismatchCount: 0,
+    purchaseUpdatedCount: 1,
+    ...overrides,
+  };
+}
+
 function buildLockedPurchase(
   overrides: Partial<{
     beneficiaryMemberId: string;
+    grantSlotReleasedAt: Date | null;
     grantUsdMicros: bigint;
     id: string;
     paidAt: Date | null;
@@ -1026,6 +1879,7 @@ function buildLockedPurchase(
 ) {
   return {
     beneficiaryMemberId: BENEFICIARY_ID,
+    grantSlotReleasedAt: null,
     grantUsdMicros: 5_000_000n,
     id: "purchase_1",
     paidAt: null,
@@ -1046,6 +1900,76 @@ function createTaggedSqlMock(
       sql: strings.join("?"),
       values,
     }));
+}
+
+function expectCombinedUsageCreditCapacityQuery(input: {
+  expectedPurchaseId?: string;
+  sql: string;
+  values: unknown[];
+}): void {
+  const normalizedSql = input.sql.replace(/\s+/gu, " ");
+  expect(normalizedSql).toContain(
+    "WITH bounded_active_grants AS MATERIALIZED (",
+  );
+  expect(normalizedSql).toContain(
+    'FROM "hosted_usage_credit_grant" AS grant_projection',
+  );
+  expect(normalizedSql).toContain(
+    'grant_projection."beneficiary_member_id" = ?',
+  );
+  expect(normalizedSql).toContain(
+    'grant_projection."remaining_usd_micros" > 0 ORDER BY '
+      + 'grant_projection."beneficiary_sequence" ASC LIMIT ?',
+  );
+  expect(normalizedSql).toContain(
+    "validated_active_grants AS MATERIALIZED (",
+  );
+  expect(normalizedSql).toContain(
+    'LEFT JOIN "hosted_usage_credit_entry" AS canonical_entry '
+      + 'ON canonical_entry."id" = active_grant."entryId"',
+  );
+  expect(normalizedSql).toContain(
+    'canonical_entry."beneficiary_member_id" IS DISTINCT FROM '
+      + 'active_grant."beneficiaryMemberId"',
+  );
+  expect(normalizedSql).toContain(
+    "bounded_purchase_reservations AS MATERIALIZED (",
+  );
+  expect(normalizedSql).toContain(
+    'FROM "hosted_usage_credit_purchase" AS purchase_reservation',
+  );
+  expect(normalizedSql).toContain(
+    "purchase_reservation.\"status\" <> 'fulfilled'",
+  );
+  expect(normalizedSql).toContain(
+    'purchase_reservation."grant_slot_released_at" IS NULL ORDER BY '
+      + 'purchase_reservation."id" ASC LIMIT GREATEST(',
+  );
+  expect(normalizedSql).toContain(
+    '? - ( SELECT COUNT(*)::integer FROM bounded_active_grants ), 0 )',
+  );
+  expect(normalizedSql).toContain(
+    "bounded_occupied_slots AS MATERIALIZED (",
+  );
+  expect(normalizedSql).toContain("UNION ALL");
+  expect(normalizedSql).toContain(
+    'COUNT(*)::integer AS "occupiedSlotCount"',
+  );
+  expect(normalizedSql).toContain(
+    'COUNT(*) FILTER ( WHERE bounded_occupied_slots."grantInvariantFailed" '
+      + ')::integer AS "grantInvariantFailureCount"',
+  );
+  expect(normalizedSql).toContain(
+    'BOOL_OR( bounded_occupied_slots."reservedPurchaseId" = ? )',
+  );
+  expect(normalizedSql.match(/\bLIMIT\b/gu)).toHaveLength(2);
+  expect(input.values).toEqual([
+    BENEFICIARY_ID,
+    33,
+    BENEFICIARY_ID,
+    33,
+    input.expectedPurchaseId ?? null,
+  ]);
 }
 
 function createFinancialCreditFixture(input: {
