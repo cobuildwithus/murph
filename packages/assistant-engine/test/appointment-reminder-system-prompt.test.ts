@@ -31,9 +31,13 @@ describe('appointment reminder system prompt', () => {
     expect(prompt).toContain('Private appointment follow-through:')
     expect(prompt).toContain('during an ordinary attended turn')
     expect(prompt).toContain('concrete future appointment')
-    expect(prompt).toContain('one one-shot reminder')
+    expect(prompt).toContain('exactly one one-shot reminder')
+    expect(prompt).toContain('unless the member explicitly declines it')
     expect(prompt).toContain('do not wait for a separate reminder request')
     expect(prompt).toContain('never knowingly create a duplicate')
+    expect(prompt).toContain(
+      'A member-specified reminder time overrides these defaults',
+    )
     expect(prompt).toContain('For a start before 10:00 AM')
     expect(prompt).toContain('otherwise 8:00 PM')
     expect(prompt).toContain('For a start at 10:00 AM or later')
@@ -42,6 +46,9 @@ describe('appointment reminder system prompt', () => {
     expect(prompt).toContain(
       'hypothetical, tentative, canceled, completed, or date/time-unknown appointment',
     )
+    expect(prompt).toContain(
+      'archive it or patch its timing rather than leaving a stale occurrence',
+    )
     expect(prompt).toContain('only after its save and timing are verified')
   })
 
@@ -49,6 +56,6 @@ describe('appointment reminder system prompt', () => {
     const prompt = buildAssistantSystemPrompt(createPromptInput('group'))
 
     expect(prompt).not.toContain('Private appointment follow-through:')
-    expect(prompt).not.toContain('one one-shot reminder')
+    expect(prompt).not.toContain('exactly one one-shot reminder')
   })
 })
