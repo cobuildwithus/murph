@@ -243,6 +243,21 @@ export async function sendHostedLinqChatMessage(input: {
   };
 }
 
+/**
+ * Reaction-bound prompts must remain one provider message because the returned
+ * message identity is the consent target. Do not split their first-party link
+ * into a second rich-link bubble.
+ */
+export async function sendHostedLinqReactionBoundChatMessage(input: {
+  chatId: string;
+  idempotencyKey?: string | null;
+  message: string;
+  replyToMessageId?: string | null;
+  signal?: AbortSignal;
+}): Promise<HostedLinqSendResult> {
+  return sendHostedLinqTextMessage(input);
+}
+
 async function sendHostedLinqTextMessage(input: {
   chatId: string;
   idempotencyKey?: string | null;

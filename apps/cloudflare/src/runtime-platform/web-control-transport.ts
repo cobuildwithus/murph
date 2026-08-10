@@ -364,10 +364,7 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     maxBytes: input.sensitiveResponseBody?.maxBytes,
     response,
     signal: input.signal ?? null,
-    streamBody: input.replayOnceOnRetryableFailure === true,
-    timeoutMs: input.replayOnceOnRetryableFailure === true
-      ? Math.max(0, requestDeadlineMs - Date.now())
-      : input.timeoutMs,
+    timeoutMs: Math.max(0, requestDeadlineMs - Date.now()),
   });
   const acceptedStatus = input.acceptedStatuses?.includes(response.status) ?? false;
   if (!response.ok && !acceptedStatus) {
@@ -437,14 +434,9 @@ async function readHostedWebControlPlaneResponseText(input: {
   maxBytes: number | undefined;
   response: Response;
   signal: AbortSignal | null;
-  streamBody: boolean;
   timeoutMs: number;
 }): Promise<string> {
   const maxBytes = input.maxBytes;
-  if (maxBytes === undefined && !input.streamBody) {
-    return await input.response.text();
-  }
-
   if (maxBytes !== undefined) {
     const contentLengthText =
       input.response.headers.get("content-length")?.trim() ?? "";

@@ -985,7 +985,7 @@ export interface HostedRuntimeGroupDisclosureGrantListEntry
   groupLabel: string | null;
 }
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE =
-  "Like or heart this message to share {{share_scope}} with this group. To choose different permissions, use {{join_url}}.";
+  "Sounds good. Like or heart this message to share {{share_scope}} with the group, or use {{join_url}} to customize what you share.";
 
 export interface HostedRuntimeGroupMemberSummary {
   disclosureGrants?: HostedRuntimeGroupDisclosureGrantSummary[];
@@ -1012,6 +1012,8 @@ export interface HostedRuntimeGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
+  /** Required on the current shape; absent only on legacy response branches. */
+  includedUsageUsedPercent?: number;
 }
 
 export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
@@ -1097,10 +1099,8 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
   displayName?: string | null;
-  // Legacy wire compatibility only. Current Web ignores this field and owns
-  // the canonical copy. The runtime supplies one fixed value so older Web can
-  // substitute already-known scopes; model input can never set it. Remove the
-  // field after the consumer-first Web rollout sets the Cloudflare rollback floor.
+  // Legacy wire compatibility only. Web owns the canonical consent sentence
+  // because an affirmative reaction grants the frozen server-side snapshot.
   messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.
@@ -1809,8 +1809,11 @@ export type HostedRuntimeFamilyPlanToolAction =
 export const HOSTED_PLAN_CODES = ["pulse", "edge"] as const;
 export type HostedPlanCode = (typeof HOSTED_PLAN_CODES)[number];
 
+export const HOSTED_FAMILY_PLAN_CODES = ["pulse", "edge", "max"] as const;
+export type HostedFamilyPlanCode = (typeof HOSTED_FAMILY_PLAN_CODES)[number];
+
 export interface HostedRuntimeFamilyPlanCreateInviteRequest {
-  planCode?: HostedPlanCode;
+  planCode?: HostedFamilyPlanCode;
   targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
@@ -1827,7 +1830,6 @@ export type HostedRuntimeFamilyPlanToolRequest =
     }
   | {
       action: "start_checkout";
-      invite?: HostedRuntimeFamilyPlanCreateInviteRequest | null;
     };
 
 export interface HostedRuntimeFamilyPlanToolSeatStatus {
@@ -1843,7 +1845,7 @@ export interface HostedRuntimeFamilyPlanToolSeatStatus {
 export interface HostedRuntimeFamilyPlanToolMember {
   isOwner: boolean;
   label: string | null;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   role: string;
   status: string;
 }
@@ -1851,7 +1853,7 @@ export interface HostedRuntimeFamilyPlanToolMember {
 export interface HostedRuntimeFamilyPlanToolInvite {
   acceptUrl: string | null;
   expiresAt: string;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -1867,7 +1869,7 @@ export interface HostedRuntimeFamilyPlanToolPlanStatus {
 }
 
 export type HostedRuntimeFamilyPlanToolPlans = Record<
-  HostedPlanCode,
+  HostedFamilyPlanCode,
   HostedRuntimeFamilyPlanToolPlanStatus
 >;
 
@@ -1894,8 +1896,6 @@ export interface HostedRuntimeFamilyPlanToolStartCheckoutResponse {
   billingStatus: string;
   checkoutUrl: string | null;
   owner: boolean;
-  preparedInvite: HostedRuntimeFamilyPlanToolInvite | null;
-  preparedInviteReplyText: string | null;
   plans: HostedRuntimeFamilyPlanToolPlans;
   seats: HostedRuntimeFamilyPlanToolSeatStatus;
   unavailableReason: "already_sponsored" | null;

@@ -77,6 +77,7 @@ import {
 import {
   HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
 } from "../src/runner-egress-venice.ts";
+import { parseHostedXaiRequestBody } from "../src/runner-egress-xai.ts";
 import {
   sealHostedInferenceRuntimeTarget,
 } from "../src/hosted-inference-target-envelope.ts";
@@ -207,6 +208,8 @@ function createHostedXaiResponsesRequestBody(
     model: "grok-4.5",
     store: false,
     tools: [{
+      enable_image_understanding: true,
+      enable_video_understanding: true,
       from_date: "2026-07-16",
       to_date: "2026-07-23",
       type: "x_search",
@@ -2266,9 +2269,16 @@ describe("hostedRunnerIntercept", () => {
       createHostedXaiResponsesRequestBody({
         tools: [{ type: "x_search" }, { type: "code_execution" }],
       }),
-      // undocumented tool filter key
+      // undocumented tool key
       createHostedXaiResponsesRequestBody({
-        tools: [{ enable_image_understanding: true, type: "x_search" }],
+        tools: [{ unknown_media_option: true, type: "x_search" }],
+      }),
+      // media-understanding flags must be booleans
+      createHostedXaiResponsesRequestBody({
+        tools: [{ enable_image_understanding: "true", type: "x_search" }],
+      }),
+      createHostedXaiResponsesRequestBody({
+        tools: [{ enable_video_understanding: 1, type: "x_search" }],
       }),
       // store must be false
       createHostedXaiResponsesRequestBody({ store: true }),
@@ -2331,6 +2341,26 @@ describe("hostedRunnerIntercept", () => {
     expect(nonJsonResponse.status).toBe(403);
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts media-understanding flags and the earlier x_search shape", async () => {
+    for (const tools of [
+      [{
+        enable_image_understanding: true,
+        enable_video_understanding: true,
+        type: "x_search",
+      }],
+      [{ type: "x_search" }],
+    ]) {
+      const body = await new Response(JSON.stringify(
+        createHostedXaiResponsesRequestBody({ tools }),
+      )).arrayBuffer();
+
+      expect(parseHostedXaiRequestBody({
+        body,
+        contentType: "application/json",
+      })).toEqual({ model: "grok-4.5" });
+    }
   });
 
   it("rejects oversized xAI request bodies before upstream fetch", async () => {

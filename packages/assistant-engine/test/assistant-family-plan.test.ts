@@ -27,7 +27,7 @@ describe("assistant family plan tool", () => {
         arguments: {
           action: "create_invite",
           invite: {
-            planCode: "edge",
+            planCode: "max",
             targetLabel: "dad",
             targetPhoneNumber: "+48 600 000 000",
             targetTelegramUsername: "dad_username",
@@ -43,7 +43,7 @@ describe("assistant family plan tool", () => {
       request: {
         action: "create_invite",
         invite: {
-          planCode: "edge",
+          planCode: "max",
           targetLabel: "dad",
           targetPhoneNumber: "+48 600 000 000",
           targetTelegramUsername: "dad_username",
@@ -61,7 +61,7 @@ describe("assistant family plan tool", () => {
           invite: {
             acceptUrl: null,
             expiresAt: "2026-06-25T00:00:00.000Z",
-            planCode: "edge" as const,
+            planCode: "max" as const,
             status: "pending",
             targetLabel: "dad",
             targetPhoneHint: "+48 *** *** 000",
@@ -69,6 +69,13 @@ describe("assistant family plan tool", () => {
           },
           plans: {
             edge: {
+              active: 0,
+              billed: 0,
+              invited: 0,
+              remaining: 0,
+              used: 0,
+            },
+            max: {
               active: 0,
               billed: 1,
               invited: 1,
@@ -121,7 +128,7 @@ describe("assistant family plan tool", () => {
     expect(familyPlanTool.request).toHaveBeenCalledWith({
       action: "create_invite",
       invite: {
-        planCode: "edge",
+        planCode: "max",
         targetLabel: "dad",
         targetPhoneNumber: "+48 600 000 000",
         targetTelegramUsername: "dad_username",
@@ -161,17 +168,12 @@ describe("assistant family plan tool", () => {
     });
   });
 
-  it("parses and executes Family checkout requests with optional next invite context", async () => {
+  it("parses and executes Family checkout without invitation context", async () => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
           action: "start_checkout",
-          invite: {
-            targetLabel: "Adam",
-            targetPhoneNumber: null,
-            targetTelegramUsername: "adam_username",
-          },
         },
         namespace: "murph",
         tool: "family_plan",
@@ -182,11 +184,6 @@ describe("assistant family plan tool", () => {
       kind: "family-plan",
       request: {
         action: "start_checkout",
-        invite: {
-          targetLabel: "Adam",
-          targetPhoneNumber: null,
-          targetTelegramUsername: "adam_username",
-        },
       },
     });
     if (!request) {
@@ -202,18 +199,15 @@ describe("assistant family plan tool", () => {
           billingStatus: "not_started",
           checkoutUrl: "https://checkout.stripe.test/family",
           owner: true,
-          preparedInvite: {
-            acceptUrl: null,
-            expiresAt: "2026-06-25T00:00:00.000Z",
-            planCode: "pulse" as const,
-            status: "pending",
-            targetLabel: "Adam",
-            targetPhoneHint: null,
-            telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-          },
-          preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
           plans: {
             edge: {
+              active: 0,
+              billed: 0,
+              invited: 0,
+              remaining: 0,
+              used: 0,
+            },
+            max: {
               active: 0,
               billed: 0,
               invited: 0,
@@ -265,14 +259,26 @@ describe("assistant family plan tool", () => {
 
     expect(familyPlanTool.request).toHaveBeenCalledWith({
       action: "start_checkout",
-      invite: {
-        targetLabel: "Adam",
-        targetPhoneNumber: null,
-        targetTelegramUsername: "adam_username",
-      },
     });
     expect(result.rpcResult.success).toBe(true);
     expect(result.rpcResult.contentItems[0]?.text).toContain("checkout.stripe.test/family");
+  });
+
+  it("rejects invitation context on Family checkout", () => {
+    expect(readTestMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "start_checkout",
+          invite: {
+            planCode: "max",
+            targetEmail: "dad@example.com",
+          },
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    })?.kind).toBe("invalid-family-plan-arguments");
   });
 
   it("rejects invite requests without a phone number, Telegram username, or email", () => {
@@ -289,5 +295,118 @@ describe("assistant family plan tool", () => {
         tool: "family_plan",
       },
     })?.kind).toBe("invalid-family-plan-arguments");
+  });
+
+  it("reports ambiguous Family mutations as unconfirmed without encouraging a duplicate", async () => {
+    const request = readTestMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "create_invite",
+          invite: {
+            planCode: "max",
+            targetEmail: "dad@example.com",
+          },
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a family plan dynamic tool request.");
+    }
+
+    const familyPlanTool = {
+      request: vi.fn(async () => {
+        throw new Error("ambiguous transport result");
+      }),
+    };
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        familyPlanTool,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(async () => ({
+          approvalUrl: "https://murph.test/approve/unused",
+          filename: "unused.pdf",
+          status: "pending" as const,
+        })),
+        vaultFileSendAvailable: false,
+      },
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(familyPlanTool.request).toHaveBeenCalledTimes(1);
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "request was not confirmed",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "check Family Settings before retrying",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "request failed",
+    );
+  });
+
+  it("reports a failed Family status read as retry-safe with no possible change", async () => {
+    const request = readTestMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "read_status",
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a family plan dynamic tool request.");
+    }
+
+    const familyPlanTool = {
+      request: vi.fn(async () => {
+        throw new Error("status transport unavailable");
+      }),
+    };
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        familyPlanTool,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(async () => ({
+          approvalUrl: "https://murph.test/approve/unused",
+          filename: "unused.pdf",
+          status: "pending" as const,
+        })),
+        vaultFileSendAvailable: false,
+      },
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(familyPlanTool.request).toHaveBeenCalledWith({
+      action: "read_status",
+    });
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "no change was attempted",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "retry the status read",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain("duplicate");
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "Family Settings",
+    );
   });
 });
