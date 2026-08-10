@@ -262,7 +262,8 @@ remember, context, private by default, worth trying, what changed, experiment,
 support, together
 
 **Words to avoid:** optimize, biohack, compliance, crush it, level up, hack,
-stack, perfect, complete your profile, collect data points
+stack, perfect, complete your profile, collect data points, mission (for
+referral options)
 
 ## Proof To Seek
 

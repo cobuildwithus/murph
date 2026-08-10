@@ -166,13 +166,22 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Adding the personalized generated contact card puts its request contract,
 // exact-shape parser, direct route resolution, and acknowledgement handling in
-// the runner's lazy output. The subsequent reviewed biomarker ranges, hosted
-// runtime-control compaction, and named-diet guidance moved exact ubuntu total
-// output from 9,908,973B to 9,933,847B by 2026-08-10. Private-continuation
-// recovery and recipient-ready answer guidance then produced the higher exact
-// current macOS measurement: 10,000,845B total and an 8,023,354B static closure.
-// The forbidden-input guard remains clean, so ratchet to those cross-platform
-// maxima while retaining the established allowances and entry baseline.
+// the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
+// on 2026-08-09; startup entry and static closure are unchanged, so ratchet
+// only the total ceiling and keep both startup baselines and all tolerances.
+//
+// Adding the single-message group offer, exact reply ownership, and weekly
+// contextualization instructions grows only that lazy assistant output. Exact
+// ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
+// baselines and established total tolerance.
+//
+// Subsequent reviewed biomarker ranges, hosted runtime-control compaction,
+// named-diet guidance, bounded group-tool failure diagnostics, and the strict
+// included-usage read contract grew only the reviewed lazy graph. The higher
+// exact pre-merge cross-platform measurements remain 10,000,845B total and an
+// 8,023,354B static closure. Retain those maxima until the combined production
+// assembly below proves a tighter exact baseline without weakening either
+// ratchet.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_000_845 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_023_354;
