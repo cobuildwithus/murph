@@ -1,8 +1,8 @@
 # non-expiring-starter-usage
 
-Status: active — exact-head CI rerunning after latest-main merge
+Status: completed
 Created: 2026-08-07
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -109,32 +109,32 @@ Updated: 2026-08-09
 
 ## Verification
 
-- Merged current `main` through `7816f428d428a51f3bf3791b4fceef4168d8becf`
-  after the final audit fixes, with GitHub reporting the PR mergeable.
-- `git diff --check`: passed for the complete candidate and final audit fixes.
-- Changed TypeScript-family syntax parse: passed for 143 changed files with
-  zero parser diagnostics.
-- Repository PR-body and frontend-design guard tests: 15/15 passed.
-- Hosted Stripe billing source guard passed after replacing trial creation,
-  continuation, and resume paths with ordinary paid checkout plus bounded
-  legacy-event retirement.
-- Focused regression coverage now includes exact once-only Starter enrollment,
-  canonical full-grant-plus-consumption migration, redeemed-timestamp fallback
-  for incomplete legacy projections, delayed-event replay, untouched Starter
-  account retirement during phone transfer, and idempotent cutover replay after
-  later Starter usage lowers the grant projection.
-- A fresh exact-head Web typecheck isolated four test-fixture typing defects;
-  commit `308dd70bdc12e2163fafb8f8d99440cdd33c71d5` fixes them without changing
-  runtime behavior. The current-main merge head is being verified again before
-  the PR leaves draft.
-- Full pnpm-backed tests, generated Prisma checks, browser design proof,
-  ReviewGPT, and exact-head CI must pass on the published PR head before this
-  plan is marked complete.
+- Merged current `main` through `87b871baf44bcf7bd75db743ce670da9f7e5cf7a`.
+  GitHub reports PR #1464 mergeable and conflict-free.
+- Final ReviewGPT round 7 reviewed the complete sensitive full snapshot at
+  `f09a7286365e211e5af56dc6ae60417a0a4fcdde` and returned model-verified
+  `PASS` with no qualifying findings. All accepted preliminary and prior-round
+  findings were reproduced, corrected, and reverified in their production paths.
+- Every exact-head GitHub check completed without failure. The optional live
+  hosted-local Stripe browser matrix skipped as configured, and Vercel's ignored
+  build step reported success.
+- The final merge-focused suite passed 385 tests across eight files, including
+  real invoice/subscription receipt retries, usage allowance, billing settings,
+  billing-plan compatibility, both migration contracts, and growth metrics.
+- Web TypeScript passed after Health Commons and Prisma generation. Scoped lint
+  had no errors; conflict-owned production source was warning-free.
+- Exact PostgreSQL migration proof covers untouched, partial, exhausted, skipped,
+  and atomic-rollback cases. Browser proof covers the exhausted-Starter Settings
+  journey on desktop and mobile.
+- `git diff --check`, the conflict-marker scan, the privacy-path scan, and the
+  final parent diff review passed.
 
 ## Rollout checklist
 
-1. Apply the additive Starter ledger migrations and backfill.
-2. Deploy Web and drain every old deployment capable of creating a trial.
+1. Prepare the new Web release, then drain old Web from the affected usage path
+   with an atomic traffic cutover or a brief affected-usage maintenance window.
+2. While old Web is drained, apply the additive Starter ledger constraint and
+   backfill migrations, then direct traffic exclusively to the new Web release.
 3. Confirm delayed events convert only exact non-paid legacy objects and that
    `invoice.paid` remains the sole paid authority.
 4. Run `stripe:retire-legacy-pulse-trials` in dry-run mode with explicit test/live
@@ -144,3 +144,4 @@ Updated: 2026-08-09
 6. Rerun dry-run to zero, then wait through the delayed-event horizon before
    deleting the remaining compatibility fields, wire actions, cleanup owner,
    command, and tests together.
+Completed: 2026-08-10
