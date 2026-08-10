@@ -134,8 +134,8 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
     intentPath: string
     terminalAtMs: number
   }> = []
-  const protectedNewsletterOccurrencePrefixes =
-    await readProtectedNewsletterOccurrencePrefixes(input.paths)
+  const protectedGroupEmailOccurrencePrefixes =
+    await readProtectedGroupEmailOccurrencePrefixes(input.paths)
 
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) {
@@ -149,7 +149,7 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
       || !isTerminalAssistantOutboxIntent(intent)
       || isPruneProtectedAssistantOutboxIntent(
         intent,
-        protectedNewsletterOccurrencePrefixes,
+        protectedGroupEmailOccurrencePrefixes,
       )
     ) {
       continue
@@ -315,12 +315,12 @@ function isTerminalAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean
 
 function isPruneProtectedAssistantOutboxIntent(
   intent: AssistantOutboxIntent,
-  protectedNewsletterOccurrencePrefixes: readonly string[],
+  protectedGroupEmailOccurrencePrefixes: readonly string[],
 ): boolean {
   const deliveryIdempotencyKey = intent.deliveryIdempotencyKey
   if (
     !deliveryIdempotencyKey
-    || !protectedNewsletterOccurrencePrefixes.some((prefix) =>
+    || !protectedGroupEmailOccurrencePrefixes.some((prefix) =>
       deliveryIdempotencyKey.startsWith(prefix)
     )
   ) {
@@ -330,7 +330,7 @@ function isPruneProtectedAssistantOutboxIntent(
   return target?.targetKind === 'group'
 }
 
-async function readProtectedNewsletterOccurrencePrefixes(
+async function readProtectedGroupEmailOccurrencePrefixes(
   paths: AssistantStatePaths,
 ): Promise<string[]> {
   const store = await readAssistantCronCanonicalRuntimeStore(paths, {
@@ -339,6 +339,9 @@ async function readProtectedNewsletterOccurrencePrefixes(
   return store.jobs.flatMap((record) =>
     record.state.pendingOccurrenceAt
       ? [
+          `group-email-effect:${record.jobId}:${record.state.pendingOccurrenceAt}:`,
+          // Bounded legacy protection for effects accepted before the generic
+          // group-email idempotency key shipped.
           `group-newsletter:${record.jobId}:${record.state.pendingOccurrenceAt}:`,
         ]
       : []

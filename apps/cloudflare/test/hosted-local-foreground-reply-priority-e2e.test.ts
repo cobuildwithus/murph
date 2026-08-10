@@ -26,7 +26,6 @@ import {
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
-  buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -2186,13 +2185,6 @@ function buildEverySystemWake(
       memberId: identity.userId,
       occurredAt: requestedAt,
       sha256: environmentVoice.sha256,
-    }),
-    buildHostedExecutionGroupNewsletterEmailNeededWake({
-      eventId: `group-newsletter.email-needed:priority:${runId}`,
-      groupDisplayName: "Priority gate",
-      groupId: `group_priority_${runId}`,
-      memberId: identity.userId,
-      occurredAt: requestedAt,
     }),
     buildHostedExecutionMealPhotoCapturedWake({
       byteLength: mealPhoto.byteLength,

@@ -234,7 +234,6 @@ export function expectAdvertisedMurphDynamicTools(
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
-    newsletterAvailable?: boolean;
     pendingVaultFilesAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
@@ -283,13 +282,6 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.imessageContactAvailable !== true
         && name === "murph.imessage_contact"
-      ) {
-        return false;
-      }
-
-      if (
-        options.newsletterAvailable !== true
-        && name === "murph.newsletter"
       ) {
         return false;
       }

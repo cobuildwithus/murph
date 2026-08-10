@@ -3051,7 +3051,7 @@ describe('assistant Codex turn planning', () => {
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
       labsTool: { request: vi.fn() },
-      newsletterTool: { request: vi.fn() },
+      groupEmailEffect: { request: vi.fn() },
       personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
@@ -3176,7 +3176,6 @@ describe('assistant Codex turn planning', () => {
         'connected_apps_execute',
         'automation',
         'group',
-        'newsletter',
         'assistant_configuration',
         'assistant_style',
         'personalization',
@@ -3761,7 +3760,7 @@ describe('assistant Codex turn planning', () => {
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
       labsTool: { request: vi.fn() },
-      newsletterTool: { request: vi.fn() },
+      groupEmailEffect: { request: vi.fn() },
       phoneCalls: { start: vi.fn() },
     }
     await expect(resolveAssistantRouteTurnPlan({

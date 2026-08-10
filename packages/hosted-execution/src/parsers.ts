@@ -54,7 +54,6 @@ import type {
   HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDirectRoute,
-  HostedExecutionGroupNewsletterEmailNeededEvent,
   HostedExecutionWake,
   HostedExecutionWakeKind,
   HostedExecutionEvent,
@@ -92,7 +91,6 @@ import {
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
-  buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
@@ -185,8 +183,8 @@ export {
   parseHostedRuntimeAssistantAskControlResponse,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
-  parseHostedRuntimeNewsletterToolRequest,
-  parseHostedRuntimeNewsletterToolResponse,
+  parseHostedRuntimeGroupEmailEffectRequest,
+  parseHostedRuntimeGroupEmailEffectResponse,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeIMessageContactToolRequest,
@@ -395,30 +393,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
             }),
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId: wireUserId,
-      });
-    case "group-newsletter.email-needed":
-      return buildHostedExecutionGroupNewsletterEmailNeededWake({
-        ...(record.directRoute === undefined
-          ? {}
-          : {
-              directRoute: record.directRoute === null
-                ? null
-                : parseHostedExecutionDirectRoute(
-                    record.directRoute,
-                    "Hosted execution wake group-newsletter.email-needed directRoute",
-                  ),
-            }),
-        eventId,
-        groupDisplayName: readNullableString(
-          record.groupDisplayName,
-          "Hosted execution wake group-newsletter.email-needed groupDisplayName",
-        ),
-        groupId: requireString(
-          record.groupId,
-          "Hosted execution wake group-newsletter.email-needed groupId",
-        ),
-        memberId: wireUserId,
-        occurredAt,
       });
     case "runtime.pending-effects-reconcile-requested":
       assertExactHostedExecutionKeys(record, [
@@ -1445,29 +1419,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
-    case "group-newsletter.email-needed":
-      return {
-        ...(record.directRoute === undefined
-          ? {}
-          : {
-              directRoute: record.directRoute === null
-                ? null
-                : parseHostedExecutionDirectRoute(
-                    record.directRoute,
-                    "Hosted execution group-newsletter.email-needed directRoute",
-                  ),
-            }),
-        groupDisplayName: readNullableString(
-          record.groupDisplayName,
-          "Hosted execution group-newsletter.email-needed groupDisplayName",
-        ),
-        groupId: requireString(
-          record.groupId,
-          "Hosted execution group-newsletter.email-needed groupId",
-        ),
-        kind,
-        userId,
-      } satisfies HostedExecutionGroupNewsletterEmailNeededEvent;
     case "runtime.pending-effects-reconcile-requested":
       assertExactHostedExecutionKeys(record, [
         "effectId",

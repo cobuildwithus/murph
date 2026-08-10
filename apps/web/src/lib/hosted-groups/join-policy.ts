@@ -56,7 +56,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   "group-email.v0": {
     label: "Email address",
     description:
-      "Shares your email so the group's Murph can send the newsletter. Visible to the group.",
+      "Shares your email so the group's Murph can send group emails. Visible to the group.",
   },
   "device-sync-status.v0": {
     label: "Health source connection status",

@@ -158,12 +158,12 @@ import {
   HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
-  HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
-  isHostedRuntimeNewsletterAuthorizationProof,
-  HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+  isHostedRuntimeGroupEmailAuthorizationProof,
+  HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
@@ -187,10 +187,10 @@ import {
   type HostedRuntimeUsageReferralSnapshot,
   type HostedRuntimeUsageReferralSourceConversation,
   type HostedUsageReferralPolicyCode,
-  type HostedRuntimeNewsletterAuthorizedShare,
-  type HostedRuntimeNewsletterParticipantSummary,
-  type HostedRuntimeNewsletterToolRequest,
-  type HostedRuntimeNewsletterToolResponse,
+  type HostedRuntimeGroupEmailAuthorizedShare,
+  type HostedRuntimeGroupEmailParticipantSummary,
+  type HostedRuntimeGroupEmailEffectRequest,
+  type HostedRuntimeGroupEmailEffectResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
   type HostedCodexAuthUpdate,
@@ -1242,6 +1242,20 @@ export function parseHostedRuntimeGroupToolRequest(
       projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
         record.projectionScopes,
         "Hosted runtime group tool read_shared request projectionScopes",
+      ),
+    };
+  }
+  if (action === "prepare_email") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "projectionScopes"]),
+      "Hosted runtime group tool prepare_email request",
+    );
+    return {
+      action,
+      projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
+        record.projectionScopes,
+        "Hosted runtime group tool prepare_email request projectionScopes",
       ),
     };
   }
@@ -3113,6 +3127,17 @@ export function parseHostedRuntimeGroupToolResponse(
     };
   }
 
+  if (action === "prepare_email") {
+    const parsed = parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
+      result: record.result,
+    });
+    if (parsed.action !== "prepare_email") {
+      throw new TypeError("Hosted runtime group tool prepare_email response action is invalid.");
+    }
+    return { action, result: parsed.result };
+  }
+
   if (action === "list_memberships") {
     const result = requireObject(
       record.result,
@@ -3688,54 +3713,61 @@ function parseHostedRuntimeUsageReferralLabel(
   });
 }
 
-export function parseHostedRuntimeNewsletterToolRequest(
+export function parseHostedRuntimeGroupEmailEffectRequest(
   value: unknown,
-): HostedRuntimeNewsletterToolRequest {
-  const record = requireObject(value, "Hosted runtime newsletter tool request");
-  const action = requireString(record.action, "Hosted runtime newsletter tool request action");
-  if (action === "prepare") {
+): HostedRuntimeGroupEmailEffectRequest {
+  const record = requireObject(value, "Hosted runtime group email effect request");
+  const action = requireString(
+    record.action,
+    "Hosted runtime group email effect request action",
+  );
+  if (action === "prepare_email") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "groupId"]),
-      "Hosted runtime newsletter tool prepare request",
+      new Set(["action", "projectionScopes"]),
+      "Hosted runtime group email effect prepare request",
     );
-    // `groupId` is accepted and ignored only for consumer-first deploy skew.
-    // Current callers rely on the callback-authenticated runtime member, which
-    // maps uniquely to its hosted group.
-    if (record.groupId !== undefined) {
-      requireString(record.groupId, "Hosted runtime newsletter tool legacy groupId");
-    }
-    return { action };
+    return {
+      action,
+      projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
+        record.projectionScopes,
+        "Hosted runtime group email effect projectionScopes",
+        HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
+      ),
+    };
   }
-  if (action === "send") {
+  if (action === "send_email") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "groupId", "subject", "html", "text"]),
-      "Hosted runtime newsletter tool send request",
+      new Set(["action", "subject", "html", "text"]),
+      "Hosted runtime group email effect send request",
     );
-    const subject = requireString(record.subject, "Hosted runtime newsletter tool subject");
-    const html = requireString(record.html, "Hosted runtime newsletter tool html");
+    const subject = requireString(
+      record.subject,
+      "Hosted runtime group email effect subject",
+    );
+    const html = requireString(
+      record.html,
+      "Hosted runtime group email effect html",
+    );
     const text = readOptionalNullableString(
       record.text,
-      "Hosted runtime newsletter tool text",
+      "Hosted runtime group email effect text",
     ) ?? null;
     if (subject.trim().length === 0) {
-      throw new TypeError("Hosted runtime newsletter tool subject must not be blank.");
+      throw new TypeError("Hosted runtime group email effect subject must not be blank.");
     }
-    if (subject.length > HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH) {
-      throw new TypeError("Hosted runtime newsletter tool subject is too long.");
+    if (subject.length > HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH) {
+      throw new TypeError("Hosted runtime group email effect subject is too long.");
     }
     if (html.trim().length === 0) {
-      throw new TypeError("Hosted runtime newsletter tool html must not be blank.");
+      throw new TypeError("Hosted runtime group email effect html must not be blank.");
     }
-    if (html.length > HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH) {
-      throw new TypeError("Hosted runtime newsletter tool html is too long.");
+    if (html.length > HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH) {
+      throw new TypeError("Hosted runtime group email effect html is too long.");
     }
-    if (text !== null && text.length > HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH) {
-      throw new TypeError("Hosted runtime newsletter tool text is too long.");
-    }
-    if (record.groupId !== undefined) {
-      requireString(record.groupId, "Hosted runtime newsletter tool legacy groupId");
+    if (text !== null && text.length > HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH) {
+      throw new TypeError("Hosted runtime group email effect text is too long.");
     }
     return {
       action,
@@ -3745,19 +3777,26 @@ export function parseHostedRuntimeNewsletterToolRequest(
     };
   }
 
-  throw new TypeError("Hosted runtime newsletter tool action is not supported.");
+  throw new TypeError("Hosted runtime group email effect action is not supported.");
 }
 
-export function parseHostedRuntimeNewsletterToolResponse(
+export function parseHostedRuntimeGroupEmailEffectResponse(
   value: unknown,
-): HostedRuntimeNewsletterToolResponse {
-  const record = requireObject(value, "Hosted runtime newsletter tool response");
-  const action = requireString(record.action, "Hosted runtime newsletter tool response action");
-  assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime newsletter tool response");
+): HostedRuntimeGroupEmailEffectResponse {
+  const record = requireObject(value, "Hosted runtime group email effect response");
+  const action = requireString(
+    record.action,
+    "Hosted runtime group email effect response action",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "result"]),
+    "Hosted runtime group email effect response",
+  );
 
-  if (action === "prepare") {
-    const result = requireObject(record.result, "Hosted runtime newsletter tool prepare response result");
-    const status = requireString(result.status, "Hosted runtime newsletter tool prepare response status");
+  if (action === "prepare_email") {
+    const result = requireObject(record.result, "Hosted runtime group email effect prepare response result");
+    const status = requireString(result.status, "Hosted runtime group email effect prepare response status");
     if (status === "ok") {
       assertAllowedObjectKeys(
         result,
@@ -3768,22 +3807,22 @@ export function parseHostedRuntimeNewsletterToolResponse(
           "participants",
           "missingEmailParticipants",
         ]),
-        "Hosted runtime newsletter tool prepare ok response result",
+        "Hosted runtime group email effect prepare ok response result",
       );
       return {
         action,
         result: {
-          authorizationProof: requireHostedRuntimeNewsletterAuthorizationProof(
+          authorizationProof: requireHostedRuntimeGroupEmailAuthorizationProof(
             result.authorizationProof,
           ),
-          groupId: requireString(result.groupId, "Hosted runtime newsletter tool groupId"),
-          missingEmailParticipants: parseHostedRuntimeNewsletterParticipants(
+          groupId: requireString(result.groupId, "Hosted runtime group email effect groupId"),
+          missingEmailParticipants: parseHostedRuntimeGroupEmailParticipants(
             result.missingEmailParticipants,
-            "Hosted runtime newsletter tool missingEmailParticipants",
+            "Hosted runtime group email effect missingEmailParticipants",
           ),
-          participants: parseHostedRuntimeNewsletterParticipants(
+          participants: parseHostedRuntimeGroupEmailParticipants(
             result.participants,
-            "Hosted runtime newsletter tool participants",
+            "Hosted runtime group email effect participants",
           ),
           status,
         },
@@ -3793,7 +3832,7 @@ export function parseHostedRuntimeNewsletterToolResponse(
       assertAllowedObjectKeys(
         result,
         new Set(["status", "unavailableReason"]),
-        "Hosted runtime newsletter tool prepare unavailable response result",
+        "Hosted runtime group email effect prepare unavailable response result",
       );
       return {
         action,
@@ -3801,36 +3840,36 @@ export function parseHostedRuntimeNewsletterToolResponse(
           status,
           unavailableReason: requireString(
             result.unavailableReason,
-            "Hosted runtime newsletter tool unavailableReason",
+            "Hosted runtime group email effect unavailableReason",
           ),
         },
       };
     }
   }
 
-  if (action === "send") {
-    const result = requireObject(record.result, "Hosted runtime newsletter tool send response result");
-    const status = requireString(result.status, "Hosted runtime newsletter tool send response status");
+  if (action === "send_email") {
+    const result = requireObject(record.result, "Hosted runtime group email effect send response result");
+    const status = requireString(result.status, "Hosted runtime group email effect send response status");
     if (status === "accepted" || status === "sent" || status === "no_recipients") {
       assertAllowedObjectKeys(
         result,
         new Set(["status", "participantCount", "skippedNoEmailMemberIds"]),
-        "Hosted runtime newsletter tool send response result",
+        "Hosted runtime group email effect send response result",
       );
       const participantCount = requireNumber(
         result.participantCount,
-        "Hosted runtime newsletter tool participantCount",
+        "Hosted runtime group email effect participantCount",
       );
       if (!Number.isInteger(participantCount) || participantCount < 0) {
-        throw new TypeError("Hosted runtime newsletter tool participantCount must be a non-negative integer.");
+        throw new TypeError("Hosted runtime group email effect participantCount must be a non-negative integer.");
       }
-      const skippedNoEmailMemberIds = parseHostedRuntimeNewsletterMemberIds(
+      const skippedNoEmailMemberIds = parseHostedRuntimeGroupEmailMemberIds(
         result.skippedNoEmailMemberIds,
-        "Hosted runtime newsletter tool skippedNoEmailMemberIds",
+        "Hosted runtime group email effect skippedNoEmailMemberIds",
       );
       if (status === "no_recipients") {
         if (participantCount !== 0) {
-          throw new TypeError("Hosted runtime newsletter tool no_recipients participantCount must be 0.");
+          throw new TypeError("Hosted runtime group email effect no_recipients participantCount must be 0.");
         }
         return {
           action,
@@ -3860,32 +3899,32 @@ export function parseHostedRuntimeNewsletterToolResponse(
           "sentRecipientCount",
           "skippedNoEmailMemberIds",
         ]),
-        "Hosted runtime newsletter tool partial_failure response result",
+        "Hosted runtime group email effect partial_failure response result",
       );
       const participantCount = requireNumber(
         result.participantCount,
-        "Hosted runtime newsletter tool participantCount",
+        "Hosted runtime group email effect participantCount",
       );
       if (!Number.isInteger(participantCount) || participantCount < 0) {
-        throw new TypeError("Hosted runtime newsletter tool participantCount must be a non-negative integer.");
+        throw new TypeError("Hosted runtime group email effect participantCount must be a non-negative integer.");
       }
-      const skippedNoEmailMemberIds = parseHostedRuntimeNewsletterMemberIds(
+      const skippedNoEmailMemberIds = parseHostedRuntimeGroupEmailMemberIds(
         result.skippedNoEmailMemberIds,
-        "Hosted runtime newsletter tool skippedNoEmailMemberIds",
+        "Hosted runtime group email effect skippedNoEmailMemberIds",
       );
       const sentRecipientCount = requireNumber(
         result.sentRecipientCount,
-        "Hosted runtime newsletter tool sentRecipientCount",
+        "Hosted runtime group email effect sentRecipientCount",
       );
       const failedRecipientCount = requireNumber(
         result.failedRecipientCount,
-        "Hosted runtime newsletter tool failedRecipientCount",
+        "Hosted runtime group email effect failedRecipientCount",
       );
       if (!Number.isInteger(sentRecipientCount) || sentRecipientCount < 0) {
-        throw new TypeError("Hosted runtime newsletter tool sentRecipientCount must be a non-negative integer.");
+        throw new TypeError("Hosted runtime group email effect sentRecipientCount must be a non-negative integer.");
       }
       if (!Number.isInteger(failedRecipientCount) || failedRecipientCount < 0) {
-        throw new TypeError("Hosted runtime newsletter tool failedRecipientCount must be a non-negative integer.");
+        throw new TypeError("Hosted runtime group email effect failedRecipientCount must be a non-negative integer.");
       }
       return {
         action,
@@ -3902,7 +3941,7 @@ export function parseHostedRuntimeNewsletterToolResponse(
       assertAllowedObjectKeys(
         result,
         new Set(["status", "unavailableReason"]),
-        "Hosted runtime newsletter tool send unavailable response result",
+        "Hosted runtime group email effect send unavailable response result",
       );
       return {
         action,
@@ -3910,32 +3949,34 @@ export function parseHostedRuntimeNewsletterToolResponse(
           status,
           unavailableReason: requireString(
             result.unavailableReason,
-            "Hosted runtime newsletter tool unavailableReason",
+            "Hosted runtime group email effect unavailableReason",
           ),
         },
       };
     }
   }
 
-  throw new TypeError("Hosted runtime newsletter tool response action/status is not supported.");
+  throw new TypeError(
+    "Hosted runtime group email effect response action/status is not supported.",
+  );
 }
 
-function requireHostedRuntimeNewsletterAuthorizationProof(value: unknown): string {
-  if (!isHostedRuntimeNewsletterAuthorizationProof(value)) {
+function requireHostedRuntimeGroupEmailAuthorizationProof(value: unknown): string {
+  if (!isHostedRuntimeGroupEmailAuthorizationProof(value)) {
     throw new TypeError(
-      "Hosted runtime newsletter tool authorizationProof must be a SHA-256 hex digest.",
+      "Hosted runtime group email effect authorizationProof must be a SHA-256 hex digest.",
     );
   }
   return value;
 }
 
-function parseHostedRuntimeNewsletterParticipants(
+function parseHostedRuntimeGroupEmailParticipants(
   value: unknown,
   label: string,
-): HostedRuntimeNewsletterParticipantSummary[] {
+): HostedRuntimeGroupEmailParticipantSummary[] {
   const entries = requireArray(value, label);
-  if (entries.length > HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX) {
-    throw new TypeError(`${label} must contain at most ${HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX} entries.`);
+  if (entries.length > HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX) {
+    throw new TypeError(`${label} must contain at most ${HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX} entries.`);
   }
   return entries.map((entry) => {
     const record = requireObject(entry, `${label} entry`);
@@ -3945,7 +3986,7 @@ function parseHostedRuntimeNewsletterParticipants(
       `${label} entry`,
     );
     return {
-      authorizedShares: parseHostedRuntimeNewsletterAuthorizedShares(
+      authorizedShares: parseHostedRuntimeGroupEmailAuthorizedShares(
         record.authorizedShares,
         `${label} entry authorizedShares`,
       ),
@@ -3955,14 +3996,14 @@ function parseHostedRuntimeNewsletterParticipants(
   });
 }
 
-function parseHostedRuntimeNewsletterAuthorizedShares(
+function parseHostedRuntimeGroupEmailAuthorizedShares(
   value: unknown,
   label: string,
-): HostedRuntimeNewsletterAuthorizedShare[] {
+): HostedRuntimeGroupEmailAuthorizedShare[] {
   const entries = requireArray(value, label);
-  if (entries.length > HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX) {
+  if (entries.length > HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX) {
     throw new TypeError(
-      `${label} must contain at most ${HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX} entries.`,
+      `${label} must contain at most ${HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX} entries.`,
     );
   }
   return entries.map((entry) => {
@@ -3982,7 +4023,7 @@ function parseHostedRuntimeNewsletterAuthorizedShares(
   });
 }
 
-function parseHostedRuntimeNewsletterMemberIds(
+function parseHostedRuntimeGroupEmailMemberIds(
   value: unknown,
   label: string,
 ): string[] {
@@ -4143,14 +4184,15 @@ const HOSTED_RUNTIME_GROUP_SHARED_SELECTABLE_PROJECTION_SCOPE_BY_KEY =
 function parseHostedRuntimeGroupSharedRequestedProjectionScopes(
   value: unknown,
   label: string,
+  maxEntries = HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
 ): HostedVaultShareSelectableProjectionScope[] {
   const requested = requireArray(value, label);
   if (
     requested.length === 0
-    || requested.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES
+    || requested.length > maxEntries
   ) {
     throw new TypeError(
-      `${label} must contain between 1 and ${HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES} entries.`,
+      `${label} must contain between 1 and ${maxEntries} entries.`,
     );
   }
 

@@ -1,6 +1,6 @@
 import type {
-  HostedRuntimeNewsletterScheduledAuthority,
-  HostedRuntimeNewsletterToolResponse,
+  HostedRuntimeGroupEmailScheduledAuthority,
+  HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type {
   AssistantOutboxIntent,
@@ -10,32 +10,35 @@ import {
   serializeHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 
-import type { AssistantHostedNewsletterTool } from './execution-context.js'
+import type {
+  AssistantHostedGroupEmailEffect,
+  AssistantHostedGroupTool,
+} from './execution-context.js'
 import {
   createAssistantOutboxIntent,
   listAssistantOutboxIntents,
 } from './outbox.js'
 
-type NewsletterPreparation = {
+type GroupEmailPreparation = {
   authorizationProof: string
-  authority: HostedRuntimeNewsletterScheduledAuthority
+  authority: HostedRuntimeGroupEmailScheduledAuthority
   groupId: string
   participantMemberIds: string[]
   skippedNoEmailMemberIds: string[]
 }
 
-export function createAssistantNewsletterOutboxTool(input: {
+export function createAssistantGroupEmailOutboxTool(input: {
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
-  authority: HostedRuntimeNewsletterScheduledAuthority | null
-  newsletterTool: AssistantHostedNewsletterTool
+  authority: HostedRuntimeGroupEmailScheduledAuthority | null
+  groupTool: AssistantHostedGroupTool
   recordPendingDeliveryIntentId?: (intentId: string) => void
   sessionId: string
   turnId: string
   vault: string
-}): AssistantHostedNewsletterTool & { closeCapability(): void } {
+}): AssistantHostedGroupEmailEffect & { closeCapability(): void } {
   let prepareAttempted = false
   let sendAttempted = false
-  let preparation: NewsletterPreparation | null = null
+  let preparation: GroupEmailPreparation | null = null
   const closeCapability = () => {
     preparation = null
     prepareAttempted = true
@@ -45,18 +48,33 @@ export function createAssistantNewsletterOutboxTool(input: {
   return {
     closeCapability,
     async request(request) {
-      if (request.action === 'prepare') {
+      if (request.action === 'prepare_email') {
         if (prepareAttempted || sendAttempted) {
           closeCapability()
-          return newsletterUnavailable('prepare', 'newsletter_capability_consumed')
+          return groupEmailUnavailable(
+            'prepare_email',
+            'group_email_capability_consumed',
+          )
         }
         prepareAttempted = true
-        const result = await input.newsletterTool.request({
-          action: 'prepare',
+        const prepared = await input.groupTool.request({
+          action: 'prepare_email',
+          projectionScopes: request.projectionScopes,
         })
+        if (prepared.action !== 'prepare_email') {
+          closeCapability()
+          return groupEmailUnavailable(
+            'prepare_email',
+            'group_email_effect_response_mismatch',
+          )
+        }
+        const result: HostedRuntimeGroupEmailEffectResponse = {
+          action: 'prepare_email',
+          result: prepared.result,
+        }
         if (
           input.authority
-          && result.action === 'prepare'
+          && result.action === 'prepare_email'
           && result.result.status === 'ok'
         ) {
           preparation = {
@@ -75,24 +93,33 @@ export function createAssistantNewsletterOutboxTool(input: {
       }
 
       if (sendAttempted) {
-        return newsletterUnavailable('send', 'newsletter_capability_consumed')
+        return groupEmailUnavailable(
+          'send_email',
+          'group_email_capability_consumed',
+        )
       }
       sendAttempted = true
       const prepared = preparation
       preparation = null
       if (!input.authority) {
-        return newsletterUnavailable('send', 'scheduled_automation_required')
+        return groupEmailUnavailable(
+          'send_email',
+          'scheduled_automation_required',
+        )
       }
       if (
         !prepared
         || prepared.authority.automationId !== input.authority.automationId
         || prepared.authority.occurrenceAt !== input.authority.occurrenceAt
       ) {
-        return newsletterUnavailable('send', 'newsletter_preparation_required')
+        return groupEmailUnavailable(
+          'send_email',
+          'group_email_preparation_required',
+        )
       }
       if (prepared.participantMemberIds.length === 0) {
         return {
-          action: 'send',
+          action: 'send_email',
           result: {
             participantCount: 0,
             skippedNoEmailMemberIds: prepared.skippedNoEmailMemberIds,
@@ -101,7 +128,7 @@ export function createAssistantNewsletterOutboxTool(input: {
         }
       }
 
-      const deliveryIdempotencyKey = buildNewsletterDeliveryIdempotencyKey({
+      const deliveryIdempotencyKey = buildGroupEmailDeliveryIdempotencyKey({
         authority: prepared.authority,
         groupId: prepared.groupId,
       })
@@ -110,27 +137,27 @@ export function createAssistantNewsletterOutboxTool(input: {
         (intent) => intent.deliveryIdempotencyKey === deliveryIdempotencyKey,
       )
       const parentIntents = currentIntents
-        .filter(isNewsletterParentIntent)
+        .filter(isGroupEmailParentIntent)
         .sort(compareOutboxIntentCreationOrder)
       const activeParent = parentIntents.find(isActiveOutboxIntent)
       if (activeParent) {
         input.recordPendingDeliveryIntentId?.(activeParent.intentId)
-        return newsletterAccepted(prepared)
+        return groupEmailAccepted(prepared)
       }
 
       if (parentIntents.some((intent) => intent.status === 'sent')) {
-        return newsletterSent(prepared)
+        return groupEmailSent(prepared)
       }
 
       if (parentIntents.length > 0) {
-        return newsletterFailed(prepared)
+        return groupEmailFailed(prepared)
       }
 
       const parentIntent = await createAssistantOutboxIntent({
         automationAuthority: input.automationAuthority ?? null,
         channel: 'email',
         dedupeToken: [
-          'group-newsletter-parent',
+          'group-email-parent',
           deliveryIdempotencyKey,
         ].join(':'),
         deliveryIdempotencyKey,
@@ -141,7 +168,7 @@ export function createAssistantNewsletterOutboxTool(input: {
           targetKind: 'group',
         }),
         message: request.text ?? 'Open this email in an HTML-capable mail client.',
-        newsletterAuthorizationProof: prepared.authorizationProof,
+        groupEmailAuthorizationProof: prepared.authorizationProof,
         sessionId: input.sessionId,
         subject: null,
         threadIsDirect: false,
@@ -149,21 +176,27 @@ export function createAssistantNewsletterOutboxTool(input: {
         vault: input.vault,
       })
       input.recordPendingDeliveryIntentId?.(parentIntent.intentId)
-      return newsletterAccepted(prepared)
+      return groupEmailAccepted(prepared)
     },
   }
 }
 
-export async function findAssistantNewsletterParentIntent(input: {
-  authority: HostedRuntimeNewsletterScheduledAuthority
+export async function findAssistantGroupEmailParentIntent(input: {
+  authority: HostedRuntimeGroupEmailScheduledAuthority
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
-  const deliveryIdempotencyPrefix =
-    buildNewsletterDeliveryIdempotencyPrefix(input.authority)
+  const deliveryIdempotencyPrefixes = [
+    buildGroupEmailDeliveryIdempotencyPrefix(input.authority),
+    // Bounded legacy reader for parent intents accepted before the generic
+    // effect key shipped. New writes never emit this prefix.
+    `group-newsletter:${input.authority.automationId}:${input.authority.occurrenceAt}:`,
+  ]
   const parentIntents = (await listAssistantOutboxIntents(input.vault))
     .filter((intent) =>
-      intent.deliveryIdempotencyKey?.startsWith(deliveryIdempotencyPrefix)
-      && isNewsletterParentIntent(intent)
+      deliveryIdempotencyPrefixes.some((prefix) =>
+        intent.deliveryIdempotencyKey?.startsWith(prefix)
+      )
+      && isGroupEmailParentIntent(intent)
     )
     .sort(compareOutboxIntentCreationOrder)
   return parentIntents.find(isActiveOutboxIntent)
@@ -172,24 +205,24 @@ export async function findAssistantNewsletterParentIntent(input: {
     ?? null
 }
 
-function buildNewsletterDeliveryIdempotencyKey(input: {
-  authority: HostedRuntimeNewsletterScheduledAuthority
+function buildGroupEmailDeliveryIdempotencyKey(input: {
+  authority: HostedRuntimeGroupEmailScheduledAuthority
   groupId: string
 }): string {
-  return `${buildNewsletterDeliveryIdempotencyPrefix(input.authority)}${input.groupId}`
+  return `${buildGroupEmailDeliveryIdempotencyPrefix(input.authority)}${input.groupId}`
 }
 
-function buildNewsletterDeliveryIdempotencyPrefix(
-  authority: HostedRuntimeNewsletterScheduledAuthority,
+function buildGroupEmailDeliveryIdempotencyPrefix(
+  authority: HostedRuntimeGroupEmailScheduledAuthority,
 ): string {
-  return `group-newsletter:${authority.automationId}:${authority.occurrenceAt}:`
+  return `group-email-effect:${authority.automationId}:${authority.occurrenceAt}:`
 }
 
-function newsletterAccepted(
-  preparation: NewsletterPreparation,
-): HostedRuntimeNewsletterToolResponse {
+function groupEmailAccepted(
+  preparation: GroupEmailPreparation,
+): HostedRuntimeGroupEmailEffectResponse {
   return {
-    action: 'send',
+    action: 'send_email',
     result: {
       participantCount: preparation.participantMemberIds.length,
       skippedNoEmailMemberIds: preparation.skippedNoEmailMemberIds,
@@ -198,21 +231,21 @@ function newsletterAccepted(
   }
 }
 
-function newsletterUnavailable(
-  action: 'prepare' | 'send',
+function groupEmailUnavailable(
+  action: 'prepare_email' | 'send_email',
   unavailableReason: string,
-): HostedRuntimeNewsletterToolResponse {
+): HostedRuntimeGroupEmailEffectResponse {
   return {
     action,
     result: { status: 'unavailable', unavailableReason },
   }
 }
 
-function newsletterSent(
-  preparation: NewsletterPreparation,
-): HostedRuntimeNewsletterToolResponse {
+function groupEmailSent(
+  preparation: GroupEmailPreparation,
+): HostedRuntimeGroupEmailEffectResponse {
   return {
-    action: 'send',
+    action: 'send_email',
     result: {
       participantCount: preparation.participantMemberIds.length,
       skippedNoEmailMemberIds: preparation.skippedNoEmailMemberIds,
@@ -221,11 +254,11 @@ function newsletterSent(
   }
 }
 
-function newsletterFailed(
-  preparation: NewsletterPreparation,
-): HostedRuntimeNewsletterToolResponse {
+function groupEmailFailed(
+  preparation: GroupEmailPreparation,
+): HostedRuntimeGroupEmailEffectResponse {
   return {
-    action: 'send',
+    action: 'send_email',
     result: {
       failedRecipientCount: preparation.participantMemberIds.length,
       participantCount: preparation.participantMemberIds.length,
@@ -236,7 +269,7 @@ function newsletterFailed(
   }
 }
 
-function isNewsletterParentIntent(intent: AssistantOutboxIntent): boolean {
+function isGroupEmailParentIntent(intent: AssistantOutboxIntent): boolean {
   const target = parseHostedEmailThreadTarget(intent.explicitTarget)
   return target?.targetKind === 'group' && target.recipientMemberId === null
 }

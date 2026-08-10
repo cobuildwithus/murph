@@ -27,11 +27,8 @@ import type { ScheduledLogQueryRecord } from '@murphai/query'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-} from '../src/assistant/group-newsletter-automation.js'
-import {
-  createAssistantNewsletterOutboxTool,
-} from '../src/assistant/newsletter-outbox.js'
+  createAssistantGroupEmailOutboxTool,
+} from '../src/assistant/group-email-outbox.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
 import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.js'
 import {
@@ -4992,7 +4989,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('withholds newsletter send authority until the latest configuration opt-out window elapses', async () => {
+  it('makes optional group email authority available at the first natural cron occurrence', async () => {
     async function runOccurrence(occurrenceAt: string) {
       vi.setSystemTime(new Date(occurrenceAt))
       const { vaultRoot } = await createRuntimeContext(
@@ -5010,6 +5007,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule: {
           kind: 'cron',
@@ -5069,7 +5067,7 @@ describe('assistant cron runtime orchestration', () => {
         throw new Error('Expected scheduled notification input.')
       }
       const authority = input.scheduledAutomationAuthority ?? null
-      expect(result.run.status).toBe(authority ? 'failed' : 'succeeded')
+      expect(result.run.status).toBe('succeeded')
       return authority
     }
 
@@ -5077,7 +5075,10 @@ describe('assistant cron runtime orchestration', () => {
     try {
       await expect(
         runOccurrence('2026-07-06T11:59:59.999Z'),
-      ).resolves.toBeNull()
+      ).resolves.toEqual({
+        automationId: 'automation-newsletter-window',
+        occurrenceAt: '2026-07-06T11:00:00.000Z',
+      })
       await expect(
         runOccurrence('2026-07-06T12:00:00.000Z'),
       ).resolves.toEqual({
@@ -5089,7 +5090,7 @@ describe('assistant cron runtime orchestration', () => {
     }
   })
 
-  it('only grants scheduled newsletter send authority for cron schedules', async () => {
+  it('only grants generic group email authority for group cron schedules', async () => {
     async function runSchedule(
       schedule: AutomationSchedule,
       tags: string[] = ['assistant', 'scheduled'],
@@ -5110,6 +5111,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule,
         slug: 'group-health-newsletter',
@@ -5167,7 +5169,7 @@ describe('assistant cron runtime orchestration', () => {
         throw new Error('Expected scheduled notification input.')
       }
       const authority = input.scheduledAutomationAuthority ?? null
-      expect(result.run.status).toBe(authority ? 'failed' : 'succeeded')
+      expect(result.run.status).toBe('succeeded')
       return {
         authority,
         instructions: input.instructions ?? '',
@@ -5184,10 +5186,8 @@ describe('assistant cron runtime orchestration', () => {
           automationId: 'automation-newsletter-schedule-kind',
           occurrenceAt: '2026-07-06T12:00:00.000Z',
         },
-        instructions: expect.stringContaining(
-          'Call `murph.newsletter` with `action="prepare"` exactly once and with no group or route identifier.',
-        ),
-        status: 'failed',
+        instructions: expect.stringContaining('Compose the group health newsletter.'),
+        status: 'succeeded',
       })
       await expect(
         runSchedule({ kind: 'at', at: '2026-07-06T12:00:00.000Z' }),
@@ -5195,22 +5195,6 @@ describe('assistant cron runtime orchestration', () => {
       await expect(
         runSchedule({ kind: 'every', everyMs: 3_600_000 }),
       ).resolves.toMatchObject({ authority: null, status: 'succeeded' })
-      await expect(
-        runSchedule(
-          { kind: 'cron', expression: '0 * * * *' },
-          [
-            'assistant',
-            'scheduled',
-            GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-          ],
-        ),
-      ).resolves.toMatchObject({
-        authority: null,
-        instructions: expect.stringContaining(
-          'delivered to the current group chat through the ordinary scheduled assistant response',
-        ),
-        status: 'succeeded',
-      })
     } finally {
       vi.useRealTimers()
     }
@@ -5219,32 +5203,28 @@ describe('assistant cron runtime orchestration', () => {
   it.each([
     {
       label: 'every email recipient fails',
-      newsletterSendResult: {
+      groupEmailSendResult: {
         status: 'unavailable' as const,
         unavailableReason: 'send_failed',
       },
     },
     {
       label: 'recipient authorization changes after preparation',
-      newsletterSendResult: {
+      groupEmailSendResult: {
         status: 'unavailable' as const,
-        unavailableReason: 'newsletter_authorization_changed',
+        unavailableReason: 'group_email_authorization_changed',
       },
     },
     {
       label: 'durable recipient delivery is still pending',
-      newsletterSendResult: {
+      groupEmailSendResult: {
         participantCount: 2,
         skippedNoEmailMemberIds: [],
         status: 'accepted' as const,
       },
     },
-    {
-      label: 'the model exits without a newsletter send result',
-      newsletterSendResult: null,
-    },
-  ])('fails and preserves a scheduled newsletter occurrence when $label', async ({
-    newsletterSendResult,
+  ])('fails and preserves a scheduled group email occurrence when $label', async ({
+    groupEmailSendResult,
   }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
@@ -5264,6 +5244,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule: {
           kind: 'cron',
@@ -5317,9 +5298,9 @@ describe('assistant cron runtime orchestration', () => {
           privateSummary: 'Newsletter delivery failed.',
           text: 'Newsletter delivery failed.',
         },
-        ...(newsletterSendResult
+        ...(groupEmailSendResult
           ? {
-              postTurnDeliveryExpectations: { newsletterSendResult },
+              postTurnDeliveryExpectations: { groupEmailSendResult },
             }
           : {}),
         response: 'Newsletter delivery failed.',
@@ -5337,7 +5318,7 @@ describe('assistant cron runtime orchestration', () => {
 
       expect(result.run.status).toBe('failed')
       expect(result.run.error).toBe(
-        'Group health newsletter delivery did not complete.',
+        'Group email delivery did not complete.',
       )
       const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
       const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
@@ -5357,8 +5338,8 @@ describe('assistant cron runtime orchestration', () => {
       expectedRunReason: 'no_delivery',
       expectedRunStatus: 'succeeded',
       label: 'partial newsletter delivery',
-      newsletterPendingDeliveryIntentId: null,
-      newsletterSendResult: {
+      groupEmailPendingDeliveryIntentId: null,
+      groupEmailSendResult: {
         failedRecipientCount: 1,
         participantCount: 3,
         sentRecipientCount: 2,
@@ -5373,8 +5354,8 @@ describe('assistant cron runtime orchestration', () => {
       expectedRunReason: 'no_delivery',
       expectedRunStatus: 'succeeded',
       label: 'newsletter with no recipients',
-      newsletterPendingDeliveryIntentId: null,
-      newsletterSendResult: {
+      groupEmailPendingDeliveryIntentId: null,
+      groupEmailSendResult: {
         participantCount: 0,
         skippedNoEmailMemberIds: ['member_without_email'],
         status: 'no_recipients' as const,
@@ -5387,8 +5368,8 @@ describe('assistant cron runtime orchestration', () => {
       expectedRunReason: 'delivery_pending',
       expectedRunStatus: 'skipped',
       label: 'durable newsletter fanout is pending',
-      newsletterPendingDeliveryIntentId: 'outbox-newsletter-parent',
-      newsletterSendResult: {
+      groupEmailPendingDeliveryIntentId: 'outbox-newsletter-parent',
+      groupEmailSendResult: {
         participantCount: 3,
         skippedNoEmailMemberIds: [],
         status: 'accepted' as const,
@@ -5402,9 +5383,9 @@ describe('assistant cron runtime orchestration', () => {
         'delivery_pending_after_ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
       expectedRunStatus: 'skipped',
       label: 'durable newsletter acceptance precedes a notification error',
-      newsletterPendingDeliveryIntentId:
+      groupEmailPendingDeliveryIntentId:
         'outbox-newsletter-parent-after-error',
-      newsletterSendResult: {
+      groupEmailSendResult: {
         participantCount: 3,
         skippedNoEmailMemberIds: [],
         status: 'accepted' as const,
@@ -5416,8 +5397,8 @@ describe('assistant cron runtime orchestration', () => {
     expectedRunOutcome,
     expectedRunReason,
     expectedRunStatus,
-    newsletterPendingDeliveryIntentId,
-    newsletterSendResult,
+    groupEmailPendingDeliveryIntentId,
+    groupEmailSendResult,
     throwsAfterAcceptance,
   }) => {
     vi.useFakeTimers()
@@ -5438,6 +5419,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule: {
           kind: 'cron',
@@ -5488,14 +5470,14 @@ describe('assistant cron runtime orchestration', () => {
       if (throwsAfterAcceptance) {
         cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (
           notificationInput: {
-            onNewsletterPendingDeliveryIntentId?: (intentId: string) => void
+            onGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
           },
         ) => {
-          if (!newsletterPendingDeliveryIntentId) {
+          if (!groupEmailPendingDeliveryIntentId) {
             throw new Error('Expected a pending newsletter parent id.')
           }
-          notificationInput.onNewsletterPendingDeliveryIntentId?.(
-            newsletterPendingDeliveryIntentId,
+          notificationInput.onGroupEmailPendingDeliveryIntentId?.(
+            groupEmailPendingDeliveryIntentId,
           )
           throw new VaultCliError(
             'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
@@ -5510,10 +5492,10 @@ describe('assistant cron runtime orchestration', () => {
             text: 'Newsletter handled.',
           },
           postTurnDeliveryExpectations: {
-            ...(newsletterPendingDeliveryIntentId
-              ? { newsletterPendingDeliveryIntentId }
+            ...(groupEmailPendingDeliveryIntentId
+              ? { groupEmailPendingDeliveryIntentId }
               : {}),
-            newsletterSendResult,
+            groupEmailSendResult,
           },
           response: 'Newsletter handled.',
           session: {
@@ -5536,12 +5518,12 @@ describe('assistant cron runtime orchestration', () => {
       const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
       const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
       expect(current?.state.pendingOccurrenceAt).toBe(
-        newsletterPendingDeliveryIntentId
+        groupEmailPendingDeliveryIntentId
           ? '2026-07-12T13:00:00.000Z'
           : null,
       )
       expect(current?.state.pendingDeliveryIntentId ?? null).toBe(
-        newsletterPendingDeliveryIntentId,
+        groupEmailPendingDeliveryIntentId,
       )
       expect(current?.state.consecutiveFailures).toBe(0)
       expect(current?.state.lastFailedAt).toBeNull()
@@ -5693,15 +5675,15 @@ describe('assistant cron runtime orchestration', () => {
         ).mockRejectedValueOnce(failure)
       }
       cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async () => {
-        const tool = createAssistantNewsletterOutboxTool({
+        const tool = createAssistantGroupEmailOutboxTool({
           automationAuthority: {
             automationId,
             expectedUpdatedAt: source.updatedAt,
           },
           authority: { automationId, occurrenceAt },
-          newsletterTool: {
+          groupTool: {
             request: async () => ({
-              action: 'prepare',
+              action: 'prepare_email',
               result: {
                 authorizationProof: 'a'.repeat(64),
                 groupId: 'group_1',
@@ -5719,9 +5701,9 @@ describe('assistant cron runtime orchestration', () => {
           turnId: 'turn_newsletter_post_write_failure',
           vault: vaultRoot,
         })
-        await tool.request({ action: 'prepare' })
+        await tool.request({ action: 'prepare_email', projectionScopes: [] })
         await tool.request({
-          action: 'send',
+          action: 'send_email',
           html: '<p>Weekly</p>',
           subject: 'Weekly',
           text: 'Weekly',
@@ -12570,6 +12552,7 @@ async function createClaimedNewsletterCronJob(input: {
       identityId: null,
       participantId: null,
       threadId: 'group-chat-1',
+          threadIsDirect: false,
     },
     schedule: {
       kind: 'cron',
@@ -12646,7 +12629,7 @@ function buildTestNewsletterParentIntent(input: {
       subject: 'Weekly',
       targetKind: 'group',
     }),
-    newsletterAuthorizationProof: 'a'.repeat(64),
+    groupEmailAuthorizationProof: 'a'.repeat(64),
     threadIsDirect: false,
   })
 }

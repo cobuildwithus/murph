@@ -138,7 +138,7 @@ interface ScriptedProviderRequestSummary {
     includesReadShared: boolean
     includesResponseCardCompactTableShape: boolean
     includesResponseCardNutritionV2Shape: boolean
-    includesSaveNewsletter: boolean
+    includesGroupEmail: boolean
     includesToolSearch: boolean
   }
   serviceTier: string | null
@@ -1448,7 +1448,7 @@ if (!tool) {
         includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
       },
     })
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
@@ -1492,7 +1492,7 @@ if (!tool) {
       providerRequestDiagnostics: {
         includesAutomation: true,
         includesGroup: true,
-        includesSaveNewsletter: true,
+        includesGroupEmail: true,
       },
     })
     expect(
@@ -1638,7 +1638,7 @@ if (!tool) {
         includesAllTools: false,
         includesAutomation: false,
         includesGroup: false,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
         includesToolSearch: true,
       },
     })
@@ -1720,7 +1720,7 @@ text(JSON.stringify(result));
         includesAutomation: false,
         includesGroup: false,
         includesReadShared: true,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
       },
     })
     expect(groupSharedRequests).toEqual([{
@@ -3253,7 +3253,7 @@ function readScriptedProviderRequestSummary(
               'target',
               'totals',
             ].every((field) => requestBody.includes(field)),
-            includesSaveNewsletter: requestBody.includes('save_newsletter'),
+            includesGroupEmail: requestBody.includes('send_email'),
             includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
           },
         }

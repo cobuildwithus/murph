@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -3063,29 +3062,6 @@ describe("executeHostedMailboxEvent", () => {
       "Hosted conversation wakes must be imported through mailbox AssistantInputEvent staging.",
     );
     expect(mocks.prepareHostedWakeContext).not.toHaveBeenCalled();
-    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
-  });
-
-  it("rejects direct group newsletter email-needed wakes so mailbox staging owns the private note", async () => {
-    const wake = buildHostedExecutionGroupNewsletterEmailNeededWake({
-      eventId: "group-newsletter.email-needed:member_123:hgrp_123",
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      memberId: "member_123",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-    });
-
-    await expect(
-      executeHostedMailboxEvent({
-        wake,
-        executionContext,
-        runtime: createRuntime(),
-        runtimeEnv: {},
-        vaultRoot: "/tmp/assistant-runtime-events",
-      }),
-    ).rejects.toThrow(
-      "Hosted group newsletter email-needed wakes are staged at mailbox import and must never reach system wake execution.",
-    );
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
   });
 

@@ -137,6 +137,32 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
+  it("normalizes the legacy group-email proof field and rejects conflicting dual writes", () => {
+    const authorizationProof = "a".repeat(64);
+    const canonicalPayload = createHostedAssistantDeliveryPayload();
+    const legacyEffect = {
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent-legacy-group-email-proof",
+      fingerprint: "dedupe-legacy-group-email-proof",
+      kind: "assistant.delivery",
+      payload: {
+        ...canonicalPayload,
+        newsletterAuthorizationProof: authorizationProof,
+      },
+    };
+
+    expect(parseHostedAssistantDeliverySideEffect(legacyEffect).payload)
+      .toMatchObject({ groupEmailAuthorizationProof: authorizationProof });
+    expect(() => parseHostedAssistantDeliverySideEffect({
+      ...legacyEffect,
+      payload: {
+        ...legacyEffect.payload,
+        groupEmailAuthorizationProof: authorizationProof,
+        newsletterAuthorizationProof: "b".repeat(64),
+      },
+    })).toThrow(/authorization proofs must match/u);
+  });
+
 
   it("propagates strict response cards and preserves legacy card omission", () => {
     const payload = createHostedAssistantDeliveryPayload({

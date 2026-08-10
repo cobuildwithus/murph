@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress: vi.fn(),
   readHostedMemberIdByReplyAliasLookupKey: vi.fn(),
-  readHostedGroupNewsletterEmailRecipients: vi.fn(),
+  readHostedGroupEmailRecipients: vi.fn(),
   upsertHostedMemberReplyAliasLookupKeyTx: vi.fn(),
 }));
 
@@ -59,9 +59,9 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
-  readHostedGroupNewsletterEmailRecipients:
-    mocks.readHostedGroupNewsletterEmailRecipients,
+vi.mock("@/src/lib/hosted-groups/group-email", () => ({
+  readHostedGroupEmailRecipients:
+    mocks.readHostedGroupEmailRecipients,
 }));
 
 type GroupRecipientsRouteModule = typeof import(
@@ -114,7 +114,7 @@ describe("hosted execution email callback routes", () => {
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue(null);
     mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue(null);
-    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+    mocks.readHostedGroupEmailRecipients.mockResolvedValue({
       recipients: [],
       status: "ok",
     });
@@ -149,7 +149,7 @@ describe("hosted execution email callback routes", () => {
   });
 
   it("returns gone when a signed group-recipient callback names a deleted group", async () => {
-    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+    mocks.readHostedGroupEmailRecipients.mockResolvedValue({
       status: "unavailable",
       unavailableReason: "group_not_found",
     });
@@ -162,28 +162,28 @@ describe("hosted execution email callback routes", () => {
     }));
 
     expect(response.status).toBe(410);
-    expect(mocks.readHostedGroupNewsletterEmailRecipients).toHaveBeenCalledWith({
+    expect(mocks.readHostedGroupEmailRecipients).toHaveBeenCalledWith({
       groupId: "group_123",
       runtimeMemberId: "runtime_member_123",
     });
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_GROUP_NEWSLETTER_GROUP_NOT_FOUND",
-        message: "Hosted group newsletter no longer exists.",
+        code: "HOSTED_GROUP_EMAIL_GROUP_NOT_FOUND",
+        message: "Hosted group email target no longer exists.",
         retryable: false,
       },
     });
   });
 
-  it("terminally supersedes stale newsletter authorization before provider entry", async () => {
-    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+  it("terminally supersedes stale group email authorization before provider entry", async () => {
+    mocks.readHostedGroupEmailRecipients.mockResolvedValue({
       status: "unavailable",
-      unavailableReason: "newsletter_authorization_changed",
+      unavailableReason: "group_email_authorization_changed",
     });
 
     const response = await groupRecipientsRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
-        expectedNewsletterAuthorizationProof: "a".repeat(64),
+        expectedGroupEmailAuthorizationProof: "a".repeat(64),
         groupId: "group_123",
       }),
       path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
@@ -192,22 +192,22 @@ describe("hosted execution email callback routes", () => {
     }));
 
     expect(response.status).toBe(410);
-    expect(mocks.readHostedGroupNewsletterEmailRecipients).toHaveBeenCalledWith({
-      expectedNewsletterAuthorizationProof: "a".repeat(64),
+    expect(mocks.readHostedGroupEmailRecipients).toHaveBeenCalledWith({
+      expectedGroupEmailAuthorizationProof: "a".repeat(64),
       groupId: "group_123",
       runtimeMemberId: "runtime_member_123",
     });
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_GROUP_NEWSLETTER_AUTHORIZATION_CHANGED",
-        message: "Hosted group newsletter authorization changed.",
+        code: "HOSTED_GROUP_EMAIL_AUTHORIZATION_CHANGED",
+        message: "Hosted group email authorization changed.",
         retryable: false,
       },
     });
   });
 
   it("keeps transient group-recipient authority unavailability retryable by status", async () => {
-    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+    mocks.readHostedGroupEmailRecipients.mockResolvedValue({
       status: "unavailable",
       unavailableReason: "runtime_inactive",
     });
@@ -222,15 +222,15 @@ describe("hosted execution email callback routes", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_GROUP_NEWSLETTER_RECIPIENTS_UNAVAILABLE",
-        message: "Hosted group newsletter recipients are unavailable.",
+        code: "HOSTED_GROUP_EMAIL_RECIPIENTS_UNAVAILABLE",
+        message: "Hosted group email recipients are unavailable.",
         retryable: false,
       },
     });
   });
 
-  it("passes the signed newsletter authorization proof to final recipient resolution", async () => {
-    mocks.readHostedGroupNewsletterEmailRecipients.mockResolvedValue({
+  it("passes the signed group email authorization proof to final recipient resolution", async () => {
+    mocks.readHostedGroupEmailRecipients.mockResolvedValue({
       recipients: [
         { address: "member@example.test", memberId: "member_123" },
       ],
@@ -240,7 +240,7 @@ describe("hosted execution email callback routes", () => {
 
     const response = await groupRecipientsRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
-        expectedNewsletterAuthorizationProof: authorizationProof,
+        expectedGroupEmailAuthorizationProof: authorizationProof,
         groupId: "group_123",
       }),
       path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
@@ -249,8 +249,8 @@ describe("hosted execution email callback routes", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.readHostedGroupNewsletterEmailRecipients).toHaveBeenCalledWith({
-      expectedNewsletterAuthorizationProof: authorizationProof,
+    expect(mocks.readHostedGroupEmailRecipients).toHaveBeenCalledWith({
+      expectedGroupEmailAuthorizationProof: authorizationProof,
       groupId: "group_123",
       runtimeMemberId: "runtime_member_123",
     });

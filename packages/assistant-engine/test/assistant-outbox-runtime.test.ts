@@ -2251,7 +2251,7 @@ describe('assistant outbox runtime', () => {
     expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
   })
 
-  it('retains group newsletter terminal occurrence evidence during outbox pruning', async () => {
+  it('retains legacy group newsletter terminal occurrence evidence during outbox pruning', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-outbox-newsletter-retention-',
     )

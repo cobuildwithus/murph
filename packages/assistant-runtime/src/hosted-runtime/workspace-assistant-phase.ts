@@ -696,6 +696,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "read_next_group":
     case "cancel_next_group":
     case "revoke_own_email_share":
+    case "prepare_email":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
@@ -1811,11 +1812,6 @@ export async function runHostedWorkspaceAssistantPhase(
           ? {
               personalizationTool:
                 input.runtime.platform.assistantPersonalizationToolPort,
-            }
-          : {}),
-        ...(input.runtime.platform.newsletterToolPort
-          ? {
-              newsletterTool: input.runtime.platform.newsletterToolPort,
             }
           : {}),
         ...(input.runtime.platform.planUsageToolPort

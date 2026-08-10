@@ -218,10 +218,8 @@ import {
   upsertAutomation,
 } from "@murphai/core";
 import {
-  buildGroupNewsletterAutomationSaveRequest,
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   completeAssistantOnboarding,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
   markAssistantContextSnapshotDirty,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
@@ -5009,20 +5007,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!saved || saved.action !== "save") {
             throw new Error("Expected saved automation.");
           }
-          const newsletter = await executionContext.hosted?.automationTool?.request(
-            buildGroupNewsletterAutomationSaveRequest({
-              configuration: {
-                delivery: "current_chat",
-                healthScopes: ["steps-days.v0", "sleep-duration-days.v0"],
-                newsletterName: "Family weekly health newsletter",
-                tone: "supportive",
-              },
-              schedule: {
-                expression: "0 13 * * 1",
-                kind: "cron",
-              },
-            }),
-          );
+          const newsletter = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            continuityPolicy: "fresh",
+            instructions: [
+              "Read and follow the group-newsletter skill before every execution.",
+              "Delivery: current_chat",
+              "Health scopes: steps-days.v0, sleep-duration-days.v0",
+              "Tone: supportive",
+            ].join("\n"),
+            schedule: { expression: "0 13 * * 1", kind: "cron" },
+            slug: "group-health-newsletter",
+            title: "Family weekly health newsletter",
+          });
           if (!newsletter || newsletter.action !== "save") {
             throw new Error("Expected saved group newsletter.");
           }
@@ -5032,16 +5029,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             instructions: "Replace the group newsletter with free-form instructions.",
             schedule: { expression: "0 13 * * 1", kind: "cron" },
             title: "Family weekly health newsletter",
-          })).rejects.toThrow(
-            "Use murph.automation action=save_newsletter to configure this group newsletter.",
-          );
+          })).resolves.toMatchObject({ action: "save", created: false });
           await expect(executionContext.hosted?.automationTool?.request({
             action: "patch",
             lookup: "group-health-newsletter",
             schedule: { expression: "0 14 * * 1", kind: "cron" },
-          })).rejects.toThrow(
-            "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
-          );
+          })).resolves.toMatchObject({ action: "patch", routeBinding: "preserved" });
           await expect(executionContext.hosted?.automationTool?.request({
             action: "patch",
             lookup: "group-health-newsletter",
@@ -5132,20 +5125,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "read_shared",
             projectionScopes: [{ projectionKind: "steps-days.v0" }],
           });
-          return await executionContext.hosted?.automationTool?.request(
-            buildGroupNewsletterAutomationSaveRequest({
-              configuration: {
-                delivery: "current_chat",
-                healthScopes: ["steps-days.v0", "sleep-duration-days.v0"],
-                newsletterName: "Family weekly health newsletter",
-                tone: "supportive",
-              },
-              schedule: {
-                expression: "0 13 * * 1",
-                kind: "cron",
-              },
-            }),
-          );
+          return await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            continuityPolicy: "fresh",
+            instructions: "Read and follow the group-newsletter skill before every execution.",
+            schedule: { expression: "0 13 * * 1", kind: "cron" },
+            slug: "group-health-newsletter",
+            title: "Family weekly health newsletter",
+          });
         },
         turnEnvironment: null,
       });
@@ -5159,7 +5146,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         created: false,
         lookupId: "group-health-newsletter",
         routeBinding: "current_conversation",
-        status: "paused",
+        status: "active",
       }));
       expect(groupRequestMock).toHaveBeenCalledWith({
         action: "read_shared",
@@ -5203,10 +5190,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           deliveryTarget: "telegram_group_chat",
           threadIsDirect: false,
         }),
-        tags: expect.arrayContaining([
-          GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-        ]),
-        status: "paused",
+        instructions: expect.stringContaining("group-newsletter skill"),
+        status: "active",
       }));
       await expect(showAutomation({
         slug: "stale-group-check-in",
@@ -5409,33 +5394,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         title: "Existing reminder",
         vaultRoot,
       });
-      const newsletterSave = buildGroupNewsletterAutomationSaveRequest({
-        configuration: {
-          delivery: "current_chat",
-          healthScopes: ["steps-days.v0"],
-          newsletterName: "Existing group newsletter",
-          tone: "supportive",
-        },
-        schedule: { expression: "0 9 * * 0", kind: "cron" },
-      });
-      await upsertAutomation({
-        continuityPolicy: newsletterSave.continuityPolicy,
-        instructions: newsletterSave.instructions,
-        route: {
-          channel: "telegram",
-          deliveryTarget: "telegram_existing_group",
-          identityId: null,
-          participantId: null,
-          threadId: "telegram_existing_group",
-          threadIsDirect: false,
-        },
-        schedule: newsletterSave.schedule,
-        slug: newsletterSave.slug,
-        status: "active",
-        tags: newsletterSave.tags,
-        title: newsletterSave.title,
-        vaultRoot,
-      });
       mocks.readAssistantInputEvent.mockResolvedValue({
         conversation: {
           accountId: "linq_identity_current",
@@ -5475,26 +5433,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             if (!automationTool) {
               throw new Error("Expected scoped hosted automation tool.");
             }
-            await expect(automationTool.request(
-              buildGroupNewsletterAutomationSaveRequest({
-                configuration: {
-                  delivery: "current_chat",
-                  healthScopes: ["steps-days.v0"],
-                  newsletterName: "Private thread newsletter",
-                  tone: "supportive",
-                },
-                schedule: { expression: "0 9 * * 0", kind: "cron" },
-              }),
-            )).rejects.toThrow(
-              "Group newsletters can be saved only from the current iMessage or Telegram group conversation.",
-            );
-            await expect(automationTool.request({
-              action: "patch",
-              lookup: "group-health-newsletter",
-              retargetToCurrentConversation: true,
-            })).rejects.toThrow(
-              "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
-            );
             return await automationTool.request({
               action: "patch",
               lookup: "existing-reminder",

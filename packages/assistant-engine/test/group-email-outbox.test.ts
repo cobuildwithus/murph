@@ -1,12 +1,12 @@
 import { rm } from 'node:fs/promises'
 
 import type {
-  HostedRuntimeNewsletterToolRequest,
-  HostedRuntimeNewsletterToolResponse,
+  HostedRuntimeGroupEmailEffectRequest,
+  HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createAssistantNewsletterOutboxTool } from '../src/assistant/newsletter-outbox.ts'
+import { createAssistantGroupEmailOutboxTool } from '../src/assistant/group-email-outbox.ts'
 import {
   listAssistantOutboxIntents,
   saveAssistantOutboxIntent,
@@ -25,7 +25,7 @@ const OUTBOX_AUTOMATION_AUTHORITY = {
 }
 const AUTHORIZATION_PROOF = 'a'.repeat(64)
 const DELIVERY_KEY =
-  'group-newsletter:automation_newsletter:2026-07-12T13:00:00.000Z:group_123'
+  'group-email-effect:automation_newsletter:2026-07-12T13:00:00.000Z:group_123'
 const tempRoots: string[] = []
 
 afterEach(async () => {
@@ -35,7 +35,7 @@ afterEach(async () => {
   ))
 })
 
-describe('newsletter durable outbox capability', () => {
+describe('group email durable outbox capability', () => {
   it('closes the capability after a second prepare attempt', async () => {
     const vault = await createVault('newsletter-outbox-one-shot-')
     const request = vi.fn(async () => preparationResponse())
@@ -43,17 +43,17 @@ describe('newsletter durable outbox capability', () => {
 
     await expect(prepare(tool)).resolves.toEqual(preparationResponse())
     await expect(prepare(tool)).resolves.toEqual({
-      action: 'prepare',
+      action: 'prepare_email',
       result: {
         status: 'unavailable',
-        unavailableReason: 'newsletter_capability_consumed',
+        unavailableReason: 'group_email_capability_consumed',
       },
     })
     await expect(send(tool)).resolves.toEqual({
-      action: 'send',
+      action: 'send_email',
       result: {
         status: 'unavailable',
-        unavailableReason: 'newsletter_capability_consumed',
+        unavailableReason: 'group_email_capability_consumed',
       },
     })
 
@@ -71,10 +71,10 @@ describe('newsletter durable outbox capability', () => {
     )
     tool.closeCapability()
     await expect(send(tool)).resolves.toEqual({
-      action: 'send',
+      action: 'send_email',
       result: {
         status: 'unavailable',
-        unavailableReason: 'newsletter_capability_consumed',
+        unavailableReason: 'group_email_capability_consumed',
       },
     })
 
@@ -95,11 +95,11 @@ describe('newsletter durable outbox capability', () => {
 
     await prepare(tool)
     await expect(send(tool)).resolves.toMatchObject({
-      action: 'send',
+      action: 'send_email',
       result: { participantCount: 2, status: 'accepted' },
     })
     await expect(send(tool)).resolves.toMatchObject({
-      action: 'send',
+      action: 'send_email',
       result: { status: 'unavailable' },
     })
 
@@ -111,7 +111,7 @@ describe('newsletter durable outbox capability', () => {
       deliveryIdempotencyKey: DELIVERY_KEY,
       emailHtml: '<p>Weekly</p>',
       message: 'Weekly',
-      newsletterAuthorizationProof: AUTHORIZATION_PROOF,
+      groupEmailAuthorizationProof: AUTHORIZATION_PROOF,
       status: 'pending',
     })
     expect(recordPendingDeliveryIntentId).toHaveBeenCalledWith(
@@ -141,7 +141,7 @@ describe('newsletter durable outbox capability', () => {
     })
     await prepare(retryTool)
     await expect(send(retryTool)).resolves.toMatchObject({
-      action: 'send',
+      action: 'send_email',
       result: { status: 'accepted' },
     })
 
@@ -171,7 +171,7 @@ describe('newsletter durable outbox capability', () => {
     })
     await prepare(retryTool)
     await expect(send(retryTool)).resolves.toEqual({
-      action: 'send',
+      action: 'send_email',
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ['member_no_email'],
@@ -182,8 +182,8 @@ describe('newsletter durable outbox capability', () => {
     expect(recordPendingDeliveryIntentId).not.toHaveBeenCalled()
   })
 
-  it('does not restart a terminal newsletter parent', async () => {
-    const vault = await createVault('newsletter-outbox-failed-parent-')
+  it('does not restart a terminal group email parent', async () => {
+    const vault = await createVault('group-email-outbox-failed-parent-')
     const firstTool = createTool({
       request: vi.fn(async () => preparationResponse()),
       turnId: 'turn_first',
@@ -191,7 +191,7 @@ describe('newsletter durable outbox capability', () => {
     })
     await prepare(firstTool)
     await send(firstTool)
-    await markOnlyIntentFailed(vault, 'ASSISTANT_NEWSLETTER_FANOUT_REJECTED')
+    await markOnlyIntentFailed(vault, 'ASSISTANT_GROUP_EMAIL_FANOUT_REJECTED')
 
     const retryTool = createTool({
       request: vi.fn(async () => preparationResponse()),
@@ -200,7 +200,7 @@ describe('newsletter durable outbox capability', () => {
     })
     await prepare(retryTool)
     await expect(send(retryTool)).resolves.toEqual({
-      action: 'send',
+      action: 'send_email',
       result: {
         failedRecipientCount: 2,
         participantCount: 2,
@@ -216,15 +216,26 @@ describe('newsletter durable outbox capability', () => {
 function createTool(input: {
   recordPendingDeliveryIntentId?: (intentId: string) => void
   request: (
-    request: HostedRuntimeNewsletterToolRequest,
-  ) => Promise<HostedRuntimeNewsletterToolResponse>
+    request: HostedRuntimeGroupEmailEffectRequest,
+  ) => Promise<HostedRuntimeGroupEmailEffectResponse>
   turnId: string
   vault: string
 }) {
-  return createAssistantNewsletterOutboxTool({
+  return createAssistantGroupEmailOutboxTool({
     automationAuthority: OUTBOX_AUTOMATION_AUTHORITY,
     authority: AUTHORITY,
-    newsletterTool: { request: input.request },
+    groupTool: {
+      request: async (request) => {
+        if (request.action !== 'prepare_email') {
+          throw new Error('Expected group email preparation request.')
+        }
+        const response = await input.request(request)
+        if (response.action !== 'prepare_email') {
+          throw new Error('Expected group email preparation response.')
+        }
+        return response
+      },
+    },
     recordPendingDeliveryIntentId: input.recordPendingDeliveryIntentId,
     sessionId: 'session_newsletter',
     turnId: input.turnId,
@@ -235,10 +246,10 @@ function createTool(input: {
 function preparationResponse(input?: {
   authorizationProof?: string
   participantIds?: string[]
-}): HostedRuntimeNewsletterToolResponse {
+}): HostedRuntimeGroupEmailEffectResponse {
   const participantIds = input?.participantIds ?? ['member_one', 'member_two']
   return {
-    action: 'prepare',
+    action: 'prepare_email',
     result: {
       authorizationProof: input?.authorizationProof ?? AUTHORIZATION_PROOF,
       groupId: 'group_123',
@@ -259,7 +270,7 @@ function preparationResponse(input?: {
 }
 
 async function prepare(tool: ReturnType<typeof createTool>) {
-  return await tool.request({ action: 'prepare' })
+  return await tool.request({ action: 'prepare_email', projectionScopes: [] })
 }
 
 async function send(
@@ -271,7 +282,7 @@ async function send(
   },
 ) {
   return await tool.request({
-    action: 'send',
+    action: 'send_email',
     html: input?.html ?? '<p>Weekly</p>',
     subject: input?.subject ?? 'Weekly health note',
     text: input?.text ?? 'Weekly',

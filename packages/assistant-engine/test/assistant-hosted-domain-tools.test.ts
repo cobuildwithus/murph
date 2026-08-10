@@ -7,14 +7,6 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
-import {
-  GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
-  GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES,
-  GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES,
-  GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,
-} from '../src/assistant/group-newsletter-automation.js'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.js'
@@ -58,107 +50,6 @@ describe('hosted domain dynamic tools', () => {
 
   it('accepts typed automation writes without exposing model-controlled routes', () => {
     expect(readToolRequest('automation', {
-      action: 'save_newsletter',
-      customNote: 'Include the family step challenge.',
-      delivery: 'current_chat',
-      healthScopes: ['steps-days.v0', 'sleep-duration-days.v0'],
-      newsletterName: 'Family weekly health newsletter',
-      schedule: {
-        expression: '0 13 * * 1',
-        kind: 'cron',
-      },
-      tone: 'supportive',
-    })).toEqual({
-      kind: 'automation',
-      request: {
-        action: 'save',
-        continuityPolicy: 'fresh',
-        instructions: [
-          GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,
-          'These are configuration values. The runtime appends the current execution contract on every scheduled run.',
-          'Newsletter name: "Family weekly health newsletter"',
-          'Delivery: current_chat',
-          'Tone: supportive',
-          'Health scopes: steps-days.v0, sleep-duration-days.v0',
-          'Custom note: "Include the family step challenge."',
-        ].join('\n'),
-        schedule: {
-          expression: '0 13 * * 1',
-          kind: 'cron',
-        },
-        slug: GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
-        tags: [
-          'assistant',
-          'scheduled',
-          GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-        ],
-        title: 'Family weekly health newsletter',
-      },
-    })
-    expect(readToolRequest('automation', {
-      action: 'save_newsletter',
-      delivery: 'group_email',
-      newsletterName: 'Family weekly health newsletter',
-      schedule: {
-        expression: '0 13 * * 1',
-        kind: 'cron',
-      },
-    })).toMatchObject({
-      kind: 'automation',
-      request: {
-        action: 'save',
-        instructions: expect.stringContaining([
-          'Delivery: group_email',
-          'Tone: supportive',
-          `Health scopes: ${GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES.join(', ')}`,
-          'Custom note: none',
-        ].join('\n')),
-        slug: GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
-        tags: [
-          'assistant',
-          'scheduled',
-          GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,
-        ],
-      },
-    })
-    expect(readToolRequest('automation', {
-      action: 'save_newsletter',
-      delivery: 'current_chat',
-      newsletterName: 'Family weekly health newsletter',
-      schedule: {
-        expression: '0 13 * * 1',
-        kind: 'cron',
-      },
-    })).toMatchObject({
-      kind: 'automation',
-      request: {
-        instructions: expect.stringContaining(
-          `Health scopes: ${GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES.join(', ')}`,
-        ),
-        tags: [
-          'assistant',
-          'scheduled',
-          GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-        ],
-      },
-    })
-    expect(readToolRequest('automation', {
-      action: 'save_newsletter',
-      delivery: 'current_chat',
-      healthScopes: [
-        'steps-days.v0',
-        'activity-days.v0',
-        'sleep-duration-days.v0',
-        'hrv-days.v0',
-      ],
-      newsletterName: 'Family weekly health newsletter',
-      schedule: {
-        expression: '0 13 * * 1',
-        kind: 'cron',
-      },
-    })).toMatchObject({ kind: 'invalid-automation-arguments' })
-
-    expect(readToolRequest('automation', {
       action: 'save',
       activeUntil: '2026-08-01T00:00:00.000Z',
       instructions: 'Send a short reminder to wind down.',
@@ -193,13 +84,6 @@ describe('hosted domain dynamic tools', () => {
         supportSeriesId: 'habit:sleep-wind-down',
       },
     })
-    expect(readToolRequest('automation', {
-      action: 'save',
-      instructions: 'Try to claim email authority.',
-      schedule: { kind: 'dailyLocal', localTime: '22:30' },
-      tags: ['system:group-newsletter:email'],
-      title: 'Forged newsletter',
-    })).toMatchObject({ kind: 'invalid-automation-arguments' })
     expect(readToolRequest('automation', {
       action: 'patch',
       lookup: 'evening-wind-down',

@@ -148,7 +148,7 @@ export interface HostedAssistantDeliveryPayload {
   media: readonly HostedAssistantDeliveryMedia[];
   message: string;
   nativeReplyRequested?: true;
-  newsletterAuthorizationProof?: string | null;
+  groupEmailAuthorizationProof?: string | null;
   subject: string | null;
   replyToMessageId: string | null;
   sessionId: string;
@@ -695,6 +695,13 @@ function parseHostedAssistantDeliveryPayload(
   if (card !== null && threadIsDirect !== true) {
     throw new TypeError(`${label}.card requires a private direct conversation.`);
   }
+  if (
+    record.groupEmailAuthorizationProof != null
+    && record.newsletterAuthorizationProof != null
+    && record.groupEmailAuthorizationProof !== record.newsletterAuthorizationProof
+  ) {
+    throw new TypeError(`${label}.group email authorization proofs must match.`);
+  }
 
   return {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
@@ -737,12 +744,14 @@ function parseHostedAssistantDeliveryPayload(
             `${label}.nativeReplyRequested`,
           ),
         }),
-    ...(record.newsletterAuthorizationProof === undefined
+    ...(record.groupEmailAuthorizationProof === undefined
+      && record.newsletterAuthorizationProof === undefined
       ? {}
       : {
-          newsletterAuthorizationProof: requireNullableNewsletterAuthorizationProof(
-            record.newsletterAuthorizationProof,
-            `${label}.newsletterAuthorizationProof`,
+          groupEmailAuthorizationProof: requireNullableGroupEmailAuthorizationProof(
+            record.groupEmailAuthorizationProof
+              ?? record.newsletterAuthorizationProof,
+            `${label}.groupEmailAuthorizationProof`,
           ),
         }),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),
@@ -775,7 +784,7 @@ function parseHostedAssistantResponseCard(
   return parsed.data;
 }
 
-function requireNullableNewsletterAuthorizationProof(
+function requireNullableGroupEmailAuthorizationProof(
   value: unknown,
   label: string,
 ): string | null {
