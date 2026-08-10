@@ -266,8 +266,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionOwnerId(connectionId);
   }
 
-  async getConnectionRecordForUser(userId: string, connectionId: string) {
-    return this.connections.getConnectionRecordForUser(userId, connectionId);
+  async getConnectionRecordForUser(
+    userId: string,
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ) {
+    return this.connections.getConnectionRecordForUser(userId, connectionId, tx);
   }
 
   async syncDurableConnectionState(account: PublicDeviceSyncAccount, tx?: HostedPrismaTransactionClient): Promise<void> {

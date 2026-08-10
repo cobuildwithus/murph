@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     ensureWebhookSubscriptions: vi.fn(),
     appendHostedMailboxEnvelope: vi.fn(),
     getConnectionForUser: vi.fn(),
+    getConnectionRecordForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
     hasPendingDirtyConnection: vi.fn(),
     inspectCompanionHrvNightReceipt: vi.fn(),
@@ -383,6 +384,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     completeWebhookTrace = mocks.completeWebhookTrace;
     createSignal = mocks.createSignal;
     getConnectionForUser = mocks.getConnectionForUser;
+    getConnectionRecordForUser = mocks.getConnectionRecordForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     hasPendingDirtyConnection = mocks.hasPendingDirtyConnection;
     inspectCompanionHrvNightReceipt = mocks.inspectCompanionHrvNightReceipt;
@@ -463,6 +465,7 @@ describe("hosted device-sync wakes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getConnectionForUser.mockReset();
+    mocks.getConnectionRecordForUser.mockReset();
     mocks.readOAuthStateProviderApplicationBinding.mockReset();
     mocks.resolveDeviceProviderApplication.mockReset();
     mocks.resolveDeviceProviderApplicationForConnection.mockReset();
@@ -482,6 +485,23 @@ describe("hosted device-sync wakes", () => {
     mocks.resolveDeviceProviderApplicationForConnection.mockResolvedValue(null);
     mocks.prismaTx.$queryRaw.mockResolvedValue([{ acquired: true }]);
     mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(0);
+    mocks.getConnectionRecordForUser.mockImplementation(async (
+      userId: string,
+      connectionId: string,
+      tx: unknown,
+    ) => {
+      const current = await mocks.getConnectionForUser(userId, connectionId, tx);
+      return current
+        ? {
+            ...current,
+            connectedAt: new Date(current.connectedAt),
+            createdAt: new Date(current.createdAt),
+            providerApplicationId: null,
+            providerApplicationRevision: null,
+            updatedAt: new Date(current.updatedAt),
+          }
+        : null;
+    });
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
@@ -4206,6 +4226,60 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
+  });
+
+  it("terminally rejects a shared webhook after its connection is rebound to a private application", async () => {
+    const connection = buildHostedConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    mocks.getConnectionRecordForUser.mockResolvedValueOnce({
+      ...connection,
+      connectedAt: new Date(connection.connectedAt),
+      createdAt: new Date(connection.createdAt),
+      providerApplicationId: "dpa_private_strava",
+      providerApplicationRevision: 2,
+      updatedAt: new Date(connection.updatedAt),
+    });
+
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: connection.provider,
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "athlete.deauthorized",
+        jobs: [{ kind: "account_disconnect" }],
+        occurredAt: "2026-03-26T11:59:00.000Z",
+      },
+    });
+
+    expect(mocks.getConnectionRecordForUser).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      mocks.prismaTx,
+    );
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "strava",
+      "trace_123",
+      "claim-token",
+      mocks.prismaTx,
+    );
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.revokeStravaDeviceSyncAccess).not.toHaveBeenCalled();
   });
 
   it("terminally supersedes webhook work when reconnect replaces its observed epoch before dirty-state commit", async () => {

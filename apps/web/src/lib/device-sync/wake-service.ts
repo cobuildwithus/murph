@@ -2206,7 +2206,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       input.userId,
       input.connectionId,
       async (tx) => {
-      const current = await input.store.getConnectionForUser(
+      const current = await input.store.getConnectionRecordForUser(
         input.userId,
         input.connectionId,
         tx,
@@ -2215,7 +2215,22 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         !current
         || current.provider !== input.provider
         || current.status !== "active"
-        || current.connectedAt !== input.expectedConnectedAt
+        || current.connectedAt.toISOString() !== input.expectedConnectedAt
+      ) {
+        await completeHostedWebhookTraceTx(input, tx);
+        return {
+          wakeMailboxItemId: null,
+        };
+      }
+      // The hosted webhook endpoint authenticates only the shared/operator
+      // provider application. A provider-account row may have been rebound to
+      // a private application after the webhook's initial account lookup, so
+      // the durable admission owner must reject that stale authority while it
+      // holds the connection lock. Private connections continue through their
+      // scheduled reconciliation path until private webhook ownership exists.
+      if (
+        current.providerApplicationId !== null
+        || current.providerApplicationRevision !== null
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {

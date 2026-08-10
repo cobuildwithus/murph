@@ -57,8 +57,11 @@ Last verified: 2026-08-10
   callback consumption, connection use, refresh, revoke, disconnect, and
   deletion must all resolve the same member, provider, application id, and
   revision. A rotated or replaced application cannot consume old OAuth state
-  or authorize a stale connection. Only credential-bearing runtime snapshots
-  may decrypt and project the invocation-scoped configuration.
+  or authorize a stale connection. Shared provider webhook authentication does
+  not authorize an app-bound connection: durable admission rechecks the raw
+  binding under the connection lock and terminally drops that work. Only
+  credential-bearing runtime snapshots may decrypt and project the
+  invocation-scoped configuration.
 - Established shared Junction account preservation is one closed persistence
   contract across hosted and local operation. Shared ingress selects
   `preserve_established` for a source addition and `replace` for an account

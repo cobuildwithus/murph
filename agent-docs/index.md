@@ -144,6 +144,10 @@ the rule that alerts never become billing or retry authority are jointly specifi
 
 ## Canonical Docs
 
+Member-owned device-provider application authority, including the shared
+webhook admission fence for app-bound connections, is jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `agent-docs/RELIABILITY.md`.
+
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |

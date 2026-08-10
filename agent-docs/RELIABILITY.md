@@ -606,7 +606,11 @@ Last verified: 2026-08-10
   revoke operation before the existing local purge; they never fall back to
   operator credentials. Transient secure-box, root-key, database, and KMS
   failures propagate as operational failures so a valid credential is never
-  misclassified as member-repairable state.
+  misclassified as member-repairable state. Shared webhook admission rereads
+  the raw connection binding inside the existing health-data admission lock;
+  an application-bound row completes the trace without dirty state, wake,
+  signal, or provider job. Such connections retain scheduled reconciliation
+  until private-application webhook ownership is explicitly designed.
 - Companion Apple Health metadata and WHOOP overnight summaries recheck their
   exact source inside the health-data admission lock and again before runtime
   import by rereading the durable source row rather than trusting the queued

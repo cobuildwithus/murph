@@ -43,6 +43,10 @@ Created: 2026-08-10
 
 - Accepted the final round-one high-severity finding.
 - Implemented exact token-return authority and repairable cleanup behavior.
-- Focused tests, typechecks, lint, and package-boundary proof pass locally.
-- Pending: reconcile current `main`, push, complete ReviewGPT and CI, run the
-  parent final review, archive this plan, and mark the PR ready without merging.
+- Accepted round two's material shared-webhook authority finding and added the
+  existing durable-admission guard for application-bound connections.
+- Focused tests, typechecks, lint, docs drift, and package-boundary proof pass
+  locally; the pre-remediation reconciled head also passed complete GitHub CI.
+- Pending: push the webhook remediation, complete ReviewGPT round three and
+  exact-head CI, run the parent final review, archive this plan, and mark the PR
+  ready without merging.

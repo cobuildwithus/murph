@@ -859,7 +859,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   that configuration for the current invocation without adding it to workspace
   state or ambient environment configuration. Credential replacement is
   rejected while an exact-bound connection is active; disconnected bindings
-  and stale OAuth state are cleared before the revision advances.
+  and stale OAuth state are cleared before the revision advances. The shared
+  provider webhook endpoint admits work only for unbound connections; an
+  app-bound connection relies on scheduled reconciliation until an explicit
+  private-application webhook authority is designed.
 
   The shared public footer may read incident.io's fixed, public, bodyless,
   queryless status summary directly from the browser. The response is display
