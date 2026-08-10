@@ -79,8 +79,8 @@ test("browser vault projects all live lab history without widening the wearable 
     sourceBundleHash: "f".repeat(64),
     vault,
   });
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 3);
-  assert.equal(replica.generation, 3);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 4);
+  assert.equal(replica.generation, 4);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
 
   assert.equal(replica.labResultRows.length, 7);
@@ -138,6 +138,7 @@ test("lab result selectors group measured biomarkers and chart only comparable e
       createLabTest("evt_hba1c_2026", "2026-06-01T08:00:00.000Z", [{
         analyte: "Hemoglobin A1c",
         biomarkerSlug: "hba1c",
+        referenceRange: { high: 42, low: 31, text: "31-42 mmol/mol" },
         unit: "mmol/mol",
         value: 38,
       }]),
@@ -180,6 +181,8 @@ test("lab result selectors group measured biomarkers and chart only comparable e
   assert.ok(detail);
   assert.equal(detail.comparableUnit, "percent");
   assert.equal(detail.latest.value, 38);
+  assert.equal(detail.latest.flag, "normal");
+  assert.equal(detail.latest.statusSource, "reporting_lab_range");
   assert.equal(detail.hasIncompatibleHistory, true);
   assert.deepEqual(detail.chartSeries.map((point) => point.value), [5.4, 5.6]);
 
@@ -202,6 +205,38 @@ test("lab result selectors group measured biomarkers and chart only comparable e
     ["2020-02-01", "2023-03-01", "2025-04-01", "2026-06-01"],
   );
   assert.deepEqual(client.labResults.list({ biomarkerKey: "biomarker:missing" }), []);
+});
+
+test("lab result selectors derive status from a unitless reporting-lab range", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_ag_ratio", "2026-06-01T08:00:00.000Z", [{
+        analyte: "Albumin/Globulin Ratio",
+        biomarkerSlug: "albumin-globulin-ratio",
+        referenceRange: { high: 2.5, low: 1 },
+        value: 0.8,
+      }]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "7".repeat(64),
+    vault,
+  });
+  const detail = selectBrowserVaultLabBiomarkerDetail(
+    createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)),
+    "albumin-globulin-ratio",
+  );
+
+  assert.ok(detail);
+  assert.equal(detail.latest.normalizedUnit, null);
+  assert.equal(detail.latest.normalizedValue, null);
+  assert.deepEqual(detail.latest.normalizedReferenceRange, { high: 2.5, low: 1 });
+  assert.equal(detail.latest.flag, "low");
+  assert.equal(detail.latest.statusSource, "reporting_lab_range");
 });
 
 test("lab aliases project into one comparable longitudinal biomarker", async () => {
@@ -489,6 +524,11 @@ test("lab result projection exposes only an allowlisted fallback specimen kind",
         unit: "mmol/L",
         value: 102,
       }], "plasma"),
+      createLabTest("evt_whole_blood", "2026-02-15T08:00:00.000Z", [{
+        analyte: "White blood cells",
+        unit: "10^3/uL",
+        value: 3,
+      }], "whole_blood"),
       createLabTest("evt_urine", "2026-03-01T08:00:00.000Z", [{
         analyte: "Chloride",
         unit: "mmol/L",
@@ -512,9 +552,19 @@ test("lab result projection exposes only an allowlisted fallback specimen kind",
 
   assert.deepEqual(
     replica.labResultRows.map((row) => row.specimenKind),
-    ["serum", "plasma", null, null],
+    ["serum", "plasma", "whole_blood", null, null],
   );
   assert.doesNotMatch(JSON.stringify(replica.labResultRows), /specimenType|testCategory/u);
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const whiteBloodCells = selectBrowserVaultLabBiomarkerDetail(
+    client,
+    "white-blood-cell-count",
+  );
+  assert.ok(whiteBloodCells);
+  assert.equal(whiteBloodCells.latest.specimenKind, "whole_blood");
+  assert.equal(whiteBloodCells.latest.flag, "low");
+  assert.equal(whiteBloodCells.latest.statusSource, "published_comparator");
 });
 
 test("unitless lab values remain raw and are excluded from normalized presentation", async () => {
@@ -820,7 +870,7 @@ test("lab-only aliases preserve manual metric selection and goal authority", asy
     sourceBundleHash: "a".repeat(64),
     vault,
   });
-  assert.equal(replica.generation, 3);
+  assert.equal(replica.generation, 4);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
   const indexed = selectBrowserVaultMeasuredBiomarkers(client)
     .find((entry) => entry.metricKey === "total-testosterone");
@@ -1195,7 +1245,7 @@ test("browser vault parser defaults a missing additive lab collection and reject
       ...legacyReplica,
       labResultRows: [{ ...row, specimenKind: "urine" }],
     }),
-    /specimenKind must be plasma, serum, or null/u,
+    /specimenKind must be plasma, serum, whole_blood, or null/u,
   );
 });
 
