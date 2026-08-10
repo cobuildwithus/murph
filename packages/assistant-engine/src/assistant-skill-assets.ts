@@ -80,12 +80,6 @@ export const ASSISTANT_SKILLS = [
       'Use for VO2 max, cardio fitness estimates, aerobic capacity, zone interpretation, cardiorespiratory health framing, and wearable cardio marker trends. Use running-cardio or competition-training when the user wants a concrete training plan.',
   },
   {
-    slug: 'recovery-modalities',
-    name: 'recovery-modalities',
-    triggerHint:
-      'Use for sauna, cold plunge, contrast therapy, compression, massage, foam rolling, percussion guns, stretching-as-recovery, breathwork-as-recovery, and recovery modality tradeoffs.',
-  },
-  {
     slug: 'daily-activity',
     name: 'daily-activity',
     triggerHint:
@@ -126,12 +120,6 @@ export const ASSISTANT_SKILLS = [
     name: 'gut-digestion',
     triggerHint:
       'Use for bloating, reflux, constipation, diarrhea, IBS-style patterns, fiber changes, meal-timing experiments, elimination or reintroduction plans, and digestive symptom tracking. Route red flags or suspected disease to clinician support.',
-  },
-  {
-    slug: 'general-eye-health',
-    name: 'general-eye-health',
-    triggerHint:
-      'Use for digital eye strain, dry or irritated eyes, contact-lens comfort and safety, myopia or refractive questions, eye-health prevention, eye exams, and triage of eye pain, redness, light sensitivity, discharge, vision changes, flashes, floaters, injury, or chemical exposure.',
   },
   {
     slug: 'behavior-followthrough',

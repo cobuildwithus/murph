@@ -1,6 +1,6 @@
 # Health Commons
 
-Last verified: 2026-07-29
+Last verified: 2026-08-10
 
 ## Current State
 
@@ -170,6 +170,12 @@ The Health Commons carries two different kinds of public truth and they must sta
 Community outcome summaries must never silently rewrite the literature-backed page body. Today, generated Health Commons artifacts may carry authored or `coming_soon` placeholders only. When run-derived summaries exist, they should surface as generated blocks with clear caveats such as cohort size, confidence, trust-tier mix, and confounders or selection limits when known.
 
 If the contribution pool is too small, too noisy, or too privacy-sensitive, the correct output is no public summary.
+
+## Assistant Skill Boundary
+
+Health Commons owns reusable public health facts, evidence limits, safety guidance, and symptom-sensitive care decisions. This includes knowledge-only topics that have no protocol, experiment, or public UI page.
+
+Assistant skills must not duplicate that topic knowledge. A skill can still own a tool procedure or a stateful product workflow, such as booking care after the Health Commons result establishes the destination. General eye-health and recovery-modality guidance therefore live in Health Commons rather than topic skills.
 
 ## Family Key Style
 

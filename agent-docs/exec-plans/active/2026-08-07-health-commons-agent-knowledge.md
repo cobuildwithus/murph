@@ -38,6 +38,8 @@ Updated: 2026-08-10
 - Assistant routing guidance for ordinary health questions.
 - General photobiomodulation knowledge and removal of the duplicate red-light
   skill and device seed catalog.
+- General eye-health and recovery-modality knowledge, with removal of both
+  remaining topic-specific knowledge skills.
 - Exact public-artifact exception for the generated SQLite file.
 - Focused generator, runtime, CLI, prompt, packaging, and release tests.
 - Matching architecture, security, and Health Commons documentation.
@@ -60,7 +62,9 @@ Updated: 2026-08-10
 4. [complete] Keep topic resolution fail-closed and retrieval owner-scoped.
 5. [complete] Remove the red-light skill and add general PBM Commons knowledge.
 6. [complete] Add the exact release-guard exception for the public index.
-7. [in progress] Run final verification, exact-head review, CI, and close the
+7. [complete] Move general eye-health and recovery-modality guidance into
+   Health Commons and delete their topic skills.
+8. [in progress] Run final verification, exact-head review, CI, and close the
    plan.
 
 ## Decisions
@@ -84,6 +88,9 @@ Updated: 2026-08-10
 - Store stable PBM definition, evidence boundaries, dose math, and safety in
   Health Commons. Current official instructions or user input own mutable device
   specifications.
+- Health Commons owns topic-specific public health facts, safety guidance, and
+  symptom-sensitive care decisions. Skills remain only for tool procedures and
+  stateful product workflows.
 - Keep the Bryan Johnson sauna post as research input only. Stronger existing
   source pages already cover its useful claims.
 - Preserve the wrong-topic, family-alias, typed-finding, qualifier, provenance,

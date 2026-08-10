@@ -3,8 +3,7 @@
 import Image from "next/image";
 import { useState } from "react";
 
-const GH_BASE =
-  "https://github.com/cobuildwithus/murph/blob/main/packages/assistant-engine/skills";
+const GH_BASE = "https://github.com/cobuildwithus/murph/blob/main";
 
 type Topic = {
   id: string;
@@ -12,7 +11,8 @@ type Topic = {
   image: string;
   headline: string;
   proof: string;
-  skill: string;
+  sourceLabel: string;
+  sourcePath: string;
   handles: readonly string[];
   example: string;
   improves: readonly string[];
@@ -25,7 +25,8 @@ const TOPICS: readonly Topic[] = [
     image: "/design-assets/hero-morning-outdoor-light-exposure.jpeg",
     headline: "Murph helps you find what is breaking the night.",
     proof: "428 studies read · reviewed Jul 2026",
-    skill: "sleep-improvement",
+    sourceLabel: "View the skill on GitHub",
+    sourcePath: "packages/assistant-engine/skills/sleep-improvement/SKILL.md",
     handles: [
       "Reads your deep, REM, and efficiency",
       "Morning light and evening dim, for your chronotype",
@@ -44,7 +45,8 @@ const TOPICS: readonly Topic[] = [
     image: "/design-assets/hero-finnish-sauna.jpeg",
     headline: "Murph builds a sauna plan around you.",
     proof: "340 studies read · reviewed Jul 2026",
-    skill: "recovery-modalities",
+    sourceLabel: "View Health Commons on GitHub",
+    sourcePath: "packages/health-commons/content/families/dry-sauna.md",
     handles: [
       "Traditional or infrared, for your goal",
       "The target temperature and session length",
@@ -64,7 +66,8 @@ const TOPICS: readonly Topic[] = [
     image: "/design-assets/hero-at-home-static-stretching-latest.jpeg",
     headline: "Murph builds the training around your goal.",
     proof: "1,748 movements · ACSM-based",
-    skill: "strength-training",
+    sourceLabel: "View the skill on GitHub",
+    sourcePath: "packages/assistant-engine/skills/strength-training/SKILL.md",
     handles: [
       "Picks movements for your goal, gear, and injuries",
       "Sets, reps, and week-to-week progression",
@@ -83,7 +86,8 @@ const TOPICS: readonly Topic[] = [
     image: "/design-assets/hero-high-protein-intake.jpeg",
     headline: "Photograph the plate. Murph reads it with you.",
     proof: "330+ studies read · reviewed Jul 2026",
-    skill: "nutrition-strategy",
+    sourceLabel: "View the skill on GitHub",
+    sourcePath: "packages/assistant-engine/skills/nutrition-strategy/SKILL.md",
     handles: [
       "Logs calories, protein, and fat from a photo",
       "The glycemic load, and a swap to flatten it",
@@ -102,7 +106,8 @@ const TOPICS: readonly Topic[] = [
     image: "/design-assets/cold-plunge-tub.jpeg",
     headline: "Murph helps you time cold so it pays off.",
     proof: "235 studies read · reviewed Jul 2026",
-    skill: "recovery-modalities",
+    sourceLabel: "View Health Commons on GitHub",
+    sourcePath: "packages/health-commons/content/families/cold-water-immersion.md",
     handles: [
       "The water temperature and duration to start with",
       "Why not right after lifting, and where to put it instead",
@@ -121,7 +126,8 @@ const TOPICS: readonly Topic[] = [
     image: "/design-assets/hero-red-light-therapy.jpeg",
     headline: "Murph helps you dial in the dose.",
     proof: "278 studies read · reviewed Jul 2026",
-    skill: "recovery-modalities",
+    sourceLabel: "View Health Commons on GitHub",
+    sourcePath: "packages/health-commons/content/families/photobiomodulation.md",
     handles: [
       "How far to sit from your specific lamp",
       "How many seconds, for the goal you have",
@@ -229,14 +235,14 @@ export function DeepCarouselSection() {
                 </p>
                 <a
                   className="inline-flex w-fit items-center gap-2 rounded-full border border-[#2d3436]/25 px-4 py-2 text-[0.8125rem] font-medium text-[#2d3436] transition-colors hover:border-[#2d3436] hover:bg-[#2d3436] hover:text-[#f5f0e8]"
-                  href={`${GH_BASE}/${topic.skill}/SKILL.md`}
+                  href={`${GH_BASE}/${topic.sourcePath}`}
                   rel="noopener noreferrer"
                   target="_blank"
                 >
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                     <path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z" />
                   </svg>
-                  View the skill on GitHub
+                  {topic.sourceLabel}
                 </a>
               </div>
             </div>

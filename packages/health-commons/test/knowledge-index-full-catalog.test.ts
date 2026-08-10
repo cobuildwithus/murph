@@ -96,6 +96,38 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
       .toBe("experiment_family:whole-body-photobiomodulation");
   });
 
+  it("returns focused eye-health evidence and emergency guidance without a topic skill", () => {
+    const screen = search("eye health", "My eyes are dry and blurry after screen work");
+    expect(screen.topic?.key).toBe("experiment_family:general-eye-health");
+    expect(packetText(screen)).toMatch(/digital eye strain|screen-linked/iu);
+    expect(screen.items.every((item) => item.sources.length > 0)).toBe(true);
+
+    const flashes = search("flashes and floaters", "I suddenly see many new ones");
+    expect(flashes.topic?.key).toBe("experiment_family:general-eye-health");
+    expect(flashes.safety?.text).toMatch(/emergency eye assessment now/iu);
+    expect(flashes.safety?.sources.some((source) =>
+      source.sourceKey === "source_artifact:nei-retinal-detachment"
+    )).toBe(true);
+
+    const contacts = search("eye health", "I wear contacts and my eye is red and painful");
+    expect(contacts.safety?.text).toMatch(/remove the lenses.+same-day eye care/iu);
+
+    const chemical = search("chemical eye", "A cleaning chemical splashed into my eye");
+    expect(chemical.safety?.text).toMatch(/irrigation.+emergency help/iu);
+
+    const severePain = search("eye pain", "Sudden severe pain with halos and nausea");
+    expect(severePain.safety?.text).toMatch(/emergency assessment/iu);
+  });
+
+  it("returns recovery-modality comparisons without unrelated safety", () => {
+    const result = search("foam rolling", "Does it improve recovery");
+
+    expect(result.topic?.key).toBe("experiment_family:recovery-modalities");
+    expect(packetText(result)).toMatch(/soreness|range of motion/iu);
+    expect(result.safety).toBeNull();
+    expect(result.items.every((item) => item.sources.length > 0)).toBe(true);
+  });
+
   it("does not substitute nearby topics for unsupported queries", () => {
     expect(search("magnesium sleep safety", "sleep safety")).toMatchObject({ items: [], safety: null, topic: null });
     expect(search("unsupported quux topic", "What does the evidence say")).toMatchObject({ items: [], safety: null, topic: null });
