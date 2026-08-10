@@ -1,0 +1,77 @@
+name: PR 1405 natural-question validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/pr1405-natural-question-validation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: agent/pr1405-natural-question-validation
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Apply candidate patch
+        run: |
+          base64 --decode .github/pr1405-natural-question.patch.gz.b64 | gzip --decompress > /tmp/pr1405.patch
+          git apply /tmp/pr1405.patch
+          git diff --check
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Health Commons
+        run: pnpm --dir packages/health-commons verify
+
+      - name: Generate and verify CLI surface
+        run: |
+          pnpm --dir packages/cli gen:config-schema
+          pnpm --dir packages/cli typecheck
+          pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/commons-command-coverage.test.ts
+
+      - name: Verify assistant prompt and procedural skills
+        run: |
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/model-behavior.test.ts test/assistant-skill-assets.test.ts test/assistant-codex-real-e2e.test.ts
+
+      - name: Verify hosted artifact packaging
+        run: |
+          pnpm --dir apps/cloudflare typecheck
+          pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/deploy-artifacts.test.ts apps/cloudflare/test/runner-bundle-workspace-artifacts.test.ts
+
+      - name: Collect final patch
+        if: always()
+        run: |
+          git status --short > /tmp/pr1405-status.txt
+          git diff --binary > /tmp/pr1405-final.patch
+          git diff --check >> /tmp/pr1405-status.txt 2>&1 || true
+          sha256sum /tmp/pr1405-final.patch >> /tmp/pr1405-status.txt
+
+      - name: Upload validation output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1405-natural-question-validation
+          path: |
+            /tmp/pr1405-final.patch
+            /tmp/pr1405-status.txt
+          if-no-files-found: error
+          retention-days: 1
