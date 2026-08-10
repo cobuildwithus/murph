@@ -1959,7 +1959,7 @@ describe("hosted system mailbox notification execution context", () => {
 
   it("forwards foreground-yield hooks to queued device-sync wakes", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
-    const shouldYieldBackgroundMaintenance = vi.fn(() => true);
+    const shouldYieldBackgroundMaintenance = vi.fn(() => false);
     const wake = buildHostedExecutionDeviceSyncWake({
       eventId: "device-sync.wake:yield",
       occurredAt: FIXED_NOW,
