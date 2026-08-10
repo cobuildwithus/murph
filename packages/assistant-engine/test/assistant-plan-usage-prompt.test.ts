@@ -17,7 +17,7 @@ describe("assistant plan usage call contracts", () => {
     expect(contract).toContain("trusted low-usage context");
     expect(contract).toContain("exact user-named plan");
     expect(contract).toContain("matching quote");
-    expect(contract).toContain("availablePlans is only the trial list");
+    expect(contract).toContain("availablePlans is the current eligible plan list");
     expect(contract).toContain("Read-only");
     expect(contract).toContain(
       "percentages and forecasts cover all available usage",

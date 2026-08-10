@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Training, patterns, reliable reminders, and web search",
+      "Training, Starter access, patterns, reminders, and web search",
     );
     expect(markup).toContain("Review your training in one private view");
     expect(markup).toContain("Managed OpenAI web search works again");
@@ -248,6 +248,9 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");
+    expect(markup).toContain("Confirmed appointments come with a reminder");
+    expect(markup).toContain("Tell Murph about an appointment");
+    expect(markup).toContain("Confirmed appointment");
     expect(markup).toContain("Recovery explains what to do next");
     expect(markup).toContain("Contact details stay tied to the right line");
     expect(markup).toContain("Corrections stay attached to the conversation");
@@ -260,6 +263,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Compact response");
     expect(markup).toContain("70 mg/dL");
     expect(markup).toContain('href="#design-follow-up"');
+    expect(markup).toContain('href="#appointment-reminders-by-default"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");
   });

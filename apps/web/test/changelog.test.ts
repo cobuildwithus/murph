@@ -516,9 +516,11 @@ describe("changelog registry", () => {
         id: "2026-08-10",
         itemIds: [
           "private-training-review",
+          "non-expiring-starter-access",
           "personal-patterns",
           "reminders-keep-requested-timezone",
           "web-search-restored",
+          "appointment-reminders-by-default",
         ],
       },
       {

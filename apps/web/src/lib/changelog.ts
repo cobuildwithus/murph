@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Training, patterns, reliable reminders, and web search",
+    title: "Training, Starter access, patterns, reminders, and web search",
     summary:
-      "A private Training view brings workouts together, Patterns compares actions with next-day health, reminders keep their local time, and managed OpenAI web search can reach current information again.",
+      "A private Training view brings workouts together, Starter usage remains available until it is used, patterns compare repeated actions with next-day health, reminders keep their local time, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "private-training-review",
@@ -83,6 +83,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/training",
           label: "Review training",
+        },
+      },
+      {
+        id: "non-expiring-starter-access",
+        kind: "feature",
+        priority: 5,
+        title: "Start with usage that does not expire",
+        summary:
+          "Eligible new members receive a Starter usage balance that remains available until it is used, with remaining usage and paid plan choices visible in Settings.",
+        details:
+          "Eligible legacy trial value carries into Starter. When the balance is exhausted, Murph pauses AI work without deleting account state and Settings offers eligible paid plans; usage top-ups remain available only to active paid-plan owners.",
+        relevanceTags: ["starter", "usage", "billing", "settings"],
+        sourcePullRequests: [1464],
+        tryIt: {
+          href: "/settings#subscription",
+          label: "View Starter usage",
         },
       },
       {
@@ -134,6 +150,23 @@ const RAW_CHANGELOG_EDITIONS = [
           "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
         relevanceTags: ["assistant", "search", "research", "reliability"],
         sourcePullRequests: [1583],
+      },
+      {
+        id: "appointment-reminders-by-default",
+        kind: "improvement",
+        priority: 4,
+        title: "Confirmed appointments come with a reminder",
+        summary:
+          "When a future care appointment is confirmed in a private conversation, Murph now creates one useful reminder by default unless you opt out.",
+        details:
+          "Morning appointments use the prior evening, later appointments use the same morning, and Murph keeps the same reminder up to date when an appointment is rescheduled or canceled.",
+        relevanceTags: ["appointments", "reminders", "automations", "care"],
+        sourcePullRequests: [1586],
+        tryIt: {
+          label: "Tell Murph about an appointment",
+          prompt:
+            "I have a confirmed dentist appointment next Thursday at 2 PM.",
+        },
       },
     ],
   },
