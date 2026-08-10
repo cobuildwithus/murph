@@ -15,6 +15,7 @@ describe("lab-result display status derivation", () => {
       normalizedValue: 4.2,
     }));
     expect(result.flag).toBe("high");
+    expect(result.statusSource).toBe("reporting_lab_flag");
   });
 
   it.each([
@@ -28,6 +29,7 @@ describe("lab-result display status derivation", () => {
       value,
     }));
     expect(result.flag).toBe(expected);
+    expect(result.statusSource).toBe("reporting_lab_range");
   });
 
   it("preserves strict one-sided source bounds", () => {
@@ -102,6 +104,7 @@ describe("lab-result display status derivation", () => {
       value,
     }));
     expect(result.flag).toBe(expected);
+    expect(result.statusSource).toBe("published_comparator");
   });
 
   it("fails closed when unit or specimen does not match", () => {
@@ -246,6 +249,7 @@ function row(
     rowSchema: "murph.browser-vault.lab-result-row.v1",
     sourceLabel: "Lab result",
     specimenKind: "serum",
+    statusSource: overrides.flag?.trim() ? "reporting_lab_flag" : "reported",
     textValue: null,
     unit: "g/dL",
     value,

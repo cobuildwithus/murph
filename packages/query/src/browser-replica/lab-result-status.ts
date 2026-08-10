@@ -32,13 +32,9 @@ export function deriveBrowserVaultLabResultStatus(
     return row;
   }
 
-  const value = comparableResultValue(row);
-  if (value === null) {
-    return row;
-  }
-
+  const sourceValue = comparableSourceValue(row);
   const sourcePosition = classifySourceRange(
-    value,
+    sourceValue,
     row.comparator,
     row.normalizedReferenceRange,
   );
@@ -46,12 +42,18 @@ export function deriveBrowserVaultLabResultStatus(
     return {
       ...row,
       flag: flagForDisposition(STANDARD_SOURCE_STATUS_MAPPING[sourcePosition]),
+      statusSource: "reporting_lab_range",
     };
   }
 
   // Any source-authored range wording blocks a generic comparator even when
   // the wording is qualified and cannot be normalized into numeric bounds.
   if (row.referenceRange !== null) {
+    return row;
+  }
+
+  const value = comparableFallbackValue(row);
+  if (value === null) {
     return row;
   }
 
@@ -66,7 +68,9 @@ export function deriveBrowserVaultLabResultStatus(
   }
 
   const flag = flagForDisposition(fallback.statusMapping[position]);
-  return flag === null ? row : { ...row, flag };
+  return flag === null
+    ? row
+    : { ...row, flag, statusSource: "published_comparator" };
 }
 
 export function selectBrowserVaultMeasuredBiomarkers(
@@ -105,7 +109,14 @@ const STANDARD_SOURCE_STATUS_MAPPING: Readonly<Record<
   within: "in_range",
 };
 
-function comparableResultValue(row: BrowserVaultPresentedLabResultRow): number | null {
+function comparableSourceValue(row: BrowserVaultPresentedLabResultRow): number | null {
+  if (row.normalizedValue !== null && Number.isFinite(row.normalizedValue)) {
+    return row.normalizedValue;
+  }
+  return row.value !== null && Number.isFinite(row.value) ? row.value : null;
+}
+
+function comparableFallbackValue(row: BrowserVaultPresentedLabResultRow): number | null {
   if (
     row.normalizedValue === null
     || !Number.isFinite(row.normalizedValue)
@@ -117,11 +128,11 @@ function comparableResultValue(row: BrowserVaultPresentedLabResultRow): number |
 }
 
 function classifySourceRange(
-  value: number,
+  value: number | null,
   comparator: BrowserVaultPresentedLabResultRow["comparator"],
   range: BrowserVaultNormalizedLabReferenceRange | null,
 ): RangePosition | null {
-  if (!range || (range.low === undefined && range.high === undefined)) {
+  if (value === null || !range || (range.low === undefined && range.high === undefined)) {
     return null;
   }
   return classifyRangePosition(value, comparator, {

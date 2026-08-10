@@ -464,7 +464,7 @@ test("boundary result study keeps comparator data out of the numeric chart", () 
   expect(markup).toContain("&lt;10");
   expect(markup).not.toContain("Why there is no line chart");
   expect(markup).not.toContain("invented midpoint");
-  expect(markup).toContain("Source range not listed");
+  expect(markup).toContain("Published comparator — not the reporting lab&#x27;s range");
   expect(markup).not.toContain('role="img"');
 });
 

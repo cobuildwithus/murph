@@ -272,6 +272,11 @@ function BiomarkerDetailContent({
             >
               {formatLabDate(detail.latest.date)}
             </time>
+            {statusSourceLabel(detail.latest.statusSource, true) ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {statusSourceLabel(detail.latest.statusSource, true)}
+              </p>
+            ) : null}
           </div>
 
           {chartPoints.length > 0 ? (
@@ -396,6 +401,8 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
                         <span aria-hidden="true" className="xl:hidden">Range </span>
                         {referenceRange}
                       </>
+                    ) : row.statusSource === "published_comparator" ? (
+                      "Published comparator — not the reporting lab's range"
                     ) : (
                       "No reference range"
                     )}
@@ -413,6 +420,22 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
       </div>
     </section>
   );
+}
+
+function statusSourceLabel(
+  source: BrowserVaultPresentedLabResultRow["statusSource"],
+  latest: boolean,
+): string | null {
+  switch (source) {
+    case "published_comparator":
+      return "Published comparator — not the reporting lab's range";
+    case "reporting_lab_flag":
+      return "Reporting-lab flag";
+    case "reporting_lab_range":
+      return latest ? "Latest lab range" : "Reporting-lab range";
+    case "reported":
+      return null;
+  }
 }
 
 function EmptyBiomarkerDetailCard({
