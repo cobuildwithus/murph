@@ -223,9 +223,12 @@ exact device item for execution. Preparation or receipt failure, a still-dirty
 acknowledgement, or another exact local device item retains the
 `device-sync.reconcile` wake and persisted paused-companion retry marker. A
 successful clean receipt for the last device item clears them. The restricted
-pass commits that post-receipt queue, marker, and wake state in its normal final
-`idle_shutdown` snapshot before returning. All other workspace wakes stay
-projected out while billing is paused.
+lane also carries that exact marker and device wake in every intermediate
+canonical checkpoint that can advance the imported system watermark, so
+committed-progress recovery cannot strand the local obligation if the final
+checkpoint fails. The pass commits the post-receipt queue, marker, and wake
+state in its normal final `idle_shutdown` snapshot before returning. All other
+workspace wakes stay projected out while billing is paused.
 
 ### Local runtime
 

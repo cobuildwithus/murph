@@ -172,9 +172,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Paused companion health access adds the device-sync-only system-mailbox
 // execution path plus its explicit admission contracts to lazy runner output.
-// Exact macOS assembly measured a 9,951,954B total on 2026-08-10; startup
+// Exact macOS assembly measured a 9,952,629B total on 2026-08-10; startup
 // entry and static closure remain under their existing independent ceilings.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_951_954 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_952_629 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

@@ -549,6 +549,52 @@ describe("runtime invocation transport failure fence handling", () => {
     expect(harness.ownerReleaseCallCount()).toBe(1);
   });
 
+  it("recovers an intermediate paused device commit with its exact continuation", async () => {
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: async () => ({
+        active: false,
+        reason: "no_active_runtime",
+      }),
+      readHostedRuntimeStatusFromWeb: async (userId) => ({
+        mailboxLag: [{
+          importedSeq: "33",
+          lag: "0",
+          lane: "system",
+          maxSeq: "33",
+        }],
+        userId,
+        workspace: {
+          checkpointedAt: "2026-06-11T00:01:00.000Z",
+          createdAt: FIXED_NOW,
+          nextWakeAt: FIXED_NOW,
+          nextWakeReason: "device-sync.reconcile",
+          redactedStatus: {
+            hostedMailboxSystemImportedSeq: "33",
+            hostedPausedCompanionDeviceSyncRetryPending: true,
+          },
+          snapshotRef: null,
+          updatedAt: FIXED_NOW,
+          userId,
+          version: "1",
+        },
+      }),
+    });
+
+    await expect(harness.invoke()).resolves.toEqual({
+      immediateRecheckRequested: true,
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "device-sync.reconcile",
+      redactedStatus: {
+        hostedMailboxSystemImportedSeq: "33",
+        hostedPausedCompanionDeviceSyncRetryPending: true,
+      },
+      status: "idle",
+    });
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
+    expect(harness.loggedFailureEntries()).toEqual([]);
+    expect(harness.ownerReleaseCallCount()).toBe(1);
+  });
+
   it("does not treat a version-only administrative transition as runtime progress", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async () => ({

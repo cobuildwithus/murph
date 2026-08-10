@@ -508,9 +508,12 @@ item as pending executable work. A failed preparation or receipt, a requeued
 still-dirty item, or any other exact local device item retains the persisted
 paused-companion retry marker and `device-sync.reconcile` wake; only a
 successful clean receipt for the last device item clears them. The restricted
-pass always publishes its normal final `idle_shutdown` snapshot after receipt
-handling, making that local queue, marker, and wake state authoritative across
-cold restore before the invocation result is returned.
+lane projects that same exact marker and device wake into every intermediate
+canonical checkpoint that can advance the system watermark, so Cloudflare's
+committed-progress recovery cannot accept a checkpoint that lost the pending
+obligation. The pass always publishes its normal final `idle_shutdown`
+snapshot after receipt handling, making that local queue, marker, and wake state
+authoritative across cold restore before the invocation result is returned.
 The bound fence continues to reject metered provider egress if an unexpected
 path reaches it.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this

@@ -9354,11 +9354,21 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("system mailbox mode checkpoints its post-receipt paused continuation", async () => {
+  test.each([
+    {
+      failFinalCheckpoint: false,
+      name: "system mailbox mode checkpoints its post-receipt paused continuation",
+    },
+    {
+      failFinalCheckpoint: true,
+      name: "system mailbox mode preserves paused continuation before a failed final checkpoint",
+    },
+  ])("$name", async ({ failFinalCheckpoint }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const retryAt = "2099-04-27T00:01:00.000Z";
+    const finalCheckpointFailure = new Error("Synthetic final paused checkpoint failure.");
     const deviceSyncItem = createMailboxItem({
       dedupeKey: "device-sync.wake:paused-post-receipt-retry",
       id: "mailbox_item_system_mailbox_post_receipt_retry",
@@ -9381,6 +9391,19 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         workspacePort: createWorkspacePort({
           checkpointRequests,
+          checkpointWorkspace(request) {
+            if (failFinalCheckpoint && request.reason === "idle_shutdown") {
+              throw finalCheckpointFailure;
+            }
+            return createWorkspaceState({
+              inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+              nextWakeAt: request.nextWakeAt ?? null,
+              nextWakeReason: request.nextWakeReason ?? null,
+              redactedStatus: request.redactedStatus ?? null,
+              snapshotRef: request.snapshotRef,
+              version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+            });
+          },
           events,
           workspace: createWorkspaceState(),
         }),
@@ -9402,7 +9425,7 @@ describe("hosted workspace runtime entrypoint", () => {
         runtime: normalizeHostedAssistantRuntimeConfig({}, platform),
         vaultRoot,
       });
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
+      const invocation = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_post_receipt_retry",
@@ -9427,7 +9450,22 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          importItem: bridgeImporter,
+          async importItem(item, context) {
+            const outcome = await bridgeImporter(item, context);
+            await runCanonicalWrite({
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "bank/system-mailbox-post-receipt-retry.md",
+                  "system mailbox post-receipt retry\n",
+                );
+              },
+              occurredAt: TEST_NOW,
+              operationType: "hosted_system_mailbox_post_receipt_retry_test",
+              summary: "Persist system mailbox post-receipt retry fixture",
+              vaultRoot,
+            });
+            return outcome;
+          },
           platform,
           async runAssistantPhase() {
             return {
@@ -9450,10 +9488,43 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot,
         },
       );
+      let result: Awaited<ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess>> | null =
+        null;
+      if (failFinalCheckpoint) {
+        await assert.rejects(invocation, /Synthetic final paused checkpoint failure/u);
+      } else {
+        result = await invocation;
+      }
 
       const finalCheckpoint = checkpointRequests.at(-1);
       assert.ok(finalCheckpoint);
+      const importProgressCheckpoint = checkpointRequests.find(
+        (request) => request.reason === "canonical_runtime_commit",
+      );
+      assert.ok(
+        importProgressCheckpoint,
+        checkpointRequests.map((request) => request.reason).join(","),
+      );
+      assert.equal(
+        importProgressCheckpoint.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "1",
+      );
+      assert.equal(
+        importProgressCheckpoint.redactedStatus
+          ?.hostedPausedCompanionDeviceSyncRetryPending,
+        true,
+      );
+      assert.equal(
+        importProgressCheckpoint.nextWakeReason,
+        "device-sync.reconcile",
+      );
       assert.equal(finalCheckpoint.reason, "idle_shutdown");
+      if (failFinalCheckpoint) {
+        assert.equal(result, null);
+        assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+        return;
+      }
+      assert.ok(result);
       assert.equal(finalCheckpoint.nextWakeAt, retryAt);
       assert.equal(finalCheckpoint.nextWakeReason, "device-sync.reconcile");
       assert.equal(

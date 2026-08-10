@@ -123,7 +123,9 @@ Updated: 2026-08-10
   Only a successful clean receipt for the last device item clears the marker.
   The restricted pass always commits the post-receipt exact local queue,
   marker, and wake in its normal final `idle_shutdown` snapshot before return,
-  so a cold restore cannot strand a locally retained retry.
+  while every earlier canonical checkpoint that can advance the system
+  watermark carries that same exact continuation so committed-progress
+  recovery cannot strand it if the final checkpoint fails.
 - The native repository has no release tag or other durable mapping from the
   App Store binary to a source commit. Compatibility is therefore based on the
   unchanged HTTP shapes plus inspection of the current native resume/connect
@@ -138,11 +140,13 @@ Updated: 2026-08-10
 - Passed after the final reconciliation tightening: focused reconciliation
   facts suite (1 file, 48 tests).
 - Passed after the round-5 correction: focused runtime event, system-mailbox,
-  assistant-phase, and entrypoint suites (4 files, 604 tests), including dirty
+  assistant-phase, and entrypoint suites (4 files, 605 tests), including dirty
   continuation after a successful receipt, clean marker clearing, restricted
   automation suppression, exact-item re-execution, remaining-item marker
   retention, device-only route execution, and preservation of unrelated
-  accepted system work without executing its pending route actions.
+  accepted system work without executing its pending route actions, plus an
+  intermediate canonical commit that retains the exact paused continuation
+  when the final checkpoint fails.
 - Passed after the round-4 corrections: hosted dirty-ack authority suite (1
   file, 48 tests), including shared-transaction pending queries and both
   serialized ingress/acknowledgement commit orders.
@@ -151,8 +155,11 @@ Updated: 2026-08-10
 - Passed: ESLint over every changed Web TypeScript file.
 - Passed: focused Cloudflare runner identity/egress-fence proof (2 files,
   3 selected tests).
-- Passed after the round-5 correction: hosted runner bundle assembly and parity
-  probes; measured total 9,951,954 bytes under the 9,984,722-byte ratcheted
+- Passed after the later round-5 correction: Cloudflare transport-failure
+  recovery suite (1 file, 24 tests), including recovery of a zero-lag paused
+  device continuation from an intermediate canonical commit.
+- Passed after the later round-5 correction: hosted runner bundle assembly and
+  parity probes; measured total 9,952,629 bytes under the 9,985,397-byte ratcheted
   ceiling.
 - Authored: a production-path hosted local E2E that cold-restores a paused
   member, submits 17 distinct companion observations without waiting for each
@@ -192,5 +199,15 @@ Updated: 2026-08-10
   wake are inside the committed snapshot before return. The same substantive
   round number must be retried because the diagnostic capture is not a valid
   reviewed round.
+- The same-number diagnostic retry again had inconclusive textual model
+  attestation and found that Cloudflare could accept an earlier canonical
+  checkpoint after a failed final snapshot. That earlier checkpoint advanced
+  the imported system watermark without the exact paused marker. The correction
+  projects the existing exact local item, marker, and device wake into every
+  recoverable intermediate canonical commit while retaining the final clean
+  snapshot as the only clearing boundary. Runtime entrypoint coverage injects
+  the final checkpoint failure, Cloudflare recovery coverage preserves the
+  marker and wake after transport failure, and the existing Web facts coverage
+  admits that pair at zero system lag.
 - Required after remediation: final ReviewGPT round-5 retry and exact-head
   GitHub Actions.

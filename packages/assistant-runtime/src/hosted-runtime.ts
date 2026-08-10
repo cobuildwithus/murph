@@ -1292,28 +1292,51 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         )
           ? checkpointInput.nextWakeReason ?? null
           : workspace?.nextWakeReason ?? null;
-        const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
-          allowedRouteActions: ["run-assistant-ask"],
-          vaultRoot: restored.vaultRoot,
-        });
-        const checkpointWake = selectEarliestHostedRuntimeWake([
-          {
-            at: requestedCheckpointNextWakeAt,
-            reason: requestedCheckpointNextWakeReason,
-          },
-          {
-            at: systemMailboxWake.at,
-            reason: systemMailboxWake.reason,
-          },
-        ]);
+        // Cloudflare may accept any advanced canonical checkpoint as completion
+        // after a transport failure. In the paused device-only lane, every such
+        // checkpoint must therefore carry the exact local continuation; the
+        // final clean idle checkpoint remains the only clearing boundary.
+        const restrictedDeviceSyncWake = input.request.processingMode === "system_mailbox"
+          ? await resolveHostedSystemMailboxNextWakeCandidate({
+              allowedRouteActions: ["run-device-sync-wake"],
+              vaultRoot: restored.vaultRoot,
+            })
+          : null;
+        const systemMailboxWake = restrictedDeviceSyncWake?.at
+          ? restrictedDeviceSyncWake
+          : await resolveHostedSystemMailboxNextWakeCandidate({
+              allowedRouteActions: ["run-assistant-ask"],
+              vaultRoot: restored.vaultRoot,
+            });
+        const checkpointWake = restrictedDeviceSyncWake?.at
+          ? {
+              nextWakeAt: restrictedDeviceSyncWake.at,
+              nextWakeReason: restrictedDeviceSyncWake.reason,
+            }
+          : selectEarliestHostedRuntimeWake([
+              {
+                at: requestedCheckpointNextWakeAt,
+                reason: requestedCheckpointNextWakeReason,
+              },
+              {
+                at: systemMailboxWake.at,
+                reason: systemMailboxWake.reason,
+              },
+            ]);
         const canonicalRuntimeCommit = checkpointInput.reason === "canonical_runtime_commit";
         const checkpointWorkspacePort = canonicalRuntimeCommit
           ? workspacePort
           : foregroundWorkspacePort;
-        const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+        const handledRedactedStatus = await withHostedSystemMailboxHandledThroughStatus({
           redactedStatus: checkpointInput.redactedStatus,
           vaultRoot: restored.vaultRoot,
         });
+        const redactedStatus = restrictedDeviceSyncWake?.at
+          ? {
+              ...handledRedactedStatus,
+              hostedPausedCompanionDeviceSyncRetryPending: true,
+            }
+          : handledRedactedStatus;
         const checkpointOperation = checkpointWorkspacePort.checkpoint({
           attemptId: checkpointMetadata.attemptId,
           expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
