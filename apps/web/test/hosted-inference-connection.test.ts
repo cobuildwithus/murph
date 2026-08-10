@@ -19,9 +19,6 @@ import {
   replaceHostedInferenceConnection,
   setHostedInferenceConnectionSelected,
 } from "@/src/lib/hosted-inference/connection-store";
-import {
-  PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-} from "./support/hosted-inference-fixtures";
 
 const MEMBER_ID = "member_custom_inference";
 const CANDIDATE = parseHostedInferenceConnectionCandidate({
@@ -269,66 +266,6 @@ describe("hosted inference connection", () => {
     expect(harness.row?.selected).toBe(false);
   });
 
-  it("allows an explicit managed escape from the selected 0.145 profile before reverification", async () => {
-    const harness = createStoreHarness();
-    await replaceHostedInferenceConnection({
-      candidate: CANDIDATE,
-      expectedRevision: null,
-      memberId: MEMBER_ID,
-      prisma: harness.prisma,
-    });
-    await setHostedInferenceConnectionSelected({
-      expectedRevision: 1,
-      memberId: MEMBER_ID,
-      prisma: harness.prisma,
-      selected: true,
-    });
-    harness.setVerificationProfile(
-      PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-    );
-
-    await expect(readSelectedHostedInferenceConnection({
-      memberId: MEMBER_ID,
-      prisma: harness.prisma,
-    })).rejects.toMatchObject({
-      code: "HOSTED_INFERENCE_CONNECTION_REVERIFICATION_REQUIRED",
-    });
-    await expect(setHostedInferenceConnectionSelected({
-      expectedRevision: 1,
-      memberId: MEMBER_ID,
-      prisma: harness.prisma,
-      selected: true,
-    })).rejects.toMatchObject({
-      code: "HOSTED_INFERENCE_CONNECTION_REVERIFICATION_REQUIRED",
-    });
-
-    const deselected = await setHostedInferenceConnectionSelected({
-      expectedRevision: 1,
-      memberId: MEMBER_ID,
-      prisma: harness.prisma,
-      selected: false,
-    });
-    expect(deselected.selected).toBe(false);
-
-    const reverified = await replaceHostedInferenceConnection({
-      candidate: CANDIDATE,
-      expectedRevision: 1,
-      memberId: MEMBER_ID,
-      prisma: harness.prisma,
-    });
-    expect(reverified).toMatchObject({
-      revision: 2,
-      selected: false,
-      verificationProfile: HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-    });
-    await expect(setHostedInferenceConnectionSelected({
-      expectedRevision: 2,
-      memberId: MEMBER_ID,
-      prisma: harness.prisma,
-      selected: true,
-    })).resolves.toMatchObject({ selected: true });
-  });
-
   it("rejects group-room runtime members", async () => {
     const harness = createStoreHarness({ threadContainer: true });
 
@@ -348,7 +285,6 @@ function createStoreHarness(
 ): {
   prisma: PrismaClient;
   readonly row: TestConnectionRow | null;
-  setVerificationProfile(profile: string): void;
 } {
   let row: TestConnectionRow | null = null;
   let revisionSequence = 0;
@@ -414,10 +350,6 @@ function createStoreHarness(
     prisma,
     get row() {
       return row;
-    },
-    setVerificationProfile(profile: string) {
-      if (!row) throw new Error("Missing inference row.");
-      row = { ...row, verificationProfile: profile };
     },
   };
 }

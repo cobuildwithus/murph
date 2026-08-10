@@ -314,13 +314,6 @@ The hosted Prisma schema keeps ownership sharp and nested:
   `bank/assistant-preference-mutations.json` retains only per-setting applied
   watermarks. For Humor, Push, and Detail, both owners apply the same
   equality-aware field-local order; timestamps are never conflict authority.
-- `HostedInferenceConnection` owns one encrypted personal custom-inference
-  endpoint plus its monotonic revision, verification profile, and selection
-  bit. A selected older profile blocks runtime admission and projects a
-  truthful re-verification state in Settings. Selection requires the current
-  profile; exact-revision deselection remains available so the member can
-  explicitly return to the dormant managed provider. Successful replacement is
-  stored deselected and never creates an automatic fallback.
 - `HostedMemberIdentity` owns recoverable member identity facts
 - `HostedMemberRouting` owns hosted channel routing facts
 - `HostedMemberBillingRef` owns Stripe/customer subscription references

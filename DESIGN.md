@@ -484,19 +484,6 @@ current balance. Keep the existing Murph conversation handoff beside the
 Missions heading, and hide it when the member has no supported conversation
 route or new missions are disabled.
 
-### Hosted Inference Routing
-In authenticated Settings, one compact provider summary owns the route for new
-core replies. A selected custom endpoint whose persisted compatibility profile
-is older than the current runtime must lead with `Reverification required` in
-sienna and state the two recovery choices: reverify the endpoint or choose a
-managed provider and save. Never label that endpoint `In use`, render its route
-radio as selectable, or imply an automatic managed fallback. In the endpoint
-pane, label the existing credential action `Reverify`; successful verification
-returns the connection to the ordinary `Verified, inactive` state so later
-selection remains explicit. Keep the sanitized endpoint host and model visible
-as secondary mono context, and preserve the flat warm-hairline settings
-composition on desktop and phone widths.
-
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a
 short status label. Pair it with a disabled control and visible action copy such

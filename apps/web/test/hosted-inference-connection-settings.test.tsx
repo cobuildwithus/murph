@@ -8,9 +8,6 @@ import {
   HostedInferenceConnectionPane,
 } from "@/src/components/settings/hosted-inference-connection-settings";
 import { renderClientComponent } from "./render-client-component";
-import {
-  PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-} from "./support/hosted-inference-fixtures";
 
 const mocks = vi.hoisted(() => ({
   requestHostedOnboardingJson: vi.fn(),
@@ -44,6 +41,7 @@ describe("hosted inference connection pane", () => {
         configurationAvailable: true,
         connection: null,
         onConnectionChange: () => {},
+        selected: false,
       },
     ));
 
@@ -77,6 +75,7 @@ describe("hosted inference connection pane", () => {
         configurationAvailable: true,
         connection: savedConnection(true),
         onConnectionChange: () => {},
+        selected: true,
       },
     ));
 
@@ -99,31 +98,11 @@ describe("hosted inference connection pane", () => {
         configurationAvailable: true,
         connection: savedConnection(false),
         onConnectionChange: () => {},
+        selected: false,
       },
     ));
 
     assert.match(markup, /Verified, inactive/u);
-    assert.doesNotMatch(markup, /In use/u);
-  });
-
-  it("shows a selected 0.145 connection as requiring reverification, never in use", () => {
-    const markup = renderToStaticMarkup(createElement(
-      HostedInferenceConnectionPane,
-      {
-        chatCompletionsAvailable: true,
-        configurationAvailable: true,
-        connection: {
-          ...savedConnection(true),
-          verificationProfile:
-            PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-        },
-        onConnectionChange: () => {},
-      },
-    ));
-
-    assert.match(markup, /Reverification required/u);
-    assert.match(markup, /choose a managed provider and save/u);
-    assert.match(markup, />Reverify</u);
     assert.doesNotMatch(markup, /In use/u);
   });
 
@@ -135,6 +114,7 @@ describe("hosted inference connection pane", () => {
         configurationAvailable: false,
         connection: null,
         onConnectionChange: () => {},
+        selected: false,
       },
     ));
 
@@ -157,6 +137,7 @@ describe("hosted inference connection pane", () => {
         configurationAvailable: true,
         connection: null,
         onConnectionChange: (next: unknown) => connectionChanges.push(next),
+        selected: false,
       },
     ));
 
@@ -209,6 +190,7 @@ describe("hosted inference connection pane", () => {
         configurationAvailable: true,
         connection: savedConnection(true),
         onConnectionChange: () => {},
+        selected: true,
       },
     ));
 
@@ -233,6 +215,7 @@ describe("hosted inference connection pane", () => {
         configurationAvailable: true,
         connection: savedConnection(false),
         onConnectionChange: () => {},
+        selected: false,
       },
     ));
 
@@ -247,66 +230,6 @@ describe("hosted inference connection pane", () => {
       assert.doesNotMatch(
         view.container.textContent ?? "",
         /Inference will return to your managed provider/u,
-      );
-    } finally {
-      await view.cleanup();
-    }
-  });
-
-  it("reverifies through the existing credential form and keeps the replacement inactive", async () => {
-    const connectionChanges: unknown[] = [];
-    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-      connection: savedConnection(false),
-    });
-    const staleConnection = {
-      ...savedConnection(true),
-      verificationProfile:
-        PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-    };
-    const view = await renderClientComponent(createElement(
-      HostedInferenceConnectionPane,
-      {
-        chatCompletionsAvailable: true,
-        configurationAvailable: true,
-        connection: staleConnection,
-        onConnectionChange: (next: unknown) => connectionChanges.push(next),
-      },
-    ));
-
-    try {
-      await act(async () => {
-        findButton(view.container, "Reverify").click();
-      });
-      await act(() => {
-        setInputValue(
-          view,
-          "hosted-inference-endpoint",
-          "https://inference.example.test/v1/responses",
-        );
-        setInputValue(view, "hosted-inference-secret", "synthetic-secret");
-      });
-      await act(async () => {
-        submitForm(view);
-        await Promise.resolve();
-      });
-
-      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
-        method: "PUT",
-        payload: {
-          auth: { kind: "bearer", secret: "synthetic-secret" },
-          contextWindowTokens: 131_072,
-          endpointUrl: "https://inference.example.test/v1/responses",
-          expectedRevision: 4,
-          model: "example-model",
-          protocol: "responses",
-          supportsImages: false,
-        },
-        url: "/api/settings/inference-connection",
-      });
-      assert.deepEqual(connectionChanges, [savedConnection(false)]);
-      assert.match(
-        view.container.textContent ?? "",
-        /Choose Your endpoint and save to route inference to it/u,
       );
     } finally {
       await view.cleanup();

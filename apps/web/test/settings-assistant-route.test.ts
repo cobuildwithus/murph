@@ -3,9 +3,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import {
   HostedInferenceConnectionError,
 } from "@/src/lib/hosted-inference/connection-store";
-import {
-  PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-} from "./support/hosted-inference-fixtures";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -114,38 +111,6 @@ describe("assistant inference mode settings route", () => {
     });
     expect(mocks.setHostedInferenceConnectionSelected).not.toHaveBeenCalled();
     expect(mocks.scheduleHostedInferenceRuntimeWake).not.toHaveBeenCalled();
-  });
-
-  it("deselects a stale 0.145 connection and wakes managed inference", async () => {
-    const staleConnection = {
-      ...CONNECTION_VIEW,
-      selected: true,
-      verificationProfile:
-        PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-    };
-    mocks.readHostedInferenceConnectionView.mockResolvedValueOnce(
-      staleConnection,
-    );
-    mocks.setHostedInferenceConnectionSelected.mockResolvedValueOnce({
-      ...staleConnection,
-      selected: false,
-    });
-
-    const response = await route.POST(request({ mode: "managed" }));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      mode: "managed",
-      updated: true,
-    });
-    expect(mocks.setHostedInferenceConnectionSelected).toHaveBeenCalledWith({
-      expectedRevision: CONNECTION_VIEW.revision,
-      memberId: "member_assistant_mode",
-      selected: false,
-    });
-    expect(mocks.scheduleHostedInferenceRuntimeWake).toHaveBeenCalledWith(
-      "member_assistant_mode",
-    );
   });
 
   it("does not select a Chat Completions connection while that adapter is disabled", async () => {

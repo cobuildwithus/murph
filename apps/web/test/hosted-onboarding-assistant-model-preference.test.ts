@@ -23,9 +23,6 @@ import {
   updateHostedMemberAssistantConfigurationTx,
   updateHostedMemberAssistantModelPreferenceTx,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
-import {
-  PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-} from "./support/hosted-inference-fixtures";
 
 describe("hosted member assistant model preference", () => {
   beforeEach(() => {
@@ -219,34 +216,6 @@ describe("hosted member assistant model preference", () => {
       reasoningEffort: "high",
       solAvailable: true,
     });
-  });
-
-  it("rejects a selected 0.145 custom profile from runtime projection until reverification", async () => {
-    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
-      assistantModelPreference: null,
-      inferenceConnection: {
-        contextWindowTokens: 131_072,
-        protocol: "responses",
-        revision: 4,
-        selected: true,
-        supportsImages: false,
-        verificationProfile:
-          PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-      },
-    }));
-
-    const resolution = await readHostedMemberAssistantModelPreference({
-      memberId: "member_stale_custom_inference",
-      prisma: createReadClient(),
-    });
-
-    expect(resolution).toMatchObject({
-      customInferenceReverificationRequired: true,
-      customInferenceSelected: true,
-    });
-    expect(resolution).not.toHaveProperty(
-      "hostedAssistantCustomInferenceOverride",
-    );
   });
 
   it("defaults synthetic thread-container runtimes to Sol with room model controls", async () => {
@@ -805,14 +774,6 @@ function buildMemberState(input: {
   familyMembershipStatus?: string;
   familyPlanCode?: string;
   familySuspendedAt?: Date | null;
-  inferenceConnection?: {
-    contextWindowTokens: number;
-    protocol: string;
-    revision: number;
-    selected: boolean;
-    supportsImages: boolean;
-    verificationProfile: string;
-  } | null;
   suspendedAt?: Date | null;
   threadContainerMemberId?: string | null;
 }) {
@@ -840,7 +801,6 @@ function buildMemberState(input: {
         : input.currentBillingPlanCode,
     },
     billingStatus: input.billingStatus ?? HostedBillingStatus.active,
-    inferenceConnection: input.inferenceConnection ?? null,
     suspendedAt: input.suspendedAt ?? null,
     threadContainer: input.threadContainerMemberId
       ? { memberId: input.threadContainerMemberId }

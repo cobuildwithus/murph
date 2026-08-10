@@ -1,16 +1,9 @@
 "use client";
 
-import {
-  AssistantProviderSummary,
-  CUSTOM_INFERENCE_ROUTING,
-  HostedAssistantModelSettings,
-} from "@/src/components/settings/hosted-assistant-model-settings";
+import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-inference-connection-settings";
 import { Separator } from "@/src/components/ui/separator";
-import {
-  DESIGN_INFERENCE_CONNECTION,
-  DESIGN_STALE_INFERENCE_CONNECTION,
-} from "./design-inference-connection";
+import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 
 export function SettingsCustomInferenceStudy() {
   return (
@@ -45,39 +38,6 @@ export function SettingsCustomInferenceStudy() {
             initialProvider="openai"
             solAvailable
             veniceAvailable={false}
-          />
-        </section>
-      </div>
-
-      <Separator />
-
-      <div
-        className="flex flex-col gap-8"
-        data-design-variant="custom-reverification-required"
-      >
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-          Selected endpoint · reverification required
-        </p>
-        <section className="flex flex-col gap-4">
-          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Route summary
-          </div>
-          <AssistantProviderSummary
-            connection={DESIGN_STALE_INFERENCE_CONNECTION}
-            currentRouting={CUSTOM_INFERENCE_ROUTING}
-            draftRouting={CUSTOM_INFERENCE_ROUTING}
-            onChangeClick={() => {}}
-          />
-        </section>
-        <section className="flex flex-col gap-4">
-          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Endpoint pane
-          </div>
-          <HostedInferenceConnectionPane
-            chatCompletionsAvailable
-            configurationAvailable
-            connection={DESIGN_STALE_INFERENCE_CONNECTION}
-            onConnectionChange={() => {}}
           />
         </section>
       </div>
@@ -127,6 +87,7 @@ export function SettingsCustomInferenceStudy() {
           configurationAvailable
           connection={null}
           onConnectionChange={() => {}}
+          selected={false}
         />
       </div>
 
@@ -144,9 +105,9 @@ export function SettingsCustomInferenceStudy() {
           configurationAvailable
           connection={DESIGN_INFERENCE_CONNECTION}
           onConnectionChange={() => {}}
+          selected
         />
       </div>
-
     </div>
   );
 }

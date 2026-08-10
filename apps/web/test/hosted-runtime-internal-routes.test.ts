@@ -1729,33 +1729,6 @@ describe("hosted runtime internal web routes", () => {
     expect(payload.hostedAssistantReasoningEffortOverride).toBeUndefined();
   });
 
-  it("rejects a selected custom route that requires profile reverification", async () => {
-    process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
-    mocks.readHostedWorkspace.mockResolvedValue(
-      buildWorkspaceRecord({ version: "4" }),
-    );
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      customInferenceReverificationRequired: true,
-      customInferenceSelected: true,
-      model: "gpt-5.6-terra",
-      reasoningEffort: "low",
-      solAvailable: false,
-    });
-
-    const response = await workspaceRoute.GET(new Request(
-      "https://join.example.test/api/internal/hosted-workspace"
-        + "?customInferenceVersion=1",
-    ));
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_INFERENCE_CONNECTION_REVERIFICATION_REQUIRED",
-      },
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-  });
-
   it("fails closed when the runtime cannot consume a selected custom route", async () => {
     process.env.HOSTED_CUSTOM_INFERENCE_ENABLED = "1";
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({

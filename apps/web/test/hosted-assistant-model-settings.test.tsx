@@ -15,9 +15,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
-import {
-  PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-} from "./support/hosted-inference-fixtures";
 
 const mocks = vi.hoisted(() => ({
   requestHostedOnboardingJson: vi.fn(),
@@ -664,84 +661,6 @@ test("the shown route is derived from the durable connection, not a copy", () =>
   assert.match(active, /Inference on your endpoint/u);
   assert.match(replaced, /Inference on OpenAI/u);
   assert.doesNotMatch(replaced, /Inference on your endpoint/u);
-});
-
-test("a selected 0.145 endpoint shows recovery and can switch explicitly to managed inference", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-    mode: "managed",
-    updated: true,
-  });
-  const view = await renderClient(
-    createElement(HostedAssistantModelSettings, {
-      canUpgradeToEdge: false,
-      chatCompletionsAvailable: true,
-      configurationAvailable: true,
-      customInferenceAvailable: true,
-      initialConnection: {
-        ...endpointConnection(true),
-        verificationProfile:
-          PREVIOUS_CODEX_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
-      },
-      initialDormantSolPreference: false,
-      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
-      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
-      solAvailable: true,
-      veniceAvailable: true,
-    }),
-  );
-
-  assert.match(view.container.textContent ?? "", /Reverification required/u);
-  assert.match(
-    view.container.textContent ?? "",
-    /choose a managed provider before Murph can reply/u,
-  );
-  assert.doesNotMatch(
-    view.container.textContent ?? "",
-    /Inference on your endpoint/u,
-  );
-
-  await act(async () => {
-    findButton(view.container, "Review").click();
-  });
-  assert.match(
-    view.document.body.textContent ?? "",
-    /Reverification required before Murph can reply/u,
-  );
-  assert.ok(findOptionalButton(view.document, "Reverify"));
-  assert.equal(
-    view.document.querySelector('[id="assistant-provider-custom"]'),
-    null,
-  );
-
-  await act(async () => {
-    findProviderRadio(
-      view.document,
-      HOSTED_ASSISTANT_OPENAI_PROVIDER,
-    ).click();
-  });
-  assert.match(
-    view.container.textContent ?? "",
-    /Inference on OpenAI after Save/u,
-  );
-  await act(async () => {
-    submitForm(view.container);
-    await vi.waitFor(() => {
-      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
-    method: "POST",
-    payload: { mode: "managed" },
-    url: "/api/settings/assistant",
-  });
-  assert.match(view.container.textContent ?? "", /Inference on OpenAI/u);
-  assert.doesNotMatch(
-    view.container.textContent ?? "",
-    /Reverification required/u,
-  );
-
-  view.cleanup();
 });
 
 test("the routing dialog is not inside the settings form", async () => {

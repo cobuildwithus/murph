@@ -201,11 +201,6 @@ Assistant runtime state is never the source of truth for these objects.
 - On secondary web control surfaces, show the actionable state first and keep
   explanatory history or requirements on demand. Do not repeat the same truth
   in a heading, introduction, and row labels.
-- When a saved provider choice becomes incompatible, show the blocking state
-  where the route is summarized, preserve an explicit path back to the managed
-  choice, and require an explicit selection after successful re-verification.
-  Never describe a blocked route as active or turn recovery into an automatic
-  provider fallback.
 - When a member choice materially changes cost-weighted included-capacity
   drawdown, disclose that difference before save and keep it visible in the
   saved-state summary. Do not imply that equal model names have equal provider

@@ -1,7 +1,7 @@
 # Bring Your Own Inference
 
 Status: specified
-Last verified: 2026-08-09
+Last verified: 2026-08-03
 
 ## Outcome
 
@@ -55,14 +55,6 @@ The saved secret is never displayed again; the member can replace it.
 The safe summary displays only protocol, endpoint host, model id, configured
 context, image availability, revision, and verification time.
 
-When a selected connection carries an older compatibility profile, Settings
-must present **Reverification required**, never **In use**. The provider summary
-must say that Murph cannot reply until the member either re-verifies the
-endpoint or explicitly selects a managed provider and saves. The endpoint pane
-reuses the existing credential form for **Reverify**. A successful replacement
-remains deselected, so the member still explicitly selects the newly verified
-connection.
-
 ## Durable state
 
 There is exactly one `HostedInferenceConnection` per personal member. It is
@@ -84,11 +76,6 @@ There is no connection id, selected-connection foreign key, provider registry,
 status machine, verification queue, retry row, or Cloudflare copy of durable
 connection state. Replacing the connection deselects it until the member
 explicitly selects the verified replacement.
-
-Selecting custom inference requires the current compatibility profile.
-Deselecting a stale selected connection does not: the member can always make an
-explicit, authenticated return to managed inference without first proving the
-endpoint Murph is releasing.
 
 A runtime-relevant connection edit increments the revision. The revision-derived
 internal model alias participates in custom-provider thread compatibility, so an
@@ -181,21 +168,12 @@ The configured context window is bounded and labeled as configured, not fully
 proven by the short probe. CI and deploy smoke exercise context and local
 compaction against the exact pinned Codex build.
 
-A profile bump does not rewrite, delete, auto-select, or silently fall back from
-an older selected row. Runtime admission rejects it, Settings derives the
-reverification state from the persisted profile, and the member owns either
-explicit recovery path described above.
-
 ## Failure and recovery
 
 - Invalid candidate: preserve the prior saved connection unchanged.
 - Endpoint unavailable or malformed: fail the current custom provider attempt
   with fixed safe copy and no managed fallback.
 - Unsupported image/tool/stream: reject before any misleading partial answer.
-- Compatibility-profile mismatch: block custom runtime admission, show the
-  stale state truthfully in Settings, permit explicit managed deselection, and
-  require successful replacement plus later explicit selection before custom
-  inference resumes.
 - Scheduled automation: use the selected endpoint and the existing bounded retry
   lifecycle; never substitute another provider.
 - Deployment skew: a selected custom workspace is returned only to a Worker that

@@ -703,13 +703,6 @@ Last verified: 2026-08-09
   credential must not enter runner env, shell env, workspace state, prompts, or
   logs. Runtime egress must validate the active fence before opening the envelope
   and must never fall back to a managed provider.
-- A selected custom-inference row with an older verification profile must block
-  runtime admission and be presented in Settings as requiring reverification,
-  never as in use. The current profile remains mandatory for selection and
-  provider use, but an authenticated exact-revision deselection must remain
-  available so the member can explicitly return to managed inference. A
-  successful re-verification replaces the connection as deselected; it must not
-  silently restore custom routing or automatically fall back a failed turn.
 - Custom-inference egress accepts only an exact public HTTPS DNS operation URL
   on port 443, follows zero redirects, has no private-network/VPC binding, strips
   caller authority and forwarding headers, and injects exactly one fixed-shape

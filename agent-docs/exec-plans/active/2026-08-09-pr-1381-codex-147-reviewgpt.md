@@ -21,8 +21,9 @@ Updated: 2026-08-09
 - Dependency guards, focused tests, relevant typechecks/builds, and exact-head
   required GitHub checks pass.
 - Preliminary ReviewGPT either reports `SPECIALIST_OUTCOME: PASS` or has every
-  accepted finding resolved; final ReviewGPT reports `ROUND_OUTCOME: PASS`.
-  Any behavior-changing remediation is reviewed on a new pushed head.
+  finding explicitly resolved or rejected with evidence and product-owner
+  direction; final ReviewGPT reports `ROUND_OUTCOME: PASS`. Any
+  behavior-changing remediation is reviewed on a new pushed head.
 - The PR description records architecture, invariants, provider-input impact,
   review metadata, verification, and deployment concerns, and the head is
   merge-clean.
@@ -120,13 +121,13 @@ Updated: 2026-08-09
   `577c106260b13d0ff23b35b0827b9554fa3f1b86` and found one coupled recovery
   gap: a selected `0.145.0` profile was runtime-blocked but still shown as in
   use, and the current-profile guard also prevented explicit managed
-  deselection. The accepted correction derives a first-class stale-profile UI
-  state, removes its selectable custom radio and `In use` claim, reuses the
-  existing credential form for re-verification, permits exact-revision
-  deselection, and leaves the successfully reverified replacement inactive.
-  Focused tests cover the exact persisted `0.145.0` to `0.147.0` recovery
-  journey through store, runtime projection, workspace admission, settings
-  route, provider dialog, and endpoint pane.
+  deselection. A first remediation implemented that compatibility journey, but
+  the product owner explicitly rejected it after confirming the production
+  database contains zero custom-inference rows. The current direction deletes
+  the stale-profile UI, deselection exception, catalog studies, transition
+  fixtures, and compatibility documentation. The release remains a clean hard
+  cut: newly verified connections use the `0.147.0` profile, while no legacy
+  row or migration surface exists to preserve.
 - Final ReviewGPT round 1 on that same immutable first head required the
   repository's large-change retrospective and reported no tactical finding.
   The retrospective is recorded on PR 1381 and accepts the hard-cut shape as
@@ -140,7 +141,6 @@ Updated: 2026-08-09
   files (one skipped), 3,367 tests (42 skipped), and all coverage thresholds;
   the final corrected dynamic fixture then passed its focused suite and the
   assistant typecheck.
-- The frontend catalog now includes both stale selected-summary and endpoint
-  pane studies. Local browser capture is currently blocked because this Codex
-  session has no attached browser backend; hosted desktop/mobile proof remains
-  required before the remediated head can be pushed.
+- The rejected recovery UI is deleted, restoring a frontend-neutral PR; design
+  catalog and screenshot proof are therefore not applicable to the current
+  candidate.

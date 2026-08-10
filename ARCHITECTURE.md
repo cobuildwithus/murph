@@ -564,14 +564,6 @@ signed workspace response, and resolves the decrypted target exactly once
 during invocation preparation. Group thread-container members cannot own or
 select this connection.
 
-The persisted verification profile is also the profile-bump recovery owner. A
-selected stale profile blocks workspace admission and is shown as requiring
-reverification rather than in use. Selecting custom inference requires the
-current profile; explicit deselection remains available under the same member
-and revision lock so recovery can return to the dormant managed provider
-without weakening the custom selection gate. Re-verification replaces the row
-as deselected and never creates an automatic fallback.
-
 `apps/cloudflare` revalidates the resolved target, seals it under a
 context-separated Worker key, and binds the encrypted envelope to the existing
 UserRunner invocation fence. The runner receives only one fixed
