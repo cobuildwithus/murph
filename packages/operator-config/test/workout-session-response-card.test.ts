@@ -223,7 +223,45 @@ describe('workout session response cards', () => {
       ACTIVE_WORKOUT_CARD,
     )
     expect(transcript).toContain(
+      'Bench press: set 1: completed; actual 185 lb × 8; target 185 lb × 8',
+    )
+    expect(transcript).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ; snapshot: 2026-08-09T19:45:00.000Z]',
+    )
+  })
+
+  it('preserves a completed extra set without inventing a target', () => {
+    const completedExtraSetCard = {
+      ...ACTIVE_WORKOUT_CARD,
+      subtitle: '4 of 7 sets complete',
+      workout: {
+        ...ACTIVE_WORKOUT_CARD.workout,
+        exercises: [
+          {
+            ...ACTIVE_WORKOUT_CARD.workout.exercises[0],
+            sets: [
+              ...ACTIVE_WORKOUT_CARD.workout.exercises[0].sets,
+              {
+                status: 'completed',
+                target: null,
+                actual: '205 lb × 5',
+              },
+            ],
+          },
+          ACTIVE_WORKOUT_CARD.workout.exercises[1],
+        ],
+      },
+    } satisfies AssistantResponseCard
+    const semanticSet = 'set 4: completed; actual 205 lb × 5'
+
+    expect(renderAssistantResponseCardText(completedExtraSetCard)).toContain(
+      semanticSet,
+    )
+    expect(
+      buildLinqIMessageAppLayout(completedExtraSetCard).subcaption,
+    ).toContain(semanticSet)
+    expect(renderAssistantResponseCardText(completedExtraSetCard)).not.toContain(
+      `${semanticSet}; target`,
     )
   })
 

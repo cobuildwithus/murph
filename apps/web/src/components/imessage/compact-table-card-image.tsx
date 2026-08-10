@@ -570,7 +570,7 @@ function getWorkoutExerciseLayout(
       && nextPendingSet?.target !== undefined
     ? `Next: ${nextPendingSet.target}`
     : nextPendingSet !== undefined
-      ? "Next set — no target"
+      ? "Next set: no target"
       : exercise.sets.some((set) => set.status === "skipped")
         ? `${exercise.sets.filter((set) => set.status === "skipped").length} skipped`
         : "Complete";

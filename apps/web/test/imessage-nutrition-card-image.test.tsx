@@ -387,7 +387,7 @@ test("workout image keeps Next on the first pending set when it has no target", 
   const [imageTree] = getImageResponseCall();
   const serialized = renderToStaticMarkup(imageTree);
 
-  assert.match(serialized, /Next set — no target/u);
+  assert.match(serialized, /Next set: no target/u);
   assert.doesNotMatch(serialized, /Next: 135 lb × 8/u);
 });
 

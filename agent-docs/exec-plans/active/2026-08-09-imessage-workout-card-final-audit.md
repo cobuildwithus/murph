@@ -89,6 +89,22 @@ Success criteria:
 - External rollout event: PR #1502 merged before round 7 and the specialist pass
   completed. Their accepted behavior findings therefore land in a separate
   follow-up PR; round 8 is not started on the merged PR.
+- Accepted from PR #1576's preliminary specialist pass: completed targetless
+  extra sets had a production semantic branch without direct executable proof,
+  and the new targetless-next label used a disallowed em dash. Operator coverage
+  now proves status and actual without inventing a target, and the image label
+  uses the catalog-compliant `Next set: no target` copy.
+- Preliminary evidence disposition: the original direct rasters proved the
+  targetless and dense renderer states, but the design study still showed only
+  ordinary fixtures and there was no browser catalog capture. The catalog now
+  exposes both materially changed states. Physical macOS and no-extension
+  iPhone evidence remains an intentional release blocker, so the preliminary
+  pass cannot be called complete until that evidence exists.
+- Accepted from PR #1576 final ReviewGPT round 1: the shared semantic formatter
+  also improves durable assistant transcript/model context. That remains the
+  correct single semantic owner, but the non-obvious persisted surface and its
+  regression proof are now explicit; the canonical workout remains the sole
+  authority.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
 - Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. PR #1502 merged externally before that gate closed; the follow-up must stay draft until the missing evidence is captured.
 
@@ -135,7 +151,7 @@ Success criteria:
   URL and native-fragment limits together.
 - Follow-up remediation passed the touched Web, contracts, operator-config, and
   assistant-engine typechecks; 12 Web route/render tests, 23 contract tests, the
-  complete 293-test operator-config suite, and 83 assistant card, skill, and
+  complete 294-test operator-config suite, and 83 assistant card, skill, and
   model-behavior tests; focused Web lint; documentation drift; and diff hygiene.
   The exact
   route rendered a 1200×580 targetless-next workout card and a 1200×1442 dense
