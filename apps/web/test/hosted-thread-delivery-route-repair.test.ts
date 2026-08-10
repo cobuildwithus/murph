@@ -89,12 +89,18 @@ describe("hosted thread delivery-route repair", () => {
           "same-authority-reaction-context",
         ...requireRouteLookupKeys(fixture),
       });
+      const preparedDeliveryRoute = await prepareDeliveryRoute({
+        containerMemberId: fixture.containerMemberId,
+        prisma: harness.prisma,
+        route: expectedRoute,
+      });
 
       await expect(refreshHostedThreadContainerDeliveryRouteTx({
         accountLookupKey: fixture.accountLookupKey,
         ...(fixture.channel === "linq"
           ? { accountLookupKeys: [fixture.accountLookupKey] }
           : {}),
+        preparedDeliveryRoute,
         prisma: harness.prisma as never,
         route: buildRouteSnapshot(harness.readRow()) as never,
         threadId: fixture.threadId,
@@ -142,10 +148,16 @@ describe("hosted thread delivery-route repair", () => {
         threadId: expectedRoute.threadId,
       }),
     });
+    const preparedDeliveryRoute = await prepareDeliveryRoute({
+      containerMemberId: "linq-container",
+      prisma: harness.prisma,
+      route: expectedRoute,
+    });
 
     await expect(refreshHostedThreadContainerDeliveryRouteTx({
       accountLookupKey: expectedRoute.accountLookupKey,
       accountLookupKeys: [expectedRoute.accountLookupKey],
+      preparedDeliveryRoute,
       prisma: harness.prisma as never,
       route: buildRouteSnapshot(harness.readRow()) as never,
       threadId: expectedRoute.threadId,
@@ -162,6 +174,22 @@ describe("hosted thread delivery-route repair", () => {
     });
   });
 });
+
+async function prepareDeliveryRoute(input: {
+  containerMemberId: string;
+  prisma: ReturnType<typeof createRepairHarness>["prisma"];
+  route: HostedThreadDeliveryRouteV1;
+}) {
+  return {
+    containerMemberId: input.containerMemberId,
+    deliveryRoute: input.route,
+    deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({
+      containerMemberId: input.containerMemberId,
+      prisma: input.prisma as never,
+      route: input.route,
+    }),
+  };
+}
 
 interface MutableHostedThreadRouteRow {
   accountLookupKey: string | null;

@@ -30,7 +30,12 @@ import {
 } from "@/src/lib/legal/consent";
 import {
   ensureHostedThreadContainerRouteTx,
+  type PreparedHostedThreadContainerCreation,
 } from "@/src/lib/hosted-routing/thread-container-service";
+import {
+  buildHostedThreadDeliveryRoute,
+  sealHostedThreadDeliveryRoute,
+} from "@/src/lib/hosted-routing/thread-delivery-route";
 import {
   consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
   lockHostedThreadRouteByThreadIdentityTx,
@@ -43,6 +48,11 @@ import type {
 import {
   applyHostedLinqParticipantChangeToRouteTx,
 } from "@/src/lib/hosted-onboarding/webhook-service";
+import {
+  HOSTED_CRYPTO_DOMAINS,
+  HOSTED_CRYPTO_DOMAIN_RECIPIENT_KINDS,
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+} from "@murphai/runtime-state";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
@@ -69,6 +79,50 @@ function createDeferred<T = void>(): Deferred<T> {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+async function buildPreparedThreadContainerCreation(input: {
+  accountLookupKey: string;
+  containerMemberId: string;
+  prisma: PrismaClient;
+  threadId: string;
+}): Promise<PreparedHostedThreadContainerCreation> {
+  const deliveryRoute = buildHostedThreadDeliveryRoute({
+    accountLookupKey: input.accountLookupKey,
+    channel: "linq",
+    threadId: input.threadId,
+  });
+  const preparedAt = "2026-08-09T11:59:00.000Z";
+  return {
+    containerMemberId: input.containerMemberId,
+    cryptoDomainRoots: new Map(HOSTED_CRYPTO_DOMAINS.map((domain) => [
+      domain,
+      {
+        authoritySignature: {
+          alg: "GCP-KMS-EC-P256-SHA256",
+          keyVersionName: "test-authority-key-version",
+          signature: "test-authority-signature",
+          signedAt: preparedAt,
+        },
+        createdAt: preparedAt,
+        domain,
+        generation: 1,
+        rootKeyId: `test-root:${domain}:${input.containerMemberId}`,
+        schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+        updatedAt: preparedAt,
+        userId: input.containerMemberId,
+        wraps: [{
+          recipient: HOSTED_CRYPTO_DOMAIN_RECIPIENT_KINDS[domain][0],
+        }],
+      } as never,
+    ])),
+    deliveryRoute,
+    deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({
+      containerMemberId: input.containerMemberId,
+      prisma: input.prisma,
+      route: deliveryRoute,
+    }),
+  };
 }
 
 async function createRouteFixture(): Promise<RouteFixture> {
@@ -483,9 +537,181 @@ function pauseHostedThreadRouteUpdateAfterWrite(input: {
   });
 }
 
+function observeFirstHostedThreadRouteRead(input: {
+  observed: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  let didObserve = false;
+  const hostedThreadRoute = new Proxy(input.tx.hostedThreadRoute, {
+    get(target, property) {
+      if (property === "findMany") {
+        return async (args: Prisma.HostedThreadRouteFindManyArgs) => {
+          const rows = await target.findMany(args);
+          if (!didObserve) {
+            didObserve = true;
+            input.observed.resolve();
+          }
+          return rows;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
+  return new Proxy<Prisma.TransactionClient>(input.tx, {
+    get(target, property) {
+      if (property === "hostedThreadRoute") {
+        return hostedThreadRoute;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Linq participant-addition PostgreSQL ordering",
   () => {
+    it("uses the unique external-thread identity to roll back a concurrent creator", async () => {
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
+      }
+      const fixtureId = randomUUID();
+      const threadId = `chat_thread_create_race_${fixtureId}`;
+      const accountLookupKey = `account_thread_create_race_${fixtureId}`;
+      const ownerMemberIds = [
+        `member_thread_create_owner_a_${fixtureId}`,
+        `member_thread_create_owner_b_${fixtureId}`,
+      ] as const;
+      const containerMemberIds = [
+        `member_thread_create_container_a_${fixtureId}`,
+        `member_thread_create_container_b_${fixtureId}`,
+      ] as const;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const winnerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const loserClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const winnerCommittedState = createDeferred();
+      const releaseWinner = createDeferred();
+      const loserObservedAbsentRoute = createDeferred();
+      let winnerTransaction: Promise<unknown> | null = null;
+      let loserTransaction: Promise<unknown> | null = null;
+
+      try {
+        await observer.hostedMember.createMany({
+          data: ownerMemberIds.map((id) => ({
+            billingStatus: "active" as const,
+            id,
+          })),
+        });
+        const [winnerPreparation, loserPreparation] = await Promise.all([
+          buildPreparedThreadContainerCreation({
+            accountLookupKey,
+            containerMemberId: containerMemberIds[0],
+            prisma: winnerClient,
+            threadId,
+          }),
+          buildPreparedThreadContainerCreation({
+            accountLookupKey,
+            containerMemberId: containerMemberIds[1],
+            prisma: loserClient,
+            threadId,
+          }),
+        ]);
+
+        winnerTransaction = winnerClient.$transaction(async (tx) => {
+          const result = await ensureHostedThreadContainerRouteTx({
+            accountLookupKey,
+            channel: "linq",
+            mailboxDedupeKey: `thread-create-race:winner:${fixtureId}`,
+            occurredAt: new Date("2026-08-09T12:00:00.000Z"),
+            ownerMemberId: ownerMemberIds[0],
+            preparedCreation: winnerPreparation,
+            prisma: tx,
+            threadId,
+          });
+          winnerCommittedState.resolve();
+          await releaseWinner.promise;
+          return result;
+        });
+        await winnerCommittedState.promise;
+
+        loserTransaction = loserClient.$transaction((tx) =>
+          ensureHostedThreadContainerRouteTx({
+            accountLookupKey,
+            channel: "linq",
+            mailboxDedupeKey: `thread-create-race:loser:${fixtureId}`,
+            occurredAt: new Date("2026-08-09T12:00:01.000Z"),
+            ownerMemberId: ownerMemberIds[1],
+            preparedCreation: loserPreparation,
+            prisma: observeFirstHostedThreadRouteRead({
+              observed: loserObservedAbsentRoute,
+              tx,
+            }),
+            threadId,
+          })
+        );
+        await loserObservedAbsentRoute.promise;
+
+        releaseWinner.resolve();
+        await expect(winnerTransaction).resolves.toMatchObject({
+          containerMemberId: containerMemberIds[0],
+          created: true,
+        });
+        await expect(loserTransaction).rejects.toMatchObject({
+          code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
+          retryable: true,
+        });
+
+        await expect(observer.hostedThreadRoute.count({
+          where: {
+            channel: "linq",
+            threadIdentityLookupKey:
+              createHostedExternalThreadIdentityLookupKey({
+                channel: "linq",
+                threadId,
+              }) ?? "",
+          },
+        })).resolves.toBe(1);
+        await expect(observer.hostedThreadContainer.count({
+          where: { memberId: { in: [...containerMemberIds] } },
+        })).resolves.toBe(1);
+        await expect(observer.hostedMember.count({
+          where: { id: { in: [...containerMemberIds] } },
+        })).resolves.toBe(1);
+        await expect(observer.hostedUserCryptoEnvelope.count({
+          where: { userId: { in: [...containerMemberIds] } },
+        })).resolves.toBe(HOSTED_CRYPTO_DOMAINS.length);
+        await expect(observer.hostedMailboxItem.count({
+          where: { userId: { in: [...containerMemberIds] } },
+        })).resolves.toBe(1);
+      } finally {
+        releaseWinner.resolve();
+        await Promise.allSettled([
+          ...(winnerTransaction ? [winnerTransaction] : []),
+          ...(loserTransaction ? [loserTransaction] : []),
+        ]);
+        await observer.hostedThreadRoute.deleteMany({
+          where: { containerMemberId: { in: [...containerMemberIds] } },
+        });
+        await observer.hostedThreadContainer.deleteMany({
+          where: { memberId: { in: [...containerMemberIds] } },
+        });
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [...ownerMemberIds, ...containerMemberIds],
+            },
+          },
+        });
+        await Promise.all([
+          observer.$disconnect(),
+          winnerClient.$disconnect(),
+          loserClient.$disconnect(),
+        ]);
+      }
+    });
+
     it("consumes an addition that commits before the waiting group message", async () => {
       const fixture = await createRouteFixture();
       const markerWritten = createDeferred();
@@ -1184,6 +1410,20 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         if (!currentThreadIdentityLookupKey || !currentThreadLookupKey) {
           throw new Error("Expected current Linq thread lookup keys.");
         }
+        const preparedRoute = buildHostedThreadDeliveryRoute({
+          accountLookupKey: currentAccountLookupKey,
+          channel: "linq",
+          threadId: activeFixture.threadId,
+        });
+        const preparedDeliveryRoute = {
+          containerMemberId: activeFixture.containerMemberId,
+          deliveryRoute: preparedRoute,
+          deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({
+            containerMemberId: activeFixture.containerMemberId,
+            prisma: activeFixture.participantClient,
+            route: preparedRoute,
+          }),
+        };
 
         rekeyTransaction = activeFixture.participantClient.$transaction(async (tx) => {
           return ensureHostedThreadContainerRouteTx({
@@ -1196,6 +1436,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             containerMemberId: activeFixture.containerMemberId,
             occurredAt: new Date("2026-07-13T12:00:00.000Z"),
             ownerMemberId: activeFixture.ownerMemberId,
+            preparedDeliveryRoute,
             prisma: pauseHostedThreadRouteUpdateAfterWrite({
               release: releaseRouteRekey,
               tx,

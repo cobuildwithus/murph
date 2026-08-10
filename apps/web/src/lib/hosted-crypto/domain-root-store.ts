@@ -98,6 +98,61 @@ export interface UnwrappedHostedDomainRootReference
 export type PreparedHostedCryptoDomainRootCandidates =
   ReadonlyMap<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>;
 
+/**
+ * Seeds the request-scoped unwrap cache from a prepared envelope that has not
+ * been inserted yet. This lets a caller seal values and warm a later
+ * transaction's local encryption path without retaining another plaintext-key
+ * owner. The cache keeps its own copy and wipes it when the request scope
+ * closes; this helper wipes the caller copy immediately.
+ */
+export async function prewarmPreparedHostedCryptoDomainRootForWeb(input: {
+  domain: HostedCryptoDomain;
+  prepared: PreparedHostedCryptoDomainRootCandidates;
+  signal?: AbortSignal;
+  userId: string;
+}): Promise<void> {
+  const envelope = input.prepared.get(input.domain);
+  if (!envelope) {
+    throw new HostedCryptoDomainRootCandidateRequiredError({
+      domain: input.domain,
+    });
+  }
+  if (envelope.domain !== input.domain || envelope.userId !== input.userId) {
+    throw new TypeError("Prepared hosted domain root does not match its prewarm target.");
+  }
+
+  const cache = getHostedDomainRootUnwrapCache();
+  if (!cache) {
+    throw new Error(
+      "Prepared hosted domain-root prewarm requires a request-scoped unwrap cache.",
+    );
+  }
+  const activeCacheKey = `${input.userId}|${input.domain}|@active`;
+  const unwrapped = await unwrapWithScopedCache(
+    activeCacheKey,
+    async () => ({
+      envelope,
+      rootKey: await unwrapEnvelopeForWeb({
+        envelope,
+        signal: input.signal,
+      }),
+    }),
+    true,
+  );
+  try {
+    if (unwrapped.envelope.rootKeyId !== envelope.rootKeyId) {
+      throw new Error("Prepared hosted domain root conflicts with the scoped active root.");
+    }
+    const active = cache.get(activeCacheKey);
+    const concreteCacheKey = `${input.userId}|${input.domain}|${envelope.rootKeyId}`;
+    if (active && !cache.has(concreteCacheKey)) {
+      cache.set(concreteCacheKey, active);
+    }
+  } finally {
+    unwrapped.rootKey.fill(0);
+  }
+}
+
 async function unwrapWithScopedCache(
   cacheKey: string,
   compute: () => Promise<UnwrappedHostedDomainRoot>,
@@ -199,9 +254,9 @@ export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
 }
 
 /**
- * Legacy all-domain bridge for the two owners that still discover or create a
- * member id after `BEGIN`: thread-container creation and inbound Family member
- * activation. Candidate signing happens before the first per-domain lock, but
+ * Legacy all-domain bridge for inbound Family member activation, whose member
+ * id may still be created after `BEGIN`. Candidate signing happens before the
+ * first per-domain lock, but
  * the caller retains its outer connection and every `pg_advisory_xact_lock`
  * remains held until that outer transaction ends. New transaction code must
  * use the prepared-only commit API above.

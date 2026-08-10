@@ -27,12 +27,18 @@ import {
   HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
 } from "./linq-group-line-recovery";
 import { HOSTED_LINQ_GROUP_SETUP_TEMPLATE } from "./linq-group-setup";
-import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
+import {
+  assertHostedTelegramWebhookSecret,
+  buildHostedTelegramMessagePayload,
+  parseHostedTelegramWebhookUpdate,
+  summarizeHostedTelegramWebhook,
+} from "./telegram";
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
+  shouldPrepareHostedLinqThreadContainerCrypto,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -108,6 +114,28 @@ import {
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
+import {
+  prepareHostedThreadContainerCreation,
+  prepareHostedThreadContainerDeliveryRoute,
+  type PreparedHostedThreadContainerCreation,
+  type PreparedHostedThreadContainerDeliveryRoute,
+} from "../hosted-routing/thread-container-service";
+import {
+  HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+} from "../hosted-routing/thread-delivery-route";
+import {
+  createHostedPhoneLookupKey,
+} from "./contact-privacy";
+import {
+  resolveHostedMemberRoutingByTelegramUserId,
+} from "./hosted-member-routing-store";
+import {
+  isHostedMemberSuspended,
+} from "./entitlement";
+import { readHostedRuntimeAiAccessDecision } from "./member-access";
+import {
+  resolveHostedOnboardingLinqMessageContext,
+} from "./webhook-provider-linq-shared";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
@@ -461,12 +489,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signal: input.signal,
     });
     const planningEvent = planningResolution.event;
-    const warmPlanningMailboxPayloadRoot = () =>
-      warmHostedLinqMailboxPayloadRoot({
-        event: planningEvent,
-        prisma,
-        threadRoute: planningResolution.threadRoute,
-      });
 
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
       event.event_type === "message.received" && !affirmativeReaction
@@ -503,9 +525,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             })
           : null;
       const runPlan = (instantStartAllowed = true) =>
-        runHostedOnboardingWebhookTransaction(
-          prisma,
-          (transaction) =>
+        runHostedThreadRoutingPreparedTransaction({
+          plan: ({ preparation, transaction }) =>
             planHostedOnboardingLinqWebhook({
               affirmativeReaction,
               event: planningEvent,
@@ -515,11 +536,30 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 planningResolution.pendingGroupParticipantMemberIds ?? null,
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
+              ...(preparation.preparedThreadContainerCreation
+                ? {
+                    preparedThreadContainerCreation:
+                      preparation.preparedThreadContainerCreation,
+                  }
+                : {}),
+              ...(preparation.preparedThreadDeliveryRoute
+                ? {
+                    preparedThreadDeliveryRoute:
+                      preparation.preparedThreadDeliveryRoute,
+                  }
+                : {}),
               requireFirstContactAdmission,
               prisma: transaction,
             }),
-          warmPlanningMailboxPayloadRoot,
-        );
+          prepare: () =>
+            prepareHostedLinqThreadRoutingCrypto({
+              event: planningEvent,
+              participantMemberIds:
+                planningResolution.pendingGroupParticipantMemberIds ?? [],
+              prisma,
+            }),
+          prisma,
+        });
       const planAfterBlockedAdmission = (reason?: string) =>
         requireFirstContactAdmission
           ? Promise.resolve(buildBlockedHostedLinqFirstContactAdmissionPlan(reason))
@@ -1684,14 +1724,36 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     };
   }
 
-  const plan = await runHostedOnboardingWebhookTransaction(
-    prisma,
-    (transaction) =>
+  const plan = await runHostedThreadRoutingPreparedTransaction({
+    plan: ({ preparation, transaction }) =>
       planHostedOnboardingTelegramWebhook({
+        ...(preparation.preparedSenderMemberId
+          ? {
+              preparedSenderMemberId:
+                preparation.preparedSenderMemberId,
+            }
+          : {}),
+        ...(preparation.preparedThreadContainerCreation
+          ? {
+              preparedThreadContainerCreation:
+                preparation.preparedThreadContainerCreation,
+            }
+          : {}),
+        ...(preparation.preparedThreadDeliveryRoute
+          ? {
+              preparedThreadDeliveryRoute:
+                preparation.preparedThreadDeliveryRoute,
+            }
+          : {}),
         prisma: transaction,
         update,
       }),
-  );
+    prepare: () => prepareHostedTelegramThreadRoutingCrypto({
+      prisma,
+      update,
+    }),
+    prisma,
+  });
 
   if (plan.desiredSideEffects.length > 0) {
     throw new Error(
@@ -1772,6 +1834,197 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
     return;
   }
   await reconcile();
+}
+
+interface HostedThreadRoutingCryptoPreparation {
+  preparedSenderMemberId?: string;
+  preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
+  preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
+}
+
+async function prepareHostedLinqThreadRoutingCrypto(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  participantMemberIds: readonly string[];
+  prisma: PrismaClient;
+}): Promise<HostedThreadRoutingCryptoPreparation> {
+  if (input.event.event_type !== "message.received") {
+    return {};
+  }
+  const context = resolveHostedOnboardingLinqMessageContext(input.event);
+  const accountLookupKey = createHostedPhoneLookupKey(
+    context.recipientPhoneNumber,
+  );
+  if (!accountLookupKey) {
+    throw new TypeError(
+      "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
+    );
+  }
+
+  const threadRoute = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: context.summary.chatId,
+  });
+  if (threadRoute) {
+    const [preparedThreadDeliveryRoute] = await Promise.all([
+      prepareHostedThreadContainerDeliveryRoute({
+        accountLookupKey,
+        channel: "linq",
+        containerMemberId: threadRoute.containerMemberId,
+        prisma: input.prisma,
+        threadId: context.summary.chatId,
+      }),
+      warmHostedLinqMailboxPayloadRoot({
+        event: input.event,
+        prisma: input.prisma,
+        threadRoute,
+      }),
+    ]);
+    return { preparedThreadDeliveryRoute };
+  }
+
+  if (context.messageEvent.data.chat?.is_group === true) {
+    if (!await shouldPrepareHostedLinqThreadContainerCrypto({
+      event: input.event,
+      participantMemberIds: input.participantMemberIds,
+      prisma: input.prisma,
+    })) {
+      return {};
+    }
+    return {
+      preparedThreadContainerCreation:
+        await prepareHostedThreadContainerCreation({
+          accountLookupKey,
+          channel: "linq",
+          prisma: input.prisma,
+          threadId: context.summary.chatId,
+        }),
+    };
+  }
+
+  await warmHostedLinqMailboxPayloadRoot({
+    event: input.event,
+    prisma: input.prisma,
+    threadRoute: null,
+  });
+  return {};
+}
+
+async function prepareHostedTelegramThreadRoutingCrypto(input: {
+  prisma: PrismaClient;
+  update: ReturnType<typeof parseHostedTelegramWebhookUpdate>;
+}): Promise<HostedThreadRoutingCryptoPreparation> {
+  const summary = await summarizeHostedTelegramWebhook(input.update);
+  const message = buildHostedTelegramMessagePayload(input.update);
+  if (
+    !summary
+    || summary.isBotMessage
+    || summary.isDirect
+    || !summary.senderTelegramUserId
+    || !message
+  ) {
+    return {};
+  }
+  const memberLookup = await resolveHostedMemberRoutingByTelegramUserId({
+    prisma: input.prisma,
+    telegramUserId: summary.senderTelegramUserId,
+  });
+  if (
+    memberLookup.status !== "found"
+  ) {
+    return {};
+  }
+  const preparedSenderMemberId = memberLookup.lookup.core.id;
+  if (isHostedMemberSuspended(memberLookup.lookup.core.suspendedAt)) {
+    return { preparedSenderMemberId };
+  }
+  const access = await readHostedRuntimeAiAccessDecision({
+    memberId: memberLookup.lookup.core.id,
+    now: new Date(),
+    prisma: input.prisma,
+  });
+  if (!access.allowed) {
+    return { preparedSenderMemberId };
+  }
+  const threadRoute = await readHostedThreadRouteByThreadIdentity({
+    channel: "telegram",
+    prisma: input.prisma,
+    threadId: message.threadId,
+  });
+  if (!threadRoute) {
+    return {
+      preparedSenderMemberId,
+      preparedThreadContainerCreation:
+        await prepareHostedThreadContainerCreation({
+          accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+          channel: "telegram",
+          prisma: input.prisma,
+          threadId: message.threadId,
+        }),
+    };
+  }
+
+  const [preparedThreadDeliveryRoute] = await Promise.all([
+    prepareHostedThreadContainerDeliveryRoute({
+      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+      channel: "telegram",
+      containerMemberId: threadRoute.containerMemberId,
+      prisma: input.prisma,
+      threadId: message.threadId,
+    }),
+    (async () => {
+      const root = await unwrapHostedDomainRootForWeb({
+        domain: getHostedCryptoDomainForLane("mailbox-payload"),
+        prisma: input.prisma,
+        retainFailureInScopedCache: true,
+        userId: threadRoute.containerMemberId,
+      });
+      root.rootKey.fill(0);
+    })(),
+  ]);
+  return { preparedSenderMemberId, preparedThreadDeliveryRoute };
+}
+
+const HOSTED_THREAD_ROUTING_PREPARATION_RETRY_CODES = new Set([
+  "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+  "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+  "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
+]);
+
+async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
+  plan: (input: {
+    preparation: HostedThreadRoutingCryptoPreparation;
+    transaction: Prisma.TransactionClient;
+  }) => Promise<TResult>;
+  prepare: () => Promise<HostedThreadRoutingCryptoPreparation>;
+  prisma: PrismaClient;
+}): Promise<TResult> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let preparation: HostedThreadRoutingCryptoPreparation = {};
+    try {
+      return await runHostedOnboardingWebhookTransaction(
+        input.prisma,
+        (transaction) => input.plan({ preparation, transaction }),
+        async () => {
+          preparation = await input.prepare();
+        },
+      );
+    } catch (error) {
+      if (
+        attempt === 0
+        && isHostedOnboardingError(error)
+        && HOSTED_THREAD_ROUTING_PREPARATION_RETRY_CODES.has(error.code)
+      ) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.webhook.thread-routing-preparation-retry",
+          { code: error.code },
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error("Hosted thread routing preparation retry exhausted unexpectedly.");
 }
 
 /**

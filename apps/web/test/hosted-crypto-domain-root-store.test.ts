@@ -1022,6 +1022,45 @@ test("domain root unwraps are memoized inside the scoped cache and wiped at scop
   assert.ok(outside.readCount() > outsideFirst);
 });
 
+test("a prepared domain root warms the scoped active key before its row exists", async () => {
+  const { decryptMetrics, tx } =
+    await createHostedWebCryptoTransactionFixture();
+  const {
+    prepareHostedCryptoDomainRootCandidates,
+    prewarmPreparedHostedCryptoDomainRootForWeb,
+    unwrapHostedDomainRootForWeb,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-prepared-prewarm";
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    domains: ["control"],
+    prisma: tx.prisma,
+    userId,
+  });
+  const counting = createEnvelopeReadCountingClient(tx.prisma);
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await prewarmPreparedHostedCryptoDomainRootForWeb({
+      domain: "control",
+      prepared,
+      userId,
+    });
+    const root = await unwrapHostedDomainRootForWeb({
+      domain: "control",
+      prisma: counting.client,
+      userId,
+    });
+    assert.ok(root.rootKey.some((byte) => byte !== 0));
+    root.rootKey.fill(0);
+  });
+
+  assert.equal(counting.readCount(), 0);
+  assert.equal(decryptMetrics.calls.length, 1);
+  assert.equal(tx.persistedEnvelopes.length, 0);
+});
+
 test("Stripe activation preflight keeps activation proof false and reuses KMS roots for private projection", async () => {
   const { decryptMetrics, tx } =
     await createHostedWebCryptoTransactionFixture();

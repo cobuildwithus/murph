@@ -1605,15 +1605,24 @@ receipts retain retry authority, and alert configuration or delivery failure
 cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.
 
-Established Linq direct messages and established external-thread group messages
-resolve only a narrow blind-index/member-id preflight target and unwrap the
-mailbox-payload ingress root before the planner transaction opens. The direct
-preflight requires current active access and a complete active domain-root set;
-the group preflight uses the already established route. Neither result grants
-authority: the planner repeats route, identity, activation, access, and
-participant checks in its transaction. New thread containers and members whose
-roots or active access are not yet established remain on the transaction-owned
-provisioning path.
+Hosted thread routing prepares variable crypto before the planner transaction.
+Established Linq direct messages resolve only a narrow blind-index/member-id
+target and unwrap the mailbox-payload ingress root; established Linq and
+Telegram group routes also pre-seal the current delivery route and prewarm its
+control and mailbox roots. For an eligible unbound group, Web generates the
+synthetic member id, prepares all four domain-root envelopes, pre-seals the
+delivery route, and prewarms the prepared control and mailbox roots before
+`BEGIN`. These reads and crypto results grant no authority: the planner repeats
+route, identity, activation, access, line, pending-setup, and participant checks
+inside the transaction. A new route then commits the synthetic member,
+prepared root envelopes, container, unique external-thread route, and activation
+mailbox wake atomically using the prewarmed ingress root. The unique
+external-thread identity, rather than an absent-row advisory lock, selects the
+winner of concurrent creation; existing-row refresh still takes the route lock.
+If the route changes after preparation, Web rolls back and performs at most one
+fresh prepare-before-transaction attempt. Thread-container creation therefore
+does not use the legacy all-domain provisioning bridge or perform KMS work while
+holding its route transaction.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The

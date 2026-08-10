@@ -128,6 +128,8 @@ import {
 import { normalizePhoneNumber } from "./phone";
 import {
   refreshHostedThreadContainerDeliveryRouteTx,
+  type PreparedHostedThreadContainerCreation,
+  type PreparedHostedThreadContainerDeliveryRoute,
 } from "../hosted-routing/thread-container-service";
 import {
   ensureHostedPreparedLinqThreadContainerRouteTx,
@@ -309,6 +311,54 @@ export async function resolveHostedLinqMailboxPayloadRootPrewarmMemberId(input: 
   })
     ? memberId
     : null;
+}
+
+/**
+ * Bounds speculative new-container crypto work to a group that has at least
+ * one currently active creation candidate. The planner repeats identity,
+ * pending-setup, access, and line-authority checks under its transaction; this
+ * read only decides whether pre-transaction KMS preparation is worthwhile.
+ */
+export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
+  event: HostedLinqWebhookEvent;
+  participantMemberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  if (input.event.event_type !== "message.received") {
+    return false;
+  }
+  const context = resolveHostedOnboardingLinqMessageContext(input.event);
+  const { messageEvent, participantContact, summary } = context;
+  if (
+    !isHostedLinqGroupChat(messageEvent)
+    || summary.isFromMe
+    || !participantContact
+    || messageEvent.data.message.parts.length === 0
+    || shouldIgnoreHostedLinqForLocalInboundGuard({
+      isFromMe: summary.isFromMe,
+      participantContact,
+    })
+  ) {
+    return false;
+  }
+
+  const senderMemberId = await lookupHostedLinqPrewarmIdentityMemberId({
+    contact: participantContact,
+    prisma: input.prisma,
+  });
+  const candidates = new Set(input.participantMemberIds);
+  if (senderMemberId) {
+    candidates.add(senderMemberId);
+  }
+  const eligibility = await Promise.all(
+    [...candidates].map((memberId) =>
+      readActiveHostedMemberAccess({
+        memberId,
+        prisma: input.prisma,
+      })
+    ),
+  );
+  return eligibility.some(Boolean);
 }
 
 async function lookupHostedLinqPrewarmIdentityMemberId(input: {
@@ -833,6 +883,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
   instantStartAllowed?: boolean;
   pendingGroupParticipantMemberIds?: readonly string[] | null;
   pendingGroupRosterUnavailable?: boolean;
+  preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
+  preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -874,6 +926,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       accountLookupKeys: threadRouteAccountLookupKeys,
       context,
       event: input.event,
+      preparedDeliveryRoute: input.preparedThreadDeliveryRoute,
       prisma: input.prisma,
       route: explicitThreadRoute,
     });
@@ -886,6 +939,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       event: input.event,
       firstContactAdmissionDecision: input.firstContactAdmissionDecision,
       participantMemberIds: input.pendingGroupParticipantMemberIds ?? [],
+      preparedThreadContainerCreation: input.preparedThreadContainerCreation,
+      preparedThreadDeliveryRoute: input.preparedThreadDeliveryRoute,
       rosterUnavailable: input.pendingGroupRosterUnavailable ?? false,
       prisma: input.prisma,
       requireFirstContactAdmission: input.requireFirstContactAdmission,
@@ -2203,12 +2258,30 @@ async function planHostedLinqExistingThreadRouteWebhook(input: {
   affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
+  preparedDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
   prisma: Prisma.TransactionClient;
   resolvedParticipantMemberId?: string;
   route: HostedThreadRouteSnapshot;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const { messageEvent, summary } = input.context;
-  let routeAccountLookupKey = input.accountLookupKey;
+  if (
+    !input.preparedDeliveryRoute
+    || input.preparedDeliveryRoute.containerMemberId
+      !== input.route.containerMemberId
+  ) {
+    // The preflight package also warms this container's mailbox ingress root.
+    // A different container here means the route changed after preparation;
+    // retry outside a fresh transaction instead of unwrapping the winner's
+    // root while this transaction is open.
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted thread delivery-route preparation is required.",
+      retryable: true,
+    });
+  }
+  let routeAccountLookupKey =
+    input.route.accountLookupKey ?? input.accountLookupKey;
   let sourceMailboxConsumedAt: Date | null = null;
   if (requiresHostedThreadDeliveryRouteRefresh({
     accountLookupKey: input.accountLookupKey,
@@ -2224,6 +2297,7 @@ async function planHostedLinqExistingThreadRouteWebhook(input: {
       accountLookupKey: input.accountLookupKey,
       accountLookupKeys: input.accountLookupKeys,
       mailboxDedupeKey: input.event.event_id,
+      preparedDeliveryRoute: input.preparedDeliveryRoute,
       prisma: input.prisma,
       route: input.route,
       threadId: summary.chatId,
@@ -2702,6 +2776,8 @@ async function planHostedLinqGroupChatWebhook(input: {
   event: HostedLinqWebhookEvent;
   firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
   participantMemberIds: readonly string[];
+  preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
+  preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
   rosterUnavailable: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
@@ -2997,6 +3073,8 @@ async function planHostedLinqGroupChatWebhook(input: {
       mailboxDedupeKey: input.event.event_id,
       occurredAt: new Date(occurredAt),
       participantMemberIds: pendingSetupParticipantMemberIds,
+      preparedCreation: input.preparedThreadContainerCreation,
+      preparedDeliveryRoute: input.preparedThreadDeliveryRoute,
       recipientPhoneLookupKeys: pendingSetupRecipientPhoneLookupKeys,
       requiredPendingSetupCandidateId,
       senderMemberId: activeSenderMemberId,
@@ -3120,6 +3198,12 @@ async function planHostedLinqGroupChatWebhook(input: {
         accountLookupKeys: input.threadRouteAccountLookupKeys,
         context: input.context,
         event: input.event,
+        preparedDeliveryRoute: [
+          input.preparedThreadDeliveryRoute,
+          input.preparedThreadContainerCreation,
+        ].find((prepared) =>
+          prepared?.containerMemberId === route.containerMemberId
+        ),
         prisma: input.prisma,
         ...(activeSenderMemberId
           ? { resolvedParticipantMemberId: activeSenderMemberId }

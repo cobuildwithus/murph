@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  handleHostedOnboardingLinqWebhook,
+  runHostedOnboardingWebhookTransaction,
+  warmHostedLinqMailboxPayloadRoot,
+} from "@/src/lib/hosted-onboarding/webhook-service";
+
 /**
  * The ingress root unwrap reads an envelope and then calls KMS. If the first
  * unwrap happens inside the planning transaction, that network round trip is
@@ -28,6 +34,51 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", async (importOriginal) =>
     readHostedThreadRouteByThreadIdentity: vi.fn(async () => {
       calls.push("read-route");
       return { channel: "linq", containerMemberId: "member_prewarm_1" };
+    }),
+  };
+});
+
+vi.mock("@/src/lib/hosted-routing/thread-container-service", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-routing/thread-container-service")
+  >();
+  return {
+    ...actual,
+    prepareHostedThreadContainerCreation: vi.fn(async (input: {
+      accountLookupKey: string;
+      channel: "linq";
+      threadId: string;
+    }) => {
+      calls.push("prepare-container");
+      return {
+        containerMemberId: "member_prepared_container",
+        cryptoDomainRoots: new Map(),
+        deliveryRoute: {
+          accountLookupKey: input.accountLookupKey,
+          channel: input.channel,
+          schema: "murph.hosted-thread-delivery-route.v1" as const,
+          threadId: input.threadId,
+        },
+        deliveryRouteEncrypted: "prepared-container-route",
+      };
+    }),
+    prepareHostedThreadContainerDeliveryRoute: vi.fn(async (input: {
+      accountLookupKey: string;
+      channel: "linq";
+      containerMemberId: string;
+      threadId: string;
+    }) => {
+      calls.push("prepare-route");
+      return {
+        containerMemberId: input.containerMemberId,
+        deliveryRoute: {
+          accountLookupKey: input.accountLookupKey,
+          channel: input.channel,
+          schema: "murph.hosted-thread-delivery-route.v1" as const,
+          threadId: input.threadId,
+        },
+        deliveryRouteEncrypted: "prepared-route",
+      };
     }),
   };
 });
@@ -99,6 +150,7 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
         threadRoute: { containerMemberId: string } | null;
       }) => threadRoute?.containerMemberId ?? "member_direct_prewarm",
     ),
+    shouldPrepareHostedLinqThreadContainerCrypto: vi.fn(async () => true),
   };
 });
 
@@ -187,13 +239,9 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     rootKeyAtTransactionOpen = null;
     rootKeysAtTransactionOpen.length = 0;
     vi.clearAllMocks();
-    vi.resetModules();
   });
 
   it("unwraps the ingress root before the planning transaction opens", async () => {
-    const { runHostedOnboardingWebhookTransaction } = await import(
-      "@/src/lib/hosted-onboarding/webhook-service"
-    );
     const prisma = {
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
         calls.push("begin");
@@ -219,9 +267,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
   });
 
   it("still opens the transaction when no warm-up is supplied", async () => {
-    const { runHostedOnboardingWebhookTransaction } = await import(
-      "@/src/lib/hosted-onboarding/webhook-service"
-    );
     const prisma = {
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
         calls.push("begin");
@@ -241,9 +286,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
   });
 
   it("does not fail the transaction when the warm-up throws", async () => {
-    const { runHostedOnboardingWebhookTransaction } = await import(
-      "@/src/lib/hosted-onboarding/webhook-service"
-    );
     const prisma = {
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
         calls.push("begin");
@@ -271,9 +313,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
   it("reports preflight wait separately from the connection-held duration", async () => {
     let nowMs = 1_000;
     vi.spyOn(Date, "now").mockImplementation(() => nowMs);
-    const { runHostedOnboardingWebhookTransaction } = await import(
-      "@/src/lib/hosted-onboarding/webhook-service"
-    );
     const prisma = {
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
         nowMs += 20;
@@ -299,9 +338,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
   });
 
   it("unwraps the ingress root for the routed member and wipes its key copy", async () => {
-    const { warmHostedLinqMailboxPayloadRoot } = await import(
-      "@/src/lib/hosted-onboarding/webhook-service"
-    );
     const { unwrapHostedDomainRootForWeb } = await import(
       "@/src/lib/hosted-crypto/domain-root-store"
     );
@@ -326,9 +362,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
   });
 
   it("unwraps the resolver's direct member when no route is established", async () => {
-    const { warmHostedLinqMailboxPayloadRoot } = await import(
-      "@/src/lib/hosted-onboarding/webhook-service"
-    );
     const { unwrapHostedDomainRootForWeb } = await import(
       "@/src/lib/hosted-crypto/domain-root-store"
     );
@@ -353,9 +386,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
   // a route exists, and that decision is what the warm hook acts on.
   describe("through handleHostedOnboardingLinqWebhook", () => {
     it("warms the routed member's root and wipes the copy before the transaction opens", async () => {
-      const { handleHostedOnboardingLinqWebhook } = await import(
-        "@/src/lib/hosted-onboarding/webhook-service"
-      );
       const { unwrapHostedDomainRootForWeb } = await import(
         "@/src/lib/hosted-crypto/domain-root-store"
       );
@@ -371,7 +401,15 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       expect(response).toMatchObject({ ok: true, reason: "prewarm-owner-boundary-plan" });
       // The route read is the resolver's; the unwrap is the warm hook's. Both
       // finish before `BEGIN`, which is the whole point of the change.
-      expect(calls).toEqual(["read-route", "unwrap", "begin", "plan", "commit"]);
+      expect(calls).toEqual([
+        "read-route",
+        "read-route",
+        "prepare-route",
+        "unwrap",
+        "begin",
+        "plan",
+        "commit",
+      ]);
       expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
         domain: "ingress",
         prisma,
@@ -385,9 +423,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     });
 
     it("warms an established route when webhook metadata says the chat is a group", async () => {
-      const { handleHostedOnboardingLinqWebhook } = await import(
-        "@/src/lib/hosted-onboarding/webhook-service"
-      );
       const { unwrapHostedDomainRootForWeb } = await import(
         "@/src/lib/hosted-crypto/domain-root-store"
       );
@@ -403,20 +438,113 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         timestamp: null,
       });
 
-      expect(readHostedThreadRouteByThreadIdentity).toHaveBeenCalledTimes(1);
+      expect(readHostedThreadRouteByThreadIdentity).toHaveBeenCalledTimes(2);
       expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
         domain: "ingress",
         prisma,
         retainFailureInScopedCache: true,
         userId: "member_prewarm_1",
       });
-      expect(calls).toEqual(["read-route", "unwrap", "begin", "plan", "commit"]);
+      expect(calls).toEqual([
+        "read-route",
+        "read-route",
+        "prepare-route",
+        "unwrap",
+        "begin",
+        "plan",
+        "commit",
+      ]);
+    });
+
+    it("prepares a new group container before the planning transaction opens", async () => {
+      const { planHostedOnboardingLinqWebhook } = await import(
+        "@/src/lib/hosted-onboarding/webhook-provider-linq"
+      );
+      const { readHostedThreadRouteByThreadIdentity } = await import(
+        "@/src/lib/hosted-routing/thread-route-store"
+      );
+      vi.mocked(readHostedThreadRouteByThreadIdentity)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      const prisma = buildPrewarmPrisma();
+
+      await handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never,
+        rawBody: buildLinqMessageWebhookBody({ chatIsGroup: true }),
+        signature: null,
+        timestamp: null,
+      });
+
+      expect(calls).toEqual([
+        "prepare-container",
+        "begin",
+        "plan",
+        "commit",
+      ]);
+      expect(planHostedOnboardingLinqWebhook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          preparedThreadContainerCreation: expect.objectContaining({
+            containerMemberId: "member_prepared_container",
+          }),
+        }),
+      );
+    });
+
+    it("re-prepares outside a fresh transaction after a concurrent route write", async () => {
+      const { hostedOnboardingError } = await import(
+        "@/src/lib/hosted-onboarding/errors"
+      );
+      const { planHostedOnboardingLinqWebhook } = await import(
+        "@/src/lib/hosted-onboarding/webhook-provider-linq"
+      );
+      const prisma = buildPrewarmPrisma();
+      vi.mocked(planHostedOnboardingLinqWebhook)
+        .mockImplementationOnce(async () => {
+          calls.push("plan-conflict");
+          throw hostedOnboardingError({
+            code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
+            httpStatus: 409,
+            message: "Concurrent route write.",
+            retryable: true,
+          });
+        })
+        .mockImplementationOnce(async () => {
+          calls.push("plan");
+          return {
+            desiredSideEffects: [],
+            response: { ok: true, reason: "prepared-retry-plan" },
+          };
+        });
+
+      const response = await handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never,
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      });
+
+      expect(response).toMatchObject({ ok: true, reason: "prepared-retry-plan" });
+      expect(calls).toEqual([
+        "read-route",
+        "read-route",
+        "prepare-route",
+        "unwrap",
+        "begin",
+        "plan-conflict",
+        "read-route",
+        "prepare-route",
+        "unwrap",
+        "begin",
+        "plan",
+        "commit",
+      ]);
+      expect(rootKeysAtTransactionOpen).toEqual([
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]);
     });
 
     it("warms before the classifier-allow replan transaction", async () => {
-      const { handleHostedOnboardingLinqWebhook } = await import(
-        "@/src/lib/hosted-onboarding/webhook-service"
-      );
       const {
         claimHostedLinqFirstContactAdmissionBudget,
         classifyHostedLinqFirstContactAdmission,
@@ -481,23 +609,28 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       expect(recordHostedLinqFirstContactAdmissionDecision).toHaveBeenCalledTimes(1);
       expect(calls).toEqual([
         "read-route",
+        "read-route",
+        "prepare-route",
         "begin",
         "plan",
         "commit",
         "begin",
         "commit",
+        "read-route",
+        "prepare-route",
         "unwrap",
         "begin",
         "plan",
         "commit",
       ]);
-      expect(rootKeysAtTransactionOpen).toEqual([null, null, [0, 0, 0, 0]]);
+      expect(rootKeysAtTransactionOpen).toEqual([
+        null,
+        null,
+        [0, 0, 0, 0],
+      ]);
     });
 
     it("warms before a deterministic decision loses to a recorded allow replan", async () => {
-      const { handleHostedOnboardingLinqWebhook } = await import(
-        "@/src/lib/hosted-onboarding/webhook-service"
-      );
       const {
         classifyHostedLinqFirstContactAdmission,
         readHostedLinqFirstContactAdmissionMode,
@@ -579,15 +712,22 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       expect(classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
       expect(calls).toEqual([
         "read-route",
+        "read-route",
+        "prepare-route",
         "begin",
         "plan",
         "commit",
+        "read-route",
+        "prepare-route",
         "unwrap",
         "begin",
         "plan",
         "commit",
       ]);
-      expect(rootKeysAtTransactionOpen).toEqual([null, [0, 0, 0, 0]]);
+      expect(rootKeysAtTransactionOpen).toEqual([
+        null,
+        [0, 0, 0, 0],
+      ]);
     });
   });
 });
