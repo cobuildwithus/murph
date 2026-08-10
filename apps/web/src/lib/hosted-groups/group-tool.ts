@@ -434,12 +434,7 @@ export async function handleHostedRuntimeGroupTool(input: {
             usage: {
               fundingNeeded: usage.fundingNeeded,
               fundingUrl: usage.fundingUrl,
-              ...(usage.includedUsageUsedPercent === undefined
-                ? {}
-                : {
-                    includedUsageUsedPercent:
-                      usage.includedUsageUsedPercent,
-                  }),
+              includedUsageUsedPercent: usage.includedUsageUsedPercent,
             },
           }
         : {

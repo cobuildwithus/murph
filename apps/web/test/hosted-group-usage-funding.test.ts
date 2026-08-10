@@ -59,8 +59,6 @@ describe("hosted group usage funding", () => {
   });
 
   it.each([
-    [0n, 0n, null],
-    [-1n, 0n, null],
     [10_000_000n, -1n, 0],
     [10_000_000n, 0n, 0],
     [10_000_000n, 1n, 1],
@@ -76,6 +74,15 @@ describe("hosted group usage funding", () => {
       })).toBe(expected);
     },
   );
+
+  it.each([0n, -1n])("rejects a nonpositive included limit of %s", (
+    limitUsdMicros,
+  ) => {
+    expect(() => calculateHostedGroupIncludedUsageUsedPercent({
+      limitUsdMicros,
+      spentUsdMicros: 0n,
+    })).toThrow(/included usage limit must be positive/u);
+  });
 
   it("uses the existing opaque join code for an active group target", async () => {
     const prisma = {
@@ -162,36 +169,6 @@ describe("hosted group usage funding", () => {
       includedUsageUsedPercent: 50,
     });
     expect(mocks.readHostedGroupSponsorshipPublicState).not.toHaveBeenCalled();
-  });
-
-  it("omits usage progress without hiding funding status when the included limit is not positive", async () => {
-    const prisma = {
-      hostedGroup: {
-        findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
-      },
-      hostedThreadContainer: {
-        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
-      },
-    };
-    mocks.readHostedAiUsageGate.mockResolvedValue({
-      allowanceSource: "thread_container",
-      allowed: false,
-      limitUsdMicros: 0n,
-      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      spentUsdMicros: 0n,
-    });
-
-    await expect(readHostedGroupFundingRecoveryStatus({
-      prisma: prisma as never,
-      runtimeMemberId: "member_group_runtime",
-    })).resolves.toEqual({
-      fundingNeeded: true,
-      fundingUrl:
-        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-    });
-    expect(mocks.hasHostedGroupAutomaticRefillAvailable).not.toHaveBeenCalled();
   });
 
   it("always projects urgency when the room is exhausted", async () => {

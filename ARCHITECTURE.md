@@ -945,9 +945,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   entitlement, and separate daily Linq anti-abuse gates, remain enforceable.
 
   The current group-tool privacy projection is
-  `{fundingNeeded,fundingUrl,includedUsageUsedPercent?}`. Web computes the
-  optional integer from included usage only: omit it when the included limit is
-  not positive; return `0` when counted current-period included spend is not
+  `{fundingNeeded,fundingUrl,includedUsageUsedPercent}`. A successful current
+  Web projection already proves a positive included limit; an inactive or
+  malformed limit makes the whole read unavailable rather than creating a
+  second successful shape. Web computes the required integer from included
+  usage only: return `0` when counted current-period included spend is not
   positive; return `100` when spend is at least the limit; otherwise return
   `max(1, floor(spend * 100 / limit))`. Credit purchases, referrals, automatic
   refills, carryover, and remaining effective capacity do not enter that math,
@@ -956,10 +958,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   has been used; it does not mean that the room is exhausted because credit may
   remain.
 
-  The runtime preserves the optional aggregate when present. Absence means
-  quantitative status is unavailable; the assistant must not reconstruct it
-  from urgency, funding, sponsorship, or conversation history. The immediately
-  preceding optional
+  The runtime requires and preserves the aggregate on the current successful
+  shape. A funding-only current response is rejected instead of serving as a
+  rollout compatibility shape; the assistant reports quantitative status as
+  unavailable and must not reconstruct it from urgency, funding, sponsorship,
+  or conversation history. The immediately preceding optional
   `sponsorshipStatus` and the older exact
   `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response remain
   legacy-facing reader branches only. The oldest shape derives only the funding
@@ -976,10 +979,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   included usage in the current period. Proactive depletion messaging, general
   funding options, and funding requests use `fundingNeeded` and `fundingUrl`
   without mentioning the percentage. The transport returns facts and never
-  infers conversational intent. A Web-owned exhaustion projection always
-  appends the current URL to the ordinary group pause copy.
+  infers conversational intent. Filesystem-capable group-chat turns load the
+  detailed low-usage skill. Group-email turns cannot read that skill, so the
+  stable prompt carries only the compact explicit-question contract: one
+  `read_usage`, the bounded under-100/at-least-100 wording, authoritative
+  unavailability, and the prohibition on remaining-capacity inference. It does
+  not grant the spoofable email sender any mutation authority. A Web-owned
+  exhaustion projection always appends the current URL to the ordinary group
+  pause copy.
 
-  The Web producer, preserving runtime reader, and assistant policy ship as one
+  The Web producer, strict runtime reader, and assistant policy ship as one
   product change. There is no strip-only reader phase or rollout-only feature
   flag. A mixed-version Web/runner window may temporarily make this strict read
   fail; that availability tradeoff is accepted. Once both components converge,

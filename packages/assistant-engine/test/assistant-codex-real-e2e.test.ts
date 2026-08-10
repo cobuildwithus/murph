@@ -2157,6 +2157,151 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 
 describeRealCodex('real Codex hosted usage behavior e2e', () => {
   it.each([
+    { channel: 'linq', filesystemAccess: true, result: 64 },
+    { channel: 'linq', filesystemAccess: true, result: 100 },
+    { channel: 'linq', filesystemAccess: true, result: 'unavailable' },
+    { channel: 'email', filesystemAccess: false, result: 64 },
+    { channel: 'email', filesystemAccess: false, result: 100 },
+    { channel: 'email', filesystemAccess: false, result: 'unavailable' },
+  ] as const)(
+    'answers explicit hosted-group usage progress on $channel with $result',
+    async ({ channel, filesystemAccess, result: usageResult }) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), `murph-group-usage-progress-${channel}-e2e-`),
+      )
+      const groupActions: string[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await mkdir(skillsRoot, { recursive: true })
+        if (filesystemAccess) {
+          await materializeAssistantSkill({
+            skillsRoot,
+            slug: 'hosted-low-usage',
+          })
+        }
+
+        const response = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          configOverrides: filesystemAccess
+            ? undefined
+            : [
+                'features.shell_tool=false',
+                'features.multi_agent=false',
+                'features.multi_agent_v2=false',
+                'features.tool_suggest=false',
+              ],
+          developerInstructions:
+            buildHostedUsageProgressDeveloperInstructions(channel),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                groupActions.push(request.action)
+                if (request.action !== 'read_usage') {
+                  throw new Error(
+                    `Unexpected group usage-progress action: ${request.action}`,
+                  )
+                }
+                if (usageResult === 'unavailable') {
+                  return {
+                    action: 'read_usage',
+                    result: {
+                      status: 'unavailable',
+                      unavailableReason: 'group_usage_unavailable',
+                      usage: null,
+                    },
+                  }
+                }
+                return {
+                  action: 'read_usage',
+                  result: {
+                    status: 'ok',
+                    usage: {
+                      fundingNeeded: false,
+                      fundingUrl: null,
+                      includedUsageUsedPercent: usageResult,
+                    },
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'What percent of this room\'s included AI usage have we used in the current period?',
+          reasoningEffort: 'low',
+          sandbox: filesystemAccess ? 'workspace-write' : 'read-only',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(response.jsonEvents)
+        const skillReads = actions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes('hosted-low-usage/SKILL.md')
+          && action.output.includes('# Hosted low usage')
+        )
+        const usageReads = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )
+
+        expect(skillReads).toHaveLength(filesystemAccess ? 1 : 0)
+        if (!filesystemAccess) {
+          expect(actions.some((action) => action.kind === 'command')).toBe(false)
+        }
+        expect(usageReads).toHaveLength(1)
+        expect(usageReads[0]).toMatchObject({
+          argumentsValue: { action: 'read_usage' },
+        })
+        expect(groupActions).toEqual(['read_usage'])
+
+        if (usageResult === 64) {
+          expect(response.finalMessage.trim()).toBe(
+            "About 64% of this room's included usage for the current period has been used.",
+          )
+        } else if (usageResult === 100) {
+          expect(response.finalMessage.trim()).toBe(
+            "At least all of this room's included usage for the current period has been used.",
+          )
+        } else {
+          expect(response.finalMessage).toMatch(
+            /authoritative included-usage progress figure.*unavailable right now/iu,
+          )
+        }
+        expect(response.finalMessage).not.toMatch(
+          /messages? left|remaining percent|\b0% left\b|\bexhausted\b|\bout of usage\b/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
+  it.each([
     {
       confirmationPrompt: [
         'Yes. I explicitly confirm switching from Pulse to Core for',
@@ -5364,6 +5509,30 @@ function buildHostedUsageOptionsDeveloperInstructions(
     },
     conversationScope,
     currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildHostedUsageProgressDeveloperInstructions(
+  channel: 'email' | 'linq',
+): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel,
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'group',
+    currentLocalDate: '2026-08-09',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',

@@ -19,6 +19,7 @@ it("categorizes a malformed group usage response without retaining its payload",
       usage: {
         fundingNeeded: false,
         fundingUrl: null,
+        includedUsageUsedPercent: 64,
         [privatePayloadKey]: privatePayloadValue,
       },
     },
@@ -48,22 +49,13 @@ it("categorizes a malformed group usage response without retaining its payload",
 });
 
 it("accepts and preserves the group usage progress field", async () => {
-  const currentResponse = {
+  const usageProgressResponse = {
     action: "read_usage" as const,
     result: {
       status: "ok" as const,
       usage: {
         fundingNeeded: false,
         fundingUrl: null,
-      },
-    },
-  };
-  const usageProgressResponse = {
-    ...currentResponse,
-    result: {
-      ...currentResponse.result,
-      usage: {
-        ...currentResponse.result.usage,
         includedUsageUsedPercent: 64,
       },
     },

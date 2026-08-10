@@ -3099,22 +3099,22 @@ describe("parseHostedRuntimeGroupTool", () => {
         usage: {
           fundingNeeded: true,
           fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-        },
-      },
-    };
-    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
-    const usageProgressResponse = {
-      ...response,
-      result: {
-        ...response.result,
-        usage: {
-          ...response.result.usage,
           includedUsageUsedPercent: 64,
         },
       },
     };
-    expect(parseHostedRuntimeGroupToolResponse(usageProgressResponse))
-      .toEqual(usageProgressResponse);
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          fundingNeeded: true,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+        },
+      },
+    })).toThrow(/includedUsageUsedPercent/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_usage",
       result: {

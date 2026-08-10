@@ -37,6 +37,10 @@ Updated: 2026-08-09
 - The product owner explicitly accepts short-lived `read_usage` failures while
   Web and Cloudflare run different strict schemas. Do not add a reader-only
   compatibility phase for this field.
+- A successful current Web usage projection already proves a positive included
+  limit. The percentage is therefore required on the current success shape;
+  accepting a funding-only current response would recreate the rejected
+  compatibility phase. Existing sponsorship-era legacy branches are unchanged.
 
 ## Success criteria
 
@@ -83,9 +87,13 @@ Updated: 2026-08-09
    runtime issue/log owner without adding latency or state.
 5. Remove the reader-only compatibility phase and document the explicitly
    accepted mixed-version failure window.
-6. Run focused tests, typechecks, privacy/diff review, required specialist and
+6. Keep the explicit-question contract resident on group email, where the
+   filesystem-backed low-usage skill is intentionally unavailable, and define
+   target-model scenarios for chat and email success, at-least-100, and
+   unavailable results.
+7. Run focused tests, typechecks, privacy/diff review, required specialist and
    ReviewGPT gates, exact-head CI, and a direct scenario proof.
-7. Close this plan with `scripts/finish-task`, push the exact head, and complete
+8. Close this plan with `scripts/finish-task`, push the exact head, and complete
    the PR and mergeability handoff.
 
 ## Verification

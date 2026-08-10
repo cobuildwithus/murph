@@ -429,10 +429,11 @@ fallback when an older supported runner omits it.
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 
 The current group-tool `read_usage` response is
-`{fundingNeeded,fundingUrl,includedUsageUsedPercent?}`. The parser preserves the
-bounded included-usage aggregate when present and remains strict about unknown
-or private fields. The existing sponsorship-era response branches remain
-legacy-facing only.
+`{fundingNeeded,fundingUrl,includedUsageUsedPercent}`. The parser requires and
+preserves the bounded included-usage aggregate on that current successful shape
+and remains strict about unknown or private fields. It rejects the newer
+funding-only shape instead of retaining a field-specific rollout compatibility
+path. The existing sponsorship-era response branches remain legacy-facing only.
 
 1. Deploy the Cloudflare Worker and runner bundle first with
    `container_rollout=immediate`. Require managed-container smoke to report the
@@ -450,7 +451,7 @@ legacy-facing only.
    bounded included-usage aggregate. Funding setup and other quantitative
    fields must not reappear.
 
-The `includedUsageUsedPercent` producer, preserving reader, and assistant policy
+The `includedUsageUsedPercent` producer, strict reader, and assistant policy
 ship as one product change. There is no strip-only reader phase or rollout-only
 feature flag. A mixed-version Web/runner window may temporarily make the strict
 read fail; that availability tradeoff is accepted. Deploy Web and Cloudflare as

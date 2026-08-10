@@ -2982,6 +2982,7 @@ export function parseHostedRuntimeGroupToolResponse(
       }
       const includedUsageUsedPercent =
         usage.includedUsageUsedPercent === undefined
+          && usage.sponsorshipStatus !== undefined
           ? undefined
           : requireNonNegativeInteger(
               usage.includedUsageUsedPercent,

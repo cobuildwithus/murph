@@ -59,7 +59,7 @@ export interface HostedGroupFundingRecoveryStatus {
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
   /** Whole-number share of the room's included usage consumed this period. */
-  includedUsageUsedPercent?: number;
+  includedUsageUsedPercent: number;
 }
 
 // Accepts the full funding-locator namespace: an owner-created join code or
@@ -186,9 +186,7 @@ export async function readHostedGroupFundingRecoveryStatus(input: {
     fundingUrl: locator
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
       : null,
-    ...(includedUsageUsedPercent === null
-      ? {}
-      : { includedUsageUsedPercent }),
+    includedUsageUsedPercent,
   };
 }
 

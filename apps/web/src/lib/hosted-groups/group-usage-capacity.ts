@@ -5,9 +5,9 @@ const HOSTED_GROUP_USAGE_LOW_PERCENT = 20n;
 export function calculateHostedGroupIncludedUsageUsedPercent(input: {
   limitUsdMicros: bigint;
   spentUsdMicros: bigint;
-}): number | null {
+}): number {
   if (input.limitUsdMicros <= 0n) {
-    return null;
+    throw new RangeError("Hosted group included usage limit must be positive.");
   }
   if (input.spentUsdMicros <= 0n) {
     return 0;

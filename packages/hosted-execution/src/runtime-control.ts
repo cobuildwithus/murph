@@ -1012,7 +1012,7 @@ export interface HostedRuntimeGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
-  /** Whole-number share of the room's included usage consumed this period. */
+  /** Required on the current shape; absent only on legacy response branches. */
   includedUsageUsedPercent?: number;
 }
 
