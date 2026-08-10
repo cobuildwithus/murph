@@ -3200,7 +3200,17 @@ describe("hosted Family plan", () => {
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
     };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const transactionOutcomes: string[] = [];
+    prisma.$transaction = vi.fn(async (callback) => {
+      try {
+        const result = await callback(tx);
+        transactionOutcomes.push("committed");
+        return result;
+      } catch (error) {
+        transactionOutcomes.push("rolled_back");
+        throw error;
+      }
+    });
 
     await expect(updateHostedFamilyMemberPlan({
       groupId: "hbag_family",
@@ -3222,6 +3232,7 @@ describe("hosted Family plan", () => {
         updatedAt: pendingStartedAt,
       },
     });
+    expect(transactionOutcomes).toEqual(["committed", "committed"]);
   });
 
   it("alerts for request-id-free member-tier failures with stable transition identity", async () => {

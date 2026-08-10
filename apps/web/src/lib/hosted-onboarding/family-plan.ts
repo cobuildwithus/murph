@@ -4879,7 +4879,7 @@ export async function updateHostedFamilyMemberPlan(input: {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (transition) {
-    await withHostedMemberStripeMutationLock({
+    const transitionOutcome = await withHostedMemberStripeMutationLock({
       memberId: input.ownerMemberId,
       prisma,
       run: async (tx) => {
@@ -4969,6 +4969,7 @@ export async function updateHostedFamilyMemberPlan(input: {
             },
             target: transition.targetCapacities,
           });
+          return { ok: true as const };
         } catch (error) {
           if (transition.pendingCreated && !providerMutationStarted) {
             await tx.hostedAccountGroupMembership.updateMany({
@@ -4980,11 +4981,18 @@ export async function updateHostedFamilyMemberPlan(input: {
                 updatedAt: transition.pendingStartedAt,
               },
             });
+            // Commit the cleanup before surfacing the validation error. If the
+            // transaction callback rethrows here, PostgreSQL rolls this write
+            // back and the member remains trapped behind the pending marker.
+            return { error, ok: false as const };
           }
           throw error;
         }
       },
     });
+    if (!transitionOutcome.ok) {
+      throw transitionOutcome.error;
+    }
   }
 
   const capacitySyncing = transition

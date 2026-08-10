@@ -132,6 +132,12 @@ function-state matrix and verification ledger. The accepted defects are:
   retry normalizes metadata without rebuilding the obsolete direct item swap,
   and that Linq/Telegram treat the same-group acceptance backstop as a
   permanent invite miss instead of retrying it indefinitely.
+- A post-push parent transaction audit found that the new deterministic
+  member-retier cleanup would have been rolled back when its transaction
+  callback rethrew. The callback now commits the exact guarded cleanup and
+  returns the original error for rethrow after commit; the regression records
+  both the marker-creation and cleanup transactions as committed. The complete
+  Family suite passes 190/190 after this hardening.
 - Design catalog evidence (desktop and mobile) was captured and inspected for
   Family management, enabled sponsorship cancellation, cancellation failure,
   Portal failure inside its confirmation dialog, and the signed-out
