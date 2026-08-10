@@ -6,7 +6,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons/runtime";
+import type { BiomarkerFallbackRangeForDisplay } from "@murphai/health-commons/biomarker-fallback-ranges";
 import {
   selectBrowserVaultLabBiomarkerDetail,
   type BrowserVaultLabBiomarkerDetail,
@@ -52,7 +52,7 @@ import { cn } from "@/src/lib/utils";
 interface LabBiomarkerDetailClientProps {
   authenticated: boolean;
   chatAction?: ReactNode;
-  fallbackRanges?: readonly HealthCommonsWebBiomarkerFallbackRange[];
+  fallbackRanges?: readonly BiomarkerFallbackRangeForDisplay[];
   metricKey: string;
   summary?: string | null;
   uploadLabsAction?: ReactNode;
@@ -196,7 +196,7 @@ function BiomarkerDetailContent({
   stale,
 }: {
   detail: BrowserVaultLabBiomarkerDetail;
-  fallbackRanges: readonly HealthCommonsWebBiomarkerFallbackRange[];
+  fallbackRanges: readonly BiomarkerFallbackRangeForDisplay[];
   onRefresh: () => void;
   refreshPending: boolean;
   stale: boolean;
@@ -579,7 +579,7 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
  */
 function resolveChartedReferenceContext(
   detail: BrowserVaultLabBiomarkerDetail,
-  fallbackRanges: readonly HealthCommonsWebBiomarkerFallbackRange[],
+  fallbackRanges: readonly BiomarkerFallbackRangeForDisplay[],
   latestReferenceRange: string | null,
 ): {
   label: string;
@@ -645,7 +645,7 @@ function resolveChartedReferenceContext(
 }
 
 function formatFallbackReferenceRange(
-  range: HealthCommonsWebBiomarkerFallbackRange,
+  range: BiomarkerFallbackRangeForDisplay,
 ): string | null {
   const lower = range.lowerBound;
   const upper = range.upperBound;

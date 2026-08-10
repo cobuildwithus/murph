@@ -7,8 +7,6 @@ import type {
   BrowserVaultPresentedLabResultRow,
 } from "../src/browser-replica/lab-results.ts";
 
-const WHOLE_BLOOD = "whole_blood" as unknown as BrowserVaultPresentedLabResultRow["specimenKind"];
-
 describe("lab-result display status derivation", () => {
   it("keeps an explicit reporting-lab flag authoritative", () => {
     const result = deriveBrowserVaultLabResultStatus(row({
@@ -205,7 +203,7 @@ describe("lab-result display status derivation", () => {
       biomarkerKey: "biomarker:white-blood-cell-count",
       metricKey: "white-blood-cell-count",
       normalizedUnit: "10^3/uL",
-      specimenKind: WHOLE_BLOOD,
+      specimenKind: "whole_blood",
       unit: "10^3/uL",
     } satisfies Partial<BrowserVaultPresentedLabResultRow>;
 

@@ -113,12 +113,7 @@ export interface BrowserVaultLabResultReferenceRange {
   text?: string;
 }
 
-/**
- * The persisted wire contract predates whole-blood classification. Generation
- * 4 may carry the canonical `whole_blood` string at runtime; readers recognize
- * it explicitly while this compatibility alias stays narrow for older clients.
- */
-export type BrowserVaultLabSpecimenKind = "plasma" | "serum";
+export type BrowserVaultLabSpecimenKind = "plasma" | "serum" | "whole_blood";
 
 export interface BrowserVaultLabResultRow {
   analyte: string;

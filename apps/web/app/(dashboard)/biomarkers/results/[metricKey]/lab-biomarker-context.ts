@@ -1,17 +1,17 @@
 import {
   resolveReviewedBiomarkerFallbackRanges,
+  type BiomarkerFallbackRangeForDisplay,
 } from "@murphai/health-commons/biomarker-fallback-ranges";
 import {
   resolveHealthCommonsBiomarkerEntityKey,
 } from "@murphai/health-commons/biomarker-entity-mappings";
-import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons/runtime";
 import { resolveLabResultMetricDefinition } from "@murphai/health-metrics";
 
 import { getGeneratedBiomarkerIndex } from "@/src/lib/health-commons/generated-biomarker-artifacts";
 
 export function resolveLabBiomarkerContext(metricKey: string): {
   displayName: string;
-  fallbackRanges: HealthCommonsWebBiomarkerFallbackRange[];
+  fallbackRanges: BiomarkerFallbackRangeForDisplay[];
   summary: string | null;
 } {
   const normalizedMetricKey = metricKey.trim().toLowerCase();
@@ -38,7 +38,7 @@ export function resolveLabBiomarkerContext(metricKey: string): {
   // contract or duplicated Web-owned range table.
   const reviewedFallbackRanges = [...entityKeys].flatMap((entityKey) =>
     resolveReviewedBiomarkerFallbackRanges(entityKey)
-  ) as unknown as HealthCommonsWebBiomarkerFallbackRange[];
+  );
 
   return {
     displayName: definition?.displayName
