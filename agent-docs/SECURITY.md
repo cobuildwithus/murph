@@ -335,6 +335,24 @@ Last verified: 2026-08-09
   route-authorized non-direct Linq or Telegram input
   for the exact beneficiary, and account deletion removes the creator-owned
   authored row while retained financial purchase history remains detached.
+- Group `read_usage` is a room-public aggregate read, not billing or sponsor
+  access. The signed callback and active runtime fence bind it to the synthetic
+  group member; the model supplies no member, payer, period, spend, limit, or
+  credit selector. Web may return only funding urgency, the first-party funding
+  capability, and a required integer `includedUsageUsedPercent` on the current
+  successful response. Web derives
+  that integer from counted current-period included spend and the included
+  limit only. Purchased, referral, carryover, and automatic-refill credit must
+  not affect it. The response must not expose raw spend or limit values, cash or
+  credit balances, remaining capacity, payer or contributor identity, sponsor
+  status, cap, charges, pending payments, refill state or events, period dates,
+  message counts, receipts, or internal accounting units. `100` is not
+  exhaustion authority. The assistant may state the approximate aggregate only
+  after an explicit participant usage-status question; transport code must not
+  infer that intent or make the aggregate proactive. Group email may use the
+  same room-public read under resident prompt policy because it cannot load the
+  detailed skill, but the spoofable sender gains no mutation, payer, billing,
+  or private-account authority.
 - Current-policy personal and Family saved-card funding resolves the exact
   Murph billing Subscription whose Customer matches the authenticated payer's
   verified Stripe Customer. Murph may use that Subscription's attached
