@@ -164,6 +164,10 @@ interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImport
   providerRecordsSeen: boolean;
 }
 
+interface JunctionPreciseTimeseriesImportOptions {
+  preservePartialRetryableFailure?: boolean;
+}
+
 interface JunctionDirectSummaryImportResult {
   durableDeliveryAccepted: boolean;
   normalizationEvidence: readonly JunctionSummaryNormalizationEvidence[];
@@ -1861,6 +1865,8 @@ export function createJunctionDeviceSyncProvider(
 
       if (inferredCategory === "timeseries") {
         const sourceProviders = await loadAndProjectSourceProviders();
+        const extendedHistoricalBackfill =
+          isJunctionExtendedTimeseriesBackfillJob(job, effectiveResource);
         const timeseriesImport = await importTimeseriesPreciseSnapshots(
           context,
           sourceProviders,
@@ -1869,9 +1875,10 @@ export function createJunctionDeviceSyncProvider(
           skippedOptionalResources,
           [effectiveResource],
           sourceProviderSlug,
+          {
+            preservePartialRetryableFailure: extendedHistoricalBackfill,
+          },
         );
-        const extendedHistoricalBackfill =
-          isJunctionExtendedTimeseriesBackfillJob(job, effectiveResource);
         const historicalRecordsSeen = extendedHistoricalBackfill
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
@@ -2467,6 +2474,7 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     resources: readonly string[],
     sourceProviderSlug?: string | null,
+    options: JunctionPreciseTimeseriesImportOptions = {},
   ): Promise<JunctionPreciseTimeseriesImportResult> {
     const accumulatedTimeseries: Record<string, unknown[]> = {};
     let executionWindowEnd: string | null = null;
@@ -2483,15 +2491,28 @@ export function createJunctionDeviceSyncProvider(
       }
 
       const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
-      const timeseries = await fetchTimeseriesSnapshots(
-        context,
-        window.windowStart,
-        window.windowEnd,
-        skippedOptionalResources,
-        resources,
-        sourceProviderSlug,
-        { dateQueryFormat: "datetime" },
-      );
+      let timeseries: Record<string, unknown[]>;
+      try {
+        timeseries = await fetchTimeseriesSnapshots(
+          context,
+          window.windowStart,
+          window.windowEnd,
+          skippedOptionalResources,
+          resources,
+          sourceProviderSlug,
+          { dateQueryFormat: "datetime" },
+        );
+      } catch (error) {
+        if (
+          options.preservePartialRetryableFailure === true
+          && hasJunctionSnapshotRecords(accumulatedTimeseries)
+          && isRetryableJunctionApiRequestFailure(error)
+        ) {
+          fetchComplete = false;
+          break;
+        }
+        throw error;
+      }
 
       if (skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
         fetchComplete = false;
@@ -3049,6 +3070,12 @@ function classifyOptionalJunctionResourceFailure(
     responseStatus: status,
     ...(responseDetail ? { responseDetail } : {}),
   };
+}
+
+function isRetryableJunctionApiRequestFailure(error: unknown): boolean {
+  return isDeviceSyncError(error)
+    && error.code === "JUNCTION_API_REQUEST_FAILED"
+    && error.retryable;
 }
 
 function buildJunctionOptionalResourceResponseDetail(input: {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import { isDeviceSyncError } from "../src/errors.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
@@ -203,6 +204,11 @@ function createJobContext(input: {
 function createProvider(input: {
   bloodPressureFailureRequest?: number;
   bloodPressureRecords?: readonly Record<string, unknown>[];
+  bloodPressureRequestFailure?: {
+    active: boolean;
+    fromRequest: number;
+    status: number;
+  };
   requests: TimeseriesRequest[];
   timeseriesBackfillDays?: number;
 }) {
@@ -257,6 +263,15 @@ function createProvider(input: {
         });
         if (resource === "blood_pressure") {
           bloodPressureRequestCount += 1;
+          if (
+            input.bloodPressureRequestFailure?.active === true
+            && bloodPressureRequestCount >= input.bloodPressureRequestFailure.fromRequest
+          ) {
+            return createJsonResponse(
+              { error: "temporary_provider_failure" },
+              input.bloodPressureRequestFailure.status,
+            );
+          }
           if (bloodPressureRequestCount === input.bloodPressureFailureRequest) {
             return createJsonResponse({ error: "unsupported_resource" }, 422);
           }
@@ -784,6 +799,98 @@ test("partial optional failure retries from the anchored window after importing 
     requests.filter((request) => request.resource === "blood_pressure").length,
     32,
   );
+});
+
+test("retryable provider failure after raw rows preserves evidence through later empty scans", async () => {
+  const bloodPressureRecords: Record<string, unknown>[] = [{
+    id: "bp-malformed-before-retryable-failure",
+    timestamp: "2026-05-12T08:30:00.000Z",
+    systolic: 119,
+  }];
+  const requestFailure = {
+    active: true,
+    fromRequest: 2,
+    status: 500,
+  };
+  const provider = createProvider({
+    bloodPressureRecords,
+    bloodPressureRequestFailure: requestFailure,
+    requests: [],
+  });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const exhausted = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+    },
+  }, 1);
+  exhausted.dedupeKey = `hosted-device-sync:${"6".repeat(64)}`;
+
+  const partial = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ canonicalEventCount: 0 }),
+    exhausted,
+  );
+  const retained = findBloodPressureJob(partial.scheduledJobs ?? []);
+
+  assert.equal(partial.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(retained.availableAt, "2026-06-12T12:00:00.000Z");
+  assert.equal(retained.dedupeKey, exhausted.dedupeKey);
+  assert.equal(retained.payload?.emptyBackfillAttempts, 4);
+  assert.equal(retained.payload?.historicalProviderRecordsSeen, true);
+  assert.equal(retained.payload?.historicalRecordsSeen, undefined);
+
+  requestFailure.active = false;
+  bloodPressureRecords.length = 0;
+  const empty = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    toJobRecord(retained, 2),
+  );
+  const stillRecoverable = findBloodPressureJob(empty.scheduledJobs ?? []);
+
+  assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(stillRecoverable.availableAt, "2026-06-13T12:00:00.000Z");
+  assert.equal(stillRecoverable.dedupeKey, exhausted.dedupeKey);
+  assert.equal(stillRecoverable.payload?.historicalProviderRecordsSeen, true);
+
+  bloodPressureRecords.push({
+    id: "bp-recovered-after-retryable-failure",
+    timestamp: "2026-05-20T08:30:00.000Z",
+    systolic: 121,
+    diastolic: 79,
+  });
+  const recovered = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
+    toJobRecord(stillRecoverable, 3),
+  );
+
+  assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
+  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("provider failures without prior rows retain their ordinary failure semantics", async () => {
+  for (const [status, retryable] of [[500, true], [401, false]] as const) {
+    const provider = createProvider({
+      bloodPressureRequestFailure: {
+        active: true,
+        fromRequest: 1,
+        status,
+      },
+      requests: [],
+    });
+    const bloodPressure = createScheduledBloodPressureJob(provider);
+
+    await assert.rejects(
+      () => requireValue(provider.jobExecutor).executeJob(
+        createJobContext(),
+        toJobRecord(bloodPressure, status),
+      ),
+      (error: unknown) =>
+        isDeviceSyncError(error)
+        && error.code === "JUNCTION_API_REQUEST_FAILED"
+        && error.retryable === retryable,
+    );
+  }
 });
 
 test("source history partial failure stays recoverable after the empty retry ladder", async () => {
