@@ -76,6 +76,31 @@ const CARD_V1: DailyNutritionResponseCardV1 = {
   },
 };
 
+const CARD_WITHOUT_CALORIE_GOAL: DailyNutritionResponseCardV2 = {
+  ...CARD,
+  goals: { ...CARD.goals, calories: null },
+};
+
+const CARD_WITH_PARTIAL_UNAVAILABLE_CALORIES: DailyNutritionResponseCardV2 = {
+  ...CARD,
+  totals: {
+    ...CARD.totals,
+    calories: { total: 1_840, mealCount: 2 },
+  },
+  goals: {
+    ...CARD.goals,
+    calories: { target: 2_200, status: "unavailable" },
+  },
+};
+
+const CARD_WITH_COMPLETE_UNAVAILABLE_CALORIES: DailyNutritionResponseCardV2 = {
+  ...CARD,
+  goals: {
+    ...CARD.goals,
+    calories: { target: 2_200, status: "unavailable" },
+  },
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -158,7 +183,52 @@ test("nutrition card image route and component retain truthful V1 compatibility"
   assert.match(serialized, /52/u);
   assert.match(serialized, /FIBER/u);
   assert.match(serialized, />—</u);
+  assert.match(serialized, /data-calorie-progress="unavailable"/u);
   assert.doesNotMatch(serialized, /Jun 17|No goal|Goal unavailable/u);
+});
+
+test.each([
+  ["a null calorie goal", CARD_WITHOUT_CALORIE_GOAL],
+  [
+    "a partial unavailable calorie total",
+    CARD_WITH_PARTIAL_UNAVAILABLE_CALORIES,
+  ],
+  [
+    "a complete unavailable calorie total",
+    CARD_WITH_COMPLETE_UNAVAILABLE_CALORIES,
+  ],
+])(
+  "nutrition card image uses a neutral calorie ring for %s",
+  async (_label, card) => {
+    const { NutritionCardImage } = await import(
+      "@/src/components/imessage/nutrition-card-image"
+    );
+    const serialized = renderToStaticMarkup(
+      <NutritionCardImage card={card} />,
+    );
+
+    assert.match(serialized, /data-calorie-progress="unavailable"/u);
+    assert.doesNotMatch(serialized, /stroke-dasharray/u);
+  },
+);
+
+test("nutrition card image route preserves the neutral ring for partial unavailable calories", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 2,
+    card: CARD_WITH_PARTIAL_UNAVAILABLE_CALORIES,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  assert.match(
+    renderToStaticMarkup(imageTree),
+    /data-calorie-progress="unavailable"/u,
+  );
 });
 
 test("nutrition card image route rejects malformed, non-nutrition, and query-bearing URLs before asset reads", async () => {

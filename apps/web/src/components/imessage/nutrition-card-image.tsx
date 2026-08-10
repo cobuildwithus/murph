@@ -73,7 +73,8 @@ export function NutritionCardImage({
       metric: v2?.totals.fiberGrams ?? EMPTY_METRIC,
     },
   ];
-  const calories = card.totals.calories.total;
+  const calorieMetric = card.totals.calories;
+  const calories = calorieMetric.total;
   const calorieGoal = v2?.goals.calories;
 
   return (
@@ -130,7 +131,11 @@ export function NutritionCardImage({
         </div>
       </div>
 
-      <CalorieRing total={calories} goal={calorieGoal} />
+      <CalorieRing
+        cardMealCount={card.mealCount}
+        metric={calorieMetric}
+        goal={calorieGoal}
+      />
 
       <div
         style={{
@@ -207,22 +212,26 @@ function SystemBadge() {
 }
 
 function CalorieRing({
-  total,
+  cardMealCount,
+  metric,
   goal,
 }: {
-  total: number | null;
+  cardMealCount: number;
+  metric: NutritionCardMetric;
   goal: NutritionCardGoalSnapshot | null | undefined;
 }) {
   const size = 203;
   const strokeWidth = 19;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const progress = getCalorieProgress(total, goal);
+  const progress = getCalorieProgress(metric, cardMealCount, goal);
 
   return (
     <div
       aria-hidden="true"
-      data-calorie-progress={progress.toFixed(4)}
+      data-calorie-progress={
+        progress === null ? "unavailable" : progress.toFixed(4)
+      }
       style={{
         position: "absolute",
         top: 75,
@@ -249,17 +258,19 @@ function CalorieRing({
           stroke={COLOR.progressTrack}
           strokeWidth={strokeWidth}
         />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={COLOR.primary}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeDasharray={`${circumference * progress} ${circumference}`}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
+        {progress === null ? null : (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={COLOR.primary}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeDasharray={`${circumference * progress} ${circumference}`}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        )}
       </svg>
       <svg width={75} height={75} viewBox="0 0 24 24">
         <path
@@ -328,13 +339,20 @@ function Metric({
 }
 
 function getCalorieProgress(
-  total: number | null,
+  metric: NutritionCardMetric,
+  cardMealCount: number,
   goal: NutritionCardGoalSnapshot | null | undefined,
-): number {
-  if (total === null || goal === null || goal === undefined) {
-    return 1;
+): number | null {
+  if (
+    metric.total === null ||
+    metric.mealCount !== cardMealCount ||
+    goal === null ||
+    goal === undefined ||
+    goal.status === "unavailable"
+  ) {
+    return null;
   }
-  return Math.min(1, Math.max(0, total / goal.target));
+  return Math.min(1, Math.max(0, metric.total / goal.target));
 }
 
 function getStatusColor(

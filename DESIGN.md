@@ -211,7 +211,10 @@ shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
 cream balloon, small system-style badge, large calorie value, calorie progress
 ring, and one-row protein, carbohydrates, fat, and fiber readings visually
 aligned with the Messages extension. Status color may tint nutrient values, but
-the static image does not expose the native card's tap-to-reveal target state.
+the ring draws quantitative progress only for a complete calorie total with an
+assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
+the neutral track. The static image does not expose the native card's
+tap-to-reveal target state.
 The provider captions beneath the image use one text column to retain the date,
 meal count, every available total, partial state, and each V2 target/status for
 assistive technology and image-failure recovery. V1 renders an unavailable

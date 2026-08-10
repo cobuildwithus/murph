@@ -1483,7 +1483,10 @@ recipient without it, including Messages on macOS, sees a provider-owned static
 layout with a generated nutrition image that mirrors the compact balloon's
 default visual state plus native captions that repeat the date, meal count,
 every available total, the partial state, and each available V2 goal target and
-status. The extension URL keeps the immutable V1 or V2
+status. The image derives a quantitative calorie arc only from a complete total
+and an assessed non-null goal; V1, partial, null-goal, and unavailable-status
+snapshots retain only the neutral ring track. The extension URL keeps the
+immutable V1 or V2
 snapshot in a bounded Base64URL fragment that the extension decodes offline.
 The static image URL carries that same bounded presentation envelope in one
 queryless path so the Web image route can render it and Linq can rehost it.
