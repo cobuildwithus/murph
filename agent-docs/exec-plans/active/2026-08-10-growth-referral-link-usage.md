@@ -137,8 +137,16 @@ Updated: 2026-08-10
 - Preliminary specialist retry reviewed all four rendered states and returned
   findings. All four were accepted: qualify open cohorts, collapse the empty
   chart, increase claims-series contrast, and assert the production page owns
-  the section. The fixes and focused coverage are implemented; the corrected
-  pass must now be rerun.
+  the section. The fixes and focused coverage are implemented. Per the
+  specialist workflow, that one substantive pass is not rerun after accepted
+  remediation.
+- Parent corrected-head product-purpose revalidation: `NO FINDINGS`. The
+  irreducible purpose remains an immediately legible aggregate view of referral
+  claims and downstream activation, and the smallest complete experience is the
+  existing Growth page with summary stats, an open-cohort chart when data
+  exists, and one compact sentence when it does not. The four refreshed
+  rendered states and desktop/mobile interaction proof cover the changed
+  journey; no material evidence gap remains for this lens.
 - Final ReviewGPT round 1: one accepted finding that deletion can rewrite
   historical cohorts. The retained-record disclosure and focused deletion/FK
   regression coverage are implemented. A substantive recovery review of that
