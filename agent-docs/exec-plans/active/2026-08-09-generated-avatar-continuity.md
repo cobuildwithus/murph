@@ -221,3 +221,8 @@ Updated: 2026-08-10
   reconciliation cannot treat marked and unmarked physical effects as the same
   persisted result. Its focused 29-test dispatch-state file and the Assistant
   Engine typecheck pass.
+- Exact-head platform coverage then exposed two stale deep-equality fixtures in
+  the hosted provider recovery suite. Both recover a physical image message,
+  so their returned effect correctly carries the new true-only media fact; only
+  the expected shapes changed. The complete 23-test file and Assistant Runtime
+  typecheck pass.
