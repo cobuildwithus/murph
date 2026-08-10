@@ -65,10 +65,26 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Patterns, local-time reminders, and a lighter homepage",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "Patterns can compare repeated actions with next-day sleep and recovery, recurring reminders keep the local time you asked for, and the public homepage starts with far less image and sign-in code to download.",
     items: [
+      {
+        id: "lighter-accessible-homepage",
+        kind: "improvement",
+        priority: 3,
+        title: "The homepage starts lighter",
+        summary:
+          "The public homepage now uses compact avatar images and waits for sign-in intent before loading the secure sign-in code.",
+        details:
+          "Cold sign-in still opens immediately, announces its loading state, keeps keyboard focus when the form arrives, and retries a temporary loading failure. Text contrast is also clearer across the updated sections.",
+        relevanceTags: ["homepage", "performance", "accessibility", "sign-in"],
+        sourcePullRequests: [1573],
+        tryIt: {
+          href: "/",
+          label: "Visit the homepage",
+        },
+      },
       {
         id: "personal-patterns",
         kind: "feature",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Dialog,
@@ -35,6 +35,14 @@ export type AuthDialogPrivyRuntimeState = HostedAuthRuntimeState;
 export const DEFAULT_AUTH_DIALOG_TITLE = "Log in or sign up";
 export const DEFAULT_AUTH_DIALOG_DESCRIPTION =
   "Murph helps you build healthier habits that fit your life.";
+const AUTH_DIALOG_PANEL_CONTROL_SELECTOR = [
+  "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "button:not([disabled])",
+  "a[href]",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 export function resolveAuthDialogHeaderPresentation({
   description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
@@ -186,6 +194,9 @@ export function AuthDialog({
     useState<HostedAuthPanelModule | null>(() => hostedAuthPanelModule);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [panelView, setPanelView] = useState<HostedAuthPanelView>("auth");
+  const dialogContentRef = useRef<HTMLDivElement | null>(null);
+  const loadedPanelRef = useRef<HTMLDivElement | null>(null);
+  const restorePanelFocusRef = useRef(false);
 
   useEffect(() => {
     if (!open || privyRuntime !== undefined || AuthPanelModule) {
@@ -200,6 +211,17 @@ export function AuthDialog({
     loadPanel
       .then((module) => {
         if (!cancelled) {
+          const content = dialogContentRef.current;
+          const activeElement = document.activeElement;
+          restorePanelFocusRef.current = Boolean(
+            content
+            && (
+              activeElement === null
+              || activeElement === document.body
+              || activeElement === content
+              || !content.contains(activeElement)
+            ),
+          );
           setLoadError(null);
           setAuthPanelModule(module);
         }
@@ -215,6 +237,54 @@ export function AuthDialog({
     };
   }, [open, privyRuntime, AuthPanelModule]);
 
+  useEffect(() => {
+    if (!open || !AuthPanelModule || !restorePanelFocusRef.current) {
+      return;
+    }
+
+    const panel = loadedPanelRef.current;
+    const content = dialogContentRef.current;
+    if (!panel || !content) {
+      return;
+    }
+
+    const restoreFocus = () => {
+      const activeElement = document.activeElement;
+      if (
+        activeElement
+        && activeElement !== document.body
+        && activeElement !== content
+        && content.contains(activeElement)
+      ) {
+        restorePanelFocusRef.current = false;
+        return true;
+      }
+
+      const control = panel.querySelector<HTMLElement>(
+        AUTH_DIALOG_PANEL_CONTROL_SELECTOR,
+      );
+      if (!control) {
+        return false;
+      }
+
+      restorePanelFocusRef.current = false;
+      control.focus({ preventScroll: true });
+      return true;
+    };
+
+    if (restoreFocus()) {
+      return;
+    }
+
+    const observer = new MutationObserver(() => {
+      if (restoreFocus()) {
+        observer.disconnect();
+      }
+    });
+    observer.observe(panel, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [open, AuthPanelModule]);
+
   const dismissLocked = panelView !== "auth";
   const consentPresentation = panelView === "consent";
   const runtimeError = privyRuntime?.kind === "unconfigured"
@@ -228,6 +298,7 @@ export function AuthDialog({
 
     if (!nextOpen) {
       setPanelView("auth");
+      restorePanelFocusRef.current = false;
     }
     onOpenChange(nextOpen);
   }
@@ -246,6 +317,7 @@ export function AuthDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
+        ref={dialogContentRef}
         className={cn(
           "max-w-md gap-6 p-6 md:p-7",
           consentPresentation ? "rounded-2xl" : null,
@@ -272,7 +344,9 @@ export function AuthDialog({
             {loadError}
           </div>
         ) : AuthPanelModule ? (
-          <AuthPanelModule.HostedAuthPanelIsland {...authPanelProps} />
+          <div ref={loadedPanelRef} data-auth-dialog-panel="loaded">
+            <AuthPanelModule.HostedAuthPanelIsland {...authPanelProps} />
+          </div>
         ) : open ? (
           <AuthPanelSkeleton />
         ) : null}
@@ -283,27 +357,33 @@ export function AuthDialog({
 
 function AuthPanelSkeleton() {
   return (
-    <div className="animate-pulse space-y-4">
-      <div className="space-y-3">
+    <div aria-atomic="true" aria-busy="true" aria-live="polite" role="status">
+      <span className="sr-only">Loading secure sign in…</span>
+      <div
+        aria-hidden="true"
+        className="animate-pulse space-y-4 motion-reduce:animate-none"
+      >
         <div className="space-y-3">
-          <div className="h-3.5 w-20 rounded-full bg-muted" />
-          <div className="flex gap-3">
-            <div className="h-14 w-28 shrink-0 rounded-2xl bg-muted" />
-            <div className="h-14 flex-1 rounded-2xl bg-muted" />
+          <div className="space-y-3">
+            <div className="h-3.5 w-20 rounded-full bg-muted" />
+            <div className="flex gap-3">
+              <div className="h-14 w-28 shrink-0 rounded-2xl bg-muted" />
+              <div className="h-14 flex-1 rounded-2xl bg-muted" />
+            </div>
           </div>
+          <div className="h-14 w-full rounded-2xl bg-muted" />
         </div>
-        <div className="h-14 w-full rounded-2xl bg-muted" />
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="h-px flex-1 bg-border" />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-          OR
-        </span>
-        <span className="h-px flex-1 bg-border" />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="h-11 rounded-2xl bg-muted" />
-        <div className="h-11 rounded-2xl bg-muted" />
+        <div className="flex items-center gap-3">
+          <span className="h-px flex-1 bg-border" />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+            OR
+          </span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="h-11 rounded-2xl bg-muted" />
+          <div className="h-11 rounded-2xl bg-muted" />
+        </div>
       </div>
     </div>
   );

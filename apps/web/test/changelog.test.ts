@@ -290,6 +290,12 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("lighter-accessible-homepage")).toMatchObject({
+      sourcePullRequests: [1573],
+      summary: expect.stringContaining("compact avatar images"),
+      details: expect.stringContaining("keeps keyboard focus"),
+      tryIt: { href: "/", label: "Visit the homepage" },
+    });
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -491,6 +497,7 @@ describe("changelog registry", () => {
       {
         id: "2026-08-10",
         itemIds: [
+          "lighter-accessible-homepage",
           "personal-patterns",
           "reminders-keep-requested-timezone",
         ],

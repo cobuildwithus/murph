@@ -100,13 +100,20 @@ Updated: 2026-08-10
 - ReviewGPT final round 1 identified the open-session replacement and import-
   rejection risks in the first auth-loading implementation. The accepted fix
   now has direct delayed-load, close-and-adopt, and failure-and-retry coverage;
-  the corrected head is pending preliminary and final round 2 review.
+  final round 2 passed with no qualifying findings.
+- The preliminary specialist pass then identified a cold-load accessibility
+  gap: the pending dialog had no loading semantics and focus escaped when the
+  usable form arrived. The dialog now owns a reduced-motion-safe live loading
+  status and conditional focus restoration that leaves a chosen Close control
+  alone. Production-browser proof passes on desktop and mobile for keyboard
+  activation, focus continuity, Tab, Shift+Tab, Escape, and shared-runtime
+  reopen; the remediation is pending its required next final round.
 - The required Claude UI double-check could not start because the `claude`
   executable is absent; both prescribed model commands failed with `command not
   found`, so no Claude verdict is claimed.
 - Public screenshot hosting is unavailable because the Cloudflare Images
   account setting is absent. The redacted local PNGs remain available for the
   exact-head ReviewGPT package and are not committed.
-- Changelog: not applicable because this remediation changes delivery,
-  scheduling, and contrast compliance without adding a member capability,
-  product flow, or new content.
+- Changelog: added a compact improvement item for the materially faster and
+  more accessible public homepage, with PR source attribution and a direct
+  homepage link.
