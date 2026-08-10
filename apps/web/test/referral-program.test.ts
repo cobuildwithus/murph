@@ -17,6 +17,11 @@ import {
   HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
 } from "@/src/lib/hosted-growth/usage-referral";
 
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
+
 function readReward(id: (typeof HOSTED_PUBLIC_REFERRAL_REWARDS)[number]["id"]) {
   const reward = HOSTED_PUBLIC_REFERRAL_REWARDS.find(
     (candidate) => candidate.id === id,
@@ -99,6 +104,7 @@ describe("public referral program projection", () => {
       "the reward is added automatically",
     );
     expect(signup.description).not.toMatch(/\$|usage credit/iu);
+    expect(signup.description).not.toMatch(RETIRED_USAGE_TERM_PATTERN);
     expect(newPersonGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );

@@ -90,6 +90,8 @@ Updated: 2026-08-09
   their applicable receipts, dynamically reject the retired phrase without
   preserving it in test source, and count all seven rendered `Usage credit`
   labels at the changelog page boundary.
+- Parent review restored equivalent dynamic negative guards across each changed
+  web surface so the source cleanup does not weaken regression coverage.
 
 ## Verification
 

@@ -3,6 +3,10 @@ import { expect, test } from "@playwright/test";
 const WIDTHS = [320, 375, 390, 768, 1280] as const;
 const REFERRAL_STUDY_WIDTHS = [390, 1440] as const;
 const OVERFLOW_TOLERANCE_PX = 1;
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
 const REFERRAL_STUDIES = [
   {
     dayLabels: [
@@ -119,6 +123,9 @@ test("referral page stays contained and actionable at every marketing breakpoint
     await expect(page.locator("body")).not.toContainText(
       /\$|≈|usage credit/i,
     );
+    await expect(page.locator("body")).not.toContainText(
+      RETIRED_USAGE_TERM_PATTERN,
+    );
   }
 });
 
@@ -191,6 +198,7 @@ test("referral reward-state study renders without reading a member referral link
   ).toHaveCount(1);
   await expect(allRewards).not.toContainText(/already added to/iu);
   await expect(study).not.toContainText(/\$|≈|usage credit/i);
+  await expect(study).not.toContainText(RETIRED_USAGE_TERM_PATTERN);
   expect(referralLinkRequests).toEqual([]);
 });
 
@@ -256,6 +264,7 @@ test.describe("homepage referral design proof", () => {
         await expect(study).not.toContainText(
           /\$|≈|usage credit/i,
         );
+        await expect(study).not.toContainText(RETIRED_USAGE_TERM_PATTERN);
 
         const overflowPx = await study.evaluate((element) =>
           element.scrollWidth - element.clientWidth
