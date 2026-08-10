@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -43,7 +43,6 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'cognitive-focus',
   'hrv-resting-heart-rate',
   'aerobic-fitness',
-  'recovery-modalities',
   'daily-activity',
   'mobility-posture',
   'cardiometabolic-health',
@@ -51,7 +50,6 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'body-composition',
   'cycle-hormonal-health',
   'gut-digestion',
-  'general-eye-health',
 ] as const
 
 const MURPH_ONBOARDING_REFERENCE_FILES = [
@@ -237,10 +235,7 @@ describe('assistant skill assets', () => {
       expect(raw).not.toMatch(/^\+\d+\s*$/mu)
     }
 
-    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(true)
-    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
-    )
+    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(false)
   })
 
   it('keeps private activity interpretation in its owner', async () => {
@@ -287,322 +282,12 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('routes red light dose ownership to the dedicated red-light skill', async () => {
-    const recoverySkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'recovery-modalities',
-    )
-    expect(recoverySkill).toBeTruthy()
-    if (!recoverySkill) {
-      return
-    }
-
-    expect(recoverySkill.triggerHint).toContain('Use red-light-therapy')
-    expect(recoverySkill.triggerHint).not.toContain('device dosing')
-
-    const recoveryText = await readSkillFile(recoverySkill)
-    expect(recoveryText).toContain('Use red-light-therapy for red/NIR photobiomodulation dose')
-    expect(recoveryText).toContain('does not own PBM device-dose math')
-    expect(recoveryText).not.toContain('device-seeds.json')
-  })
-
-  it('keeps red light therapy registered with device seed data', async () => {
-    const redLightSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'red-light-therapy',
-    )
-    expect(redLightSkill).toBeTruthy()
-    if (!redLightSkill) {
-      return
-    }
-
-    expect(redLightSkill.triggerHint).toContain('red light therapy')
-    expect(redLightSkill.triggerHint).toContain('device irradiance')
-    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
-    )
-
-    const redLightText = await readSkillFile(redLightSkill)
-    expect(redLightText).toContain('device-seeds.json')
-    expect(redLightText).toContain('activeModeLabel')
-    expect(redLightText).toContain('manufacturer-claim duration estimate')
-
-    const deviceSeedsRaw = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        'red-light-therapy',
-        'device-seeds.json',
-      ),
-      'utf8',
-    )
-    const deviceSeeds: unknown = JSON.parse(deviceSeedsRaw)
-    expectRecord(deviceSeeds, 'red-light device seeds')
-    expect(deviceSeeds.schemaVersion).toBe(
-      'murph.assistant.skill.red-light-device-seeds.v1',
-    )
-    const devices = deviceSeeds.devices
-    expect(Array.isArray(devices)).toBe(true)
-    if (!Array.isArray(devices)) {
-      return
-    }
-    expect(devices.length).toBeGreaterThan(0)
-  })
-
-  it('routes general eye health with evidence and contact-lens safety boundaries', async () => {
-    const eyeSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'general-eye-health',
-    )
-    expect(eyeSkill).toBeTruthy()
-    if (!eyeSkill) {
-      return
-    }
-
-    expect(eyeSkill.triggerHint).toContain('digital eye strain')
-    expect(eyeSkill.triggerHint).toContain('contact-lens comfort and safety')
-    expect(buildAssistantSkillFileRef('general-eye-health')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/general-eye-health/SKILL.md',
-    )
-
-    const eyeSkillText = await readSkillFile(eyeSkill)
-    expect(eyeSkillText).toContain('references/triage-and-contact-lenses.md')
-    expect(eyeSkillText).toContain('references/evidence-register.md')
-    expect(eyeSkillText).toContain(
-      'For eye-exam timing, read both: the Decision Order owns the outcome and timing, while the evidence register supplies evidence only.',
-    )
-    expect(eyeSkillText).toContain('correction information, not an eye-health score')
-    expect(eyeSkillText).toContain('optional memory cue, not a proven treatment dose')
-    expect(eyeSkillText).toContain('Do not recommend blue-light-filtering glasses')
-    expect(eyeSkillText).toContain(
-      'Apply Prerequisite First Aid and then the Decision Order in `references/triage-and-contact-lenses.md` before selecting a care destination or any further action.',
-    )
-    expect(eyeSkillText).toContain(
-      'Only when the Decision Order assigns `Brief self-care trial is reasonable`:',
-    )
-    expect(eyeSkillText).toContain('`Arrange a prompt eye exam`')
-    expect(eyeSkillText).toContain('`Arrange a routine eye exam`')
-    expect(eyeSkillText).toContain('`Prevention action only`')
-    expect(eyeSkillText).not.toContain('safety pass is negative')
-    expect(eyeSkillText).not.toContain('A contact-lens wearer with pain')
-    expect(eyeSkillText).not.toContain('gradual, mild, in both eyes')
-    expect(eyeSkillText).not.toContain('still hurts after removal')
-    expect(eyeSkillText).not.toContain('pain that persists or worsens after removal')
-    expect(eyeSkillText).not.toContain('usually in both eyes')
-    expect(eyeSkillText).toContain('Stop the trial')
-    expect(eyeSkillText).not.toContain('Stop the experiment')
-
-    const [triageText, evidenceText] = await Promise.all([
-      readFile(
-        path.join(
-          resolveAssistantSkillsRoot(),
-          'general-eye-health',
-          'references',
-          'triage-and-contact-lenses.md',
-        ),
-        'utf8',
-      ),
-      readFile(
-        path.join(
-          resolveAssistantSkillsRoot(),
-          'general-eye-health',
-          'references',
-          'evidence-register.md',
-        ),
-        'utf8',
-      ),
-    ])
-    expect(triageText).toContain('### Emergency now')
-    expect(triageText).toContain('### Prompt same-day eye care')
-    const emergencyRule = triageText.slice(
-      triageText.indexOf('### Emergency now'),
-      triageText.indexOf('### Prompt same-day eye care'),
-    )
-    expect(emergencyRule).toContain(
-      'Sudden severe or intense eye pain, even before another feature is known, including with a red eye, blurred vision, halos, nausea, or vomiting.',
-    )
-    const sameDayRule = triageText.slice(
-      triageText.indexOf('### Prompt same-day eye care'),
-      triageText.indexOf('### Arrange a prompt eye exam'),
-    )
-    expect(sameDayRule).toContain(
-      'A significant direct blow or blunt impact to the eye, even when initial pain and vision seem normal',
-    )
-    expect(triageText).toContain('## Prerequisite First Aid')
-    expect(triageText.indexOf('## Prerequisite First Aid')).toBeLessThan(
-      triageText.indexOf('## Decision Order'),
-    )
-    expect(triageText).toContain(
-      'Evaluate these outcomes from top to bottom, select exactly one, and stop at the first match.',
-    )
-    expect(triageText).toContain('### Arrange a prompt eye exam')
-    expect(triageText).toContain('### Brief self-care trial is reasonable')
-    expect(triageText).toContain('### Prevention action only')
-    expect(triageText).toContain('### Arrange a routine eye exam')
-    expect(triageText).toContain('### Ask one decision-changing question')
-    expect(triageText).toContain(
-      'If no earlier outcome matches, self-care is reasonable',
-    )
-    const prerequisiteFirstAid = triageText.slice(
-      triageText.indexOf('## Prerequisite First Aid'),
-      triageText.indexOf('## Decision Order'),
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'apply the first applicable rule below from top to bottom',
-    )
-    expect(prerequisiteFirstAid.indexOf('For a suspected penetrating')).toBeLessThan(
-      prerequisiteFirstAid.indexOf(
-        'For a corrosive, industrial, or unknown chemical exposure',
-      ),
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'For a corrosive, industrial, or unknown chemical exposure, start copious gentle irrigation',
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'Remove contacts only if easy and without pausing or delaying irrigation.',
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'Do not manipulate or remove a contact lens.',
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'any new vision change, marked tearing, discharge, irritation, or a foreign-body sensation, remove the lens or lenses immediately',
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'Otherwise, if water contacts lenses, remove them as soon as possible.',
-    )
-    expect(triageText).toContain(
-      'Otherwise, for a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water.',
-    )
-    expect(triageText).toContain(
-      'known mild irritant or loose superficial particle that fully resolves after thorough rinsing',
-    )
-    const promptExamRule = triageText.slice(
-      triageText.indexOf('### Arrange a prompt eye exam'),
-      triageText.indexOf('### Brief self-care trial is reasonable'),
-    )
-    expect(promptExamRule).toContain('Arrange the next available eye-care visit')
-    expect(promptExamRule).toContain(
-      'when a headache is persistent, recurring, worsening, function-limiting, or present away from near work',
-    )
-    expect(promptExamRule).toContain(
-      'unless every condition in `Brief self-care trial is reasonable` is known to be met',
-    )
-    expect(promptExamRule).toContain(
-      'missing eligibility facts do not default to self-care',
-    )
-    expect(promptExamRule).not.toContain(
-      'Use a lower threshold for prompt clinician input',
-    )
-    expect(promptExamRule).not.toContain(' or medical eye visit')
-    expect(triageText).toContain(
-      'This may include a mild headache confined to near work that improves with rest.',
-    )
-    const preventionActionRule = triageText.slice(
-      triageText.indexOf('### Prevention action only'),
-      triageText.indexOf('### Arrange a routine eye exam'),
-    )
-    expect(preventionActionRule).toContain(
-      'Do not invent a need for an eye exam.',
-    )
-    const routineExamRule = triageText.slice(
-      triageText.indexOf('### Arrange a routine eye exam'),
-      triageText.indexOf('### Ask one decision-changing question'),
-    )
-    expect(routineExamRule).toContain(
-      'known age, eye or medical risk, last-exam timing, or an established clinician schedule',
-    )
-    expect(routineExamRule).toContain(
-      'Do not ask another question when the known inputs already determine the routine guidance.',
-    )
-    expect(routineExamRule).toContain(
-      'If one missing input would change the timing, use `Ask one decision-changing question` instead.',
-    )
-    expect(routineExamRule).toContain(
-      'recommend the next available visit of the resolved type',
-    )
-    expect(routineExamRule).not.toContain('next available routine eye exam')
-    const examTypeResolver = triageText.slice(
-      triageText.indexOf('## Exam Type Resolver'),
-      triageText.indexOf('## Contact-Lens Action Rules'),
-    )
-    expect(examTypeResolver).toContain(
-      'resolve one booking type before handing off to computer-use',
-    )
-    expect(examTypeResolver).toContain(
-      'Follow a known clinician-specified exam or visit type.',
-    )
-    expect(examTypeResolver).toContain(
-      'For active symptom evaluation or known eye or medical risk that requires risk-based screening or clinician-directed follow-up, use a medical eye visit.',
-    )
-    expect(examTypeResolver).toContain(
-      'For asymptomatic general vision or prevention without that risk or direction, use a routine comprehensive eye or vision exam.',
-    )
-    expect(examTypeResolver).toContain(
-      'For an active-symptom medical eye visit, mention current contact-lens wear in the booking reason but do not append a separate fit-review type.',
-    )
-    expect(examTypeResolver).toContain(
-      'current contact-lens wear resolves to a routine comprehensive eye or vision exam with contact-lens evaluation as the single requested service.',
-    )
-    expect(examTypeResolver).not.toContain('Add a contact-lens-fit review')
-    expect(examTypeResolver).not.toContain('fit or prescription is due')
-    expect(examTypeResolver).toContain(
-      'A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts.',
-    )
-    expect(examTypeResolver).toContain(
-      'Do not select dilation or another procedure unless it is already directed.',
-    )
-    expect(triageText).toContain('new flashes of light')
-    expect(triageText).toContain('a sudden increase in or many new floaters')
-    const triageContactLensSameDayRule = triageText
-      .split('\n')
-      .find((line) => line.includes('A contact-lens wearer has pain;'))
-    expect(triageContactLensSameDayRule).toContain(
-      'has pain; redness; light sensitivity; any new vision change;',
-    )
-    expect(triageContactLensSameDayRule).not.toContain('marked redness')
-    expect(triageText).toContain(
-      'A contact-lens wearer with redness or a new vision change is not eligible for this pathway',
-    )
-    expect(triageText).toContain(
-      'When a contact-lens wearer is assigned `Prompt same-day eye care`, the matching prerequisite removes the lenses;',
-    )
-    expect(triageText).toContain(
-      'When the Decision Order assigns `Brief self-care trial is reasonable` for mild contact-lens dryness, do not wear the lenses again that day.',
-    )
-    expect(triageText).toContain(
-      'if symptoms return, stop lens wear and apply the Decision Order again.',
-    )
-    expect(triageText).not.toContain(
-      'if symptoms return, stop lens wear and arrange a contact-lens-fit exam',
-    )
-    expect(triageText).not.toContain(
-      'For mild end-of-day dryness that fully resolves after removal',
-    )
-    expect(triageText).not.toContain(
-      'or symptoms that persist after removal, do not reinsert',
-    )
-    expect(triageText).not.toContain('attend at least yearly contact-lens exams')
-    expect(triageText).toContain(
-      'mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms',
-    )
-    expect(triageText).toContain(
-      'improve with complete blinking, rest, or lens removal',
-    )
-    expect(triageText).not.toContain('pain that persists or worsens after removal')
-    expect(triageText).toContain('mild, gradual, bilateral')
-    expect(triageText).not.toContain('usually bilateral')
-    expect(triageText).toContain(
-      'new flashes, a sudden increase in or many new floaters',
-    )
-    expect(triageText).toContain(
-      'Stable, longstanding occasional floaters do not meet this rule by themselves.',
-    )
-    expect(triageText).toContain(
-      'https://www.cdc.gov/contact-lenses/causes/index.html',
-    )
-    expect(evidenceText).toContain('The exact `20-20-20` formula has limited evidence')
-    expect(evidenceText).toContain(
-      'Do not assign exam timing or type outside that outcome.',
-    )
-    expect(evidenceText).toContain(
-      'https://www.cochrane.org/evidence/CD013244_blue-light-filtering-spectacle-lenses-visual-performance-macular-back-part-eye-protection-and',
-    )
+  it('keeps eye-health and recovery-modality knowledge out of topic skills', () => {
+    const registeredSlugs: readonly string[] = ASSISTANT_SKILLS.map((skill) => skill.slug)
+    expect(registeredSlugs).not.toContain('general-eye-health')
+    expect(registeredSlugs).not.toContain('recovery-modalities')
+    expect(existsSync(path.join(resolveAssistantSkillsRoot(), 'general-eye-health'))).toBe(false)
+    expect(existsSync(path.join(resolveAssistantSkillsRoot(), 'recovery-modalities'))).toBe(false)
 
     const systemPrompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
@@ -622,13 +307,10 @@ describe('assistant skill assets', () => {
       turnTrigger: null,
     })
     expect(systemPrompt).toContain(
-      'Eye health: general-eye-health for screen-linked discomfort, contact-lens safety, refractive questions, prevention, and symptom triage.',
+      'Eye-health evidence, symptom urgency, contact-lens safety, and refractive guidance come from the required Health Commons lookup.',
     )
     expect(systemPrompt).toContain(
-      'Route any active eye pain, redness, light sensitivity, discharge, vision change, flashes, floaters, injury, or chemical exposure to general-eye-health first',
-    )
-    expect(systemPrompt).toContain(
-      'Load secondary skills only after establishing the care level and immediate action.',
+      'Recovery-modality evidence and safety come from the required Health Commons lookup.',
     )
   })
 
@@ -1425,134 +1107,6 @@ describe('assistant skill assets', () => {
     )
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
-  })
-
-  it('keeps red light therapy registered with dose math and device seeds', async () => {
-    const redLightSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'red-light-therapy',
-    )
-    expect(redLightSkill).toBeTruthy()
-    if (!redLightSkill) {
-      return
-    }
-
-    const skillText = await readSkillFile(redLightSkill)
-    expect(redLightSkill.triggerHint).toContain('device irradiance')
-    expect(skillText).toContain('seconds = target dose J/cm2 * 1000 / irradiance mW/cm2')
-    expect(skillText).toContain('manufacturer-claim duration estimate')
-    expect(skillText).toContain('matches the user\'s distance or contact setting')
-    expect(skillText).toContain('activeModeLabel')
-    expect(skillText).toContain('vault-cli commons protocol explore "red light therapy" --format json')
-    expect(skillText).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md')
-
-    const raw = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        redLightSkill.slug,
-        'device-seeds.json',
-      ),
-      'utf8',
-    )
-    const parsed: unknown = JSON.parse(raw)
-    expectRecord(parsed, 'red light device seed root')
-
-    expect(parsed.schemaVersion).toBe(
-      'murph.assistant.skill.red-light-device-seeds.v1',
-    )
-    expect(Array.isArray(parsed.sourcePolicy)).toBe(true)
-    expect(JSON.stringify(parsed.sourcePolicy)).toContain(
-      'manufacturer-claim examples',
-    )
-    expect(JSON.stringify(parsed.sourcePolicy)).toContain(
-      'Do not extrapolate',
-    )
-
-    const devices = parsed.devices
-    expect(Array.isArray(devices)).toBe(true)
-    if (!Array.isArray(devices)) {
-      return
-    }
-    expect(devices.length).toBeGreaterThanOrEqual(8)
-
-    const aliases = new Set<string>()
-    const models = new Set<string>()
-
-    for (const [deviceIndex, deviceValue] of devices.entries()) {
-      expectRecord(deviceValue, `device ${deviceIndex}`)
-      expect(typeof deviceValue.brand).toBe('string')
-      expect(typeof deviceValue.model).toBe('string')
-      expect(typeof deviceValue.deviceClass).toBe('string')
-      models.add(String(deviceValue.model))
-
-      const deviceClass = deviceValue.deviceClass
-      expect(['panel', 'contact_wrap', 'contact_mat']).toContain(deviceClass)
-
-      expect(Array.isArray(deviceValue.aliases)).toBe(true)
-      if (Array.isArray(deviceValue.aliases)) {
-        for (const alias of deviceValue.aliases) {
-          expect(typeof alias).toBe('string')
-          expect(aliases.has(String(alias))).toBe(false)
-          aliases.add(String(alias))
-        }
-      }
-
-      expect(Array.isArray(deviceValue.wavelengthsNm)).toBe(true)
-      if (Array.isArray(deviceValue.wavelengthsNm)) {
-        for (const wavelength of deviceValue.wavelengthsNm) {
-          expect(typeof wavelength).toBe('number')
-          expect(wavelength).toBeGreaterThan(0)
-        }
-      }
-
-      expect(Array.isArray(deviceValue.irradianceReadings)).toBe(true)
-      if (!Array.isArray(deviceValue.irradianceReadings)) {
-        continue
-      }
-
-      for (const [
-        readingIndex,
-        readingValue,
-      ] of deviceValue.irradianceReadings.entries()) {
-        expectRecord(
-          readingValue,
-          `device ${deviceIndex} reading ${readingIndex}`,
-        )
-        expect(readingValue.sourceType).toBe('manufacturer_claim')
-        expect(String(readingValue.sourceUrl)).toMatch(
-          /^https:\/\/www\.bestqool\.com\/products\//u,
-        )
-        expect(typeof readingValue.activeModeLabel).toBe('string')
-        expect(String(readingValue.activeModeLabel).trim().length)
-          .toBeGreaterThan(0)
-        expect(typeof readingValue.distanceCm).toBe('number')
-        expect(typeof readingValue.distanceLabel).toBe('string')
-        expect(typeof readingValue.irradianceMwPerCm2).toBe('number')
-        expect(Number(readingValue.irradianceMwPerCm2)).toBeGreaterThan(0)
-        expect(typeof readingValue.measurementContext).toBe('string')
-
-        if (deviceClass === 'panel') {
-          expect(Number(readingValue.distanceCm)).toBeGreaterThan(0)
-        } else {
-          expect(readingValue.distanceCm).toBe(0)
-          expect(String(readingValue.distanceLabel)).toContain('surface')
-        }
-      }
-    }
-
-    expect(models).toEqual(
-      new Set([
-        'BQ40',
-        'BQ60',
-        'BQ60Pro',
-        'BQ150',
-        'Pro100',
-        'Pro200',
-        'Pro300',
-        'Redot S',
-        'Redot M',
-        'Redot L',
-      ]),
-    )
   })
 
   it('keeps behavior follow-through policy in the skill file with only compact bridges elsewhere', async () => {

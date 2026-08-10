@@ -2120,9 +2120,9 @@ text(result.output);
         expect(result.responseCard).toEqual(input.card ?? null)
         if (input.card) {
           expect(result.finalMessage).toContain(
-            'Targets: 1,800 calories (ON TARGET)',
+            'Targets: 1,800 calories (on target)',
           )
-          expect(result.finalMessage).toContain('25g fiber (ON TARGET).')
+          expect(result.finalMessage).toContain('25g fiber (on target).')
           expect(result.finalMessage).not.toContain(input.finalMessage)
         } else {
           expect(result.finalMessage).toBe(input.finalMessage)

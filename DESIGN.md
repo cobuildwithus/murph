@@ -205,6 +205,21 @@ on larger screens it centers at no more than 540px wide.
 ### Signal Cards
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
+### iMessage Nutrition Card Image
+Render the macOS and app-absent fallback as the compact default state of the
+shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
+cream balloon, small system-style badge, large calorie value, calorie progress
+ring, and one-row protein, carbohydrates, fat, and fiber readings visually
+aligned with the Messages extension. Status color may tint nutrient values, but
+the ring draws quantitative progress only for a complete calorie total with an
+assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
+the neutral track. The static image does not expose the native card's
+tap-to-reveal target state.
+The provider captions beneath the image use one text column to retain the date,
+meal count, every available total, partial state, and each V2 target/status for
+assistive technology and image-failure recovery. V1 renders an unavailable
+fiber dash in the image while its caption correctly omits a fiber claim.
+
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
 current MRR, tracked fulfilled usage top-ups, paying-customer growth, active
@@ -426,6 +441,22 @@ full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
 
+### Group Join Sharing Choices
+
+The group join consent checkpoint may request the complete selectable sharing
+catalog. Keep every requested choice selected for a new invitee until they
+explicitly uncheck it, state the selected count when the catalog is long, and
+place the checklist in one bounded, keyboard-scrollable region so the primary
+join action remains visible. Beside a long-catalog count, include one quiet
+button that clears all optional sharing so joining without health or email
+sharing is a single action; members can then re-enable exact choices below.
+Each row stays a full-width checkbox card with its
+plain-language scope description; do not compress a consequential permission
+into a dense table, hide choices behind categories, or imply that the defaults
+have already been granted. Existing members reopen the same surface with only
+their currently active shares selected, and the list includes both the current
+group request and every older share that member can still revoke.
+
 ### Group Usage Funding
 An authenticated group funding link opens its relevant funding control
 immediately: monthly sponsorship for an unsponsored chat, one-time contribution
@@ -535,6 +566,7 @@ View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Moti
 - Logo (dark): `apps/web/public/logo-dark.svg`
 - Favicon (auto dark mode): `apps/web/app/icon.svg`
 - Dynamic OG image: `apps/web/app/opengraph-image.tsx` (1200×630, Fraunces + DM Sans, hero.jpg background)
+- Static iMessage nutrition image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200×568, DM Sans, immutable bounded snapshot)
 - Canonical hero image: `apps/web/public/hero.jpg` (3583×2000)
 - Supporting texture: `apps/web/public/warmglow.png` (1376×768)
 - Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`)

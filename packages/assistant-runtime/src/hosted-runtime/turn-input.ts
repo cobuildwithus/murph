@@ -3,6 +3,8 @@ import {
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
+  isAssistantHostedImageCompletionEvent,
+  parseAssistantHostedImageCompletionOriginText,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItemDetails,
   type AssistantInputCandidate,
@@ -18,6 +20,7 @@ import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
+  isSameAuthenticatedAssistantGroupRoute,
   shouldGroupAdjacentAssistantInputCandidates,
 } from "@murphai/assistant-engine/assistant-automation";
 import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
@@ -25,6 +28,7 @@ import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
+  readHostedPendingAssistantInputIds,
   runHostedPendingAssistantInputContentRetention,
 } from "./pending-input-index.ts";
 
@@ -38,11 +42,13 @@ type HostedAssistantInputSelection =
       inputIds: string[];
       mode: "foreground";
       pendingInputIds: string[];
+      preserveInputOrder?: true;
     }
   | {
       inputIds: string[];
       mode: "background";
       pendingInputIds: string[];
+      preserveInputOrder?: true;
     };
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
@@ -101,7 +107,13 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     : "not_observed";
   let batch: AssistantInputEventRecord[];
   try {
-    batch = selectHostedAssistantInputEventBatch({
+    batch = await selectHostedImageCompletionInputEventBatch({
+      events,
+      hostedImageCompletionInputIds: events
+        .filter(isAssistantHostedImageCompletionEvent)
+        .map((event) => event.inputId),
+      vaultRoot: input.vaultRoot,
+    }) ?? selectHostedAssistantInputEventBatch({
       events,
       limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
     });
@@ -132,11 +144,13 @@ function isHostedConversationActivityInputEvent(
 export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
   pendingInputRefreshMode: HostedPendingInputRefreshMode;
+  preserveSelectedInputOrder?: boolean;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): HostedAssistantInputSource {
   const selectedInputIds = uniqueStrings(input.selectedInputIds ?? []);
   const selectedInputIdSet = new Set(selectedInputIds);
+  let preserveSelectedInputOrder = input.preserveSelectedInputOrder === true;
   const observedInputIds = new Set([
     ...(input.initialPendingInputIds ?? []),
     ...selectedInputIds,
@@ -146,12 +160,16 @@ export function createHostedAssistantInputSource(input: {
   const readSelectedCandidates = () => {
     selectedCandidatesPromise ??= readHostedAssistantInputCandidatesById({
       inputIds: selectedInputIds,
+      preserveInputOrder: preserveSelectedInputOrder,
       vaultRoot: input.vaultRoot,
     });
     return selectedCandidatesPromise;
   };
 
   return {
+    get preserveInputCandidateOrder() {
+      return preserveSelectedInputOrder;
+    },
     readObservedInputIds() {
       return [...observedInputIds];
     },
@@ -185,18 +203,24 @@ export function createHostedAssistantInputSource(input: {
         inputIds: newPendingInputIds,
         vaultRoot: input.vaultRoot,
       });
-      const appendablePendingInputIds = selectedInputIds.length === 0
-        ? selectHostedAssistantInputEventBatch({
+      const appendablePendingBatch = selectedInputIds.length === 0
+        ? await selectHostedAssistantInputEventBatchWithImageCompletion({
             events: appendablePendingEvents,
             limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-          }).map((event) => event.inputId)
-        : [];
+            vaultRoot: input.vaultRoot,
+          })
+        : null;
+      const appendablePendingInputIds = appendablePendingBatch?.events.map(
+        (event) => event.inputId,
+      ) ?? [];
       const added = appendSelectedHostedAssistantInputIds({
         inputIds: appendablePendingInputIds,
         selectedInputIdSet,
         selectedInputIds,
       });
       if (added > 0) {
+        preserveSelectedInputOrder =
+          appendablePendingBatch?.preserveInputOrder === true;
         selectedCandidatesPromise = null;
       }
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
@@ -212,6 +236,7 @@ export function createHostedAssistantInputSource(input: {
       return filterHostedAssistantInputCandidates({
         candidates,
         emittedCursorKeys: emittedListInputCandidateCursorKeys,
+        preserveInputOrder: preserveSelectedInputOrder,
         query,
       });
     },
@@ -305,13 +330,18 @@ export async function selectHostedAssistantInputIds(
       vaultRoot: input.vaultRoot,
     });
     const limit = normalizeHostedAssistantInputBatchLimit(input.limit);
+    const selected = await selectHostedAssistantInputEventBatchWithImageCompletion({
+      events: pendingEvents,
+      limit,
+      vaultRoot: input.vaultRoot,
+    });
     return {
-      inputIds: selectHostedAssistantInputEventBatch({
-        events: pendingEvents,
-        limit,
-      }).map((event) => event.inputId),
+      inputIds: selected.events.map((event) => event.inputId),
       mode: "background",
       pendingInputIds,
+      ...(selected.preserveInputOrder
+        ? { preserveInputOrder: true as const }
+        : {}),
     };
   }
 
@@ -329,16 +359,210 @@ export async function selectHostedAssistantInputIds(
     inputIds: freshInputIds,
     vaultRoot: input.vaultRoot,
   });
+  const hasFreshImageCompletion = freshEvents.some(
+    isAssistantHostedImageCompletionEvent,
+  );
+  let selectionEvents = freshEvents;
+  let restoredCompletionRequiredInputIds: string[] | undefined;
+  if (!hasFreshImageCompletion) {
+    try {
+      const pendingInputIds = await readHostedPendingAssistantInputIds({
+        vaultRoot: input.vaultRoot,
+      });
+      const pendingEvents =
+        await readHostedReplyablePendingAssistantInputEvents({
+          inputIds: pendingInputIds,
+          vaultRoot: input.vaultRoot,
+        });
+      if (pendingEvents.some(isAssistantHostedImageCompletionEvent)) {
+        const eventsByInputId = new Map<string, AssistantInputEventRecord>();
+        for (const event of [...pendingEvents, ...freshEvents]) {
+          eventsByInputId.set(event.inputId, event);
+        }
+        selectionEvents = [...eventsByInputId.values()];
+        restoredCompletionRequiredInputIds =
+          selectHostedAssistantInputEventBatch({
+            events: freshEvents,
+            limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+          }).slice(0, 1).map((event) => event.inputId);
+      }
+    } catch {
+      // Fresh conversation input remains authoritative when unrelated pending
+      // state cannot be read safely. The durable wake can retry that state.
+    }
+  }
+  let selected: Awaited<
+    ReturnType<typeof selectHostedAssistantInputEventBatchWithImageCompletion>
+  >;
+  try {
+    selected = await selectHostedAssistantInputEventBatchWithImageCompletion({
+      events: selectionEvents,
+      fallbackEvents: freshEvents,
+      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+      ...(restoredCompletionRequiredInputIds
+        ? { requiredInputIds: restoredCompletionRequiredInputIds }
+        : {}),
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    if (hasFreshImageCompletion) {
+      throw error;
+    }
+    selected = {
+      events: selectHostedAssistantInputEventBatch({
+        events: freshEvents,
+        limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+      }),
+      preserveInputOrder: false,
+    };
+  }
 
   return {
     freshInputIds,
-    inputIds: selectHostedAssistantInputEventBatch({
-      events: freshEvents,
-      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-    }).map((event) => event.inputId),
+    inputIds: selected.events.map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds: [],
+    ...(selected.preserveInputOrder
+      ? { preserveInputOrder: true as const }
+      : {}),
   };
+}
+
+async function selectHostedAssistantInputEventBatchWithImageCompletion(input: {
+  events: readonly AssistantInputEventRecord[];
+  fallbackEvents?: readonly AssistantInputEventRecord[];
+  limit: number;
+  requiredInputIds?: readonly string[];
+  vaultRoot: string;
+}): Promise<{
+  events: AssistantInputEventRecord[];
+  preserveInputOrder: boolean;
+}> {
+  const completionInputIds = input.events
+    .filter(isAssistantHostedImageCompletionEvent)
+    .map((event) => event.inputId);
+  const cursorOrderedEvents = [...input.events].sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  );
+  const completionInputIdSet = new Set(completionInputIds);
+  const completionEvents = cursorOrderedEvents.filter((event) =>
+    completionInputIdSet.has(event.inputId)
+    && isAssistantHostedImageCompletionEvent(event)
+  );
+  const requiredInputIdSet = new Set(input.requiredInputIds ?? []);
+  for (const anchorEvent of completionEvents) {
+    const completionFirstEvents = [
+      anchorEvent,
+      ...completionEvents.filter((event) => event !== anchorEvent),
+      ...cursorOrderedEvents.filter((event) =>
+        !completionInputIdSet.has(event.inputId)
+      ),
+    ];
+    const hostedImageCompletionEvents =
+      await selectHostedImageCompletionInputEventBatch({
+        events: completionFirstEvents,
+        hostedImageCompletionInputIds: [anchorEvent.inputId],
+        vaultRoot: input.vaultRoot,
+      });
+    if (
+      hostedImageCompletionEvents
+      && (
+        requiredInputIdSet.size === 0
+        || hostedImageCompletionEvents.some((event) =>
+          requiredInputIdSet.has(event.inputId)
+        )
+      )
+    ) {
+      return {
+        events: hostedImageCompletionEvents.slice(0, input.limit),
+        preserveInputOrder: true,
+      };
+    }
+  }
+  return {
+    events: selectHostedAssistantInputEventBatch({
+      events: input.fallbackEvents ?? input.events,
+      limit: input.limit,
+    }),
+    preserveInputOrder: false,
+  };
+}
+
+async function selectHostedImageCompletionInputEventBatch(input: {
+  events: readonly AssistantInputEventRecord[];
+  hostedImageCompletionInputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[] | null> {
+  const completionInputIds = new Set(
+    uniqueStrings(input.hostedImageCompletionInputIds),
+  );
+  if (completionInputIds.size === 0) {
+    return null;
+  }
+  const [anchorEvent] = input.events;
+  if (
+    !anchorEvent
+    || !completionInputIds.has(anchorEvent.inputId)
+    || [...completionInputIds].some((inputId) =>
+      !input.events.some((event) =>
+        event.inputId === inputId
+        && isAssistantHostedImageCompletionEvent(event)
+      )
+    )
+  ) {
+    return null;
+  }
+
+  const candidates = await createHostedAssistantInputCandidates({
+    events: input.events,
+    preserveInputOrder: true,
+    vaultRoot: input.vaultRoot,
+  });
+  const anchorCandidate = candidates[0];
+  if (!anchorCandidate) {
+    return null;
+  }
+  const completionOrigin = parseAssistantHostedImageCompletionOriginText(
+    anchorEvent.content.text ?? "",
+  );
+  if (!completionOrigin) {
+    return [anchorEvent];
+  }
+  const [originEvent] = await readHostedAssistantInputEventsById({
+    inputIds: [completionOrigin.originAssistantInputId],
+    missingInput: "skip",
+    vaultRoot: input.vaultRoot,
+  });
+  if (!originEvent) {
+    return [anchorEvent];
+  }
+  const [originCandidate] = await createHostedAssistantInputCandidates({
+    events: [originEvent],
+    vaultRoot: input.vaultRoot,
+  });
+  if (
+    !originCandidate
+    || !isSameAuthenticatedAssistantGroupRoute(anchorCandidate, originCandidate)
+  ) {
+    return [anchorEvent];
+  }
+  const candidatesByInputId = new Map(
+    candidates.map((candidate) => [candidate.event.inputId, candidate] as const),
+  );
+  return input.events.filter((event, index) => {
+    if (index === 0) {
+      return true;
+    }
+    const candidate = candidatesByInputId.get(event.inputId);
+    if (
+      !candidate
+      || !isSameAuthenticatedAssistantGroupRoute(anchorCandidate, candidate)
+    ) {
+      return false;
+    }
+    return isAssistantHostedImageCompletionEvent(event)
+      || compareAssistantInputCursors(event.cursor, originEvent.cursor) > 0;
+  }).slice(0, DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT);
 }
 
 function selectHostedAssistantInputEventBatch(input: {
@@ -448,27 +672,33 @@ function readPositiveHostedAssistantInputCausalSeq(
 
 async function readHostedAssistantInputCandidatesById(input: {
   inputIds: readonly string[];
+  preserveInputOrder?: boolean;
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const events = await readHostedAssistantInputEventsById(input);
   return createHostedAssistantInputCandidates({
     events,
+    preserveInputOrder: input.preserveInputOrder === true,
     vaultRoot: input.vaultRoot,
   });
 }
 
 async function createHostedAssistantInputCandidates(input: {
   events: readonly AssistantInputEventRecord[];
+  preserveInputOrder?: boolean;
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
     inputIds: input.events.map((event) => event.inputId),
     vault: input.vaultRoot,
   });
-  return [...input.events]
-    .sort((left, right) =>
+  const orderedEvents = [...input.events];
+  if (input.preserveInputOrder !== true) {
+    orderedEvents.sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
-    )
+    );
+  }
+  return orderedEvents
     .map((event) => {
       const hostedMailboxItem = hostedMailboxItems.get(event.inputId);
       return assistantInputCandidateFromStoredEvent(event, {
@@ -553,6 +783,7 @@ function filterHostedAssistantInputCandidates(input: {
   candidates: readonly AssistantInputCandidate[];
   emittedCursorKeys?: Set<string>;
   ignoreAfterCursor?: boolean;
+  preserveInputOrder?: boolean;
   query: AssistantInputCandidateQuery;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
@@ -577,6 +808,7 @@ function filterHostedAssistantInputCandidates(input: {
       return true;
     }),
     limit: input.query.limit,
+    preserveInputOrder: input.preserveInputOrder === true,
   });
   for (const candidate of batch.inputs) {
     input.emittedCursorKeys?.add(hostedAssistantInputCursorKey(candidate.event.cursor));
@@ -618,23 +850,25 @@ function buildHostedAssistantInputCandidateBatch(input: {
   afterCursor: AssistantInputCursor | null;
   candidates: readonly AssistantInputCandidate[];
   limit?: number;
+  preserveInputOrder?: boolean;
 }): AssistantInputCandidateBatch {
   const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
-  const selected = input.candidates
-    .filter((candidate) =>
+  const selected = input.candidates.filter((candidate) =>
       input.afterCursor
         ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
         : true
-    )
-    .sort((left, right) =>
+    );
+  if (input.preserveInputOrder !== true) {
+    selected.sort((left, right) =>
       compareAssistantInputCursors(left.event.cursor, right.event.cursor)
-    )
-    .slice(0, limit);
+    );
+  }
+  const limited = selected.slice(0, limit);
 
   return {
-    inputs: selected,
-    nextCursor: selected.length > 0
-      ? selected[selected.length - 1]!.event.cursor
+    inputs: limited,
+    nextCursor: limited.length > 0
+      ? limited[limited.length - 1]!.event.cursor
       : input.afterCursor,
   };
 }

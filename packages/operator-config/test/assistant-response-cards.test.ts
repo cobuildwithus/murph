@@ -9,6 +9,7 @@ import {
   assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
   buildLinqIMessageAppCardUrl,
+  buildLinqIMessageAppCardImageUrl,
   buildLinqIMessageAppLayout,
   renderAssistantResponseCardText,
   type DailyNutritionResponseCard,
@@ -50,6 +51,12 @@ const COMPLETE_CARD_V2: DailyNutritionResponseCardV2 = {
 
 function decodeAppCardUrl(url: string): unknown {
   const encoded = new URL(url).hash.replace(/^#murph-card=/u, '')
+  return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
+}
+
+function decodeAppCardImageUrl(url: string): unknown {
+  const filename = new URL(url).pathname.split('/').at(-1) ?? ''
+  const encoded = filename.replace(/\.png$/u, '')
   return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
 }
 
@@ -420,7 +427,7 @@ describe('assistant response cards', () => {
   })
 
   it('omits unavailable layout metrics while retaining the partial marker', () => {
-    expect(buildLinqIMessageAppLayout({
+    const card: DailyNutritionResponseCardV2 = {
       ...COMPLETE_CARD_V2,
       totals: {
         calories: { total: 1_490.25, mealCount: 3 },
@@ -436,9 +443,11 @@ describe('assistant response cards', () => {
         fatGrams: null,
         fiberGrams: null,
       },
-    })).toEqual({
-      caption: 'Jul 28 · 3 meals · PARTIAL TOTALS',
-      subcaption: '1,490.25 cal',
+    }
+    expect(buildLinqIMessageAppLayout(card)).toEqual({
+      caption: 'Jul 28 · 3 meals',
+      image_url: buildLinqIMessageAppCardImageUrl(card),
+      subcaption: '1,490.25 cal · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
     })
   })
 
@@ -488,25 +497,39 @@ describe('assistant response cards', () => {
     })
     expect(completeLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
-      subcaption: '1,490.25 cal',
-      trailing_caption: '94.5g protein · 193.125g carbs',
-      trailing_subcaption: '34.75g fat',
+      image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD),
+      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat',
     })
     expect(goalLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
-      subcaption: '1,490.25 cal · 2,100 cal goal · UNDER TARGET',
-      trailing_caption: '94.5g protein · 193.125g carbs',
-      trailing_subcaption: '34.75g fat · 26.5g fiber',
+      image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
+      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · Goals: calories goal 2,100 cal, under target; protein goal 100g, on target; carbs goal unavailable; fat goal 40g, on target; fiber goal 30g, under target',
     })
-    expect(proteinGoalLayout.subcaption).toBe(
-      '1,490.25 cal · 100g protein goal · ON TARGET',
+    expect(proteinGoalLayout.subcaption).toContain(
+      'protein goal 100g, on target',
     )
-    expect(partialLayout).toEqual({
-      caption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
-      subcaption: '1,490.25 cal',
-      trailing_caption: '94.5g protein · 193.125g carbs',
-      trailing_subcaption: '34.75g fat · 26.5g fiber',
+    expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
+      schemaVersion: 2,
+      card: {
+        ...COMPLETE_CARD_V2,
+        goals: {
+          calories: null,
+          proteinGrams: { target: 100, status: 'on_target' },
+          carbsGrams: null,
+          fatGrams: null,
+          fiberGrams: null,
+        },
+      },
     })
+    expect(partialLayout).toEqual({
+      caption: 'Jul 28 · 4 meals',
+      image_url: expect.stringMatching(
+        /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+      ),
+      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
+    })
+    expect(buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2).length)
+      .toBeLessThan(2_048)
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).not.toMatch(
       /\d|today|day|time/iu,
     )

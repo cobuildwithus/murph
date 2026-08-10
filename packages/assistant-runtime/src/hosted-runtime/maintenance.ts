@@ -342,9 +342,9 @@ export async function runHostedAssistantAutomation(
   let providerStartCriticalPath = options?.providerStartCriticalPath ?? null;
   const selectedInputIds = await selectHostedAssistantInputIds(
     freshAssistantInputIdCount > 0
-      ? {
-          freshAssistantInputIds,
-          mode: "foreground",
+        ? {
+            freshAssistantInputIds,
+            mode: "foreground",
           vaultRoot,
         }
       : {
@@ -361,6 +361,8 @@ export async function runHostedAssistantAutomation(
     initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:
       selectedInputIds.mode === "foreground" ? "none" : "compact",
+    preserveSelectedInputOrder:
+      selectedInputIds.preserveInputOrder,
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
