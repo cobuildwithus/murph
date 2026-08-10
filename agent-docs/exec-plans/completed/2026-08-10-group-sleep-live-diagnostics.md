@@ -1,6 +1,6 @@
 # Group sleep live diagnostics
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -60,8 +60,9 @@ Updated: 2026-08-10
 4. [x] Run focused tests, package typechecks, and direct diff/privacy review.
 5. [x] Push the exact candidate, open the PR, and start specialist/final
    ReviewGPT concurrently with CI.
-6. [ ] Resolve accepted findings, close this plan through `scripts/finish-task`,
-   merge the green PR, verify deployment behavior, and retire the worktree.
+6. [x] Resolve accepted findings, pass final ReviewGPT and exact-head CI, and
+   close this plan through `scripts/finish-task`. PR merge, deployment watch,
+   and worktree retirement remain release follow-through after the plan commit.
 
 ## Verification log
 
@@ -94,3 +95,11 @@ Updated: 2026-08-10
   by default; the exact target-owner real-model run remains blocked by the
   unavailable `OPENAI_API_KEY`. Corrected detached Assistant Ask lifecycle: 15
   passed. Assistant Engine and Assistant Runtime typechecks passed.
+- The repository and lockfile resolve `@cobuild/review-gpt` 0.5.124, matching
+  the package registry's current `latest` tag. Final ReviewGPT round 4 passed
+  on the exact candidate with no qualifying unresolved finding.
+- Exact-head CI passed. One unrelated Assistant Engine outbox test failed once
+  in the coverage shard, passed in focused local reproduction, and passed when
+  the unchanged CI job was rerun; the aggregate release gate is green.
+- Parent final diff, privacy, and merge-tree review found no remaining issue.
+Completed: 2026-08-10
