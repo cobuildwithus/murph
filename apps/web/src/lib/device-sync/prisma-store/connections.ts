@@ -109,7 +109,7 @@ type HostedConnectionSetupWrite = {
 };
 
 const DEFAULT_HOSTED_DEVICE_SYNC_SETUP_TTL_MS = 30 * 60_000;
-const HOSTED_CONNECTION_DIRTY_CLASSIFICATION_MAX_ATTEMPTS = 2;
+const HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS = 2;
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
@@ -138,7 +138,7 @@ export class PrismaHostedConnectionStore {
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     for (
       let attempt = 0;
-      attempt < HOSTED_CONNECTION_DIRTY_CLASSIFICATION_MAX_ATTEMPTS;
+      attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS;
       attempt += 1
     ) {
       try {
@@ -147,7 +147,7 @@ export class PrismaHostedConnectionStore {
       } catch (error) {
         if (
           isHostedDirtyPayloadClassificationPendingError(error)
-          && attempt < HOSTED_CONNECTION_DIRTY_CLASSIFICATION_MAX_ATTEMPTS - 1
+          && attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS - 1
         ) {
           continue;
         }
@@ -155,7 +155,14 @@ export class PrismaHostedConnectionStore {
           throw error;
         }
 
-        return this.resolveUpsertConnectionUniqueRace(input, error);
+        const resolved = await this.resolveUpsertConnectionUniqueRace(input, error);
+        if (resolved) {
+          return resolved;
+        }
+        if (attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS - 1) {
+          continue;
+        }
+        throw error;
       }
     }
 
@@ -431,7 +438,7 @@ export class PrismaHostedConnectionStore {
   private async resolveUpsertConnectionUniqueRace(
     input: UpsertPublicDeviceSyncConnectionInput,
     originalError: unknown,
-  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+  ): Promise<UpsertPublicDeviceSyncConnectionResult | null> {
     const ownerId = normalizeNullableString(input.ownerId);
     if (!ownerId) {
       throw originalError;
@@ -464,7 +471,7 @@ export class PrismaHostedConnectionStore {
       };
     }
 
-    return this.upsertConnectionWithPrevious(input);
+    return null;
   }
 
   async getConnectionByExternalAccount(

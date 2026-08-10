@@ -988,6 +988,67 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(supersedeDirtyStateMock).toHaveBeenCalledTimes(2);
   });
 
+  it("bounds repeated connection unique-conflict recovery to one retry", async () => {
+    const stored = createConnection({
+      connectedAt: new Date("2026-03-25T00:00:00.000Z"),
+      id: "dsc_unique_retry",
+      provider: "whoop",
+      status: "disconnected",
+      userId: "user-123",
+    });
+    const uniqueConflict = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    const transaction = vi.fn(async () => {
+      throw uniqueConflict;
+    });
+    const findUnique = vi.fn(async (input: {
+      select?: Record<string, boolean>;
+      where: { id?: string; provider_providerAccountBlindIndex?: unknown };
+    }) => {
+      if (input.where.id) {
+        return { userId: stored.userId };
+      }
+      if (input.select?.connectedAt && Object.keys(input.select).length === 5) {
+        return {
+          connectedAt: stored.connectedAt,
+          id: stored.id,
+          setupPhase: stored.setupPhase,
+          status: stored.status,
+          userId: stored.userId,
+        };
+      }
+      return cloneConnection(stored);
+    });
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: transaction,
+        deviceConnection: { findUnique },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "whoop",
+      externalAccountId: "acct_456",
+      displayName: "WHOOP",
+      scopes: ["read:recovery"],
+      tokens: {
+        accessToken: "new-access-token",
+        refreshToken: "new-refresh-token",
+      },
+      metadata: {},
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      nextReconcileAt: null,
+    })).rejects.toBe(uniqueConflict);
+
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(prepareDirtyClassificationsMock).toHaveBeenCalledTimes(2);
+  });
+
   it("reactivates a disconnected hosted connection on successful OAuth reconnect", async () => {
     let stored = createConnection({
       accessTokenEncrypted: null,

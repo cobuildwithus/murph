@@ -247,6 +247,14 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
 
   it("persists the server classifier result while sealing each new payload", async () => {
     installHostedSecureBoxStringTestCodec();
+    const companionObservationJson = serializeCompanionHrvRmssdObservation({
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+      nightDate: "2026-07-10",
+      rmssdMs: 52.75,
+      completedWindowCount: 96,
+      acceptedWindowCount: 72,
+    });
     const prisma = {
       deviceSyncDirtyConnection: {
         findUnique: vi.fn(async () => null),
@@ -276,7 +284,13 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         resources: [{
           count: 1,
           jobKind: "resource",
-          payload: { resource: COMPANION_HRV_RMSSD_RESOURCE },
+          payload: {
+            companionAdmissionId: createHash("sha256")
+              .update(companionObservationJson)
+              .digest("hex"),
+            companionObservationJson,
+            resource: COMPANION_HRV_RMSSD_RESOURCE,
+          },
           resource: COMPANION_HRV_RMSSD_RESOURCE,
           resourceCategory: "derived",
           sourceProviderSlug: "whoop",
@@ -944,6 +958,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
   });
 
   it("recomputes store-owned dirty payload rows after a stale preseal revision contention", async () => {
+    installHostedSecureBoxStringTestCodec();
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
       .mockImplementation((callback: TimerHandler) => {
         if (typeof callback === "function") {
@@ -1115,6 +1130,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         .toBe(payloadRow.id);
     } finally {
       setTimeoutSpy.mockRestore();
+      setHostedSecureBoxStringTestCodecForTests(null);
     }
   });
 
