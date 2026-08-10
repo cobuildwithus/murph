@@ -51,9 +51,9 @@ const REWARD_ICONS: Record<HostedPublicReferralRewardId, typeof Link2> = {
 const SHARE_LINK_ONLY_CARD = {
   availabilityLabel: "Personal referral link",
   description:
-    "Copy your personal link and send it to someone you’d like to bring to Murph.",
+    "Copy your personal link and send it to someone you’d like to bring to Murph. This option does not currently add usage.",
   id: "share-link-only",
-  rewardLabel: "Available to Murph members",
+  rewardLabel: "Share only · no usage reward",
   title: "Share your referral link",
 } as const;
 
@@ -65,7 +65,7 @@ function buildHowItWorks(input: {
     ? "Share your personal link anytime. For a group reward, tell Murph which option you want and wait for the go-ahead before creating the group."
     : input.signupAvailable
     ? "Copy your personal link and send it to someone who is new to Murph."
-    : "Share your personal link anytime. For a group reward, tell Murph which option you want and wait for the go-ahead before creating the group.";
+    : "Tell Murph which group option you want and wait for the go-ahead before creating the group.";
   const qualificationDescription = input.signupAvailable && input.groupAvailable
     ? "Someone new finishes setting up Murph, or several people take part in a real group conversation."
     : input.signupAvailable
@@ -155,10 +155,12 @@ function buildFaqs(input: {
 export function ReferralPageContent({
   authenticated,
   identityKey,
+  referralSignupUrl,
   rewards,
 }: {
   authenticated: boolean;
   identityKey: string | null;
+  referralSignupUrl?: string;
   rewards: readonly HostedPublicReferralReward[];
 }) {
   if (rewards.length === 0) {
@@ -167,23 +169,6 @@ export function ReferralPageContent({
 
   const signupAvailable = rewards.some(({ id }) => id === "signup-link");
   const groupAvailable = rewards.some(({ id }) => id !== "signup-link");
-  const signupReward = rewards.find(({ id }) => id === "signup-link");
-  const referralCards = [
-    ...rewards
-      .filter(({ id }) => id !== "signup-link")
-      .map((reward) => ({
-        ...reward,
-        rewardLabel: formatHostedPublicReferralRewardValue(reward),
-      })),
-    ...(signupReward
-      ? [{
-          ...signupReward,
-          rewardLabel: formatHostedPublicReferralRewardValue(signupReward),
-        }]
-      : groupAvailable
-      ? [SHARE_LINK_ONLY_CARD]
-      : []),
-  ];
   const howItWorks = buildHowItWorks({ groupAvailable, signupAvailable });
   const faqs = buildFaqs({ groupAvailable, rewards, signupAvailable });
   const rewardPrivacyTrustPoint = groupAvailable && !signupAvailable
@@ -204,7 +189,7 @@ export function ReferralPageContent({
     ? "Share your link or bring Murph into a new group. When someone genuinely joins in and the referral meets the rules, Murph adds extra usage automatically."
     : signupAvailable
     ? "Share your personal link. When someone new finishes setting up Murph and the referral meets the rules, Murph adds extra usage automatically."
-    : "Bring Murph into a new group and get people talking. Once the group qualifies, Murph adds extra usage automatically. You can also share your personal link anytime.";
+    : "Bring Murph into a new group and get people talking. Once the group qualifies, Murph adds extra usage automatically. Your personal link remains available for sharing, but it does not currently earn usage.";
   const qualificationLead = signupAvailable && groupAvailable
     ? "A link or a brand-new group is only the start. Rewards come after someone genuinely joins in."
     : signupAvailable
@@ -214,12 +199,12 @@ export function ReferralPageContent({
     ? "Link rewards go to your personal Murph. Group rewards go to the Murph where you started the referral."
     : signupAvailable
     ? "Link rewards go to your personal Murph."
-    : "Group rewards go to the Murph where you started the referral. Your personal link is always ready to share.";
+    : "Group rewards go to the Murph where you started the referral. Your personal link is share-only and does not currently earn usage.";
   const privacyLead = groupAvailable && !signupAvailable
     ? "Murph keeps only what it needs to recognize a group referral and add the reward. Sharing your personal link does not currently earn extra usage."
     : "Murph keeps only what it needs to recognize the referral and add the reward.";
   const closingDescription = groupAvailable && !signupAvailable
-    ? "Share your personal link anytime. Group rewards are tracked without sharing anyone’s private information."
+    ? "Your personal link is ready to share below, but it does not currently earn usage."
     : "Murph keeps track of the reward without sharing anyone’s private information.";
   const artifactReward = signupAvailable
     ? rewards.find(({ id }) => id === "signup-link")!
@@ -252,10 +237,22 @@ export function ReferralPageContent({
             </p>
 
             <div className="mt-8">
-              <ReferralShareAction
-                authenticated={authenticated}
-                identityKey={identityKey}
-              />
+              {signupAvailable
+                ? (
+                  <ReferralShareAction
+                    authenticated={authenticated}
+                    identityKey={identityKey}
+                    signupUrl={referralSignupUrl}
+                  />
+                )
+                : (
+                  <a
+                    className="inline-flex min-h-12 items-center justify-center rounded-xl border border-white/10 bg-[#f5f0e8] px-5 py-3.5 text-[0.9375rem] font-semibold text-[#2d3436] transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]"
+                    href="#ways-to-earn"
+                  >
+                    See group referral options
+                  </a>
+                )}
             </div>
             <a
               className="mt-5 inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-[#f5f0e8]/76 underline decoration-[#d4b87a]/45 underline-offset-4 transition-colors hover:text-[#f5f0e8]"
@@ -270,7 +267,7 @@ export function ReferralPageContent({
             </p>
           </div>
 
-          <ReferralHeroArtifact reward={artifactReward} />
+          <ReferralRewardReceiptPreview reward={artifactReward} />
         </div>
       </section>
 
@@ -328,62 +325,11 @@ export function ReferralPageContent({
             </p>
           </div>
 
-          <div className="mt-12 grid gap-5 lg:grid-cols-3">
-            {referralCards.map((card, index) => {
-              const Icon = card.id === "share-link-only"
-                ? Link2
-                : REWARD_ICONS[card.id];
-              return (
-                <article
-                  className={`rounded-[1.75rem] border p-7 sm:p-8 ${
-                    index === 0
-                      ? "border-[#5a6e32]/35 bg-[#253321] text-[#f5f0e8]"
-                      : "border-[#c4a882]/35 bg-[#faf7f1] text-[#2d3436]"
-                  }`}
-                  key={card.id}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <span
-                      className={`inline-flex size-11 items-center justify-center rounded-2xl ${
-                        index === 0
-                          ? "bg-white/10 text-[#d4b87a]"
-                          : "bg-[#5a6e32]/10 text-[#5a6e32]"
-                      }`}
-                    >
-                      <Icon aria-hidden="true" className="size-5" />
-                    </span>
-                    <span
-                      className={`rounded-full border px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.09em] ${
-                        index === 0
-                          ? "border-white/15 bg-white/[0.05] text-[#f5f0e8]/70"
-                          : "border-[#c4a882]/35 bg-white/55 text-[#736a58]"
-                      }`}
-                    >
-                      {card.availabilityLabel}
-                    </span>
-                  </div>
-
-                  <p
-                    className={`mt-9 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.12em] ${
-                      index === 0 ? "text-[#d4b87a]" : "text-[#736a58]"
-                    }`}
-                  >
-                    {card.rewardLabel}
-                  </p>
-                  <h3 className="mt-3 text-balance font-serif text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.04em]">
-                    {card.title}
-                  </h3>
-                  <p
-                    className={`mt-5 text-[0.9375rem] leading-[1.72] ${
-                      index === 0 ? "text-[#f5f0e8]/74" : "text-[#4a4036]"
-                    }`}
-                  >
-                    {card.description}
-                  </p>
-                </article>
-              );
-            })}
-          </div>
+          <ReferralRewardCards
+            className="mt-12"
+            includeShareLink={groupAvailable && !signupAvailable}
+            rewards={rewards}
+          />
         </div>
       </section>
 
@@ -477,6 +423,7 @@ export function ReferralPageContent({
             <ReferralShareAction
               authenticated={authenticated}
               identityKey={identityKey}
+              signupUrl={referralSignupUrl}
             />
           </div>
         </div>
@@ -534,7 +481,84 @@ function ReferralUnavailableContent() {
   );
 }
 
-function ReferralHeroArtifact({
+export function ReferralRewardCards({
+  className,
+  includeShareLink = false,
+  rewards,
+}: {
+  className?: string;
+  includeShareLink?: boolean;
+  rewards: readonly HostedPublicReferralReward[];
+}) {
+  const cards = [
+    ...rewards.map((reward) => ({
+      ...reward,
+      rewardLabel: formatHostedPublicReferralRewardValue(reward),
+    })),
+    ...(includeShareLink ? [SHARE_LINK_ONLY_CARD] : []),
+  ];
+
+  return (
+    <div className={`grid gap-5 lg:grid-cols-3 ${className ?? ""}`}>
+      {cards.map((card, index) => {
+        const Icon = card.id === "share-link-only"
+          ? Link2
+          : REWARD_ICONS[card.id];
+        return (
+          <article
+            className={`rounded-[1.75rem] border p-7 sm:p-8 ${
+              index === 0
+                ? "border-[#5a6e32]/35 bg-[#253321] text-[#f5f0e8]"
+                : "border-[#c4a882]/35 bg-[#faf7f1] text-[#2d3436]"
+            }`}
+            key={card.id}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <span
+                className={`inline-flex size-11 items-center justify-center rounded-2xl ${
+                  index === 0
+                    ? "bg-white/10 text-[#d4b87a]"
+                    : "bg-[#5a6e32]/10 text-[#5a6e32]"
+                }`}
+              >
+                <Icon aria-hidden="true" className="size-5" />
+              </span>
+              <span
+                className={`rounded-full border px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.09em] ${
+                  index === 0
+                    ? "border-white/15 bg-white/[0.05] text-[#f5f0e8]/70"
+                    : "border-[#c4a882]/35 bg-white/55 text-[#736a58]"
+                }`}
+              >
+                {card.availabilityLabel}
+              </span>
+            </div>
+
+            <p
+              className={`mt-9 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.12em] ${
+                index === 0 ? "text-[#d4b87a]" : "text-[#736a58]"
+              }`}
+            >
+              {card.rewardLabel}
+            </p>
+            <h3 className="mt-3 text-balance font-serif text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.04em]">
+              {card.title}
+            </h3>
+            <p
+              className={`mt-5 text-[0.9375rem] leading-[1.72] ${
+                index === 0 ? "text-[#f5f0e8]/74" : "text-[#4a4036]"
+              }`}
+            >
+              {card.description}
+            </p>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+export function ReferralRewardReceiptPreview({
   reward,
 }: {
   reward: HostedPublicReferralReward;

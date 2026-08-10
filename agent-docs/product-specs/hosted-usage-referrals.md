@@ -75,7 +75,7 @@ an amount the tool did not return.
 | `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | About 14 more days of Murph usage |
 
 The day labels estimate typical Murph usage rather than calendar access. The
-ledger continues to store exact cost-weighted usage value in USD micros. The
+ledger continues to store the exact usage value in USD micros. The
 current display generation anchors the signup/new-person fixed grant at 10 days
 and the active-group fixed grant at 14 days. Grants between those anchors
 interpolate; grants outside them scale from the nearest anchor. Persisted policy

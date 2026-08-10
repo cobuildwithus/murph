@@ -113,7 +113,7 @@ export interface BrowserVaultLabResultReferenceRange {
   text?: string;
 }
 
-export type BrowserVaultLabSpecimenKind = "plasma" | "serum";
+export type BrowserVaultLabSpecimenKind = "plasma" | "serum" | "whole_blood";
 
 export interface BrowserVaultLabResultRow {
   analyte: string;

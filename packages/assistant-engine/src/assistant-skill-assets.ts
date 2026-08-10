@@ -23,7 +23,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
-      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
+      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going. In a hosted group, a request to start or manage a Murph Family plan, seats, or invites is not room funding or a room usage top-up; use murph-family unless the same request explicitly asks about funding or usage for the current room.',
   },
   {
     slug: 'signup-link',
@@ -185,7 +185,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'nutrition-strategy',
     name: 'nutrition-strategy',
     triggerHint:
-      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, and real-life food-system execution. Use food-journal for meal capture, body-composition for fat loss/muscle gain/recomposition, and gut-digestion for digestive symptom strategy.',
+      'Use for forward-looking nutrition decisions about meal structure, named diets and dietary patterns, protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, and real-life food-system execution. Use food-journal for meal capture and retrospective patterns, body-composition for intentional body change, gut-digestion for digestive symptom strategy or elimination/reintroduction, and clinical owners for therapeutic diets or medically complex cases.',
   },
   {
     slug: 'sleep-recovery-readiness',
@@ -221,7 +221,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'murph-family',
     name: 'murph-family',
     triggerHint:
-      'Use only for Murph Family product questions or account actions involving plans, sponsored seats, owner status, checkout, member invites, member usage handoffs, billing, or access. Do not use for ordinary family medical history, genetics, family symptoms, household health context, or caregiving unless Murph Family account access is also in scope.',
+      'Use only for Murph Family product questions or account actions involving plans, sponsored seats, owner status, checkout, member invites, member usage handoffs, billing, or access. In a hosted group, requests to set up a plan for the requester\'s family, add family members, or manage Family stay here and are not group sponsorship, room funding, or room usage top-ups. Do not use for ordinary family medical history, genetics, family symptoms, household health context, or caregiving unless Murph Family account access is also in scope.',
   },
   {
     slug: 'pdf',

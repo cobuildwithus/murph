@@ -48,7 +48,7 @@ describe('assistant nutrition strategy skill', () => {
       'Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion',
     )
     expect(prompt).toContain(
-      'Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution; body-composition weight/waist/recomposition; gut-digestion digestive symptoms',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation; body-composition owns weight/waist/recomposition; gut-digestion owns digestive symptoms and elimination/reintroduction',
     )
     expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md')
     expect(prompt).not.toContain(
@@ -76,6 +76,9 @@ describe('assistant nutrition strategy skill', () => {
 
     expect(nutrition).toMatch(/^---\nname: nutrition-strategy\n/)
     expect(nutrition).toContain(
+      'named diets and dietary patterns',
+    )
+    expect(nutrition).toContain(
       'Food-journal answers "what happened?" This skill answers "what should we do next?"',
     )
     expect(nutrition).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/body-composition/SKILL.md')
@@ -86,6 +89,27 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain(
       'Do not add a nutrition store, diet-plan entity, calorie engine, body-composition score, adherence score, or nutrition-specific CLI.',
     )
+    expect(nutrition).toContain(
+      'A named diet is a rule package, not the user\'s goal.',
+    )
+    expect(nutrition).toContain(
+      'Popularity is evidence of demand, not efficacy.',
+    )
+    expect(nutrition).toContain(
+      'Child references are progressive disclosure, not separately registered skills.',
+    )
+    for (const reference of [
+      'intermittent-fasting.md',
+      'low-carbohydrate.md',
+      'ketogenic.md',
+      'mediterranean.md',
+      'carnivore-animal-based.md',
+      'vegan-plant-based.md',
+      'vegetarian-spectrum.md',
+      'dash.md',
+    ]) {
+      expect(nutrition).toContain(`references/named-diets/${reference}`)
+    }
     expect(foodJournal).toContain(
       'Use `nutrition-strategy` for forward-looking decisions about what to eat or change',
     )
@@ -116,7 +140,7 @@ describe('assistant nutrition strategy skill', () => {
       expect(nutrition).toContain(lane)
     }
 
-    expect(nutrition).toContain('It is not the owner for body-composition strategy or digestive symptom strategy.')
+    expect(nutrition).toContain('It is not the owner for body-composition strategy, digestive symptom strategy, or clinician-managed therapeutic diets.')
     expect(nutrition).toContain('The lowest useful tracking burden wins')
     expect(nutrition).toContain('Do not give unsolicited calorie, macro, or weight-loss estimates.')
     expect(nutrition).toContain('Treat appetite cues as information')
@@ -145,6 +169,8 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain('Do not calculate energy availability or diagnose RED-S')
     expect(nutrition).toContain('little or nothing for about five days')
     expect(nutrition).toContain('refeeding can require medical monitoring')
+    expect(nutrition).toContain('supplement dosing, fasting, or personalized fluid/electrolyte plans')
+    expect(nutrition).toContain('an older adult with frailty, sarcopenia, or low intake')
     expect(nutrition).toContain(
       'Do not provide a calorie deficit, weight-loss target, compensatory exercise plan, fasting strategy, or detailed macro prescription.',
     )
@@ -153,5 +179,28 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain(
       'Medical stability, adequate fueling, and eating-disorder recovery outrank appearance, performance, and optimization.',
     )
+  })
+
+  it('routes named diets through bounded, non-registered child references', async () => {
+    const { nutrition } = await readSkills()
+
+    expect(nutrition).toContain('## Named Diets And Dietary Patterns')
+    expect(nutrition).toContain('Answer a direct factual question before asking about goals.')
+    expect(nutrition).toContain('Do not infer one exact implementation from a label.')
+    expect(nutrition).toContain('direct health-outcome evidence')
+    expect(nutrition).toContain(
+      '`gut-digestion` owns symptom-driven elimination and reintroduction, including low-FODMAP-style work.',
+    )
+    expect(nutrition).toContain(
+      '`cardiometabolic-health`, `chronic-illness-support`, care navigation, and the user\'s clinician own marker-first',
+    )
+    expect(nutrition).toContain('preserve the useful core with the least avoidable restriction')
+    expect(nutrition).toContain('Do not use purity, moral, identity, or compliance framing.')
+    expect(nutrition).toContain('do not scan the directory, invent an absent file, or preload references')
+    expect(nutrition).toContain('Read at most one mapped child for a narrow question')
+    expect(nutrition).toContain('two only when the user explicitly compares two patterns')
+    expect(nutrition).toContain('For an unmapped named diet, use this parent contract')
+    expect(nutrition).not.toContain('diet-patterns/SKILL.md')
+    expect(nutrition).not.toContain('named-diets/SKILL.md')
   })
 })

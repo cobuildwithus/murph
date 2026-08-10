@@ -670,7 +670,7 @@ describe("HostedAiUsageActivity", () => {
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
     assert.match(markup, />Copy link</);
-    assert.match(markup, /Share your link or ask Murph about group referral options\./);
+    assert.match(markup, /Your personal link is ready to share\./);
     assert.match(markup, /aria-label="Usage activity history"/);
     assert.match(markup, /Usage purchase/);
     assert.match(markup, /Added for you/);
@@ -698,7 +698,8 @@ describe("HostedAiUsageActivity", () => {
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
     assert.match(markup, />Copy link</);
     assert.match(markup, /Ask Murph/);
-    assert.match(markup, /Share your link or ask Murph about group referral options\./);
+    assert.match(markup, /Your personal link is ready to share\. Ask Murph if you want to explore a group referral option\./);
+    assert.doesNotMatch(markup, /adds? (?:the )?usage automatically/i);
     assert.doesNotMatch(markup, /No purchased credits yet|<details/);
   });
 });

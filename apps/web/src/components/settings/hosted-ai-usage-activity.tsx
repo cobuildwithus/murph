@@ -70,9 +70,9 @@ export function HostedAiUsageActivity(props: {
         ) : (
           <div className="border-t border-border/70 py-5">
             <p className="text-sm leading-6 text-muted-foreground">
-              Share your link or ask Murph about group referral options.
-              When a referral meets the rules, Murph adds the usage
-              automatically.
+              {canStartMissions
+                ? "Your personal link is ready to share. Ask Murph if you want to explore a group referral option."
+                : "Your personal link is ready to share."}
             </p>
           </div>
         )}

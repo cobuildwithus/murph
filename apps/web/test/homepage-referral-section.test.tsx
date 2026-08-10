@@ -9,6 +9,11 @@ import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
 
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
+
 test("ReferralSection presents every available referral path on the homepage", () => {
   const markup = renderToStaticMarkup(
     createElement(ReferralSection, {
@@ -28,7 +33,8 @@ test("ReferralSection presents every available referral path on the homepage", (
   assert.match(markup, /See ways to earn/);
   assert.match(markup, /Typical-use estimate\. Actual capacity varies\./);
   assert.doesNotMatch(markup, /If eligible/);
-  assert.doesNotMatch(markup, /\$|≈|cost-weighted|usage credit/i);
+  assert.doesNotMatch(markup, /\$|≈|usage credit/i);
+  assert.doesNotMatch(markup, RETIRED_USAGE_TERM_PATTERN);
   assert.doesNotMatch(markup, /applies earned usage automatically when/);
 });
 
@@ -60,7 +66,11 @@ test("ReferralSection keeps disabled referral paths out of its copy and rewards"
   assert.match(groupMarkup, /About 14 more days of Murph usage/);
   assert.doesNotMatch(
     `${signupMarkup}${groupMarkup}`,
-    /\$|≈|cost-weighted|usage credit/i,
+    /\$|≈|usage credit/i,
+  );
+  assert.doesNotMatch(
+    `${signupMarkup}${groupMarkup}`,
+    RETIRED_USAGE_TERM_PATTERN,
   );
   assert.doesNotMatch(groupMarkup, /personal link/i);
   assert.doesNotMatch(groupMarkup, /Share your referral link/);

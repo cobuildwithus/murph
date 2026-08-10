@@ -32,6 +32,11 @@ import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
 
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
+
 function selectRewards(
   ids: readonly (typeof HOSTED_PUBLIC_REFERRAL_REWARDS)[number]["id"][],
 ) {
@@ -80,6 +85,7 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /do not extend your trial or plan dates/);
   assert.doesNotMatch(markup, /\bmissions?\b/i);
   assert.doesNotMatch(markup, /\$|cost-weighted|usage credit/i);
+  assert.doesNotMatch(markup, RETIRED_USAGE_TERM_PATTERN);
   assert.match(markup, /Health is hard\./);
   assert.match(markup, /Bring someone with you\./);
   assert.equal(
@@ -132,7 +138,9 @@ test("ReferralPageContent keeps the personal link visible when signup rewards ar
   assert.match(markup, /Bring someone new to Murph/);
   assert.match(markup, /Start a group conversation/);
   assert.match(markup, /Share your referral link/);
-  assert.match(markup, /Available to Murph members/);
+  assert.match(markup, /Share only · no usage reward/);
+  assert.match(markup, /This option does not currently add usage/);
+  assert.match(markup, /See group referral options/);
   assert.match(markup, /Your link shares nothing private\./);
   assert.match(markup, /Private chats and health data stay private/);
   assert.match(markup, /Messages someone chooses to post in a shared group remain visible to that group/);
@@ -153,7 +161,7 @@ test("ReferralPageContent keeps the personal link visible when signup rewards ar
   assert.doesNotMatch(markup, /sends you a short confirmation/);
   assert.doesNotMatch(markup, /Ways to earn right now/);
   assert.doesNotMatch(markup, /\bmissions?\b/i);
-  assert.equal((markup.match(/Referral action/g) ?? []).length, 2);
+  assert.equal((markup.match(/Referral action/g) ?? []).length, 1);
 });
 
 test("ReferralPageContent shows one unavailability state when every reward path is disabled", () => {
@@ -171,4 +179,5 @@ test("ReferralPageContent shows one unavailability state when every reward path 
   assert.doesNotMatch(markup, /Referral action/);
   assert.doesNotMatch(markup, /Choose how to share Murph\./);
   assert.doesNotMatch(markup, /cost-weighted usage credit/);
+  assert.doesNotMatch(markup, RETIRED_USAGE_TERM_PATTERN);
 });

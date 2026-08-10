@@ -146,6 +146,71 @@ for (const route of ROUTES) {
   }
 }
 
+test("homepage footer link columns stay separate at the sm breakpoint", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 640, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto("/", { waitUntil: "load" });
+  expect(response?.status(), "homepage should respond 200 at 640px").toBe(200);
+  await page.evaluate(async () => {
+    await document.fonts?.ready;
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+  });
+
+  const footer = page.locator("#site-footer");
+  await expect(footer).toBeVisible();
+  const overlaps = await footer.evaluate((element, tolerance) => {
+    const readLinks = (ariaLabel: string) =>
+      Array.from(
+        element.querySelectorAll<HTMLAnchorElement>(
+          `nav[aria-label="${ariaLabel}"] a`,
+        ),
+      ).map((link) => {
+        const rect = link.getBoundingClientRect();
+        return {
+          bottom: rect.bottom,
+          label: link.textContent?.trim() ?? "",
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+        };
+      });
+
+    const productLinks = readLinks("Product links");
+    const legalLinks = readLinks("Legal links");
+    if (productLinks.length === 0 || legalLinks.length === 0) {
+      throw new Error("Homepage footer link columns are missing.");
+    }
+
+    return productLinks.flatMap((productLink) =>
+      legalLinks
+        .filter(
+          (legalLink) =>
+            productLink.left < legalLink.right - tolerance
+            && productLink.right > legalLink.left + tolerance
+            && productLink.top < legalLink.bottom - tolerance
+            && productLink.bottom > legalLink.top + tolerance,
+        )
+        .map((legalLink) => `${productLink.label} / ${legalLink.label}`),
+    );
+  }, OVERFLOW_TOLERANCE_PX);
+
+  expect(
+    overlaps,
+    `footer product and legal links overlap at 640px: ${overlaps.join(", ")}`,
+  ).toEqual([]);
+});
+
 test("health-data consent actions stay inline and contained", async ({ page }) => {
   test.setTimeout(300_000);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -515,7 +580,7 @@ for (const width of [768, 1280] as const) {
     await expect(historyPreview).toHaveCount(1);
     await expect(
       historyPreview.getByText(
-        "Share your link or ask Murph about group referral options.",
+        "Your personal link is ready to share. Ask Murph if you want to explore a group referral option.",
       ),
     ).toBeVisible();
     await expect(historyPreview.getByText("Copy link", { exact: true })).toBeVisible();

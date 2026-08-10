@@ -734,7 +734,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Usage credit is shown without message estimates",
         summary:
-          "Personal, Family, and group funding now present dollar-denominated cost-weighted usage credit without converting it into an approximate number of messages.",
+          "Personal, Family, and group funding now present dollar-denominated usage credit without converting it into an approximate number of messages.",
         details:
           "Actual model and tool costs vary, so the credit amount is the durable financial truth. Group participants see only whether Murph is sponsored, while exact charges, pending purchases, and monthly maximums stay private to the sponsor.",
         relevanceTags: ["billing", "usage", "groups", "privacy"],
@@ -746,10 +746,10 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "See every way to get more usage",
         summary:
-          "Ask Murph how to get more usage and it now checks the available plan, top-up, group funding, and ways to earn usage together. Settings also shows recent credits and each current or completed mission.",
+          "Ask Murph how to get more usage and it now checks the available plan, top-up, group funding, and referral options together. Settings also shows recent credits and each current or completed group referral.",
         details:
-          "Choosing one or both missions remains explicit. Each tracks and can be cancelled independently, and a mission past its action deadline reads as final activity being checked rather than still actionable.",
-        relevanceTags: ["usage", "credits", "missions", "settings"],
+          "Choosing one or both group referral options remains explicit. Each tracks and can be cancelled independently, and an option past its action deadline reads as final activity being checked rather than still actionable.",
+        relevanceTags: ["usage", "credits", "referrals", "settings"],
         sourcePullRequests: [1120, 1136, 1138, 1157],
         tryIt: {
           label: "Ask about more usage",
@@ -1144,7 +1144,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "A current participant can make one $5, $10, or $20 contribution, add an optional public alias or note, and turn a larger one-time contribution into a short-lived running bit.",
         details:
-          "Verified payment adds ordinary cost-weighted group usage credit first. Murph then sends one short original sponsor song in that group; the optional creative moment never controls the credit.",
+          "Verified payment adds ordinary group usage credit first. Murph then sends one short original sponsor song in that group; the optional creative moment never controls the credit.",
         relevanceTags: ["groups", "billing", "usage", "music"],
         sourcePullRequests: [1026, 1135],
       },

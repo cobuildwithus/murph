@@ -204,7 +204,7 @@ Assistant runtime state is never the source of truth for these objects.
 - Describe earned group referrals as referral options in member-facing copy.
   Keep internal lifecycle names such as `mission` out of the website, Settings,
   and assistant language.
-- When a member choice materially changes cost-weighted included-capacity
+- When a member choice materially changes included-capacity
   drawdown, disclose that difference before save and keep it visible in the
   saved-state summary. Do not imply that equal model names have equal provider
   cost.
