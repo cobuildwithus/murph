@@ -95,20 +95,20 @@ export async function readHostedGrowthSponsorshipMetrics(
           COUNT(*)::bigint AS "activeMonthlySponsorships",
           COALESCE(SUM(
             CASE
-              WHEN authorization."period_ends_at" <= bounds.captured_at
-                AND authorization."pending_monthly_cap_minor" IS NOT NULL
-                THEN authorization."pending_monthly_cap_minor"
-              ELSE authorization."monthly_cap_minor"
+              WHEN sponsorship_authorization."period_ends_at" <= bounds.captured_at
+                AND sponsorship_authorization."pending_monthly_cap_minor" IS NOT NULL
+                THEN sponsorship_authorization."pending_monthly_cap_minor"
+              ELSE sponsorship_authorization."monthly_cap_minor"
             END
           ), 0)::bigint AS "activeMonthlyCapUsdCents"
-        FROM "hosted_group_sponsorship_authorization" AS authorization
+        FROM "hosted_group_sponsorship_authorization" AS sponsorship_authorization
         CROSS JOIN bounds
-        WHERE authorization."status" = 'active'
+        WHERE sponsorship_authorization."status" = 'active'
           AND EXISTS (
             SELECT 1
             FROM sponsorship_purchases AS activation_purchase
             WHERE activation_purchase."group_sponsorship_authorization_id" =
-              authorization."id"
+              sponsorship_authorization."id"
               AND activation_purchase."group_sponsorship_charge_ordinal" = 0
           )
       ),

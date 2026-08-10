@@ -209,6 +209,8 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /data-goal-status="unavailable"/u);
   assert.match(serialized, /color:#666163/u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
   assert.doesNotMatch(
     serialized,
     /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Under target|Goal unavailable|Complete total/u,

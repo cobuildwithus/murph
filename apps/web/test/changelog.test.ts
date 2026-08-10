@@ -508,6 +508,7 @@ describe("changelog registry", () => {
           "group-replies-respect-the-room",
           "sponsorship-creative-opt-in",
           "response-cards-survive-long-turns",
+          "cleaner-imessage-nutrition-cards",
           "typing-prewarms-private-chat",
           "automation-output-variety",
           "ios-app-footer-link",
