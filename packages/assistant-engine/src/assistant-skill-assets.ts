@@ -185,7 +185,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'nutrition-strategy',
     name: 'nutrition-strategy',
     triggerHint:
-      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, daily nutrition-card goal setup, and real-life food-system execution. Use food-journal for meal capture, body-composition for fat loss/muscle gain/recomposition, and gut-digestion for digestive symptom strategy.',
+      'Use for forward-looking nutrition decisions about meal structure, named diets and dietary patterns, protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, daily nutrition-card goal setup, and real-life food-system execution. Use food-journal for meal capture and retrospective patterns, body-composition for intentional body change, gut-digestion for digestive symptom strategy or elimination/reintroduction, and clinical owners for therapeutic diets or medically complex cases.',
   },
   {
     slug: 'sleep-recovery-readiness',

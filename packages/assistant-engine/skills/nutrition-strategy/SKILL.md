@@ -1,15 +1,16 @@
 ---
 name: nutrition-strategy
-description: Use for forward-looking nutrition decisions about meal structure, protein, training fuel, recovery eating, hydration, appetite, under-fueling, and real-life food-system execution. Use food-journal for capture, body-composition for fat loss, muscle gain, recomposition, weight or waist trends, and gut-digestion for digestive symptom strategy.
+description: Use for forward-looking nutrition decisions about meal structure, named diets and dietary patterns, protein, training fuel, recovery eating, hydration, appetite, under-fueling, and real-life food-system execution. Use food-journal for capture, body-composition for intentional body change, gut-digestion for digestive symptom strategy and elimination or reintroduction, and clinical owners for therapeutic diets or medically complex cases.
 ---
 
 # Nutrition strategy
 
-Use this as Murph operating guidance for practical food choices and repeatable food systems. It is not the owner for body-composition strategy or digestive symptom strategy.
+Use this as Murph operating guidance for practical food choices, named-diet evaluation, and repeatable food systems. It is not the owner for body-composition strategy, digestive symptom strategy, or clinician-managed therapeutic diets.
 
 ## Owns
 
 - Meal structure, food defaults, grocery/cooking/access constraints, and emergency options.
+- Understanding, comparing, adapting, and executing named diets or dietary patterns when the main job is an ordinary forward-looking food decision.
 - Protein targets and distribution for generally healthy exercising adults.
 - Training fuel, recovery eating, carbohydrate timing, and food tolerance around workouts.
 - Hydration and electrolyte reasoning for routine training, heat, sweat, travel, long duration, and repeated sessions.
@@ -62,6 +63,48 @@ missing, also read and follow `references/daily-nutrition-card-goals.md`. It
 owns evidence-grounded default derivation, the single canonical Goal proposal,
 and the explanation-before-card sequence. Do not send a goal-less card, create
 a second goal store, or reuse the workflow as unsolicited diet planning.
+
+## Named Diets And Dietary Patterns
+
+A named diet is a rule package, not the user's goal. First identify the job the user is asking for - a definition, comparison, fit decision, practical adaptation, or troubleshooting - and the outcome they actually care about. Answer a direct factual question before asking about goals. Ask one focused question only when the answer would materially change for the user's goal, implementation, or safety.
+
+Do not infer one exact implementation from a label. Briefly define the common version and name variants that would change the tradeoffs. Separate:
+
+- popularity and testimonials;
+- plausible mechanisms;
+- short-term changes in weight or biomarkers;
+- direct health-outcome evidence; and
+- guideline or consensus support.
+
+Popularity is evidence of demand, not efficacy. Say plainly when evidence is indirect, short-term, low-certainty, condition-specific, or absent. Do not overstate causality or make every named diet sound equally supported. Label unsupported claims and fad framing without shaming the user.
+
+Route by the actual goal and risk:
+
+- `food-journal` owns capture and retrospective patterns.
+- `body-composition` owns intentional fat loss, muscle gain, recomposition, weight, and waist strategy; return here for diet execution after it sets direction.
+- `gut-digestion` owns symptom-driven elimination and reintroduction, including low-FODMAP-style work.
+- `cardiometabolic-health`, `chronic-illness-support`, care navigation, and the user's clinician own marker-first, disease-specific, medication-linked, and therapeutic-diet decisions.
+- `micronutrients-supplements` owns supplement evidence, labels, dose, and safety when food adequacy alone is not the question.
+- `experiment-onboarding` owns a bounded test only after the user chooses one specific, safe change.
+
+For ordinary execution, preserve the useful core with the least avoidable restriction. Prefer additions, substitutions, and flexible defaults before bans. Protect adequate energy, protein, carbohydrate when demand requires it, fiber, fats, and relevant micronutrients. Include a restaurant, travel, family-meal, cultural, budget, or emergency-food fallback when it is likely to matter. Do not use purity, moral, identity, or compliance framing. Do not default to a rigid menu, day-by-day meal plan, adherence score, or transformation promise; a few meal structures, swaps, and feedback signals are usually enough.
+
+Child references are progressive disclosure, not separately registered skills. A supported child must be explicitly mapped in this section to `references/named-diets/<slug>.md`. Read at most one mapped child for a narrow question, or two only when the user explicitly compares two patterns and both files materially change the answer. Confirm the mapped file exists before reading it; do not scan the directory, invent an absent file, or preload references. The parent contract owns routing and universal safety, and no child may weaken it.
+
+**Mapped child references in this tranche:**
+
+- Intermittent fasting, time-restricted eating, TRE, 16:8, 14:10, 5:2, alternate-day fasting, ADF, or OMAD -> `references/named-diets/intermittent-fasting.md`.
+- Low-carbohydrate or low-carb eating that is not explicitly ketogenic -> `references/named-diets/low-carbohydrate.md`.
+- Ketogenic or keto diets -> `references/named-diets/ketogenic.md`.
+- Mediterranean or Mediterranean-style diets -> `references/named-diets/mediterranean.md`.
+- Carnivore or animal-based diets -> `references/named-diets/carnivore-animal-based.md`.
+- Vegan, plant-only, whole-food plant-based, or WFPB diets -> `references/named-diets/vegan-plant-based.md`.
+- Vegetarian, lacto-ovo, lacto-vegetarian, ovo-vegetarian, pescatarian, or flexitarian patterns -> `references/named-diets/vegetarian-spectrum.md`.
+- DASH or Dietary Approaches to Stop Hypertension -> `references/named-diets/dash.md`.
+
+For an unmapped named diet, use this parent contract and current authoritative evidence rather than guessing a child reference.
+
+For a named-diet answer, usually cover only what the question needs from: what it is and common variants; what evidence supports and does not support; likely benefits sought; material downsides and who should be cautious; the lowest-risk practical version; feedback and stop conditions; and the right handoff.
 
 ## Practical Levers
 
@@ -144,7 +187,7 @@ After an off-plan meal or day, return to the next normal meal; do not compensate
 
 ## Clinical Boundaries
 
-General education and low-risk meal ideas may still help in medically complex contexts. Condition-specific targets, intentional weight change, supplement dosing, or personalized fluid/electrolyte plans should involve an appropriate clinician or registered dietitian when the user is under 18; pregnant or breastfeeding; using glucose-lowering medication; living with kidney disease, advanced liver disease, significant heart disease, or a relevant endocrine disorder; post-bariatric surgery; managing a severe food allergy or therapeutic diet; or experiencing persistent digestive symptoms, substantial unintentional weight change, or medication-related appetite suppression that prevents adequate intake.
+General education and low-risk meal ideas may still help in medically complex contexts. Condition-specific targets, intentional weight change, supplement dosing, fasting, or personalized fluid/electrolyte plans should involve an appropriate clinician or registered dietitian when the user is under 18; pregnant or breastfeeding; an older adult with frailty, sarcopenia, or low intake; using glucose-lowering medication; living with kidney disease, advanced liver disease, significant heart disease, or a relevant endocrine disorder; post-bariatric surgery; managing a severe food allergy or therapeutic diet; or experiencing persistent digestive symptoms, substantial unintentional weight change, or medication-related appetite suppression that prevents adequate intake.
 
 Recommend urgent medical assessment for fainting, chest pain, confusion, severe weakness, inability to keep fluids down, signs of severe dehydration, blood in vomit or stool, or other acute deterioration.
 
@@ -165,8 +208,8 @@ Use concrete foods as options, not requirements. Explain uncertainty only where 
 
 Before responding, check:
 
-- Did I answer a meal-structure, fueling, hydration, under-fueling, or food-system execution question rather than stealing body-composition or digestion ownership?
+- Did I answer a meal-structure, named-diet, fueling, hydration, under-fueling, or food-system execution question rather than stealing body-composition, digestion, marker, supplement, or therapeutic-diet ownership?
 - Did I reuse known context and avoid turning food support into a generic diet plan?
 - Did I use the lowest tracking burden that can answer the question?
-- Did I protect adequacy, autonomy, and the user's relationship with food?
+- Did I separate demand from efficacy and protect adequacy, autonomy, ordinary life, and the user's relationship with food?
 - Did I hand off body change and digestive symptom strategy to the focused owners?
