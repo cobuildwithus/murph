@@ -1452,6 +1452,13 @@ export async function readCanonicalEventAvailabilityInterruptible(
       && (
         latestBodyMeasurementOccurredAt === null
         || record.occurredAt > latestBodyMeasurementOccurredAt
+        || (
+          record.occurredAt === latestBodyMeasurementOccurredAt
+          && (
+            latestBodyMeasurementDayKey === null
+            || record.dayKey > latestBodyMeasurementDayKey
+          )
+        )
       )
     ) {
       latestBodyMeasurementOccurredAt = record.occurredAt;

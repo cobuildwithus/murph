@@ -160,6 +160,89 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
   }
 })
 
+test.each([
+  ['older first', ['2026-08-07', '2026-08-09']],
+  ['newer first', ['2026-08-09', '2026-08-07']],
+] as const)(
+  'floating Junction body summaries select the latest canonical day when imported %s',
+  async (_label, orderedDays) => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), 'junction-floating-body-days-'),
+    )
+    const vaultRoot = path.join(parentRoot, 'vault')
+    const sharedOccurredAt = '2026-08-10T00:00:00.000Z'
+
+    try {
+      await coreRuntime.initializeVault({
+        createdAt: '2026-08-01T00:00:00.000Z',
+        timezone: 'UTC',
+        vaultRoot,
+      })
+
+      await importDeviceProviderSnapshot(
+        {
+          provider: 'junction',
+          sourceKind: 'poll',
+          deliveryMode: 'scheduled_reconcile',
+          vaultRoot,
+          snapshot: {
+            accountId: 'junction-floating-body-account',
+            importedAt: sharedOccurredAt,
+            windowEnd: sharedOccurredAt,
+            summaries: {
+              body: orderedDays.map((day, index) => ({
+                id: `withings-body-${day}`,
+                provider_slug: 'withings',
+                source_type: 'scale',
+                localDate: day,
+                observedAt: `${day} 08:00:00`,
+                timestampSemantics: 'floating',
+                weight_kg: 73 + index,
+              })),
+            },
+            timeseries: {},
+          },
+        },
+        { corePort: coreRuntime },
+      )
+
+      const canonicalRecords = await coreRuntime.readJsonlRecords({
+        vaultRoot,
+        relativePath: 'ledger/events/2026/2026-08.jsonl',
+      })
+      const bodyRecords = canonicalRecords.filter((record) =>
+        record.kind === 'observation'
+        && record.metric === 'weight'
+      )
+      expect(bodyRecords).toHaveLength(2)
+      expect(bodyRecords.map((record) => record.occurredAt))
+        .toEqual([sharedOccurredAt, sharedOccurredAt])
+
+      await expect(
+        coreRuntime.readCanonicalEventAvailabilityInterruptible({ vaultRoot }),
+      ).resolves.toMatchObject({
+        latestBodyMeasurementDayKey: '2026-08-09',
+        latestBodyMeasurementOccurredAt: sharedOccurredAt,
+      })
+      const bodyRead = await createIntegratedVaultServices()
+        .query.listWearableBodyState({
+          limit: 30,
+          requestId: null,
+          vault: vaultRoot,
+        })
+      expect(bodyRead.count).toBe(2)
+      expect(bodyRead.items[0]).toMatchObject({
+        date: '2026-08-09',
+      })
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  },
+)
+
 test('Junction offset blood pressure keeps the local day used by measurement reads', async () => {
   const parentRoot = await mkdtemp(
     path.join(tmpdir(), 'junction-offset-blood-pressure-'),
