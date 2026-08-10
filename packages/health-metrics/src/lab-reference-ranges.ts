@@ -1,4 +1,4 @@
-export type BiomarkerFallbackSpecimenKind = "plasma" | "serum";
+export type BiomarkerFallbackSpecimenKind = "plasma" | "serum" | "whole_blood";
 
 export interface BiomarkerFallbackRangeBound {
   inclusive: boolean;
@@ -117,6 +117,9 @@ const ADULT_CARDIOVASCULAR_CONTEXT =
 
 const ADULT_THYROID_CONTEXT =
   `For published adult thyroid comparison on serum results when the saved result uses this exact unit and has no range; this comparator is not the reporting laboratory's range, pregnancy, illness, medications, biotin, and assay method can change interpretation, and ${SOURCE_AUTHORITY}`;
+
+const ADULT_WHOLE_BLOOD_CONTEXT =
+  `For published adult comparison on whole-blood results when the saved result uses this exact unit and has no range; this comparator is not the reporting laboratory's range, analyzer and local reference-population differences can still matter, and ${SOURCE_AUTHORITY}`;
 
 export const REVIEWED_BIOMARKER_FALLBACK_RANGES: Readonly<Record<
   string,
@@ -315,6 +318,104 @@ export const REVIEWED_BIOMARKER_FALLBACK_RANGES: Readonly<Record<
       ),
       unit: "mIU/L",
       upperBound: { inclusive: true, value: 4.2 },
+    }),
+  ],
+  "biomarker:white-blood-cell-count": [
+    reviewedRange({
+      applicability: ADULT_WHOLE_BLOOD_CONTEXT,
+      eligibleSpecimenKinds: ["whole_blood"],
+      label: "Mayo Clinic Laboratories adult whole-blood reference interval",
+      lowerBound: { inclusive: true, value: 3.4 },
+      source: mayoAssaySource(
+        "Complete Blood Cell Count with Differential, Blood",
+        "https://www.mayocliniclabs.com/test-catalog/Overview/9109",
+      ),
+      unit: "10^3/uL",
+      upperBound: { inclusive: true, value: 9.6 },
+    }),
+  ],
+  "biomarker:mean-corpuscular-volume": [
+    reviewedRange({
+      applicability: ADULT_WHOLE_BLOOD_CONTEXT,
+      eligibleSpecimenKinds: ["whole_blood"],
+      label: "Mayo Clinic Laboratories adult whole-blood reference interval",
+      lowerBound: { inclusive: true, value: 78.2 },
+      source: mayoAssaySource(
+        "Complete Blood Cell Count with Differential, Blood",
+        "https://www.mayocliniclabs.com/test-catalog/Overview/9109",
+      ),
+      unit: "fL",
+      upperBound: { inclusive: true, value: 97.9 },
+    }),
+  ],
+  "biomarker:absolute-neutrophils": [
+    reviewedRange({
+      applicability: ADULT_WHOLE_BLOOD_CONTEXT,
+      eligibleSpecimenKinds: ["whole_blood"],
+      label: "Mayo Clinic Laboratories adult whole-blood reference interval",
+      lowerBound: { inclusive: true, value: 1.56 },
+      source: mayoAssaySource(
+        "Complete Blood Cell Count with Differential, Blood",
+        "https://www.mayocliniclabs.com/test-catalog/Overview/9109",
+      ),
+      unit: "10^3/uL",
+      upperBound: { inclusive: true, value: 6.45 },
+    }),
+  ],
+  "biomarker:absolute-lymphocytes": [
+    reviewedRange({
+      applicability: ADULT_WHOLE_BLOOD_CONTEXT,
+      eligibleSpecimenKinds: ["whole_blood"],
+      label: "Mayo Clinic Laboratories adult whole-blood reference interval",
+      lowerBound: { inclusive: true, value: 0.95 },
+      source: mayoAssaySource(
+        "Complete Blood Cell Count with Differential, Blood",
+        "https://www.mayocliniclabs.com/test-catalog/Overview/9109",
+      ),
+      unit: "10^3/uL",
+      upperBound: { inclusive: true, value: 3.07 },
+    }),
+  ],
+  "biomarker:absolute-monocytes": [
+    reviewedRange({
+      applicability: ADULT_WHOLE_BLOOD_CONTEXT,
+      eligibleSpecimenKinds: ["whole_blood"],
+      label: "Mayo Clinic Laboratories adult whole-blood reference interval",
+      lowerBound: { inclusive: true, value: 0.26 },
+      source: mayoAssaySource(
+        "Complete Blood Cell Count with Differential, Blood",
+        "https://www.mayocliniclabs.com/test-catalog/Overview/9109",
+      ),
+      unit: "10^3/uL",
+      upperBound: { inclusive: true, value: 0.81 },
+    }),
+  ],
+  "biomarker:absolute-eosinophils": [
+    reviewedRange({
+      applicability: ADULT_WHOLE_BLOOD_CONTEXT,
+      eligibleSpecimenKinds: ["whole_blood"],
+      label: "Mayo Clinic Laboratories adult whole-blood reference interval",
+      lowerBound: { inclusive: true, value: 0.03 },
+      source: mayoAssaySource(
+        "Complete Blood Cell Count with Differential, Blood",
+        "https://www.mayocliniclabs.com/test-catalog/Overview/9109",
+      ),
+      unit: "10^3/uL",
+      upperBound: { inclusive: true, value: 0.48 },
+    }),
+  ],
+  "biomarker:absolute-basophils": [
+    reviewedRange({
+      applicability: ADULT_WHOLE_BLOOD_CONTEXT,
+      eligibleSpecimenKinds: ["whole_blood"],
+      label: "Mayo Clinic Laboratories adult whole-blood reference interval",
+      lowerBound: { inclusive: true, value: 0.01 },
+      source: mayoAssaySource(
+        "Complete Blood Cell Count with Differential, Blood",
+        "https://www.mayocliniclabs.com/test-catalog/Overview/9109",
+      ),
+      unit: "10^3/uL",
+      upperBound: { inclusive: true, value: 0.08 },
     }),
   ],
   "biomarker:total-cholesterol": [
