@@ -518,6 +518,11 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
                   refreshedStoredAccount,
                   durableExternalAccountId,
                   refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
+                  {
+                    forceReauthorizationRequired:
+                      !providerApplicationBindingCurrent,
+                    includeCredentialMaterial: false,
+                  },
                 ).connection
               : null,
             connectionId: update.connectionId,
