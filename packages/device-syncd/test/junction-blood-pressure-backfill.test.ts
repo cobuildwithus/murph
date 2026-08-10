@@ -9,11 +9,13 @@ import type {
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   ProviderJobContext,
+  StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
 const NOW = "2026-06-11T12:00:00.000Z";
 const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
 const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
+const BP_HISTORY_VERSION_KEY = "junctionBloodPressureHistoryBackfillVersion";
 
 interface TimeseriesRequest {
   end: string | null;
@@ -21,7 +23,12 @@ interface TimeseriesRequest {
   start: string | null;
 }
 
-function createAccount(): DeviceSyncAccount {
+function createAccount(input: {
+  connectedAt?: string;
+  metadata?: Record<string, unknown>;
+  now?: string;
+} = {}): DeviceSyncAccount {
+  const now = input.now ?? NOW;
   return {
     id: "acct-junction-bp-1",
     provider: "junction",
@@ -36,8 +43,8 @@ function createAccount(): DeviceSyncAccount {
     status: "active",
     scopes: [],
     accessTokenExpiresAt: null,
-    metadata: {},
-    connectedAt: NOW,
+    metadata: input.metadata ?? {},
+    connectedAt: input.connectedAt ?? NOW,
     lastWebhookAt: null,
     lastSyncStartedAt: null,
     lastSyncCompletedAt: null,
@@ -45,8 +52,28 @@ function createAccount(): DeviceSyncAccount {
     lastErrorCode: null,
     lastErrorMessage: null,
     nextReconcileAt: null,
-    createdAt: NOW,
-    updatedAt: NOW,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createStoredAccount(input: {
+  connectedAt?: string;
+  metadata?: Record<string, unknown>;
+} = {}): StoredDeviceSyncAccount {
+  return {
+    ...createAccount(input),
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+      credentialMetadata: {},
+    },
+    hostedObservedConnectionRevision: 0,
+    hostedObservedTokenRevision: 0,
+    hostedObservedTokenVersion: null,
+    hostedObservedUpdatedAt: null,
+    localConnectionRevision: 0,
+    localTokenRevision: 0,
   };
 }
 
@@ -74,31 +101,41 @@ function toJobRecord(input: DeviceSyncJobInput, index: number): DeviceSyncJobRec
   };
 }
 
-function createJobContext(): ProviderJobContext {
-  const account = createAccount();
+function createJobContext(input: {
+  account?: DeviceSyncAccount;
+  importedSnapshots?: unknown[];
+  now?: string;
+  shouldYield?: () => boolean;
+} = {}): ProviderJobContext {
+  const account = input.account ?? createAccount();
   return {
     account,
-    now: NOW,
-    importSnapshot: async () => ({ imported: true }),
-    upsertConnectionSource: (input) => ({
+    now: input.now ?? NOW,
+    importSnapshot: async (snapshot) => {
+      input.importedSnapshots?.push(snapshot);
+      return { imported: true };
+    },
+    upsertConnectionSource: (sourceInput) => ({
       id: "src-1",
       connectionId: account.id,
-      ...input,
-      displayName: input.displayName ?? null,
-      resourceAvailabilitySummary: input.resourceAvailabilitySummary ?? {},
-      lastErrorCode: input.lastErrorCode ?? null,
-      lastErrorMessage: input.lastErrorMessage ?? null,
-      firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
-      lastDataAt: input.lastDataAt ?? null,
-      createdAt: input.lastSeenAt,
-      updatedAt: input.lastSeenAt,
+      ...sourceInput,
+      displayName: sourceInput.displayName ?? null,
+      resourceAvailabilitySummary: sourceInput.resourceAvailabilitySummary ?? {},
+      lastErrorCode: sourceInput.lastErrorCode ?? null,
+      lastErrorMessage: sourceInput.lastErrorMessage ?? null,
+      firstSeenAt: sourceInput.firstSeenAt ?? sourceInput.lastSeenAt,
+      lastDataAt: sourceInput.lastDataAt ?? null,
+      createdAt: sourceInput.lastSeenAt,
+      updatedAt: sourceInput.lastSeenAt,
     }),
     refreshAccountTokens: async () => account,
+    ...(input.shouldYield ? { shouldYield: input.shouldYield } : {}),
     logger: {},
   };
 }
 
 function createProvider(input: {
+  bloodPressureRecords?: readonly Record<string, unknown>[];
   requests: TimeseriesRequest[];
   timeseriesBackfillDays?: number;
 }) {
@@ -121,17 +158,17 @@ function createProvider(input: {
       }
       if (url.pathname === "/v2/user/providers/junction-user-1") {
         return createJsonResponse({
-providers: [{
-  id: "provider-omron-1",
-  slug: "omron",
-  name: "Omron",
-  status: "connected",
-  resource_availability: {
-    activity: true,
-    blood_pressure: true,
-    stress_level: true,
-  },
-}],
+          providers: [{
+            id: "provider-omron-1",
+            slug: "omron",
+            name: "Omron",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              blood_pressure: true,
+              stress_level: true,
+            },
+          }],
         });
       }
       if (url.pathname === "/v2/summary/activity/junction-user-1") {
@@ -142,14 +179,22 @@ providers: [{
       }
       const timeseriesPrefix = "/v2/timeseries/junction-user-1/";
       if (url.pathname.startsWith(timeseriesPrefix)) {
+        const resource = url.pathname
+          .slice(timeseriesPrefix.length)
+          .replace(/\/grouped$/u, "");
         input.requests.push({
-end: url.searchParams.get("end_date"),
-resource: url.pathname
-  .slice(timeseriesPrefix.length)
-  .replace(/\/grouped$/u, ""),
-start: url.searchParams.get("start_date"),
+          end: url.searchParams.get("end_date"),
+          resource,
+          start: url.searchParams.get("start_date"),
         });
-        return createJsonResponse({ groups: {} });
+        const records = resource === "blood_pressure"
+          ? [...(input.bloodPressureRecords ?? [])]
+          : [];
+        return createJsonResponse(
+          records.length > 0
+            ? { groups: { omron: [{ data: records }] } }
+            : { groups: {} },
+        );
       }
 
       throw new Error(`Unexpected request: ${url.toString()}`);
@@ -177,6 +222,8 @@ test("Junction gives sparse blood pressure its own full-history resumable job", 
 
   assert.equal(bloodPressure.availableAt, NOW);
   assert.deepEqual(bloodPressure.payload, {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-05-12T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
     windowStart: "2026-05-12T00:00:00.000Z",
@@ -196,13 +243,224 @@ test("Junction gives sparse blood pressure its own full-history resumable job", 
     false,
   );
 
-  await executor.executeJob(createJobContext(), toJobRecord(bloodPressure, 2));
+  const result = await executor.executeJob(
+    createJobContext(),
+    toJobRecord(bloodPressure, 2),
+  );
   const bloodPressureRequests = requests.filter(
     (request) => request.resource === "blood_pressure",
   );
   assert.equal(bloodPressureRequests.length, 30);
   assert.equal(bloodPressureRequests[0]?.start, "2026-05-12T00:00:00.000Z");
   assert.equal(bloodPressureRequests.at(-1)?.end, BACKFILL_WINDOW_END);
+  const retry = findBloodPressureJob(result.scheduledJobs ?? []);
+  assert.equal(retry.availableAt, "2026-06-11T12:15:00.000Z");
+  assert.equal(retry.payload?.emptyBackfillAttempts, 1);
+  assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+});
+
+test("empty blood-pressure history retries are bounded and mark account-wide coverage terminal", async () => {
+  const provider = createProvider({ requests: [] });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const exhausted = {
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+    },
+  };
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(exhausted, 1),
+  );
+
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(result.metadataPatch?.[BP_HISTORY_VERSION_KEY], 1);
+});
+
+test("a source-scoped terminal pass does not suppress the account-wide migration", async () => {
+  const provider = createProvider({ requests: [] });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const sourceScoped = {
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+      sourceProviderSlug: "omron",
+    },
+  };
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(sourceScoped, 1),
+  );
+
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(result.metadataPatch?.[BP_HISTORY_VERSION_KEY], undefined);
+});
+
+test("an existing account receives one account-wide migration anchored to its connection window", () => {
+  const provider = createProvider({ requests: [] });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const connectedAt = "2026-04-20T17:45:00.000Z";
+  const scheduled = createScheduledJobs(
+    createStoredAccount({ connectedAt }),
+    NOW,
+  );
+  const bloodPressure = findBloodPressureJob(scheduled.jobs);
+
+  assert.equal(bloodPressure.availableAt, NOW);
+  assert.equal(bloodPressure.payload?.historicalWindowStart, "2026-03-21T00:00:00.000Z");
+  assert.equal(bloodPressure.payload?.windowStart, "2026-03-21T00:00:00.000Z");
+  assert.equal(bloodPressure.payload?.windowEnd, "2026-04-20T00:00:00.000Z");
+
+  const completed = createScheduledJobs(
+    createStoredAccount({
+      connectedAt,
+      metadata: { [BP_HISTORY_VERSION_KEY]: 1 },
+    }),
+    NOW,
+  );
+  assert.equal(
+    completed.jobs.some((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "blood_pressure"
+    ),
+    false,
+  );
+});
+
+test("a fetched blood-pressure record completes without an empty retry", async () => {
+  const provider = createProvider({
+    bloodPressureRecords: [{
+      id: "bp-1",
+      timestamp: "2026-05-20T08:30:00.000Z",
+      systolic: 121,
+      diastolic: 79,
+    }],
+    requests: [],
+  });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(findBloodPressureJob(connection.initialJobs ?? []), 1),
+  );
+
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(result.metadataPatch?.[BP_HISTORY_VERSION_KEY], 1);
+});
+
+test("ordinary empty webhook fetches do not enter the historical retry ladder", async () => {
+  const provider = createProvider({ requests: [] });
+  const webhookJob: DeviceSyncJobInput = {
+    kind: "resource",
+    payload: {
+      eventType: "daily.data.blood_pressure.created",
+      objectId: "bp-webhook-1",
+      occurredAt: NOW,
+      resource: "blood_pressure",
+      resourceCategory: "timeseries",
+      windowStart: "2026-06-10T00:00:00.000Z",
+      windowEnd: BACKFILL_WINDOW_END,
+    },
+    priority: 65,
+  };
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(webhookJob, 1),
+  );
+
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(result.metadataPatch?.[BP_HISTORY_VERSION_KEY], undefined);
+});
+
+test("yielded blood-pressure history keeps one identity and remembers earlier records", async () => {
+  const bloodPressureRecords: Record<string, unknown>[] = [{
+    id: "bp-first-day",
+    timestamp: "2026-05-12T08:30:00.000Z",
+    systolic: 118,
+    diastolic: 76,
+  }];
+  const provider = createProvider({
+    bloodPressureRecords,
+    requests: [],
+  });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  let yieldChecks = 0;
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      shouldYield: () => {
+        yieldChecks += 1;
+        return yieldChecks > 1;
+      },
+    }),
+    toJobRecord(bloodPressure, 1),
+  );
+  const followUp = findBloodPressureJob(result.scheduledJobs ?? []);
+
+  assert.equal(followUp.dedupeKey, bloodPressure.dedupeKey);
+  assert.equal(followUp.payload?.historicalRecordsSeen, true);
+  assert.equal(
+    followUp.payload?.historicalWindowStart,
+    "2026-05-12T00:00:00.000Z",
+  );
+  assert.equal(followUp.payload?.windowStart, "2026-05-13T00:00:00.000Z");
+  assert.equal(followUp.payload?.windowEnd, BACKFILL_WINDOW_END);
+
+  bloodPressureRecords.length = 0;
+  const completed = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(followUp, 2),
+  );
+  assert.equal(completed.scheduledJobs?.length ?? 0, 0);
+  assert.equal(completed.metadataPatch?.[BP_HISTORY_VERSION_KEY], 1);
+});
+
+test("an empty yielded scan retries from the original anchored window", async () => {
+  const provider = createProvider({ requests: [] });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  let yieldChecks = 0;
+  const yielded = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      shouldYield: () => {
+        yieldChecks += 1;
+        return yieldChecks > 1;
+      },
+    }),
+    toJobRecord(bloodPressure, 1),
+  );
+  const followUp = findBloodPressureJob(yielded.scheduledJobs ?? []);
+  const completedScan = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(followUp, 2),
+  );
+  const retry = findBloodPressureJob(completedScan.scheduledJobs ?? []);
+
+  assert.equal(retry.dedupeKey, bloodPressure.dedupeKey);
+  assert.equal(retry.payload?.emptyBackfillAttempts, 1);
+  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
 });
 
 test("same-day SDK ensures coalesce to one blood-pressure history identity", async () => {

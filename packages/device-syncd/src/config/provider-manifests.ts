@@ -198,7 +198,11 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
     payload: {
       companionAdmissionId: stringJobField({ includeInHostedHint: true }),
       companionObservationJson: stringJobField({ includeInHostedHint: true }),
+      emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       eventType: stringJobField({ includeInHostedHint: true }),
+      historicalBackfill: booleanJobField({ includeInHostedHint: true }),
+      historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
+      historicalWindowStart: stringJobField({ includeInHostedHint: true }),
       objectId: stringJobField({ includeInHostedHint: true }),
       occurredAt: stringJobField({ includeInHostedHint: true }),
       resource: stringJobField({ includeInHostedHint: true }),
