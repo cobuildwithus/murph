@@ -100,6 +100,30 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
     })).resolves.toEqual({ status: "allowed" });
   });
 
+  it.each([
+    [900_000n, true],
+    [900_001n, false],
+  ] as const)(
+    "derives the Starter low-usage boundary from its grant at %s micros",
+    async (remainingUsdMicros, expectedLow) => {
+      mocks.readHostedAiUsageGate.mockResolvedValue(
+        buildAllowedUsageGateDecision({
+          allowanceSource: "direct_starter",
+          limitUsdMicros: 0n,
+          remainingUsdMicros,
+        }),
+      );
+
+      await expect(resolveHostedRuntimeAiUsageGate({
+        mode: "read_only",
+        userId: "member_123",
+      })).resolves.toEqual({
+        status: "allowed",
+        ...(expectedLow ? { usageRunningLow: true } : {}),
+      });
+    },
+  );
+
   it("returns the canonical denial after included and purchased usage are exhausted", async () => {
     const decision = buildMonthlyUsageExhaustedGateDecision();
     mocks.resolveHostedAiUsageGate.mockResolvedValue(decision);
@@ -167,20 +191,29 @@ function buildMonthlyUsageExhaustedGateDecision() {
 }
 
 function buildAllowedUsageGateDecision(input: {
-  allowanceSource?: "direct_paid_member_plan" | "thread_container";
+  allowanceSource?:
+    | "direct_paid_member_plan"
+    | "direct_starter"
+    | "thread_container";
+  limitUsdMicros?: bigint;
   remainingUsdMicros: bigint;
 }) {
+  const limitUsdMicros = input.limitUsdMicros ?? 10_000_000n;
   return {
     allowed: true,
     allowanceSource: input.allowanceSource ?? "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
-    limitUsdMicros: 10_000_000n,
+    limitUsdMicros,
     memberId: "member_123",
     periodEnd: new Date("2026-07-01T00:00:00.000Z"),
     periodStart: new Date("2026-06-01T00:00:00.000Z"),
     remainingUsdMicros: input.remainingUsdMicros,
-    spentUsdMicros: 10_000_000n - input.remainingUsdMicros,
-    usageCreditBalanceUsdMicros: 0n,
+    spentUsdMicros: input.allowanceSource === "direct_starter"
+      ? 4_500_000n - input.remainingUsdMicros
+      : limitUsdMicros - input.remainingUsdMicros,
+    usageCreditBalanceUsdMicros: input.allowanceSource === "direct_starter"
+      ? input.remainingUsdMicros
+      : 0n,
     usageCreditLedgerVersion: 0n,
   };
 }

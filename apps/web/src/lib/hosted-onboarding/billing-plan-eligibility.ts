@@ -56,38 +56,6 @@ export function resolveVisibleHostedBillingPlanCodes(input: {
   ];
 }
 
-export interface HostedTrialContinuationOffer {
-  availablePlanCodes: Array<
-    "launch_group_monthly" | "launch_monthly"
-  >;
-  recommendedPlanCode:
-    | "launch_group_monthly"
-    | "launch_monthly";
-}
-
-export function resolveHostedTrialContinuationOffer(input: {
-  groupPlanConfigured: boolean;
-  hasConfirmedGroupMembership: boolean;
-}): HostedTrialContinuationOffer {
-  if (
-    input.groupPlanConfigured &&
-    input.hasConfirmedGroupMembership
-  ) {
-    return {
-      availablePlanCodes: [
-        "launch_group_monthly",
-        "launch_monthly",
-      ],
-      recommendedPlanCode: "launch_group_monthly",
-    };
-  }
-
-  return {
-    availablePlanCodes: ["launch_monthly"],
-    recommendedPlanCode: "launch_monthly",
-  };
-}
-
 /**
  * Visibility is advisory. Every mutation that would start or schedule Group
  * rechecks the canonical membership row under its existing billing lock.

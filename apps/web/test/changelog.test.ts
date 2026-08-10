@@ -38,6 +38,22 @@ describe("changelog registry", () => {
     expect(invalidItems).toEqual([]);
   });
 
+  it("bounds restored web search to the managed OpenAI provider", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "web-search-restored",
+    );
+
+    expect(item).toMatchObject({
+      details: expect.stringContaining("managed OpenAI"),
+      summary: expect.stringContaining("managed OpenAI"),
+      title: expect.stringContaining("Managed OpenAI"),
+    });
+    expect(item?.tryIt).toBeUndefined();
+    expect(`${item?.title} ${item?.summary} ${item?.details}`).not.toContain(
+      "Murph can search the web",
+    );
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -501,8 +517,11 @@ describe("changelog registry", () => {
         id: "2026-08-10",
         itemIds: [
           "generated-image-group-photo",
+          "non-expiring-starter-access",
           "personal-patterns",
           "reminders-keep-requested-timezone",
+          "web-search-restored",
+          "appointment-reminders-by-default",
         ],
       },
       {
