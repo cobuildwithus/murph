@@ -1,6 +1,6 @@
 # Hosted web-search 403
 
-Status: active
+Status: completed
 Updated: 2026-08-10
 
 ## Goal
@@ -70,5 +70,22 @@ Success means:
 - [x] Prove Codex sends `POST /v1/alpha/search` with the configured provider
   credential while the Worker allowlist omits that route and returns 403.
 - [x] Add the narrow route, regression coverage, and matching durable docs.
-- [ ] Complete focused verification, review, exact-head CI, plan closure, and
+- [x] Complete focused verification, review, exact-head CI, plan closure, and
   merge readiness.
+
+## Outcome
+
+- A pre-fix production-shaped regression returned the reported Worker 403,
+  proving that the request failed before reaching OpenAI.
+- The existing managed OpenAI egress policy now admits only exact
+  `POST /v1/alpha/search` requests after the existing provider, user, runner,
+  and platform-allowance checks.
+- The focused Worker suite passes 239 tests, the provider-qualified changelog
+  suites pass 43 tests, Cloudflare and Web typechecks pass, and the frontend
+  design-proof suite passes 10 tests.
+- Corrected-head PR CI is green. Preliminary specialist review passed with no
+  findings, and final sensitive ReviewGPT round 2 passed after the one accepted
+  provider-scope changelog finding from round 1 was corrected.
+- Deployment remains intentionally separate from this change: ship the Worker
+  before Web, then smoke-test one managed OpenAI search in production.
+Completed: 2026-08-10
