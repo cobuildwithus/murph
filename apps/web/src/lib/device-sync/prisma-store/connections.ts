@@ -142,7 +142,6 @@ export class PrismaHostedConnectionStore {
       attempt += 1
     ) {
       try {
-        await this.preparePotentialReplacementDirtyPayloadClassifications(input);
         return await this.upsertConnectionWithPreviousOnce(input);
       } catch (error) {
         if (
@@ -169,52 +168,6 @@ export class PrismaHostedConnectionStore {
     throw new Error("Hosted device-sync connection replacement retry loop exhausted.");
   }
 
-  private async preparePotentialReplacementDirtyPayloadClassifications(
-    input: UpsertPublicDeviceSyncConnectionInput,
-  ): Promise<void> {
-    const ownerId = normalizeNullableString(input.ownerId);
-    const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(
-      input.provider,
-      input.externalAccountId,
-    );
-    const existing = await this.prisma.deviceConnection.findUnique({
-      select: {
-        connectedAt: true,
-        id: true,
-        setupPhase: true,
-        status: true,
-        userId: true,
-      },
-      where: {
-        provider_providerAccountBlindIndex: {
-          provider: input.provider,
-          providerAccountBlindIndex,
-        },
-      },
-    });
-    if (
-      !existing
-      || (ownerId && existing.userId !== ownerId)
-      || (
-        ownerId
-        && existing.userId === ownerId
-        && shouldPreserveEstablishedDeviceSyncConnection(
-          existing,
-          input.existingAccountPolicy,
-        )
-      )
-      || existing.connectedAt.getTime() === new Date(input.connectedAt).getTime()
-    ) {
-      return;
-    }
-
-    await classifyHostedUnclassifiedDirtyPayloadsForConnection({
-      connectionId: existing.id,
-      prisma: this.prisma,
-      userId: existing.userId,
-    });
-  }
-
   private async upsertConnectionWithPreviousOnce(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
@@ -229,21 +182,27 @@ export class PrismaHostedConnectionStore {
     const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, input.externalAccountId);
     const credential = resolveHostedUpsertConnectionCredential(input);
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
+    if (!ownerId) {
+      throw deviceSyncError({
+        code: "CONNECTION_OWNER_REQUIRED",
+        message: "Hosted device-sync connections must be initiated by an authenticated Murph user.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      if (ownerId) {
-        await lockHostedMemberRow(tx, ownerId);
-        if (await readHostedHealthDataConsentState({
-          memberId: ownerId,
-          prisma: tx,
-        }) === "revoked") {
-          throw deviceSyncError({
-            code: "HEALTH_DATA_CONSENT_REQUIRED",
-            httpStatus: 403,
-            message: "Use Murph again before connecting a health source.",
-            retryable: false,
-          });
-        }
+      await lockHostedMemberRow(tx, ownerId);
+      if (await readHostedHealthDataConsentState({
+        memberId: ownerId,
+        prisma: tx,
+      }) === "revoked") {
+        throw deviceSyncError({
+          code: "HEALTH_DATA_CONSENT_REQUIRED",
+          httpStatus: 403,
+          message: "Use Murph again before connecting a health source.",
+          retryable: false,
+        });
       }
 
       let existing = await tx.deviceConnection.findUnique({
@@ -305,6 +264,17 @@ export class PrismaHostedConnectionStore {
         }
 
         assertNoActiveHostedConnectionRefreshLease(existing, connectedAt);
+
+        if (existing.connectedAt.getTime() !== connectedAt.getTime()) {
+          // Nullable rows only exist during mixed-version rollout. Classify
+          // them behind the same member-row consent fence as replacement so a
+          // completed withdrawal always orders before any legacy decryption.
+          await classifyHostedUnclassifiedDirtyPayloadsForConnection({
+            connectionId: existing.id,
+            tx,
+            userId: existing.userId,
+          });
+        }
 
         const metadata = input.provider === "junction" && input.existingAccountGuard
           ? sanitizeHostedDeviceSyncConnectionMetadata(
@@ -372,15 +342,6 @@ export class PrismaHostedConnectionStore {
       }
 
       assertHostedUpsertExistingConnectionGuard(null, input.existingAccountGuard ?? null);
-
-      if (!ownerId) {
-        throw deviceSyncError({
-          code: "CONNECTION_OWNER_REQUIRED",
-          message: "Hosted device-sync connections must be initiated by an authenticated Murph user.",
-          retryable: false,
-          httpStatus: 400,
-        });
-      }
 
       const connectionId = generateHostedRandomPrefixedId("dsc");
       const credentialWrite = await buildHostedConnectionCredentialWrite({

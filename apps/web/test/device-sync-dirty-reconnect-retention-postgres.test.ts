@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
@@ -31,8 +31,9 @@ describe.skipIf(!runPostgresProof)(
         prisma,
         providerAccountBlindIndexKey: Buffer.alloc(32, 7),
       });
+      const decrypt = vi.fn((input: { value: string }) => input.value);
       setHostedSecureBoxStringTestCodecForTests({
-        decrypt: (input) => input.value,
+        decrypt,
         encrypt: (input) => input.value,
       });
 
@@ -93,6 +94,7 @@ describe.skipIf(!runPostgresProof)(
           expect.objectContaining({ credentialIndependent: false, _count: { _all: 1 } }),
           expect.objectContaining({ credentialIndependent: true, _count: { _all: 1 } }),
         ]));
+        decrypt.mockClear();
 
         const replacement = await store.upsertConnection({
           connectedAt: "2026-07-16T12:02:00.000Z",
@@ -110,6 +112,7 @@ describe.skipIf(!runPostgresProof)(
           },
         });
         expect(replacement.id).toBe(connection.id);
+        expect(decrypt).not.toHaveBeenCalled();
 
         const retainedRows = await prisma.deviceSyncDirtyPayload.findMany({
           where: { connectionId: connection.id },

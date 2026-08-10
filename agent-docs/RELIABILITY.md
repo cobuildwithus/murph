@@ -536,13 +536,14 @@ Last verified: 2026-08-09
   and secure-box seals each payload before opening a caller-owned admission
   transaction. After entry, the dirty-payload store validates the prepared
   revision and performs only its database mutations; other owners in the same
-  admission commit retain their existing bounded work. Connection replacement
-  classifies bounded nullable rows from mixed-version writers before its
-  serialized commit; after the boundary is held, it rejects any remaining null
-  row, compare-and-sets the marker, and deletes credential-scoped payloads with
-  set-based writes. Reconnect must never decrypt payloads, dynamically load
-  provider code, or run a data-dependent payload loop while a pooled transaction
-  is open.
+  admission commit retain their existing bounded work. The steady-state
+  connection-replacement path reads no payload and uses set-based writes only.
+  Nullable rows from mixed-version writers are the bounded transitional
+  exception: replacement classifies at most 800 rows after taking the existing
+  member lock and re-reading health-data consent, then compare-and-sets the
+  marker and deletes credential-scoped payloads set-wise in that transaction.
+  A larger nullable backlog fails retryably until runtime acknowledgement
+  reduces it; classification may never run before the consent fence.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account
   release their trace claim and return a retryable not-ready response; they do

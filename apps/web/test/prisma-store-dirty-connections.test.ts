@@ -203,7 +203,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
 
       await expect(classifyHostedUnclassifiedDirtyPayloadsForConnection({
         connectionId,
-        prisma: prisma as never,
+        tx: prisma as never,
         userId,
       })).resolves.toBeUndefined();
       expect(updateMany).toHaveBeenCalledWith({
@@ -236,7 +236,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       });
       await expect(classifyHostedUnclassifiedDirtyPayloadsForConnection({
         connectionId,
-        prisma: prisma as never,
+        tx: prisma as never,
         userId,
       })).rejects.toThrow("kms unavailable");
       expect(updateMany).not.toHaveBeenCalled();

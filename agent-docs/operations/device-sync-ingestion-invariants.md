@@ -230,11 +230,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    preparing each encrypted dirty payload and persists only the resulting
    boolean beside the ciphertext. Compression, secure-box sealing, and any lazy
    Junction classifier load complete before the admission transaction. On a
-   replacement epoch, Web classifies bounded nullable rows left by mixed-version
-   writers before transaction entry, then the serialized reconnect commit uses
-   only a marker compare-and-set plus set-based deletion of rows classified as
-   credential-scoped. The locked transaction never decrypts payloads, loads
-   provider/importer code, or iterates payload collections. Hosted runtime
+   replacement epoch, the ordinary non-null path uses only a marker
+   compare-and-set plus set-based deletion of rows classified as
+   credential-scoped. Nullable rows left by mixed-version writers are the one
+   transitional exception: Web classifies at most 800 of them inside the
+   existing member-row transaction, after the health-data consent re-read, so
+   completed withdrawal orders before any legacy decryption. More than 800
+   null rows fail retryably until runtime acknowledgement reduces that backlog.
+   Hosted runtime
    hydration still loads the classifier per turn and passes it into the existing
    SQLite credential-replacement transaction. Both paths keep provider/importer
    modules out of their static boot closures. Recovery does not use an automatic export endpoint, operator

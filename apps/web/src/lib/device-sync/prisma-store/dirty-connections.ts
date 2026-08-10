@@ -79,7 +79,7 @@ export type CompanionHrvNightReceiptInspection = "conflict" | "exact" | "missing
 
 export async function classifyHostedUnclassifiedDirtyPayloadsForConnection(input: {
   connectionId: string;
-  prisma: PrismaClient;
+  tx: HostedPrismaTransactionClient;
   userId: string;
 }): Promise<void> {
   const classifyResource = createDirtyPayloadCredentialClassifier();
@@ -89,7 +89,7 @@ export async function classifyHostedUnclassifiedDirtyPayloadsForConnection(input
     batch < DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_MAX_BATCHES;
     batch += 1
   ) {
-    const rows = await input.prisma.deviceSyncDirtyPayload.findMany({
+    const rows = await input.tx.deviceSyncDirtyPayload.findMany({
       orderBy: [
         { createdAt: "asc" },
         { id: "asc" },
@@ -118,7 +118,7 @@ export async function classifyHostedUnclassifiedDirtyPayloadsForConnection(input
       async (row) => {
         const resource = await readDirtyPayloadResourceJson({
           row,
-          tx: input.prisma,
+          tx: input.tx,
           userId: input.userId,
         });
         return {
@@ -140,7 +140,7 @@ export async function classifyHostedUnclassifiedDirtyPayloadsForConnection(input
       if (ids.length === 0) {
         continue;
       }
-      await input.prisma.deviceSyncDirtyPayload.updateMany({
+      await input.tx.deviceSyncDirtyPayload.updateMany({
         data: { credentialIndependent },
         where: {
           connectionId: input.connectionId,

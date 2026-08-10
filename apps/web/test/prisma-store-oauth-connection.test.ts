@@ -913,7 +913,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
   });
 
-  it("retries once when deploy skew adds an unclassified payload after reconnect preflight", async () => {
+  it("retries legacy classification once behind the consent-ordered transaction", async () => {
     let stored = createConnection({
       accessTokenEncrypted: null,
       id: "dsc_classification_retry",
@@ -957,7 +957,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
-    supersedeDirtyStateMock
+    prepareDirtyClassificationsMock
       .mockRejectedValueOnce({
         code: "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING",
         retryable: true,
@@ -984,8 +984,19 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     }));
 
     expect(prepareDirtyClassificationsMock).toHaveBeenCalledTimes(2);
+    expect(prepareDirtyClassificationsMock).toHaveBeenNthCalledWith(1, {
+      connectionId: "dsc_classification_retry",
+      tx,
+      userId: "user-123",
+    });
+    expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]).toBeLessThan(
+      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0]).toBeLessThan(
+      prepareDirtyClassificationsMock.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(transaction).toHaveBeenCalledTimes(2);
-    expect(supersedeDirtyStateMock).toHaveBeenCalledTimes(2);
+    expect(supersedeDirtyStateMock).toHaveBeenCalledTimes(1);
   });
 
   it("bounds repeated connection unique-conflict recovery to one retry", async () => {
@@ -1046,7 +1057,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     })).rejects.toBe(uniqueConflict);
 
     expect(transaction).toHaveBeenCalledTimes(2);
-    expect(prepareDirtyClassificationsMock).toHaveBeenCalledTimes(2);
+    expect(prepareDirtyClassificationsMock).not.toHaveBeenCalled();
   });
 
   it("reactivates a disconnected hosted connection on successful OAuth reconnect", async () => {
