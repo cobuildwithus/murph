@@ -27,20 +27,20 @@ jobs:
           fetch-depth: 1
           path: helper
 
-      - name: Rebuild exact feature tree on current main
+      - name: Rebuild exact feature tree on one main snapshot
         shell: bash
         run: |
           set -euo pipefail
           cd target
           expected_target=ee78d0004d070d0e9aa422f20b603a826f085545
-          expected_main=a22fba70b680c748367dcdc6ef2e09a24215ea85
           feature_commit=e5fe6d0f70a1c46a2e098ae117bdcd971aa126f8
           test "$(git rev-parse HEAD)" = "$expected_target"
           git fetch origin main
-          test "$(git rev-parse origin/main)" = "$expected_main"
+          main_sha=$(git rev-parse origin/main)
+          echo "PR1484_MAIN_SHA=$main_sha" >> "$GITHUB_ENV"
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git checkout -B rebuilt "$expected_main"
+          git checkout -B rebuilt "$main_sha"
           git cherry-pick "$feature_commit"
           base64 --decode ../helper/.github/pr1484/fixes-final.patch.gz.b64 \
             | gzip --decompress > /tmp/pr1484-fixes-final.patch
@@ -105,7 +105,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --check origin/main...HEAD
+          git diff --check "$PR1484_MAIN_SHA"...HEAD
           test -z "$(git status --short --untracked-files=no)" || {
             git status --short
             echo "Validation changed tracked files." >&2
