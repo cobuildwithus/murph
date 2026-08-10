@@ -1,8 +1,8 @@
 # runtime accepted-failure diagnostics
 
-Status: active — round-5 transport-scope remediation is locally proven; exact-head gates pending
+Status: completed
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -84,9 +84,9 @@ Updated: 2026-08-09
    preservation, exact-transport, and identifier-rejection tests.
 5. [x] Run focused Assistant Runtime and Cloudflare proof and typecheck, then
    review the complete diff.
-6. Push the candidate, open a draft PR, run preliminary specialists and final
+6. [x] Push the candidate, open a draft PR, run preliminary specialists and final
    ReviewGPT concurrently with exact-head CI, and resolve accepted findings.
-7. Close the plan with final exact-head evidence.
+7. [x] Close the plan with final exact-head evidence.
 
 ## Decisions
 
@@ -180,4 +180,12 @@ Updated: 2026-08-09
 - Passed `git diff --check` and parent scope/call-path review.
 - Production deployment proof confirmed the existing propagation bridge is
   already live at 100%; no rollout wait or duplicate transport work is needed.
-- Pending exact-head GitHub Actions and ReviewGPT round 6 on the corrected head.
+- Final ReviewGPT round 6 passed the corrected exact head with no qualifying
+  finding. The independently captured response verified all five prior
+  correction areas, the real Durable Object RPC seam, preservation of non-phase
+  HTTP classifications, the bounded privacy contract, and unchanged retry and
+  state behavior.
+- Exact-head GitHub Actions passed on the corrected implementation head,
+  including release verification, package coverage, host matrices, billing
+  boundaries, tracked-artifact checks, frontend design proof, and Vercel.
+Completed: 2026-08-10
