@@ -150,6 +150,21 @@ describe('assistant automatic meal capture skill', () => {
       'This active-target authority read is separate from any all-status Goal lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactSkill).toContain(
+      'requires both `vault-cli condition list --status active --limit 200 --format json` and `vault-cli regimen list --status active --limit 200 --format json`.',
+    )
+    expect(compactSkill).toContain(
+      'If either returns exactly 200 records or fails, run no condition or regimen detail reads, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
+    )
+    expect(compactSkill).toContain(
+      'run `vault-cli condition show <condition-id> --format json` for every returned condition and `vault-cli regimen show <regimen-id> --format json` for every returned regimen before applying the safety gate.',
+    )
+    expect(compactSkill).toContain(
+      'Never use the five-record context projection, a title, substance, severity, or the default list prefix to select the safety set.',
+    )
+    expect(compactSkill).toContain(
+      'If any required detail read fails or is unreadable, use the same ordinary-text, no-write, no-question, no-card failure behavior.',
+    )
+    expect(compactSkill).toContain(
       'Only when all five qualifying exact point targets resolve from active canonical Goals',
     )
     expect(compactSkill).toContain(

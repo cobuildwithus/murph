@@ -189,7 +189,19 @@ On a scheduled run:
    abandoned proposal; never substitute that lookup here. Then read and apply
    `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
    before resolving a card, even when five accepted goals already exist. This
-   scheduled closeout uses only that card-time safety gate and does not provide
+   requires both `vault-cli condition list --status active --limit 200 --format
+   json` and `vault-cli regimen list --status active --limit 200 --format json`.
+   If either returns exactly 200 records or fails, run no condition or regimen
+   detail reads, keep the ordinary compact closeout, perform no Goal or
+   measurement mutation, ask no question, and attach no card. Otherwise, run
+   `vault-cli condition show <condition-id> --format json` for every returned
+   condition and `vault-cli regimen show <regimen-id> --format json` for every
+   returned regimen before applying the safety gate. Never use the five-record
+   context projection, a title, substance, severity, or the default list prefix
+   to select the safety set. If any required detail read fails or is unreadable,
+   use the same ordinary-text, no-write, no-question, no-card failure behavior.
+   Reuse these complete reads for the current turn. This scheduled closeout uses
+   only that card-time safety gate and does not provide
    target-setting intent: do not ask for profile inputs, call `goal import-json`,
    create or change a paused proposal, or surface a numeric target proposal.
    If numeric presentation is suppressed, or the active target bundle is

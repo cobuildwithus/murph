@@ -41,7 +41,10 @@ Ask at most one question, and only when the missing detail materially changes sa
 
 Before every requested daily nutrition card, read and apply
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`,
-even when all five goals already appear to exist. Also read and follow the
+even when all five goals already appear to exist. Its complete active-condition
+and active-regimen discovery is mandatory before numeric target derivation as
+well as before a card; the five-record context projection is not completeness
+proof. Also read and follow the
 target-authority and complete active-Goal discovery contract in
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
 before deciding that the five canonical daily goals are complete. Use its

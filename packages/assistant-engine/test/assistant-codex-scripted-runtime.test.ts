@@ -1605,8 +1605,8 @@ if (!tool) {
     }
   })
 
-  it('proves complete Goal discovery before scheduled and interactive nutrition cards', {
-    timeout: 240_000,
+  it('proves complete Goal and safety discovery before nutrition targets and cards', {
+    timeout: 480_000,
   }, async () => {
     const activeListCommand =
       'goal list --status active --limit 200 --format json'
@@ -1614,6 +1614,10 @@ if (!tool) {
       'goal show goal_visible_bundle --format json'
     const hiddenGoalShowCommand =
       'goal show goal_hidden_conflict --format json'
+    const conditionListCommand =
+      'condition list --status active --limit 200 --format json'
+    const regimenListCommand =
+      'regimen list --status active --limit 200 --format json'
     const measurementCommand =
       'measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from 2026-06-15 --to 2026-07-30 --limit 200 --format json'
     const totalsCommand =
@@ -1770,6 +1774,7 @@ if (!tool) {
       finalMessage: string
       prompt: string
       scheduled: boolean
+      snapshotPrompt?: string
       skillReadCommands: readonly string[]
       skillSlugs: readonly string[]
     }) => {
@@ -1814,6 +1819,8 @@ text(result.output);
                   'Before every goal-aware daily_nutrition card',
                   'goal list --status active --limit 200 --format json',
                   'nonzero data.metricTargetsCount',
+                  'condition list --status active --limit 200 --format json',
+                  'regimen list --status active --limit 200 --format json',
                 ],
               }
             : {}),
@@ -1849,6 +1856,7 @@ text(result.output);
             'direct',
             false,
             input.scheduled ? '2026-07-30T21:00:00.000-04:00' : undefined,
+            input.snapshotPrompt,
           ),
           dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
           env: {
@@ -1940,12 +1948,28 @@ text(result.output);
     const controlOutputs = [
       [activeListCommand, completeList],
       [visibleGoalShowCommand, visibleGoal],
+      [conditionListCommand, {
+        count: 0,
+        filters: { limit: 200, status: 'active' },
+        items: [],
+        nextCursor: null,
+        vault: 'synthetic-vault',
+      }],
+      [regimenListCommand, {
+        count: 0,
+        filters: { limit: 200, status: 'active' },
+        items: [],
+        nextCursor: null,
+        vault: 'synthetic-vault',
+      }],
       [measurementCommand, safeMeasurements],
       [totalsCommand, canonicalTotals],
     ] as const
     const controlCommands = [
       activeListCommand,
       visibleGoalShowCommand,
+      conditionListCommand,
+      regimenListCommand,
       measurementCommand,
       totalsCommand,
     ]
@@ -1971,6 +1995,231 @@ text(result.output);
         ...control,
       })
     }
+
+    const listResult = (
+      kind: 'condition' | 'regimen',
+      ids: readonly string[],
+    ) => ({
+      count: ids.length,
+      filters: { limit: 200, status: 'active' },
+      items: ids.map((id, index) => ({
+        data: kind === 'condition'
+          ? { clinicalStatus: 'active' }
+          : { status: 'active' },
+        id,
+        kind,
+        title: `${kind === 'condition' ? 'Condition' : 'Regimen'} ${index + 1}`,
+      })),
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const detailResult = (input: {
+      contraindication?: 'glucose-lowering-medication' | 'kidney-disease'
+      id: string
+      kind: 'condition' | 'regimen'
+    }) => ({
+      entity: {
+        data: input.kind === 'condition'
+          ? {
+              clinicalStatus: 'active',
+              slug: input.contraindication === 'kidney-disease'
+                ? 'chronic-kidney-disease'
+                : `benign-condition-${input.id}`,
+            }
+          : {
+              kind: 'medication',
+              status: 'active',
+              substance: input.contraindication === 'glucose-lowering-medication'
+                ? 'insulin'
+                : `benign-medication-${input.id}`,
+            },
+        id: input.id,
+        kind: input.kind,
+        title: input.contraindication === 'kidney-disease'
+          ? 'Chronic kidney disease'
+          : input.contraindication === 'glucose-lowering-medication'
+            ? 'Basal insulin'
+            : `Benign ${input.kind}`,
+      },
+      vault: 'synthetic-vault',
+    })
+    const conditionIds = Array.from(
+      { length: 6 },
+      (_, index) => `condition_active_${index + 1}`,
+    )
+    const regimenIds = Array.from(
+      { length: 6 },
+      (_, index) => `regimen_active_${index + 1}`,
+    )
+    const completeSafetyOutputs = (input: {
+      hiddenCondition?: boolean
+      hiddenRegimen?: boolean
+    }): readonly (readonly [string, unknown])[] => [
+      [conditionListCommand, listResult('condition', conditionIds)],
+      [regimenListCommand, listResult('regimen', regimenIds)],
+      ...conditionIds.map((id, index) => [
+        `condition show ${id} --format json`,
+        detailResult({
+          contraindication: input.hiddenCondition && index === 5
+            ? 'kidney-disease'
+            : undefined,
+          id,
+          kind: 'condition',
+        }),
+      ] as const),
+      ...regimenIds.map((id, index) => [
+        `regimen show ${id} --format json`,
+        detailResult({
+          contraindication: input.hiddenRegimen && index === 5
+            ? 'glucose-lowering-medication'
+            : undefined,
+          id,
+          kind: 'regimen',
+        }),
+      ] as const),
+    ]
+    const completeSafetyCommands = [
+      conditionListCommand,
+      regimenListCommand,
+      ...conditionIds.map((id) => `condition show ${id} --format json`),
+      ...regimenIds.map((id) => `regimen show ${id} --format json`),
+    ]
+    const hiddenSnapshot = (kind: 'condition' | 'regimen') => [
+      'Current canonical context snapshot (current and readable):',
+      kind === 'condition'
+        ? '- Active conditions: Condition 1; Condition 2; Condition 3; Condition 4; Condition 5. 1 additional active condition is omitted.'
+        : '- Active medication regimens: Regimen 1; Regimen 2; Regimen 3; Regimen 4; Regimen 5. 1 additional active medication regimen is omitted.',
+    ].join('\n')
+
+    const runHiddenSafetyCase = async (input: {
+      deriveTargets?: boolean
+      finalMessage: string
+      kind: 'condition' | 'regimen'
+      prompt: string
+      scheduled: boolean
+    }) => {
+      const goalOutputs: readonly (readonly [string, unknown])[] =
+        input.deriveTargets
+          ? []
+          : [
+              [activeListCommand, completeList],
+              [visibleGoalShowCommand, visibleGoal],
+            ]
+      const goalCommands = input.deriveTargets
+        ? []
+        : [activeListCommand, visibleGoalShowCommand]
+
+      await runCase({
+        commandOutputs: [
+          ...goalOutputs,
+          ...completeSafetyOutputs({
+            hiddenCondition: input.kind === 'condition',
+            hiddenRegimen: input.kind === 'regimen',
+          }),
+        ],
+        expectedCommands: [...goalCommands, ...completeSafetyCommands],
+        finalMessage: input.finalMessage,
+        prompt: input.prompt,
+        scheduled: input.scheduled,
+        skillReadCommands: input.scheduled
+          ? scheduledSkillReads
+          : interactiveSkillReads,
+        skillSlugs: input.scheduled
+          ? ['automatic-meal-capture', 'nutrition-strategy']
+          : ['food-journal', 'nutrition-strategy'],
+        snapshotPrompt: hiddenSnapshot(input.kind),
+      })
+    }
+
+    await runHiddenSafetyCase({
+      finalMessage: 'Closeout saved without numeric feedback because current medication context needs the non-numeric path.',
+      kind: 'regimen',
+      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+      scheduled: true,
+    })
+    await runHiddenSafetyCase({
+      finalMessage: 'Closeout saved without numeric feedback because current health context needs the non-numeric path.',
+      kind: 'condition',
+      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+      scheduled: true,
+    })
+    await runHiddenSafetyCase({
+      finalMessage: 'I kept this non-numeric because your current medication context makes target feedback inappropriate.',
+      kind: 'regimen',
+      prompt: 'Show my daily nutrition card for 2026-07-30.',
+      scheduled: false,
+    })
+    await runHiddenSafetyCase({
+      deriveTargets: true,
+      finalMessage: 'I kept this non-numeric because your current health context makes self-directed targets inappropriate.',
+      kind: 'condition',
+      prompt: 'Set any missing daily nutrition targets for me.',
+      scheduled: false,
+    })
+
+    const saturatedSafetyIds = Array.from(
+      { length: 200 },
+      (_, index) => `safety_saturated_${index + 1}`,
+    )
+    for (const saturation of [
+      {
+        conditionIds: saturatedSafetyIds,
+        finalMessage: 'Closeout saved without a card because active-condition discovery was saturated.',
+        regimenIds: [] as readonly string[],
+      },
+      {
+        conditionIds: [] as readonly string[],
+        finalMessage: 'Closeout saved without a card because active-regimen discovery was saturated.',
+        regimenIds: saturatedSafetyIds,
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [activeListCommand, completeList],
+          [visibleGoalShowCommand, visibleGoal],
+          [conditionListCommand, listResult('condition', saturation.conditionIds)],
+          [regimenListCommand, listResult('regimen', saturation.regimenIds)],
+        ],
+        expectedCommands: [
+          activeListCommand,
+          visibleGoalShowCommand,
+          conditionListCommand,
+          regimenListCommand,
+        ],
+        finalMessage: saturation.finalMessage,
+        prompt: 'Run the scheduled closeout and fail closed if canonical safety discovery is saturated.',
+        scheduled: true,
+        skillReadCommands: scheduledSkillReads,
+        skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+      })
+    }
+
+    await runCase({
+      card: eligibleCard,
+      commandOutputs: [
+        [activeListCommand, completeList],
+        [visibleGoalShowCommand, visibleGoal],
+        ...completeSafetyOutputs({}),
+        [measurementCommand, safeMeasurements],
+        [totalsCommand, canonicalTotals],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        visibleGoalShowCommand,
+        ...completeSafetyCommands,
+        measurementCommand,
+        totalsCommand,
+      ],
+      finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_SAFETY_READ',
+      prompt: 'Show my eligible daily nutrition card after checking all six benign active conditions and regimens.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+      snapshotPrompt: [
+        hiddenSnapshot('condition'),
+        hiddenSnapshot('regimen'),
+      ].join('\n'),
+    })
   })
 
   it('discovers deferred Murph schemas through native Codex tool_search', {
@@ -3279,10 +3528,11 @@ function buildScriptedHostedSystemPrompt(
   conversationScope: 'direct' | 'group',
   onboardingGuidance = false,
   scheduledOccurrenceAt?: string,
+  assistantContextSnapshotPrompt?: string,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
-    assistantContextSnapshotPrompt: null,
+    assistantContextSnapshotPrompt: assistantContextSnapshotPrompt ?? null,
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: true,

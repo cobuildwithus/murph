@@ -7,7 +7,24 @@ is still safe in the member's current context.
 
 - Reuse already-known conversation and vault context. Do not turn a routine card
   into a universal medical screening checklist, but do not ignore a safety fact
-  that is already known or becomes known later.
+  that is already known or becomes known later. The context snapshot's visible
+  condition and medication-regimen rows are navigation only, not proof that the
+  canonical active sets are complete.
+- Before deriving, saving, or surfacing numeric nutrition goals and before every
+  goal-aware card, run both `vault-cli condition list --status active --limit 200
+  --format json` and `vault-cli regimen list --status active --limit 200 --format
+  json`. Reuse identical current-turn results. If either list fails or returns
+  exactly 200 records, canonical safety discovery may be incomplete: fail closed
+  with ordinary non-numeric text, no Goal or measurement mutation, and no card.
+  Run no condition or regimen detail reads for a saturated pair. Otherwise, run
+  `vault-cli condition show <condition-id> --format json` for every returned
+  active condition and `vault-cli regimen show <regimen-id> --format json` for
+  every returned active regimen. Inspect the complete detail sets before applying
+  the exclusions below; never select records by title, substance, severity,
+  context-snapshot visibility, or the default list prefix. If any required detail
+  read fails or is unreadable, use the same fail-closed behavior. A scheduled
+  occurrence asks no question when this read is unavailable or suppresses numeric
+  output.
 - Before any card, run one bounded lossless canonical-entry read for the current
   local date: `vault-cli measurement entry list --metric bmi --metric height
   --metric weight --metric body-weight --from <45-days-before-today> --to

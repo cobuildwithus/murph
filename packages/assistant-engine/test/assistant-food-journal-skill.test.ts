@@ -81,6 +81,12 @@ describe('assistant food journal skill', () => {
     )
     expect(skill).toContain('even when all five goals already appear to exist')
     expect(skill).toContain(
+      'complete active-condition\nand active-regimen discovery is mandatory before numeric target derivation as\nwell as before a card',
+    )
+    expect(skill).toContain(
+      'the five-record context projection is not completeness\nproof',
+    )
+    expect(skill).toContain(
       'target-authority and complete active-Goal discovery contract',
     )
     expect(skill).toContain(

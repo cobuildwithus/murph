@@ -10,9 +10,12 @@ closeout follows the equivalent discovery contract in its owning skill and may
 use an already accepted active bundle, but it must not use this workflow to ask
 for inputs, derive or save targets, or surface a proposal.
 
-Before using this workflow, read and apply `daily-nutrition-card-safety.md`. If
-its card-time gate suppresses numeric goals, stop here and keep the owning
-non-numeric or clinical path.
+Before using this workflow, read and apply `daily-nutrition-card-safety.md`,
+including its complete bounded active-condition and active-regimen list/show
+reads. The context snapshot's five visible records are not completeness proof.
+If either canonical read is saturated or unavailable, or the gate suppresses
+numeric goals, stop here with no Goal or measurement mutation and keep the
+owning non-numeric or clinical path.
 
 A numeric card request explicitly asks for Murph's goal-aware daily-card
 experience. It authorizes only the one paused canonical proposal below so the

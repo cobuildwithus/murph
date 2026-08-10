@@ -282,6 +282,15 @@ describe('assistant nutrition strategy skill', () => {
       'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactGoals).toContain(
+      'including its complete bounded active-condition and active-regimen list/show reads.',
+    )
+    expect(compactGoals).toContain(
+      'The context snapshot\'s five visible records are not completeness proof.',
+    )
+    expect(compactGoals).toContain(
+      'If either canonical read is saturated or unavailable, or the gate suppresses numeric goals, stop here with no Goal or measurement mutation',
+    )
+    expect(compactGoals).toContain(
       'Separately run `vault-cli goal list --limit 200 --format json`',
     )
     expect(compactGoals).toContain(
@@ -425,6 +434,18 @@ describe('assistant nutrition strategy skill', () => {
     )
     expect(compactSafety).toContain(
       'before every `daily_nutrition` attachment, including when five accepted active goals already exist and during a scheduled closeout.',
+    )
+    expect(compactSafety).toContain(
+      'Before deriving, saving, or surfacing numeric nutrition goals and before every goal-aware card, run both `vault-cli condition list --status active --limit 200 --format json` and `vault-cli regimen list --status active --limit 200 --format json`.',
+    )
+    expect(compactSafety).toContain(
+      'If either list fails or returns exactly 200 records, canonical safety discovery may be incomplete: fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card.',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli condition show <condition-id> --format json` for every returned active condition and `vault-cli regimen show <regimen-id> --format json` for every returned active regimen.',
+    )
+    expect(compactSafety).toContain(
+      'If any required detail read fails or is unreadable, use the same fail-closed behavior.',
     )
     expect(compactSafety).toContain(
       '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
