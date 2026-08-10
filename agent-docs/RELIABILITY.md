@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Current Guardrails
 
@@ -184,8 +184,26 @@ Last verified: 2026-08-07
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample
   or classified failure in Durable Object SQLite and prunes history after 30
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
-  Concrete unhealthy gauges page immediately; discovery, scrape, parse, or
-  required-metric absence must recur on two consecutive runs before paging.
+  Concrete unhealthy gauges page immediately. Metric families are normalized
+  independently: an absent or structurally unusable family remains unknown,
+  its canonical allowlisted name is retained with the failed sample and warning,
+  and every available signal is still evaluated. No unknown value becomes zero.
+  Discovery, scrape, parse, or incomplete required metrics must recur on two
+  consecutive runs before paging the monitoring condition. Crossing that
+  threshold persists one bounded telemetry-page obligation in the existing
+  incident row. The represented first two-check window counts incomplete versus
+  unavailable observations, unions only canonical missing families observed on
+  partial checks, and uses the threshold time as its window end. One bounded
+  evidence value on each existing sample preserves that aggregate provenance
+  across restart. The obligation survives an occupied pending-message slot,
+  restart, recovery, and direct-error-only prioritization; only acknowledgment
+  of a pending body that includes the monitoring condition clears it. Recovery
+  and another threshold before acknowledgment deliberately coalesce into that
+  unresolved notification, retaining the first threshold window; this monitor
+  does not maintain an outage backlog. The additive columns retain the existing
+  schema version so a rollback Worker can ignore them. Current code recognizes
+  the prior Worker's cleared pending key/body with the telemetry marker still set
+  as an acknowledgment and removes the stale obligation before re-admission.
   A newly opened incident or one-shot direct migration admission failure admits
   its exact body and idempotency key in the same synchronous SQLite transaction
   that persists the sample and advances any direct-error counter baseline.
@@ -194,27 +212,48 @@ Last verified: 2026-08-07
   direct-error count plus latest check time in the existing alert row instead
   of dropping it. An acknowledged older page cannot close the incident while
   that evidence remains. The next run with a free slot atomically promotes the
-  accumulated count into one direct-error page, which then follows the ordinary
-  attempt fence, health preflight, exact-body retry, and restart contract.
+  accumulated count into one non-replayable page, retaining any owed telemetry
+  condition in the same body, which then follows the ordinary attempt fence,
+  health preflight, exact-body retry, and restart contract.
   When a direct error forces admission inside an acknowledged incident's
-  closed attempt fence, that pending body contains only the non-replayable
-  direct-error evidence; co-occurring replayable gauges remain in the persisted
-  sample but cannot become stale pending claims. That exact direct-error page
-  owns the next eligible attempt. A replayable condition still unsafe at that
-  boundary remains eligible for the following paced recurrence. The same
-  one-slot ordering applies in reverse: a later direct-error obligation waits
-  behind an older page but cannot be consumed by the counter baseline. This
-  explicit prioritization keeps admitted bodies immutable without another
-  message queue or delivery lifecycle.
-  An acknowledged incident's replayable gauge or monitoring recurrence does
-  not admit stale evidence while the attempt fence is closed; once the fence
-  opens, a still-unsafe current sample admits the recurrence, while recovery
-  closes the incident without another page. An already pending page is
+  closed attempt fence, that pending body contains the non-replayable direct
+  error plus any durable telemetry obligation already available at admission;
+  co-occurring replayable gauges remain in the persisted sample but cannot
+  become stale pending claims. Pure deferred evidence keeps its stored check
+  time; when a current direct-error delta joins the promoted count, the page uses
+  the latest included check. Historical telemetry carries its separate
+  observation time. That exact combined page owns the next eligible attempt and
+  acknowledgment clears the represented telemetry obligation, avoiding a
+  second notification lifecycle.
+  A replayable condition still unsafe at that boundary remains eligible for the
+  following paced recurrence. The same one-slot ordering applies in reverse: a
+  later direct-error obligation waits behind an older page but cannot be consumed
+  by the counter baseline. This explicit prioritization keeps admitted bodies
+  immutable without another message queue or delivery lifecycle.
+  An acknowledged incident's replayable gauge does not admit stale evidence
+  while the attempt fence is closed; once the fence opens, a still-unsafe
+  current gauge admits the recurrence. An unadmitted monitoring obligation does
+  not occupy a closed provider fence. Until an incident admits its first page,
+  concrete evidence, including a direct-error delta, that appears on the
+  threshold or a later sample persists in one combined immutable body with
+  exact identity, concrete check time, and
+  condition-local telemetry time; both facts share the first eligible attempt
+  and one acknowledgment cycle. For an acknowledged-incident
+  recurrence, the first eligible sample supplies any still-current concrete
+  evidence and historical telemetry carries its own observation time. An
+  acknowledged telemetry-only notification is one-shot while collection remains
+  continuously incomplete or unavailable; its current samples remain queryable,
+  but they do not admit repeated pages or add monitoring copy to concrete-pressure
+  recurrences without a currently owed obligation. A complete healthy sample
+  cannot discard an unacknowledged telemetry obligation or rearm a separately
+  recovered gap.
+  Once any owed page is acknowledged, complete collection closes that incident
+  and rearms telemetry. An already pending page is
   processed or deferred before a later clean sample can close the incident,
   and only an acknowledged provider response clears it. Provider entry is
   globally fenced by the persisted last-attempt
   timestamp, so neither a new incident, recurrence, retry, nor worker restart
-  can attempt Linq more often than once every 30 minutes. The attempt time is
+  can attempt Linq more often than once every hour. The attempt time is
   actual wall time, not the Cron slot, and is written before network egress.
   The message's UTC check time likewise comes from the actual completed
   collection run while the Cron slot remains only the persisted sample
@@ -239,10 +278,22 @@ Last verified: 2026-08-07
   destination keys for the next eligible cycle; only acknowledged entry to both
   distinct recipients clears the pending alert. An idempotent replay of a
   destination that already succeeded cannot produce another recipient-visible
-  message. Acknowledged recurrences advance the alert
-  sequence and choose another fixed opening from current metric evidence.
+  message. Acknowledged concrete-condition recurrences advance the alert
+  sequence and deterministically select from one hundred reviewed,
+  observation-scoped openings by persisted incident and alert identity. An
+  opening may say only that the recorded check met alert criteria; current-state
+  or condition-specific claims must come from evidence that proves them. The
+  recorded evidence and check time make each body specific, while a retry
+  retains that truthful exact body after recovery. The bank size is an explicit
+  bounded operator deliverability contract rather than a claim about platform
+  filtering: at the hourly cap, one incident traverses one hundred reviewed
+  leads before repeating one. Literal reviewed data avoids a prose generator,
+  provider dependency, or second runtime copy owner.
+  Telemetry-only copy instead states that monitoring is incomplete or
+  unavailable and cannot claim that the database itself is under pressure.
   Message variation must remain contextual and deterministic, never random
-  padding. Database pages intentionally have no quiet hours.
+  padding, filler, invisible characters, or provider-generated prose. Database
+  pages intentionally have no quiet hours.
 - Linq edit delivery is at-least-once and remains owned by the existing hosted
   mailbox. A per-source advisory lock serializes correction planners from
   lineage read through correction append; ordinary accepted messages write the

@@ -658,6 +658,97 @@ test("keeps a customizable sponsorship quiet by default", async () => {
   }
 });
 
+test("drops hidden sponsor details when their owning features are disabled", async () => {
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      offers: groupSponsorshipOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_20_usd");
+    await clickCheckboxByLabel(
+      rendered.container,
+      rendered.window,
+      "Send something to the group",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "Credit it as",
+      ),
+      rendered.window,
+      "The Group Historian",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "What should it be about?",
+      ),
+      rendered.window,
+      "Celebrate the room.",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "Temporary running bit",
+      ),
+      rendered.window,
+      "Treat me like Murph’s exhausted CFO.",
+    );
+
+    await clickCheckboxByLabel(
+      rendered.container,
+      rendered.window,
+      "Send something to the group",
+    );
+    await clickRadio(rendered.container, rendered.window, "usage_5_usd");
+
+    assert.equal(controlByLabel(rendered.container, "Credit it as"), null);
+    assert.equal(
+      controlByLabel(rendered.container, "Temporary running bit"),
+      null,
+    );
+    await clickButton(rendered.container, rendered.window, "Contribute $5");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_5_usd",
+        sponsorship: {
+          publicAlias: null,
+          runningBitRequest: null,
+          sponsorMessage: null,
+        },
+        sponsorshipKind: "one_time",
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    checkout.resolve({
+      purchaseId: "hucp_group_hidden_sponsorship_details",
+      status: "payment_pending",
+    });
+    await rendered.cleanup();
+  }
+});
+
 test("freezes an opted-in sponsorship creative request with the selected offer", async () => {
   const checkout = deferred<unknown>();
   mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);

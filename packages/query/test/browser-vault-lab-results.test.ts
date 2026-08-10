@@ -79,8 +79,8 @@ test("browser vault projects all live lab history without widening the wearable 
     sourceBundleHash: "f".repeat(64),
     vault,
   });
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 3);
-  assert.equal(replica.generation, 3);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 4);
+  assert.equal(replica.generation, 4);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
 
   assert.equal(replica.labResultRows.length, 7);
@@ -820,7 +820,7 @@ test("lab-only aliases preserve manual metric selection and goal authority", asy
     sourceBundleHash: "a".repeat(64),
     vault,
   });
-  assert.equal(replica.generation, 3);
+  assert.equal(replica.generation, 4);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
   const indexed = selectBrowserVaultMeasuredBiomarkers(client)
     .find((entry) => entry.metricKey === "total-testosterone");
@@ -1195,7 +1195,7 @@ test("browser vault parser defaults a missing additive lab collection and reject
       ...legacyReplica,
       labResultRows: [{ ...row, specimenKind: "urine" }],
     }),
-    /specimenKind must be plasma, serum, or null/u,
+    /specimenKind must be plasma, serum, whole_blood, or null/u,
   );
 });
 

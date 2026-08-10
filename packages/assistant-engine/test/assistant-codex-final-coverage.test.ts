@@ -930,6 +930,10 @@ describe('Codex model catalog', () => {
     expect(providerInput).toMatchObject({
       dynamicTools: [MURPH_GENERATE_SONG_TOOL],
       environments: [],
+      generateSongPolicy: {
+        maxAttempts: 1,
+        requiredDurationSeconds: 15,
+      },
       hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
       progressDelivery: null,

@@ -221,7 +221,7 @@ export const REVIEWED_BIOMARKER_FALLBACK_RANGES: Readonly<Record<
   "biomarker:total-protein": [
     reviewedRange({
       applicability: ADULT_SERUM_CONTEXT,
-      label: "Mayo Clinic Laboratories adult serum reference interval",
+      label: "Mayo Clinic Laboratories serum reference interval",
       lowerBound: { inclusive: true, value: 6.3 },
       source: mayoAssaySource(
         "Protein, Total, Serum",

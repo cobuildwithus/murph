@@ -4216,9 +4216,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "ain_00000000000000000000000000000001",
         "ain_00000000000000000000000000000002",
       ],
-      operation: async (executionContext) => {
+      operation: async (
+        executionContext,
+        _turnEnvironment,
+        providerStartCriticalPath,
+      ) => {
         expect(executionContext.hosted?.automationTool).toBeUndefined();
         expect(executionContext.hosted?.groupSharedReader).toBeUndefined();
+        expect(providerStartCriticalPath).toEqual(expect.objectContaining({
+          automationGroupAndOperationScopeDoneAtMonotonicMs: expect.any(Number),
+          mailboxImportDoneAtMonotonicMs: 0,
+        }));
+      },
+      providerStartCriticalPath: {
+        mailboxImportDoneAtMonotonicMs: 0,
       },
       turnEnvironment: null,
     });
