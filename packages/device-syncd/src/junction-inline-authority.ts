@@ -23,8 +23,40 @@ export function isJunctionCredentialIndependentInlineImportJob(input: {
   kind?: string | null;
   payload?: Record<string, unknown> | null;
 }): boolean {
+  return readJunctionCredentialIndependentInlineImport(input) !== null;
+}
+
+/**
+ * Returns true only when the inline import cannot cross the Junction provider
+ * boundary. Source-reference sleep payloads still need an authenticated
+ * provider-list lookup and therefore remain active/default work.
+ */
+export function isJunctionProviderEgressFreeInlineImportJob(input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+}): boolean {
+  const directImport = readJunctionCredentialIndependentInlineImport(input);
+  return directImport !== null
+    && !requiresJunctionInlineImportProviderLookup(directImport);
+}
+
+export function requiresJunctionInlineImportProviderLookup(input: {
+  record: Record<string, unknown>;
+  resource: string;
+}): boolean {
+  return (input.resource === "sleep_cycle" || input.resource === "sleep")
+    && hasJunctionSourceReferenceIdentity(input.record);
+}
+
+function readJunctionCredentialIndependentInlineImport(input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+}): {
+  record: Record<string, unknown>;
+  resource: string;
+} | null {
   if (input.kind !== "resource" || input.payload?.resourceCategory !== "summary") {
-    return false;
+    return null;
   }
   const resource = normalizeJunctionResourceName(input.payload.resource);
   if (
@@ -33,26 +65,32 @@ export function isJunctionCredentialIndependentInlineImportJob(input: {
     || typeof input.payload.webhookDataJson !== "string"
     || input.payload.webhookDataJson.trim().length === 0
   ) {
-    return false;
+    return null;
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(input.payload.webhookDataJson);
   } catch {
-    return false;
+    return null;
   }
   const record = readJunctionInlineRecord(parsed);
   if (!record) {
-    return false;
+    return null;
   }
   const sourceProviderSlug = resolveDeviceSyncJunctionInlineSourceProviderSlug(record);
   if (!sourceProviderSlug) {
-    return false;
+    return null;
   }
 
-  return resource !== "sleep_cycle"
-    || canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug);
+  if (
+    resource === "sleep_cycle"
+    && !canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug)
+  ) {
+    return null;
+  }
+
+  return { record, resource };
 }
 
 export function resolveDeviceSyncJunctionInlineSourceProviderSlug(
@@ -115,6 +153,41 @@ function readJunctionInlineRecord(value: unknown): Record<string, unknown> | nul
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function hasJunctionSourceReferenceIdentity(
+  value: unknown,
+  seen: Set<Record<string, unknown>> = new Set(),
+): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasJunctionSourceReferenceIdentity(entry, seen));
+  }
+
+  const record = readJunctionInlineRecord(value);
+  if (!record || seen.has(record)) {
+    return false;
+  }
+  seen.add(record);
+
+  return Object.entries(record).some(([key, nested]) =>
+    (isJunctionSourceReferenceIdentityKey(key) && normalizeJunctionReference(nested) !== null)
+    || hasJunctionSourceReferenceIdentity(nested, seen)
+  );
+}
+
+function isJunctionSourceReferenceIdentityKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+  return normalized === "connectionid"
+    || normalized === "providerconnectionid"
+    || normalized === "sourceid";
+}
+
+function normalizeJunctionReference(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized || null;
 }
 
 function normalizeHostedJunctionProviderSlug(value: unknown): string | null {

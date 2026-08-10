@@ -114,10 +114,11 @@ Updated: 2026-08-10
   execute unrelated pending route actions, assistant automation, conversation
   work, delivery, or model admission, and the restricted device-sync action
   requests a credential-free snapshot, skips provider scheduling and unrelated
-  retention/staleness maintenance, claims only credential-independent
-  canonical import/delete jobs, and suppresses device-activity automation
-  scheduling. Credential-scoped wearable jobs remain queued for ordinary
-  active/default execution. A failed preparation or
+  retention/staleness maintenance, claims only provider-egress-free
+  credential-independent canonical import/delete jobs, and suppresses
+  device-activity automation scheduling. Junction source-reference imports and
+  credential-scoped wearable jobs remain queued for ordinary active/default
+  execution. A failed preparation or
   post-checkpoint receipt, a successful receipt that reports `stillDirty`, or
   another exact local device item may persist one exact device-sync retry
   marker and `device-sync.reconcile` wake. A still-dirty receipt clears its
@@ -160,6 +161,10 @@ Updated: 2026-08-10
   snapshot, leaves a higher-priority direct-provider reconcile queued, and
   makes zero provider requests until an ordinary active pass runs it.
 - Passed: the full device-syncd suite (44 files, 884 tests).
+- Passed after the fifth diagnostic correction: the 78-test hosted device-sync
+  classifier suite plus three existing Junction provider-path tests prove that
+  all source-reference aliases require provider lookup, self-contained inline
+  imports do not, and active/default execution retains its lookup behavior.
 - Passed: `pnpm --dir apps/web typecheck:prepared`, assistant-runtime
   typecheck, and Cloudflare typecheck.
 - Passed: ESLint over every changed Web TypeScript file.
@@ -170,7 +175,7 @@ Updated: 2026-08-10
   device continuation from an intermediate canonical commit.
 - Passed after the later round-5 correction: hosted runner bundle assembly and
   parity probes; the latest exact macOS assembly measured a 7,982,116-byte
-  static closure and 9,958,141-byte total under the 9,990,909-byte ratcheted
+  static closure and 9,959,861-byte total under the 9,992,629-byte ratcheted
   ceiling.
 - Authored: a production-path hosted local E2E that cold-restores a paused
   member, submits 17 distinct companion observations without waiting for each
@@ -242,5 +247,13 @@ Updated: 2026-08-10
   entrypoint regressions prove the restricted boundary, including a
   production-path cold restore that completes credential-independent companion
   import work while direct wearable-provider egress remains at zero.
+- A fifth same-number diagnostic capture again had inconclusive model
+  attestation and found that the inherited Junction inline classifier proved
+  only independence from replaceable connection credentials. Source-reference
+  sleep or sleep-cycle jobs still use the platform Junction key for a
+  provider-list lookup. The correction shares the executor's pure lookup
+  predicate with the restricted worker authority, leaving those jobs queued
+  until active/default processing while self-contained inline imports remain
+  eligible.
 - Required after remediation: final ReviewGPT round-5 retry and exact-head
   GitHub Actions.

@@ -183,7 +183,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // the existing worker and provider classifiers. Exact macOS assembly measured
 // a 7,982,116B static closure and 9,958,141B total on 2026-08-10; ratchet those
 // baselines and retain the existing tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_958_141 + 32_768;
+// Excluding source-reference Junction imports from that restricted policy adds
+// one shared pure provider-lookup predicate. Exact macOS assembly measured
+// 9,959,861B total on 2026-08-10 while leaving the static closure unchanged;
+// ratchet the total baseline and retain the existing tolerance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_959_861 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_982_116;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

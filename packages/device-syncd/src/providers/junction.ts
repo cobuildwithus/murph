@@ -34,6 +34,7 @@ import {
 } from "../hosted-runtime.ts";
 import {
   isJunctionCredentialIndependentInlineImportJob,
+  requiresJunctionInlineImportProviderLookup,
   resolveDeviceSyncJunctionInlineSourceProviderSlug,
 } from "../junction-inline-authority.ts";
 import {
@@ -1238,11 +1239,6 @@ export function createJunctionDeviceSyncProvider(
     });
   }
 
-  function shouldLoadJunctionDirectResourceSourceProviders(input: JunctionDirectResourceJobInput): boolean {
-    return (input.resource === "sleep_cycle" || input.resource === "sleep")
-      && hasJunctionSourceReferenceIdentity(input.record);
-  }
-
   async function diagnoseBackfill(
     context: DeviceSyncBackfillDiagnosticContext,
   ): Promise<DeviceSyncBackfillDiagnosticResult> {
@@ -1676,7 +1672,7 @@ export function createJunctionDeviceSyncProvider(
         // replaceable per-connection credential epoch. It resolves source
         // provenance only; the accepted inline payload remains the data
         // carrier and the floor remains the sole projection owner.
-        const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
+        const sourceProviders = requiresJunctionInlineImportProviderLookup(directInput)
           ? await loadSourceProviders()
           : [];
         const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(

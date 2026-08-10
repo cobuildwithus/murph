@@ -577,10 +577,13 @@ Last verified: 2026-08-09
   route actions, delivery, or assistant/model work while paused. The restricted
   device-sync pass requests the existing control-plane snapshot without
   credential material, skips the provider scheduler, and lets the existing
-  worker claim only credential-independent canonical imports and deletion
-  imports. Credential-scoped Oura, WHOOP, Strava, and Junction fetch work stays
-  queued for an ordinary active/default pass, and its provider schedules and
-  token state do not advance. The restricted execution also skips dense-raw
+  worker claim only provider-egress-free credential-independent canonical
+  imports and deletion imports. Junction sleep or sleep-cycle payloads with a
+  source reference stay queued because their canonical import requires an
+  authenticated provider-list lookup, even though their health payload is
+  inline. Credential-scoped Oura, WHOOP, Strava, and other Junction fetch work
+  also stays queued for an ordinary active/default pass, and its provider
+  schedules and token state do not advance. The restricted execution also skips dense-raw
   retention and source-staleness maintenance and suppresses new device-activity
   automation scheduling. Web serializes a dirty acknowledgement
   and its pending-work check through the same member-then-connection

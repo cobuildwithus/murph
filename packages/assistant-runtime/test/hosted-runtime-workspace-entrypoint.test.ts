@@ -9383,13 +9383,32 @@ describe("hosted workspace runtime entrypoint", () => {
     const dueAt = "2026-04-26T23:00:00.000Z";
     const accessTokenExpiresAt = "2099-01-01T00:00:00.000Z";
     const snapshotCredentialMaterialRequests: Array<boolean | null> = [];
-    const providerFetch = vi.fn(async () => new Response(
-      JSON.stringify({ records: [] }),
-      {
-        headers: { "content-type": "application/json" },
-        status: 200,
-      },
-    ));
+    const providerFetch = vi.fn<typeof fetch>(async (request) => {
+      const url = typeof request === "string"
+        ? request
+        : request instanceof URL
+        ? request.toString()
+        : request.url;
+      return new Response(
+        JSON.stringify(
+          url.includes("/v2/user/providers/")
+            ? {
+                providers: [{
+                  id: "provider-garmin-1",
+                  name: "Garmin",
+                  resource_availability: { sleep: true },
+                  slug: "garmin",
+                  status: "connected",
+                }],
+              }
+            : { records: [] },
+        ),
+        {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        },
+      );
+    });
     const deviceSyncItem = createMailboxItem({
       dedupeKey: "device-sync.wake:paused-restricted-provider-work",
       id: "mailbox_item_system_mailbox_paused_restricted_provider_work",
@@ -9420,6 +9439,7 @@ describe("hosted workspace runtime entrypoint", () => {
     };
     let credentialIndependentJobId = "";
     let credentialScopedJobId = "";
+    let junctionProviderLookupJobId = "";
     const seedDeviceSyncJobs = (targetVaultRoot = vaultRoot) => {
       const codec = createSecretCodec(secret);
       const store = new SqliteDeviceSyncStore(
@@ -9527,6 +9547,36 @@ describe("hosted workspace runtime entrypoint", () => {
           sourceProviderSlug: "whoop_v2",
           status: "connected",
         });
+        junctionProviderLookupJobId = store.enqueueJob({
+          accountId: junctionAccount.id,
+          availableAt: dueAt,
+          kind: "resource",
+          payload: {
+            eventType: "daily.data.sleep.created",
+            objectId: "synthetic-provider-reference-sleep",
+            occurredAt: TEST_NOW,
+            resource: "sleep",
+            resourceCategory: "summary",
+            sourceProviderSlug: "garmin",
+            webhookDataJson: JSON.stringify({
+              average_hrv: 42,
+              bedtime_start: "2026-04-26T03:00:00.000Z",
+              bedtime_stop: "2026-04-26T11:00:00.000Z",
+              deep: 5_400,
+              duration: 28_800,
+              id: "synthetic-provider-reference-sleep",
+              light: 12_600,
+              provider_connection_id: "provider-garmin-1",
+              rem: 7_200,
+              sourceProviderSlug: "garmin",
+              total: 25_200,
+            }),
+            windowEnd: TEST_NOW,
+            windowStart: "2026-04-26T00:00:00.000Z",
+          },
+          priority: 50,
+          provider: "junction",
+        }).id;
         credentialIndependentJobId = store.enqueueJob({
           accountId: junctionAccount.id,
           availableAt: dueAt,
@@ -9764,6 +9814,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       try {
         assert.equal(pausedStore.getJobById(credentialIndependentJobId)?.status, "succeeded");
+        assert.equal(pausedStore.getJobById(junctionProviderLookupJobId)?.status, "queued");
         assert.equal(pausedStore.getJobById(credentialScopedJobId)?.status, "queued");
       } finally {
         pausedStore.close();
@@ -9793,12 +9844,25 @@ describe("hosted workspace runtime entrypoint", () => {
         path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
       );
       try {
+        assert.equal(activeStore.getJobById(junctionProviderLookupJobId)?.status, "succeeded");
         assert.equal(activeStore.getJobById(credentialScopedJobId)?.status, "succeeded");
       } finally {
         activeStore.close();
       }
-      assert.deepEqual(snapshotCredentialMaterialRequests, [false, false, true]);
+      assert.equal(
+        snapshotCredentialMaterialRequests.filter((includeCredentials) => includeCredentials === true)
+          .length,
+        1,
+      );
       assert.ok(providerFetch.mock.calls.length > 0);
+      assert.ok(providerFetch.mock.calls.some(([request]) => {
+        const url = typeof request === "string"
+          ? request
+          : request instanceof URL
+          ? request.toString()
+          : request.url;
+        return url.includes("/v2/user/providers/");
+      }));
       assert.ok(activeResult.processedJobs > 0);
     } finally {
       vi.unstubAllGlobals();

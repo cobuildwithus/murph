@@ -500,9 +500,11 @@ It does not execute unrelated pending route actions, delivery, assistant
 admission, or credential-scoped provider work. The restricted device-sync pass
 fetches the existing control-plane snapshot with credential material omitted,
 skips provider scheduling, source-staleness and dense-raw maintenance, and lets
-the existing worker claim only credential-independent canonical imports and
-deletion imports. Direct Oura, WHOOP, Strava, and credential-dependent Junction
-jobs remain queued for ordinary active/default processing. The same action
+the existing worker claim only provider-egress-free credential-independent
+canonical imports and deletion imports. Junction sleep or sleep-cycle jobs
+with source references remain queued because execution would use the platform
+Junction key for a provider-list lookup. Direct Oura, WHOOP, Strava, and other
+Junction provider-I/O jobs remain queued for ordinary active/default processing. The same action
 suppresses new device-activity automation scheduling. Web records the dirty
 acknowledgement and reads pending dirty work in the same member-then-connection
 health-data admission transaction used by companion ingress, so either ingress
@@ -525,8 +527,10 @@ authoritative across cold restore before the invocation result is returned.
 Only an exact empty-queue reread at that final boundary clears an inherited
 paused marker and its paired device wake.
 The bound fence continues to reject metered provider egress if an unexpected
-path reaches it; direct wearable HTTP egress is prevented by the restricted
-snapshot/scheduler/worker policy before provider execution.
+path reaches it. Junction uses its platform credential on the open-internet
+path, so the restricted snapshot/scheduler/worker policy must reject every job
+whose executor would perform Junction or direct wearable HTTP before provider
+execution.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because

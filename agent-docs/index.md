@@ -15,8 +15,9 @@ single paused retry marker. Intermediate and final checkpoint projection
 re-reads that exact local queue, including future backoff items and successors
 behind them; only a final empty-queue reread clears the marker and paired wake.
 The restricted pass receives no device credential material, does not run the
-provider scheduler, and claims only credential-independent import/delete jobs;
-all credential-scoped wearable work stays queued for active/default execution.
+provider scheduler, and claims only provider-egress-free credential-independent
+import/delete jobs. Junction source-reference imports and all credential-scoped
+wearable work stay queued for active/default execution.
 This contract is jointly specified by
 `agent-docs/SECURITY.md`, `docs/device-sync-hosted-control-plane.md`,
 `agent-docs/references/hosted-runtime-protocol.md`, and

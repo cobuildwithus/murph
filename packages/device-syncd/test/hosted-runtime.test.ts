@@ -28,7 +28,7 @@ import {
   sanitizeHostedRuntimeErrorText,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "../src/hosted-runtime.ts";
-import { isJunctionCredentialIndependentInlineImportJob } from "../src/junction-inline-authority.ts";
+import { isJunctionProviderEgressFreeInlineImportJob } from "../src/junction-inline-authority.ts";
 
 function isDeviceSyncCredentialIndependentImportJob(input: {
   kind?: string | null;
@@ -38,7 +38,7 @@ function isDeviceSyncCredentialIndependentImportJob(input: {
   return classifyCredentialIndependentImportJob(
     input,
     input.provider === "junction"
-      ? isJunctionCredentialIndependentInlineImportJob
+      ? isJunctionProviderEgressFreeInlineImportJob
       : undefined,
   );
 }
@@ -73,6 +73,53 @@ describe("isDeviceSyncCredentialIndependentImportJob", () => {
       },
       provider: "junction",
     })).toBe(true);
+    expect(isDeviceSyncCredentialIndependentImportJob({
+      kind: "resource",
+      payload: {
+        resource: "sleep_cycle",
+        resourceCategory: "summary",
+        sourceProviderSlug: "garmin",
+        webhookDataJson: JSON.stringify({
+          end: "2026-08-10T11:00:00.000Z",
+          sourceProviderSlug: "garmin",
+          stages: [{
+            endAt: "2026-08-10T11:00:00.000Z",
+            stage: "deep",
+            startAt: "2026-08-10T10:00:00.000Z",
+          }],
+          start: "2026-08-10T10:00:00.000Z",
+        }),
+      },
+      provider: "junction",
+    })).toBe(true);
+    for (const resource of ["sleep", "sleep_cycle"]) {
+      for (const sourceReferenceKey of [
+        "provider_connection_id",
+        "connection_id",
+        "source_id",
+      ]) {
+        expect(isDeviceSyncCredentialIndependentImportJob({
+          kind: "resource",
+          payload: {
+            resource,
+            resourceCategory: "summary",
+            sourceProviderSlug: "garmin",
+            webhookDataJson: JSON.stringify({
+              [sourceReferenceKey]: "provider-garmin-1",
+              end: "2026-08-10T11:00:00.000Z",
+              sourceProviderSlug: "garmin",
+              stages: [{
+                endAt: "2026-08-10T11:00:00.000Z",
+                stage: "deep",
+                startAt: "2026-08-10T10:00:00.000Z",
+              }],
+              start: "2026-08-10T10:00:00.000Z",
+            }),
+          },
+          provider: "junction",
+        })).toBe(false);
+      }
+    }
     expect(isDeviceSyncCredentialIndependentImportJob({
       kind: "resource",
       payload: { resource: "companion_health_metadata" },

@@ -16,7 +16,7 @@ import {
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
 } from "./hosted-runtime.ts";
-import { isJunctionCredentialIndependentInlineImportJob } from "./junction-inline-authority.ts";
+import { isJunctionProviderEgressFreeInlineImportJob } from "./junction-inline-authority.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 import {
   isDeviceSyncConnectionSetupPending,
@@ -1710,7 +1710,7 @@ function createDeviceSyncJobExecutionPredicate(
 
   return (job) => isDeviceSyncCredentialIndependentImportJob(
     job,
-    isJunctionCredentialIndependentInlineImportJob,
+    isJunctionProviderEgressFreeInlineImportJob,
   );
 }
 

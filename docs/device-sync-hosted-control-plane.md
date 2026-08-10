@@ -217,9 +217,11 @@ and dirty-ack boundary. It does not execute unrelated pending route actions,
 conversation, delivery, assistant, or model work, and the restricted
 device-sync run fetches the control-plane snapshot without credential material,
 skips provider scheduling plus unrelated retention/staleness maintenance, and
-claims only credential-independent canonical import/delete jobs from the
-existing worker queue. Credential-scoped Oura, WHOOP, Strava, and Junction
-provider work remains queued for ordinary active/default processing. The
+claims only provider-egress-free credential-independent canonical import/delete
+jobs from the existing worker queue. Junction sleep or sleep-cycle jobs with a
+source reference remain queued because they require an authenticated
+provider-list lookup. Credential-scoped Oura, WHOOP, Strava, and other Junction
+provider work also remains queued for ordinary active/default processing. The
 restricted run also suppresses new device-activity automation scheduling. Dirty
 acknowledgement and the following pending-dirty query run in the same health-data
 admission transaction used by companion ingress. If an acknowledgement remains

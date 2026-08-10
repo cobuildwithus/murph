@@ -353,9 +353,11 @@ older accepted system work and its bounded import-time durability effects,
 then executes only `run-device-sync-wake`; the restricted action suppresses
 device-activity automation scheduling, requests no device credential material,
 skips provider scheduling and unrelated device maintenance, and lets the
-existing worker claim only credential-independent canonical imports or
-deletions. Credential-scoped wearable-provider jobs remain queued for an active
-default pass. It cannot execute unrelated pending route actions, delivery, or
+existing worker claim only provider-egress-free credential-independent
+canonical imports or deletions. Junction sleep or sleep-cycle jobs carrying
+source references remain queued because their executor performs an
+authenticated provider-list lookup. Credential-scoped wearable-provider jobs
+also remain queued for an active default pass. It cannot execute unrelated pending route actions, delivery, or
 model work. Conversation/default work and an
 otherwise idle paused workflow remain blocked by canonical active access; each
 bounded system pass re-reads the exact local device queue at checkpoint time,
