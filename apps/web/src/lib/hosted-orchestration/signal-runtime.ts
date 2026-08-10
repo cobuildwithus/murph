@@ -186,6 +186,7 @@ export async function signalHostedBrowserVaultRefreshRuntime(
     kind: "runtime.browser-vault-refresh-requested",
     occurredAt: control.occurredAt,
     prisma,
+    resignalDuplicate: false,
     userId: input.userId,
   });
 }
@@ -348,6 +349,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
   occurredAt?: string | null;
   prisma?: PrismaClient;
+  resignalDuplicate?: boolean;
   userId: string;
 }): Promise<HostedRuntimeSignalResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -355,7 +357,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   const deterministicEventId = normalizeHostedRuntimeControlEventId(input.eventId);
   const occurredAt = normalizeHostedRuntimeControlOccurredAt(input.occurredAt)
     ?? (deterministicEventId ? HOSTED_RUNTIME_CONTROL_DETERMINISTIC_OCCURRED_AT : new Date().toISOString());
-  const mailboxItem = (await prisma.$transaction((tx) =>
+  const mailboxAppend = await prisma.$transaction((tx) =>
     appendHostedMailboxEnvelopeTx({
       envelope: buildHostedExecutionRuntimeControlWake({
         eventId: deterministicEventId
@@ -366,7 +368,22 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
       }),
       tx,
     })
-  )).item;
+  );
+  const mailboxItem = mailboxAppend.item;
+
+  if (
+    input.resignalDuplicate === false
+    && mailboxAppend.duplicate
+    && !mailboxAppend.dedupeConflict
+  ) {
+    // The durable request already exists. Canonical runtime reconciliation
+    // recovers a missed first signal; repeated browser polls must not wake and
+    // preempt the same low-priority refresh forever.
+    return {
+      signalAccepted: true,
+      workflowId: hostedUserRuntimeWorkflowId(input.userId),
+    };
+  }
 
   return signalHostedUserRuntimeWorkflow({
     abortSignal: input.abortSignal,

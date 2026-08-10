@@ -68,7 +68,6 @@ const STRIPE_CUSTOMER_ID = "cus_trial";
 const STRIPE_SUBSCRIPTION_ID = "sub_trial";
 const BROWSER_VAULT_REFRESH_CONTROL_EVENT_ID =
   buildHostedBrowserVaultRefreshRuntimeControlEvent({
-    nowMs: NOW.getTime(),
     userId: SOURCE_MEMBER_ID,
     workspaceVersion: "0",
   }).eventId;
