@@ -10,12 +10,12 @@ import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
 import {
   captureHostedGrowthDailySnapshot,
   readHostedGrowthDashboard,
+  HOSTED_GROWTH_CONVERSION_MATURITY_DAYS,
   type HostedGrowthStatusCounts,
 } from "@/src/lib/hosted-ops/growth-metrics";
 import {
   readHostedGrowthSponsorshipMetrics,
 } from "@/src/lib/hosted-ops/growth-sponsorship-metrics";
-import { HOSTED_PULSE_TRIAL_DAYS } from "@/src/lib/hosted-onboarding/billing-plans";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   Table,
@@ -64,8 +64,8 @@ export default async function HostedOpsGrowthPage() {
           <div className="flex flex-wrap gap-2">
             <SummaryChip label="Captured" value={formatDateTime(dashboard.capturedAt)} />
             <SummaryChip
-              label="Trial maturity"
-              value={`${HOSTED_PULSE_TRIAL_DAYS} days`}
+              label="Conversion maturity"
+              value={`${HOSTED_GROWTH_CONVERSION_MATURITY_DAYS} days`}
             />
           </div>
         </div>
@@ -171,18 +171,18 @@ export default async function HostedOpsGrowthPage() {
 
       <section aria-labelledby="growth-cohort-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Pulse trial cohorts by start week. Converted means the member is currently paid, so churned conversions leave old cohorts. Immature rows are not treated as failed conversions."
+          description="Starter-activation cohorts by week. Converted means the member is currently paid, so churned conversions leave old cohorts. Activations inside the maturity window are not treated as failed conversions."
           id="growth-cohort-title"
-          title="Trial cohorts"
+          title="Starter cohorts"
         />
         <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Trial start week</TableHead>
+                <TableHead>Starter week</TableHead>
                 <TableHead className="text-right">Started</TableHead>
                 <TableHead className="text-right">Converted</TableHead>
-                <TableHead className="text-right">Still trialing</TableHead>
+                <TableHead className="text-right">Still maturing</TableHead>
                 <TableHead className="text-right">Conversion</TableHead>
               </TableRow>
             </TableHeader>

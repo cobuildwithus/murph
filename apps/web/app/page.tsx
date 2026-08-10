@@ -29,7 +29,6 @@ import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
 import { isHostedCustomInferenceEnabled } from "@/src/lib/hosted-inference/feature";
-import { formatHostedLandingPricingShortSummary } from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -123,8 +122,9 @@ export default async function HomePage() {
     : {
         body: null,
         eyebrow: "Sign up",
-        metaItems: [formatHostedLandingPricingShortSummary(), "Open source"],
-        note: "Cancel anytime.",
+        metaItems: ["Free starter usage", "Open source"],
+        note:
+          "Starter usage does not expire. No card required; choose a plan when you need more.",
         signupLabel: "Get started",
         title: "Whatever your goal, you don’t have to hit it alone.",
       };
