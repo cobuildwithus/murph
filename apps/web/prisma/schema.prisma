@@ -970,6 +970,7 @@ model HostedMemberBillingRef {
   scheduledBillingEffectiveAt   DateTime?    @map("scheduled_billing_effective_at")
   pulseTrialRedeemedAt          DateTime?    @map("pulse_trial_redeemed_at")
   pulseTrialPolicyVersion       String?      @map("pulse_trial_policy_version")
+  pulseTrialPaidClaimPriceId    String?      @map("pulse_trial_paid_claim_price_id")
   pulseTrialStartSource         String?      @map("pulse_trial_start_source")
   currentPeriodStart            DateTime?    @map("current_period_start")
   currentPeriodEnd              DateTime?    @map("current_period_end")

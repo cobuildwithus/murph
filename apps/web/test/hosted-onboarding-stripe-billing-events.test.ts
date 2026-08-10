@@ -1663,6 +1663,7 @@ describe("hosted onboarding stripe billing events", () => {
         currentBillingPlanCode: "launch_group_monthly",
         currentCheckoutOffer: "pulse_trial_7d",
         memberId: "member_123",
+        pulseTrialPaidClaimPriceId: "price_core_base",
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_123",
       },
@@ -1697,6 +1698,94 @@ describe("hosted onboarding stripe billing events", () => {
     });
 
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("does not settle an accepted Core claim from a later catalog price", async () => {
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.incomplete,
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_group_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialPaidClaimPriceId: "price_core_accepted",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await expect(applyStripeInvoicePaid(
+      makeStripeInvoice({
+        billingReason: "subscription_cycle",
+        priceId: "price_core_current",
+        subscription: "sub_123",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_rotated_core_price",
+        sourceType: "stripe.invoice.paid",
+      },
+      {} as never,
+      HostedBillingStatus.active,
+      makeStripeSubscription({
+        items: ["price_core_current"],
+        metadata: { checkoutOffer: "pulse_trial_7d" },
+        status: "active",
+      }),
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("settles an accepted Core claim from its bound price after catalog rotation", async () => {
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.incomplete,
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_group_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialPaidClaimPriceId: "price_core_accepted",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await applyStripeInvoicePaid(
+      makeStripeInvoice({
+        billingReason: "subscription_cycle",
+        priceId: "price_core_accepted",
+        subscription: "sub_123",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_bound_core_price",
+        sourceType: "stripe.invoice.paid",
+      },
+      {} as never,
+      HostedBillingStatus.active,
+      makeStripeSubscription({
+        items: ["price_core_accepted"],
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "pulse_trial_7d",
+        },
+        status: "active",
+      }),
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_group_monthly",
+      }),
+    );
   });
 
   it("does not replay a trial-conversion wake for a different event timestamp", async () => {

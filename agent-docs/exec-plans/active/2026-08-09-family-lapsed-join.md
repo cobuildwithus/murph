@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -37,6 +37,9 @@ Updated: 2026-08-09
   stale, and terminal cancellation leaves the member eligible for Family.
 - Paid-invoice activation requires the invoice line Price to match the
   canonical target subscription, not only the subscription identifier.
+- The durable claim binds the validated claim-time Stripe Price before provider
+  access. Exact retry and invoice settlement keep using that Price if the
+  mutable catalog later points at a replacement Price.
 - The direct recovery claim is committed before cardless payment setup, so
   Family-first returns no portal while direct-first remains exactly recoverable
   from Settings and assistant without a forced refresh.
@@ -57,12 +60,16 @@ Updated: 2026-08-09
     and execute any resulting invoice-owned cleanup outcome.
   - Preserve the exact pending recovery actions in the existing Settings plan
     cards and assistant offer projection.
+  - Label a paid Pulse claim as billing pending and avoid presenting a mutable
+    catalog amount as already accepted while confirmation is incomplete.
   - Add focused regression coverage for lapsed and genuinely live statuses.
   - Clarify the live-direct-subscription rule in the Family product contract.
 - Out of scope:
   - Changing Stripe subscription state during invite acceptance.
-  - Adding a new transfer workflow, queue, billing state, UI screen, or
-    component.
+  - Adding a new transfer workflow, queue, billing status, UI screen, component,
+    or lifecycle owner. One nullable claim-Price scalar is added to the existing
+    billing reference because the accepted provider term cannot be derived from
+    mutable catalog configuration.
   - Repairing or mutating production account or invite rows.
 
 ## Constraints
@@ -203,6 +210,28 @@ Updated: 2026-08-09
   refreshing canonical Web state, and derive the payment-method receipt from
   the existing billing projection so an exact Core claim points only to Check
   Core status. No new state, component, action, or lifecycle owner is added.
+- Final ReviewGPT round 7 found that the non-expiring claim stored a plan code
+  but not the exact immutable Stripe Price accepted at selection. A catalog
+  rotation could therefore retry against new terms without consent or strand a
+  provider transition already made at the old Price. It also found that an
+  incomplete paid Pulse claim still displayed the `Free trial` ribbon.
+- Round 7 requirement decision: persist the validated claim-time Price as one
+  nullable scalar on the existing member billing reference in the same locked
+  write as the target plan. Exact recovery skips validation against the mutable
+  current catalog and uses the bound Price for provider mutation, idempotency,
+  invoice proof, and final plan projection. A missing legacy binding fails
+  closed before provider access. Pending Pulse is labeled `Billing pending`,
+  and the pending status dialog omits the mutable current amount rather than
+  implying reconfirmation. This adds no state owner, queue, lease, enum, action,
+  or screen.
+- The valid round-7 response reviewed exact head
+  `74bf6d90f86f43d7c5001228a84f53c397510870` with the requested and returned
+  GPT-5.6 Pro-class model and ended `FINDINGS`. The ReviewGPT tooling required
+  two packaging retries before the successful send: the first packet used an
+  invalid current-head full-snapshot anchor, and the second failed attachment
+  staging before any review request was sent. Round 7 is the substantive-round
+  hard cap; after remediating its findings, another final-gate round requires an
+  explicit user continuation decision.
 - The required Claude Code UI double-check was attempted against the final
   desktop/mobile catalog evidence and stopped on explicit Fable usage-credit
   exhaustion. Per the completion workflow, no second Claude request or local
@@ -213,7 +242,8 @@ Updated: 2026-08-09
 - Commands to run:
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-family-plan.test.ts`
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts`
-  - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-stripe-billing-status.test.ts apps/web/test/hosted-onboarding-billing-plans.test.ts apps/web/test/hosted-billing-settings.test.tsx apps/web/test/hosted-usage-status.test.ts`
+  - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-stripe-billing-events.test.ts apps/web/test/hosted-onboarding-stripe-billing-status.test.ts apps/web/test/hosted-onboarding-billing-plans.test.ts apps/web/test/hosted-billing-settings.test.tsx apps/web/test/hosted-usage-status.test.ts apps/web/test/settings-page.test.ts`
+  - `DATABASE_URL="$MURPH_DEV_DATABASE_URL" pnpm --dir apps/web prisma:migrate:deploy`
   - `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-stripe-webhook-entitlement-postgres.test.ts -t 'rejects Family acceptance after Checkout binds before status projection|keeps the Core recovery target and Family fence while a paused receipt races the resume response|rejects a delayed Core claim after Pulse paid reconciliation wins|preserves a deleted receipt against a delayed Core claim so Family can join|commits the direct recovery fence before opening card setup|recovers a claimed Core plan after group membership is removed'`
   - `pnpm hosted-billing:ci-guard`
   - `pnpm --dir apps/web typecheck`
@@ -232,13 +262,15 @@ Updated: 2026-08-09
     the claimed recovery remains visible in Settings and assistant output.
   - Initial Core selection still requires current group membership, while an
     exact claim remains recoverable after later membership loss and can settle
-    only through its exact-price invoice.
+    only through its claim-time exact-price invoice, including after the current
+    catalog Price changes.
   - Paid and deleted receipt winners cannot be overwritten by a delayed claim;
     exact-price invoice proof prevents cross-plan activation, and terminal
     cancellation permits the existing Family admission path.
   - Billing request-shape/contract guards, typecheck, and lint remain green.
-  - No new persisted state, external call, dependency, component, or UI screen
-    appears.
+  - No new state owner, external call, dependency, component, or UI screen
+    appears. The only new persisted value is the accepted claim-time Price on
+    the existing billing reference.
 - Round 5 remediation proof on the local candidate:
   - Eight focused unit/UI files pass with 468 tests.
   - The five focused real-PostgreSQL orderings pass, including paid-wins and
@@ -262,4 +294,23 @@ Updated: 2026-08-09
   - Real-component portal-failure and payment-method-return states pass desktop
     and mobile native-resolution inspection. All four lossless hosted images
     are byte-identical to the inspected local captures.
+  - `git diff --check` passes.
+- Round 7 remediation proof on the local candidate:
+  - Nine focused unit/UI files pass with 530 tests, including immutable
+    claim-Price recovery, mismatched invoice rejection, exact old-Price invoice
+    settlement after catalog rotation, the paid-Pulse pending label, and the
+    absence of a current-price reconfirmation in the pending dialog.
+  - The additive migration applies cleanly to the isolated worktree database.
+    All six focused real-PostgreSQL orderings pass; the exact Core recovery
+    ordering now rotates the configured catalog Price after selection and still
+    resumes and settles only the claim-time Price.
+  - Hosted billing CI guard and Web typecheck pass. Full Web lint passes with
+    zero errors; its 37 warnings remain outside the changed files.
+  - Real-component paid-Pulse pending and portal-failure states pass desktop and
+    mobile native-resolution inspection. All four hosted lossless images are
+    byte-identical to the inspected local captures.
+  - Product-experience revalidation finds no remaining changed-journey finding:
+    the lapsed invite remains one accept action, while incomplete direct billing
+    exposes one truthful exact-status recovery without a cancel chore, alternate
+    plan choice, false trial label, or mutable-price implication.
   - `git diff --check` passes.

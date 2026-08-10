@@ -1583,15 +1583,41 @@ describe("startHostedPulseTrialPaidPlan", () => {
         updatedAt: new Date("2026-05-01T00:00:00.000Z"),
       })
       .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.paused,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.incomplete,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:01.000Z"),
+      })
+      .mockResolvedValueOnce({
         billingStatus: HostedBillingStatus.incomplete,
         createdAt: new Date("2026-05-01T00:00:00.000Z"),
         id: "member_123",
         suspendedAt: null,
         updatedAt: new Date("2026-05-01T00:00:01.000Z"),
       });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
-      currentBillingPhase: null,
-    }));
+    mocks.readHostedMemberStripeBillingRef
+      .mockResolvedValueOnce(makeBillingRef({
+        currentBillingPhase: null,
+      }))
+      .mockResolvedValueOnce(makeBillingRef({
+        currentBillingPhase: null,
+      }))
+      .mockResolvedValueOnce(makeBillingRef({
+        currentBillingPhase: null,
+        pulseTrialPaidClaimPriceId: "price_pulse_recurring",
+      }))
+      .mockResolvedValueOnce(makeBillingRef({
+        currentBillingPhase: null,
+        pulseTrialPaidClaimPriceId: "price_pulse_recurring",
+      }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription({
       customer: makeCustomer({
         defaultPaymentMethod: "pm_customer_123",
@@ -1633,6 +1659,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_group_monthly",
+      pulseTrialPaidClaimPriceId: "price_group_recurring",
     }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription({
       customer: makeCustomer({
@@ -1655,6 +1682,68 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps the claim-time Core price when the current catalog price changes", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: HostedBillingStatus.incomplete,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:01.000Z"),
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_group_monthly",
+      pulseTrialPaidClaimPriceId: "price_group_accepted",
+    }));
+    mocks.requireHostedStripeBillingPlanConfig.mockImplementation(
+      (input: { billingPlanCode: string }) => ({
+        billingPlanCode: input.billingPlanCode,
+        priceId:
+          input.billingPlanCode === "launch_group_monthly"
+            ? "price_group_current"
+            : "price_pulse_recurring",
+        stripe: mocks.stripe,
+        stripeLiveMode: true,
+      }),
+    );
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: "pm_customer_123",
+        defaultSource: null,
+      }),
+      status: "paused",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).resolves.toMatchObject({ status: "billing_pending" });
+
+    expect(mocks.requireValidatedHostedStripeBillingPlanConfig).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_123",
+      expect.objectContaining({
+        items: [{
+          id: "si_price_pulse_recurring",
+          price: "price_group_accepted",
+          quantity: 1,
+        }],
+      }),
+      {
+        idempotencyKey:
+          buildExpectedPausedCleanupIdempotencyKey("price_group_accepted"),
+      },
+    );
+    expect(mocks.stripe.subscriptions.resume.mock.calls[0]?.[2]?.idempotencyKey)
+      .toBe(buildExpectedStartPaidPulseIdempotencyKey(
+        "paused-resume-v2",
+        "price_group_accepted",
+      ));
   });
 
   test("rejects a conflicting paused-plan choice before another resume", async () => {
@@ -1720,6 +1809,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.writeHostedMemberStripeBillingRefTx).toHaveBeenCalledWith({
       currentBillingPlanCode: "launch_monthly",
       memberId: "member_123",
+      pulseTrialPaidClaimPriceId: "price_pulse_recurring",
       tx: mocks.prismaClient,
     });
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
@@ -2193,6 +2283,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.writeHostedMemberStripeBillingRefTx).toHaveBeenCalledWith({
       currentBillingPlanCode: "launch_monthly",
       memberId: "member_123",
+      pulseTrialPaidClaimPriceId: "price_pulse_recurring",
       tx: mocks.prismaClient,
     });
     expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
@@ -2780,6 +2871,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
 function makeBillingRef(input: {
   currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
+  pulseTrialPaidClaimPriceId?: string | null;
   scheduledBillingPlanCode?: string | null;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
@@ -2793,6 +2885,7 @@ function makeBillingRef(input: {
     currentCheckoutOffer: "pulse_trial_7d",
     currentTrialEndsAt: new Date("2026-05-13T00:00:00.000Z"),
     memberId: "member_123",
+    pulseTrialPaidClaimPriceId: input.pulseTrialPaidClaimPriceId ?? null,
     scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
     stripeCustomerId: input.stripeCustomerId ?? "cus_123",
     stripeSubscriptionId: input.stripeSubscriptionId ?? "sub_123",

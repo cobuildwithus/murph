@@ -391,7 +391,11 @@ export function HostedBillingSettings(props: {
     {
       action: pulseAction,
       current: pulseCurrent,
-      currentLabel: isPulseTrial ? "Free trial" : "Current plan",
+      currentLabel: pulseTrialBillingPending
+        ? "Billing pending"
+        : pulseTrialActive
+          ? "Free trial"
+          : "Current plan",
       features: SETTINGS_PULSE_FEATURES,
       key: "launch_monthly",
       name: "Pulse",

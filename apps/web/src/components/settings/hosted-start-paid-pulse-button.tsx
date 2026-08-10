@@ -617,7 +617,7 @@ export function StartPaidPlanConfirmationContent(props: {
         </DialogHeader>
 
         <PlanFeatureCard
-          price={targetPriceLabel}
+          price={props.status === "billing_pending" ? undefined : targetPriceLabel}
           features={targetFeatures}
         />
 

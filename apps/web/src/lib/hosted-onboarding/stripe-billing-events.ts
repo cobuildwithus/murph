@@ -1411,6 +1411,7 @@ export async function applyStripeInvoicePaid(
     isHostedStripeTrialConversionInvoiceCandidate(member, canonicalSubscription) &&
     !isHostedStripeAcceptedTrialConversionInvoice({
       invoice,
+      member,
       subscription: canonicalSubscription,
       subscriptionId,
     })
@@ -1436,7 +1437,7 @@ export async function applyStripeInvoicePaid(
     billingStatus: HostedBillingStatus.active,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     ...(canonicalSubscription
-      ? buildHostedStripeSubscriptionBillingPeriodSnapshot(canonicalSubscription)
+      ? buildHostedStripeSubscriptionBillingPeriodSnapshot(canonicalSubscription, member)
       : {}),
     ...(canonicalSubscription
       ? buildHostedStripeInvoicePaidBillingPhaseSnapshot(canonicalSubscription, member, invoice)
@@ -2054,12 +2055,18 @@ function readHostedStripeInvoiceEmailAddress(invoice: Stripe.Invoice): string | 
 
 function buildHostedStripeSubscriptionBillingPeriodSnapshot(
   subscription: Stripe.Subscription,
+  member?: HostedMemberBillingSnapshot,
 ): {
   currentBillingPlanCode?: string | null;
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
 } {
-  const currentBillingPlanCode = resolveHostedStripeSubscriptionBillingPlanCode(subscription);
+  const paidClaim = member ? readHostedPulseTrialPaidClaim(member) : null;
+  const currentBillingPlanCode =
+    paidClaim?.priceId &&
+    readHostedStripeSubscriptionPriceIds(subscription).includes(paidClaim.priceId)
+      ? paidClaim.planCode
+      : resolveHostedStripeSubscriptionBillingPlanCode(subscription);
   const currentPeriod = readHostedStripeSubscriptionCurrentPeriod(subscription);
 
   return {
@@ -2070,6 +2077,35 @@ function buildHostedStripeSubscriptionBillingPeriodSnapshot(
           currentPeriodStart: currentPeriod.currentPeriodStart,
         }
       : {}),
+  };
+}
+
+function readHostedPulseTrialPaidClaim(
+  member: HostedMemberBillingSnapshot,
+): {
+  planCode: "launch_group_monthly" | "launch_monthly";
+  priceId: string | null;
+} | null {
+  const planCode = parseHostedBillingPlanCode(
+    member.billingRef?.currentBillingPlanCode,
+  );
+  if (
+    member.core.billingStatus !== HostedBillingStatus.incomplete ||
+    parseHostedBillingCheckoutOffer(
+      member.billingRef?.currentCheckoutOffer,
+    ) !== HOSTED_PULSE_TRIAL_OFFER ||
+    (planCode !== "launch_group_monthly" && planCode !== "launch_monthly")
+  ) {
+    return null;
+  }
+
+  const storedPriceId = member.billingRef?.pulseTrialPaidClaimPriceId;
+  return {
+    planCode,
+    priceId:
+      typeof storedPriceId === "string" && storedPriceId.length > 0
+        ? storedPriceId
+        : null,
   };
 }
 
@@ -2155,6 +2191,7 @@ function buildHostedStripeInvoicePaidBillingPhaseSnapshot(
 
   if (!isHostedStripeAcceptedTrialConversionInvoice({
     invoice,
+    member,
     subscription,
     subscriptionId: coerceStripeInvoiceSubscriptionId(invoice),
   })) {
@@ -2223,6 +2260,7 @@ function isHostedStripeTrialConversionInvoiceCandidate(
 
 function isHostedStripeAcceptedTrialConversionInvoice(input: {
   invoice: Stripe.Invoice;
+  member: HostedMemberBillingSnapshot;
   subscription?: Stripe.Subscription | null;
   subscriptionId: string | null;
 }): boolean {
@@ -2234,6 +2272,17 @@ function isHostedStripeAcceptedTrialConversionInvoice(input: {
   const subscriptionPriceIds = readHostedStripeSubscriptionPriceIds(
     input.subscription,
   );
+  const paidClaim = readHostedPulseTrialPaidClaim(input.member);
+  if (paidClaim) {
+    return Boolean(
+      paidClaim.priceId &&
+      input.subscription.id === input.subscriptionId &&
+      input.subscription.status === "active" &&
+      readHostedStripeInvoiceBillingReason(input.invoice) !== "subscription_create" &&
+      subscriptionPriceIds.includes(paidClaim.priceId) &&
+      invoicePriceIds.includes(paidClaim.priceId)
+    );
+  }
   return input.subscription.id === input.subscriptionId &&
     input.subscription.status === "active" &&
     readHostedStripeInvoiceBillingReason(input.invoice) !== "subscription_create" &&

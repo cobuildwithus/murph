@@ -394,13 +394,18 @@ async function transitionHostedPulseTrialPaidPlan<
   const targetRuntimeConfig = requireHostedStripeBillingPlanConfig({
     billingPlanCode: input.targetPlanCode,
   });
+  const targetPriceId = sourceDisposition === "recover_existing_claim"
+    ? requireHostedPulseTrialPaidClaimPriceId(billingRef)
+    : targetRuntimeConfig.priceId;
   const performStartPaidTransition = async (): Promise<
     HostedTrialContinueResult<TPlanCode>
   > => {
-    const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
-      billingPlanCode: input.targetPlanCode,
-    });
-    const stripe = targetConfig.stripe;
+    const stripe = targetRuntimeConfig.stripe;
+    if (sourceDisposition !== "recover_existing_claim") {
+      await requireValidatedHostedStripeBillingPlanConfig({
+        billingPlanCode: input.targetPlanCode,
+      });
+    }
     const subscription = await callHostedStripeStartPaidPulseOperation(
       "subscription.retrieve",
       () => stripe.subscriptions.retrieve(stripeSubscriptionId, {
@@ -431,7 +436,7 @@ async function transitionHostedPulseTrialPaidPlan<
       invoice: readExpandedLatestInvoice(subscription),
       memberId: input.memberId,
       now,
-      priceId: targetConfig.priceId,
+      priceId: targetPriceId,
       prisma,
       stripeCustomerId,
       stripeSubscriptionId,
@@ -442,7 +447,7 @@ async function transitionHostedPulseTrialPaidPlan<
     const transitionItems = buildHostedStripeTrialPaidPlanTransitionItems({
       sourcePriceId: sourceConfig.priceId,
       subscription,
-      targetPriceId: targetConfig.priceId,
+      targetPriceId,
     });
 
     if (canStart && isHostedStripePulseTrialStartPaidPendingWithoutInvoiceProof(subscription)) {
@@ -473,7 +478,7 @@ async function transitionHostedPulseTrialPaidPlan<
         memberId: input.memberId,
         now,
         paymentMethodContinuation,
-        priceId: targetConfig.priceId,
+        priceId: targetPriceId,
         prisma,
         stripe,
         stripeCustomerId,
@@ -491,7 +496,7 @@ async function transitionHostedPulseTrialPaidPlan<
       return reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure({
         memberId: input.memberId,
         now,
-        priceId: targetConfig.priceId,
+        priceId: targetPriceId,
         prisma,
         stripe,
         stripeCustomerId,
@@ -538,7 +543,7 @@ async function transitionHostedPulseTrialPaidPlan<
     const trialStartResult = await updateHostedPulseTrialStartPaidSubscription({
       memberId: input.memberId,
       now,
-      priceId: targetConfig.priceId,
+      priceId: targetPriceId,
       prisma,
       stripe,
       stripeCustomerId,
@@ -555,7 +560,7 @@ async function transitionHostedPulseTrialPaidPlan<
     return reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure({
       memberId: input.memberId,
       now,
-      priceId: targetConfig.priceId,
+      priceId: targetPriceId,
       prisma,
       stripe,
       stripeCustomerId,
@@ -571,7 +576,7 @@ async function transitionHostedPulseTrialPaidPlan<
         currentBillingPhase: billingRef?.currentBillingPhase ?? null,
         currentCheckoutOffer: billingRef?.currentCheckoutOffer ?? null,
         memberId: input.memberId,
-        priceId: targetRuntimeConfig.priceId,
+        priceId: targetPriceId,
         stripeSubscriptionId,
         targetPlanCode: input.targetPlanCode,
         timing: input.timing,
@@ -652,6 +657,22 @@ function resolveHostedPulseTrialStartPaidSourceDisposition(input: {
   }
 
   throw buildHostedPulseTrialStartPaidUnsupportedError();
+}
+
+function requireHostedPulseTrialPaidClaimPriceId(
+  billingRef: Awaited<ReturnType<typeof readHostedMemberStripeBillingRef>>,
+): string {
+  const priceId = billingRef?.pulseTrialPaidClaimPriceId;
+  if (typeof priceId === "string" && priceId.length > 0) {
+    return priceId;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
+    httpStatus: 409,
+    message:
+      "Your saved plan price could not be confirmed. Contact support before retrying billing.",
+  });
 }
 
 function buildHostedPulseTrialStartPaidUnsupportedError(): Error {
@@ -1288,6 +1309,12 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
       if (lockedSourceDisposition === "already_started") {
         return lockedSourceDisposition;
       }
+      if (
+        lockedSourceDisposition === "recover_existing_claim" &&
+        lockedBillingRef?.pulseTrialPaidClaimPriceId !== input.priceId
+      ) {
+        throw buildHostedPulseTrialStartPaidChoiceChangedError();
+      }
       const familyClaim = await readHostedMemberFamilyBillingClaim({
         memberId: input.memberId,
         prisma: tx,
@@ -1304,6 +1331,7 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
         await writeHostedMemberStripeBillingRefTx({
           currentBillingPlanCode: input.targetPlanCode,
           memberId: input.memberId,
+          pulseTrialPaidClaimPriceId: input.priceId,
           tx,
         });
         await updateHostedMemberCoreState({

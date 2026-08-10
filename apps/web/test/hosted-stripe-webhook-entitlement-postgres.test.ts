@@ -1181,6 +1181,7 @@ describe.skipIf(!runPostgresProof)(
       const stripeInvoiceId = `in_core_claim_${fixtureId}`;
       const pulsePriceId = `price_core_claim_pulse_${fixtureId}`;
       const groupPriceId = `price_core_claim_group_${fixtureId}`;
+      const rotatedGroupPriceId = `price_core_claim_group_next_${fixtureId}`;
       const edgePriceId = `price_core_claim_edge_${fixtureId}`;
       const webhookSecret = "whsec_core_claim_fixture";
       const now = new Date("2026-07-01T13:49:00.000Z");
@@ -1236,6 +1237,10 @@ describe.skipIf(!runPostgresProof)(
         prices: {
           [groupPriceId]: buildHostedMonthlyPrice({
             priceId: groupPriceId,
+            unitAmount: 350,
+          }),
+          [rotatedGroupPriceId]: buildHostedMonthlyPrice({
+            priceId: rotatedGroupPriceId,
             unitAmount: 350,
           }),
           [pulsePriceId]: buildHostedMonthlyPrice({
@@ -1318,8 +1323,19 @@ describe.skipIf(!runPostgresProof)(
           memberId,
           prisma,
         })).resolves.toMatchObject({
-          billingRef: { currentBillingPlanCode: "launch_group_monthly" },
+          billingRef: {
+            currentBillingPlanCode: "launch_group_monthly",
+            pulseTrialPaidClaimPriceId: groupPriceId,
+          },
           core: { billingStatus: HostedBillingStatus.incomplete },
+        });
+
+        configureHostedStripeFixtureEnvironment({
+          edgePriceId,
+          groupPriceId: rotatedGroupPriceId,
+          pulsePriceId,
+          stripe: stripeFixture.stripe,
+          webhookSecret,
         });
 
         await prisma.hostedGroupMember.delete({
@@ -1362,6 +1378,7 @@ describe.skipIf(!runPostgresProof)(
           billingRef: {
             currentBillingPhase: "paid",
             currentBillingPlanCode: "launch_group_monthly",
+            pulseTrialPaidClaimPriceId: groupPriceId,
           },
           core: { billingStatus: HostedBillingStatus.active },
         });

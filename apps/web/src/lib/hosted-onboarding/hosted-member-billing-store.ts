@@ -51,6 +51,7 @@ export interface HostedMemberStripeBillingRefSnapshot {
   lastStripeEventCreatedAt?: Date | null;
   memberId: string;
   pulseTrialPolicyVersion?: string | null;
+  pulseTrialPaidClaimPriceId?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   pulseTrialStartSource?: HostedPulseTrialStartSource | null;
   scheduledBillingEffectiveAt?: Date | null;
@@ -97,6 +98,7 @@ export interface HostedMemberStripeBillingRefWriteInput {
   currentTrialStartedAt?: Date | null;
   memberId: string;
   pulseTrialPolicyVersion?: string | null;
+  pulseTrialPaidClaimPriceId?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   pulseTrialStartSource?: HostedPulseTrialStartSource | null;
   scheduledBillingEffectiveAt?: Date | null;
@@ -1153,6 +1155,9 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
     ...(billingRef.pulseTrialPolicyVersion !== undefined
       ? { pulseTrialPolicyVersion: billingRef.pulseTrialPolicyVersion }
       : {}),
+    ...(billingRef.pulseTrialPaidClaimPriceId !== undefined
+      ? { pulseTrialPaidClaimPriceId: billingRef.pulseTrialPaidClaimPriceId }
+      : {}),
     ...(billingRef.pulseTrialRedeemedAt !== undefined
       ? { pulseTrialRedeemedAt: billingRef.pulseTrialRedeemedAt }
       : {}),
@@ -1247,6 +1252,7 @@ async function buildHostedMemberBillingRefCreateData(
     currentTrialEndsAt: input.currentTrialEndsAt ?? null,
     currentTrialStartedAt: input.currentTrialStartedAt ?? null,
     pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
+    pulseTrialPaidClaimPriceId: input.pulseTrialPaidClaimPriceId ?? null,
     pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
     pulseTrialStartSource: input.pulseTrialStartSource ?? null,
     scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
@@ -1311,6 +1317,9 @@ async function buildHostedMemberBillingRefUpdateData(
   }
   if (input.pulseTrialPolicyVersion !== undefined) {
     data.pulseTrialPolicyVersion = input.pulseTrialPolicyVersion;
+  }
+  if (input.pulseTrialPaidClaimPriceId !== undefined) {
+    data.pulseTrialPaidClaimPriceId = input.pulseTrialPaidClaimPriceId;
   }
   if (input.pulseTrialStartSource !== undefined) {
     data.pulseTrialStartSource = input.pulseTrialStartSource;

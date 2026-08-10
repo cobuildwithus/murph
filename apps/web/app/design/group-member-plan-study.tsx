@@ -107,6 +107,24 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Paid Pulse is selected and awaiting Stripe confirmation"
+        state="payment-recovery-pending-pulse"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="incomplete"
+            canStartPaidPulse
+            canSwitchToGroup
+            currentBillingPhase="trial"
+            currentBillingPlanCode="launch_monthly"
+            currentCheckoutOffer="pulse_trial_7d"
+            showGroupPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
         label="Exact Core status check while Stripe confirmation is pending"
         state="payment-recovery-pending-confirmation"
       >

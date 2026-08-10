@@ -1311,7 +1311,9 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Check Pulse status/);
+    assert.match(markup, /Billing pending/);
     assert.doesNotMatch(markup, /Check Core status/);
+    assert.doesNotMatch(markup, /Free trial/);
     assert.doesNotMatch(markup, /Choose Edge/);
     assert.doesNotMatch(markup, /Manage billing/);
   });
@@ -1777,6 +1779,7 @@ describe("HostedBillingSettings", () => {
     assert.match(rendered.window.document.body.textContent ?? "", /Close/);
     assert.doesNotMatch(rendered.window.document.body.textContent ?? "", /Open billing/);
     assert.doesNotMatch(rendered.window.document.body.textContent ?? "", /charged immediately/);
+    assert.doesNotMatch(rendered.window.document.body.textContent ?? "", /\/ month/);
     assert.equal(mocks.routerRefresh.mock.calls.length, 1);
     assert.equal(rendered.assign.mock.calls.length, 0);
 

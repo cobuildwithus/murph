@@ -1,6 +1,6 @@
 # Hosted Core Member Plan
 
-Last verified: 2026-07-30
+Last verified: 2026-08-10
 Status: Implemented current-state contract
 
 ## Product Contract
@@ -98,27 +98,32 @@ brief reconciliation window where the retained Pulse-trial offer is canonical
 but the phase projection is still null. A local-trial/provider-paid race fails
 stale instead of scheduling one paid cycle late.
 
-A paused Pulse-trial recovery commits `incomplete` and its exact Pulse-or-Core
-target to the existing member billing reference under the member lock before
-opening payment setup or mutating Stripe. That database projection, rather than
-Stripe's bounded idempotency cache, owns the first selected target. Provider
-cleanup keys include that target. Exact same-target retries recover the claim,
-while a different target conflicts before provider access and returns the
-existing stale-choice recovery. Subscription receipts preserve the target
-while invoice confirmation remains incomplete. Settings and assistant offers
-expose only that exact status-check action instead of another plan choice or a
-generic billing-portal link. Web immediately refreshes the canonical billing
+A paused Pulse-trial recovery commits `incomplete`, its exact Pulse-or-Core
+target, and the validated claim-time Stripe Price id to the existing member
+billing reference under the member lock before opening payment setup or
+mutating Stripe. That database projection, rather than mutable catalog
+configuration or Stripe's bounded idempotency cache, owns the first selected
+terms. Provider cleanup keys include the bound Price. Exact same-target retries
+recover the claim with that Price even after the catalog points at a replacement
+Price, while a different target conflicts before provider access and returns
+the existing stale-choice recovery. A concurrent change to the bound Price also
+fails closed under the member lock. Subscription receipts preserve the
+claim while invoice confirmation remains incomplete. Invoice settlement must
+contain the bound Price on both the target subscription and invoice, so neither
+an older Pulse invoice nor a later catalog Price can activate Core (or vice
+versa). Settings and assistant offers expose only that exact status-check action
+instead of another plan choice or a generic billing-portal link. The status
+dialog does not present the mutable current catalog amount as though it were the
+already accepted amount. Web immediately refreshes the canonical billing
 projection when the request reports pending, and closing the confirmation
 preserves the exact status-check action; the close control does not claim to
 cancel provider work. The locked retry proceeds only while the customer and
 subscription binding is unchanged and the source is the exact incomplete
 target or the original active-trial/paused subscription. The same paid target
 is idempotently complete, while another paid target, suspension, or terminal
-state wins before provider access. Invoice confirmation must contain the
-target subscription Price, so an older Pulse invoice cannot activate Core (or
-vice versa). The claim has no automatic expiry: Murph cannot prove that an
-interrupted request did not already mutate the provider, so releasing it on a
-timer would reopen the direct-versus-Family charge race.
+state wins before provider access. The claim has no automatic expiry: Murph
+cannot prove that an interrupted request did not already mutate the provider,
+so releasing it on a timer would reopen the direct-versus-Family charge race.
 
 Core membership eligibility is required when the first locked selection
 creates the claim. Later membership loss does not revoke an exact incomplete
@@ -128,7 +133,8 @@ binding, Family-authority, terminal-state, paid-target, and conflicting-target
 guards. After a rejected request, Web preserves its accessible error and
 refreshes the canonical projection. A marked payment-method return for an
 exact incomplete Core claim points to Check Core status; fresh-choice wording
-remains limited to active-trial returns where no target claim exists.
+remains limited to active-trial returns where no target claim exists. An exact
+incomplete Pulse claim is labeled `Billing pending`, never `Free trial`.
 
 Public checkout accepts only the explicit public billing-code allowlist. Adding
 Core to the private catalog must not make it publicly selectable.
@@ -154,6 +160,12 @@ Core to the private catalog must not make it publicly selectable.
   plan.
 
 ## Deployment
+
+Apply the nullable `pulse_trial_paid_claim_price_id` database migration before
+deploying Web code that creates or recovers paid-trial claims. The prior Web
+version ignores the additive column, so this order preserves a safe rolling
+window; deploy the new Web version immediately afterward to ensure every new
+claim binds its accepted Price.
 
 Configure `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY` with the
 recurring $3.50 Stripe Price before exposing Core in production.
