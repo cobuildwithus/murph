@@ -1683,6 +1683,68 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
+  it('applies ReviewGPT response timeout precedence from repo config to one run', () => {
+    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-timeout-'))
+    const localConfigRoot = path.join(harnessRoot, 'config')
+    const reviewGptBin = path.join(
+      repoRoot,
+      'node_modules',
+      '.bin',
+      'cobuild-review-gpt',
+    )
+    const runDry = (extraArgs: string[] = []) =>
+      spawnSync(
+        reviewGptBin,
+        [
+          '--config',
+          'scripts/review-gpt.config.sh',
+          '--wait',
+          '--dry-run',
+          '--no-zip',
+          '--prompt',
+          'Validate response timeout precedence.',
+          ...extraArgs,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...withoutNodeV8Coverage(),
+            HOME: harnessRoot,
+            REVIEW_GPT_BROWSER_LANE_COUNT: '1',
+            XDG_CONFIG_HOME: localConfigRoot,
+          },
+        },
+      )
+
+    try {
+      const defaultResult = runDry()
+      expect(defaultResult.status, defaultResult.stderr).toBe(0)
+      expect(defaultResult.stdout).toContain(
+        'Response capture: enabled (10800000ms timeout)',
+      )
+
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'response_timeout_ms=7654321\n',
+      )
+      const localResult = runDry()
+      expect(localResult.status, localResult.stderr).toBe(0)
+      expect(localResult.stdout).toContain(
+        'Response capture: enabled (7654321ms timeout)',
+      )
+
+      const perRunResult = runDry(['--wait-timeout', '42m'])
+      expect(perRunResult.status, perRunResult.stderr).toBe(0)
+      expect(perRunResult.stdout).toContain(
+        'Response capture: enabled (2520000ms timeout)',
+      )
+    } finally {
+      rmSync(harnessRoot, { force: true, recursive: true })
+    }
+  })
+
   it('keeps ReviewGPT browser preferences local and reuses correction threads', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-browser-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
