@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  list|log) ;;
+  *)
+    echo "Usage: scripts/frog {list|log} [options]" >&2
+    exit 2
+    ;;
+esac
+
+for argument in "$@"; do
+  case "$argument" in
+    --publish|--publish=*)
+      echo "Publishing is owned by .github/workflows/friction-log.yml." >&2
+      exit 2
+      ;;
+  esac
+done
+
+unset FROG_DATABASE_URL FROG_NAMESPACE FROG_SCHEMA
+exec pnpm dlx frog@1.1.0 "$@"
