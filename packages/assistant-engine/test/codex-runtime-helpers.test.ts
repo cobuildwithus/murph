@@ -77,9 +77,6 @@ import {
   MURPH_DYNAMIC_TOOLS,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
-import {
-  executeGenerateSongTool,
-} from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
   AssistantProviderTurnExecutionInput,
@@ -2371,7 +2368,7 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
-  it('forwards voice memo delivery channels through input wrappers to Codex execution', async () => {
+  it('fails closed when public input wrappers receive voice memo delivery channels', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
       precedingAgentMessageSegments: [],
@@ -2403,11 +2400,7 @@ describe('Codex assistant registry helpers', () => {
     })
     const telegramTurnInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
-    expect(telegramTurnInput).toMatchObject({
-      voiceMemoRuntime: {
-        kind: 'telegram',
-      },
-    })
+    expect(telegramTurnInput?.voiceMemoRuntime).toBeNull()
     expect(telegramTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
 
     const attempt = await executeCodexAssistantTurnAttemptFromInput({
@@ -2425,124 +2418,8 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.ok).toBe(true)
     const linqTurnInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]
-    expect(linqTurnInput).toMatchObject({
-      voiceMemoRuntime: {
-        kind: 'linq',
-      },
-    })
+    expect(linqTurnInput?.voiceMemoRuntime).toBeNull()
     expect(linqTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
-  })
-
-  it('reuses the application public fetch inside the Linq media tool', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
-      finalMessage: 'ok',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'ok',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'codex-thread-song-upload',
-      stderr: '',
-      stdout: '',
-      threadId: 'codex-thread-song-upload',
-      turnId: 'turn-song-upload',
-    })
-    const providerFetch = vi.fn<typeof fetch>(async (input) => {
-      const url = String(input)
-      if (url.startsWith('https://api.elevenlabs.io/v1/music')) {
-        return new Response(new Uint8Array([0xff, 0xfb, 0x90, 0x64]), {
-          headers: {
-            'content-type': 'audio/mpeg',
-          },
-        })
-      }
-      if (url === 'https://api.linqapp.com/api/partner/v3/attachments') {
-        return new Response(JSON.stringify({
-          attachment_id: 'attachment_sponsor_song',
-          download_url: 'https://cdn.example.test/sponsor-song.mp3',
-          expires_at: '2026-07-29T21:00:00.000Z',
-          http_method: 'PUT',
-          required_headers: {
-            'content-type': 'audio/mpeg',
-          },
-          upload_url: 'https://uploads.example.test/sponsor-song',
-        }), {
-          headers: {
-            'content-type': 'application/json',
-          },
-        })
-      }
-      throw new Error(`Unexpected provider request: ${url}`)
-    })
-    const applicationPublicFetch = vi.fn<typeof fetch>(async (input, init) => {
-      expect(String(input)).toBe(
-        'https://uploads.example.test/sponsor-song',
-      )
-      expect(init?.method).toBe('PUT')
-      expect(init?.body).toBeInstanceOf(Blob)
-      return new Response(null, { status: 204 })
-    })
-
-    const attempt = await executeCodexAssistantTurnAttemptFromInput({
-      providerConfig: { provider: 'codex-cli' },
-      turn: {
-        codexThreadConfig: {
-          'features.shell_tool': false,
-          web_search: 'disabled',
-        },
-        dynamicTools: resolveMurphDynamicTools({
-          progressUpdatesAvailable: false,
-        }),
-        env: {
-          ELEVENLABS_API_KEY: 'elevenlabs-key',
-          LINQ_API_TOKEN: 'linq-token',
-        },
-        prompt: 'generate one sponsor song',
-        providerFetch,
-        publicInternetFetch: applicationPublicFetch,
-        voiceMemoDeliveryChannel: 'linq',
-        workingDirectory: '/tmp/provider-tests',
-      },
-    })
-
-    expect(attempt.ok).toBe(true)
-    const appServerInput =
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
-    expect(appServerInput).toMatchObject({
-      publicInternetFetch: applicationPublicFetch,
-      threadConfig: {
-        'features.shell_tool': false,
-        web_search: 'disabled',
-      },
-      voiceMemoRuntime: {
-        kind: 'linq',
-      },
-    })
-    if (appServerInput?.voiceMemoRuntime?.kind !== 'linq') {
-      throw new Error('Expected a Linq voice memo runtime')
-    }
-
-    await expect(executeGenerateSongTool({
-      args: {
-        durationSeconds: 5,
-        instrumental: false,
-        prompt: 'A five-second thank-you song.',
-      },
-      runtime: appServerInput.voiceMemoRuntime,
-    })).resolves.toMatchObject({
-      responseMedia: [
-        {
-          kind: 'voice_memo',
-          transport: {
-            attachmentId: 'attachment_sponsor_song',
-            kind: 'linq_attachment',
-          },
-        },
-      ],
-      rpcSuccess: true,
-    })
-    expect(providerFetch).toHaveBeenCalledTimes(2)
-    expect(applicationPublicFetch).toHaveBeenCalledOnce()
   })
 
   it('forwards message-target tools and their authorizer to Codex execution', async () => {

@@ -340,6 +340,15 @@ describe('executeGenerateVoiceMemoTool', () => {
         ok: false,
       })),
     )
+    const uploadFailureRuntime = createLinqRuntime(
+      vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>(async () => ({
+        failure: {
+          detail: 'LINQ_API_REQUEST_FAILED (http 503)',
+          kind: 'upload_failed',
+        },
+        ok: false,
+      })),
+    )
 
     await expect(
       executeGenerateVoiceMemoTool({
@@ -378,6 +387,19 @@ describe('executeGenerateVoiceMemoTool', () => {
     ).resolves.toEqual({
       rpcSuccess: false,
       rpcText: 'voice memo generation returned invalid audio data',
+    })
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        runtime: uploadFailureRuntime,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText:
+        'voice memo generated but Linq attachment upload failed: LINQ_API_REQUEST_FAILED (http 503)',
     })
   })
 

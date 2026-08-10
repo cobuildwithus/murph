@@ -83,9 +83,6 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
-  createVoiceMemoToolRuntimeFromEnv,
-} from '../src/assistant-codex/generate-voice-memo-tool.ts'
-import {
   executeCodexAssistantTurnAttempt,
   executeCodexAssistantTurnAttemptFromInput,
 } from '../src/assistant/codex-runtime.ts'
@@ -715,11 +712,15 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
     progressDelivery: input.progressDelivery,
     prompt: 'Send only a voice memo',
     sandbox: 'workspace-write',
-    voiceMemoRuntime: createVoiceMemoToolRuntimeFromEnv({
-      env,
-      fetchImpl: fetch,
-      voiceMemoDeliveryChannel: 'telegram',
-    }),
+    voiceMemoRuntime: {
+      elevenLabs: {
+        apiKeyAvailable: true,
+        defaultVoiceId: 'voice_murph',
+        modelId: 'eleven_multilingual_v2',
+        voiceId: 'voice_murph',
+      },
+      kind: 'telegram',
+    },
     workingDirectory,
   })
 }

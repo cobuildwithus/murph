@@ -55,6 +55,10 @@ export type VoiceMemoToolRuntimeFailure =
       kind: 'invalid_audio'
     }
   | {
+      kind: 'upload_failed'
+      detail: string | null
+    }
+  | {
       kind: 'missing_configuration'
       variable: 'ELEVENLABS_API_KEY' | 'LINQ_API_TOKEN'
     }
@@ -281,6 +285,11 @@ function describeVoiceMemoRuntimeFailure(
       return appendFailureDetail(`${label} generation failed`, failure.detail)
     case 'invalid_audio':
       return `${label} generation returned invalid audio data`
+    case 'upload_failed':
+      return appendFailureDetail(
+        `${label} generated but Linq attachment upload failed`,
+        failure.detail,
+      )
     case 'missing_configuration':
       return failure.variable === 'LINQ_API_TOKEN'
         ? `${failure.variable} is required for ${label} attachment upload`
