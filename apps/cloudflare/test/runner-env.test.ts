@@ -1113,7 +1113,7 @@ describe("buildHostedRuntimeResolvedConfig", () => {
     });
   });
 
-  it("requires both device-sync secrets and provider credentials before enabling device sync", () => {
+  it("enables device sync from trusted runtime secrets without shared provider credentials", () => {
     expect(buildHostedRuntimeResolvedConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "secret_123",
@@ -1122,7 +1122,11 @@ describe("buildHostedRuntimeResolvedConfig", () => {
         emailSendReady: false,
         telegramBotConfigured: false,
       },
-      deviceSync: null,
+      deviceSync: {
+        providerConfigs: {},
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
     });
 
     expect(buildHostedRuntimeResolvedConfig({
