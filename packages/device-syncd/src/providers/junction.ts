@@ -2023,11 +2023,17 @@ export function createJunctionDeviceSyncProvider(
       );
     }
 
-    const emptyBackfillAttempts =
+    let emptyBackfillAttempts =
       readHistoricalBackfillJobEmptyAttempts(input.job) + 1;
-    const retryDelayMs =
+    let retryDelayMs =
       EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyBackfillAttempts - 1]
       ?? null;
+    if (retryDelayMs === null && !input.importResult.fetchComplete) {
+      emptyBackfillAttempts = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length;
+      retryDelayMs =
+        EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyBackfillAttempts - 1]
+        ?? null;
+    }
     if (retryDelayMs === null) {
       return withJunctionMetadataPatch(
         input.result,

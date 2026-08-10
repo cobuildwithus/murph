@@ -470,6 +470,102 @@ test("partial optional failure retries from the anchored window after importing 
   );
 });
 
+test("account-wide partial failure stays recoverable after the empty retry ladder", async () => {
+  const provider = createProvider({
+    bloodPressureFailureRequest: 2,
+    bloodPressureRecords: [{
+      id: "bp-account-before-exhausted-partial-failure",
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 116,
+      diastolic: 74,
+    }],
+    requests: [],
+  });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const exhausted = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+      historicalRecordsSeen: true,
+    },
+  }, 1);
+  exhausted.dedupeKey = `hosted-device-sync:${"f".repeat(64)}`;
+
+  const partial = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    exhausted,
+  );
+  const retry = findBloodPressureJob(partial.scheduledJobs ?? []);
+
+  assert.equal(partial.metadataPatch?.[BP_HISTORY_VERSION_KEY], undefined);
+  assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
+  assert.equal(retry.dedupeKey, exhausted.dedupeKey);
+  assert.equal(retry.payload?.emptyBackfillAttempts, 4);
+  assert.equal(retry.payload?.historicalRecordsSeen, true);
+  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+
+  const recovered = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    toJobRecord(retry, 2),
+  );
+  assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
+  assert.equal(recovered.metadataPatch?.[BP_HISTORY_VERSION_KEY], 1);
+});
+
+test("source-scoped partial failure stays recoverable after the empty retry ladder", async () => {
+  const provider = createProvider({
+    bloodPressureFailureRequest: 2,
+    bloodPressureRecords: [{
+      id: "bp-source-before-exhausted-partial-failure",
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 115,
+      diastolic: 73,
+    }],
+    requests: [],
+  });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const exhausted = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+      historicalRecordsSeen: true,
+      sourceProviderSlug: "omron",
+    },
+  }, 1);
+  exhausted.dedupeKey = `hosted-device-sync:${"9".repeat(64)}`;
+
+  const partial = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    exhausted,
+  );
+  const retry = findBloodPressureJob(partial.scheduledJobs ?? []);
+
+  assert.equal(partial.metadataPatch?.[BP_HISTORY_VERSION_KEY], undefined);
+  assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
+  assert.equal(retry.dedupeKey, exhausted.dedupeKey);
+  assert.equal(retry.payload?.emptyBackfillAttempts, 4);
+  assert.equal(retry.payload?.historicalRecordsSeen, true);
+  assert.equal(retry.payload?.sourceProviderSlug, "omron");
+  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+
+  const recovered = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    toJobRecord(retry, 2),
+  );
+  assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
+  assert.equal(recovered.metadataPatch?.[BP_HISTORY_VERSION_KEY], undefined);
+});
+
 test("raw provider rows without canonical imported events remain on the retry ladder", async () => {
   const provider = createProvider({
     bloodPressureRecords: [{
