@@ -116,10 +116,16 @@ Success criteria:
 - Accepted from PR #1576's preliminary specialist pass: the existing
   character-count wrapper split ordinary words that fit within a value column,
   including `Bodyweight`. The renderer now measures a deterministic
-  font-aligned word candidate before wrapping and reserves grapheme-aware hard
+  font-metric word candidate before wrapping and reserves grapheme-aware hard
   breaks for genuinely overwide tokens. Focused coverage proves both paths,
   and the 390px catalog study uses a smaller preview scale so the final column
   remains visible.
+- Accepted from final ReviewGPT round 4: the first word-aware correction used
+  handwritten width buckets that underestimated the actual checked-in DM Sans
+  font and could still allocate a two-line row for text the renderer wrapped to
+  four lines. The sole private layout owner now uses exact cmap/hmtx advances
+  derived from that same font, with its hash pinned by focused proof and a
+  conservative fallback only for unsupported glyphs.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
 - Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. PR #1502 merged externally before that gate closed; the follow-up must stay draft until the missing evidence is captured.
 
@@ -186,6 +192,12 @@ Success criteria:
   the updated 390px design-catalog capture preserves all four value columns.
   Both updated catalog captures were inspected locally and through the hosted
   lossless design-proof variant.
+- The exact-font remediation passed 15 focused Web tests, Web typecheck, and
+  scoped Web ESLint. The production-font regression proves the bundled font
+  hash and exact advances for the review phrase, every inserted line is within
+  the 160.05px four-column width, and the resulting three-line row owns 100px.
+  A fresh native-resolution 1200×1120 direct-route raster shows those three
+  lines contained between their dividers without overlap.
 
 ## Parent product-experience revalidation
 

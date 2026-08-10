@@ -4,6 +4,10 @@ import type {
 } from "@murphai/contracts";
 
 import { IMESSAGE_CARD_COLOR } from "./card-image-chrome";
+import {
+  measureDmSans400Text,
+  segmentDmSans400Text,
+} from "./dm-sans-400-card-metrics";
 
 export const IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH = 1_200;
 
@@ -13,9 +17,6 @@ const CARD_CONTENT_WIDTH =
 const HEADER_TEXT_WIDTH = CARD_CONTENT_WIDTH;
 const GENERIC_ROW_LABEL_WIDTH = CARD_CONTENT_WIDTH * 0.38;
 const GENERIC_VALUES_WIDTH = CARD_CONTENT_WIDTH * 0.62;
-const CARD_GRAPHEME_SEGMENTER = new Intl.Segmenter("en", {
-  granularity: "grapheme",
-});
 
 type WrappedCardText = {
   lineCount: number;
@@ -603,7 +604,7 @@ function wrapCardText(
 
   for (const word of words) {
     const candidate = currentLine === "" ? word : `${currentLine} ${word}`;
-    if (measureCardText(candidate, fontSize, letterSpacingEm) <= width) {
+    if (measureDmSans400Text(candidate, fontSize, letterSpacingEm) <= width) {
       currentLine = candidate;
       continue;
     }
@@ -640,11 +641,11 @@ function breakOverwideCardToken(
   const fragments: string[] = [];
   let currentFragment = "";
 
-  for (const grapheme of segmentCardGraphemes(token)) {
+  for (const grapheme of segmentDmSans400Text(token)) {
     const candidate = `${currentFragment}${grapheme}`;
     if (
       currentFragment !== ""
-      && measureCardText(candidate, fontSize, letterSpacingEm) > width
+      && measureDmSans400Text(candidate, fontSize, letterSpacingEm) > width
     ) {
       fragments.push(currentFragment);
       currentFragment = grapheme;
@@ -657,46 +658,4 @@ function breakOverwideCardToken(
     fragments.push(currentFragment);
   }
   return fragments;
-}
-
-function measureCardText(
-  value: string,
-  fontSize: number,
-  letterSpacingEm: number,
-): number {
-  const graphemes = segmentCardGraphemes(value);
-  const textUnits = graphemes.reduce(
-    (total, grapheme) => total + getCardGraphemeWidthUnits(grapheme),
-    0,
-  );
-  const letterSpacing = Math.max(0, graphemes.length - 1)
-    * fontSize
-    * letterSpacingEm;
-  return textUnits * fontSize + letterSpacing;
-}
-
-function segmentCardGraphemes(value: string): string[] {
-  return Array.from(
-    CARD_GRAPHEME_SEGMENTER.segment(value),
-    (segment) => segment.segment,
-  );
-}
-
-function getCardGraphemeWidthUnits(grapheme: string): number {
-  const normalized = grapheme.normalize("NFC");
-  if (/\p{Extended_Pictographic}/u.test(normalized)) return 1;
-  if (
-    /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
-      .test(normalized)
-  ) {
-    return 1;
-  }
-
-  const character = Array.from(normalized)[0] ?? "";
-  if (character === " ") return 0.28;
-  if ("il.,;:!'|".includes(character)) return 0.26;
-  if ("mwMW@#%&".includes(character)) return 0.9;
-  if (/\p{Lu}/u.test(character)) return 0.68;
-  if (/\p{Nd}/u.test(character)) return 0.56;
-  return 0.54;
 }

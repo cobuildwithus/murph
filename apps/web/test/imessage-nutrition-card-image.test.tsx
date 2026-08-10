@@ -144,6 +144,20 @@ const DENSE_TABLE_CARD: CompactTablePresentationCardV1 = {
   footer: "Assists and spotted reps remain on the exact set note.",
 };
 
+const FONT_METRIC_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Recovery signals",
+  subtitle: null,
+  rowHeader: "Metric",
+  columns: ["Today", "Week", "Trend", "Note"],
+  rows: [{
+    label: "Recovery",
+    values: ["deep sleep and mood guidance", "Stable", "Up", "Review"],
+  }],
+  footer: null,
+};
+
 const WORKOUT_CARD: Extract<
   CompactTablePresentationCardV1,
   { workout: unknown }
@@ -423,7 +437,26 @@ test("dense contract-valid tables wrap every value into measured row height", as
   assert.match(serialized, /white-space:pre-wrap/u);
   assert.match(serialized, /Bodyweight ×\n16/u);
   assert.doesNotMatch(serialized, /Bodywe\night/u);
-  assert.match(serialized, /1xxxxxxxxxxx\nxxxxxxxxxx/u);
+  assert.match(serialized, /1xxxxxxxxxxxxx\nxxxxxxxx/u);
+});
+
+test("four-column rows use exact DM Sans advances for word breaks and height", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 3,
+    card: FONT_METRIC_TABLE_CARD,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /deep sleep\nand mood\nguidance/u);
+  assert.match(serialized, /height:100px/u);
+  assert.match(serialized, /data-card-text-lines="3"[^>]*>deep sleep/u);
 });
 
 test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {
