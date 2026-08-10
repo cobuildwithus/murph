@@ -1,6 +1,6 @@
 # Keep app-absent iMessage card icons clean
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -52,7 +52,8 @@ Updated: 2026-08-10
 3. Run focused tests, typecheck, diff checks, and candidate review.
 4. Push a PR, run specialist and final ReviewGPT concurrently with CI, and
    resolve any accepted findings.
-5. Merge, deploy Cloudflare, and verify a new Mac/app-absent card.
+5. Merge, deploy Vercel and then Cloudflare, and verify a new Mac/app-absent
+   card.
 
 ## Decisions
 
@@ -61,6 +62,10 @@ Updated: 2026-08-10
 - Do not change iOS assets. The production screenshot matches the app-absent
   static route, and the installed extension's opaque 4:3 icon assets are
   already correctly shaped.
+- Do not update the public changelog until production-faithful Mac,
+  no-extension iPhone, and installed-extension evidence proves the
+  provider-owned result. The preliminary specialist finding identified this as
+  a release-truth requirement, so the unverified changelog delta was removed.
 
 ## Verification
 
@@ -69,3 +74,4 @@ Updated: 2026-08-10
   CI, Cloudflare deployment smoke, then a physical Mac/app-absent retry.
 - Expected outcomes: no `app_store_id` in the provider request; all automated
   checks pass; the new static card has no square-icon pillarboxing.
+Completed: 2026-08-10
