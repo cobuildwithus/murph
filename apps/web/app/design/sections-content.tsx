@@ -478,7 +478,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and usage limits">
+      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and exact usage status">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -578,8 +578,10 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Boundary result detail">
-        <BiomarkerBoundaryResultStudy />
+      <StudySection title="Biomarker boundary result · published comparator provenance">
+        <div id="biomarker-boundary-result">
+          <BiomarkerBoundaryResultStudy />
+        </div>
       </StudySection>
     </div>
   );
