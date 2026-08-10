@@ -58,7 +58,7 @@ Updated: 2026-08-09
 2. [x] Implement the Vercel image route and production image component.
 3. [x] Add catalog, route, provider, egress, and asset-trace proof.
 4. [x] Update security, reliability, architecture, UX, and deploy guidance.
-5. [ ] Push the updated PR candidate and complete ReviewGPT plus exact-head CI.
+5. [x] Push the updated PR candidate and complete ReviewGPT plus exact-head CI.
 6. [ ] Capture one macOS static card and one no-app iPhone static card, then
    close the plan.
 
