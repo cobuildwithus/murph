@@ -349,6 +349,7 @@ function resolveCanonicalAssistantCronUnboundedOccurrenceAt(
   }
 
   const pendingOccurrenceAt = resolveCurrentCanonicalPendingOccurrenceAt({
+    runtimeUpdatedAt: runtimeState.updatedAt,
     source,
     state: runtimeState.state,
   })
@@ -361,6 +362,9 @@ function resolveCanonicalAssistantCronUnboundedOccurrenceAt(
   }
 
   const anchorAt = resolveCanonicalAssistantCronScheduleAnchorAt({
+    pendingOccurrenceIgnored:
+      runtimeState.state.pendingOccurrenceAt !== null &&
+      pendingOccurrenceAt === null,
     source,
     state: runtimeState.state,
   })
@@ -610,6 +614,7 @@ function projectCanonicalAssistantCronJobState(input: {
   runtimeState: AssistantCronCanonicalRuntimeRecord
 }): AssistantCronJob['state'] {
   const nextRunAt = resolveCanonicalAssistantCronNextRunAt({
+    runtimeUpdatedAt: input.runtimeState.updatedAt,
     source: input.source,
     state: input.runtimeState.state,
   })
@@ -652,6 +657,7 @@ function normalizeAssistantCronPublicSchedule(
 }
 
 function resolveCanonicalAssistantCronNextRunAt(input: {
+  runtimeUpdatedAt: string
   source: CanonicalAssistantCronJobRecord
   state: AssistantCronCanonicalRuntimeState
 }): string | null {
@@ -676,6 +682,9 @@ function resolveCanonicalAssistantCronNextRunAt(input: {
   }
 
   const anchorAt = resolveCanonicalAssistantCronScheduleAnchorAt({
+    pendingOccurrenceIgnored:
+      input.state.pendingOccurrenceAt !== null &&
+      pendingOccurrenceAt === null,
     source: input.source,
     state: input.state,
   })
@@ -712,6 +721,7 @@ function boundCanonicalAssistantCronOccurrenceByActiveUntil(
 }
 
 function resolveCurrentCanonicalPendingOccurrenceAt(input: {
+  runtimeUpdatedAt: string
   source: CanonicalAssistantCronJobRecord
   state: AssistantCronCanonicalRuntimeState
 }): string | null {
@@ -738,9 +748,17 @@ function resolveCurrentCanonicalPendingOccurrenceAt(input: {
 }
 
 function canonicalSourceScheduleTransitionIsUnconsumed(input: {
+  runtimeUpdatedAt: string
   source: CanonicalAssistantCronJobRecord
   state: AssistantCronCanonicalRuntimeState
 }): boolean {
+  if (input.source.kind === 'scheduledLog') {
+    return canonicalScheduledLogSourceChangedAfterRuntimeState({
+      runtimeUpdatedAt: input.runtimeUpdatedAt,
+      source: input.source,
+    })
+  }
+
   const sourceScheduleAnchorMs = Date.parse(
     resolveCanonicalAssistantCronSourceScheduleAnchorAt(input.source),
   )
@@ -754,6 +772,24 @@ function canonicalSourceScheduleTransitionIsUnconsumed(input: {
     Number.isFinite(sourceScheduleAnchorMs) &&
     sourceScheduleAnchorMs > consumedAnchorMs
   )
+}
+
+function canonicalScheduledLogSourceChangedAfterRuntimeState(input: {
+  runtimeUpdatedAt: string
+  source: CanonicalScheduledLogAssistantCronJobRecord
+}): boolean {
+  const sourceCreatedMs = Date.parse(input.source.createdAt)
+  const sourceUpdatedMs = Date.parse(input.source.updatedAt)
+  const runtimeUpdatedMs = Date.parse(input.runtimeUpdatedAt)
+  if (
+    !Number.isFinite(sourceCreatedMs) ||
+    !Number.isFinite(sourceUpdatedMs) ||
+    !Number.isFinite(runtimeUpdatedMs)
+  ) {
+    return false
+  }
+
+  return sourceUpdatedMs !== sourceCreatedMs && sourceUpdatedMs > runtimeUpdatedMs
 }
 
 function isCanonicalPendingOccurrenceForCurrentSchedule(input: {
@@ -804,9 +840,17 @@ function isCanonicalPendingOccurrenceForCurrentSchedule(input: {
 }
 
 function resolveCanonicalAssistantCronScheduleAnchorAt(input: {
+  pendingOccurrenceIgnored?: boolean
   source: CanonicalAssistantCronJobRecord
   state: AssistantCronCanonicalRuntimeState
 }): string | null {
+  if (
+    input.source.kind === 'scheduledLog' &&
+    input.pendingOccurrenceIgnored === true
+  ) {
+    return input.source.updatedAt
+  }
+
   return latestAssistantCronTimestamp([
     resolveCanonicalAssistantCronConsumedAnchorAt(input.state),
     resolveCanonicalAssistantCronSourceScheduleAnchorAt(input.source),

@@ -18,7 +18,7 @@ Key decisions:
 - Update the existing schedule-owner documentation and focused contract/core/assistant/runtime tests rather than adding a new service or state owner.
 
 State:
-- ReviewGPT round three accepted the timing-transition redesign and found one separate response-contract defect for active event-triggered automations. The schedule-kind-aware prompt/tool correction is implemented and focused verification is green before the next pushed review head.
+- ReviewGPT round four verified every prior automation and event-trigger correction, then found one shared scheduled-log retry regression caused by removing the union-wide source revision input. The scheduled-log-only restoration is implemented with a production-shaped failing-then-passing real-vault regression.
 
 Done:
 - Proved the production failure mechanism: a UTC-converted cron hour was persisted and then evaluated in the vault timezone.
@@ -48,12 +48,17 @@ Done:
 - Added prompt and deferred-tool contract assertions, a real scripted App Server save result, hosted save-and-patch response proof, an opt-in actual-model journey, and coverage of the existing device-trigger queue path. The focused assistant-engine set passed 147 tests with 36 opt-in skips, the hosted assistant-phase suite passed all 280 tests, and both affected packages typecheck.
 - Recomputed the provider-visible delta by applying only the reviewed schedule-kind wording to the same prior canonical measurement. The prompt adds 72 `o200k_harmony` tokens and 364 UTF-8 bytes to both runtimes: direct is now 23,947 tokens / 110,685 bytes versus base 23,701 / 109,497 (+246, +1.0379%, +1,188 bytes); group is 20,419 / 95,134 versus base 20,173 / 93,946 (+246, +1.2195%, +1,188 bytes). Prompt content is now 14,808 tokens / 72,597 bytes direct and 11,380 / 57,177 group. The deferred automation tool serialization is 4,531 tokens / 15,431 bytes when loaded.
 - Rebuilt the complete hosted runner closure after the prompt correction. The runner entrypoint is 1,661,608 bytes, its static boot closure is 8,017,366 bytes, and total output is 9,992,497 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed.
+- ReviewGPT round four proved that a scheduled-log occurrence waiting on retry could survive a supported schedule edit and write the retired occurrence. A real core writer/runtime-store regression reproduced the failure by moving a pending 8:00 daily measurement to 9:00: the unfixed scheduler processed and wrote 8:00 at retry time.
+- Restored the deleted `updatedAt` source-revision comparison only for the `scheduledLog` union member. A newer scheduled-log source revalidates a retained non-running occurrence against the current schedule; a mismatch is discarded and reanchored at the edit, while an unchanged schedule preserves the retry. Automations remain exclusively on `scheduleAnchorAt`, and running/pending-delivery work keeps its existing authority.
+- The real-vault proof now skips the retired 8:00 retry, projects and writes only 9:00, while a summary-only edit preserves and writes the valid 8:00 retry and an already-running 8:00 occurrence remains owned by its writer. The complete 217-test shared cron and scheduled-log set passes.
+- The expanded 361-test scheduler, mutation, outbox-authority, managed-reconciliation, availability, and scheduled-log set passes, as does the complete 30-project workspace typecheck.
+- Rebuilt the complete hosted runner closure after the scheduled-log correction. The runner entrypoint remains 1,661,608 bytes, its static boot closure is 8,018,488 bytes, and total output is 9,993,619 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed.
 
 Now:
-- Complete the full workspace typecheck and candidate diff review, then commit and push the event-trigger response correction.
+- Correct PR intent wording for shared scheduled-log coverage, stale claimed work, and old-runner rewrite skew, then review and push the exact remediation head.
 
 Next:
-- Update PR #1546's intent/evidence contract, run sensitive full-snapshot ReviewGPT round four against the repaired exact head concurrently with CI, and resolve any remaining accepted finding until the latest substantive round passes.
+- Commit and push the scheduled-log restoration, update PR #1546's exact-head evidence, and run sensitive full-snapshot ReviewGPT round five concurrently with CI until the latest substantive round passes.
 
 Open questions (UNCONFIRMED if needed):
 - None. The timing result now reuses the canonical scheduler owners through an exact-file projection instead of the broad public job lookup.
