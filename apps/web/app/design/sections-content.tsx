@@ -422,7 +422,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings sign-in required">
+      <StudySection title="Settings and Family sign-in handoffs">
         <SettingsAuthRequiredStudy />
       </StudySection>
 

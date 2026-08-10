@@ -576,7 +576,9 @@ for (const width of [768, 1280] as const) {
       starterExhausted.getByText("Starter usage exhausted", { exact: true }),
     ).toBeVisible();
     await expect(
-      starterExhausted.locator("button").filter({ hasText: "Choose Pulse" }),
+      starterExhausted
+        .getByRole("button", { name: "Choose Pulse", exact: true })
+        .first(),
     ).toBeVisible();
 
     const layout = await page.evaluate(() => {
