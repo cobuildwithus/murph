@@ -168,6 +168,7 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
@@ -1402,6 +1403,15 @@ export function ComponentsContent() {
 
         <Section title="Private experiment results share">
           <ExperimentResultsShareStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-nutrition-card"
+          title="iMessage nutrition card"
+        >
+          <ImessageNutritionCardStudy />
         </Section>
 
         <Separator />
