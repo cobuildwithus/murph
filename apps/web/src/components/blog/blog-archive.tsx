@@ -81,7 +81,10 @@ export function BlogArchive({ articles }: { articles: readonly BlogArticle[] }) 
         </div>
       </section>
 
-      <section className="px-6 py-16 sm:px-10 sm:py-20 lg:px-16 lg:py-24">
+      <section
+        className="px-6 py-16 sm:px-10 sm:py-20 lg:px-16 lg:py-24"
+        id="articles"
+      >
         <div className="mx-auto max-w-[1080px]">
           <div className="grid gap-8 border-b border-[#c4a882]/30 pb-16 lg:grid-cols-[0.36fr_0.64fr] lg:gap-16 lg:pb-20">
             <div>

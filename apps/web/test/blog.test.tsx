@@ -116,8 +116,9 @@ describe("blog presentation and discovery", () => {
     expect(archiveMarkup).toContain("Read the pattern before choosing the next step");
     expect(articleMarkup).toContain('data-design-study="blog-article"');
     expect(articleMarkup).toContain("Begin with the decision");
-    expect(archiveMarkup).toContain("inert");
-    expect(articleMarkup).toContain("inert");
+    expect(archiveMarkup).toContain('data-design-state="blog-navigation"');
+    expect(archiveMarkup).toContain('id="blog-study-footer"');
+    expect(articleMarkup).toContain("Verified result");
   });
 
   it("publishes canonical metadata, a complete RSS feed, and a blog sitemap", async () => {

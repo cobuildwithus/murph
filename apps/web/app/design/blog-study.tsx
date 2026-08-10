@@ -1,6 +1,9 @@
 import { BlogArchive } from "@/src/components/blog/blog-archive";
 import { BlogArticleView } from "@/src/components/blog/blog-article-view";
+import { SiteFooter } from "@/src/components/homepage/site-footer";
 import type { BlogArticle } from "@/src/lib/blog";
+
+import { StickyNav } from "../sticky-nav";
 
 const DESIGN_BLOG_ARTICLES = [
   {
@@ -16,8 +19,14 @@ An answer, a small adjustment, or a short watch period may be enough. More track
     description:
       "A synthetic guide showing how the production archive and article typography work together.",
     featured: true,
+    evidence: {
+      consentConfirmed: true,
+      resultSummary:
+        "Synthetic catalog result with permission and verification recorded.",
+      verifiedOn: "2030-01-17",
+    },
     keywords: ["design guide"],
-    kind: "guide",
+    kind: "case-study",
     publishedOn: "2030-01-17",
     readingMinutes: 4,
     slug: "design-read-the-pattern",
@@ -51,8 +60,15 @@ An answer, a small adjustment, or a short watch period may be enough. More track
 
 export function BlogArchiveStudy() {
   return (
-    <div data-design-study="blog-archive" inert>
+    <div data-design-study="blog-archive">
+      <div
+        className="relative h-[72px] bg-[#1f241c] [&>nav]:!absolute"
+        data-design-state="blog-navigation"
+      >
+        <StickyNav authenticated={false} darkTop />
+      </div>
       <BlogArchive articles={DESIGN_BLOG_ARTICLES} />
+      <SiteFooter id="blog-study-footer" referralsAvailable={false} />
     </div>
   );
 }
@@ -61,7 +77,7 @@ export function BlogArticleStudy() {
   const [article, ...relatedArticles] = DESIGN_BLOG_ARTICLES;
 
   return (
-    <div data-design-study="blog-article" inert>
+    <div data-design-study="blog-article">
       <BlogArticleView
         article={article}
         relatedArticles={relatedArticles}

@@ -74,7 +74,81 @@ for (const study of [
         selector: `[data-design-section="${study.id}"]`,
         viewportWidth: viewport.width,
       });
+
+      if (study.id === "blog-archive") {
+        const firstArticleLink = surface.locator('a[href^="/blog/"]').first();
+        await expect(firstArticleLink).toBeVisible();
+        await firstArticleLink.focus();
+        await expect(firstArticleLink).toBeFocused();
+
+        await captureElementProof({
+          fileName: `archive-content-${viewport.name}.png`,
+          page,
+          proofDirectory: PROOF_DIRECTORY,
+          selector: '[data-design-study="blog-archive"] #articles',
+          viewportWidth: viewport.width,
+        });
+        await captureElementProof({
+          fileName: `footer-${viewport.name}.png`,
+          page,
+          proofDirectory: PROOF_DIRECTORY,
+          selector: '[data-design-study="blog-archive"] #blog-study-footer',
+          viewportWidth: viewport.width,
+        });
+
+        if (viewport.name === "mobile") {
+          const menuButton = surface.getByRole("button", { name: "Open menu" });
+          await menuButton.click();
+          const blogMenuLink = page
+            .getByRole("dialog")
+            .getByRole("link", { name: "Blog", exact: true });
+          await expect(blogMenuLink).toBeVisible();
+          await blogMenuLink.focus();
+          await expect(blogMenuLink).toBeFocused();
+          await page.screenshot({
+            animations: "disabled",
+            path: path.join(
+              PROOF_DIRECTORY,
+              "navigation-mobile-open.png",
+            ),
+          });
+        }
+      } else {
+        await expect(surface.getByText("Verified result")).toBeVisible();
+        const archiveLink = surface.getByRole("link", { name: "Field notes" });
+        await archiveLink.focus();
+        await expect(archiveLink).toBeFocused();
+      }
     }
+  });
+}
+
+async function captureElementProof(input: {
+  fileName: string;
+  page: Page;
+  proofDirectory: string | null;
+  selector: string;
+  viewportWidth: number;
+}) {
+  if (!input.proofDirectory) {
+    throw new TypeError("DESIGN_PROOF_OUTPUT_DIR is required.");
+  }
+  const element = input.page.locator(input.selector);
+  await element.scrollIntoViewIfNeeded();
+  const bounds = await element.boundingBox();
+  if (!bounds) {
+    throw new TypeError(`Could not measure ${input.selector}.`);
+  }
+
+  await input.page.screenshot({
+    animations: "disabled",
+    clip: {
+      height: Math.min(input.viewportWidth === 390 ? 1_000 : 900, bounds.height),
+      width: Math.min(input.viewportWidth === 390 ? 390 : 1_200, bounds.width),
+      x: Math.max(0, bounds.x),
+      y: bounds.y,
+    },
+    path: path.join(input.proofDirectory, input.fileName),
   });
 }
 
