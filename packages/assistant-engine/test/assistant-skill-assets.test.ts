@@ -476,7 +476,9 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('do not include `group-email.v0`')
     expect(raw).toMatch(/The slug is a\s+lookup key, not authority/u)
     expect(raw).toMatch(/Save only when no recipe exists;\s+patch every existing recipe/u)
-    expect(raw).toContain('Preserve its route, paused status, schedule, and explicit')
+    expect(raw).toMatch(
+      /recipe, delivery, pause, resume, or route change[\s\S]*delegate the mutation to the exact patch rules in `group-newsletter`/u,
+    )
     expect(raw).toMatch(
       /chosen schedule becomes the ordinary cron schedule object with the cron\s+expression and exact validated IANA `timeZone`; `0 9 \* \* 0` is the Sunday 9am\s+default/u,
     )
