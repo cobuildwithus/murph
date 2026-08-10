@@ -9,7 +9,6 @@ import {
   sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
   summarizeHostedExecutionErrorCode,
-  type HostedExecutionErrorCode,
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
@@ -505,11 +504,10 @@ export interface RunnerContainerEnsureProcessingInput {
 }
 
 // Durable Object RPC does not preserve custom own properties on thrown Errors,
-// so invocation diagnostics must cross this seam as an explicitly bounded value.
+// so phase-bearing generic failures cross this seam as an explicitly bounded value.
 export interface RunnerContainerProcessingFailure {
-  code: HostedExecutionErrorCode;
   errorCodeDetail: string | null;
-  runtimeFailurePhaseCode: HostedRuntimeFailurePhaseCode | null;
+  runtimeFailurePhaseCode: HostedRuntimeFailurePhaseCode;
   status: number | null;
 }
 
@@ -1095,10 +1093,14 @@ export class RunnerContainer extends Container {
           reason: "no-active-child",
         };
       }
-      return {
-        failure: buildRunnerContainerProcessingFailure(error),
-        kind: "failed",
-      };
+      const failure = buildRunnerContainerProcessingFailure(error);
+      if (failure) {
+        return {
+          failure,
+          kind: "failed",
+        };
+      }
+      throw error;
     }
   }
 
@@ -4264,7 +4266,7 @@ function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructu
 
 function buildRunnerContainerProcessingFailure(
   error: unknown,
-): RunnerContainerProcessingFailure {
+): RunnerContainerProcessingFailure | null {
   const code = deriveHostedExecutionErrorCode(error);
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
   const details = readRunnerContainerErrorDetails(error);
@@ -4278,12 +4280,14 @@ function buildRunnerContainerProcessingFailure(
     : isHostedRuntimeFailurePhaseCode(transportedCodeDetail)
     ? transportedCodeDetail
     : null;
+  if (code !== "runtime_error" || !runtimeFailurePhaseCode) {
+    return null;
+  }
   const errorCodeDetail = transportedCodeDetail
     && !isHostedRuntimeFailurePhaseCode(transportedCodeDetail)
     ? transportedCodeDetail
     : null;
   return {
-    code,
     errorCodeDetail,
     runtimeFailurePhaseCode,
     status: readHostedRunnerContainerDiagnosticStatus(diagnostics),
@@ -4293,7 +4297,6 @@ function buildRunnerContainerProcessingFailure(
 function createRunnerContainerProcessingFailureError(
   failure: RunnerContainerProcessingFailure,
 ): Error {
-  const code = normalizeRunnerContainerProcessingFailureCode(failure.code);
   const errorCodeDetail = readHostedRunnerContainerSafeCode(
     failure.errorCodeDetail,
   );
@@ -4320,13 +4323,13 @@ function createRunnerContainerProcessingFailureError(
       : {}),
   });
   const message = joinHostedRunnerContainerErrorFragments([
-    summarizeHostedExecutionErrorCode(code)
+    summarizeHostedExecutionErrorCode("runtime_error")
       ?? "Hosted execution runtime failed.",
-    `Code: ${errorCodeDetail ?? code}`,
+    `Code: ${errorCodeDetail ?? "runtime_error"}`,
     ...(status === null ? [] : [`Status: ${status}`]),
   ]);
   const error = Object.assign(new Error(message), {
-    code,
+    code: "runtime_error",
     ...(details ? { details } : {}),
     ...(status === null
       ? {}
@@ -4335,35 +4338,7 @@ function createRunnerContainerProcessingFailureError(
           statusCode: status,
         }),
   });
-  const errorName = readHostedExecutionErrorNameForCode(code);
-  if (errorName) {
-    error.name = errorName;
-  }
   return error;
-}
-
-function normalizeRunnerContainerProcessingFailureCode(
-  value: string,
-): HostedExecutionErrorCode {
-  switch (value) {
-    case "authorization_error":
-    case "bundle_archive_validation_error":
-    case "checkpoint_error":
-    case "configuration_error":
-    case "invalid_request":
-    case "outbox_error":
-    case "range_error":
-    case "reference_error":
-    case "runner_http_error":
-    case "runtime_error":
-    case "syntax_error":
-    case "timeout":
-    case "type_error":
-    case "uri_error":
-      return value;
-    default:
-      return "runtime_error";
-  }
 }
 
 function buildRunnerContainerEnvVars(): Record<string, string> {

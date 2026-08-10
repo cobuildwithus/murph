@@ -230,7 +230,6 @@ describe("runtime invocation transport failure fence handling", () => {
 
     expect(processingFailure).toEqual({
       failure: {
-        code: "runtime_error",
         errorCodeDetail: "type_error",
         runtimeFailurePhaseCode: "runtime_phase:workspace.read",
         status: 500,
@@ -276,48 +275,37 @@ describe("runtime invocation transport failure fence handling", () => {
     expect(JSON.stringify(harness.loggedFailureEntries())).not.toContain(hiddenCauseMessage);
   });
 
-  it("preserves a typed failure and safe source code through the plain RPC result", async () => {
-    const harness = await createTransportFailureHarness({
-      ensureProcessingFailure: {
-        failure: {
-          code: "type_error",
-          errorCodeDetail: "EACCES",
-          runtimeFailurePhaseCode: null,
-          status: 500,
-        },
-        kind: "failed",
-      },
-      readActiveRuntimeUserFence: async (token) => ({
-        active: true,
-        attemptId: token.attemptId,
-        leaseGeneration: token.leaseGeneration,
-        userId: TEST_USER_ID,
-      }),
-    });
-
-    await expect(harness.invoke()).rejects.toMatchObject({
-      code: "type_error",
-      details: {
-        errorCodeDetail: "EACCES",
-      },
-      message: "Hosted execution runtime failed. Code: EACCES. Status: 500.",
-      name: "TypeError",
-      status: 500,
-      statusCode: 500,
-    });
-    expect(harness.loggedFailureEntries()).toEqual([
-      expect.objectContaining({
-        errorCode: "type_error",
-        eventCode: "runner.accepted_attempt_failed",
-        redactedJson: expect.objectContaining({
-          errorCode: "type_error",
-          errorCodeDetail: "type_error",
-          safeErrorDetail:
-            "Hosted execution runtime failed. Code: EACCES. Status: 500.",
+  it.each([401, 404, 500, 504])(
+    "preserves a non-phase runner HTTP %i classification at final persistence",
+    async (status) => {
+      const invocationError = Object.assign(
+        new Error(`Hosted runner container returned HTTP ${status}.`),
+        { status, statusCode: status },
+      );
+      const harness = await createTransportFailureHarness({
+        invocationError,
+        readActiveRuntimeUserFence: async (token) => ({
+          active: true,
+          attemptId: token.attemptId,
+          leaseGeneration: token.leaseGeneration,
+          userId: TEST_USER_ID,
         }),
-      }),
-    ]);
-  });
+      });
+
+      await expect(harness.invoke()).rejects.toBe(invocationError);
+      expect(harness.loggedFailureEntries()).toEqual([
+        expect.objectContaining({
+          errorCode: "runner_http_error",
+          eventCode: "runner.accepted_attempt_failed",
+          redactedJson: expect.objectContaining({
+            errorCode: "runner_http_error",
+            safeErrorMessage:
+              `Hosted runner container returned HTTP ${status}.`,
+          }),
+        }),
+      ]);
+    },
+  );
 
   it("keeps the write fence when the invocation is still active in the container", async () => {
     const rawHostedId = "hbm_abcdefghijklmnop-";

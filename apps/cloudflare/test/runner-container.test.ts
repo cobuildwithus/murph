@@ -6981,15 +6981,19 @@ describe("RunnerContainer", () => {
       }),
     });
 
-    const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_non_json_failure"),
+    const thrown = await container.ensureProcessing({
+      invoke: {
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_non_json_failure"),
+        },
+        timeoutMs: 10_000,
+        userId: "member_123",
       },
-      timeoutMs: 10_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
 
+    expect(deriveHostedExecutionErrorCode(thrown)).toBe("runner_http_error");
     expect(thrown).toMatchObject({
       details: {
         responseBodyPresent: true,

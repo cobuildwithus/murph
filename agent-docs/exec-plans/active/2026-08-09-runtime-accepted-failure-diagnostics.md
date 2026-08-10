@@ -1,6 +1,6 @@
 # runtime accepted-failure diagnostics
 
-Status: active — round-4 RPC-boundary remediation is locally proven; exact-head gates pending
+Status: active — round-5 transport-scope remediation is locally proven; exact-head gates pending
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -68,9 +68,10 @@ Updated: 2026-08-09
 6. Risk: Cloudflare Durable Object RPC preserves standard `Error` fields but
    drops custom own properties, which would erase the structured phase and
    source code between RunnerContainer and UserRunner.
-   Mitigation: return a bounded plain-data failure variant from
-   `ensureProcessing`, validate its categorical fields in the UserRunner realm,
-   reconstruct the local error there, and prove the result through a real
+   Mitigation: return a bounded plain-data failure variant only for canonical
+   `runtime_error` failures with an exact allowlisted phase, reconstruct that
+   local error in the UserRunner realm, and leave every non-phase failure on its
+   existing standard `Error` RPC path. Prove both paths through a real
    Workers-runtime namespace stub.
 
 ## Tasks
@@ -109,11 +110,11 @@ Updated: 2026-08-09
   changing canonical message-derived classification while preserving the phase
   in structured redacted metadata. A prior safe source code remains in the
   sanitized reconstructed detail instead of being replaced by the phase.
-- RunnerContainer no longer throws an enriched `Error` across Durable Object
-  RPC for invocation failures. Its existing `ensureProcessing` result union now
-  carries only canonical code, safe source code, exact allowlisted phase, and
-  bounded status primitives; UserRunner validates and reconstructs the local
-  error before the existing retry and persistence owners see it.
+- RunnerContainer uses the existing `ensureProcessing` result union only for a
+  canonical generic failure with an exact phase. That value carries the safe
+  source code, exact allowlisted phase, and bounded status; UserRunner validates
+  and reconstructs the local `runtime_error`. Every non-phase failure retains
+  its pre-existing standard `Error` RPC path and classification.
 
 ## Verification
 
@@ -163,10 +164,20 @@ Updated: 2026-08-09
   complete Workers-runtime suite passes with 6 tests across 5 files, including
   proof that the complete failure value survives
   `getByName(...).ensureProcessing()` RPC.
+- Final ReviewGPT round 5 proved the round-4 bridge was broader than the phase
+  requirement and could reclassify a non-phase `runner_http_error` after local
+  reconstruction. Accepted: a focused production-path regression first failed
+  with `runtime_error`; the bridge is now limited to canonical generic failures
+  with an exact phase, while all other errors are rethrown unchanged. The full
+  three-file propagation slice passes with 272 tests, Cloudflare typecheck
+  passes, and the complete Workers-runtime suite passes with 10 tests across 5
+  files. Representative HTTP 401, 404, 500, and 504 errors retain
+  `runner_http_error` through real RPC and final persistence, and the non-JSON
+  HTTP 500 body remains absent.
 - The PR also includes the one-line current-main CI repair registering the new
   static `/family/setup` route with the existing canonical telemetry allowlist;
   its focused census/redaction test passes all 10 cases.
 - Passed `git diff --check` and parent scope/call-path review.
 - Production deployment proof confirmed the existing propagation bridge is
   already live at 100%; no rollout wait or duplicate transport work is needed.
-- Pending exact-head GitHub Actions and required ReviewGPT gates.
+- Pending exact-head GitHub Actions and ReviewGPT round 6 on the corrected head.
