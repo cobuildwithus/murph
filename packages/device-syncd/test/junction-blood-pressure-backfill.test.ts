@@ -1900,6 +1900,107 @@ test("every malformed provider identity must be repaired before coverage complet
   assert.equal(fullyRepaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
 
+test("more than 64 stable unresolved identities survive yield and clear exactly after repair", async () => {
+  const bloodPressureRecords: Record<string, unknown>[] = Array.from(
+    { length: 65 },
+    (_, index) => ({
+      id: `bp-stable-overflow-${index}`,
+      timestamp: new Date(
+        Date.parse("2026-05-12T08:00:00.000Z") + index * 1_000,
+      ).toISOString(),
+      systolic: 110 + (index % 20),
+    }),
+  );
+  const provider = createProvider({ bloodPressureRecords, requests: [] });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const admitted = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+    },
+  }, 73);
+  admitted.dedupeKey = `hosted-device-sync:${"e".repeat(64)}`;
+  let yieldChecks = 0;
+  const yielded = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      shouldYield: () => {
+        yieldChecks += 1;
+        return yieldChecks > 1;
+      },
+    }),
+    admitted,
+  );
+  const yieldedContinuation = findBloodPressureJob(yielded.scheduledJobs ?? []);
+  const yieldedIdentitiesJson =
+    yieldedContinuation.payload?.historicalUnresolvedProviderRecordIdentitiesJson;
+  assert.equal(typeof yieldedIdentitiesJson, "string");
+  if (typeof yieldedIdentitiesJson !== "string") {
+    throw new Error("Expected exact unresolved identity evidence after yield.");
+  }
+  const yieldedIdentityEvidence = JSON.parse(yieldedIdentitiesJson);
+  assert.equal(Array.isArray(yieldedIdentityEvidence.i), true);
+  assert.equal(yieldedIdentityEvidence.i.length, 65);
+  assert.equal(yieldedIdentityEvidence.u, undefined);
+  assert.equal(
+    yieldedContinuation.payload?.historicalUnresolvedProviderRecordCount,
+    65,
+  );
+
+  const { result: reachedWindowEnd } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    job: toJobRecord(yieldedContinuation, 74),
+    provider,
+  });
+  const anchoredRetry = findBloodPressureJob(reachedWindowEnd.scheduledJobs ?? []);
+  assert.equal(anchoredRetry.payload?.historicalUnresolvedProviderRecordCount, 65);
+  assert.equal(
+    anchoredRetry.payload?.historicalUnresolvedProviderRecordIdentitiesJson,
+    yieldedIdentitiesJson,
+  );
+
+  for (const record of bloodPressureRecords.slice(0, 64)) {
+    record.diastolic = 70;
+  }
+  const { result: oneStillUnresolved } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-12T12:00:00.000Z",
+    }),
+    job: toJobRecord(anchoredRetry, 75),
+    provider,
+  });
+  const finalRetry = findBloodPressureJob(oneStillUnresolved.scheduledJobs ?? []);
+  const finalIdentityJson =
+    finalRetry.payload?.historicalUnresolvedProviderRecordIdentitiesJson;
+  assert.equal(oneStillUnresolved.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(finalRetry.payload?.historicalUnresolvedProviderRecordCount, 1);
+  assert.equal(typeof finalIdentityJson, "string");
+  if (typeof finalIdentityJson !== "string") {
+    throw new Error("Expected one exact unresolved identity after partial repair.");
+  }
+  const finalIdentityEvidence = JSON.parse(finalIdentityJson);
+  assert.equal(finalIdentityEvidence.i.length, 1);
+  assert.equal(finalIdentityEvidence.u, undefined);
+
+  bloodPressureRecords[64] = {
+    ...bloodPressureRecords[64],
+    diastolic: 70,
+  };
+  const { result: fullyRepaired } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-13T12:00:00.000Z",
+    }),
+    job: toJobRecord(finalRetry, 76),
+    provider,
+  });
+
+  assert.equal(fullyRepaired.scheduledJobs?.length ?? 0, 0);
+  assert.equal(fullyRepaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
 test("legacy and identity-less unresolved evidence cannot be cleared speculatively", async () => {
   const cases = [
     {
@@ -1918,6 +2019,20 @@ test("legacy and identity-less unresolved evidence cannot be cleared speculative
       record: {
         timestamp: "2026-05-12T08:30:00.000Z",
         systolic: 121,
+      },
+    },
+    {
+      label: "malformed encoded evidence",
+      payload: {
+        historicalUnresolvedProviderRecordIdentitiesJson:
+          '{"v":1,"i":["not-a-stable-provider-identity"]}',
+        historicalUnresolvedProviderRecordCount: 1,
+      },
+      record: {
+        id: "bp-unrelated-to-malformed-evidence",
+        timestamp: "2026-05-12T08:30:00.000Z",
+        systolic: 121,
+        diastolic: 79,
       },
     },
   ] as const;

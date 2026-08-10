@@ -2737,6 +2737,12 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
   });
 
   it("parses Junction historical backfill job hints", () => {
+    const unresolvedIdentitiesJson = JSON.stringify({
+      v: 1,
+      i: Array.from({ length: 65 }, (_, index) =>
+        `blood-pressure-${index.toString(16).padStart(16, "0")}`
+      ),
+    });
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
         {
@@ -2746,9 +2752,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             historicalBackfill: true,
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
-            historicalUnresolvedProviderRecordIdentitiesJson:
-              "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
-            historicalUnresolvedProviderRecordCount: 2,
+            historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
+            historicalUnresolvedProviderRecordCount: 65,
             historicalWindowStart: "2026-03-01T00:00:00Z",
             timeseriesCursor: "2026-04-02T00:00:00Z",
             windowEnd: "2026-04-03T00:00:00Z",
@@ -2763,9 +2768,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       historicalBackfill: true,
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
-      historicalUnresolvedProviderRecordIdentitiesJson:
-        "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
-      historicalUnresolvedProviderRecordCount: 2,
+      historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
+      historicalUnresolvedProviderRecordCount: 65,
       historicalWindowStart: "2026-03-01T00:00:00.000Z",
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",

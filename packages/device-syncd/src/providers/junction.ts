@@ -343,7 +343,6 @@ const EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS = Object.freeze([
   24 * 60 * 60_000,
 ] as const);
 const JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITIES_VERSION = 1;
-const JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT = 64;
 const JUNCTION_BLOOD_PRESSURE_PROVIDER_RECORD_IDENTITY_PATTERN =
   /^blood-pressure-[0-9a-f]{16}$/u;
 const JUNCTION_SCHEDULED_RECONCILE_PRIORITY = 40;
@@ -5791,15 +5790,12 @@ function readJunctionHistoricalUnresolvedProviderRecords(
         typeof identity === "string"
         && JUNCTION_BLOOD_PRESSURE_PROVIDER_RECORD_IDENTITY_PATTERN.test(identity)
       );
-      const identities = [...new Set(validIdentities)]
-        .sort()
-        .slice(0, JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT);
+      const identities = [...new Set(validIdentities)].sort();
       return {
         identities,
         withoutStableIdentity:
           parsed?.u === true
-          || validIdentities.length !== rawIdentities.length
-          || rawIdentities.length > JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT,
+          || validIdentities.length !== rawIdentities.length,
       };
     } catch {
       return { identities: [], withoutStableIdentity: true };
@@ -5832,19 +5828,11 @@ function resolveJunctionHistoricalUnresolvedProviderRecords(
     identities.add(identity);
   }
 
-  const sortedIdentities = [...identities].sort();
-  const overflow =
-    sortedIdentities.length
-      > JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT;
   return {
-    identities: sortedIdentities.slice(
-      0,
-      JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT,
-    ),
+    identities: [...identities].sort(),
     withoutStableIdentity:
       carried.withoutStableIdentity
-      || importResult.unresolvedProviderRecordsWithoutStableIdentity
-      || overflow,
+      || importResult.unresolvedProviderRecordsWithoutStableIdentity,
   };
 }
 
