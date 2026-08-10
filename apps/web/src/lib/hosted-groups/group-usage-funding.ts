@@ -7,6 +7,7 @@ import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
+  calculateHostedGroupIncludedUsageUsedPercent,
   classifyHostedGroupUsageCapacity,
 } from "./group-usage-capacity";
 import {
@@ -57,6 +58,8 @@ export interface HostedGroupFundingRecoveryStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
+  /** Whole-number share of the room's included usage consumed this period. */
+  includedUsageUsedPercent?: number;
 }
 
 // Accepts the full funding-locator namespace: an owner-created join code or
@@ -151,6 +154,12 @@ export async function readHostedGroupFundingRecoveryStatus(input: {
     return null;
   }
 
+  const includedUsageUsedPercent =
+    calculateHostedGroupIncludedUsageUsedPercent({
+      limitUsdMicros: decision.limitUsdMicros,
+      spentUsdMicros: decision.spentUsdMicros,
+    });
+
   const capacityState = classifyHostedGroupUsageCapacity({
     limitUsdMicros: decision.limitUsdMicros,
     remainingUsdMicros: decision.remainingUsdMicros,
@@ -177,6 +186,9 @@ export async function readHostedGroupFundingRecoveryStatus(input: {
     fundingUrl: locator
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
       : null,
+    ...(includedUsageUsedPercent === null
+      ? {}
+      : { includedUsageUsedPercent }),
   };
 }
 

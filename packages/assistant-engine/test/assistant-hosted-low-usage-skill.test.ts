@@ -123,7 +123,9 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(skill).toContain('final paragraph with no delimiter')
     expect(skill).toContain('internal delimiter as visible copy')
-    expect(skill).toContain('ignore `usedPercent`, `remainingPercent`, `forecast`')
+    expect(normalizedSkill).toContain(
+      'ignore `usedPercent`, `remainingPercent`, `forecast`, `includedUsageUsedPercent`',
+    )
     expect(skill).toContain('Do not render a link or Markdown link')
     expect(normalizedSkill).toContain(
       'In a group, also keep the first heads-up link-free',
@@ -282,6 +284,45 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(normalizedSkill).not.toContain(
       'Share a returned first-party funding URL only when `fundingNeeded` is true',
+    )
+  })
+
+  it('answers only explicit current-room usage progress with the bounded aggregate', async () => {
+    const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+
+    expect(normalizedSkill).toContain(
+      'an explicit current-room usage-progress question asks how much of this room\'s included usage has been used in the current period',
+    )
+    expect(normalizedSkill).toContain(
+      'A request about funding, sponsoring, contributing, adding usage, options, referrals, or earning more usage does not qualify by itself',
+    )
+    expect(normalizedSkill).toContain(
+      'For an integer from 0 through 99, answer with exactly: "About X% of this room\'s included usage for the current period has been used."',
+    )
+    expect(normalizedSkill).toContain(
+      'For 100, answer with exactly: "At least all of this room\'s included usage for the current period has been used."',
+    )
+    expect(normalizedSkill).toContain(
+      'Never rewrite this as "100% used," "0% left," "out," "exhausted," or a claim that no usage remains',
+    )
+    expect(normalizedSkill).toContain(
+      'an authoritative included-usage progress figure for this room is unavailable right now',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not treat a missing field as zero or answer from an earlier read',
+    )
+    expect(normalizedSkill).toContain(
+      'Ignore `includedUsageUsedPercent` for every assistant-initiated heads-up',
+    )
+    expect(normalizedSkill).toContain(
+      'when handling funding, sponsor, contribution, add-usage, options, referral, or earned-usage intent',
+    )
+    expect(normalizedSkill).toContain(
+      'the percentage must not rank, justify, or change the options',
+    )
+    expect(normalizedSkill).toContain(
+      'Only an explicit current-room progress question authorizes the exact included-usage wording above',
     )
   })
 

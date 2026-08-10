@@ -1059,6 +1059,41 @@ describe("murph.group dynamic tool", () => {
     }))?.kind).toBe("invalid-group-arguments");
   });
 
+  it("passes the bounded included-usage progress field through to the model", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_usage",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const response = {
+      action: "read_usage" as const,
+      result: {
+        status: "ok" as const,
+        usage: {
+          fundingNeeded: false,
+          fundingUrl: null,
+          includedUsageUsedPercent: 64,
+        },
+      },
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async () => response);
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(groupRequest).toHaveBeenCalledWith({ action: "read_usage" });
+    expect(readGroupToolPayload(result)).toEqual(response);
+  });
+
   it("parses read_current arguments", () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "read_current",

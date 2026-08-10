@@ -6,9 +6,8 @@ Updated: 2026-08-09
 
 ## Goal
 
-- Make a hosted group's usage-status read reliable across Web and hosted-runner
-  rollout so a participant's usage question cannot fail because the producer
-  and strict reader briefly disagree about the response shape.
+- Make a hosted group's usage-status read return a useful, authoritative answer
+  when a participant asks how much included usage the room has consumed.
 - Preserve Web as the sole usage-projection owner and keep payer identity,
   payment state, internal accounting, and other private funding facts out of
   the assistant response.
@@ -35,16 +34,15 @@ Updated: 2026-08-09
   after a successful read. An included-usage percentage that is monotone within
   one period answers it without revealing credits, refill timing, payment
   setup, payer identity, or period start/end timestamps.
+- The product owner explicitly accepts short-lived `read_usage` failures while
+  Web and Cloudflare run different strict schemas. Do not add a reader-only
+  compatibility phase for this field.
 
 ## Success criteria
 
-- A direct regression proves the formerly incompatible producer/reader pairing
-  and the implemented compatibility or rollout gate.
-- The new optional response field lands in a reader-only phase that validates
-  and strips it. The Web producer and preserving reader land only after that
-  non-failing hosted reader is independently deployed and proven converged.
-- Current and supported rolling-deploy response shapes remain fail-closed on
-  unknown or private fields.
+- The Web projection, hosted parser, runtime contract, and assistant policy ship
+  the bounded aggregate as one direct product change.
+- The strict response remains fail-closed on unknown or private fields.
 - An ordinary group-tool failure remains recoverable inside the provider turn
   and emits only bounded, metadata-only diagnostics.
 - Focused tests, relevant package typechecks, exact-head CI, ReviewGPT gates,
@@ -52,9 +50,9 @@ Updated: 2026-08-09
 
 ## Scope
 
-- In scope: `murph.group read_usage` Web/runtime response contract, its rollout
-  enforcement, focused parser/Web/runtime tests, metadata-only diagnostics if
-  they close the proven observability gap, and directly affected durable docs.
+- In scope: `murph.group read_usage` Web/runtime response contract, focused
+  parser/Web/runtime tests, metadata-only diagnostics if they close the proven
+  observability gap, and directly affected durable docs.
 - In scope: one room-public `includedUsageUsedPercent` aggregate, calculated
   from included spend and limit and independent of purchased or referred
   credit. Assistant disclosure policy limits it to explicit usage questions;
@@ -67,7 +65,8 @@ Updated: 2026-08-09
 
 - Web remains the sole owner of usage and funding projections.
 - Hosted readers remain strict and reject unknown accounting or identity fields.
-- Rolling-deploy compatibility must be executable, not only documented.
+- Do not add a rollout-only parser mode, feature flag, state owner, or release
+  negotiation path for this field.
 - Production evidence and identifiers stay out of committed artifacts.
 - The foreground reply path must not wait on optional observability.
 
@@ -76,15 +75,14 @@ Updated: 2026-08-09
 1. Complete the runtime/security/reliability contract read and map active-plan
    overlap.
 2. Reproduce the exact response-shape mismatch from repository history and add
-   a focused failing proof for the reader boundary.
-3. Land the optional validating-and-stripping reader plus metadata-only
-   parser-failure category without changing the Web producer, then deploy and
-   prove runner convergence.
-4. Update the canonical product/privacy contracts, then land
+   a metadata-only parser-failure category for future diagnosis.
+3. Update the canonical product/privacy contracts, then land
    `includedUsageUsedPercent` in the Web projection, explicit-question
    assistant disclosure policy, and end-to-end regression coverage.
-5. Add metadata-only failure categorization only through the existing
+4. Add metadata-only failure categorization only through the existing
    runtime issue/log owner without adding latency or state.
+5. Remove the reader-only compatibility phase and document the explicitly
+   accepted mixed-version failure window.
 6. Run focused tests, typechecks, privacy/diff review, required specialist and
    ReviewGPT gates, exact-head CI, and a direct scenario proof.
 7. Close this plan with `scripts/finish-task`, push the exact head, and complete

@@ -3004,6 +3004,9 @@ export function parseHostedRuntimeGroupToolResponse(
               usage.fundingUrl,
               "Hosted runtime group tool read_usage fundingUrl",
             ),
+            ...(includedUsageUsedPercent === undefined
+              ? {}
+              : { includedUsageUsedPercent }),
           },
         },
       };

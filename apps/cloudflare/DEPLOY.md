@@ -428,35 +428,35 @@ fallback when an older supported runner omits it.
 
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 
-The group-tool `read_usage` parser accepts the exact current privacy-safe
-response, the immediately preceding exact response, and a prospective optional
-`includedUsageUsedPercent` field. The first reader phase validates and strips
-that field, preserving the current product projection while making a later
-producer-first skew non-failing. This matters because read-side tolerance is
-only the first deployment step.
+The current group-tool `read_usage` response is
+`{fundingNeeded,fundingUrl,includedUsageUsedPercent?}`. The parser preserves the
+bounded included-usage aggregate when present and remains strict about unknown
+or private fields. The existing sponsorship-era response branches remain
+legacy-facing only.
 
 1. Deploy the Cloudflare Worker and runner bundle first with
    `container_rollout=immediate`. Require managed-container smoke to report the
    new bundle fingerprint and drain older warm runners. The compatible runtime
-   accepts the current `{fundingNeeded,fundingUrl}` response, validates and
-   strips an additive optional `includedUsageUsedPercent`, strips the
-   immediately preceding optional `sponsorshipStatus` field, and still accepts
+   accepts the current response, strips the immediately preceding optional
+   `sponsorshipStatus` field, and still accepts
    the older `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response.
    It derives only whether funding is needed from that oldest shape and
    discards period, percentage, and funding-setup fields.
 2. Apply the additive capped-sponsorship migration, then deploy the compatible
    Web release. Confirm both the migration and new Web have converged before
-   enabling monthly authorization creation or automatic refill admission. Web
-   now emits only `{fundingNeeded,fundingUrl}`.
-3. Any change that exposes `includedUsageUsedPercent` to assistant policy must
-   update the canonical product/privacy contracts and land separately after
-   that reader fingerprint converges. The first-phase reader will safely strip
-   the field if Web promotes first; deploy the preserving reader immediately to
-   close that bounded product-availability window.
-4. Until that separate product change completes, smoke group reads with and
-   without an active automatic sponsor and confirm the runtime learns only
-   funding urgency and the first-party capability. Funding setup and
-   quantitative fields must not reappear.
+   enabling monthly authorization creation or automatic refill admission.
+3. Smoke group reads with and without an active automatic sponsor and confirm
+   the runtime learns only funding urgency, the first-party capability, and the
+   bounded included-usage aggregate. Funding setup and other quantitative
+   fields must not reappear.
+
+The `includedUsageUsedPercent` producer, preserving reader, and assistant policy
+ship as one product change. There is no strip-only reader phase or rollout-only
+feature flag. A mixed-version Web/runner window may temporarily make the strict
+read fail; that availability tradeoff is accepted. Deploy Web and Cloudflare as
+close together as practical, require managed-container smoke to prove the new
+runner fingerprint, then run a controlled explicit group usage-status question.
+Roll back both sides to a schema-compatible pair if rollback is required.
 
 The first monthly authorization is the old-Web rollback floor. The preceding
 Web reconciliation code cannot activate that authorization, so after the first
@@ -471,9 +471,9 @@ Remove them after
 old Web is neither routable nor rollback-eligible, all pre-reader warm runners
 have drained, and production evidence shows no preceding-shape responses. This
 is a narrow read-side seam, not a permanent rollout framework, and it must never
-restore group percentages, period boundaries, or other quantitative accounting
-to runtime or assistant policy without an explicit product/privacy contract
-change.
+restore legacy remaining percentages, period boundaries, or other quantitative
+accounting to runtime or assistant policy outside the reviewed included-usage
+aggregate.
 
 The current projection separates urgency from capability: `fundingNeeded`
 controls assistant-initiated depletion messaging, while a non-null `fundingUrl`

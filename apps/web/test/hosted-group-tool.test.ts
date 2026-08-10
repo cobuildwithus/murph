@@ -451,6 +451,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      includedUsageUsedPercent: 64,
       sponsorshipStatus: "sponsored",
     });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
@@ -698,7 +699,33 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
-  it("does not expose private sponsorship state to the runtime", async () => {
+  it("serializes only the room-public usage projection", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "read_usage" },
+    })).resolves.toEqual({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          fundingNeeded: true,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          includedUsageUsedPercent: 64,
+        },
+      },
+    });
+    expect(mocks.readHostedGroupFundingRecoveryStatus).toHaveBeenCalledWith({
+      runtimeMemberId: "member_group_runtime",
+    });
+  });
+
+  it("omits unavailable usage progress without hiding funding status", async () => {
+    mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValueOnce({
+      fundingNeeded: true,
+      fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+    });
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: { action: "read_usage" },
@@ -712,9 +739,6 @@ describe("handleHostedRuntimeGroupTool", () => {
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
         },
       },
-    });
-    expect(mocks.readHostedGroupFundingRecoveryStatus).toHaveBeenCalledWith({
-      runtimeMemberId: "member_group_runtime",
     });
   });
 

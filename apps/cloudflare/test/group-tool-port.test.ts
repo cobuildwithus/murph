@@ -47,7 +47,7 @@ it("categorizes a malformed group usage response without retaining its payload",
   expect(String(error)).not.toContain(privatePayloadValue);
 });
 
-it("accepts and strips the reader-first group usage progress field", async () => {
+it("accepts and preserves the group usage progress field", async () => {
   const currentResponse = {
     action: "read_usage" as const,
     result: {
@@ -58,7 +58,7 @@ it("accepts and strips the reader-first group usage progress field", async () =>
       },
     },
   };
-  const readerFirstResponse = {
+  const usageProgressResponse = {
     ...currentResponse,
     result: {
       ...currentResponse.result,
@@ -68,7 +68,7 @@ it("accepts and strips the reader-first group usage progress field", async () =>
       },
     },
   };
-  const fetchImpl = vi.fn(async () => new Response(JSON.stringify(readerFirstResponse), {
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify(usageProgressResponse), {
     headers: { "content-type": "application/json; charset=utf-8" },
     status: 200,
   }));
@@ -80,7 +80,7 @@ it("accepts and strips the reader-first group usage progress field", async () =>
   });
 
   await expect(groupToolPort.request({ action: "read_usage" }))
-    .resolves.toEqual(currentResponse);
+    .resolves.toEqual(usageProgressResponse);
 });
 
 it("aborts participant display-name reads at the short soft deadline and ignores late responses", async () => {

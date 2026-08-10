@@ -3103,7 +3103,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
-    const readerFirstResponse = {
+    const usageProgressResponse = {
       ...response,
       result: {
         ...response.result,
@@ -3113,8 +3113,8 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       },
     };
-    expect(parseHostedRuntimeGroupToolResponse(readerFirstResponse))
-      .toEqual(response);
+    expect(parseHostedRuntimeGroupToolResponse(usageProgressResponse))
+      .toEqual(usageProgressResponse);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_usage",
       result: {
