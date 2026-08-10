@@ -20,6 +20,11 @@ Updated: 2026-08-10
   unauthorized sibling remains counted by the global resource guard.
 - An already-authorized checkout on the preceding guard implementation can use
   its installer, committer wrapper, and creation helper during rollout.
+- An authorized checkout on the current guard can use those entrypoints while
+  the primary checkout still has the preceding guard and no raw sibling exists;
+  the older primary remains globally fail-closed if a raw sibling exists.
+- Isolation is durable before legacy compatibility authorization is exposed,
+  and malformed or interrupted marker states remain fail-closed.
 - The explicit no-argument guard continues to fail when any unauthorized
   registered worktree exists when run from the primary checkout.
 
@@ -42,16 +47,18 @@ Updated: 2026-08-10
 
 - Shell syntax passed for the guard, creation helper, hook installer, and
   pre-commit hook.
-- Focused worktree-guard coverage passed: 26 tests, including historical
-  entrypoint compatibility and scoped resource-budget coverage.
+- Focused worktree-guard coverage passed: 31 tests, including both
+  mixed-version directions, hook/guard update ordering, interrupted and
+  malformed marker states, and scoped resource-budget coverage.
 - Scoped `pnpm test:diff` passed with serialized Vitest workers, including all
-  519 repo-tools tests, repo-tools typechecking, dependency policy, and source
+  524 repo-tools tests, repo-tools typechecking, dependency policy, and source
   guards. Two preceding parallel attempts hit unrelated timing-only tests;
   both affected files passed directly before the serialized full rerun.
 - With the live unrelated raw review checkout still registered, the repaired
   guard passed for this authorized checkout while its no-argument global audit
   continued to fail as designed.
 - The preliminary ReviewGPT pass identified historical-entrypoint and scoped
-  resource-budget coverage gaps. Both were remediated and await exact-head
-  reruns.
+  resource-budget coverage gaps. Final round 1 then identified inverse-version
+  compatibility and marker-write ordering gaps. All accepted findings were
+  remediated and await exact-head reruns.
 - Pending: exact-head ReviewGPT and GitHub Actions.

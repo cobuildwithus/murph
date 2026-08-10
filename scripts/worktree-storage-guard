@@ -11,7 +11,7 @@ usage() {
 reserve=0
 target_path=''
 creating_worktree=0
-current_worktree_path=''
+current_worktree_path="${MURPH_WORKTREE_GUARD_CURRENT_WORKTREE:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --creating-worktree)
@@ -129,7 +129,7 @@ record_path=''
 record_locked=''
 
 count_record() {
-  local gitdir_line gitdir_value admin_dir canonical_record_path
+  local gitdir_line gitdir_value admin_dir canonical_record_path authorization_marker isolation_marker
   [[ -n "$record_path" && -d "$record_path" ]] || return 0
   canonical_record_path="$(cd "$record_path" 2>/dev/null && pwd -P)" || return 0
   registered_paths+=("$canonical_record_path")
@@ -154,17 +154,29 @@ count_record() {
       admin_dirs+=("$admin_dir")
       disk_paths+=("$record_path")
       if [[ -f "$authorization_initialized" ]]; then
-        if [[ ! -f "$admin_dir/murph-storage-guard-authorized" ]]; then
-          # Legacy guards only understand the authorization marker. Backfill it
-          # while retaining the current guard's isolation marker so historical
-          # sanctioned entrypoints can keep enforcing count and disk budgets.
-          : >"$admin_dir/murph-storage-guard-authorized"
-          : >"$admin_dir/murph-storage-guard-isolated"
+        authorization_marker="$admin_dir/murph-storage-guard-authorized"
+        isolation_marker="$admin_dir/murph-storage-guard-isolated"
+        if [[ ! -f "$authorization_marker" && ! -e "$isolation_marker" \
+          && ! -L "$isolation_marker" ]]; then
+          # Make isolation durable before exposing the legacy compatibility
+          # marker. Noclobber prevents a concurrently inserted filesystem node
+          # from being followed or overwritten.
+          if ! (set -o noclobber; : >"$isolation_marker") 2>/dev/null; then
+            :
+          fi
         fi
-        if [[ -f "$admin_dir/murph-storage-guard-isolated" ]]; then
+        if [[ -e "$isolation_marker" || -L "$isolation_marker" \
+          || ! -f "$authorization_marker" ]]; then
           unauthorized_count=$((unauthorized_count + 1))
           if [[ -n "$current_worktree_path" && "$canonical_record_path" == "$current_worktree_path" ]]; then
             current_worktree_unauthorized=1
+          fi
+          # Only a regular, non-symlink isolation marker is a completed current
+          # migration state. Once isolation is proven, retry the legacy marker
+          # so preceding-version sanctioned entrypoints can enforce budgets.
+          if [[ -f "$isolation_marker" && ! -L "$isolation_marker" \
+            && ! -f "$authorization_marker" ]]; then
+            : >"$authorization_marker"
           fi
         fi
       fi

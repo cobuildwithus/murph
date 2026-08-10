@@ -32,4 +32,5 @@ git -C "$repo_root" config --local --add include.path "$guard_config"
 
 # Initialize the machine-local authorization baseline before a raw worktree can
 # reach the shared hook for the first time.
-"$primary_worktree/scripts/worktree-storage-guard" --current-worktree "$repo_root"
+MURPH_WORKTREE_GUARD_CURRENT_WORKTREE="$repo_root" \
+  "$primary_worktree/scripts/worktree-storage-guard"

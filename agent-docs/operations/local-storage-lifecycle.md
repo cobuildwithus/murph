@@ -96,13 +96,17 @@ fails its own commit without blocking an authorized sibling. Sanctioned
 creation may also continue while a raw sibling exists because every registered
 worktree still consumes the global numeric and disk budget. During a
 mixed-version rollout, the current guard adds a current isolation marker and a
-legacy authorization marker to a raw worktree. The legacy marker lets an
+legacy authorization marker to a raw worktree, in that order. Any partial or
+malformed isolation-marker state remains fail-closed. The legacy marker lets an
 already-authorized historical checkout keep using its branch-local installer,
 committer, and creation helper; the current shared hook and primary guard honor
-the isolation marker and continue rejecting the raw checkout. Running the
-primary checkout's `scripts/worktree-storage-guard` without a scoped checkout
-remains the explicit global audit and reports every isolated registered
-worktree.
+the isolation marker and continue rejecting the raw checkout. The shared hook
+and installer pass the current checkout through an environment hint while
+retaining the preceding guard's no-argument command surface, so either the
+primary or task checkout may advance first. Until an older primary advances,
+its global authorization behavior remains fail-closed. Running the primary
+checkout's `scripts/worktree-storage-guard` without a scoped checkout remains
+the explicit global audit and reports every isolated registered worktree.
 
 The ratchet does not delete a checkout. Preserve active/open-PR or dirty work.
 Retire a clean registered checkout with `scripts/retire-worktree` after its

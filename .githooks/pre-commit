@@ -19,7 +19,8 @@ guard_root="$(
   exit 1
 }
 
-"$guard_root/scripts/worktree-storage-guard" --current-worktree "$repo_root"
+MURPH_WORKTREE_GUARD_CURRENT_WORKTREE="$repo_root" \
+  "$guard_root/scripts/worktree-storage-guard"
 
 # Fast no-op unless the staged change touches the CLI package.
 if ! git diff --cached --name-only | grep -q '^packages/cli/'; then
