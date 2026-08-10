@@ -1,0 +1,29 @@
+name: Export device-sync source 337a
+
+on:
+  push:
+    branches:
+      - agent/device-sync-dirty-source-337a7588
+    paths:
+      - .github/workflows/agent-export-device-sync-source-337a.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Archive tracked source
+        shell: bash
+        run: git archive --format=tar.gz --output=murph-source-337a.tar.gz HEAD
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: murph-source-337a
+          path: murph-source-337a.tar.gz
+          if-no-files-found: error
+          retention-days: 1
