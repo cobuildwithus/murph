@@ -281,6 +281,16 @@ describe("changelog registry", () => {
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
 
+    expect(items.get("companion-access-during-billing-pause")).toMatchObject({
+      sourcePullRequests: [1542],
+      summary: expect.stringContaining("established health connection syncing"),
+      details: expect.stringContaining(
+        "Administrative suspension and health-data consent still fail closed",
+      ),
+    });
+    expect(items.get("companion-access-during-billing-pause")?.details).toContain(
+      "automatic meal capture",
+    );
     expect(items.get("reminders-keep-requested-timezone")).toMatchObject({
       sourcePullRequests: [1546],
       summary: expect.stringContaining("preserves that local time"),
@@ -491,6 +501,7 @@ describe("changelog registry", () => {
       {
         id: "2026-08-10",
         itemIds: [
+          "companion-access-during-billing-pause",
           "personal-patterns",
           "reminders-keep-requested-timezone",
         ],

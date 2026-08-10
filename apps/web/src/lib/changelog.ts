@@ -65,10 +65,28 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Companion access, patterns, and local-time reminders",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "The companion now stays usable through a billing pause, Patterns can compare repeated actions with next-day sleep and recovery, and recurring reminders keep the local time and timezone you asked for.",
     items: [
+      {
+        id: "companion-access-during-billing-pause",
+        kind: "improvement",
+        priority: 5,
+        title: "The companion stays available while billing is paused",
+        summary:
+          "Members with a paused subscription can open the companion and keep an established health connection syncing without reactivating paid assistant work.",
+        details:
+          "Administrative suspension and health-data consent still fail closed. Starting or explicitly reconnecting a provider, automatic meal capture, and assistant or model work remain unavailable until paid access returns.",
+        relevanceTags: [
+          "companion",
+          "health-data",
+          "sync",
+          "billing",
+          "reliability",
+        ],
+        sourcePullRequests: [1542],
+      },
       {
         id: "personal-patterns",
         kind: "feature",

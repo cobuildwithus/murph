@@ -88,7 +88,10 @@ Updated: 2026-08-10
 4. Add focused access and route regressions; update the durable companion
    architecture/security contract.
 5. Run focused verification, commit and push the exact candidate, open the PR,
-   and complete preliminary specialist ReviewGPT, final ReviewGPT, and CI.
+   and complete preliminary specialist review and exact-head CI. Do not make
+   further ReviewGPT calls after the user's rate-limit opt-out.
+6. Publish the member-visible paused-companion recovery in the Web changelog
+   and satisfy the repository PR changelog gate.
 
 ## Decisions
 
@@ -144,6 +147,9 @@ Updated: 2026-08-10
 - Run the final gate with the current public npm `latest` release of
   `@cobuild/review-gpt` (0.5.124), pinned in Murph's manifest, lockfile, and
   minimum-release-age exception rather than relying on a machine-global CLI.
+- Publish the recovery in the existing 2026-08-10 changelog edition. No new
+  visual is needed because this change restores an existing companion state
+  without introducing a new screen or interaction.
 
 ## Verification
 
@@ -302,3 +308,7 @@ Updated: 2026-08-10
   full runner-bundle assembly. The combined bundle measured a 1,607,412-byte
   entry, 7,714,947-byte static closure, and 9,606,003-byte total under the
   current 10,056,956-byte ceiling.
+- Passed: the member-facing changelog registry and page suites (2 files, 38
+  tests), Web typecheck, and Web lint with no errors after adding the
+  paused-companion recovery to the 2026-08-10 edition. Exact-head CI remains
+  required after the changelog commit is pushed.

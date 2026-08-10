@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Patterns and reminders that keep their local time",
+      "Companion access, patterns, and local-time reminders",
     );
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(
@@ -105,7 +105,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('aria-label="Changelog pages"');
     expect(markup).toContain('href="/changelog?edition=2026-08-03"');
     expect(markup).toContain(
-      'href="/changelog?edition=2026-08-10#personal-patterns"',
+      'href="/changelog?edition=2026-08-10#companion-access-during-billing-pause"',
     );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',
