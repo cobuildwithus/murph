@@ -915,7 +915,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     );
   });
 
-  it("drains slow route preparation before BEGIN when Telegram mailbox warming fails", async () => {
+  it("preserves the first observed Telegram preparation failure after a slower sibling also fails", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
       channel: "telegram",
@@ -974,20 +974,16 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       callback: (tx: TelegramWebhookPrismaHarness) => Promise<unknown>,
     ) => originalTransaction(callback));
     prisma.$transaction = transaction;
-    const defaultRoutePreparation =
-      mocks.prepareHostedThreadContainerDeliveryRoute.getMockImplementation();
-    if (!defaultRoutePreparation) {
-      throw new Error("Expected the default Telegram route preparation mock.");
-    }
+    const routeError = new Error("Telegram route preparation failed later.");
     let releaseRoutePreparation: (() => void) | undefined;
     const routePreparationGate = new Promise<void>((resolve) => {
       releaseRoutePreparation = resolve;
     });
     let routePreparationSettled = false;
-    mocks.prepareHostedThreadContainerDeliveryRoute.mockImplementationOnce(async (input) => {
+    mocks.prepareHostedThreadContainerDeliveryRoute.mockImplementationOnce(async () => {
       await routePreparationGate;
       routePreparationSettled = true;
-      return defaultRoutePreparation(input);
+      throw routeError;
     });
     const { unwrapHostedDomainRootForWeb } = await import(
       "@/src/lib/hosted-crypto/domain-root-store"

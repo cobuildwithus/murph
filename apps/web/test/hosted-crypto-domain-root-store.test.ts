@@ -397,7 +397,9 @@ test("candidate preparation drains every started KMS operation before returning 
     signCalls,
     signer: signer.privateKey,
   });
-  const firstError = new Error("First candidate KMS failure.");
+  const firstError = new Error("First observed candidate KMS failure.");
+  const laterError = new Error("Later candidate KMS failure.");
+  const observedPlaintexts: Uint8Array[] = [];
   let encryptCallCount = 0;
   let releaseSlowEncrypt: (() => void) | undefined;
   let slowEncryptStarted = false;
@@ -408,12 +410,14 @@ test("candidate preparation drains every started KMS operation before returning 
     ...baseClient,
     async encrypt(input) {
       encryptCallCount += 1;
+      observedPlaintexts.push(input.plaintext);
       if (encryptCallCount === 1) {
-        throw firstError;
-      }
-      if (encryptCallCount === 2) {
         slowEncryptStarted = true;
         await slowEncrypt;
+        throw laterError;
+      }
+      if (encryptCallCount === 2) {
+        throw firstError;
       }
       return baseClient.encrypt(input);
     },
@@ -441,7 +445,10 @@ test("candidate preparation drains every started KMS operation before returning 
     },
   );
 
-  await vi.waitFor(() => expect(slowEncryptStarted).toBe(true));
+  await vi.waitFor(() => {
+    expect(slowEncryptStarted).toBe(true);
+    expect(encryptCallCount).toBeGreaterThanOrEqual(2);
+  });
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(preparationSettled).toBe(false);
   if (!releaseSlowEncrypt) {
@@ -451,9 +458,9 @@ test("candidate preparation drains every started KMS operation before returning 
 
   await expect(preparation).rejects.toBe(firstError);
   expect(encryptCallCount).toBe(3);
-  expect(encryptCalls.length).toBeGreaterThanOrEqual(2);
-  expect(encryptCalls.every((call) =>
-    call.plaintext.every((byte) => byte === 0)
+  expect(encryptCalls.length).toBeGreaterThanOrEqual(1);
+  expect(observedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
   )).toBe(true);
 });
 
@@ -1039,15 +1046,67 @@ test("Linq authority batch preflight retains failure for its authoritative repea
 
 test("Linq authority batch retains an envelope query failure only for the current request", async () => {
   const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const records = (await createBatchPrivateFieldRecords({
+    memberIds: [
+      "member-batch-retained-query-failure-1",
+      "member-batch-retained-query-failure-2",
+    ],
+    tx,
+  })).identityRecords;
+  const first = records[0];
+  const second = records[1];
+  if (!first || !second) {
+    throw new Error("Expected two private-field fixtures.");
+  }
+  const healthyFindMany = createBatchEnvelopeFindMany(tx);
+  const metadataError = new Error("Envelope metadata read failed.");
+  const envelopeFindMany = vi.fn(async (input: Parameters<typeof healthyFindMany>[0]) =>
+    healthyFindMany(input)
+  );
+  envelopeFindMany.mockRejectedValueOnce(metadataError);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const decrypt = (selectedRecords = records) => decryptHostedWebNullableFields({
+    entries: selectedRecords.map((record) => ({
+      field: "hosted-member-identity.phone-number",
+      memberId: record.memberId,
+      value: record.phoneNumberEncrypted,
+    })),
+    prisma,
+    retainFailureInScopedCache: true,
+  });
+
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(decrypt()).rejects.toBe(metadataError);
+    await expect(decrypt([first])).rejects.toBe(metadataError);
+    await expect(decrypt([second])).rejects.toBe(metadataError);
+  });
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(0);
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(decrypt()).resolves.toHaveLength(2);
+  });
+  expect(envelopeFindMany).toHaveBeenCalledTimes(2);
+  expect(decryptMetrics.calls).toHaveLength(2);
+});
+
+test("batch metadata query failures are retryable in the same cache scope without opt-in", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
   const [record] = (await createBatchPrivateFieldRecords({
-    memberIds: ["member-batch-retained-query-failure"],
+    memberIds: ["member-batch-query-failure-no-retain"],
     tx,
   })).identityRecords;
   if (!record) {
     throw new Error("Expected one private-field fixture.");
   }
   const healthyFindMany = createBatchEnvelopeFindMany(tx);
-  const metadataError = new Error("Envelope metadata read failed.");
+  const metadataError = new Error("Transient envelope metadata read failed.");
   const envelopeFindMany = vi.fn(async (input: Parameters<typeof healthyFindMany>[0]) =>
     healthyFindMany(input)
   );
@@ -1065,18 +1124,11 @@ test("Linq authority batch retains an envelope query failure only for the curren
       value: record.phoneNumberEncrypted,
     }],
     prisma,
-    retainFailureInScopedCache: true,
   });
 
   resetLocalKmsDecryptMetrics(decryptMetrics);
   await runWithHostedDomainRootUnwrapCache(async () => {
     await expect(decrypt()).rejects.toBe(metadataError);
-    await expect(decrypt()).rejects.toBe(metadataError);
-  });
-  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
-  expect(decryptMetrics.calls).toHaveLength(0);
-
-  await runWithHostedDomainRootUnwrapCache(async () => {
     await expect(decrypt()).resolves.toHaveLength(1);
   });
   expect(envelopeFindMany).toHaveBeenCalledTimes(2);
@@ -1172,33 +1224,25 @@ test("Linq authority batch retains metadata validation failures only for the cur
     const { runWithHostedDomainRootUnwrapCache } = await import(
       "../src/lib/hosted-crypto/domain-root-unwrap-cache"
     );
-    const decrypt = () => decryptHostedWebNullableFields({
-      entries: [{
+    const decrypt = (selectedRecords = [record]) => decryptHostedWebNullableFields({
+      entries: selectedRecords.map((selectedRecord) => ({
         field: "hosted-member-identity.phone-number",
-        memberId: record.memberId,
-        value: record.phoneNumberEncrypted,
-      }],
+        memberId: selectedRecord.memberId,
+        value: selectedRecord.phoneNumberEncrypted,
+      })),
       prisma,
       retainFailureInScopedCache: true,
     });
 
     resetLocalKmsDecryptMetrics(decryptMetrics);
     await runWithHostedDomainRootUnwrapCache(async () => {
-      const firstFailure = await decrypt().then(
+      const firstFailure = await decrypt([record, siblingRecord]).then(
         () => null,
         (error: unknown) => error,
       );
       expect(firstFailure, variant.name).not.toBeNull();
-      await expect(decrypt(), variant.name).rejects.toBe(firstFailure);
-      await expect(decryptHostedWebNullableFields({
-        entries: [{
-          field: "hosted-member-identity.phone-number",
-          memberId: siblingRecord.memberId,
-          value: siblingRecord.phoneNumberEncrypted,
-        }],
-        prisma,
-        retainFailureInScopedCache: true,
-      }), variant.name).resolves.toHaveLength(1);
+      await expect(decrypt([record]), variant.name).rejects.toBe(firstFailure);
+      await expect(decrypt([siblingRecord]), variant.name).resolves.toHaveLength(1);
     });
     expect(envelopeFindMany, variant.name).toHaveBeenCalledTimes(2);
     expect(decryptMetrics.calls, variant.name).toHaveLength(1);
