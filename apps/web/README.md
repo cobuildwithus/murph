@@ -1701,11 +1701,13 @@ Assertion-authenticated browser-to-agent bridge routes:
 
 Public provider-facing routes:
 
-- `GET /imessage/card/v1/:payload.png` renders one bounded immutable nutrition
-  snapshot for Linq's static Messages fallback. It accepts no query string,
-  identity, reference, credential, or authority; it performs no database or
-  remote read and returns private no-store/no-index headers. Deploy this route
-  before any runtime starts producing its URL.
+- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V4
+  nutrition, generic-table, or workout presentation for Linq's static Messages
+  fallback. It accepts no query string, identity, canonical reference,
+  credential, tracking reference, or authority; it performs no database or
+  remote read and returns private no-store/no-index headers. Deploy the
+  compatible native reader first, this route second, and its runtime producer
+  last.
 - `GET /api/device-sync/oauth/:provider/callback`
 - `POST /api/device-sync/webhooks/:provider`
 - `GET /api/device-sync/webhooks/oura`
