@@ -551,12 +551,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               requireFirstContactAdmission,
               prisma: transaction,
             }),
-          prepare: () =>
+          prepare: ({ attempt }) =>
             prepareHostedLinqThreadRoutingCrypto({
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
               prisma,
+              // The resolver already performed the first authority read. A
+              // route-conflict retry must read again so it can prepare for the
+              // winning container instead of reusing a stale snapshot.
+              threadRoute: attempt === 0
+                ? planningResolution.threadRoute
+                : undefined,
             }),
           prisma,
         });
@@ -1846,6 +1852,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
   prisma: PrismaClient;
+  threadRoute?: HostedThreadRouteSnapshot | null;
 }): Promise<HostedThreadRoutingCryptoPreparation> {
   if (input.event.event_type !== "message.received") {
     return {};
@@ -1860,11 +1867,13 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     );
   }
 
-  const threadRoute = await readHostedThreadRouteByThreadIdentity({
-    channel: "linq",
-    prisma: input.prisma,
-    threadId: context.summary.chatId,
-  });
+  const threadRoute = input.threadRoute === undefined
+    ? await readHostedThreadRouteByThreadIdentity({
+        channel: "linq",
+        prisma: input.prisma,
+        threadId: context.summary.chatId,
+      })
+    : input.threadRoute;
   if (threadRoute) {
     const [preparedThreadDeliveryRoute] = await Promise.all([
       prepareHostedThreadContainerDeliveryRoute({
@@ -2000,7 +2009,9 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
     preparation: HostedThreadRoutingCryptoPreparation;
     transaction: Prisma.TransactionClient;
   }) => Promise<TResult>;
-  prepare: () => Promise<HostedThreadRoutingCryptoPreparation>;
+  prepare: (input: {
+    attempt: number;
+  }) => Promise<HostedThreadRoutingCryptoPreparation>;
   prisma: PrismaClient;
 }): Promise<TResult> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -2012,7 +2023,7 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
         (transaction) => input.plan({ preparation, transaction }),
         async () => {
           try {
-            preparation = await input.prepare();
+            preparation = await input.prepare({ attempt });
           } catch (error) {
             preparationFailures.push(error);
             throw error;

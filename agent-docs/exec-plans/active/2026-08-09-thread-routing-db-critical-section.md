@@ -86,6 +86,9 @@ Updated: 2026-08-09
 - Preserve a failed preparation's original provider/KMS error when the planner
   proves that material was required. Retry only a successfully prepared stale
   candidate or the existing unique route-write conflict.
+- Reuse the resolver's route snapshot for the initial crypto preparation so the
+  admission path performs one authority read before `BEGIN`; require every
+  conflict retry to reread the route before preparing for the winning container.
 
 ## Verification
 
@@ -100,9 +103,12 @@ Updated: 2026-08-09
 - Local proof on the remediated candidate: the Linq/Telegram routing slice
   passed 177 tests; the isolated crypto-domain store passed 28 tests; the
   PostgreSQL concurrency lane passed 8 tests; app-local typecheck and scoped
-  lint passed; `git diff --check` passed. A combined crypto-domain/routing run
-  caused two shared-fixture interference failures, while the four routing files
-  and the same crypto-domain file in its isolated lane passed.
+  lint passed; the final route-snapshot follow-up passed the isolated Linq
+  mailbox-prewarm suite (13 tests) and Linq dispatch suite (171 tests), plus
+  app-local typecheck and scoped lint; `git diff --check` passed. A combined
+  crypto-domain/routing run caused two shared-fixture interference failures,
+  while the four routing files and the same crypto-domain file in its isolated
+  lane passed.
 - Review remediation: the preliminary specialist and final round 1 both found
   the pending-contact preparation gap; final round 1 also found failed KMS work
   being misclassified as a route race and an overbroad documentation claim.

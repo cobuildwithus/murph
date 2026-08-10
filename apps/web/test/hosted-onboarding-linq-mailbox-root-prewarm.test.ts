@@ -399,10 +399,9 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       });
 
       expect(response).toMatchObject({ ok: true, reason: "prewarm-owner-boundary-plan" });
-      // The route read is the resolver's; the unwrap is the warm hook's. Both
-      // finish before `BEGIN`, which is the whole point of the change.
+      // The resolver's route snapshot is reused by crypto preparation, and the
+      // unwrap finishes before `BEGIN`, which is the whole point of the change.
       expect(calls).toEqual([
-        "read-route",
         "read-route",
         "prepare-route",
         "unwrap",
@@ -438,7 +437,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         timestamp: null,
       });
 
-      expect(readHostedThreadRouteByThreadIdentity).toHaveBeenCalledTimes(2);
+      expect(readHostedThreadRouteByThreadIdentity).toHaveBeenCalledTimes(1);
       expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
         domain: "ingress",
         prisma,
@@ -446,7 +445,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         userId: "member_prewarm_1",
       });
       expect(calls).toEqual([
-        "read-route",
         "read-route",
         "prepare-route",
         "unwrap",
@@ -464,7 +462,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         "@/src/lib/hosted-routing/thread-route-store"
       );
       vi.mocked(readHostedThreadRouteByThreadIdentity)
-        .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(null);
       const prisma = buildPrewarmPrisma();
 
@@ -525,7 +522,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
 
       expect(response).toMatchObject({ ok: true, reason: "prepared-retry-plan" });
       expect(calls).toEqual([
-        "read-route",
         "read-route",
         "prepare-route",
         "unwrap",
@@ -595,7 +591,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         expect(prepareRoute).toHaveBeenCalledTimes(1);
         expect(planHostedOnboardingLinqWebhook).toHaveBeenCalledTimes(1);
         expect(calls).toEqual([
-          "read-route",
           "read-route",
           "prepare-route",
           "unwrap",
@@ -672,14 +667,12 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       expect(recordHostedLinqFirstContactAdmissionDecision).toHaveBeenCalledTimes(1);
       expect(calls).toEqual([
         "read-route",
-        "read-route",
         "prepare-route",
         "begin",
         "plan",
         "commit",
         "begin",
         "commit",
-        "read-route",
         "prepare-route",
         "unwrap",
         "begin",
@@ -775,12 +768,10 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       expect(classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
       expect(calls).toEqual([
         "read-route",
-        "read-route",
         "prepare-route",
         "begin",
         "plan",
         "commit",
-        "read-route",
         "prepare-route",
         "unwrap",
         "begin",

@@ -375,7 +375,13 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
+  prewarmPreparedHostedCryptoDomainRootForWeb: vi.fn(async () => undefined),
   provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+  provisionPreparedHostedCryptoDomainRootsTx: vi.fn(async () => undefined),
+  unwrapHostedDomainRootForWeb: vi.fn(async () => ({
+    rootKey: new Uint8Array(32),
+  })),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
@@ -1975,11 +1981,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         message: expect.stringContaining("https://join.example.test/groups/start"),
       }),
     );
-    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
-    // The only routing read is the pending group-contact recovery lookup, which
-    // is scoped to this chat and line. Personal routing is neither read by
-    // identity nor mutated.
-    expect(prisma.hostedMemberRouting.findFirst).toHaveBeenCalledTimes(1);
+    // Planning resolves the provisional group roster once, then crypto
+    // preflight independently confirms that no active sender needs a new
+    // container. Neither read mutates or grants personal routing authority.
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(2);
+    // Preflight and the authoritative transaction repeat only the pending
+    // group-contact recovery lookup scoped to this chat and line. Personal
+    // routing is neither read by identity nor mutated.
+    expect(prisma.hostedMemberRouting.findFirst).toHaveBeenCalledTimes(2);
     expect(prisma.hostedMemberRouting.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
