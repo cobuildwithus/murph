@@ -338,7 +338,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage footer with vitals and split link columns">
+      <StudySection title="Homepage footer with vitals, iOS app, and split link columns">
         <div
           data-design-section="homepage-footer"
           className="-mx-5 sm:-mx-8 lg:-mx-12"

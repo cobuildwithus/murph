@@ -41,6 +41,11 @@ const footerLinks = {
     { label: "Referrals", href: "/refer", external: false },
     { label: "Changelog", href: "/changelog", external: false },
     {
+      label: "iOS app",
+      href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+      external: true,
+    },
+    {
       label: "Status",
       href: "https://status.withmurph.ai",
       external: true,
