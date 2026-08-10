@@ -4,6 +4,7 @@ import {
   IMESSAGE_APP_CARD_URL_MAX_LENGTH,
   IMESSAGE_APP_CARD_URL_PREFIX,
   MURPH_PRODUCT_ORIGIN,
+  assistantResponseCardV1Bounds,
   assistantResponseCardSchema,
   buildWorkoutSessionAppCardEnvelopeV4,
   compactTableCardV1Bounds,
@@ -522,16 +523,16 @@ function isDailyNutritionResponseCardV2(
 function responseCardTextSchema(maxLength: number) {
   return {
     type: 'string',
+    minLength: 1,
     maxLength,
+    pattern: '^\\S(?:.*\\S)?$',
   } as const
 }
 
 function responseCardNullableTextSchema(maxLength: number) {
   return {
-    anyOf: [
-      responseCardTextSchema(maxLength),
-      { type: 'null' },
-    ],
+    ...responseCardTextSchema(maxLength),
+    type: ['string', 'null'],
   } as const
 }
 
@@ -539,39 +540,62 @@ function createAssistantResponseCardJsonSchema() {
   // Runtime Zod schemas remain authoritative. This deliberately compact
   // authoring schema keeps the dynamic-tool prompt bounded and exposes only
   // current card versions without duplicating every refinement.
-  const requiredMetric = {
+  const nutritionMealCount = {
+    type: 'integer',
+    minimum: 1,
+    maximum: assistantResponseCardV1Bounds.mealCount,
+  } as const
+  const metricTotal = (maximum: number) => ({
+    type: 'number',
+    minimum: 0,
+    maximum,
+  } as const)
+  const metric = (maximum: number, totalRequired: boolean) => ({
     type: 'object',
+    additionalProperties: false,
     properties: {
-      total: { type: 'number' },
-      mealCount: { type: 'number' },
+      total: totalRequired
+        ? metricTotal(maximum)
+        : { ...metricTotal(maximum), type: ['number', 'null'] },
+      mealCount: {
+        ...nutritionMealCount,
+        minimum: totalRequired ? 1 : 0,
+      },
     },
     required: ['total', 'mealCount'],
-  } as const
-  const optionalMetric = {
-    anyOf: [
-      requiredMetric,
-      {
-        type: 'object',
-        properties: {
-          total: { type: 'null' },
-          mealCount: { const: 0 },
-        },
-        required: ['total', 'mealCount'],
+  } as const)
+  const goal = (maximum: number) => ({
+    type: ['object', 'null'],
+    additionalProperties: false,
+    properties: {
+      target: {
+        type: 'number',
+        exclusiveMinimum: 0,
+        maximum,
       },
-    ],
-  } as const
-  const goal = {
-    anyOf: [
-      {
-        type: 'object',
-        properties: {
-          target: { type: 'number' },
-          status: { enum: nutritionCardGoalStatusValues },
-        },
-        required: ['target', 'status'],
+      status: { enum: nutritionCardGoalStatusValues },
+    },
+    required: ['target', 'status'],
+  } as const)
+  const tracking = {
+    type: ['object', 'null'],
+    additionalProperties: false,
+    properties: {
+      kind: { const: 'workout' },
+      entityId: {
+        type: 'string',
+        maxLength: 30,
+        pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
       },
-      { type: 'null' },
-    ],
+      snapshotAt: {
+        type: 'string',
+        minLength: 24,
+        maxLength: 24,
+        pattern:
+          '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$',
+      },
+    },
+    required: ['kind', 'entityId', 'snapshotAt'],
   } as const
   const workoutSet = {
     type: 'object',
@@ -636,39 +660,35 @@ function createAssistantResponseCardJsonSchema() {
     },
     required: ['label', 'values'],
   } as const
-  const tracking = {
-    anyOf: [
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          kind: { const: 'workout' },
-          entityId: { type: 'string' },
-          snapshotAt: { type: 'string' },
-        },
-        required: ['kind', 'entityId', 'snapshotAt'],
-      },
-      { type: 'null' },
-    ],
-  } as const
   const nutrition = {
     type: 'object',
     additionalProperties: false,
     properties: {
       kind: { const: 'daily_nutrition' },
       version: { const: 2 },
-      localDate: { type: 'string' },
-      mealCount: { type: 'number' },
+      localDate: {
+        type: 'string',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+      },
+      mealCount: nutritionMealCount,
       totals: {
         type: 'object',
-        additionalProperties: false,
-        properties: {
-          calories: requiredMetric,
-          proteinGrams: optionalMetric,
-          carbsGrams: optionalMetric,
-          fatGrams: optionalMetric,
-          fiberGrams: optionalMetric,
+        propertyNames: {
+          enum: [
+            'calories',
+            'proteinGrams',
+            'carbsGrams',
+            'fatGrams',
+            'fiberGrams',
+          ],
         },
+        properties: {
+          calories: metric(assistantResponseCardV1Bounds.calories, true),
+        },
+        additionalProperties: metric(
+          assistantResponseCardV1Bounds.macroGrams,
+          false,
+        ),
         required: [
           'calories',
           'proteinGrams',
@@ -679,14 +699,19 @@ function createAssistantResponseCardJsonSchema() {
       },
       goals: {
         type: 'object',
-        additionalProperties: false,
-        properties: {
-          calories: goal,
-          proteinGrams: goal,
-          carbsGrams: goal,
-          fatGrams: goal,
-          fiberGrams: goal,
+        propertyNames: {
+          enum: [
+            'calories',
+            'proteinGrams',
+            'carbsGrams',
+            'fatGrams',
+            'fiberGrams',
+          ],
         },
+        properties: {
+          calories: goal(assistantResponseCardV1Bounds.calories),
+        },
+        additionalProperties: goal(assistantResponseCardV1Bounds.macroGrams),
         required: [
           'calories',
           'proteinGrams',

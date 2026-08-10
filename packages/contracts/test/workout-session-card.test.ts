@@ -152,6 +152,28 @@ describe("workout session compact-table contract", () => {
         },
       }).success,
     ).toBe(false);
+
+    expect(
+      compactTableResponseCardV1Schema.safeParse({
+        ...TRACKED_WORKOUT_CARD,
+        workout: {
+          ...TRACKED_WORKOUT_CARD.workout,
+          exercises: [
+            {
+              name: "Bench press",
+              sets: [
+                {
+                  status: "skipped",
+                  target: "185 lb × 8",
+                  actual: null,
+                },
+              ],
+            },
+          ],
+        },
+        rows: [{ label: "Bench press", values: ["0/1"] }],
+      }).success,
+    ).toBe(false);
   });
 
   it("allows an active workout to wait for explicit finish after its final set", () => {

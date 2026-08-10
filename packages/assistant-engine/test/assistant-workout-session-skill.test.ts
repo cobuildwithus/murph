@@ -72,6 +72,9 @@ describe('assistant live workout card skill', () => {
     expect(skill).toContain('Only the normal Murph message path may mutate canonical workout state')
     expect(skill).toContain('single unambiguous tracked workout card')
     expect(skill).toContain('choosing by recency alone')
+    expect(skill).toContain('presentation positions, not canonical')
+    expect(skill).toContain('exact displayed name and mapped order')
+    expect(skill).toContain('--require-existing-set')
     expect(skill).toContain('`workout` detail')
   })
 

@@ -175,6 +175,26 @@ describe('workout session response cards', () => {
       },
     }).success).toBe(false)
 
+    expect(assistantResponseCardSchema.safeParse({
+      ...ACTIVE_WORKOUT_CARD,
+      workout: {
+        ...ACTIVE_WORKOUT_CARD.workout,
+        exercises: [
+          {
+            name: 'Bench press',
+            sets: [
+              {
+                status: 'skipped',
+                target: '185 lb × 8',
+                actual: null,
+              },
+            ],
+          },
+        ],
+      },
+      rows: [{ label: 'Bench press', values: ['0/1'] }],
+    }).success).toBe(false)
+
     const { workout: _workout, ...ordinaryTable } = ACTIVE_WORKOUT_CARD
     expect(() => encodeWorkoutSessionAppCardUrl(ordinaryTable)).toThrow(
       /workout session detail/u,
@@ -291,7 +311,15 @@ describe('workout session response cards', () => {
       encodeWorkoutSessionAppCardUrl(completedCard),
     )).toMatchObject({
       schemaVersion: 4,
-      card: { s: 'c', u: null, f: null },
+      card: {
+        s: 'c',
+        u: null,
+        f: null,
+        e: [
+          { s: [{ s: 'c' }, { s: 'c' }, { s: 's' }] },
+          { s: [{ s: 'c' }, { s: 's' }, { s: 's' }] },
+        ],
+      },
     })
   })
 

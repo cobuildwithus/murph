@@ -104,6 +104,20 @@ export const workoutSessionDetailV1Schema = z
         exercise.sets.filter((set) => set.status === "pending").length,
       0,
     );
+    const skippedSetCount = workout.exercises.reduce(
+      (total, exercise) =>
+        total +
+        exercise.sets.filter((set) => set.status === "skipped").length,
+      0,
+    );
+
+    if (workout.state === "active" && skippedSetCount > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "An active workout cannot contain skipped sets.",
+        path: ["state"],
+      });
+    }
 
     if (workout.state === "completed" && pendingSetCount > 0) {
       context.addIssue({

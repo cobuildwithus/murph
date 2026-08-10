@@ -158,10 +158,10 @@ describe('murph.attach_response_card', () => {
       'Occurrence authority alone is not card intent',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'single active tracked workout whose table was explicitly established earlier',
+      'verified initial card after starting or resuming one canonical live workout',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'with no active table or multiple plausible workouts, do not infer authority',
+      'with multiple plausible workouts, do not infer authority',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'card replaces the entire final response',

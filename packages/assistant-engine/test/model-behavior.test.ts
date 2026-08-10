@@ -1710,6 +1710,9 @@ describe('assistant consumption lookup guidance', () => {
       'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
     )
     expect(prompt).toContain(
+      'Live workout start/resume: read strength-training and tracked-table before starting/resuming the canonical session or attaching its card.',
+    )
+    expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
     )
     expect(prompt).toContain(

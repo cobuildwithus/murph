@@ -62,46 +62,100 @@ describe('assistant response cards', () => {
           additionalProperties: false,
           properties: {
             goals: {
+              additionalProperties: {
+                additionalProperties: false,
+                properties: {
+                  target: {
+                    exclusiveMinimum: 0,
+                    maximum: 2_000,
+                    type: 'number',
+                  },
+                },
+                type: ['object', 'null'],
+              },
+              propertyNames: {
+                enum: [
+                  'calories',
+                  'proteinGrams',
+                  'carbsGrams',
+                  'fatGrams',
+                  'fiberGrams',
+                ],
+              },
               properties: {
                 calories: {
-                  anyOf: [
-                    {
-                      properties: {
-                        status: {
-                          enum: [
-                            'far_under_target',
-                            'under_target',
-                            'on_target',
-                            'over_target',
-                            'far_over_target',
-                            'unavailable',
-                          ],
-                        },
-                        target: { type: 'number' },
-                      },
+                  additionalProperties: false,
+                  properties: {
+                    status: {
+                      enum: [
+                        'far_under_target',
+                        'under_target',
+                        'on_target',
+                        'over_target',
+                        'far_over_target',
+                        'unavailable',
+                      ],
                     },
-                    { type: 'null' },
-                  ],
+                    target: {
+                      exclusiveMinimum: 0,
+                      maximum: 20_000,
+                      type: 'number',
+                    },
+                  },
+                  type: ['object', 'null'],
                 },
               },
             },
             kind: { const: 'daily_nutrition' },
+            localDate: {
+              pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+              type: 'string',
+            },
+            mealCount: {
+              maximum: 100,
+              minimum: 1,
+              type: 'integer',
+            },
             totals: {
+              additionalProperties: {
+                additionalProperties: false,
+                properties: {
+                  mealCount: {
+                    maximum: 100,
+                    minimum: 0,
+                    type: 'integer',
+                  },
+                  total: {
+                    maximum: 2_000,
+                    minimum: 0,
+                    type: ['number', 'null'],
+                  },
+                },
+              },
+              propertyNames: {
+                enum: [
+                  'calories',
+                  'proteinGrams',
+                  'carbsGrams',
+                  'fatGrams',
+                  'fiberGrams',
+                ],
+              },
               properties: {
-                fiberGrams: {
-                  anyOf: [
-                    {
-                      properties: {
-                        total: { type: 'number' },
-                      },
+                calories: {
+                  additionalProperties: false,
+                  properties: {
+                    mealCount: {
+                      maximum: 100,
+                      minimum: 1,
+                      type: 'integer',
                     },
-                    {
-                      properties: {
-                        mealCount: { const: 0 },
-                        total: { type: 'null' },
-                      },
+                    total: {
+                      maximum: 20_000,
+                      minimum: 0,
+                      type: 'number',
                     },
-                  ],
+                  },
                 },
               },
             },
@@ -125,21 +179,31 @@ describe('assistant response cards', () => {
               type: 'array',
             },
             kind: { const: 'compact_table' },
+            title: {
+              minLength: 1,
+              pattern: '^\\S(?:.*\\S)?$',
+              type: 'string',
+            },
             rows: {
               maxItems: 8,
               minItems: 1,
               type: 'array',
             },
             tracking: {
-              anyOf: [
-                {
-                  additionalProperties: false,
-                  properties: {
-                    kind: { const: 'workout' },
-                  },
+              additionalProperties: false,
+              properties: {
+                entityId: {
+                  maxLength: 30,
+                  pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
                 },
-                { type: 'null' },
-              ],
+                kind: { const: 'workout' },
+                snapshotAt: {
+                  maxLength: 24,
+                  minLength: 24,
+                  pattern: expect.stringContaining('\\.\\d{3}Z'),
+                },
+              },
+              type: ['object', 'null'],
             },
             version: { const: 1 },
           },
@@ -157,7 +221,6 @@ describe('assistant response cards', () => {
         },
       ],
     })
-    expect(assistantResponseCardJsonSchema).not.toHaveProperty('$defs')
     expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
   })
 

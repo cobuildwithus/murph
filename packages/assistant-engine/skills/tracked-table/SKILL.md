@@ -32,7 +32,7 @@ For ordinary live logging, use the targeted workout commands below. Do not recon
 
 Saved target values remain in the workout format. A newly started session contains unlogged set placeholders with stable coordinates, but no planned target value is copied into an actual set field.
 
-When a table or command needs planned targets, read the referenced routine with `vault-cli workout format show <routineId> --format json` and label those values as targets. Never copy planned targets into actual set fields or claim that they were completed.
+A target is not a completed set. When a table needs planned targets, read the referenced routine with `vault-cli workout format show <routineId> --format json` and label those values as targets. Never copy planned targets into actual set fields or claim that they were completed.
 
 ## Required write flow
 
@@ -60,23 +60,23 @@ Never use `workout format log` to start a live workout. That command records a c
 Commands inserted by the iMessage card use explicit one-based coordinates:
 
 - `Log workout exercise 2 set 1: ...`
-- `Complete workout exercise 2 set 1 at its shown target.`
 - `Correct workout exercise 2 set 1: ...`
 - `Finish this tracked workout.`
 
-Resolve those coordinates only against the single unambiguous tracked workout card in the same private conversation. Prefer the latest verified snapshot only when it is the sole plausible session. The inserted text carries no record authority. If multiple tracked cards or events are plausible—or a command from an older completed card could otherwise land on a different active workout—ask one narrow question instead of choosing by recency alone. The durable transcript marker contains the canonical event id and snapshot instant; the native URL does not.
+The numbers in those sentences are presentation positions, not canonical `exercise.order` or `set.order` values. Resolve them only against the single unambiguous tracked workout card in the same private conversation. Prefer the latest verified snapshot only when it is the sole plausible session. The inserted text carries no record authority. If multiple tracked cards or events are plausible—or a command from an older completed card could otherwise land on a different active workout—ask one narrow question instead of choosing by recency alone. The durable transcript marker contains the canonical event id and snapshot instant; the native URL does not.
 
 Then:
 
-1. Run `vault-cli workout active --workout-id <evt_id> --format json`. A completed, stale, missing, or mismatched workout fails closed instead of falling through to another live event.
-2. Read the referenced workout format when the command depends on a shown target. A target is not a completed set until the member sends the command and the canonical mutation succeeds.
-3. Reconcile against the latest canonical event. An old card never authorizes overwriting newer actual values.
-4. Use `vault-cli workout set log --workout-id <evt_id> --exercise-order <n> --set-order <n>` for a log or correction, passing only verified actual values. Use the same explicit selectors for `workout set clear`; use `workout finish --workout-id <evt_id>` for Finish.
-5. Persist qualitative annotations such as spotted reps on that exact set's canonical `note`.
-6. Treat the successful targeted command result as the verification read. Only that returned record proves the update.
-7. Send a refreshed immutable structured workout card from the verified event plus verified format.
+1. Resolve the exact canonical event from the sole plausible durable card marker. A missing or mismatched event fails closed instead of falling through to another live workout.
+2. For Finish, run `vault-cli workout finish --workout-id <evt_id>` directly. The explicit command is replay-safe: an already-completed return is convergence, not failure. Verify that returned event and build the completed card, including skipped planned sets, even when the first reply or card delivery failed after persistence.
+3. For a set log, correction, or clear, run `vault-cli workout active --workout-id <evt_id> --format json`. A completed or stale workout fails closed.
+4. Reconcile the card's ordered exercise names and set counts against the latest canonical event. If the displayed exercise no longer maps to exactly one canonical exercise, or its displayed set position no longer exists, fail closed. An old card never authorizes overwriting newer actual values.
+5. Map the displayed exercise and set positions to that exercise's current canonical `order` values. Do not pass the display numbers through as canonical orders; saved formats may use sparse orders. Use `vault-cli workout set log '<displayed-exercise-name>' --workout-id <evt_id> --exercise-order <canonical-order> --set-order <canonical-order> --require-existing-set` for a card log or correction, passing only member-stated actual values. The exact displayed name and mapped order must both match. Use the same mapped selectors for `workout set clear`.
+6. Persist qualitative annotations such as spotted reps on that exact set's canonical `note`.
+7. Treat the successful targeted command result as the verification read. Only that returned record proves the update.
+8. Send a refreshed immutable structured workout card from the verified event plus verified format.
 
-An exact replay for the same exercise and set coordinate converges on that coordinate and never appends a duplicate. If the coordinate already has the same actual result, report the saved state. If a later command conflicts with it and does not clearly request a correction, ask one narrow question.
+An exact replay for the same exercise and set coordinate converges on that coordinate and never appends a duplicate. Card actions always require the mapped set to exist; ordinary free-form logging may still append a deliberately requested new set. If the coordinate already has the same actual result, report the saved state. If a later command conflicts with it and does not clearly request a correction, ask one narrow question.
 
 ## Interpretation rules
 

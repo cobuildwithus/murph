@@ -56,11 +56,14 @@ An active workout may have zero pending sets after the final result is logged; i
 The native app composes explicit one-based commands such as:
 
 - `Log workout exercise 2 set 1: `
-- `Complete workout exercise 2 set 1 at its shown target.`
 - `Correct workout exercise 2 set 1: `
 - `Finish this tracked workout.`
 
-The assistant resolves the command only when one tracked workout is unambiguous in the same private conversation. It may prefer the latest verified snapshot only when no second session is plausible; the inserted text itself is never identity or write authority. The assistant resolves that exact active event, reads the saved format when a shown target is required, and invokes the targeted `workout set log`, `workout set clear`, or `workout finish` command with the canonical workout id and explicit one-based coordinates. The command owner preserves unrelated state and returns the verified canonical event; only that success permits a refreshed immutable card.
+The assistant resolves the command only when one tracked workout is unambiguous in the same private conversation. It may prefer the latest verified snapshot only when no second session is plausible; the inserted text itself is never identity or write authority. This keeps the common path to one tap and one sent reply. An ambiguous older card deliberately requires one narrow clarification instead of carrying a native correlation token, canonical event id, or write authority.
+
+The command numbers are one-based presentation positions, not canonical workout-order values. For set commands, the assistant resolves the exact active event, checks that the card's ordered exercise names and set counts still map unambiguously to it, and translates each display position to the current canonical `exercise.order` and `set.order`. It invokes the targeted `workout set log` or `workout set clear` command with the canonical workout id, exact displayed exercise name, and mapped orders. The card never offers a generic “complete at target” shortcut because range, AMRAP, null, and qualitative targets are not concrete actual performance. Card-driven set logging requires the mapped set to exist, so a stale name, order, or position fails instead of appending a new set.
+
+Finish branches before the active-only set preflight. The assistant invokes the exact event's idempotent `workout finish` command and accepts an already-completed return as convergence, allowing a refreshed completed card after an earlier response or delivery failure. The command owner preserves unrelated state and returns the verified canonical event; only that success permits a refreshed immutable card.
 
 ## Rollout
 
