@@ -1256,6 +1256,7 @@ export function parseHostedRuntimeGroupToolRequest(
       projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
         record.projectionScopes,
         "Hosted runtime group tool prepare_email request projectionScopes",
+        HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
       ),
     };
   }

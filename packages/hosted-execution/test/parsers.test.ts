@@ -2174,6 +2174,31 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/not allowed/u);
   });
 
+  it("accepts the former eight-scope newsletter recipe only for email preparation", () => {
+    const projectionScopes = [
+      { projectionKind: "steps-days.v0" },
+      { projectionKind: "activity-days.v0" },
+      { projectionKind: "workout-days.v0" },
+      { projectionKind: "workouts.v0" },
+      { projectionKind: "sleep-duration-days.v0" },
+      { projectionKind: "sleep-times.v0" },
+      { projectionKind: "resting-heart-rate-days.v0" },
+      { projectionKind: "hrv-days.v0" },
+    ];
+
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "prepare_email",
+      projectionScopes,
+    })).toEqual({
+      action: "prepare_email",
+      projectionScopes,
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      projectionScopes: projectionScopes.slice(0, 4),
+    })).toThrow(/between 1 and 3 entries/u);
+  });
+
   it("parses referral requests with channel-qualified trusted sender evidence", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_usage_referral",

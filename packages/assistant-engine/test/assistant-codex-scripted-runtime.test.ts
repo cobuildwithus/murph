@@ -2692,6 +2692,63 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('ends an accepted group email effect without another provider request', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const groupEmailRequests: unknown[] = []
+    scenario.stub.queue({
+      functionCall: {
+        arguments: {
+          action: 'send_email',
+          html: '<p>Scheduled update</p>',
+          subject: 'Scheduled update',
+          text: 'Scheduled update',
+        },
+        name: 'group',
+        namespace: 'murph',
+      },
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        groupAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async () => ({
+          action: 'read_chat_participants',
+          result: { participants: [], status: 'ok' },
+        })),
+        groupEmailEffect: {
+          request: async (request) => {
+            groupEmailRequests.push(request)
+            return {
+              action: 'send_email',
+              result: {
+                participantCount: 1,
+                skippedNoEmailMemberIds: [],
+                status: 'accepted',
+              },
+            }
+          },
+        },
+      },
+      prompt: 'Send the prepared scheduled group email.',
+    })
+
+    expect(groupEmailRequests).toEqual([{
+      action: 'send_email',
+      html: '<p>Scheduled update</p>',
+      subject: 'Scheduled update',
+      text: 'Scheduled update',
+    }])
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalMessage).toBe('')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
   it.each([
     {
       contactCardFails: false,

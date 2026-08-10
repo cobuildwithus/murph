@@ -81,6 +81,9 @@ type GroupPermissionOfferRequest = NonNullable<
   AssistantHostedToolContext["groupPermissionOfferTool"]
 >["request"];
 type GroupSharedReadRequest = AssistantHostedGroupSharedReader["request"];
+type GroupEmailEffectRequest = NonNullable<
+  AssistantHostedToolContext["groupEmailEffect"]
+>["request"];
 
 const webpBytes = new Uint8Array([
   0x52, 0x49, 0x46, 0x46,
@@ -4917,9 +4920,275 @@ describe("murph.group email actions", () => {
       toolCallId: "call-test",
     });
   });
+
+  it("exposes only email-eligible members and their exact authorized projections", async () => {
+    const requestedScopes = [
+      { projectionKind: "steps-days.v0" as const },
+      { projectionKind: "sleep-times.v0" as const },
+    ];
+    const groupEmailRequest = vi.fn<GroupEmailEffectRequest>(async (request) => {
+      if (request.action !== "prepare_email") {
+        throw new Error("Expected group email preparation.");
+      }
+      return {
+        action: "prepare_email",
+        result: {
+          authorizationProof: "authorization-proof-hidden",
+          groupId: "group-id-hidden",
+          missingEmailParticipants: [{
+            authorizedShares: [{
+              projectionScopeKey: "steps-days.v0",
+              shareId: "share-missing-email-hidden",
+            }],
+            hasEmail: false,
+            memberId: "member_missing_email",
+          }],
+          participants: [
+            {
+              authorizedShares: [
+                {
+                  projectionScopeKey: "steps-days.v0",
+                  shareId: "share-eligible-steps-hidden",
+                },
+                {
+                  projectionScopeKey: "sleep-times.v0",
+                  shareId: "share-eligible-sleep-hidden",
+                },
+              ],
+              hasEmail: true,
+              memberId: "member_eligible",
+            },
+            {
+              authorizedShares: [{
+                projectionScopeKey: "steps-days.v0",
+                shareId: "share-missing-email-hidden",
+              }],
+              hasEmail: false,
+              memberId: "member_missing_email",
+            },
+            {
+              authorizedShares: [{
+                projectionScopeKey: "steps-days.v0",
+                shareId: "share-partial-steps-hidden",
+              }],
+              hasEmail: true,
+              memberId: "member_partial_scope",
+            },
+          ],
+          status: "ok",
+        },
+      };
+    });
+    const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
+      members: [
+        sharedEmailMember({
+          memberId: "member_eligible",
+          participantId: "participant_eligible",
+          values: { steps: 8_400, workouts: 2 },
+        }),
+        sharedEmailMember({
+          memberId: "member_missing_email",
+          participantId: "participant_missing_email",
+          values: { steps: 7_200, workouts: 1 },
+        }),
+        sharedEmailMember({
+          memberId: "member_partial_scope",
+          participantId: "participant_partial_scope",
+          values: { steps: 9_100, workouts: 3 },
+        }),
+      ],
+      requestedProjectionScopeKeys: ["steps-days.v0", "sleep-times.v0"],
+      status: "ok",
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      audience: "group_email",
+      projectionScopes: requestedScopes,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group email shared-read request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentScheduledAutomationAuthority: () => ({
+          automationId: "automation-weekly-update",
+          occurrenceAt: "2026-08-10T13:00:00.000Z",
+        }),
+        groupEmailRequest,
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(groupEmailRequest).toHaveBeenCalledWith({
+      action: "prepare_email",
+      projectionScopes: requestedScopes,
+    });
+    expect(groupSharedReadRequest).toHaveBeenCalledWith({
+      projectionScopes: requestedScopes,
+    });
+    expect(result.rpcResult.success).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "read_shared",
+      audience: "group_email",
+      result: {
+        members: [
+          {
+            participantId: "participant_eligible",
+            projections: {
+              "sleep-times.v0": {
+                grantedAt: "2026-08-01T12:00:00.000Z",
+                records: [{
+                  data: {
+                    date: "2026-08-09",
+                    sleepEndAt: "2026-08-09T07:00:00.000Z",
+                    sleepStartAt: "2026-08-09T00:00:00.000Z",
+                  },
+                  occurredAt: "2026-08-09T07:00:00.000Z",
+                  recordKey: "2026-08-09",
+                }],
+                status: "available",
+              },
+              "steps-days.v0": {
+                grantedAt: "2026-08-01T12:00:00.000Z",
+                records: [{
+                  data: {
+                    date: "2026-08-09",
+                    metricKey: "steps",
+                    unit: "count",
+                    value: 8_400,
+                  },
+                  occurredAt: "2026-08-09T00:00:00.000Z",
+                  recordKey: "2026-08-09",
+                }],
+                status: "available",
+              },
+            },
+          },
+          {
+            participantId: "participant_partial_scope",
+            projections: {
+              "steps-days.v0": {
+                grantedAt: "2026-08-01T12:00:00.000Z",
+                records: [{
+                  data: {
+                    date: "2026-08-09",
+                    metricKey: "steps",
+                    unit: "count",
+                    value: 9_100,
+                  },
+                  occurredAt: "2026-08-09T00:00:00.000Z",
+                  recordKey: "2026-08-09",
+                }],
+                status: "available",
+              },
+            },
+          },
+        ],
+        missingVerifiedEmailCount: 1,
+        recipientCount: 2,
+        referenceAt: "2026-08-10T13:00:00.000Z",
+        requestedProjectionScopeKeys: ["steps-days.v0", "sleep-times.v0"],
+        status: "ok",
+      },
+    });
+    const modelText = JSON.stringify(readGroupToolPayload(result));
+    for (const hidden of [
+      "authorization-proof-hidden",
+      "group-id-hidden",
+      "member_eligible",
+      "member_missing_email",
+      "member_partial_scope",
+      "share-eligible-steps-hidden",
+      "share-eligible-sleep-hidden",
+      "share-missing-email-hidden",
+      "share-partial-steps-hidden",
+      "participant_missing_email",
+      "workouts.v0",
+    ]) {
+      expect(modelText).not.toContain(hidden);
+    }
+  });
 });
 
+function sharedEmailMember(input: {
+  memberId: string;
+  participantId: string;
+  values: { steps: number; workouts: number };
+}) {
+  return {
+    currentTurnHandles: [],
+    displayName: null,
+    memberId: input.memberId,
+    participantId: input.participantId,
+    projections: [
+      {
+        dataStatus: "available" as const,
+        grantedAt: "2026-08-01T12:00:00.000Z",
+        grantStatus: "granted" as const,
+        projectionScope: { projectionKind: "steps-days.v0" as const },
+        projectionScopeKey: "steps-days.v0",
+        records: [{
+          data: {
+            date: "2026-08-09",
+            metricKey: "steps" as const,
+            unit: "count",
+            value: input.values.steps,
+          },
+          occurredAt: "2026-08-09T00:00:00.000Z",
+          recordKey: "2026-08-09",
+        }],
+      },
+      {
+        dataStatus: "available" as const,
+        grantedAt: "2026-08-01T12:00:00.000Z",
+        grantStatus: "granted" as const,
+        projectionScope: { projectionKind: "sleep-times.v0" as const },
+        projectionScopeKey: "sleep-times.v0",
+        records: [{
+          data: {
+            date: "2026-08-09",
+            sleepEndAt: "2026-08-09T07:00:00.000Z",
+            sleepStartAt: "2026-08-09T00:00:00.000Z",
+          },
+          occurredAt: "2026-08-09T07:00:00.000Z",
+          recordKey: "2026-08-09",
+        }],
+      },
+      {
+        dataStatus: "available" as const,
+        grantedAt: "2026-08-01T12:00:00.000Z",
+        grantStatus: "granted" as const,
+        projectionScope: { projectionKind: "workouts.v0" as const },
+        projectionScopeKey: "workouts.v0",
+        records: [{
+          data: {
+            calendarClosedThroughDate: "2026-08-09",
+            date: "2026-08-09",
+            timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+            workouts: Array.from(
+              { length: input.values.workouts },
+              () => ({ kind: "running", minutes: 30, startLocalMs: 64_800_000 }),
+            ),
+          },
+          occurredAt: "2026-08-09T18:00:00.000Z",
+          recordKey: "2026-08-09",
+        }],
+      },
+    ],
+  };
+}
+
 function createGroupHostedToolContext(input: {
+  currentScheduledAutomationAuthority?:
+    AssistantHostedToolContext["currentScheduledAutomationAuthority"];
   currentHostedDeliveryContext?:
     AssistantHostedToolContext["currentHostedDeliveryContext"];
   currentInvocationScope?: AssistantHostedToolContext["currentInvocationScope"];
@@ -4928,6 +5197,7 @@ function createGroupHostedToolContext(input: {
     AssistantHostedToolContext["groupTool"]
   >["directAttachmentRouteStatus"];
   groupPermissionOfferRequest?: GroupPermissionOfferRequest;
+  groupEmailRequest?: GroupEmailEffectRequest;
   groupSharedReadRequest?: GroupSharedReadRequest;
   groupRequest?: GroupToolRequest;
   groupToolAvailable?: boolean;
@@ -4960,7 +5230,8 @@ function createGroupHostedToolContext(input: {
         : null;
     }),
     currentUserActionScope,
-    currentScheduledAutomationAuthority: () => null,
+    currentScheduledAutomationAuthority:
+      input.currentScheduledAutomationAuthority ?? (() => null),
     familyPlanTool: null,
     groupPermissionOfferTool: input.groupPermissionOfferRequest
       ? { request: input.groupPermissionOfferRequest }
@@ -4979,7 +5250,9 @@ function createGroupHostedToolContext(input: {
             ? { directAttachmentRouteStatus: input.directAttachmentRouteStatus }
             : {}),
         },
-    groupEmailEffect: null,
+    groupEmailEffect: input.groupEmailRequest
+      ? { request: input.groupEmailRequest }
+      : null,
     phoneCalls: null,
     persistGeneratedImageCapture:
       input.persistGeneratedImageCapture ?? (async (write) => await write()),
