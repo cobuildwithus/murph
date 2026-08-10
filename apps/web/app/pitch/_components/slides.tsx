@@ -1025,8 +1025,8 @@ export function ValidationSlide() {
       <div className="mt-9 grid gap-3 sm:grid-cols-3">
         {[
           {
-            value: "+103% MRR growth",
-            note: "In 30 days, with revenue up every week.",
+            value: "18% w/w MRR growth",
+            note: "Compounded over the last 30 days, with revenue up every week.",
           },
           {
             value: "+82% paying customers",
