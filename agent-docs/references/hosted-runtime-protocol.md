@@ -56,6 +56,15 @@ The live ownership split is:
   signature, and unwraps only its `cloudflare-automation-secret` recipient. The
   signed full envelopes are disclosed to preserve signature verification over
   the web-authored body; Cloudflare still has no GCP KMS decrypt authority.
+  Current and historical root callbacks are signed, user-bound,
+  workspace-scoped resource authority. They do not repeat operation admission:
+  Temporal and UserRunner own mode-aware runtime admission (including
+  `inbox_media_retention` for an inactive member), Settings vault export owns
+  app-session, MFA, and consent admission, and ordinary browser-vault, media
+  staging, and ingress owners keep their existing active-access gates. This
+  separation lets paused-member retention and an explicitly authorized
+  Settings export restore encrypted workspace state without reopening ordinary
+  assistant or model work.
   During active mailbox import, the runner container calls a Worker-owned
   mailbox-payload decode route over the invocation outbound proxy. That route
   requires the runtime write fence, decrypts the mailbox payload with the
@@ -185,6 +194,25 @@ The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
 runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint.
+When replacement observes an inactive runtime fence, the `UserRunner` checks
+the durable current snapshot-upload session before clearing that fence. An
+exact attempt-and-generation match gets a one-second retry only while its
+runtime-owned heartbeat is less than 10 seconds old and no completion marker is
+present. The snapshot-session handshake has one six-second total deadline; the
+runtime starts its first heartbeat immediately after that response, then keeps
+serialized heartbeat attempts on a two-second start-to-start cadence for the
+full publication. This leaves the two-second heartbeat request inside the
+10-second stale boundary. A successful foreground preemption bypasses handoff
+preservation and stops heartbeat liveness before detached session cleanup.
+After Web accepts the checkpoint, the runtime stops heartbeating and
+best-effort records completion; a failed marker falls back to stale-heartbeat
+expiry. Absent, mismatched, completed, or stale sessions do not delay
+replacement. This
+bridges the shutdown publication race without imposing a fixed snapshot
+deadline or turning the much longer orphan-cleanup lifetime into startup
+liveness. A dead runtime can defer replacement for the 10-second liveness
+window plus at most one additional retry interval (one second) after its final
+heartbeat.
 Plain-text Linq plus
 attachment-free Telegram and WhatsApp input does not initialize or import inbox
 projection. Linq input with link parts retains the existing projection path.
@@ -1013,6 +1041,37 @@ therefore relinquishes the existing lifecycle boundary without leaving a stale
 hint or partially initialized start ahead of foreground work. If a Worker
 version changes before authoritative start, the `UserRunner` destroys and
 clears a different pending versioned target before binding the current fence.
+The existing Web helper carries its bounded `linq-instant-start` or
+`linq-typing-started` source through the same request and RPC. During additive
+rollout an empty legacy request remains accepted and is recorded as `unknown`;
+unknown is never assumed to mean typing. Cloudflare logs one bounded admission outcome (`scheduled`,
+`skipped_consent_busy`, `skipped_admission_unavailable`,
+`skipped_processing_disallowed`, or `skipped_runtime_busy`) at the existing
+decision point. The runner container records one completion outcome for the
+coalesced operation after that asynchronous operation settles; the unawaited
+microtask log contains only the bounded trigger source, outcome, elapsed
+milliseconds, coalesced hint count, and whether the container lifecycle
+observed a cold start. These records
+do not imply port or health readiness.
+
+The container also consumes its in-memory hint observation on the next
+authoritative `ensureReadyForProcessing` call. One observation belongs to one
+shell-prewarm operation and carries its triggering source, first causal hint
+timestamp, completion time and duration, coalesced hint count, and one terminal
+outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
+After that operation settles, later hints may only increment its bounded hint
+count until readiness consumes it; they cannot launch a second operation or
+replace the causal timestamp. Fresh runtime preparation maps those bounded
+leaves into the existing orchestration latency phase breakdown; it adds no
+request, persisted state owner, awaited reporting step, or work on the
+message-ingress path. A stop, explicit destroy, or Durable Object eviction may
+erase the optional observation, so an absent observation means `no observed
+prewarm`, not proof that no typing hint occurred. The aggregate cold-start
+report includes only typing-sourced, chronology-safe, uniquely matched
+Web-direct traces whose reply belongs to the same runtime attempt. It omits
+instant-start, unknown-source, ambiguous, backlog, and attempt-handoff rows
+rather than guessing, and returns no member, mailbox, trace, delivery, or
+runtime-attempt identifiers.
 The signal
 reconciles both the foreground conversation lane and the already-durable
 activation item. Web then
@@ -1061,6 +1120,24 @@ stream EOF. Body consumption overlaps streamed hash/decrypt work and its
 backpressure, so it is not pure network-transfer latency. These two bounded
 numbers are appended to the existing in-memory staged phase breakdown; they do
 not add a request, awaited reporting step, per-chunk timer, or separate log.
+The same existing `provider_started` phase breakdown may subdivide
+`automationLaneToAssistantServiceMs` into ten adjacent monotonic durations:
+readiness, input selection, pass setup, candidate scan, group/operation scope,
+terminal evidence, session preflight, cross-session context, prompt preparation,
+and service handoff. When present, those ten values sum exactly to their parent;
+outbox and receipt-scan timings remain nested within cross-session context, and
+the subdivision adds no I/O or awaited reporting work. The emitter omits a
+partial or non-additive subdivision, and Web's best-effort parser drops the
+malformed phase breakdown without losing the core provider-start milestone.
+The complete subdivision is emitted only when the provider-producing group is
+the first group processed in that automation pass. If an earlier group finishes
+without reaching the provider, later provider starts retain the canonical path
+but omit the subdivision so earlier group work and pass-shared history scans are
+not misattributed; the scan-nesting statement applies only to an emitted complete
+subdivision.
+Because Web strictly parses phase-breakdown leaves, roll this telemetry out
+Web-first so its reader accepts the additive fields before a runner emits them;
+during rollback, remove the runner/Cloudflare emitter before rolling Web back.
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
