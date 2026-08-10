@@ -4147,6 +4147,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).toContain('agent-docs/FRONTEND.md')
       expect(leanEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
       expect(leanEntries).toContain('agent-docs/PRODUCT_SENSE.md')
+      expect(leanEntries).toContain('Dockerfile.cloudflare-hosted-runner-base')
       expect(leanEntries).not.toContain('.crabbox.yaml')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
