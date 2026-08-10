@@ -3056,13 +3056,22 @@ describe('assistant conversation scope', () => {
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
     )
     expect(prompt).toContain(
-      'confirm timing only from a result with `timingVerified: true`',
+      'For an active `deviceActivity` schedule, confirm the persisted event trigger directly',
+    )
+    expect(prompt).toContain(
+      'a null `nextOccurrenceAt` means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+    )
+    expect(prompt).toContain(
+      'do not invent a time or offer timing recovery',
+    )
+    expect(prompt).toContain(
+      'For time-based schedules, confirm timing only from a result with `timingVerified: true`',
     )
     expect(prompt).toContain(
       'a verified null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
     )
     expect(prompt).toContain(
-      'When `timingVerified` is false, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write.',
+      'When a time-based result has `timingVerified: false`, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write.',
     )
     expect(prompt).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',

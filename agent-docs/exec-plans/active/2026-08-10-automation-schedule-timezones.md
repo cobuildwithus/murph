@@ -18,7 +18,7 @@ Key decisions:
 - Update the existing schedule-owner documentation and focused contract/core/assistant/runtime tests rather than adding a new service or state owner.
 
 State:
-- ReviewGPT round three is auditing the pushed timing-transition redesign. Release coverage exposed one controlled predecessor-migration edge case locally; its exact occurrence-transfer fix is implemented and focused verification is green before the next pushed review head.
+- ReviewGPT round three accepted the timing-transition redesign and found one separate response-contract defect for active event-triggered automations. The schedule-kind-aware prompt/tool correction is implemented and focused verification is green before the next pushed review head.
 
 Done:
 - Proved the production failure mechanism: a UTC-converted cron hour was persisted and then evaluated in the vault timezone.
@@ -44,12 +44,16 @@ Done:
 - Added core persistence, legacy query fallback, real availability-maintenance, due-before-claim, schedule-revision, and reactivation coverage. Focused core/query/contract/CLI tests, the 219-test assistant cron/availability set, and affected package typechecks pass.
 - Reproduced the release-coverage failures from round three's candidate. A current onboarding seed is now a true no-op under deterministic timestamps, while a legacy schedule transition preserves a retrying occurrence only when reconciliation explicitly adopts that exact occurrence. The runtime cadence-reset cursor is advanced before the replacement recurrence becomes visible, so generic user schedule edits still invalidate pre-transition work.
 - Passed 356 scheduler, mutation, outbox-authority, managed-reconciliation, and availability-refresh tests plus the assistant-engine package typecheck after the occurrence-transfer correction.
+- ReviewGPT round three verified the cadence-anchor redesign and found that the prior unconditional null-occurrence wording could misdescribe an active `deviceActivity` automation as exhausted. Active device triggers now confirm the persisted event schedule and treat a null next occurrence as clock-time-not-applicable until a matching activity; only time-based schedules use null as no-later-delivery proof or enter timing recovery.
+- Added prompt and deferred-tool contract assertions, a real scripted App Server save result, hosted save-and-patch response proof, an opt-in actual-model journey, and coverage of the existing device-trigger queue path. The focused assistant-engine set passed 147 tests with 36 opt-in skips, the hosted assistant-phase suite passed all 280 tests, and both affected packages typecheck.
+- Recomputed the provider-visible delta by applying only the reviewed schedule-kind wording to the same prior canonical measurement. The prompt adds 72 `o200k_harmony` tokens and 364 UTF-8 bytes to both runtimes: direct is now 23,947 tokens / 110,685 bytes versus base 23,701 / 109,497 (+246, +1.0379%, +1,188 bytes); group is 20,419 / 95,134 versus base 20,173 / 93,946 (+246, +1.2195%, +1,188 bytes). Prompt content is now 14,808 tokens / 72,597 bytes direct and 11,380 / 57,177 group. The deferred automation tool serialization is 4,531 tokens / 15,431 bytes when loaded.
+- Rebuilt the complete hosted runner closure after the prompt correction. The runner entrypoint is 1,661,608 bytes, its static boot closure is 8,017,366 bytes, and total output is 9,992,497 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed.
 
 Now:
-- Complete the queued workspace typecheck, inspect ReviewGPT round three, then commit and push the occurrence-transfer correction.
+- Complete the full workspace typecheck and candidate diff review, then commit and push the event-trigger response correction.
 
 Next:
-- Update PR #1546's intent/evidence contract, run the required sensitive full-snapshot ReviewGPT follow-up against the repaired exact head concurrently with CI, and resolve any remaining accepted finding until the latest substantive round passes.
+- Update PR #1546's intent/evidence contract, run sensitive full-snapshot ReviewGPT round four against the repaired exact head concurrently with CI, and resolve any remaining accepted finding until the latest substantive round passes.
 
 Open questions (UNCONFIRMED if needed):
 - None. The timing result now reuses the canonical scheduler owners through an exact-file projection instead of the broad public job lookup.

@@ -31,6 +31,15 @@ describe('hosted domain dynamic tools', () => {
     })
     expect(enabled).toContain(MURPH_DEVICE_TOOL)
     expect(enabled).toContain(MURPH_AUTOMATION_TOOL)
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an active deviceActivity schedule, confirm the persisted event trigger directly',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
+    )
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {

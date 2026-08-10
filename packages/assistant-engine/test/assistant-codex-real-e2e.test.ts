@@ -3963,6 +3963,96 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
+    'confirms an active device trigger without claiming future delivery is exhausted',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-next-workout-trigger-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected an automation save request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation-next-workout',
+                  created: true,
+                  effectiveTimeZone: null,
+                  lookupId: 'next-workout-check-in',
+                  nextOccurrenceAt: null,
+                  routeBinding: 'current_conversation',
+                  schedule: request.schedule,
+                  status: 'active',
+                  timingVerified: true,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'After my next WHOOP workout recorded after',
+            '2026-08-10T12:00:00.000Z, ask me here how it felt.',
+            'Save that event-triggered check-in now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'save',
+          schedule: {
+            activityKind: expect.stringMatching(/workout/iu),
+            after: '2026-08-10T12:00:00.000Z',
+            kind: 'deviceActivity',
+            source: expect.stringMatching(/^whoop(?:_v2)?$/u),
+          },
+        })
+        expect(result.finalMessage).toMatch(/next.*workout|workout.*arrives/iu)
+        expect(result.finalMessage).not.toMatch(
+          /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /could not verify|couldn't verify|unable to verify|inspect or update/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'saves one finite dense reminder conversation and stays quiet after its sent grace',
     async () => {
       const config = await resolveRealCodexE2eConfig()

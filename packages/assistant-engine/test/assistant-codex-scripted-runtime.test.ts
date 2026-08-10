@@ -1515,6 +1515,100 @@ if (!tool) {
     ).toBeGreaterThan(4_000)
   })
 
+  it('keeps active device-triggered saves distinct from exhausted clock schedules', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    const baseInstructions = buildScriptedHostedSystemPrompt('direct', true)
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+if (!tool) {
+  text(JSON.stringify({ found: false }));
+} else {
+  const result = await tools.murph__automation({
+    action: "save",
+    instructions: "Ask how the next workout felt.",
+    schedule: {
+      activityKind: "workout",
+      after: "2026-08-10T12:00:00.000Z",
+      kind: "deviceActivity",
+      source: "whoop",
+    },
+    title: "Next workout check-in",
+  });
+  text(JSON.stringify({ found: true, result }));
+}
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "Saved. I'll check in after your next workout. There isn't a clock time to confirm until that workout arrives.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-next-workout',
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: 'next-workout-check-in',
+              nextOccurrenceAt: null,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'After my next WHOOP workout, ask how it felt. Save it now.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Ask how the next workout felt.',
+      schedule: {
+        activityKind: 'workout',
+        after: '2026-08-10T12:00:00.000Z',
+        kind: 'deviceActivity',
+        source: 'whoop',
+      },
+      title: 'Next workout check-in',
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"deviceActivity"')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(result.finalMessage).toContain('after your next workout')
+    expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
+  })
+
   it('preserves both response-card shapes through the real App Server boundary', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

@@ -5294,6 +5294,40 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
       await expect(requestAutomation({
         action: "save",
+        instructions: "Ask how the next workout felt.",
+        schedule: {
+          activityKind: "workout",
+          after: "2026-08-01T12:00:00.000Z",
+          kind: "deviceActivity",
+          source: "whoop",
+        },
+        slug: "next-workout-check-in",
+        title: "Next workout check-in",
+      })).resolves.toEqual(expect.objectContaining({
+        effectiveTimeZone: null,
+        nextOccurrenceAt: null,
+        schedule: {
+          activityKind: "workout",
+          after: "2026-08-01T12:00:00.000Z",
+          kind: "deviceActivity",
+          source: "whoop",
+        },
+        status: "active",
+        timingVerified: true,
+      }));
+      await expect(requestAutomation({
+        action: "patch",
+        instructions: "Ask briefly how the next workout felt.",
+        lookup: "next-workout-check-in",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        schedule: expect.objectContaining({ kind: "deviceActivity" }),
+        status: "active",
+        timingVerified: true,
+      }));
+
+      await expect(requestAutomation({
+        action: "save",
         instructions: "Send the daily evening reminder.",
         schedule: {
           kind: "dailyLocal",
