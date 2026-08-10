@@ -408,6 +408,14 @@ describe("HostedBillingSettings", () => {
       rendered.window.document.body.textContent ?? "",
       /Review and start Core/,
     );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /make a fresh choice/,
+    );
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Check Core status/,
+    );
     assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 0);
     await rendered.cleanup();
 
@@ -423,6 +431,32 @@ describe("HostedBillingSettings", () => {
     ));
     assert.match(currentMarkup, /Current plan/);
     assert.doesNotMatch(currentMarkup, /Core has not started/);
+  });
+
+  test("returns a saved payment method to the exact selected Core recovery", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        billingStatus: "incomplete",
+        canStartPaidPulse: true,
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_group_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        groupPaymentMethodSaved: true,
+        showGroupPlan: true,
+      },
+    ));
+
+    assert.match(markup, /Payment method saved/);
+    assert.match(markup, /Core is still starting/);
+    assert.match(markup, /Core remains selected/);
+    assert.match(markup, /Check Core status/);
+    assert.doesNotMatch(markup, /fresh choice|plan options/);
+    assert.doesNotMatch(markup, /Start Pulse plan|Start Core|Choose Family/);
   });
 
   test("confirms the exact Core price and trial-end timing before scheduling", async () => {
@@ -1842,6 +1876,68 @@ describe("HostedBillingSettings", () => {
     });
     assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 2);
     assert.equal(mocks.routerRefresh.mock.calls.length, 2);
+
+    await rendered.cleanup();
+  });
+
+  test("preserves a rejected Core handoff error while refreshing the exact claim", async () => {
+    mocks.requestHostedTrialPlanStartPaid.mockRejectedValueOnce(
+      new Error("Stripe could not open payment setup. Try again."),
+    );
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const initialProps = {
+      authenticated: true,
+      billingStatus: "paused",
+      canStartFamily: true,
+      canStartPaidPulse: true,
+      canSwitchToGroup: false,
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      showGroupPlan: true,
+    } as const;
+    const rendered = await renderClientComponent(
+      createElement(HostedBillingSettings, initialProps),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      findButtonByText(
+        rendered.window.document,
+        "Start Core",
+        rendered.window,
+      ).dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    await act(async () => {
+      findLastButtonByText(
+        rendered.window.document,
+        "Start Core",
+        rendered.window,
+      ).dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    assert.match(
+      rendered.window.document.querySelector('[role="alert"]')?.textContent ?? "",
+      /Stripe could not open payment setup\. Try again\./,
+    );
+
+    await rendered.rerender(createElement(HostedBillingSettings, {
+      ...initialProps,
+      billingStatus: "incomplete",
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_group_monthly",
+    }));
+
+    const recoveredText = rendered.window.document.body.textContent ?? "";
+    assert.match(recoveredText, /Stripe could not open payment setup\. Try again\./);
+    assert.match(recoveredText, /Check Core status/);
+    assert.doesNotMatch(recoveredText, /Start Pulse plan|Start Core|Choose Family/);
+    assert.doesNotMatch(recoveredText, /Manage billing|Open billing/);
 
     await rendered.cleanup();
   });

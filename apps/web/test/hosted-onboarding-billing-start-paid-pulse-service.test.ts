@@ -429,7 +429,16 @@ describe("startHostedPulseTrialPaidPlan", () => {
       code: "HOSTED_GROUP_PLAN_NOT_ELIGIBLE",
     });
 
+    expect(mocks.assertHostedBillingPlanSelectable).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      targetPlanCode: "launch_group_monthly",
+    });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   test("rejects a new Pulse trial action while another plan change is scheduled", async () => {
@@ -1611,6 +1620,41 @@ describe("startHostedPulseTrialPaidPlan", () => {
       .toEqual(mocks.stripe.subscriptions.update.mock.calls[0]?.[1]);
     expect(mocks.stripe.subscriptions.resume.mock.calls[0]?.[2]?.idempotencyKey)
       .toBe(mocks.stripe.subscriptions.resume.mock.calls[1]?.[2]?.idempotencyKey);
+  });
+
+  test("recovers an exact Core claim after membership loss without rewriting it", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: HostedBillingStatus.incomplete,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:01.000Z"),
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_group_monthly",
+    }));
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: "pm_customer_123",
+        defaultSource: null,
+      }),
+      status: "paused",
+      trialEnd: null,
+    }));
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).resolves.toMatchObject({ status: "billing_pending" });
+
+    expect(mocks.assertHostedBillingPlanSelectable).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberFamilyBillingClaim).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
   });
 
   test("rejects a conflicting paused-plan choice before another resume", async () => {

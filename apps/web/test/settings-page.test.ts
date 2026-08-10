@@ -87,6 +87,7 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedBillingSettings: vi.fn((props: {
     authenticated: boolean;
+    billingStatus?: unknown;
     canStartFamily?: boolean;
     canStartPaidPulse?: boolean;
     canSwitchToGroup?: boolean;
@@ -2425,6 +2426,49 @@ test("SettingsPage preserves the Group payment-method receipt and fresh start ac
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     canStartPaidPulse: true,
+    groupPaymentMethodSaved: true,
+    showGroupPlan: true,
+  }), undefined);
+});
+
+test("SettingsPage returns a saved payment method to the selected Core claim", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "incomplete",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_group_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      startGroup: "payment_method_saved",
+    }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
+    billingStatus: "incomplete",
+    canStartPaidPulse: true,
+    currentBillingPlanCode: "launch_group_monthly",
     groupPaymentMethodSaved: true,
     showGroupPlan: true,
   }), undefined);

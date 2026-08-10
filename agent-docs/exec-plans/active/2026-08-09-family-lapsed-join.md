@@ -190,6 +190,19 @@ Updated: 2026-08-09
   the generic portal and false cancellation affordance. Real PostgreSQL
   paid-wins and deleted-wins interleavings cover both receipt orders without
   adding state or another lifecycle owner.
+- Final ReviewGPT round 6 found that new Core admission and recovery of an
+  existing exact Core claim still shared one membership check, so leaving the
+  qualifying group after selection could strand the durable claim. It also
+  found that a post-claim portal failure left stale actions visible until a
+  manual reload and that the payment-method return contradicted the exact
+  selected recovery with fresh-choice copy.
+- Round 6 requirement decision: distinguish a new locked selection from an
+  exact incomplete retry. Require membership and write the target only for the
+  first selection; retain binding, suspension, Family, terminal, paid-target,
+  and conflicting-target checks on recovery. Preserve request errors while
+  refreshing canonical Web state, and derive the payment-method receipt from
+  the existing billing projection so an exact Core claim points only to Check
+  Core status. No new state, component, action, or lifecycle owner is added.
 - The required Claude Code UI double-check was attempted against the final
   desktop/mobile catalog evidence and stopped on explicit Fable usage-credit
   exhaustion. Per the completion workflow, no second Claude request or local
@@ -201,7 +214,7 @@ Updated: 2026-08-09
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-family-plan.test.ts`
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts`
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-stripe-billing-status.test.ts apps/web/test/hosted-onboarding-billing-plans.test.ts apps/web/test/hosted-billing-settings.test.tsx apps/web/test/hosted-usage-status.test.ts`
-  - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_dev_family_lapsed_join MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-stripe-webhook-entitlement-postgres.test.ts -t 'rejects Family acceptance after Checkout binds before status projection|keeps the Core recovery target and Family fence while a paused receipt races the resume response|rejects a delayed Core claim after Pulse paid reconciliation wins|preserves a deleted receipt against a delayed Core claim so Family can join|commits the direct recovery fence before opening card setup'`
+  - `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-stripe-webhook-entitlement-postgres.test.ts -t 'rejects Family acceptance after Checkout binds before status projection|keeps the Core recovery target and Family fence while a paused receipt races the resume response|rejects a delayed Core claim after Pulse paid reconciliation wins|preserves a deleted receipt against a delayed Core claim so Family can join|commits the direct recovery fence before opening card setup|recovers a claimed Core plan after group membership is removed'`
   - `pnpm hosted-billing:ci-guard`
   - `pnpm --dir apps/web typecheck`
   - `pnpm --dir apps/web lint`
@@ -217,6 +230,9 @@ Updated: 2026-08-09
   - Exact paused-plan retries reuse the target-specific provider claim;
     conflicting Pulse/Core choices fail stale before provider access, and only
     the claimed recovery remains visible in Settings and assistant output.
+  - Initial Core selection still requires current group membership, while an
+    exact claim remains recoverable after later membership loss and can settle
+    only through its exact-price invoice.
   - Paid and deleted receipt winners cannot be overwritten by a delayed claim;
     exact-price invoice proof prevents cross-plan activation, and terminal
     cancellation permits the existing Family admission path.
@@ -233,4 +249,17 @@ Updated: 2026-08-09
   - Desktop 1440 CSS px at 2x and mobile 390 CSS px at 3x catalog crops render
     the real pending confirmation state, pass native-resolution inspection,
     and match their hosted PNGs byte-for-byte.
+  - `git diff --check` passes.
+- Round 6 remediation proof on the local candidate:
+  - Nine focused unit/UI files pass with 527 tests, including rejected-request
+    refresh, saved-payment return branching, existing-claim recovery, and
+    initial-selection rejection with no local or provider mutation.
+  - Six focused real-PostgreSQL orderings pass. The new ordering commits a
+    cardless Core claim while membership exists, removes the last membership,
+    resumes the exact claim, and activates only through its matching invoice.
+  - Hosted billing CI guard and Web typecheck pass. Full Web lint passes with
+    zero errors; its 37 warnings remain outside the changed files.
+  - Real-component portal-failure and payment-method-return states pass desktop
+    and mobile native-resolution inspection. All four lossless hosted images
+    are byte-identical to the inspected local captures.
   - `git diff --check` passes.

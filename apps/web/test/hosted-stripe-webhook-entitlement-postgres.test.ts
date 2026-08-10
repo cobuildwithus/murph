@@ -1168,6 +1168,219 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
+    it("recovers a claimed Core plan after group membership is removed", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const ownerMemberId = `hbm_core_claim_owner_${fixtureId}`;
+      const memberId = `hbm_core_claim_member_${fixtureId}`;
+      const confirmedGroupId = `hbg_core_claim_${fixtureId}`;
+      const membershipId = `hgm_core_claim_${fixtureId}`;
+      const stripeCustomerId = `cus_core_claim_${fixtureId}`;
+      const stripeSubscriptionId = `sub_core_claim_${fixtureId}`;
+      const stripeEventId = `evt_core_claim_${fixtureId}`;
+      const stripeInvoiceId = `in_core_claim_${fixtureId}`;
+      const pulsePriceId = `price_core_claim_pulse_${fixtureId}`;
+      const groupPriceId = `price_core_claim_group_${fixtureId}`;
+      const edgePriceId = `price_core_claim_edge_${fixtureId}`;
+      const webhookSecret = "whsec_core_claim_fixture";
+      const now = new Date("2026-07-01T13:49:00.000Z");
+      const cardlessSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        paymentMethodId: "",
+        priceId: pulsePriceId,
+        status: "paused",
+        subscriptionId: stripeSubscriptionId,
+      });
+      cardlessSubscription.default_payment_method = null;
+      const cardBackedSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        paymentMethodId: `pm_core_claim_${fixtureId}`,
+        priceId: pulsePriceId,
+        status: "paused",
+        subscriptionId: stripeSubscriptionId,
+      });
+      const updatedSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        paymentMethodId: `pm_core_claim_${fixtureId}`,
+        priceId: groupPriceId,
+        status: "paused",
+        subscriptionId: stripeSubscriptionId,
+      });
+      const resumedSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        latestInvoice: buildDraftPulseResumeInvoice({
+          customerId: stripeCustomerId,
+          invoiceId: stripeInvoiceId,
+          priceId: groupPriceId,
+          subscriptionId: stripeSubscriptionId,
+        }),
+        paymentMethodId: `pm_core_claim_${fixtureId}`,
+        priceId: groupPriceId,
+        status: "active",
+        subscriptionId: stripeSubscriptionId,
+      });
+      const subscriptions: Record<string, Stripe.Subscription> = {
+        [stripeSubscriptionId]: cardlessSubscription,
+      };
+      const paidEvent = buildInvoicePaidEvent({
+        created: Math.floor(now.getTime() / 1_000),
+        customerId: stripeCustomerId,
+        eventId: stripeEventId,
+        invoiceId: stripeInvoiceId,
+        priceId: groupPriceId,
+        subscriptionId: stripeSubscriptionId,
+      });
+      const stripeFixture = await startHostedStripeHttpFixture({
+        billingPortalSessionUrl: "https://billing.stripe.test/core-claim",
+        events: { [stripeEventId]: paidEvent },
+        prices: {
+          [groupPriceId]: buildHostedMonthlyPrice({
+            priceId: groupPriceId,
+            unitAmount: 350,
+          }),
+          [pulsePriceId]: buildHostedMonthlyPrice({
+            priceId: pulsePriceId,
+            unitAmount: 800,
+          }),
+        },
+        resumedSubscriptions: {
+          [stripeSubscriptionId]: resumedSubscription,
+        },
+        subscriptions,
+        updatedSubscriptions: {
+          [stripeSubscriptionId]: updatedSubscription,
+        },
+      });
+      const runtimeGlobals = readHostedStripeRuntimeGlobals();
+
+      configureHostedStripeFixtureEnvironment({
+        edgePriceId,
+        groupPriceId,
+        pulsePriceId,
+        stripe: stripeFixture.stripe,
+        webhookSecret,
+      });
+
+      try {
+        await prisma.hostedMember.createMany({
+          data: [
+            { id: ownerMemberId },
+            {
+              billingStatus: HostedBillingStatus.paused,
+              id: memberId,
+            },
+          ],
+        });
+        await seedHostedMemberActivationProof({
+          memberId,
+          prisma,
+          sequence: 1n,
+        });
+        await prisma.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            currentBillingPhase: null,
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+            currentTrialEndsAt: now,
+            memberId,
+            stripeCustomerId,
+            stripeSubscriptionId,
+            tx,
+          })
+        );
+        await prisma.hostedGroup.create({
+          data: {
+            id: confirmedGroupId,
+            members: {
+              create: {
+                id: membershipId,
+                joinedAt: now,
+                memberId,
+              },
+            },
+            ownerMemberId,
+          },
+        });
+
+        await expect(startHostedTrialPaidPlan({
+          memberId,
+          now,
+          paymentMethodContinuation: "settings",
+          prisma,
+          targetPlanCode: "launch_group_monthly",
+          timing: "now",
+        })).resolves.toEqual({
+          billingPlanCode: "launch_group_monthly",
+          paymentUrl: "https://billing.stripe.test/core-claim",
+          status: "payment_required",
+        });
+        await expect(readHostedMemberBillingSnapshot({
+          memberId,
+          prisma,
+        })).resolves.toMatchObject({
+          billingRef: { currentBillingPlanCode: "launch_group_monthly" },
+          core: { billingStatus: HostedBillingStatus.incomplete },
+        });
+
+        await prisma.hostedGroupMember.delete({
+          where: { id: membershipId },
+        });
+        await expect(prisma.hostedGroupMember.count({
+          where: { memberId },
+        })).resolves.toBe(0);
+        subscriptions[stripeSubscriptionId] = cardBackedSubscription;
+
+        await expect(startHostedTrialPaidPlan({
+          memberId,
+          now,
+          paymentMethodContinuation: "settings",
+          prisma,
+          targetPlanCode: "launch_group_monthly",
+          timing: "now",
+        })).resolves.toEqual({
+          billingPlanCode: "launch_group_monthly",
+          status: "billing_pending",
+        });
+        subscriptions[stripeSubscriptionId] = resumedSubscription;
+        await postSignedHostedStripeEvent({
+          event: paidEvent,
+          stripe: stripeFixture.stripe,
+          webhookSecret,
+        });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId: stripeEventId,
+          prisma,
+          timeoutMs: 5_000,
+        })).resolves.toEqual({
+          accepted: true,
+          required: false,
+        });
+        await expect(readHostedMemberBillingSnapshot({
+          memberId,
+          prisma,
+        })).resolves.toMatchObject({
+          billingRef: {
+            currentBillingPhase: "paid",
+            currentBillingPlanCode: "launch_group_monthly",
+          },
+          core: { billingStatus: HostedBillingStatus.active },
+        });
+      } finally {
+        clearHostedStripeFixtureEnvironment(runtimeGlobals);
+        await stripeFixture.stop();
+        await prisma.hostedStripeEvent.deleteMany({
+          where: { eventId: stripeEventId },
+        });
+        await prisma.hostedGroup.deleteMany({
+          where: { id: confirmedGroupId },
+        });
+        await prisma.hostedMember.deleteMany({
+          where: { id: { in: [ownerMemberId, memberId] } },
+        });
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
     it("lets Family removal win before Checkout loser cleanup without touching Stripe", async () => {
       const ownerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const cleanupClient = createPrismaClient({ databaseUrl, poolMax: 1 });

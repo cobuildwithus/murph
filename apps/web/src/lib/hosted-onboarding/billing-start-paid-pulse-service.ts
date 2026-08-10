@@ -589,7 +589,7 @@ function resolveHostedPulseTrialStartPaidSourceDisposition(input: {
   billingStatus: HostedBillingStatus;
   requireClaimableState?: boolean;
   targetPlanCode: HostedTrialPaidPlanCode;
-}): "already_started" | "claim" {
+}): "already_started" | "claim" | "recover_existing_claim" {
   const currentPlanCode = parseHostedBillingPlanCode(
     input.billingRef?.currentBillingPlanCode,
   );
@@ -621,7 +621,7 @@ function resolveHostedPulseTrialStartPaidSourceDisposition(input: {
 
   if (input.billingStatus === HostedBillingStatus.incomplete) {
     if (currentPlanCode === input.targetPlanCode) {
-      return "claim";
+      return "recover_existing_claim";
     }
     if (
       currentPlanCode === "launch_group_monthly" ||
@@ -846,8 +846,9 @@ function resolveHostedPulseTrialPaymentMethodContinuation(input: {
   }
 
   // The legacy continuation contract can only resume Pulse. A Group payment
-  // setup therefore returns to a marked Settings receipt without auto-running
-  // the wrong plan; the member confirms a fresh, current Group quote there.
+  // setup therefore returns to a marked Settings receipt. Settings derives
+  // whether to recover an exact committed claim or request a fresh choice from
+  // the canonical billing projection.
   if (input.targetPlanCode === "launch_group_monthly") {
     return { kind: "settings_group" };
   }
@@ -1287,11 +1288,6 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
       if (lockedSourceDisposition === "already_started") {
         return lockedSourceDisposition;
       }
-      await assertHostedBillingPlanSelectable({
-        memberId: input.memberId,
-        prisma: tx,
-        targetPlanCode: input.targetPlanCode,
-      });
       const familyClaim = await readHostedMemberFamilyBillingClaim({
         memberId: input.memberId,
         prisma: tx,
@@ -1299,16 +1295,23 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
       if (familyClaim) {
         throw buildHostedFamilyBillingClaimError(familyClaim);
       }
-      await writeHostedMemberStripeBillingRefTx({
-        currentBillingPlanCode: input.targetPlanCode,
-        memberId: input.memberId,
-        tx,
-      });
-      await updateHostedMemberCoreState({
-        billingStatus: HostedBillingStatus.incomplete,
-        memberId: input.memberId,
-        prisma: tx,
-      });
+      if (lockedSourceDisposition === "claim") {
+        await assertHostedBillingPlanSelectable({
+          memberId: input.memberId,
+          prisma: tx,
+          targetPlanCode: input.targetPlanCode,
+        });
+        await writeHostedMemberStripeBillingRefTx({
+          currentBillingPlanCode: input.targetPlanCode,
+          memberId: input.memberId,
+          tx,
+        });
+        await updateHostedMemberCoreState({
+          billingStatus: HostedBillingStatus.incomplete,
+          memberId: input.memberId,
+          prisma: tx,
+        });
+      }
       return lockedSourceDisposition;
     },
   });

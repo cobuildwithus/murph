@@ -136,6 +136,9 @@ export function HostedBillingSettings(props: {
     });
   const pulseTrialBillingPending =
     pulseTrialRecoverable && props.billingStatus === "incomplete";
+  const groupPaymentMethodSavedForSelectedClaim =
+    props.groupPaymentMethodSaved === true &&
+    pulseTrialRecoveryTarget === "launch_group_monthly";
   const groupCurrent =
     ownPaidBillingActive && currentPlanCode === "launch_group_monthly";
   const pulseCurrent =
@@ -538,12 +541,14 @@ export function HostedBillingSettings(props: {
               Payment method saved
             </p>
             <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
-              {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} has not started
+              {groupPaymentMethodSavedForSelectedClaim
+                ? `${HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} is still starting`
+                : `${HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} has not started`}
             </p>
             <p className="mt-1 max-w-2xl text-sm text-pretty text-muted-foreground">
-              {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} has not started. Review
-              the plan options below and make a fresh choice when you are
-              ready.
+              {groupPaymentMethodSavedForSelectedClaim
+                ? `Your payment method was saved and ${HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} remains selected. Use Check ${HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} status below to finish confirming billing.`
+                : `${HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} has not started. Review the plan options below and make a fresh choice when you are ready.`}
             </p>
           </div>
         </div>

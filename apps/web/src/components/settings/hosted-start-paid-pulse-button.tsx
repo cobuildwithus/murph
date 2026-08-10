@@ -159,6 +159,7 @@ export function StartPaidPulseButton(props: {
         error,
         `Could not start ${targetPlan.displayName} right now.`,
       ));
+      router.refresh();
     } finally {
       props.onPendingChange?.(false);
     }

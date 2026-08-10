@@ -127,6 +127,44 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Payment setup failed after the exact Core claim was saved"
+        state="payment-recovery-portal-failure"
+      >
+        <div
+          className="mx-auto grid w-full max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7"
+          inert
+        >
+          <StartPaidPlanConfirmationContent
+            errorMessage="Stripe could not open payment setup. Try again."
+            onClose={() => undefined}
+            onConfirm={() => undefined}
+            staticPresentation
+            status="billing_pending"
+            targetPlanCode="launch_group_monthly"
+            timing="now"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Payment method saved for the selected Core recovery"
+        state="payment-recovery-method-saved"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="incomplete"
+            canStartPaidPulse
+            currentBillingPhase="trial"
+            currentBillingPlanCode="launch_group_monthly"
+            currentCheckoutOffer="pulse_trial_7d"
+            groupPaymentMethodSaved
+            showGroupPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
         label="Group member on the $3.50 Core plan"
         state="active-core-usage"
       >

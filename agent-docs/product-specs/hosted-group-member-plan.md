@@ -120,6 +120,16 @@ vice versa). The claim has no automatic expiry: Murph cannot prove that an
 interrupted request did not already mutate the provider, so releasing it on a
 timer would reopen the direct-versus-Family charge race.
 
+Core membership eligibility is required when the first locked selection
+creates the claim. Later membership loss does not revoke an exact incomplete
+claim, just as it does not cancel active Core: same-target retries remain
+recovery and skip new-selection admission while preserving suspension,
+binding, Family-authority, terminal-state, paid-target, and conflicting-target
+guards. After a rejected request, Web preserves its accessible error and
+refreshes the canonical projection. A marked payment-method return for an
+exact incomplete Core claim points to Check Core status; fresh-choice wording
+remains limited to active-trial returns where no target claim exists.
+
 Public checkout accepts only the explicit public billing-code allowlist. Adding
 Core to the private catalog must not make it publicly selectable.
 
@@ -131,8 +141,9 @@ Core to the private catalog must not make it publicly selectable.
 - Settings bounds its display-only provider Price read to five seconds with no
   network retry. Failure hides Core while the rest of Settings remains
   available; quote and mutation boundaries keep their stronger validation.
-- Stale membership, quote, local billing state, Stripe customer, subscription,
-  subscription items, or schedule shape fails closed.
+- Stale membership before the first Core selection, quote, local billing state,
+  Stripe customer, subscription, subscription items, or schedule shape fails
+  closed. Membership loss after an exact claim does not revoke its recovery.
 - A cardless Core-at-trial-end choice does not create a schedule. Payment
   setup returns the member to neutral Settings or conversation context for a
   fresh exact-price choice.
