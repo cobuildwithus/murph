@@ -73,7 +73,6 @@ describe('assistant manual provider export guidance', () => {
     expect(normalizedSkill).toContain(
       'does not make that service a connected-app provider',
     )
-
     expect(normalizedSkill).toContain(
       'verified fallback routes for Function Health, Livongo/Teladoc Condition Management, Strong, and Hevy',
     )

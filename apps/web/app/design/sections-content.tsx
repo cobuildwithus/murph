@@ -410,7 +410,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Apple Health relay wearable setup">
+      <StudySection title="Apple Health relay wearable sources">
         <AppleHealthRelaySetupStudy />
       </StudySection>
 
