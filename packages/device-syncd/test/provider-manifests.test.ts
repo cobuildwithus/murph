@@ -488,6 +488,7 @@ describe("deviceSyncProviderManifests", () => {
         kind: "resource",
         payload: {
           eventType: "daily.data.activity.created",
+          historicalProviderRecordsSeen: true,
           ignored: "value",
           objectId: "activity-1",
           occurredAt: "2026-04-22T00:00:00.000Z",
@@ -500,6 +501,7 @@ describe("deviceSyncProviderManifests", () => {
       }),
     ).toEqual({
       eventType: "daily.data.activity.created",
+      historicalProviderRecordsSeen: true,
       objectId: "activity-1",
       occurredAt: "2026-04-22T00:00:00.000Z",
       resource: "activity",

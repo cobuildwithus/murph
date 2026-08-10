@@ -710,8 +710,53 @@ test("raw provider rows without canonical imported events remain on the retry la
 
   assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
   assert.equal(retry.payload?.emptyBackfillAttempts, 1);
+  assert.equal(retry.payload?.historicalProviderRecordsSeen, true);
   assert.equal(retry.payload?.historicalRecordsSeen, undefined);
   assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
+});
+
+test("exhausted malformed provider rows stay recoverable until canonical import succeeds", async () => {
+  const bloodPressureRecords: Record<string, unknown>[] = [{
+    id: "bp-malformed-at-exhaustion",
+    timestamp: "2026-05-20T08:30:00.000Z",
+    systolic: 120,
+  }];
+  const provider = createProvider({ bloodPressureRecords, requests: [] });
+  const connection = await createSourceConnection(provider);
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const exhausted = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+    },
+  }, 1);
+  exhausted.dedupeKey = `hosted-device-sync:${"7".repeat(64)}`;
+
+  const malformed = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ canonicalEventCount: 0 }),
+    exhausted,
+  );
+  const retry = findBloodPressureJob(malformed.scheduledJobs ?? []);
+
+  assert.equal(malformed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
+  assert.equal(retry.dedupeKey, exhausted.dedupeKey);
+  assert.equal(retry.payload?.emptyBackfillAttempts, 4);
+  assert.equal(retry.payload?.historicalProviderRecordsSeen, true);
+  assert.equal(retry.payload?.historicalRecordsSeen, undefined);
+
+  bloodPressureRecords[0] = {
+    ...bloodPressureRecords[0],
+    diastolic: 78,
+  };
+  const recovered = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    toJobRecord(retry, 2),
+  );
+
+  assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
+  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
 
 test("source admission rejection cannot certify historical coverage", async () => {
@@ -855,6 +900,57 @@ test("yielded blood-pressure history keeps one identity and remembers earlier re
   );
   assert.equal(completed.scheduledJobs?.length ?? 0, 0);
   assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("malformed rows before a yield cannot become terminal empty coverage", async () => {
+  const bloodPressureRecords: Record<string, unknown>[] = [{
+    id: "bp-malformed-before-yield",
+    timestamp: "2026-05-12T08:30:00.000Z",
+    systolic: 118,
+  }];
+  const provider = createProvider({ bloodPressureRecords, requests: [] });
+  const connection = await createSourceConnection(provider);
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const exhausted = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+    },
+  }, 1);
+  exhausted.dedupeKey = `hosted-device-sync:${"8".repeat(64)}`;
+  let yieldChecks = 0;
+  const yielded = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      canonicalEventCount: 0,
+      shouldYield: () => {
+        yieldChecks += 1;
+        return yieldChecks > 1;
+      },
+    }),
+    exhausted,
+  );
+  const continuation = findBloodPressureJob(yielded.scheduledJobs ?? []);
+
+  assert.equal(continuation.dedupeKey, exhausted.dedupeKey);
+  assert.equal(continuation.payload?.emptyBackfillAttempts, 4);
+  assert.equal(continuation.payload?.historicalProviderRecordsSeen, true);
+  assert.equal(continuation.payload?.historicalRecordsSeen, false);
+  assert.equal(continuation.payload?.windowStart, "2026-05-13T00:00:00.000Z");
+
+  bloodPressureRecords.length = 0;
+  const completedContinuation = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(continuation, 2),
+  );
+  const retry = findBloodPressureJob(completedContinuation.scheduledJobs ?? []);
+
+  assert.equal(completedContinuation.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
+  assert.equal(retry.dedupeKey, exhausted.dedupeKey);
+  assert.equal(retry.payload?.emptyBackfillAttempts, 4);
+  assert.equal(retry.payload?.historicalProviderRecordsSeen, true);
+  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
 });
 
 test("an empty yielded scan retries from the original anchored window", async () => {

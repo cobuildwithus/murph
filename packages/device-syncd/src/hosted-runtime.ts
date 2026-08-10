@@ -604,6 +604,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   emptyBackfillAttempts: "number",
   eventType: "string",
   historicalBackfill: "boolean",
+  historicalProviderRecordsSeen: "boolean",
   historicalRecordsSeen: "boolean",
   historicalWindowStart: "isoTimestamp",
   includePersonalInfo: "boolean",

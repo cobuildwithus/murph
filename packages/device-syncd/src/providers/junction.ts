@@ -161,6 +161,7 @@ interface JunctionTimeseriesImportResult {
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   canonicalEventCount: number;
   fetchComplete: boolean;
+  providerRecordsSeen: boolean;
 }
 
 interface JunctionDirectSummaryImportResult {
@@ -1880,11 +1881,16 @@ export function createJunctionDeviceSyncProvider(
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
           : undefined;
+        const historicalProviderRecordsSeen = extendedHistoricalBackfill
+          ? job.payload.historicalProviderRecordsSeen === true
+            || timeseriesImport.providerRecordsSeen
+          : undefined;
         if (timeseriesImport.yieldedAt) {
           return withJunctionSkippedResourceMetadata(
             context,
             buildYieldedJunctionJobResult({
               context,
+              historicalProviderRecordsSeen,
               historicalRecordsSeen,
               job,
               windowEnd: window.windowEnd,
@@ -2034,6 +2040,9 @@ export function createJunctionDeviceSyncProvider(
     const recordsSeen =
       input.job.payload.historicalRecordsSeen === true
       || input.importResult.canonicalEventCount > 0;
+    const providerRecordsSeen =
+      input.job.payload.historicalProviderRecordsSeen === true
+      || input.importResult.providerRecordsSeen;
 
     if (input.importResult.fetchComplete && recordsSeen) {
       return withJunctionMetadataPatch(
@@ -2051,7 +2060,10 @@ export function createJunctionDeviceSyncProvider(
     let retryDelayMs =
       EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyBackfillAttempts - 1]
       ?? null;
-    if (retryDelayMs === null && !input.importResult.fetchComplete) {
+    if (
+      retryDelayMs === null
+      && (!input.importResult.fetchComplete || providerRecordsSeen)
+    ) {
       emptyBackfillAttempts = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length;
       retryDelayMs =
         EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyBackfillAttempts - 1]
@@ -2079,6 +2091,7 @@ export function createJunctionDeviceSyncProvider(
           availableAt: addMilliseconds(input.context.now, retryDelayMs),
           dedupeKey: input.job.dedupeKey,
           emptyBackfillAttempts,
+          historicalProviderRecordsSeen: providerRecordsSeen,
           historicalRecordsSeen: recordsSeen,
           historicalWindowStart,
           resource: input.resource,
@@ -2504,6 +2517,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const dedupedTimeseries = dedupeJunctionTimeseriesSnapshotRecords(accumulatedTimeseries);
+    const providerRecordsSeen = hasJunctionSnapshotRecords(dedupedTimeseries);
     if (executionWindowStart && executionWindowEnd && hasJunctionSnapshotRecords(dedupedTimeseries)) {
       const preparedImport = await prepareJunctionImportSnapshot(
         context,
@@ -2529,6 +2543,7 @@ export function createJunctionDeviceSyncProvider(
     return {
       canonicalEventCount,
       fetchComplete,
+      providerRecordsSeen,
       yieldedAt,
     };
   }
@@ -2722,6 +2737,7 @@ export function createJunctionDeviceSyncProvider(
 
   function buildYieldedJunctionJobResult(input: {
     context: ProviderJobContext;
+    historicalProviderRecordsSeen?: boolean;
     historicalRecordsSeen?: boolean;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
@@ -2738,6 +2754,7 @@ export function createJunctionDeviceSyncProvider(
   }
 
   function buildYieldedJunctionFollowUpJob(input: {
+    historicalProviderRecordsSeen?: boolean;
     historicalRecordsSeen?: boolean;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
@@ -2785,6 +2802,9 @@ export function createJunctionDeviceSyncProvider(
 
     const payload: Record<string, unknown> = {
       ...input.job.payload,
+      ...(input.historicalProviderRecordsSeen === undefined
+        ? {}
+        : { historicalProviderRecordsSeen: input.historicalProviderRecordsSeen }),
       ...(input.historicalRecordsSeen === undefined
         ? {}
         : { historicalRecordsSeen: input.historicalRecordsSeen }),
@@ -5521,6 +5541,7 @@ function buildExtendedTimeseriesBackfillJob(input: {
   availableAt: string;
   dedupeKey?: string | null;
   emptyBackfillAttempts?: number;
+  historicalProviderRecordsSeen?: boolean;
   historicalRecordsSeen?: boolean;
   historicalWindowStart: string;
   resource: string;
@@ -5533,6 +5554,9 @@ function buildExtendedTimeseriesBackfillJob(input: {
       ? { emptyBackfillAttempts: input.emptyBackfillAttempts }
       : {}),
     historicalBackfill: true,
+    ...(input.historicalProviderRecordsSeen
+      ? { historicalProviderRecordsSeen: true }
+      : {}),
     ...(input.historicalRecordsSeen
       ? { historicalRecordsSeen: true }
       : {}),

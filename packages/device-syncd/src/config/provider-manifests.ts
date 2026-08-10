@@ -201,6 +201,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       eventType: stringJobField({ includeInHostedHint: true }),
       historicalBackfill: booleanJobField({ includeInHostedHint: true }),
+      historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalWindowStart: stringJobField({ includeInHostedHint: true }),
       objectId: stringJobField({ includeInHostedHint: true }),

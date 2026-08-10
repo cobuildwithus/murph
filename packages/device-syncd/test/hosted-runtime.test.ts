@@ -2744,6 +2744,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           payload: {
             emptyBackfillAttempts: 2,
             historicalBackfill: true,
+            historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
             historicalWindowStart: "2026-03-01T00:00:00Z",
             timeseriesCursor: "2026-04-02T00:00:00Z",
@@ -2757,6 +2758,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(hint?.jobs?.[0]?.payload).toEqual({
       emptyBackfillAttempts: 2,
       historicalBackfill: true,
+      historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
       historicalWindowStart: "2026-03-01T00:00:00.000Z",
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
