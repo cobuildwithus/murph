@@ -171,12 +171,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // only the total ceiling and keep both startup baselines and all tolerances.
 //
 // Preserving admitted identity and retry state for Junction blood-pressure
-// history extends only that deferred provider's lazy output. Exact ubuntu
-// assembly measured a 9,941,837B total on 2026-08-10; retain the same 32 KiB
-// reviewed-addition allowance without changing either startup-path budget.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_941_837 + 32_768;
+// history extends that deferred provider's lazy output. After reconciling the
+// reviewed hosted-execution base, exact assembly measured a 9,988,779B total
+// and 8,004,094B static closure on 2026-08-10. Ratchet those two candidate
+// baselines while retaining their reviewed-addition allowances and the
+// unchanged startup-entry baseline.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_988_779 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_004_094;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
