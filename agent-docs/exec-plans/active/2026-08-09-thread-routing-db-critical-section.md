@@ -202,8 +202,8 @@ Updated: 2026-08-09
   observed ciphertext before demotion, mailbox work, or decryption and uses the
   existing preparation-required retry if it changed. Absent or structurally
   corrupt ciphertext retains the existing owning-ingress repair path.
-- Local proof on the round-5-remediated worktree: the six affected
-  non-PostgreSQL crypto/Linq/Telegram routing files passed 407 tests, the
+- Local proof on the round-5-remediated worktree: the seven affected
+  non-PostgreSQL crypto/Linq/Telegram routing files passed 420 tests, the
   PostgreSQL concurrency lane passed 9 tests, app-local prepared typecheck and
   scoped lint passed, and `git diff --check` passed. Production-format Linq and
   Telegram fixtures prove both active and decrypt-only roots unwrap before the
