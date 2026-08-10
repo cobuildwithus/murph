@@ -903,6 +903,8 @@ export function evaluateAnomalies(input: {
     const source = readSourceFromDimensions(counter.dimensions) ?? "database";
     if (counter.metric === "db_connection_ratio" && counter.current >= 0.9) {
       anomalies.push(makeAnomaly({
+        fingerprintMetric: counter.metric,
+        fingerprintDimensions: counter.dimensions,
         ruleId: "database_connection_pressure",
         severity: counter.current >= 0.95 ? "high" : "medium",
         category: "pressure",
@@ -917,6 +919,8 @@ export function evaluateAnomalies(input: {
     }
     if (counter.metric === "db_long_transaction_count" && counter.current >= 1) {
       anomalies.push(makeAnomaly({
+        fingerprintMetric: counter.metric,
+        fingerprintDimensions: counter.dimensions,
         ruleId: "database_long_transaction",
         severity: "high",
         category: "pressure",
@@ -931,6 +935,8 @@ export function evaluateAnomalies(input: {
     }
     if (counter.metric === "db_blocked_session_count" && counter.current >= 5) {
       anomalies.push(makeAnomaly({
+        fingerprintMetric: counter.metric,
+        fingerprintDimensions: counter.dimensions,
         ruleId: "database_blocked_sessions",
         severity: "high",
         category: "pressure",
@@ -949,6 +955,8 @@ export function evaluateAnomalies(input: {
       && counter.current > counter.previous
     ) {
       anomalies.push(makeAnomaly({
+        fingerprintMetric: counter.metric,
+        fingerprintDimensions: counter.dimensions,
         ruleId: "database_deadlock_observed",
         severity: "medium",
         category: "pressure",
@@ -990,6 +998,8 @@ export function evaluateAnomalies(input: {
     const sensitive = source === "stripe";
     const release = findCorrelatedRelease(input.releaseContext, source, input.now);
     anomalies.push(makeAnomaly({
+      fingerprintMetric: summary.metric,
+      fingerprintDimensions: summary.dimensions,
       ruleId: "latency_regression",
       severity: sensitive || summary.p99Ms >= 60_000 ? "high" : "medium",
       category: sensitive ? "sensitive" : "latency",
@@ -1242,15 +1252,25 @@ export function updateStateFromSnapshot(
       && now.getTime() - Date.parse(previous.lastSeenAt) <= runWindowMs * 2 + 60_000;
     const streak = previousStillAdjacent ? previous.count + 1 : 1;
     newStreaks[candidate.fingerprint] = { count: streak, lastSeenAt: snapshot.generatedAt };
+    const existing = next.incidents.find((incident) => incident.fingerprint === candidate.fingerprint);
+    if (existing !== undefined && !TERMINAL_INCIDENT_STATES.has(existing.state)) {
+      existing.lastDetectedAt = snapshot.generatedAt;
+      existing.occurrenceCount += 1;
+      existing.lastEvidence = candidate.evidence.slice(0, 4);
+      existing.severity = maxSeverity(existing.severity, candidate.severity);
+      tightenIncidentPolicy(existing, candidate);
+      existing.releaseSha ??= candidate.releaseSha;
+      existing.sourceFingerprint ??= candidate.sourceFingerprint;
+      continue;
+    }
     if (streak < candidate.minimumConsecutiveRuns) {
       continue;
     }
-    const existing = next.incidents.find((incident) => incident.fingerprint === candidate.fingerprint);
     if (existing === undefined) {
       const incident = incidentFromCandidate(candidate, snapshot.generatedAt);
       next.incidents.push(incident);
       promotedIncidentIds.push(incident.id);
-    } else if (TERMINAL_INCIDENT_STATES.has(existing.state)) {
+    } else {
       const resolvedAt = existing.resolvedAt === undefined ? 0 : Date.parse(existing.resolvedAt);
       const canReopen = existing.state === "resolved"
         || now.getTime() - resolvedAt >= FALSE_POSITIVE_REOPEN_COOLDOWN_MS;
@@ -1268,14 +1288,6 @@ export function updateStateFromSnapshot(
         appendTransition(existing, { at: snapshot.generatedAt, from, to: "candidate" });
         promotedIncidentIds.push(existing.id);
       }
-    } else {
-      existing.lastDetectedAt = snapshot.generatedAt;
-      existing.occurrenceCount += 1;
-      existing.lastEvidence = candidate.evidence.slice(0, 4);
-      existing.severity = maxSeverity(existing.severity, candidate.severity);
-      tightenIncidentPolicy(existing, candidate);
-      existing.releaseSha ??= candidate.releaseSha;
-      existing.sourceFingerprint ??= candidate.sourceFingerprint;
     }
   }
   next.anomalyStreaks = Object.fromEntries(
@@ -1361,6 +1373,9 @@ export function transitionIncident(
   const incident = requireIncident(next, fingerprint);
   if (incident.owner?.sessionId !== sessionId) {
     throw new Error("incident_lease_not_owned");
+  }
+  if (incident.source !== "database" && target !== "escalated") {
+    throw new Error("provider_incident_escalation_only");
   }
   const from = incident.state;
   if (!INCIDENT_TRANSITIONS[from].has(target)) {
@@ -1838,6 +1853,8 @@ function evaluateCountCounter(
   const source = readSourceFromDimensions(counter.dimensions) ?? "database";
   const release = findCorrelatedRelease(releases, source, new Date(observedAt));
   return makeAnomaly({
+    fingerprintMetric: counter.metric,
+    fingerprintDimensions: counter.dimensions,
     ruleId: rule.ruleId,
     severity: counter.current >= Math.max(50, baseline * 10) ? "high" : "medium",
     category: "availability",
@@ -1897,6 +1914,8 @@ function evaluateRateCounter(
   const sensitive = source === "stripe";
   const release = findCorrelatedRelease(releases, source, new Date(observedAt));
   return makeAnomaly({
+    fingerprintMetric: counter.metric,
+    fingerprintDimensions: counter.dimensions,
     ruleId: rule.ruleId,
     severity: sensitive || currentRate >= 0.1 ? "high" : "medium",
     category: sensitive ? "sensitive" : "availability",
@@ -1923,18 +1942,26 @@ function evaluateRateCounter(
   });
 }
 
-function makeAnomaly(input: Omit<AnomalyCandidate, "fingerprint">): AnomalyCandidate {
+function makeAnomaly(
+  input: Omit<AnomalyCandidate, "fingerprint"> & {
+    fingerprintMetric?: string;
+    fingerprintDimensions?: Record<string, string>;
+  },
+): AnomalyCandidate {
+  const { fingerprintMetric, fingerprintDimensions, ...candidate } = input;
   const fingerprint = stableHash([
     "incident",
-    input.ruleId,
-    input.source,
-    input.component,
-    input.phase,
-    input.errorCode,
-    input.issueKind,
-    input.sourceFingerprint,
+    candidate.ruleId,
+    candidate.source,
+    candidate.component,
+    candidate.phase,
+    candidate.errorCode,
+    candidate.issueKind,
+    candidate.sourceFingerprint,
+    fingerprintMetric,
+    fingerprintDimensions === undefined ? undefined : dimensionsKey(fingerprintDimensions),
   ]);
-  return { ...input, fingerprint };
+  return { ...candidate, fingerprint };
 }
 
 function deduplicateAnomalies(anomalies: AnomalyCandidate[]): AnomalyCandidate[] {

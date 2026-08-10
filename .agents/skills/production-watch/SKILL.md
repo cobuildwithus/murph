@@ -56,7 +56,7 @@ Use this skill only for Murph production-watch runs and incidents.
 
 - Phase 1 provider incidents are list, claim, and escalate only. Do not pass a provider envelope to `drill-down`; the command rejects provider incidents before extending their claim lease.
 - Corroborate the causal chain using aggregate provider evidence, release timestamps, and relevant repository source/tests. Never broaden into raw production records.
-- Record one evidence-backed state transition. Valid Phase 1 outcomes are `investigating`, `confirmed`, `monitor_incomplete`, `false_positive`, `escalated`, or `resolved`. Missing, partial, stale, or failed evidence must lead to `monitor_incomplete` or `escalated`, never `resolved`. Use `escalated` for sensitive domains; they remain escalation-only even if an external fix is later observed.
+- For database incidents, record one evidence-backed state transition. Valid database outcomes are `investigating`, `confirmed`, `monitor_incomplete`, `false_positive`, `escalated`, or `resolved`. Missing, partial, stale, or failed evidence must lead to `monitor_incomplete` or `escalated`, never `resolved`. Provider and other sensitive incidents permit only `escalated`, even if an external fix is later observed.
 
 ## ReviewGPT and remediation boundary
 

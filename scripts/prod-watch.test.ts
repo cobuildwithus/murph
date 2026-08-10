@@ -13,6 +13,7 @@ import {
   buildSnapshot,
   claimIncident,
   createInitialState,
+  evaluateAnomalies,
   filterSnapshotForIncident,
   parseState,
   parseAdapterEvidence,
@@ -25,7 +26,10 @@ import {
   type AdapterEvidence,
   type ProductionWatchSnapshot,
 } from "./prod-watch/core.ts";
-import { renderLaunchdPlistTemplate } from "./prod-watch.ts";
+import {
+  renderLaunchdPlistTemplate,
+  verifySchedulerExecutableChain,
+} from "./prod-watch.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const prodWatchPath = path.join(repoRoot, "scripts", "prod-watch.ts");
@@ -282,6 +286,111 @@ describe("production-watch snapshot contract", () => {
       automationClass: "alert_only",
       minimumConsecutiveRuns: 2,
     });
+  });
+
+  it("keeps provider metric and exact dimensions in anomaly and streak identity", () => {
+    const makeSnapshot = (surface: string, now: Date): ProductionWatchSnapshot => {
+      const provider = parseProviderEvidence(JSON.parse(
+        readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+      ) as unknown);
+      const vercel = provider.sources.find((source) => source.source === "vercel")!;
+      for (const counter of vercel.counters) {
+        counter.dimensions.surface = surface;
+      }
+      const errors = vercel.counters.find((counter) => counter.metric === "provider_error_count")!;
+      errors.current = 20;
+      errors.previous = 1;
+      return buildSnapshot({
+        now,
+        runId: `provider-surface-${surface}`,
+        mode: "collect",
+        dryRun: true,
+        startedAt: new Date(now.getTime() - 100),
+        timeoutMs: 240000,
+        skippedOverlap: false,
+        previousStart: new Date(now.getTime() - 30 * 60 * 1000),
+        currentStart: new Date(now.getTime() - 15 * 60 * 1000),
+        end: now,
+        lookbackMinutes: 15,
+        settlingDelaySeconds: 0,
+        configuredSources: ["database", "vercel", "cloudflare", "stripe"],
+        evidences: [
+          rebaseEvidence(readFixture("healthy"), now),
+          ...provider.sources.map((source) => rebaseEvidence(source, now)),
+        ],
+        failures: [],
+      });
+    };
+
+    const api = makeSnapshot("api", new Date("2026-08-09T20:00:00.000Z"));
+    const hosted = makeSnapshot("hosted_web", new Date("2026-08-09T20:05:00.000Z"));
+    const apiAnomaly = api.anomalyCandidates.find((candidate) => candidate.source === "vercel")!;
+    const hostedAnomaly = hosted.anomalyCandidates.find((candidate) => candidate.source === "vercel")!;
+    expect(apiAnomaly.fingerprint).not.toBe(hostedAnomaly.fingerprint);
+
+    let state = createInitialState(
+      new Date("2026-08-09T19:55:00.000Z"),
+      ["database", "vercel", "cloudflare", "stripe"],
+    );
+    state = updateStateFromSnapshot(state, api).state;
+    state = updateStateFromSnapshot(state, hosted).state;
+    expect(state.incidents.filter((incident) => incident.source === "vercel")).toHaveLength(0);
+    state = updateStateFromSnapshot(
+      state,
+      makeSnapshot("hosted_web", new Date("2026-08-09T20:10:00.000Z")),
+    ).state;
+    expect(state.incidents.filter((incident) => incident.source === "vercel")).toHaveLength(1);
+
+    const simultaneous = makeSnapshot("hosted_web", new Date("2026-08-09T20:15:00.000Z"));
+    const vercelCounters = simultaneous.counters.filter((counter) => counter.dimensions.source === "vercel");
+    vercelCounters.push(
+      {
+        metric: "provider_request_count",
+        dimensions: { source: "vercel", surface: "api" },
+        unit: "count",
+        current: 240,
+        previous: 230,
+      },
+      {
+        metric: "provider_error_count",
+        dimensions: { source: "vercel", surface: "api" },
+        unit: "count",
+        current: 20,
+        previous: 1,
+      },
+      {
+        metric: "provider_timeout_count",
+        dimensions: { source: "vercel", surface: "api" },
+        unit: "count",
+        current: 0,
+        previous: 0,
+      },
+      {
+        metric: "deployment_error_count",
+        dimensions: { source: "vercel", surface: "hosted_web" },
+        unit: "count",
+        current: 20,
+        previous: 1,
+      },
+    );
+    simultaneous.counters = [
+      ...simultaneous.counters.filter((counter) => counter.dimensions.source !== "vercel"),
+      ...vercelCounters,
+    ];
+    simultaneous.anomalyCandidates = evaluateAnomalies({
+      now: new Date(simultaneous.generatedAt),
+      sourceHealth: simultaneous.sourceHealth,
+      releaseContext: simultaneous.releaseContext,
+      counters: simultaneous.counters,
+      latency: simultaneous.latency,
+      fingerprints: simultaneous.fingerprints,
+      failures: simultaneous.collectorFailures,
+    });
+    const simultaneousVercel = simultaneous.anomalyCandidates.filter((candidate) => (
+      candidate.source === "vercel" && candidate.ruleId === "error_rate_regression"
+    ));
+    expect(simultaneousVercel).toHaveLength(3);
+    expect(new Set(simultaneousVercel.map((candidate) => candidate.fingerprint)).size).toBe(3);
   });
 
   it("treats clinical, consent, and integrity code paths as sensitive", () => {
@@ -570,6 +679,61 @@ describe("production-watch incident coordination", () => {
       resolvedAt: "2026-08-09T20:11:00.000Z",
     });
     expect(resolved.incidents.find((candidate) => candidate.fingerprint === incident.fingerprint)?.owner).toBeUndefined();
+  });
+
+  it("records a current recurrence before the new-incident streak gate permits resolution", () => {
+    const first = buildCompleteSnapshotWithDatabase("suspicious", new Date("2026-08-09T20:00:00.000Z"));
+    const second = buildCompleteSnapshotWithDatabase("suspicious", new Date("2026-08-09T20:05:00.000Z"));
+    let state = createInitialState(
+      new Date("2026-08-09T19:55:00.000Z"),
+      ["database", "vercel", "cloudflare", "stripe"],
+    );
+    state = updateStateFromSnapshot(state, first).state;
+    state = updateStateFromSnapshot(state, second).state;
+    const incident = state.incidents.find((candidate) => (
+      candidate.source === "database" && candidate.category !== "sensitive"
+    ))!;
+    expect(incident).toBeDefined();
+    state = claimIncident(state, incident.fingerprint, "session-recurrence", new Date("2026-08-09T20:06:00.000Z"), 30);
+    state = transitionIncident(
+      state,
+      incident.fingerprint,
+      "session-recurrence",
+      "confirmed",
+      new Date("2026-08-09T20:07:00.000Z"),
+    );
+
+    state = updateStateFromSnapshot(
+      state,
+      buildCompleteSnapshot(new Date("2026-08-09T20:10:00.000Z")),
+    ).state;
+    state = updateStateFromSnapshot(
+      state,
+      buildCompleteSnapshotWithDatabase("suspicious", new Date("2026-08-09T20:15:00.000Z")),
+    ).state;
+    expect(state.anomalyStreaks[incident.fingerprint]?.count).toBe(1);
+    expect(state.incidents.find((candidate) => candidate.fingerprint === incident.fingerprint)?.lastDetectedAt)
+      .toBe("2026-08-09T20:15:00.000Z");
+    expect(() => transitionIncident(
+      state,
+      incident.fingerprint,
+      "session-recurrence",
+      "resolved",
+      new Date("2026-08-09T20:16:00.000Z"),
+    )).toThrow("incident_resolution_requires_later_clean_evidence");
+
+    state = updateStateFromSnapshot(
+      state,
+      buildCompleteSnapshot(new Date("2026-08-09T20:20:00.000Z")),
+    ).state;
+    expect(transitionIncident(
+      state,
+      incident.fingerprint,
+      "session-recurrence",
+      "resolved",
+      new Date("2026-08-09T20:21:00.000Z"),
+    ).incidents.find((candidate) => candidate.fingerprint === incident.fingerprint)?.state)
+      .toBe("resolved");
   });
 
   it("rejects terminal transitions for sensitive incidents and stale or still-observed evidence", () => {
@@ -1085,7 +1249,7 @@ describe("production-watch locking and dry-run behavior", () => {
     )).toContain(incidentId);
   });
 
-  it("scores one authoritative provider rate fact and stops provider drill-down before lease mutation", () => {
+  it("keeps every provider incident claim-and-escalate-only without drill-down lease mutation", () => {
     const runtimeRoot = makeTempRoot();
     const provider = JSON.parse(
       readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
@@ -1099,6 +1263,14 @@ describe("production-watch locking and dry-run behavior", () => {
     const errors = vercel.counters.find((counter) => counter.metric === "provider_error_count")!;
     errors.current = 20;
     errors.previous = 1;
+    const cloudflare = provider.sources.find((source) => source.source === "cloudflare")!;
+    const timeouts = cloudflare.counters.find((counter) => counter.metric === "provider_timeout_count")!;
+    timeouts.current = 10;
+    timeouts.previous = 1;
+    const stripe = provider.sources.find((source) => source.source === "stripe")!;
+    const stripeErrors = stripe.counters.find((counter) => counter.metric === "provider_error_count")!;
+    stripeErrors.current = 10;
+    stripeErrors.previous = 0;
     const providerPath = path.join(runtimeRoot, "provider.json");
     writeFileSync(providerPath, JSON.stringify(provider), { mode: 0o600 });
 
@@ -1114,32 +1286,61 @@ describe("production-watch locking and dry-run behavior", () => {
 
     const listing = runProdWatch(["incident", "list"], runtimeRoot);
     expect(listing.status).toBe(0);
-    expect(listing.stdout).toContain("| vercel |");
-    const incidentId = listing.stdout.match(/\| (pw_[A-Za-z0-9]+) \|/u)?.[1];
-    expect(incidentId).toBeDefined();
-
-    expect(runProdWatch([
-      "incident", "claim", incidentId!, "--session-id", "provider-session",
-    ], runtimeRoot).status).toBe(0);
     const statePath = path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json");
-    const stateBefore = JSON.parse(readFileSync(statePath, "utf8")) as {
-      incidents: Array<{ id: string; state: string; owner?: { heartbeatAt: string; expiresAt: string } }>;
+    type ProviderState = {
+      incidents: Array<{
+        id: string;
+        source: string;
+        state: string;
+        owner?: { heartbeatAt: string; expiresAt: string };
+      }>;
     };
-    const ownerBefore = stateBefore.incidents.find((incident) => incident.id === incidentId)!.owner;
+    const promoted = JSON.parse(readFileSync(statePath, "utf8")) as ProviderState;
+    for (const source of ["vercel", "cloudflare", "stripe"]) {
+      expect(listing.stdout).toContain(`| ${source} |`);
+      const incidentId = promoted.incidents.find((incident) => incident.source === source)?.id;
+      expect(incidentId).toBeDefined();
+      const sessionId = `${source}-session`;
+      expect(runProdWatch([
+        "incident", "claim", incidentId!, "--session-id", sessionId,
+      ], runtimeRoot).status).toBe(0);
+      const claimed = JSON.parse(readFileSync(statePath, "utf8")) as ProviderState;
+      const claimedIncident = claimed.incidents.find((incident) => incident.id === incidentId)!;
 
-    const rejectedDrillDown = runProdWatch([
-      "drill-down", incidentId!, "--session-id", "provider-session", "--fixture", "healthy",
-    ], runtimeRoot);
-    expect(rejectedDrillDown.status).toBe(1);
-    expect(rejectedDrillDown.stderr).toContain("provider_incident_drill_down_unavailable_phase_1");
-    const stateAfter = JSON.parse(readFileSync(statePath, "utf8")) as typeof stateBefore;
-    expect(stateAfter.incidents.find((incident) => incident.id === incidentId)!.owner).toEqual(ownerBefore);
+      const rejectedDrillDown = runProdWatch([
+        "drill-down", incidentId!, "--session-id", sessionId, "--fixture", "healthy",
+      ], runtimeRoot);
+      expect(rejectedDrillDown.status).toBe(1);
+      expect(rejectedDrillDown.stderr).toContain("provider_incident_drill_down_unavailable_phase_1");
+      expect((JSON.parse(readFileSync(statePath, "utf8")) as ProviderState).incidents
+        .find((incident) => incident.id === incidentId)).toEqual(claimedIncident);
 
+      for (const target of [
+        "investigating",
+        "confirmed",
+        "monitor_incomplete",
+        "false_positive",
+        "resolved",
+      ]) {
+        const rejected = runProdWatch([
+          "incident", "transition", incidentId!, "--session-id", sessionId, "--state", target,
+        ], runtimeRoot);
+        expect(rejected.status).toBe(1);
+        expect(rejected.stderr).toContain("provider_incident_escalation_only");
+        expect((JSON.parse(readFileSync(statePath, "utf8")) as ProviderState).incidents
+          .find((incident) => incident.id === incidentId)).toEqual(claimedIncident);
+      }
+      expect(runProdWatch([
+        "incident", "transition", incidentId!, "--session-id", sessionId, "--state", "escalated",
+      ], runtimeRoot).status).toBe(0);
+    }
+
+    const firstProvider = promoted.incidents.find((incident) => incident.source === "vercel")!;
     const rejectedHiddenEvidence = runProdWatch([
       "drill-down",
-      incidentId!,
+      firstProvider.id,
       "--session-id",
-      "provider-session",
+      "vercel-session",
       "--fixture",
       "healthy",
       "--provider-evidence",
@@ -1147,22 +1348,6 @@ describe("production-watch locking and dry-run behavior", () => {
     ], runtimeRoot);
     expect(rejectedHiddenEvidence.status).toBe(1);
     expect(rejectedHiddenEvidence.stderr).toContain("drill_down_provider_evidence_forbidden_phase_1");
-    const stateAfterHiddenEvidence = JSON.parse(readFileSync(statePath, "utf8")) as typeof stateBefore;
-    expect(stateAfterHiddenEvidence.incidents.find((incident) => incident.id === incidentId)!.owner)
-      .toEqual(ownerBefore);
-
-    expect(runProdWatch([
-      "incident", "transition", incidentId!, "--session-id", "provider-session", "--state", "confirmed",
-    ], runtimeRoot).status).toBe(0);
-    expect(runProdWatch(providerRun, runtimeRoot).status).toBe(0);
-    const rejectedResolution = runProdWatch([
-      "incident", "transition", incidentId!, "--session-id", "provider-session", "--state", "resolved",
-    ], runtimeRoot);
-    expect(rejectedResolution.status).toBe(1);
-    expect(rejectedResolution.stderr).toContain("incident_resolution_requires_later_clean_evidence");
-    expect(runProdWatch([
-      "incident", "transition", incidentId!, "--session-id", "provider-session", "--state", "escalated",
-    ], runtimeRoot).status).toBe(0);
   });
 
   it("keeps the Phase 1 remediation command disabled at the CLI boundary", () => {
@@ -1267,7 +1452,7 @@ describe("production-watch static safety contracts", () => {
     }
   });
 
-  it("ships a non-overlapping five-minute launchd template without machine paths", () => {
+  it("ships a non-overlapping five-minute launchd template with a resolved executable chain", async () => {
     const template = readFileSync(
       path.join(repoRoot, "scripts", "prod-watch", "com.murph.prod-watch.plist.template"),
       "utf8",
@@ -1277,18 +1462,70 @@ describe("production-watch static safety contracts", () => {
     expect(template).toContain("<string>/dev/null</string>");
     expect(template).toContain("murph-prod-watch-managed:v1");
     expect(template).toContain("__REPO_HOME_RELATIVE__");
+    expect(template).toContain("__NODE_EXECUTABLE__");
     expect(template).toContain("<string>-c</string>");
     expect(template).not.toContain("<string>-lc</string>");
+    expect(template).not.toContain("exec pnpm");
     expect(template).not.toContain(os.homedir());
 
     const fakeHome = path.join(os.tmpdir(), "prod-watch-home");
-    const rendered = renderLaunchdPlistTemplate(template, path.join(fakeHome, "project"), fakeHome);
+    const fakeNode = path.join(fakeHome, "tools", "node");
+    const rendered = renderLaunchdPlistTemplate(
+      template,
+      path.join(fakeHome, "project"),
+      fakeHome,
+      fakeNode,
+    );
     expect(rendered).toContain("$HOME/project");
-    expect(rendered).toContain("pnpm --silent prod-watch run --scheduled");
+    expect(rendered).toContain("$HOME/tools/node");
+    expect(rendered).toContain("node_modules/tsx/dist/cli.mjs");
+    expect(rendered).toContain("scripts/prod-watch.ts&quot; run --scheduled");
+    expect(rendered).not.toContain("exec pnpm");
     expect(rendered).not.toContain(fakeHome);
     expect(() => renderLaunchdPlistTemplate(template, path.join(fakeHome, "..", "project"), fakeHome))
       .toThrow("scheduler_repo_path_unsafe");
+    await expect(verifySchedulerExecutableChain(repoRoot, path.join(fakeHome, "missing-node")))
+      .rejects.toThrow("scheduler_executable_chain_unavailable");
   });
+
+  it.runIf(process.platform === "darwin")(
+    "runs the rendered scheduler command under a minimal launchd environment",
+    () => {
+      const testRoot = makeTempRoot();
+      const schedulerHome = path.parse(repoRoot).root;
+      const runtimeRoot = path.join(testRoot, "runtime");
+      const plistPath = path.join(testRoot, "scheduler.plist");
+      const template = readFileSync(
+        path.join(repoRoot, "scripts", "prod-watch", "com.murph.prod-watch.plist.template"),
+        "utf8",
+      );
+      writeFileSync(
+        plistPath,
+        renderLaunchdPlistTemplate(template, repoRoot, schedulerHome, process.execPath),
+      );
+      const commandResult = spawnSync(
+        "/usr/libexec/PlistBuddy",
+        ["-c", "Print :ProgramArguments:2", plistPath],
+        { encoding: "utf8" },
+      );
+      expect(commandResult.status).toBe(0);
+      const run = spawnSync("/bin/zsh", ["-c", commandResult.stdout.trim()], {
+        cwd: schedulerHome,
+        encoding: "utf8",
+        env: {
+          HOME: schedulerHome,
+          PATH: "/usr/bin:/bin",
+          TMPDIR: os.tmpdir(),
+          NODE_ENV: "test",
+          MURPH_PROD_WATCH_TEST_RUNTIME_ROOT: runtimeRoot,
+        },
+        timeout: 30_000,
+      });
+      expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
+      expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json")))
+        .toBe(true);
+    },
+  );
 
   it.runIf(process.platform === "darwin")(
     "keeps launchd lifecycle acknowledgements proven and retryable",
@@ -1489,7 +1726,7 @@ describe("production-watch static safety contracts", () => {
     expect(skill).toContain(
       "Missing, partial, stale, or failed evidence must lead to `monitor_incomplete` or `escalated`, never `resolved`.",
     );
-    expect(skill).toContain("Use `escalated` for sensitive domains; they remain escalation-only");
+    expect(skill).toContain("Provider and other sensitive incidents permit only `escalated`");
   });
 
   it("keeps strict JSON schemas executable and fixtures conformant", () => {
@@ -1516,6 +1753,13 @@ function buildFixtureSnapshot(name: "healthy" | "suspicious", now: Date): Produc
 }
 
 function buildCompleteSnapshot(now: Date): ProductionWatchSnapshot {
+  return buildCompleteSnapshotWithDatabase("healthy", now);
+}
+
+function buildCompleteSnapshotWithDatabase(
+  databaseFixture: "healthy" | "suspicious",
+  now: Date,
+): ProductionWatchSnapshot {
   const provider = parseProviderEvidence(JSON.parse(
     readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
   ) as unknown);
@@ -1534,7 +1778,7 @@ function buildCompleteSnapshot(now: Date): ProductionWatchSnapshot {
     settlingDelaySeconds: 0,
     configuredSources: ["database", "vercel", "cloudflare", "stripe"],
     evidences: [
-      rebaseEvidence(readFixture("healthy"), now),
+      rebaseEvidence(readFixture(databaseFixture), now),
       ...provider.sources.map((source) => rebaseEvidence(source, now)),
     ],
     failures: [],

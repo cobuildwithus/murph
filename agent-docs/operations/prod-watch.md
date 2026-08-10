@@ -31,7 +31,7 @@ A strict “fresh Codex plus all MCPs every five minutes” mode can follow the 
 
 The scheduled interval is 300 seconds. One run has a 240-second deadline, leaving 60 seconds for process teardown and the next tick.
 
-1. `launchd` invokes `pnpm --silent prod-watch run --scheduled` in the repository root.
+1. `launchd` invokes the current verified Node executable directly with the repository-local `tsx` entrypoint and `prod-watch.ts run --scheduled`; it does not depend on launchd finding a shell-only pnpm/Corepack shim.
 2. The command creates one contender claim in `.runtime/tmp/prod-watch/run.lock`; the oldest live claim wins. A dead PID is recoverable, and claims older than 10 minutes are stale even if the PID was reused. `launchd` itself skips an interval that fires while the job is still running; the lock additionally protects manual runs, duplicate installations, and other launchers. Any losing invocation records one bounded overlap marker and exits successfully without starting another collector.
 3. The collection window ends 60 seconds before collection time to tolerate ingestion lag. It compares adjacent 15-minute windows, so every event is seen in multiple scheduled runs without becoming duplicate incident state.
 4. The database adapter sends fixed SQL to `murph-prod-psql-ro` on stdin. The helper remains the only PostgreSQL entry point. The child has a 30-second deadline and bounded stdout/stderr capture. Only stdout is parsed; stderr contents are discarded and reduced to a redacted error code.
@@ -76,7 +76,7 @@ pnpm --silent prod-watch scheduler status
 pnpm --silent prod-watch scheduler uninstall
 ```
 
-`install` renders the checked-in plist template with a `$HOME`-relative repository path, writes it under the current user's LaunchAgents directory, and uses `launchctl bootstrap`. It refuses repositories outside the current home directory or paths containing shell-significant characters. Neither the checked-in template nor the rendered plist contains a concrete home directory, account name, or secret. Install, replacement, and uninstall verify the label with `launchctl print`; an unknown service state is an error, and uninstall preserves the managed plist until absence is proven. Status reports `launchdState` as `loaded`, `absent`, or `unknown` and uses `loaded: null` for the unknown case. Routine stdout/stderr goes to `/dev/null`; monitor state plus `launchctl` status are the diagnostic surface.
+`install` first verifies the current Node executable plus repository-local `tsx`, tools tsconfig, and production-watch entrypoint, then renders that direct chain with `$HOME`-relative paths where needed. Verification happens before an existing managed job is stopped. The command writes the plist under the current user's LaunchAgents directory and uses `launchctl bootstrap`. It refuses repositories outside the current home directory, unsafe paths, or an unavailable executable chain. Neither the checked-in template nor the rendered plist contains a concrete home directory, account name, or secret. Install, replacement, and uninstall verify the label with `launchctl print`; an unknown service state is an error, and uninstall preserves the managed plist until absence is proven. Status reports `launchdState` as `loaded`, `absent`, or `unknown` and uses `loaded: null` for the unknown case. Routine stdout/stderr goes to `/dev/null`; monitor state plus `launchctl` status are the diagnostic surface.
 
 ### Incident coordination and drill-down
 
@@ -171,7 +171,7 @@ JSON is sufficient for Phase 1 because state is small, single-host, and serializ
 
 ### Deduplication and retention
 
-- Incident fingerprint = SHA-256 of source, rule, stable allowlisted dimensions, and source fingerprint when present.
+- Incident fingerprint = SHA-256 of source and rule plus the scored metric and canonical exact dimensions for metric/latency candidates, or the bounded source fingerprint for fingerprint candidates.
 - Counts, timestamps, and release SHA do not participate, so one continuing regression survives new windows and release observations.
 - New candidates must satisfy their consecutive-run gate before promotion. Missing a candidate resets its short streak after a bounded retention window.
 - Repeated occurrences update `lastSeenAt`, count, evidence, and release context on the same incident.
@@ -184,7 +184,8 @@ JSON is sufficient for Phase 1 because state is small, single-host, and serializ
 ```text
 anomaly observation
   └─(consecutive/min-volume gate)─> candidate
-candidate ─claim triage─> claimed_triage ─> investigating
+provider candidate ─claim triage─> claimed_triage ─> escalated only
+database candidate ─claim triage─> claimed_triage ─> investigating
 claimed_triage/investigating ─> confirmed               (causal chain supported)
                               ├─> monitor_incomplete    (coverage/provider failure)
                               ├─> escalated             (sensitive or unsafe)
@@ -193,7 +194,7 @@ monitor_incomplete ─> investigating | escalated | false_positive
 confirmed/escalated ─> resolved                         (external fix observed)
 ```
 
-A lease claim records the handling session. State transitions require that same owner while the lease is live. `false_positive` and `resolved` are terminal. Phase 1 permits coordination and escalation but disables the future remediation command. A later edit phase must introduce and prove its own remediation lifecycle and global lease rather than carrying unreachable future states in the Phase 1 record.
+A lease claim records the handling session. State transitions require that same owner while the lease is live. Provider incidents reject every target except `escalated` in the state authority; the broader diagnostic and terminal graph is database-only. `false_positive` and `resolved` are terminal. Every observation of an existing nonterminal incident updates its last-detected evidence before the new-incident streak gate, so a current recurrence cannot be mistaken for a later clean pass. Phase 1 permits coordination and escalation but disables the future remediation command. A later edit phase must introduce and prove its own remediation lifecycle and global lease rather than carrying unreachable future states in the Phase 1 record.
 
 ## First-release anomaly rules
 

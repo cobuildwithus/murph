@@ -876,14 +876,16 @@ async function renderLaunchdPlist(): Promise<string> {
   if (process.platform !== "darwin") {
     throw new Error("launchd_requires_macos");
   }
+  await verifySchedulerExecutableChain(repoRoot, process.execPath);
   const template = await readFile(schedulerTemplatePath, "utf8");
-  return renderLaunchdPlistTemplate(template, repoRoot, os.homedir());
+  return renderLaunchdPlistTemplate(template, repoRoot, os.homedir(), process.execPath);
 }
 
 export function renderLaunchdPlistTemplate(
   template: string,
   repositoryRoot: string,
   homeDirectory: string,
+  nodeExecutable = process.execPath,
 ): string {
   const relativeRepoPath = path.relative(path.resolve(homeDirectory), path.resolve(repositoryRoot));
   if (
@@ -896,15 +898,51 @@ export function renderLaunchdPlistTemplate(
     throw new Error("scheduler_repo_path_unsafe");
   }
   const portableRepoPath = relativeRepoPath.split(path.sep).join("/");
+  const portableNodeExecutable = launchdShellPath(nodeExecutable, homeDirectory);
   return template
     .replaceAll("__LABEL__", xmlEscape(LAUNCHD_LABEL))
-    .replaceAll("__REPO_HOME_RELATIVE__", xmlEscape(portableRepoPath));
+    .replaceAll("__REPO_HOME_RELATIVE__", xmlEscape(portableRepoPath))
+    .replaceAll("__NODE_EXECUTABLE__", xmlEscape(portableNodeExecutable));
+}
+
+export async function verifySchedulerExecutableChain(
+  repositoryRoot: string,
+  nodeExecutable: string,
+): Promise<void> {
+  const requiredPaths: Array<[string, number]> = [
+    [nodeExecutable, fsConstants.X_OK],
+    [path.join(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"), fsConstants.R_OK],
+    [path.join(repositoryRoot, "tsconfig.tools.json"), fsConstants.R_OK],
+    [path.join(repositoryRoot, "scripts", "prod-watch.ts"), fsConstants.R_OK],
+  ];
+  try {
+    await Promise.all(requiredPaths.map(async ([targetPath, mode]) => {
+      await access(targetPath, mode);
+    }));
+  } catch {
+    throw new Error("scheduler_executable_chain_unavailable");
+  }
+}
+
+function launchdShellPath(targetPath: string, homeDirectory: string): string {
+  if (!path.isAbsolute(targetPath) || !/^[A-Za-z0-9._ /@+-]+$/u.test(targetPath)) {
+    throw new Error("scheduler_executable_path_unsafe");
+  }
+  const relative = path.relative(path.resolve(homeDirectory), path.resolve(targetPath));
+  if (relative.length === 0) {
+    return "$HOME";
+  }
+  if (relative.length > 0 && relative !== ".." && !relative.startsWith(`..${path.sep}`)) {
+    return `$HOME/${relative.split(path.sep).join("/")}`;
+  }
+  return targetPath.split(path.sep).join("/");
 }
 
 async function installScheduler(): Promise<void> {
   if (process.platform !== "darwin") {
     throw new Error("launchd_requires_macos");
   }
+  const renderedPlist = await renderLaunchdPlist();
   await ensurePrivateDirectory(operationRoot);
   const launchAgents = path.join(os.homedir(), "Library", "LaunchAgents");
   const plistPath = path.join(launchAgents, `${LAUNCHD_LABEL}.plist`);
@@ -921,7 +959,7 @@ async function installScheduler(): Promise<void> {
       throw new Error("launchd_service_state_unknown");
     }
   }
-  await atomicWriteText(plistPath, await renderLaunchdPlist(), { privateDirectory: false });
+  await atomicWriteText(plistPath, renderedPlist, { privateDirectory: false });
   const bootstrap = await spawnCaptured("launchctl", ["bootstrap", domain, plistPath], { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 });
   if (bootstrap.status !== 0) {
     await stopLaunchdService(domain, plistPath).catch(() => undefined);
