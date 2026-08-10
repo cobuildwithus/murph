@@ -185,7 +185,7 @@ describe('murph.attach_response_card', () => {
       'Before every daily_nutrition attachment, even with five active goals or on a scheduled closeout',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'run its bounded canonical 45-day measurement read and suppress the card for a usable adult BMI below 18.5, including same-event height and weight evidence',
+      'run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window and suppress the card for a usable adult BMI below 18.5, including height and weight rows sharing one eventId',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'known underweight, frailty, malnutrition risk, and calorie targets below 1,200 kcal/day without flooring them upward',

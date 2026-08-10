@@ -342,10 +342,10 @@ describe('assistant nutrition strategy skill', () => {
       'before every `daily_nutrition` attachment, including when five accepted active goals already exist and during a scheduled closeout.',
     )
     expect(compactSafety).toContain(
-      '`vault-cli measurement list --from <45-days-before-today> --to <today> --limit 200 --format json`',
+      '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
     )
     expect(compactSafety).toContain(
-      'either a direct `bmi` measurement in `kg/m^2`, or height and weight from the same measurement event',
+      'either a direct `bmi` row whose unit is canonically equivalent to `kg/m^2` (including `kg/m2` and `kg_m2`), or height and weight rows that share the same `eventId`',
     )
     expect(compactSafety).toContain(
       'Do not combine height and weight from different events or dates',

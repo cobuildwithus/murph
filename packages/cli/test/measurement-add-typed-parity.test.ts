@@ -95,6 +95,33 @@ interface MeasurementShowResult {
   }
 }
 
+interface MeasurementEntryListResult {
+  filters: {
+    metric: string[]
+    from?: string
+    to?: string
+    limit: number
+  }
+  items: Array<{
+    eventId: string
+    measurementIndex: number
+    occurredAt: string
+    source: string | null
+    metric: string
+    value: number
+    unit: string
+  }>
+  count: number
+  nextCursor: null
+}
+
+interface MeasurementListResult {
+  items: Array<{
+    id: string
+    data: Record<string, unknown>
+  }>
+}
+
 const cleanupPaths: string[] = []
 
 afterEach(async () => {
@@ -205,6 +232,196 @@ test('measurement add guidance surfaces teach quoted metrics and indexed grouped
   assert.match(getOptionDescription(schema, 'qualifier'), /2:posture=seated/u)
   assert.match(getOptionDescription(schema, 'measurementNote'), /1:after coffee/u)
   assert.match(getOptionDescription(schema, 'measurementNote'), /2:five quiet minutes/u)
+})
+
+test('measurement entry list schema requires exact metric filters and preserves lossless entry fields', async () => {
+  const schema = await readCommandSchema(createMeasurementCli(), [
+    'measurement',
+    'entry',
+    'list',
+  ])
+
+  assert.deepEqual(schema.args.required ?? [], [])
+  assert.equal(schema.options.required?.includes('metric') ?? false, true)
+  for (const field of ['metric', 'from', 'to', 'limit', 'vault']) {
+    assert.equal(field in schema.options.properties, true, field)
+  }
+  assert.match(getOptionDescription(schema, 'metric'), /matching is exact, not fuzzy/u)
+})
+
+test('measurement entry list returns direct BMI and same-event height and weight without changing event list', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-entry-list-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const directBmi = requireData(
+    (
+      await runInProcessJsonCli<MeasurementAddResult>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'BMI',
+        '--value',
+        '17.2',
+        '--unit',
+        'kg_m2',
+        '--occurred-at',
+        '2026-07-02T07:30:00.000Z',
+        '--source',
+        'device',
+      ])
+    ).envelope,
+  )
+  const grouped = requireData(
+    (
+      await runInProcessJsonCli<MeasurementAddResult>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'height',
+        '--value',
+        '175',
+        '--unit',
+        'cm',
+        '--metric',
+        'weight',
+        '--value',
+        '50',
+        '--unit',
+        'kg',
+        '--occurred-at',
+        '2026-07-03T07:30:00.000Z',
+        '--source',
+        'manual',
+      ])
+    ).envelope,
+  )
+  requireData(
+    (
+      await runInProcessJsonCli<MeasurementAddResult>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'body-weight-estimate',
+        '--value',
+        '55',
+        '--unit',
+        'kg',
+        '--occurred-at',
+        '2026-07-04T07:30:00.000Z',
+      ])
+    ).envelope,
+  )
+  requireData(
+    (
+      await runInProcessJsonCli<MeasurementAddResult>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'body-weight',
+        '--value',
+        '58',
+        '--unit',
+        'kg',
+        '--occurred-at',
+        '2026-05-01T07:30:00.000Z',
+      ])
+    ).envelope,
+  )
+
+  const entries = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'BMI',
+        '--metric',
+        'height',
+        '--metric',
+        'weight',
+        '--metric',
+        'body_weight',
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--limit',
+        '200',
+      ])
+    ).envelope,
+  )
+
+  assert.deepEqual(entries.filters, {
+    metric: ['bmi', 'height', 'weight', 'body-weight'],
+    from: '2026-07-01',
+    to: '2026-07-31',
+    limit: 200,
+  })
+  assert.equal(entries.count, 3)
+  assert.equal(entries.nextCursor, null)
+  assert.deepEqual(entries.items, [
+    {
+      eventId: grouped.eventId,
+      measurementIndex: 0,
+      occurredAt: '2026-07-03T07:30:00.000Z',
+      source: 'manual',
+      metric: 'height',
+      value: 175,
+      unit: 'cm',
+    },
+    {
+      eventId: grouped.eventId,
+      measurementIndex: 1,
+      occurredAt: '2026-07-03T07:30:00.000Z',
+      source: 'manual',
+      metric: 'weight',
+      value: 50,
+      unit: 'kg',
+    },
+    {
+      eventId: directBmi.eventId,
+      measurementIndex: 0,
+      occurredAt: '2026-07-02T07:30:00.000Z',
+      source: 'device',
+      metric: 'bmi',
+      value: 17.2,
+      unit: 'kg_m2',
+    },
+  ])
+
+  const events = requireData(
+    (
+      await runInProcessJsonCli<MeasurementListResult>(cli, [
+        'measurement',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--limit',
+        '10',
+      ])
+    ).envelope,
+  )
+  const groupedEvent = events.items.find((item) => item.id === grouped.eventId)
+  assert.ok(groupedEvent)
+  assert.equal(groupedEvent.data.measurementsCount, 2)
+  assert.equal('measurements' in groupedEvent.data, false)
 })
 
 test('measurement import-json schema exposes the structured payload escape hatch', async () => {

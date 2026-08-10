@@ -1,7 +1,7 @@
 # Body-Composition CLI Audit
 
-Status: proposed
-Reviewed: 2026-08-09
+Status: partially implemented
+Reviewed: 2026-08-10
 Scope: intentional fat loss, lean-mass gain, weight gain, recomposition, maintenance, and trend review
 
 ## Decision
@@ -18,9 +18,9 @@ Murph already has canonical owners for the underlying facts:
 - wearable and connected-device data
 - automations and tracked-table presentation
 
-The missing capability is a small, generic **measurement-entry read projection**. A measurement event can contain several scalar entries, while the current event-level `measurement list` compacts nested object arrays and therefore cannot reliably return the individual values needed for filtering or trend math. Preserve that existing event-list contract. Add a typed entry-level read, build a deterministic generic trend read on the same use case, and only then consider a thin `body-composition` composition.
+The first missing capability was a small, generic **measurement-entry read projection**. A measurement event can contain several scalar entries, while the event-level `measurement list` compacts nested object arrays and therefore cannot reliably return the individual values needed for filtering or trend math. The lossless `measurement entry list` projection now exists without changing that event-list contract. Build a deterministic generic trend read on the same use case before considering a thin `body-composition` composition.
 
-Keep the skill as the strategy owner and the CLI as deterministic data access. Do not encode nutrition coaching inside command handlers. This document specifies future slices only; it does not authorize hidden runtime behavior or a second canonical store.
+Keep the skill as the strategy owner and the CLI as deterministic data access. Do not encode nutrition coaching inside command handlers. The remaining slices are future work; this document does not authorize hidden runtime behavior or a second canonical store.
 
 ## Current Inventory
 
@@ -31,6 +31,7 @@ What exists:
 - `measurement add` records one or more open scalar entries with canonical metric slugs, values, units, optional qualifiers and notes, occurrence time, source, media, tags, and timezone.
 - `measurement import-json` preserves richer nested imports and raw provenance.
 - `measurement show`, `list`, and `manifest` expose canonical events and immutable import provenance.
+- `measurement entry list` returns lossless, exact-metric scalar rows with parent event identity and original entry indexes.
 
 What works for body composition:
 
@@ -42,12 +43,10 @@ What works for body composition:
 
 Gap:
 
-- `measurement list` filters events by date and limit but not scalar entries by metric.
-- its generic list projection intentionally compacts nested arrays, so it is not a lossless scalar-value read.
 - there is no deterministic trend summary.
 - there is no shared unit-conversion contract.
 - there is no safe source-aware duplicate-resolution contract.
-- an assistant must inspect broad event output and calculate trends itself, which is error-prone and token-heavy.
+- an assistant must still calculate trends itself, which is error-prone.
 
 ### `goal`
 
@@ -97,9 +96,9 @@ Any new surface must:
 
 ## Recommended Sequence
 
-### P0 — generic measurement-entry filtering
+### P0 — generic measurement-entry filtering (delivered 2026-08-10)
 
-Add a typed read projection rather than changing the current event-level `measurement list` response:
+The typed read projection was added without changing the current event-level `measurement list` response:
 
 ```bash
 murph measurement entry list \
@@ -341,7 +340,7 @@ Do not implement this until the owner for subjective check-in fields is clear. A
 
 ## Suggested Delivery Slices
 
-1. `measurement entry list` plus its shared typed entry-read use case, tests, and generated contract refresh
+1. Delivered: `measurement entry list` plus its shared typed entry-read use case, tests, and generated contract refresh
 2. `measurement trend` over that same use case, with tests and documentation
 3. `body-composition status` only after product validation shows generic reads are too cumbersome
 4. typed goal targets only after the status or automation workflow proves the need

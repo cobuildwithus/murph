@@ -1,5 +1,9 @@
 import path from 'node:path'
-import { rawImportManifestSchema } from '@murphai/contracts'
+import {
+  eventSourceSchema,
+  measurementEntrySchema,
+  rawImportManifestSchema,
+} from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   loadQueryRuntime,
@@ -7,7 +11,12 @@ import {
   type QueryRecord,
 } from '../commands/query-record-command-helpers.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
+import {
+  isoTimestampSchema,
+  localDateSchema,
+  pathSchema,
+  slugSchema,
+} from '@murphai/operator-config/vault-cli-contracts'
 import {
   asListEnvelope,
   readRawImportManifest,
@@ -18,6 +27,9 @@ import {
   relativePathEntries,
   relativePathStrings,
 } from './vault-usecase-helpers.js'
+import {
+  normalizeMetricSlug,
+} from './measurement.js'
 
 const DEFAULT_LIST_LIMIT = 50
 const TRACKED_MEASUREMENT_EVENT_KINDS = ['measurement', 'body_measurement'] as const
@@ -36,6 +48,26 @@ export const measurementImportManifestResultSchema = z.object({
   kind: z.enum(TRACKED_MEASUREMENT_EVENT_KINDS),
   manifestFile: pathSchema,
   manifest: rawImportManifestSchema,
+})
+
+export const measurementEntryListItemSchema = measurementEntrySchema.extend({
+  eventId: measurementLookupSchema,
+  measurementIndex: z.number().int().nonnegative(),
+  occurredAt: isoTimestampSchema,
+  source: eventSourceSchema.nullable(),
+})
+
+export const measurementEntryListResultSchema = z.object({
+  vault: pathSchema,
+  filters: z.object({
+    metric: z.array(slugSchema).min(1),
+    from: localDateSchema.optional(),
+    to: localDateSchema.optional(),
+    limit: z.number().int().positive().max(DEFAULT_LIST_LIMIT * 4),
+  }),
+  items: z.array(measurementEntryListItemSchema),
+  count: z.number().int().nonnegative(),
+  nextCursor: z.null(),
 })
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -125,6 +157,92 @@ export async function listMeasurementRecords(input: {
     to: input.to,
     limit,
   }, items)
+}
+
+export async function listMeasurementEntries(input: {
+  vault: string
+  metrics: readonly string[]
+  from?: string
+  to?: string
+  limit?: number
+}) {
+  const query = await loadQueryRuntime('measurement entry query reads')
+  const readModel = await query.readVault(input.vault)
+  const metrics = [
+    ...new Set(
+      input.metrics.map((metric, index) =>
+        normalizeMetricSlug(metric, `metric[${index}]`),
+      ),
+    ),
+  ]
+  if (metrics.length === 0) {
+    throw new VaultCliError(
+      'invalid_option',
+      'measurement entry list requires at least one metric filter.',
+    )
+  }
+  const metricSet = new Set(metrics)
+  const limit =
+    typeof input.limit === 'number' && Number.isFinite(input.limit)
+      ? Math.max(1, Math.min(DEFAULT_LIST_LIMIT * 4, Math.round(input.limit)))
+      : DEFAULT_LIST_LIMIT
+  const items = query
+    .listEntities(readModel, {
+      families: ['event'],
+      kinds: [...TRACKED_MEASUREMENT_EVENT_KINDS],
+      from: input.from,
+      to: input.to,
+    })
+    .flatMap((record: QueryRecord) => {
+      if (!record.occurredAt || !Array.isArray(record.attributes.measurements)) {
+        return []
+      }
+
+      const occurredAt = record.occurredAt
+      const parsedSource = eventSourceSchema.safeParse(record.attributes.source)
+      return record.attributes.measurements.flatMap((rawEntry, measurementIndex) => {
+        const parsedEntry = measurementEntrySchema.safeParse(rawEntry)
+        if (!parsedEntry.success) {
+          throw new VaultCliError(
+            'invalid_payload',
+            `Measurement "${record.entityId}" entry ${measurementIndex} is not a valid canonical measurement entry.`,
+          )
+        }
+        const entry = parsedEntry.data
+        if (!metricSet.has(entry.metric)) {
+          return []
+        }
+
+        return [{
+          eventId: record.entityId,
+          measurementIndex,
+          occurredAt,
+          source: parsedSource.success ? parsedSource.data : null,
+          ...entry,
+        }]
+      })
+    })
+    .sort((left, right) => {
+      const occurredAtOrder = Date.parse(right.occurredAt) - Date.parse(left.occurredAt)
+      if (occurredAtOrder !== 0) {
+        return occurredAtOrder
+      }
+
+      const eventOrder = left.eventId.localeCompare(right.eventId)
+      return eventOrder !== 0
+        ? eventOrder
+        : left.measurementIndex - right.measurementIndex
+    })
+    .slice(0, limit)
+
+  return measurementEntryListResultSchema.parse(
+    asListEnvelope(input.vault, {
+      metric: metrics,
+      from: input.from,
+      to: input.to,
+      limit,
+    }, items),
+  )
 }
 
 export async function showMeasurementManifest(vault: string, lookup: string) {

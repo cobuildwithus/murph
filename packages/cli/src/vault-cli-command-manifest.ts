@@ -1058,6 +1058,10 @@ export const vaultCliCommandDescriptors = [
         description: measurementCommandDescriptions.list,
       },
       {
+        path: ['measurement', 'entry', 'list'],
+        description: measurementCommandDescriptions.entryList,
+      },
+      {
         path: ['measurement', 'manifest'],
         description: measurementCommandDescriptions.manifest,
       },

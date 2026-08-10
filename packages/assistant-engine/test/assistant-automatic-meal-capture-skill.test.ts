@@ -169,7 +169,7 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain('known underweight')
     expect(compactSafety).toContain('frailty, or malnutrition risk')
     expect(compactSafety).toContain(
-      '`vault-cli measurement list --from <45-days-before-today> --to <today> --limit 200 --format json`',
+      '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
     )
     expect(compactSafety).toContain(
       'A usable adult BMI below 18.5 suppresses numeric goals and the card.',

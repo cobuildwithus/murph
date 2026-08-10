@@ -5647,6 +5647,63 @@
                     }
                   }
                 },
+                "entry": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "list": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "metric": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120
+                                  },
+                                  "description": "Measurement metric name or slug. Repeat --metric for OR matching. Inputs are normalized to canonical slugs; matching is exact, not fuzzy."
+                                },
+                                "from": {
+                                  "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "to": {
+                                  "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "limit": {
+                                  "default": 10,
+                                  "description": "Maximum number of results to return.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 200
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "manifest": {
                   "type": "object",
                   "additionalProperties": false,

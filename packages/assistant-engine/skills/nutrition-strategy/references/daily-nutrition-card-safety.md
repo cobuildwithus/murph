@@ -8,14 +8,16 @@ is still safe in the member's current context.
 - Reuse already-known conversation and vault context. Do not turn a routine card
   into a universal medical screening checklist, but do not ignore a safety fact
   that is already known or becomes known later.
-- Before any card, run one bounded canonical measurement read for the current
-  local date: `vault-cli measurement list --from <45-days-before-today> --to
+- Before any card, run one bounded lossless canonical-entry read for the current
+  local date: `vault-cli measurement entry list --metric bmi --metric height
+  --metric weight --metric body-weight --from <45-days-before-today> --to
   <today> --limit 200 --format json`. Reuse an identical current-turn result
   instead of repeating it. Resolve only the newest unambiguous evidence inside
-  that window: either a direct `bmi` measurement in `kg/m^2`, or height and
-  weight from the same measurement event with units that can be converted
-  unambiguously. Do not combine height and weight from different events or
-  dates, and do not use stale, malformed, conflicting, or unit-ambiguous values.
+  that window: either a direct `bmi` row whose unit is canonically equivalent to
+  `kg/m^2` (including `kg/m2` and `kg_m2`), or height and weight rows that share
+  the same `eventId` and have units that can be converted unambiguously. Do not
+  combine height and weight from different events or dates, and do not use
+  stale, malformed, conflicting, or unit-ambiguous values.
   A usable adult BMI below 18.5 suppresses numeric goals and the card. If the
   200-record result is saturated without resolving whether usable BMI evidence
   is present, suppress the card; otherwise missing measurements are unavailable
