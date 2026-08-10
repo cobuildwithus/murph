@@ -225,10 +225,11 @@ function validateArchiveEntryPath(entryPath) {
 }
 
 function sensitiveFilenameRule(relativePath) {
-  const normalized = normalizedArchivePath(relativePath).toLowerCase();
+  const exactPath = normalizedArchivePath(relativePath);
+  const normalized = exactPath.toLowerCase();
   const basename = path.posix.basename(normalized);
 
-  if (allowedPublicDataStorePaths.has(normalized)) {
+  if (allowedPublicDataStorePaths.has(exactPath)) {
     return null;
   }
 

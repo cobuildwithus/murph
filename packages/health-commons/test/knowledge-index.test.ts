@@ -177,6 +177,28 @@ describe("Health Commons knowledge SQLite projection", () => {
     })).toThrow("at most 500 characters");
   });
 
+  it("rejects an index with an unsupported schema version", async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), "health-commons-schema-"));
+    const databasePath = path.join(temporaryRoot, "knowledge.sqlite");
+    try {
+      writeHealthCommonsKnowledgeIndex(databasePath, testCatalog());
+      const { DatabaseSync } = await import("node:sqlite");
+      const database = new DatabaseSync(databasePath);
+      try {
+        database.exec("PRAGMA user_version = 3");
+      } finally {
+        database.close();
+      }
+
+      expect(() => searchHealthCommonsKnowledgeIndex({
+        databasePath,
+        query: "What does the evidence say about dry sauna?",
+      })).toThrow("Unsupported Health Commons knowledge index version 3");
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
+  });
+
   it("uses question terms without admitting a nearby topic", async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), "health-commons-focus-"));
     const databasePath = path.join(temporaryRoot, "knowledge.sqlite");

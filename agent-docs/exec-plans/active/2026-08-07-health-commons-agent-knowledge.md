@@ -94,6 +94,9 @@ Updated: 2026-08-10
   removed after their failed runs. They are not part of the product design.
 - PR #1556 replaces #1405 and #1555. GitHub blocked reopening the first PR, and
   an old external process closed the second PR on the original branch name.
+- Final parent review expanded lookup routing to factual health Q&A, narrowed
+  general PBM safety to direct sources, made CLI contract failures visible, and
+  made the public SQLite release exception case-sensitive.
 
 ## Verification
 
@@ -102,3 +105,7 @@ Updated: 2026-08-10
 - `pnpm --dir packages/assistant-engine typecheck`
 - Focused Health Commons, CLI schema/command, assistant prompt, Cloudflare
   packaging, and release artifact guard tests.
+- Final focused proof: Health Commons 144 tests, CLI 89 tests, assistant prompt
+  98 tests with 6 skips, Cloudflare packaging 57 tests, and release guard 22
+  tests. The real-model file compiled with 6 deterministic tests and 40 opt-in
+  tests skipped without credentials.

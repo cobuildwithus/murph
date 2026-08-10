@@ -121,7 +121,7 @@ const commonsKnowledgeItemSchema = z.object({
     title: z.string().min(1),
     url: z.string().url().nullable(),
     year: z.number().int().nullable(),
-  })),
+  })).min(1).max(4),
 });
 
 export const commonsKnowledgeSearchResultSchema = z.object({
@@ -130,8 +130,8 @@ export const commonsKnowledgeSearchResultSchema = z.object({
     key: z.string().min(1),
     title: z.string().min(1),
   })).max(3),
-  items: z.array(commonsKnowledgeItemSchema),
-  query: z.string().min(1),
+  items: z.array(commonsKnowledgeItemSchema).max(HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT),
+  query: z.string().min(1).max(500),
   safety: commonsKnowledgeItemSchema.nullable(),
   topic: z.object({
     key: z.string().min(1),
@@ -160,7 +160,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     description:
       "Return a small source-backed evidence and safety packet for one complete health question.",
     args: z.object({
-      query: z.string().min(2).max(500),
+      query: z.string().trim().min(2).max(500).regex(/[\p{L}\p{N}]/u),
     }),
     options: z.object({
       limit: z.number().int().positive().max(HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT).default(3),
@@ -174,14 +174,11 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     }],
     output: commonsKnowledgeSearchResultSchema,
     run({ args, options }) {
+      let result: ReturnType<typeof searchGeneratedHealthCommonsKnowledge>;
       try {
-        return commonsKnowledgeSearchResultSchema.parse({
-          available: true,
-          ...searchGeneratedHealthCommonsKnowledge({
-            limit: options.limit,
-            query: args.query,
-          }),
-          warning: null,
+        result = searchGeneratedHealthCommonsKnowledge({
+          limit: options.limit,
+          query: args.query,
         });
       } catch {
         return commonsKnowledgeSearchResultSchema.parse({
@@ -194,6 +191,11 @@ export function registerCommonsCommands(cli: Cli.Cli) {
           warning: "Health Commons knowledge index is unavailable; continue without corpus context.",
         });
       }
+      return commonsKnowledgeSearchResultSchema.parse({
+        available: true,
+        ...result,
+        warning: null,
+      });
     },
   });
 

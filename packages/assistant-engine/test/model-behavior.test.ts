@@ -2335,12 +2335,15 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('Supported experiment protocols:')
     expect(prompt).toContain('Health Commons tools:')
     expect(prompt).toContain(
+      'Before health Q&A or advice',
+    )
+    expect(prompt).toContain(
       '`vault-cli commons knowledge search "<full health question in concise English>" --format json`',
     )
     expect(prompt).toContain('run one `vault-cli commons knowledge search')
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
     expect(prompt).toContain('If unavailable or empty, continue honestly.')
-    expect(prompt).toContain('Skip jokes, acknowledgements, logs, logistics, and non-health turns.')
+    expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')
     expect(prompt).toContain('only when asked to try, test, track, or set one up.')
     expect(prompt).not.toContain('overall evidence')
     expect(prompt).not.toContain('topicResolved')

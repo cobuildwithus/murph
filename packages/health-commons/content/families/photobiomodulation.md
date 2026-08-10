@@ -34,6 +34,10 @@ relations:
     target: source_artifact:fda-k230124-led-facewear-mask-eye-protection-2023-02-09
   - type: cites
     target: source_artifact:canada-risk-thermal-harm-energy-devices-2020-08-21
+  - type: cites
+    target: source_artifact:pmid-28891192
+  - type: cites
+    target: source_artifact:pmid-24590242
 claims:
   - claimId: family-definition-and-mechanism-boundary
     type: evidence_scope
@@ -62,13 +66,15 @@ claims:
       - Do not calculate when units, geometry, mode, wavelength scope, target site, or target fluence do not match.
   - claimId: device-and-eye-safety-boundary
     type: safety
-    text: Follow the exact device instructions and eye-protection requirements. Stop for burning, marked skin irritation, unusual pain, headache, persistent afterimages, new eye symptoms, or dizziness. Heat is a safety signal, not the PBM dose.
+    text: Follow the exact device instructions and eye-protection requirements. Stop for burning, marked skin irritation, unusual pain, or new eye symptoms. Heat is a safety signal, not the PBM dose.
     strength: high
     sourceKeys:
       - source_artifact:fda-k230124-led-facewear-mask-eye-protection-2023-02-09
       - source_artifact:canada-risk-thermal-harm-energy-devices-2020-08-21
+      - source_artifact:pmid-28891192
+      - source_artifact:pmid-24590242
     caveats:
-      - Get qualified guidance for eye treatment, photosensitizing medicines or topicals, active cancer care, suspicious lesions, pregnancy, reduced sensation, impaired circulation, or an active skin condition.
+      - Get qualified guidance before eye treatment or when using a photosensitizing medicine or topical; the evidence is limited and device-specific.
 ---
 
 Photobiomodulation is the broad family for red and near-infrared light therapy. It keeps general education and dose interpretation separate from evidence for one body site, device, condition, or outcome.

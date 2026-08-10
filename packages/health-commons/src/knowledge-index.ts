@@ -704,14 +704,6 @@ function normalizeTopicPhrase(value: string): string {
     ?.join(" ") ?? "";
 }
 
-function searchTokens(query: string): string[] {
-  return [...new Set(query
-    .normalize("NFKD")
-    .replace(/\p{M}+/gu, "")
-    .toLowerCase()
-    .match(/[\p{L}\p{N}]+/gu) ?? [])];
-}
-
 function nullableString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }

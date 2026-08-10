@@ -229,6 +229,7 @@ the only member-facing evidence shapes. The CLI returns the resolved topic or
 ambiguity candidates, not query internals, `focus`, or catalog-hash merge work.
 The assistant does one lookup and does not create or suggest an experiment
 unless the member asks to try, test, track, or set up one.
+An authored knowledge page can support this lookup without a protocol or UI.
 Hosted runner packaging must include that compact direction projection and the
 knowledge index without shipping the web artifact tree. A missing direction
 projection is auxiliary availability loss: progress cards remain available with

@@ -115,6 +115,24 @@ test('allows only the generated public Health Commons knowledge index', () => {
     sensitiveFilenameRule('package/generated/knowledge.sqlite'),
     'sensitive-filename:data-store',
   );
+  assert.equal(
+    sensitiveFilenameRule(
+      'package/node_modules/@murphai/health-commons/generated/KNOWLEDGE.SQLITE',
+    ),
+    'sensitive-filename:data-store',
+  );
+  assert.equal(
+    sensitiveFilenameRule(
+      'package/node_modules/@murphai/health-commons/generated/knowledge.sqlite.bak',
+    ),
+    'sensitive-filename:data-store',
+  );
+  assert.equal(
+    sensitiveFilenameRule(
+      'package/node_modules/@murphai/other/generated/knowledge.sqlite',
+    ),
+    'sensitive-filename:data-store',
+  );
 });
 
 test('detects quoted and unquoted generic secret assignments', () => {

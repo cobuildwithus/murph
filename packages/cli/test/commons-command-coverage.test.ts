@@ -93,6 +93,27 @@ test("commons knowledge search returns a safety-only sauna hard stop", async () 
   ));
 });
 
+test("commons knowledge search returns evidence and safety from one compound question", async () => {
+  const result = await runInProcessJsonCli<{
+    available: boolean;
+    items: Array<{ text: string }>;
+    safety: { text: string } | null;
+    topic: { title: string } | null;
+  }>(createCommonsSliceCli(), [
+    "commons",
+    "knowledge",
+    "search",
+    "Does Finnish dry sauna improve immunity, and is it safe after I fainted recently?",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.available, true);
+  assert.equal(data.topic?.title, "Finnish Dry Sauna");
+  assert.ok(data.items.some((item) => /immun/iu.test(item.text)));
+  assert.match(data.safety?.text ?? "", /faint|cardiovascular/iu);
+});
+
 test("commons knowledge search rejects a result limit larger than three items", async () => {
   const result = await runInProcessJsonCli(createCommonsSliceCli(), [
     "commons",
@@ -108,15 +129,17 @@ test("commons knowledge search rejects a result limit larger than three items", 
 });
 
 test("commons knowledge search requires one complete question", async () => {
-  const result = await runInProcessJsonCli(createCommonsSliceCli(), [
-    "commons",
-    "knowledge",
-    "search",
-    "x",
-  ]);
+  for (const query of ["x", "--"] as const) {
+    const result = await runInProcessJsonCli(createCommonsSliceCli(), [
+      "commons",
+      "knowledge",
+      "search",
+      query,
+    ]);
 
-  assert.equal(result.exitCode, 1);
-  assert.equal(result.envelope.ok, false);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+  }
 });
 
 test("commons knowledge search stays non-blocking when its generated index is missing", async () => {

@@ -2235,6 +2235,76 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
     },
     360_000,
   )
+
+  it(
+    'answers an ordinary red-light question from one Health Commons lookup',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'What is red light therapy, and what limits how broadly its evidence applies?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
+
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(knowledgeCommands[0] ?? '').toMatch(/red light therapy/iu)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
+      expect(result.finalMessage).toMatch(/photobiomodulation|red light/iu)
+      expect(result.finalMessage).toMatch(/wavelength|dose|device|body site|outcome/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'uses Health Commons dose constraints without inventing a device specification',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'For red light therapy, how long is 12 J/cm2 at 109 mW/cm2, and what must match before that calculation is valid?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
+
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
+      expect(result.finalMessage).toMatch(/110 seconds|1\.8 minutes|about 2 minutes/iu)
+      expect(result.finalMessage).toMatch(/distance|contact|geometry|wavelength|body site/iu)
+      expect(result.finalMessage).not.toMatch(/Bestqool|BQ60|Pro200/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'skips Health Commons for a trivial non-health turn',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'Thanks, that was helpful. Tell me a short joke about databases.',
+      )
+
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+      )).toBe(false)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
+      expect(result.finalMessage.trim().length).toBeGreaterThan(0)
+    },
+    360_000,
+  )
 })
 
 describeRealCodex('real Codex hosted usage behavior e2e', () => {

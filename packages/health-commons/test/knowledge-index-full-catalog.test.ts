@@ -75,6 +75,20 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     expect(text).toMatch(/do not calculate when units|do not match/iu);
   });
 
+  it("returns directly sourced general PBM eye and medication safety", () => {
+    const result = search(
+      "red light therapy",
+      "Is it safe for my eyes while using a photosensitizing medicine",
+    );
+
+    expect(result.topic?.key).toBe("experiment_family:photobiomodulation");
+    expect(result.safety?.text).toMatch(/eye-protection|eye symptoms/iu);
+    expect(result.safety?.caveat).toMatch(/photosensitizing medicine/iu);
+    expect(result.safety?.sources.some((source) =>
+      source.pmid === "28891192" || source.pmid === "24590242"
+    )).toBe(true);
+  });
+
   it("keeps specific photobiomodulation child topics distinct", () => {
     expect(search("skin PBM", "wrinkles").topic?.key)
       .toBe("experiment_family:skin-photobiomodulation");
