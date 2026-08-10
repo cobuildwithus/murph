@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — ReviewGPT round 2 remediation awaiting exact-head review
+Status: active — ReviewGPT round 3 remediation awaiting exact-head review
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -162,3 +162,24 @@ Updated: 2026-08-10
   passed at 1,659,616-byte entry, 8,018,416-byte static closure, and
   9,996,234-byte total; the 42-test bundle-policy suite, focused reply
   regression, and affected typecheck also passed on the merged candidate.
+- Final ReviewGPT round 3 found that one Linq intent can split into a primary
+  image/text bubble and a link-only provider sibling while the reply projection
+  copied parent-intent media onto both physical ids. The remediation preserves
+  the ordered persisted provider ids, treats only the first physical message as
+  the media owner, strips media from every matched sibling effect, and gives a
+  null-text sibling a neutral exact-reply context rather than an unseen-media
+  claim. Ambiguous legacy multi-effect records fail closed with no media owner.
+- The production-shaped split regression now dispatches one generated vault
+  image plus terminal link through the real attachment reservation/upload,
+  primary send, link send, provider-effect persistence, and outbox reload. It
+  proves the primary reply receives the exact ref/hash and bounded visible text
+  while the link reply receives neither image identity nor a media claim. The
+  existing-chat event-path file passes 68 tests; the Operator Config Linq file
+  passes 64 tests and proves created-chat media likewise stays on the ordered
+  primary message. Both affected package typechecks pass.
+- The first exact assembly exposed a 230-byte vault CLI budget overage from the
+  initial remediation. Collapsing duplicate reply-context rendering and using
+  the ordered id array itself as the media-owner proof avoided a ratchet change.
+  Final exact assembly passes at 8,999,581-byte vault CLI total and a
+  1,659,616-byte runner entry, 8,018,907-byte static closure, and
+  9,996,725-byte runner total.

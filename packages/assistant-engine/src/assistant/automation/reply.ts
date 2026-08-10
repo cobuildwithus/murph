@@ -4706,7 +4706,9 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
       : generatedImageReplyContext
         ?? (delivery.message !== null
           ? buildAssistantAutoReplyExplicitReplyContext(delivery.message)
-          : buildAssistantAutoReplyExplicitMediaReplyContext())
+          : buildAssistantAutoReplyExplicitUnquotedReplyContext(
+              delivery.media.length > 0,
+            ))
     contextualizedInputs.push({
       ...promptInput,
       replyContext,
@@ -4935,7 +4937,6 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     ) {
       return []
     }
-
     return [{
       intentId: intent.intentId,
       media: intent.media ?? [],
@@ -4967,8 +4968,14 @@ function resolveAssistantAutoReplyExactOutboxDelivery(
   }
 
   const delivery = matchingDeliveries[0]!
+  const matchedDelivery = {
+    ...delivery,
+    media: delivery.providerMessageIds[0] === providerMessageId
+      ? delivery.media
+      : [],
+  }
   if (delivery.providerMessageEffects.length === 0) {
-    return delivery
+    return matchedDelivery
   }
 
   const matchingEffects = delivery.providerMessageEffects.filter((effect) =>
@@ -4976,12 +4983,12 @@ function resolveAssistantAutoReplyExactOutboxDelivery(
   )
   return matchingEffects.length === 1
     ? {
-        ...delivery,
+        ...matchedDelivery,
         message: matchingEffects[0]!.message,
       }
     : matchingEffects.length === 0 && delivery.media.length > 0
       ? {
-          ...delivery,
+          ...matchedDelivery,
           message: null,
         }
       : null
@@ -5090,15 +5097,24 @@ function assistantAutoReplyOutboxDeliveryMatchesStableConversationFallback(input
 function readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
   delivery: AssistantAutoReplyOutboxMessageDelivery,
 ): string[] {
-  const ids = [
-    readAssistantTargetProviderScalar(delivery.providerMessageId),
-    ...(Array.isArray(delivery.providerMessageIds)
-      ? delivery.providerMessageIds.map((id) =>
-          readAssistantTargetProviderScalar(id),
-        )
-      : []),
-  ].filter((id): id is string => id !== null)
-  return [...new Set(ids)]
+  const orderedProviderMessageIds = Array.isArray(delivery.providerMessageIds)
+    ? delivery.providerMessageIds
+        .map((id) => readAssistantTargetProviderScalar(id))
+        .filter((id): id is string => id !== null)
+    : []
+  const legacyProviderMessageId = readAssistantTargetProviderScalar(
+    delivery.providerMessageId,
+  )
+  if (
+    orderedProviderMessageIds.length === 0 &&
+    (delivery.providerMessageEffects?.length ?? 0) > 1
+  ) {
+    return []
+  }
+  return [...new Set([
+    ...orderedProviderMessageIds,
+    legacyProviderMessageId,
+  ].filter((id): id is string => id !== null))]
 }
 
 function assistantAutoReplyRouteValueMatches(input: {
@@ -5191,11 +5207,18 @@ function buildAssistantAutoReplyExplicitGeneratedImageReplyContext(input: {
   return null
 }
 
-function buildAssistantAutoReplyExplicitMediaReplyContext(): string {
-  return [
-    'The sender explicitly replied to an exact prior assistant media delivery that has no quotable text.',
-    'Use only that authorship fact to interpret this message; do not infer or describe the unseen media content.',
-  ].join('\n')
+function buildAssistantAutoReplyExplicitUnquotedReplyContext(
+  hasAttestedMedia: boolean,
+): string {
+  return hasAttestedMedia
+    ? [
+        'The exact reply target is an assistant media delivery with no text.',
+        'Do not infer or describe unseen media.',
+      ].join('\n')
+    : [
+        'The exact reply target has no attested text or media.',
+        'Do not infer adjacent content.',
+      ].join('\n')
 }
 
 function buildAssistantAutoReplyTurnContext(input: {

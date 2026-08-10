@@ -547,7 +547,7 @@ describe('assistant auto-reply event-first path', () => {
 
     const prompt = readSentPrompt()
     expect(prompt).toContain(
-      'The sender explicitly replied to an exact prior assistant media delivery',
+      'The exact reply target is an assistant media delivery with no text.',
     )
     expect(prompt).not.toContain('cannot be attested as Murph-authored')
     expect(prompt).not.toContain('Native reply context:')
@@ -802,12 +802,13 @@ describe('assistant auto-reply event-first path', () => {
       unexpectedContext: 'prior assistant media delivery',
     },
     {
-      expectedContext: 'The sender explicitly replied to an exact prior assistant media delivery',
+      expectedContext:
+        'The exact reply target has no attested text or media.',
       expectedMessage: null,
       inputId: 'ain_15151515151515151515151515151515',
       label: 'native rich-link bubble',
       replyToMessageId: 'linq-msg-murph-split-link',
-      unexpectedContext: 'this exact prior assistant message:',
+      unexpectedContext: 'prior assistant media delivery',
     },
   ])('uses only the attested effect for a split voice fallback $label', async ({
     expectedContext,
@@ -874,41 +875,93 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('memo-split-fallback.m4a')
   })
 
-  it('persists ordinary physical Linq effects before resolving native replies', async () => {
+  it('binds generated media only to the primary physical Linq effect', async () => {
     const vault = await createTempVault()
-    const requestedMessage = 'Read this\nhttps://example.test/report'
+    const media = {
+      alt: 'Generated image',
+      contentType: 'image/png',
+      filename: 'split-generated-avatar.png',
+      kind: 'vault_image',
+      ref: 'raw/captures/2026/08/split-avatar/split-generated-avatar.png',
+      sha256: '3'.repeat(64),
+      sizeBytes: 4,
+      source: 'gpt-image-2',
+    } as const
+    replyEventPathMocks.listAssistantTranscriptEntries.mockResolvedValue([{
+      createdAt: '2026-08-07T21:08:00.000Z',
+      kind: 'status',
+      schema: 'murph.assistant-transcript-entry.v1',
+      text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+        contentType: media.contentType,
+        deliveryContextOrdinal: 0,
+        ref: media.ref,
+        sha256: media.sha256,
+        sizeBytes: media.sizeBytes,
+        turnId: 'turn-split-generated-avatar',
+      }),
+    }])
+    const requestedMessage = 'Generated image\nhttps://example.test/source'
     const intent = await createAssistantOutboxIntent({
       actorId: null,
       channel: 'linq',
-      dedupeToken: 'ordinary-physical-effects',
+      dedupeToken: 'split-generated-avatar',
       explicitTarget: 'thread-1',
       identityId: 'identity-1',
+      media: [media],
       message: requestedMessage,
-      sessionId: 'session-ordinary-physical-effects',
+      sessionId: 'session-split-generated-avatar',
       threadId: 'thread-1',
       threadIsDirect: false,
-      turnId: 'turn-ordinary-physical-effects',
+      turnId: 'turn-split-generated-avatar',
       vault,
     })
-    let requestCount = 0
+    const providerBodies: Array<Record<string, unknown>> = []
+    let providerMessageCount = 0
+    const loadVaultImage = vi.fn().mockResolvedValue(
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    )
+    const fetchImplementation = vi.fn(async (request, init) => {
+      const url = String(request)
+      if (url.endsWith('/attachments')) {
+        return new Response(JSON.stringify({
+          attachment_id: 'attachment-split-generated-avatar',
+          expires_at: '2026-08-07T21:20:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'image/png',
+          },
+          upload_url: 'https://uploads.example.test/split-generated-avatar',
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url === 'https://uploads.example.test/split-generated-avatar') {
+        expect(init?.method).toBe('PUT')
+        return new Response(null, { status: 204 })
+      }
+      if (url.endsWith('/chats/thread-1/messages')) {
+        providerMessageCount += 1
+        providerBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+        return new Response(JSON.stringify({
+          chat_id: 'thread-1',
+          message: {
+            id: providerMessageCount === 1
+              ? 'linq-msg-generated-image-primary'
+              : 'linq-msg-generated-image-link',
+          },
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected Linq request: ${init?.method} ${url}`)
+    })
     const sendLinq = vi.fn(async (request) => await sendLinqMessage(request, {
       env: {
         LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
         LINQ_API_TOKEN: 'linq-token',
       },
-      fetchImplementation: vi.fn(async () => {
-        requestCount += 1
-        return new Response(JSON.stringify({
-          chat_id: 'thread-1',
-          message: {
-            id: requestCount === 1
-              ? 'linq-msg-ordinary-text'
-              : 'linq-msg-ordinary-link',
-          },
-        }), {
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }),
+      fetchImplementation,
+      loadVaultImage,
     }))
 
     const dispatched = await dispatchAssistantOutboxIntent({
@@ -918,26 +971,46 @@ describe('assistant auto-reply event-first path', () => {
       now: new Date('2026-08-07T21:09:00.000Z'),
       vault,
     })
-    expect(requestCount).toBe(2)
+    expect(loadVaultImage).toHaveBeenCalledTimes(1)
+    expect(providerMessageCount).toBe(2)
+    expect(providerBodies[0]).toMatchObject({
+      message: {
+        parts: [
+          { type: 'text', value: 'Generated image' },
+          {
+            attachment_id: 'attachment-split-generated-avatar',
+            type: 'media',
+          },
+        ],
+      },
+    })
+    expect(providerBodies[1]).toMatchObject({
+      message: {
+        parts: [{
+          type: 'link',
+          value: 'https://example.test/source',
+        }],
+      },
+    })
     expect(dispatched.intent.status).toBe('sent')
     const persisted = await readAssistantOutboxIntent(vault, intent.intentId)
     if (!persisted) {
-      throw new Error('expected persisted ordinary Linq delivery')
+      throw new Error('expected persisted split generated-image Linq delivery')
     }
     expect(persisted.delivery).toMatchObject({
       providerMessageEffects: [
         {
-          message: 'Read this',
-          providerMessageId: 'linq-msg-ordinary-text',
+          message: 'Generated image',
+          providerMessageId: 'linq-msg-generated-image-primary',
         },
         {
           message: null,
-          providerMessageId: 'linq-msg-ordinary-link',
+          providerMessageId: 'linq-msg-generated-image-link',
         },
       ],
       providerMessageIds: [
-        'linq-msg-ordinary-text',
-        'linq-msg-ordinary-link',
+        'linq-msg-generated-image-primary',
+        'linq-msg-generated-image-link',
       ],
     })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([persisted])
@@ -946,10 +1019,37 @@ describe('assistant auto-reply event-first path', () => {
       allowSelfAuthored: false,
       context: createReplyContext(createLinqGroupCandidate({
         inputId: 'ain_16161616161616161616161616161616',
-        messageId: 'linq-msg-reply-to-ordinary-link',
+        messageId: 'linq-msg-reply-to-generated-image-primary',
         occurredAt: '2026-08-07T21:10:00.000Z',
-        replyToMessageId: 'linq-msg-ordinary-link',
-        text: 'What about this link?',
+        replyToMessageId: 'linq-msg-generated-image-primary',
+        text: 'Use this as the group photo.',
+      })),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const primaryPrompt = readSentPrompt()
+    expect(primaryPrompt).toContain(
+      'explicitly replied to this exact prior assistant generated-image delivery',
+    )
+    expect(primaryPrompt).toContain(media.ref)
+    expect(primaryPrompt).toContain(media.sha256)
+    expect(primaryPrompt).toContain('Visible text sent with that image:')
+    expect(primaryPrompt).toContain('Generated image')
+    expect(primaryPrompt).not.toContain('https://example.test/source')
+
+    replyEventPathMocks.sendAssistantMessage.mockClear()
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createLinqGroupCandidate({
+        inputId: 'ain_18181818181818181818181818181818',
+        messageId: 'linq-msg-reply-to-generated-image-link',
+        occurredAt: '2026-08-07T21:11:00.000Z',
+        replyToMessageId: 'linq-msg-generated-image-link',
+        text: 'Use this link as the group photo.',
       })),
       enabledChannels: ['linq'],
       inboxServices: createInboxServices(),
@@ -960,12 +1060,18 @@ describe('assistant auto-reply event-first path', () => {
 
     const linkPrompt = readSentPrompt()
     expect(linkPrompt).toContain(
-      'The sender explicitly replied to an exact prior assistant media delivery',
+      'The exact reply target has no attested text or media.',
     )
-    expect(linkPrompt).not.toContain('Read this')
-    expect(linkPrompt).not.toContain('https://example.test/report')
-    expect(linkPrompt).not.toContain('linq-msg-ordinary-text')
-    expect(linkPrompt).not.toContain('linq-msg-ordinary-link')
+    expect(linkPrompt).not.toContain(
+      'explicitly replied to this exact prior assistant generated-image delivery',
+    )
+    expect(linkPrompt).not.toContain('prior assistant media delivery')
+    expect(linkPrompt).not.toContain(media.ref)
+    expect(linkPrompt).not.toContain(media.sha256)
+    expect(linkPrompt).not.toContain('Generated image')
+    expect(linkPrompt).not.toContain('https://example.test/source')
+    expect(linkPrompt).not.toContain('linq-msg-generated-image-primary')
+    expect(linkPrompt).not.toContain('linq-msg-generated-image-link')
   })
 
   it('preserves the explicit-reply boundary for private provider placeholders', async () => {

@@ -1101,7 +1101,7 @@ test('linq runtime sanitizes but still promotes an uppercase terminal HTTPS URL'
   }])
 })
 
-test('linq runtime creates a chat with caller text before the rich-link follow-up', async () => {
+test('linq runtime keeps created-chat media on the primary message before the rich-link follow-up', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
     LINQ_API_TOKEN: 'linq-token',
@@ -1130,7 +1130,8 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
     {
       from: '+15550000000',
       idempotencyKey: 'create-123',
-      message: 'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+      media: [{ url: 'https://cdn.example.test/generated-avatar.png' }],
+      message: 'Generated image\nhttps://example.test/source',
       to: ['+15550000001'],
     },
     { env, fetchImplementation },
@@ -1140,7 +1141,7 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
   assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
   assert.deepEqual(result.providerMessageEffects, [
     {
-      message: 'Your secure payment link:',
+      message: 'Generated image',
       providerMessageId: 'message-text',
     },
     {
@@ -1156,7 +1157,10 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
           idempotency_key: 'create-123',
           parts: [{
             type: 'text',
-            value: 'Your secure payment link:',
+            value: 'Generated image',
+          }, {
+            type: 'media',
+            url: 'https://cdn.example.test/generated-avatar.png',
           }],
         },
         to: ['+15550000001'],
@@ -1169,7 +1173,7 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
           idempotency_key: 'create-123:link',
           parts: [{
             type: 'link',
-            value: 'https://pay.example.test/checkout/session_123',
+            value: 'https://example.test/source',
           }],
         },
       },
