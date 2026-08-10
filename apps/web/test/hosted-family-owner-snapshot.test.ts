@@ -200,6 +200,8 @@ test("pending Max transition advances the Web rollback floor before Stripe capac
     pendingPlanCode: "max",
     planCode: "pulse",
   });
+  expect(snapshot?.plans.pulse.billed).toBe(4);
+  expect(snapshot?.plans.max.billed).toBe(0);
 });
 
 test("owner snapshot exposes a Telegram link only for a Telegram-bound invite", async () => {

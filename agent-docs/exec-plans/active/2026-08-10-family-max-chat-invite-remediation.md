@@ -116,10 +116,11 @@ Updated: 2026-08-10
 - Assistant Engine, Hosted Execution, and Web typechecks passed.
 - Pending-Max rollback disclosure correction: 188 focused Web owner-snapshot
   and member-transition tests passed; Web typecheck, `git diff --check`, and
-  the private-identifier diff scan passed.
+  the private-identifier diff scan passed. The owner-snapshot file then passed
+  all 15 tests with the final explicit Pulse-only/zero-Max capacity assertions.
 - Exact pushed head `4efbb4c1b1b14deed3059b544b085e51ca7008a9` passed every required
   GitHub Action before the round-7 rollback-disclosure correction.
 - Round 7 inspected that exact head and returned only the pending-Max rollback
   floor finding recorded above.
-- Pending: focused rollback-floor verification, commit and push, the round-7
-  disclosure-only verification retry, and final-head GitHub Actions.
+- Pending: push the correction, run the round-7 disclosure-only verification
+  retry, and pass final-head GitHub Actions.
