@@ -63,7 +63,6 @@ import {
   upsertKnowledgePage,
 } from '../src/knowledge/service.ts'
 import {
-  digestGroupChallengeDefinition,
   renderGroupChallengeDefinitionSection,
 } from '../src/assistant/group-challenge-response-card-schema.ts'
 import {
@@ -121,7 +120,7 @@ const GROUP_CHALLENGE_DEFINITION = {
 
 const GROUP_CHALLENGE_AUTHORING_INPUT = {
   challengeSlug: 'weird-health-week',
-  definitionDigest: digestGroupChallengeDefinition(GROUP_CHALLENGE_DEFINITION),
+  pageRevisionDigest: '0'.repeat(64),
   participantObservations: [
     {
       components: [{
@@ -1698,6 +1697,13 @@ if (!tool) {
     const vaultRoot = await prepareGroupChallengeVault(
       scenario.turnInput.workingDirectory,
     )
+    const challengeAuthoringInput = {
+      ...GROUP_CHALLENGE_AUTHORING_INPUT,
+      pageRevisionDigest: (await getKnowledgePage({
+        slug: 'weird-health-week',
+        vault: vaultRoot,
+      })).page.pageRevisionDigest,
+    }
     scenario.stub.queue(
       {
         customToolCall: {
@@ -1714,7 +1720,7 @@ if (!tool) {
       {
         customToolCall: {
           input: [
-            `const result = await tools.murph__attach_response_card(${JSON.stringify(GROUP_CHALLENGE_AUTHORING_INPUT)});`,
+            `const result = await tools.murph__attach_response_card(${JSON.stringify(challengeAuthoringInput)});`,
             'text(result);',
           ].join('\n'),
           name: 'exec',

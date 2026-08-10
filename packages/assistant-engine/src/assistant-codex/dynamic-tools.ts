@@ -3592,12 +3592,9 @@ async function executeGroupChallengeResponseCardAttachment(input: {
     const definitionSnapshot = readGroupChallengeDefinitionSnapshot(
       pageResult.page.body,
     )
-    if (
-      input.request.definitionDigest
-      !== definitionSnapshot.definitionDigest
-    ) {
+    if (input.request.pageRevisionDigest !== pageResult.page.pageRevisionDigest) {
       throw new TypeError(
-        'Challenge observations must use the current page definition digest.',
+        'Challenge observations must use the current page revision digest.',
       )
     }
     const definition = definitionSnapshot.definition

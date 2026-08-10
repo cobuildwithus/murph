@@ -52,7 +52,7 @@ const challengeSlugSchema = z
   .max(160)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
 
-const definitionDigestSchema = z.string().regex(/^[0-9a-f]{64}$/u)
+const sha256DigestSchema = z.string().regex(/^[0-9a-f]{64}$/u)
 
 const projectionScopeKeySchema = z.string().trim().min(1).max(500)
 
@@ -63,7 +63,7 @@ const componentProjectionScopeKeysSchema = z.object({
 
 export const groupChallengeResponseCardToolInputSchema = z.object({
   challengeSlug: challengeSlugSchema,
-  definitionDigest: definitionDigestSchema,
+  pageRevisionDigest: sha256DigestSchema,
   participantObservations: groupChallengeParticipantObservationsSchema,
 }).strict()
 
@@ -81,7 +81,7 @@ export const groupChallengeResponseCardToolInputJsonSchema = (() => {
 
 const groupChallengeStandingsSnapshotSchema = z.object({
   componentProjectionScopeKeys: z.array(componentProjectionScopeKeysSchema),
-  definitionDigest: definitionDigestSchema,
+  definitionDigest: sha256DigestSchema,
   readProjectionScopeKeyBatches: z
     .array(z.array(projectionScopeKeySchema).min(1).max(3))
     .min(1),

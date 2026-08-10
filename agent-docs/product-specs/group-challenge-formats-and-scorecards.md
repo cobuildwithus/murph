@@ -312,11 +312,18 @@ The JSON is closed and bounded: one to five components, one to three exact scope
 component, positive integer rates, optional non-negative caps, a positive integer
 `rulesRevision`, and participation states `in`, `pending`, `declined`, or
 `withdrawn`. The lowercase digest is SHA-256 over the compact schema-normalized JSON
-and is recomputed whenever any definition field changes. The model copies it only as
-a consistency precondition; the host validates it against the JSON and continues to
-derive all authority from that JSON. A malformed, mismatched-digest, duplicate,
-missing, generic-page, or legacy unstructured definition is ordinary-text-only.
-Attachment never creates or repairs this section.
+and is recomputed whenever any definition field changes. The host validates it against
+the JSON and continues to derive all structural authority from that JSON. A malformed,
+mismatched-digest, duplicate, missing, generic-page, or legacy unstructured definition
+is ordinary-text-only. Attachment never creates or repairs this section.
+
+`vault-cli knowledge show` also returns `pageRevisionDigest`, lowercase SHA-256 over
+the exact returned canonical Markdown bytes. After normalizing observations from that
+page, the model copies this page-revision digest into the attachment request. The host
+re-reads the page and requires the digest to match before scoring, persistence, or
+delivery, so definition-preserving changes to the window, cadence, baselines,
+cumulative settlement, rulings, or prior snapshots reject stale observations. The
+existing expected-Markdown compare-and-set rejects a later change after that check.
 
 ## Long-running cumulative settlement
 

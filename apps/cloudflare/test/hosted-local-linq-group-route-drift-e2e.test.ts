@@ -36,7 +36,7 @@ const rejectedStandingsReplyText =
   "I could not verify a complete standings card, so I am keeping this update in text.";
 const challengeCardAuthoringInput = {
   challengeSlug: "weird-health-week",
-  definitionDigest: "0".repeat(64),
+  pageRevisionDigest: "0".repeat(64),
   participantObservations: [
     {
       components: [{
