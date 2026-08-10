@@ -143,6 +143,26 @@ dedicated sandbox; cleanup removes only mutable resources whose exact run
 ownership was proved. Repository files contain only the protected Environment
 contract names; the sandbox values remain external to the checkout.
 
+## Live Junction WHOOP Canary Verification
+
+The public live wearable canary is a protected-main external-provider proof,
+not a pull-request check. Its focused hermetic owner proof is:
+
+```bash
+pnpm --dir packages/hosted-local-harness exec vitest run \
+  --config vitest.config.ts --no-coverage \
+  test/junction-wearable-canary-workflow.test.ts
+```
+
+The workflow must install and smoke-check the exact Codex CLI version declared
+by `Dockerfile.cloudflare-hosted-runner-base` before hosted-local model-catalog
+preparation. Keep that setup step free of Environment secrets; only the final
+browser-canary step may receive Junction sandbox authority and the dedicated
+WHOOP login. A real sign-in proof remains available only after the exact
+workflow reaches protected `main`, where non-canceling concurrency serializes
+the dedicated provider account. Do not weaken the protected-branch gate or
+expose live credentials to a pull request to obtain earlier proof.
+
 ## Verification Execution Location
 
 The verification matrix chooses the command and coverage surface; it does not

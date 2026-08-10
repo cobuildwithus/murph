@@ -54,6 +54,26 @@ describe("live Junction wearable canary workflow", () => {
     expect(workflow).not.toContain("OURA_CLIENT_SECRET");
   });
 
+  it("installs the repository-pinned Codex CLI before hosted-local starts", () => {
+    const installStepMarker =
+      "      - name: Install Codex CLI for hosted-local model catalog\n";
+    const liveStepMarker = "      - name: Run live Junction wearable browser canary\n";
+    const installStepOffset = workflow.indexOf(installStepMarker);
+    const liveStepOffset = workflow.indexOf(liveStepMarker);
+    expect(installStepOffset).toBeGreaterThan(0);
+    expect(liveStepOffset).toBeGreaterThan(installStepOffset);
+
+    const installStep = workflow.slice(installStepOffset, liveStepOffset);
+    expect(installStep).toContain(
+      "sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base",
+    );
+    expect(installStep).toContain('"@openai/codex@${codex_cli_version}"');
+    expect(installStep).toContain('echo "${npm_prefix}/bin" >> "$GITHUB_PATH"');
+    expect(installStep).toContain('"${npm_prefix}/bin/codex" --version');
+    expect(installStep).not.toContain("${{ secrets.");
+    expect(workflow).not.toMatch(/@openai\/codex@\d/u);
+  });
+
   it("runs only the sandbox browser proof with pinned actions", () => {
     expect(workflow).toContain("JUNCTION_ENV: sandbox");
     expect(workflow).toContain("MURPH_DEV_TEMPORAL: disabled");
