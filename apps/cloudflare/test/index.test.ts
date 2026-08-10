@@ -2946,7 +2946,7 @@ describe("cloudflare worker routes", () => {
         await signControlRequest(new Request(
           "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
           {
-            body: "{}",
+            body: JSON.stringify({ source: "linq-typing-started" }),
             headers: { "content-type": "application/json; charset=utf-8" },
             method: "POST",
           },
@@ -2958,7 +2958,10 @@ describe("cloudflare worker routes", () => {
       await expect(response.json()).resolves.toEqual({ accepted: true });
       expect(userRunnerGetByName).toHaveBeenCalledWith("test-user");
       expect(stub.bindUser).not.toHaveBeenCalled();
-      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith("test-user");
+      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
+        "test-user",
+        "linq-typing-started",
+      );
       expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
 
@@ -3003,7 +3006,10 @@ describe("cloudflare worker routes", () => {
       expect(response.status).toBe(202);
       await expect(response.json()).resolves.toEqual({ accepted: true });
       expect(bindUser).not.toHaveBeenCalled();
-      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith("test-user");
+      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
+        "test-user",
+        undefined,
+      );
       expect(harness.namespace.getByName).not.toHaveBeenCalled();
       expect(
         harness.sql.exec("SELECT user_id FROM runner_meta").toArray(),

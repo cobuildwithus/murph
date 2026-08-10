@@ -305,6 +305,23 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Referral rewards page">
+        <div
+          id="referral-rewards-page"
+          data-design-section="referral-rewards-page"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated={false}
+            identityKey={null}
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Referral rewards unavailable">
         <div
           data-design-section="referral-rewards-unavailable"
@@ -394,7 +411,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Apple Health relay wearable setup">
+      <StudySection title="Apple Health relay wearable sources">
         <AppleHealthRelaySetupStudy />
       </StudySection>
 
@@ -406,7 +423,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings sign-in required">
+      <StudySection title="Settings and Family sign-in handoffs">
         <SettingsAuthRequiredStudy />
       </StudySection>
 
@@ -460,7 +477,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Reusable signup referral link and recipient claim states">
+      <StudySection title="Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states">
         <SignupReferralFlowStudy />
       </StudySection>
 

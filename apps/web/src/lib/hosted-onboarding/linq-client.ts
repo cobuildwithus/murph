@@ -37,6 +37,12 @@ const HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS =
 const HOSTED_LINQ_RICH_LINK_ATTEMPT_TIMEOUT_MS =
   Math.floor(HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS / 2);
 const HOSTED_LINQ_ERROR_RESPONSE_MAX_BYTES = 16 * 1024;
+// One attachment-send attempt when the caller supplies a deadline, covering
+// headers and body together. Owned here because this is the layer that spends
+// it; callers size their own budgets against it rather than restating it. Two
+// of these plus the pre-send stretch must fit inside the caller's window, so it
+// is deliberately tighter than the shared default.
+export const HOSTED_LINQ_ATTACHMENT_SEND_ATTEMPT_TIMEOUT_MS = 7 * 1000;
 
 export type HostedLinqSendResult = {
   chatId: string | null;
@@ -764,10 +770,25 @@ export async function sendHostedLinqAttachmentMessage(input: {
    * caller signal: cutting an irreversible send short is worse than waiting.
    */
   prepareSignal?: AbortSignal;
+  /**
+   * Absolute deadline for the prepare phase, covering its response bodies too.
+   * `fetchLinqApi` stops its own timer once headers arrive, so without this an
+   * attachment-create body could stall past the pre-send bound.
+   */
+  prepareDeadlineAt?: number;
+  /** Absolute deadline shared by the message POST and its one reconciliation. */
+  sendDeadlineAt?: number;
   signal?: AbortSignal;
 }): Promise<HostedLinqSendResult> {
   const chatId = normalizeRequiredString(input.chatId, "chat id");
   const prepareSignal = input.prepareSignal ?? input.signal;
+  const readPrepareBody = async (response: Response) =>
+    input.prepareDeadlineAt === undefined
+      ? await response.text().catch(() => null)
+      : await readHostedLinqBoundedResponseText(
+        response,
+        input.prepareDeadlineAt - Date.now(),
+      );
   // Everything before the final message POST is tagged phase "prepare":
   // failures here provably never created a chat message, so callers may undo
   // side effects such as share reservations. The message POST itself stays
@@ -786,17 +807,18 @@ export async function sendHostedLinqAttachmentMessage(input: {
       timeoutMessage: "Linq attachment create timed out.",
     });
     if (!createResponse.ok) {
+      await endHostedLinqResponseBody(createResponse);
       throw buildHostedLinqRequestFailedError({
         operation: "attachment create",
         retryable: isRetryableHostedLinqStatus(createResponse.status),
         status: createResponse.status,
       });
     }
-    const created = await readHostedLinqOptionalJsonResponse<{
+    const created = parseHostedLinqOptionalJson<{
       attachment_id?: unknown;
       required_headers?: unknown;
       upload_url?: unknown;
-    }>(createResponse);
+    }>(await readPrepareBody(createResponse));
     const createdAttachmentId = normalizeNullableString(created?.attachment_id);
     const uploadUrl = normalizeNullableString(created?.upload_url);
     if (!createdAttachmentId || !uploadUrl) {
@@ -814,6 +836,9 @@ export async function sendHostedLinqAttachmentMessage(input: {
       method: "PUT",
       signal: prepareSignal ? AbortSignal.any([prepareSignal, uploadTimeout]) : uploadTimeout,
     });
+    // The upload's own body is never read, on either branch, so it is ended
+    // here rather than left holding a connection into the message POST.
+    await endHostedLinqResponseBody(uploadResponse);
     if (!uploadResponse.ok) {
       throw buildHostedLinqRequestFailedError({
         operation: "attachment upload",
@@ -841,14 +866,63 @@ export async function sendHostedLinqAttachmentMessage(input: {
   // with the original message instead of accepting a second one.
   const sendBody = JSON.stringify({ message } satisfies MessageSendParams);
   const sendPath = `chats/${encodeURIComponent(chatId)}/messages`;
-  const submitSend = async () => await fetchHostedLinqApiOrThrow({
-    body: sendBody,
-    method: "POST",
-    operation: "attachment send",
-    path: sendPath,
-    signal: input.signal,
-    timeoutMessage: "Linq attachment send timed out.",
-  });
+  // fetchLinqApi's timer stops when headers arrive, so an attempt's deadline is
+  // tracked here and the body read below is charged against what is left of it.
+  // Otherwise a stalled body outlives the budget the caller was promised.
+  let attemptDeadlineAt = 0;
+  const submitSend = async () => {
+    // Each attempt gets its own budget, never more than what the caller's
+    // deadline still allows, so two attempts cannot outlive one operation.
+    // Compared here rather than left to a scheduled abort: a timer callback is
+    // a scheduling mechanism, and a busy event loop can run it after its own
+    // deadline, by which time the request has already been dispatched.
+    const remainingMs = input.sendDeadlineAt === undefined
+      ? LINQ_API_DEFAULT_TIMEOUT_MS
+      : input.sendDeadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        message: "Linq attachment send deadline elapsed before the request.",
+        httpStatus: 502,
+        retryable: false,
+      });
+    }
+    const attemptBudgetMs = input.sendDeadlineAt === undefined
+      ? LINQ_API_DEFAULT_TIMEOUT_MS
+      : Math.min(HOSTED_LINQ_ATTACHMENT_SEND_ATTEMPT_TIMEOUT_MS, remainingMs);
+    attemptDeadlineAt = Date.now() + attemptBudgetMs;
+    return await fetchHostedLinqApiOrThrow({
+      body: sendBody,
+      method: "POST",
+      operation: "attachment send",
+      path: sendPath,
+      signal: input.signal,
+      timeoutMessage: "Linq attachment send timed out.",
+      ...(input.sendDeadlineAt === undefined ? {} : { timeoutMs: attemptBudgetMs }),
+    });
+  };
+  const readRemainingBody = async (response: Response) =>
+    await readHostedLinqBoundedResponseText(
+      response,
+      attemptDeadlineAt - Date.now(),
+    );
+
+  // The pre-send deadline is the admission check for the irreversible POST, so
+  // it is compared here rather than trusted to the abort callback that may not
+  // have run yet. Refusing here is still provably before any message reached
+  // the chat, which is why it stays a prepare-phase failure.
+  if (
+    input.prepareDeadlineAt !== undefined
+    && Date.now() >= input.prepareDeadlineAt
+  ) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: { phase: HOSTED_LINQ_ATTACHMENT_SEND_PHASE_PREPARE },
+      message: "Linq attachment preparation exceeded its deadline.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
 
   let sendResponse: Response;
   try {
@@ -860,7 +934,11 @@ export async function sendHostedLinqAttachmentMessage(input: {
     if (idempotencyKey === null) {
       throw error;
     }
-    return await reconcileHostedLinqAttachmentSend({ cause: error, submitSend });
+    return await reconcileHostedLinqAttachmentSend({
+      cause: error,
+      readRemainingBody,
+      submitSend,
+    });
   }
   if (!sendResponse.ok) {
     // A replay of one accepted request re-creates its attachment, so the body
@@ -868,26 +946,53 @@ export async function sendHostedLinqAttachmentMessage(input: {
     // answers with a key-reuse conflict. Classify only that exact response so
     // a caller with a stable per-request key can read it as "already sent";
     // every other 409 and error stays an ordinary failure.
-    const idempotencyConflict = idempotencyKey !== null
-      && sendResponse.status === 409
-      && await isHostedLinqIdempotencyKeyReuseConflict(sendResponse);
+    let conflict: "conflict" | "not_conflict" | "unreadable" = "not_conflict";
+    if (idempotencyKey !== null && sendResponse.status === 409) {
+      conflict = await readHostedLinqIdempotencyKeyReuseConflict(
+        await readRemainingBody(sendResponse),
+      );
+    } else {
+      // Only the status matters on these, and nothing else will end them.
+      await endHostedLinqResponseBody(sendResponse);
+    }
     const retryable = isRetryableHostedLinqStatus(sendResponse.status);
     const failure = buildHostedLinqRequestFailedError({
       operation: "attachment send",
       retryable,
       status: sendResponse.status,
-      ...(idempotencyConflict ? { idempotencyKeyReuseConflict: true } : {}),
+      ...(conflict === "conflict" ? { idempotencyKeyReuseConflict: true } : {}),
     });
     // A retryable response can arrive after the provider already accepted the
     // message and lost the acknowledgement, so it does not prove the card is
-    // absent. A definitive rejection does, and stays an ordinary failure.
-    if (idempotencyKey !== null && !idempotencyConflict && retryable) {
-      return await reconcileHostedLinqAttachmentSend({ cause: failure, submitSend });
+    // absent. A definitive rejection does, and stays an ordinary failure. An
+    // answer we could not finish reading is not an answer either.
+    if (
+      idempotencyKey !== null
+      && conflict !== "conflict"
+      && (retryable || conflict === "unreadable")
+    ) {
+      return await reconcileHostedLinqAttachmentSend({
+        cause: failure,
+        readRemainingBody,
+        submitSend,
+      });
     }
     throw failure;
   }
 
-  return await readHostedLinqAttachmentSendResult(sendResponse);
+  const acceptedBody = await readRemainingBody(sendResponse);
+  if (acceptedBody === null && idempotencyKey !== null) {
+    // Accepted, but the answer never finished arriving, so the send owner has
+    // not established anything it can report. The same-key resubmission is the
+    // one way to turn that into a fact, and it replays rather than accepting a
+    // second message. An unkeyed send has no such move, so it keeps the 200.
+    return await reconcileHostedLinqAttachmentSend({
+      cause: buildHostedLinqUnreadAcknowledgementCause(sendResponse.status),
+      readRemainingBody,
+      submitSend,
+    });
+  }
+  return readHostedLinqAttachmentSendResult(acceptedBody);
 }
 
 /**
@@ -903,6 +1008,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
  */
 async function reconcileHostedLinqAttachmentSend(input: {
   cause: unknown;
+  readRemainingBody: (response: Response) => Promise<string | null>;
   submitSend: () => Promise<Response>;
 }): Promise<HostedLinqSendResult> {
   let response: Response;
@@ -912,30 +1018,115 @@ async function reconcileHostedLinqAttachmentSend(input: {
     throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
   }
   if (response.ok) {
-    return await readHostedLinqAttachmentSendResult(response);
+    const body = await input.readRemainingBody(response);
+    if (body === null) {
+      // Same rule as everywhere else on this boundary: an answer we could not
+      // finish reading is not an answer. Reconciliation was the one attempt
+      // available, so this is where the request ends unresolved.
+      throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
+    }
+    return readHostedLinqAttachmentSendResult(body);
   }
-  if (
-    response.status === 409
-    && await isHostedLinqIdempotencyKeyReuseConflict(response)
-  ) {
-    throw buildHostedLinqRequestFailedError({
-      idempotencyKeyReuseConflict: true,
-      operation: "attachment send",
-      retryable: false,
-      status: response.status,
-    });
+  if (response.status === 409) {
+    const conflict = await readHostedLinqIdempotencyKeyReuseConflict(
+      await input.readRemainingBody(response),
+    );
+    if (conflict === "conflict") {
+      throw buildHostedLinqRequestFailedError({
+        idempotencyKeyReuseConflict: true,
+        operation: "attachment send",
+        retryable: false,
+        status: response.status,
+      });
+    }
+  } else {
+    await endHostedLinqResponseBody(response);
   }
   throw buildHostedLinqUnconfirmedAcknowledgementError(input.cause);
 }
 
-async function readHostedLinqAttachmentSendResult(
-  response: Response,
-): Promise<HostedLinqSendResult> {
-  const payload = await readHostedLinqOptionalJsonResponse<MessageSendResponse>(response);
+function readHostedLinqAttachmentSendResult(
+  body: string | null,
+): HostedLinqSendResult {
+  let payload: MessageSendResponse | null = null;
+  if (body?.trim()) {
+    try {
+      payload = JSON.parse(body) as MessageSendResponse;
+    } catch {
+      payload = null;
+    }
+  }
   return {
     chatId: normalizeNullableString(payload?.chat_id),
     messageId: normalizeNullableString(payload?.message?.id),
   };
+}
+
+/**
+ * Read a response body within whatever is left of its attempt's budget, and
+ * terminate it when that runs out. `fetchLinqApi` stops its own timer once
+ * headers arrive, so without this a stalled body would outlive the deadline the
+ * caller was told it had.
+ *
+ * The read owns the stream reader rather than calling `response.text()`: that
+ * helper locks the body, so cancelling through `response.body` afterwards
+ * throws and leaves the read and its connection alive. Holding the reader means
+ * the cancel below actually ends both. A body that does not finish in time
+ * reads as absent, never as a different answer.
+ */
+async function readHostedLinqBoundedResponseText(
+  response: Response,
+  timeoutMs: number,
+): Promise<string | null> {
+  const body = response.body;
+  if (!body) {
+    return "";
+  }
+  if (!(timeoutMs > 0)) {
+    await body.cancel().catch(() => undefined);
+    return null;
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let cancelled: Promise<void> | null = null;
+  const timer = setTimeout(() => {
+    cancelled = reader.cancel().catch(() => undefined);
+  }, timeoutMs);
+  let text = "";
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) {
+        // Joined, not fired and forgotten: the caller must not settle while the
+        // stream this read owns is still being torn down.
+        if (cancelled) {
+          await cancelled;
+          return null;
+        }
+        return text + decoder.decode();
+      }
+      text += decoder.decode(next.value, { stream: true });
+    }
+  } catch {
+    if (cancelled) {
+      await cancelled;
+    }
+    return null;
+  } finally {
+    clearTimeout(timer);
+    reader.releaseLock();
+  }
+}
+
+/**
+ * End a response whose status is all this path needs. Every `Response` on the
+ * attachment-send path gets exactly one terminal owner: either a bounded read
+ * above, or this. `fetchLinqApi` clears its own timer once headers arrive, so
+ * an ignored body has nothing left to end it and would hold its connection.
+ */
+async function endHostedLinqResponseBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
 }
 
 export const HOSTED_LINQ_ATTACHMENT_SEND_PHASE_PREPARE = "prepare";
@@ -1113,17 +1304,24 @@ const HOSTED_LINQ_IDEMPOTENCY_CONFLICT_MESSAGE =
 /**
  * Narrow reader for the provider's exact same-key/different-payload conflict.
  * It rejects bodies above 500 code units and requires the exact JSON shape, so
- * a generic 409 or wrapped phrase cannot be mistaken for a proven duplicate.
+ * a generic 409 or wrapped phrase cannot be mistaken for a proven duplicate. A
+ * body that could not be read is its own outcome rather than "not a conflict",
+ * so a keyed caller reads an unread answer as uncertainty, not as failure.
  */
-async function isHostedLinqIdempotencyKeyReuseConflict(
-  response: Response,
-): Promise<boolean> {
-  let body: string;
-  try {
-    body = await response.clone().text();
-  } catch {
-    return false;
+async function readHostedLinqIdempotencyKeyReuseConflict(
+  body: string | null,
+): Promise<"conflict" | "not_conflict" | "unreadable"> {
+  if (body === null) {
+    return "unreadable";
   }
+  return await readHostedLinqIdempotencyKeyReuseConflictBody(body)
+    ? "conflict"
+    : "not_conflict";
+}
+
+async function readHostedLinqIdempotencyKeyReuseConflictBody(
+  body: string,
+): Promise<boolean> {
   if (body.length > 500) {
     return false;
   }
@@ -1152,6 +1350,16 @@ async function isHostedLinqIdempotencyKeyReuseConflict(
 export function isHostedLinqIdempotencyKeyReuseFailure(error: unknown): boolean {
   return isHostedOnboardingError(error)
     && error.details?.idempotencyKeyReuseConflict === true;
+}
+
+function buildHostedLinqUnreadAcknowledgementCause(status: number) {
+  return hostedOnboardingError({
+    code: "LINQ_SEND_FAILED",
+    details: { status },
+    httpStatus: 502,
+    message: "Linq attachment send response body did not finish arriving.",
+    retryable: true,
+  });
 }
 
 function buildHostedLinqUnconfirmedAcknowledgementError(cause: unknown) {
@@ -1216,14 +1424,12 @@ function readHostedLinqProviderErrorDiagnostics(payload: unknown): {
   return { providerErrorCode };
 }
 
-async function readHostedLinqOptionalJsonResponse<T>(response: Response): Promise<T | null> {
+function parseHostedLinqOptionalJson<T>(body: string | null): T | null {
+  if (!body?.trim()) {
+    return null;
+  }
   try {
-    const text = await response.text();
-    if (!text.trim()) {
-      return null;
-    }
-
-    return JSON.parse(text) as T;
+    return JSON.parse(body) as T;
   } catch {
     return null;
   }
