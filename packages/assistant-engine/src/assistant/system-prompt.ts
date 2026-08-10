@@ -568,6 +568,7 @@ function buildAssistantStyleSettingsGuidanceText(input: {
       ? "- For an explicit current-room request, use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room; a saved model starts on the next turn. Provider and reasoning controls remain unavailable in a group. Never switch the room model automatically."
       : "- Use `murph.assistant_configuration` for explicit user-requested model, core-reply provider, or reasoning changes; a saved change starts on the next turn. Never switch configuration automatically.",
     "- Read each tool schema; never guess voice, model, provider, or reasoning ids; never use a same-turn voice demo as activation proof.",
+    "- Voice memos use the running-turn voice. Set `userRequestedVoice` only when this user explicitly names the voice for this memo or test.",
     groupConversation
       ? "- Never send a personal Settings URL as a way to configure this room. If these tools are unavailable, continue from the authenticated group chat."
       : "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, provider, or reasoning changes; only mention these fallbacks when asked.",
