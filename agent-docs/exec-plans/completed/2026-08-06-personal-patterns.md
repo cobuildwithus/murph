@@ -1,8 +1,9 @@
 # Personal Patterns
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-10
+Completed: 2026-08-10
 
 ## Goal
 
@@ -46,10 +47,18 @@ Updated: 2026-08-10
 5. [x] Add the production Patterns page and design-catalog study.
 6. [x] Suppress outcome-like factors and document the V1 evidence policy.
 7. [x] Verify focused query, CLI, assistant, web, desktop, and mobile behavior.
-8. [ ] Complete the required review, PR, and CI workflow.
+8. [x] Complete the required review, PR, and CI workflow.
 
 ## Verification log
 
 - Focused query, CLI, vault, assistant, web, and Cloudflare tests passed.
-- Web type-checking and the full runner bundle assembly passed.
+- The post-rebase focused suite passed 252 tests across the changed owners.
+- Query, vault, assistant, CLI, Web, and Cloudflare type-checking passed.
+- The full runner bundle assembly passed without changing its size limit.
 - The production component passed desktop and mobile visual checks in the design catalog.
+- Immutable GitHub-hosted desktop and mobile design proof passed the frontend proof gate.
+- The preliminary specialist review findings and all three final ReviewGPT rounds were resolved;
+  final round 3 returned `PASS` with no remaining finding.
+- Required GitHub Actions passed on the reviewed feature head. The final plan-closing,
+  base-only rebased head must pass the same required checks before merge.
+Completed: 2026-08-10
