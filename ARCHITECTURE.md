@@ -2600,6 +2600,13 @@ verified-private support escalation remain accepted-message capabilities; schedu
 turns create neither a feedback candidate nor a delivery-linked feedback obligation.
 Background image completion and its physical-note continuation remain bound to a
 real accepted message because they must return through that durable message route.
+The trusted completion keeps the foreground dynamic-tool contract so it resumes
+the same native provider thread, but provider continuity is not effect authority.
+An engine-owned turn-local restriction hides accepted-input capabilities and
+permits only the completion's exact hash-bound media attachment, no reply, or the
+existing exact-origin physical-note continuation until a later accepted foreground
+input becomes current. That later input may use the retained `raw/captures/**` ref
+through an independently authorized action such as the existing group-avatar path.
 Ephemeral progress updates remain unavailable because queue-only background turns
 have no waiting audience and cannot durably order a progress send before the final
 reply. No scheduler-specific service, persisted authority row, queue, or second

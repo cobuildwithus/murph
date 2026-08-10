@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   addCaptureWithLookup,
@@ -202,6 +202,14 @@ describe("murph.group dynamic tool", () => {
       .toContain("trusted host owns the exact consent copy");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.avatarSource.description)
+      .toBe(
+        'Generate a new square avatar or reuse an exact existing private image ref.',
+      );
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.imageRef.description)
+      .toBe(
+        'Exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
+      );
     expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
     expect(MURPH_GROUP_TOOL.description)
       .toContain("authorized direct, group, or scheduled context");
@@ -4014,12 +4022,21 @@ describe("murph.group dynamic tool", () => {
     expect(groupRequest).not.toHaveBeenCalled();
   });
 
-  it("uploads a user-sent image ref before setting the group avatar", async () => {
+  it.each([
+    ["user-sent", "raw/inbox/avatar.png"],
+    [
+      "Murph-generated canonical capture",
+      "raw/captures/2026/08/generated-avatar/avatar.png",
+    ],
+  ] as const)("uploads a %s image ref before setting the group avatar", async (
+    _source,
+    imageRef,
+  ) => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
     try {
-      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await mkdir(dirname(join(vaultRoot, imageRef)), { recursive: true });
       await writeFile(
-        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        join(vaultRoot, imageRef),
         Buffer.from(
           "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
           "base64",
@@ -4046,7 +4063,7 @@ describe("murph.group dynamic tool", () => {
         action: "set_chat_avatar",
         alt: "Our group avatar",
         avatarSource: "image_ref",
-        imageRef: "raw/inbox/avatar.png",
+        imageRef,
       }));
       if (!request || request.kind !== "group") {
         throw new Error("Expected group request.");
@@ -4074,6 +4091,10 @@ describe("murph.group dynamic tool", () => {
         "murph-hosted.cobuildwithus.workers.dev",
       );
       expect(result.responseMediaPatch).toBeUndefined();
+      expect(groupRequest).toHaveBeenNthCalledWith(
+        1,
+        { action: "preflight_set_chat_avatar" },
+      );
       expect(privateImageUrlPublish).toHaveBeenCalledOnce();
       expect(privateImageUrlPublish.mock.calls[0]?.[0]).toEqual({
         bytes: expect.any(Uint8Array),
@@ -4083,6 +4104,10 @@ describe("murph.group dynamic tool", () => {
         2,
         { action: "set_chat_avatar", groupChatIconUrl: SIGNED_PRIVATE_IMAGE_URL },
       );
+      expect(groupRequest.mock.invocationCallOrder[0])
+        .toBeLessThan(privateImageUrlPublish.mock.invocationCallOrder[0]!);
+      expect(privateImageUrlPublish.mock.invocationCallOrder[0])
+        .toBeLessThan(groupRequest.mock.invocationCallOrder[1]!);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

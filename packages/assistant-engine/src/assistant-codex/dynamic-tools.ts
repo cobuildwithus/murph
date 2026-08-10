@@ -80,6 +80,7 @@ import {
   assistantMessageReactionSchema,
   type AssistantMessageReaction,
   type AssistantResponseMedia,
+  type AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantResponseCardSchema,
@@ -108,6 +109,7 @@ import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newslet
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import {
   createAssistantHostedScheduledRequestKey,
+  type AssistantHostedImageCompletionEffectScope,
   type AssistantHostedInvocationScope,
   type AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
@@ -1758,6 +1760,20 @@ export async function executeMurphDynamicToolRequest(input: {
   askGrokTurnState?: AskGrokTurnState | null
   generateSongTurnState?: GenerateSongTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  const hostedImageCompletionEffectScope =
+    input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
+  if (
+    hostedImageCompletionEffectScope !== null &&
+    !isHostedImageCompletionToolRequestAllowed({
+      request: input.request,
+      scope: hostedImageCompletionEffectScope,
+    })
+  ) {
+    return toolTextResult(
+      false,
+      'this hosted image completion carries no authority for that tool action',
+    )
+  }
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
     !canExecuteComputerDynamicTools(input.hostedToolContext ?? null)
@@ -1874,6 +1890,24 @@ export async function executeMurphDynamicToolRequest(input: {
           ...toolTextResult(
             false,
             'private response image could not be prepared',
+          ),
+          responseMediaPatch: {
+            media: [],
+            op: 'replace',
+          },
+        }
+      }
+      if (
+        hostedImageCompletionEffectScope !== null &&
+        !matchesExactHostedImageCompletionMedia({
+          actual: media,
+          expected: hostedImageCompletionEffectScope.exactMedia,
+        })
+      ) {
+        return {
+          ...toolTextResult(
+            false,
+            'the trusted completion image no longer matches its saved media',
           ),
           responseMediaPatch: {
             media: [],
@@ -2095,11 +2129,15 @@ export async function executeMurphDynamicToolRequest(input: {
       let artwork: ResolvedGenerateImageReference | null = null
       let originAssistantInputId: string | null = null
       try {
+        const completionEffectScope =
+          hostedToolContext.currentHostedImageCompletionEffectScope?.() ?? null
         trustedCompletion = hasExplicitArtwork
           ? null
           : await readAssistantHostedImageCompletion({
               assistantInputId:
-                hostedToolContext.currentAssistantInputId?.() ?? null,
+                completionEffectScope?.completionAssistantInputId
+                ?? hostedToolContext.currentAssistantInputId?.()
+                ?? null,
               vault: vaultRoot,
             })
         const userActionScope = hasExplicitArtwork
@@ -2824,6 +2862,44 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     }
   }
+}
+
+function isHostedImageCompletionToolRequestAllowed(input: {
+  request: MurphDynamicToolRequest
+  scope: AssistantHostedImageCompletionEffectScope
+}): boolean {
+  if (input.request.kind === 'finish-without-reply') {
+    return true
+  }
+  if (input.request.kind === 'attach-response-media') {
+    return matchesExactHostedImageCompletionMedia({
+      actual: input.request.media,
+      expected: input.scope.exactMedia,
+    })
+  }
+  // Physical-note generation already owns an exact-origin continuation: the
+  // model must have launched generation with an authorized message_ref, and
+  // that executor re-reads the completion and verifies the vault bytes.
+  return input.request.kind === 'send-physical-note' &&
+    input.scope.authorizedOriginAssistantInputId !== null &&
+    input.scope.exactMedia !== null
+}
+
+function matchesExactHostedImageCompletionMedia(input: {
+  actual: readonly AssistantResponseMedia[]
+  expected: readonly [AssistantVaultImageResponseMedia] | null
+}): boolean {
+  const actual = input.actual.length === 1 ? input.actual[0] : null
+  const expected = input.expected?.[0] ?? null
+  return actual?.kind === 'vault_image' &&
+    expected !== null &&
+    actual.alt === expected.alt &&
+    actual.contentType === expected.contentType &&
+    actual.filename === expected.filename &&
+    actual.ref === expected.ref &&
+    actual.sha256 === expected.sha256 &&
+    actual.sizeBytes === expected.sizeBytes &&
+    actual.source === expected.source
 }
 
 async function resolveAttachedResponseMedia(input: {

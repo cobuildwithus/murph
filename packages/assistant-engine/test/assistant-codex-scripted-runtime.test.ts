@@ -1392,8 +1392,9 @@ text(result.output);
         customToolCall: {
           input: `
 const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group");
 if (!tool) {
-  text(JSON.stringify({ found: false }));
+  text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
 } else {
   const result = await tools.murph__automation({
     action: "save",
@@ -1401,7 +1402,7 @@ if (!tool) {
     schedule: { kind: "dailyLocal", localTime: "09:00" },
     title: "Morning reminder",
   });
-  text(JSON.stringify({ found: true, result }));
+  text(JSON.stringify({ found: true, foundGroup: Boolean(groupTool), result }));
 }
 `,
           name: 'exec',
@@ -1454,6 +1455,7 @@ if (!tool) {
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
     const automationOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(automationOutput).toContain('"foundGroup":true')
     expect(automationOutput).toContain('automation-native-deferred')
     expect(automationOutput).toContain('morning-reminder')
     expect(automationOutput).toContain('active')
@@ -1584,6 +1586,12 @@ if (!tool) {
       {
         toolSearchCall: {
           limit: 8,
+          query: 'Murph group set_chat_avatar current chat icon',
+        },
+      },
+      {
+        toolSearchCall: {
+          limit: 8,
           query: 'create a durable Murph automation reminder',
         },
       },
@@ -1628,7 +1636,7 @@ if (!tool) {
         vaultFileSendAvailable: false,
       },
       model: 'gpt-5.4',
-      prompt: 'Save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
+      prompt: 'Discover the supported group-avatar path, save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
@@ -1643,6 +1651,9 @@ if (!tool) {
       },
     })
     expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"group"',
+    )
+    expect(JSON.stringify(summaries[2]?.toolSearchOutputTools)).toContain(
       '"name":"automation"',
     )
     expect(automationRequests).toEqual([{
@@ -1652,7 +1663,7 @@ if (!tool) {
       title: 'Morning reminder',
     }])
     expect(result.finalMessage).toBe('NATIVE_TOOL_SEARCH_OK')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
   it('keeps narrow group reads eager beside deferred Terra tools', {
