@@ -1,8 +1,8 @@
 # X media understanding
 
-Status: active
+Status: completed
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-10
 
 ## Goal
 
@@ -39,11 +39,11 @@ Updated: 2026-08-06
 
 ## Tasks
 
-1. Update the fixed worktree disk floor, tests, and workflow documentation.
-2. Enable image and video understanding in `ask_grok` and clarify its tool contract.
-3. Extend the hosted xAI request validator and focused tests.
-4. Update durable security documentation and the product changelog.
-5. Run focused proof, review the diff, commit, push, open a PR, and complete required review and CI gates.
+1. [x] Update the fixed worktree disk floor, tests, and workflow documentation.
+2. [x] Enable image and video understanding in `ask_grok` and clarify its tool contract.
+3. [x] Extend the hosted xAI request validator and focused tests.
+4. [x] Update durable security documentation and the product changelog.
+5. [x] Run focused proof, review the diff, commit, push, open a PR, and complete required review and CI gates.
 
 ## Decisions
 
@@ -53,5 +53,12 @@ Updated: 2026-08-06
 
 ## Verification
 
-- Commands to run: focused Vitest files for `ask_grok`, Cloudflare xAI egress, and worktree storage guard; targeted typechecks if the changed graph requires them.
-- Expected outcomes: exact media flags pass, malformed flags fail closed, the 20 GiB boundary is enforced, and no unrelated behavior changes.
+- Assistant `ask_grok` Vitest: 21 passed.
+- Cloudflare xAI interceptor Vitest: 238 passed.
+- Worktree storage guard Vitest: 22 passed.
+- Changelog registry and page Vitest: 34 passed.
+- Assistant Engine, Cloudflare, and prepared Web typechecks passed.
+- ReviewGPT final Round 3 passed on commit `7b52f6b4946217046d8bd5da7868b54358029ecd`.
+- Required GitHub Actions passed on the same commit. The optional live Stripe matrix was skipped by its workflow.
+- Parent diff review found no remaining correctness, security, simplicity, or product-flow issue.
+Completed: 2026-08-10
