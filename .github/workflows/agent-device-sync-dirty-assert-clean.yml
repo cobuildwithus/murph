@@ -1,0 +1,51 @@
+name: Assert clean device-sync dirty PR branch
+
+on:
+  push:
+    branches:
+      - agent/device-sync-dirty-ci-monitor
+    paths:
+      - .github/workflows/agent-device-sync-dirty-assert-clean.yml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  assert-clean:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/device-sync-dirty-classification
+          fetch-depth: 0
+
+      - name: Verify published branch shape
+        id: shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          test "$(git rev-list --count origin/main..HEAD)" -ge 1
+          test -n "$(git diff --name-only origin/main...HEAD)"
+          ! git diff --name-only origin/main...HEAD | grep -E '^\.agent/|^\.github/workflows/agent-' >/dev/null
+          ! git ls-tree -r --name-only HEAD | grep -E '^\.agent/device-sync-dirty|^\.github/workflows/agent-(apply|finalize|export|device-sync-dirty)' >/dev/null
+          git diff --check origin/main...HEAD
+          git merge-tree --write-tree HEAD origin/main >/dev/null
+          head="$(git rev-parse HEAD)"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          git diff --stat origin/main...HEAD
+
+      - name: Comment branch-shape proof
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.shape.outputs.head }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$TARGET_BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+          test -n "$pr"
+          gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body "Published branch-shape proof passed on \`$HEAD_SHA\`: current-main ancestry, non-empty product diff, no staging chunks or temporary agent workflows, diff hygiene, and clean merge-tree. No merge was performed."
