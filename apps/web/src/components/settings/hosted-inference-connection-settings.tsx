@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
   HOSTED_INFERENCE_CONTEXT_WINDOW_MAX_TOKENS,
   HOSTED_INFERENCE_CONTEXT_WINDOW_MIN_TOKENS,
   isHostedInferenceAuthKind,
@@ -58,7 +59,6 @@ interface HostedInferenceConnectionPaneProps {
   configurationAvailable: boolean;
   connection: HostedInferenceConnectionView | null;
   onConnectionChange: (connection: HostedInferenceConnectionView | null) => void;
-  selected: boolean;
 }
 
 interface ConnectionMutationResponse {
@@ -103,6 +103,10 @@ export function HostedInferenceConnectionPane(
   const protocolTriggerRef = useRef<HTMLButtonElement>(null);
   const replaceButtonRef = useRef<HTMLButtonElement>(null);
   const disabled = pendingAction !== null || !props.configurationAvailable;
+  const selected = connection?.selected === true;
+  const reverificationRequired = connection !== null
+    && connection.verificationProfile
+      !== HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE;
 
   async function verifyConnection(
     event: React.FormEvent<HTMLFormElement>,
@@ -219,6 +223,12 @@ export function HostedInferenceConnectionPane(
 
       {connection && !editing ? (
         <>
+          {reverificationRequired ? (
+            <p className="rounded-xl border border-destructive/25 bg-destructive/[0.05] p-4 text-sm/6 text-pretty text-destructive">
+              Reverification required. Verify this endpoint again before
+              selecting it, or choose a managed provider and save.
+            </p>
+          ) : null}
           <dl className="grid gap-x-6 gap-y-4 border-y border-border py-5 sm:grid-cols-2">
             <ConnectionFact label="Endpoint" value={connection.endpointHost} />
             <ConnectionFact label="Model" value={connection.model} />
@@ -246,10 +256,12 @@ export function HostedInferenceConnectionPane(
               label="Verified"
               value={formatVerificationTime(connection.verifiedAt)}
             />
-            <ConnectionFact
-              label="Status"
-              value={props.selected ? "In use" : "Verified, inactive"}
-            />
+            {!reverificationRequired ? (
+              <ConnectionFact
+                label="Status"
+                value={selected ? "In use" : "Verified, inactive"}
+              />
+            ) : null}
           </dl>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -264,7 +276,7 @@ export function HostedInferenceConnectionPane(
               type="button"
               variant="outline"
             >
-              Replace
+              {reverificationRequired ? "Reverify" : "Replace"}
             </Button>
             {confirmDelete ? (
               <>
@@ -272,7 +284,7 @@ export function HostedInferenceConnectionPane(
                   className="mr-1 text-sm text-muted-foreground"
                   id="hosted-inference-delete-description"
                 >
-                  {props.selected
+                  {selected
                     ? "Delete the saved endpoint and credential? Inference will return to your managed provider."
                     : "Delete the saved endpoint and credential?"}
                 </span>

@@ -1252,7 +1252,6 @@ export function ComponentsContent() {
               configurationAvailable={false}
               connection={null}
               onConnectionChange={() => {}}
-              selected={false}
             />
           </div>
         </Section>

@@ -14,11 +14,15 @@ const OTHER_INPUT_ID = `ain_${"b".repeat(32)}`;
 
 function groupToolCall(argumentsValue: unknown): Record<string, unknown> {
   return {
+    id: "request-test",
     method: "item/tool/call",
     params: {
       arguments: argumentsValue,
+      callId: "call-test",
       namespace: "murph",
+      threadId: "thread-test",
       tool: MURPH_GROUP_TOOL.name,
+      turnId: "turn-test",
     },
   };
 }

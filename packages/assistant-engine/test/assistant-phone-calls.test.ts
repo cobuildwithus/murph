@@ -879,11 +879,15 @@ function dynamicToolCall(input: {
   tool: string;
 }): Record<string, unknown> {
   return {
+    id: "request-test",
     method: "item/tool/call",
     params: {
       arguments: input.argumentsValue,
+      callId: "call-test",
       namespace: "murph",
+      threadId: "thread-test",
       tool: input.tool,
+      turnId: "turn-test",
     },
   };
 }

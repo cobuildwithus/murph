@@ -20,9 +20,9 @@ Updated: 2026-08-09
   envelopes fail closed in focused protocol, assistant, runtime, and CLI tests.
 - Dependency guards, focused tests, relevant typechecks/builds, and exact-head
   required GitHub checks pass.
-- Preliminary ReviewGPT reports `SPECIALIST_OUTCOME: PASS`; final ReviewGPT
-  reports `ROUND_OUTCOME: PASS`; all accepted findings are resolved and any
-  behavior-changing remediation is reviewed on a new pushed head.
+- Preliminary ReviewGPT either reports `SPECIALIST_OUTCOME: PASS` or has every
+  accepted finding resolved; final ReviewGPT reports `ROUND_OUTCOME: PASS`.
+  Any behavior-changing remediation is reviewed on a new pushed head.
 - The PR description records architecture, invariants, provider-input impact,
   review metadata, verification, and deployment concerns, and the head is
   merge-clean.
@@ -116,3 +116,31 @@ Updated: 2026-08-09
 - Parent candidate review found no unresolved local issue. Remaining proof is
   the pushed-head preliminary specialist pass, final ReviewGPT gate, exact-head
   GitHub checks, merge cleanliness, and plan closure.
+- Preliminary specialists reviewed pushed head
+  `577c106260b13d0ff23b35b0827b9554fa3f1b86` and found one coupled recovery
+  gap: a selected `0.145.0` profile was runtime-blocked but still shown as in
+  use, and the current-profile guard also prevented explicit managed
+  deselection. The accepted correction derives a first-class stale-profile UI
+  state, removes its selectable custom radio and `In use` claim, reuses the
+  existing credential form for re-verification, permits exact-revision
+  deselection, and leaves the successfully reverified replacement inactive.
+  Focused tests cover the exact persisted `0.145.0` to `0.147.0` recovery
+  journey through store, runtime projection, workspace admission, settings
+  route, provider dialog, and endpoint pane.
+- Final ReviewGPT round 1 on that same immutable first head required the
+  repository's large-change retrospective and reported no tactical finding.
+  The retrospective is recorded on PR 1381 and accepts the hard-cut shape as
+  indivisible net deletion with no new state owner, compatibility layer, or
+  migration machinery.
+- Exact-head GitHub Actions on the first reviewed head found stale assistant
+  test fixtures that still emitted removed `0.145.0` identities and event or
+  usage aliases. Production behavior was already exact; the fixture remediation
+  now emits canonical request identity, notification item types, text fields,
+  and six-field token usage. A clean full assistant coverage run passed 221
+  files (one skipped), 3,367 tests (42 skipped), and all coverage thresholds;
+  the final corrected dynamic fixture then passed its focused suite and the
+  assistant typecheck.
+- The frontend catalog now includes both stale selected-summary and endpoint
+  pane studies. Local browser capture is currently blocked because this Codex
+  session has no attached browser backend; hosted desktop/mobile proof remains
+  required before the remediated head can be pushed.

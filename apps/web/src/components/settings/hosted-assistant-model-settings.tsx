@@ -1,6 +1,9 @@
 "use client";
 
 import {
+  HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE,
+} from "@murphai/hosted-execution/assistant-inference";
+import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
@@ -209,17 +212,30 @@ export function AssistantProviderSummary({
     draftRouting === CUSTOM_INFERENCE_ROUTING && connection
       ? `${connection.endpointHost} · ${connection.model}`
       : null;
+  const endpointReverificationRequired =
+    draftRouting === CUSTOM_INFERENCE_ROUTING
+    && connection !== null
+    && connection.verificationProfile
+      !== HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE;
 
   return (
     <div className="w-full px-1" data-slot="assistant-provider-summary">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0 py-1.5">
           <p className="text-sm font-medium text-foreground">
-            Inference on {displayedName}
-            {hasPendingChange ? (
+            {endpointReverificationRequired
+              ? "Reverification required"
+              : <>Inference on {displayedName}</>}
+            {!endpointReverificationRequired && hasPendingChange ? (
               <span className="font-normal text-muted-foreground"> after Save</span>
             ) : null}
           </p>
+          {endpointReverificationRequired ? (
+            <p className="mt-1 max-w-2xl text-xs/5 text-pretty text-destructive">
+              Reverify your endpoint or choose a managed provider before Murph
+              can reply.
+            </p>
+          ) : null}
           {endpointDetail ? (
             <p className="mt-1 font-mono text-xs/5 text-muted-foreground [overflow-wrap:anywhere]">
               {endpointDetail}
@@ -228,7 +244,9 @@ export function AssistantProviderSummary({
         </div>
         <Button
           aria-label={
-            hasPendingChange
+            endpointReverificationRequired
+              ? "Review inference routing. Your endpoint needs reverification."
+              : hasPendingChange
               ? `Change inference routing. Inference on ${draftName} after Save.`
               : `Change inference routing. Inference on ${currentName}.`
           }
@@ -239,7 +257,7 @@ export function AssistantProviderSummary({
           type="button"
           variant="ghost"
         >
-          Change
+          {endpointReverificationRequired ? "Review" : "Change"}
         </Button>
       </div>
       {draftRouting === HOSTED_ASSISTANT_VENICE_PROVIDER ? (
@@ -302,7 +320,6 @@ export function AssistantProviderDialog({
               configurationAvailable={configurationAvailable}
               connection={connection}
               onConnectionChange={(next) => onConnectionChange?.(next)}
-              selected={connection?.selected === true}
             />
             <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
               <Button
@@ -313,7 +330,10 @@ export function AssistantProviderDialog({
               >
                 Back to providers
               </Button>
-              {connection && !endpointUnsupported ? (
+              {connection
+                && !endpointUnsupported
+                && connection.verificationProfile
+                  === HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE ? (
                 <Button
                   disabled={!configurationAvailable}
                   onClick={() => {
@@ -406,6 +426,11 @@ export function AssistantProviderDialog({
                 <CustomEndpointOption
                   connection={connection}
                   onManage={() => setPane("endpoint")}
+                  reverificationRequired={
+                    connection !== null
+                    && connection.verificationProfile
+                      !== HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE
+                  }
                   unsupported={endpointUnsupported}
                 />
               ) : null}
@@ -430,10 +455,12 @@ export function AssistantProviderDialog({
 function CustomEndpointOption({
   connection,
   onManage,
+  reverificationRequired,
   unsupported,
 }: {
   connection: HostedInferenceConnectionView | null;
   onManage: () => void;
+  reverificationRequired: boolean;
   unsupported: boolean;
 }) {
   return (
@@ -460,7 +487,9 @@ function CustomEndpointOption({
           id="assistant-provider-custom-description"
         >
           {connection
-            ? unsupported
+            ? reverificationRequired
+              ? "Reverification required before Murph can reply."
+              : unsupported
               ? "This connection's protocol is unavailable in this deployment."
               : `${connection.endpointHost} · ${connection.model}`
             : "Connect an OpenAI-compatible endpoint you control."}
@@ -473,9 +502,9 @@ function CustomEndpointOption({
         type="button"
         variant="ghost"
       >
-        {connection ? "Manage" : "Set up"}
+        {reverificationRequired ? "Reverify" : connection ? "Manage" : "Set up"}
       </Button>
-      {connection && !unsupported ? (
+      {connection && !unsupported && !reverificationRequired ? (
         <RadioGroupItem
           aria-describedby="assistant-provider-custom-description"
           aria-labelledby="assistant-provider-custom-title"
@@ -495,7 +524,7 @@ export function HostedAssistantModelSettings(
   const initialConnection = props.initialConnection ?? null;
   return (
     <HostedAssistantModelSettingsForm
-      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}:${String(props.customInferenceAvailable === true)}:${String(initialConnection?.revision ?? "none")}:${String(initialConnection?.selected === true)}`}
+      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}:${String(props.customInferenceAvailable === true)}:${String(initialConnection?.revision ?? "none")}:${String(initialConnection?.selected === true)}:${initialConnection?.verificationProfile ?? "none"}`}
       {...props}
       initialConnection={initialConnection}
       initialProvider={initialProvider}

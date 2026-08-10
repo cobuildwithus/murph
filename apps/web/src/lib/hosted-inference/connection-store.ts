@@ -218,7 +218,9 @@ export async function setHostedInferenceConnectionSelected(input: {
       currentRevision: current.revision,
       expectedRevision: input.expectedRevision,
     });
-    requireCurrentVerificationProfile(current);
+    if (input.selected) {
+      requireCurrentVerificationProfile(current);
+    }
     if (current.selected === input.selected) {
       return current;
     }

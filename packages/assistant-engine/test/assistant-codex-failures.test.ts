@@ -25,46 +25,64 @@ describe('assistant Codex failure helpers', () => {
     expect(message).not.toMatch(/resume it/iu)
   }
 
-  it('extracts turn identifiers, statuses, and error messages from fallback shapes', () => {
+  it('extracts canonical turn fields and rejects compatibility aliases', () => {
     expect(
       extractCodexThreadIdFromResult({
         thread: {
-          id: '  ',
+          id: ' thread-result ',
         },
-        threadId: ' thread-fallback ',
       }),
-    ).toBe('thread-fallback')
+    ).toBe('thread-result')
+    expect(extractCodexThreadIdFromResult({
+      threadId: 'thread-flat-alias',
+    })).toBeNull()
     expect(
       extractCodexTurnIdFromResult({
         turn: {
-          id: '',
+          id: ' turn-result ',
         },
-        turnId: ' turn-fallback ',
       }),
-    ).toBe('turn-fallback')
+    ).toBe('turn-result')
+    expect(extractCodexTurnIdFromResult({
+      turnId: 'turn-flat-alias',
+    })).toBeNull()
     expect(
       extractCodexTurnIdFromMessage({
+        method: 'turn/completed',
         params: {
           turn: {
-            id: ' ',
+            id: ' turn-nested ',
           },
-          turnId: ' turn-message-fallback ',
         },
       }),
-    ).toBe('turn-message-fallback')
+    ).toBe('turn-nested')
+    expect(
+      extractCodexTurnIdFromMessage({
+        method: 'thread/tokenUsage/updated',
+        params: {
+          turnId: ' turn-flat-canonical ',
+        },
+      }),
+    ).toBe('turn-flat-canonical')
     expect(
       extractCodexTurnStatus({
+        method: 'turn/completed',
         params: {
           turn: {
             id: 'turn-with-params-status',
+            status: 'failed',
           },
-          status: 'FAILED',
         },
       }),
-    ).toBe('FAILED')
+    ).toBe('failed')
+    expect(extractCodexTurnStatus({
+      method: 'turn/completed',
+      params: { status: 'failed' },
+    })).toBeNull()
 
     expect(
       extractCodexTurnErrorMessage({
+        method: 'turn/completed',
         params: {
           turn: {
             error: {
@@ -76,15 +94,7 @@ describe('assistant Codex failure helpers', () => {
     ).toBe('nested turn error')
     expect(
       extractCodexTurnErrorMessage({
-        params: {
-          turn: {
-            error: '  turn error string  ',
-          },
-        },
-      }),
-    ).toBe('turn error string')
-    expect(
-      extractCodexTurnErrorMessage({
+        method: 'error',
         params: {
           error: {
             message: '  params error object  ',
@@ -92,88 +102,86 @@ describe('assistant Codex failure helpers', () => {
         },
       }),
     ).toBe('params error object')
-    expect(
-      extractCodexTurnErrorMessage({
-        params: {
-          error: '  params error string  ',
-        },
-      }),
-    ).toBe('params error string')
+    expect(extractCodexTurnErrorMessage({
+      method: 'turn/completed',
+      params: { turn: { error: 'turn error string alias' } },
+    })).toBeNull()
+    expect(extractCodexTurnErrorMessage({
+      method: 'turn/completed',
+      params: { error: { message: 'params error alias' } },
+    })).toBeNull()
     expect(extractCodexTurnErrorMessage({ params: null })).toBeNull()
 
     expect(isFailedCodexTurnStatus(null)).toBe(false)
   })
 
-  it('extracts thread identifiers from every notification shape codex emits', () => {
-    // Nested thread object wins over flat aliases.
+  it('extracts canonical notification thread fields and rejects legacy envelopes', () => {
     expect(
       extractCodexThreadIdFromMessage({
+        method: 'turn/completed',
         params: {
           thread: {
-            id: ' thread-nested-wins ',
+            id: 'thread-nested-loses',
           },
-          threadId: 'thread-flat-loses',
+          threadId: ' thread-flat-wins ',
         },
       }),
-    ).toBe('thread-nested-wins')
+    ).toBe('thread-flat-wins')
 
-    // Blank nested ids fall through to the flat aliases.
     expect(
       extractCodexThreadIdFromMessage({
+        method: 'thread/started',
         params: {
           thread: {
-            id: '  ',
+            id: ' thread-nested ',
           },
-          threadId: ' thread-params-camel ',
         },
       }),
-    ).toBe('thread-params-camel')
+    ).toBe('thread-nested')
     expect(
       extractCodexThreadIdFromMessage({
+        method: 'turn/completed',
         params: {
           thread_id: 'thread-params-snake',
         },
       }),
-    ).toBe('thread-params-snake')
+    ).toBeNull()
 
-    // data-style envelopes and top-level fields are also honored.
     expect(
       extractCodexThreadIdFromMessage({
+        method: 'turn/completed',
         data: {
           threadId: 'thread-data-camel',
         },
+        params: {},
       }),
-    ).toBe('thread-data-camel')
+    ).toBeNull()
     expect(
       extractCodexThreadIdFromMessage({
-        data: {
-          thread_id: 'thread-data-snake',
-        },
-      }),
-    ).toBe('thread-data-snake')
-    expect(
-      extractCodexThreadIdFromMessage({
+        method: 'turn/completed',
+        params: {},
         thread: {
           id: 'thread-top-nested',
         },
       }),
-    ).toBe('thread-top-nested')
+    ).toBeNull()
     expect(
       extractCodexThreadIdFromMessage({
+        method: 'turn/completed',
+        params: {},
         threadId: 'thread-top-camel',
       }),
-    ).toBe('thread-top-camel')
-    expect(
-      extractCodexThreadIdFromMessage({
-        thread_id: 'thread-top-snake',
-      }),
-    ).toBe('thread-top-snake')
+    ).toBeNull()
 
     // Absent or blank ids never produce a thread id, so thread routing can
     // never misclassify a thread-id-less parent event as a subagent event.
-    expect(extractCodexThreadIdFromMessage({ params: {} })).toBeNull()
+    expect(extractCodexThreadIdFromMessage({
+      method: 'turn/completed',
+      params: {},
+    })).toBeNull()
     expect(
       extractCodexThreadIdFromMessage({
+        method: 'turn/completed',
         params: {
           threadId: '   ',
         },
