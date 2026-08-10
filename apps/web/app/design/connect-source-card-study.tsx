@@ -256,6 +256,7 @@ export function ConnectSourceCardStudy() {
     </>
   );
 }
+
 export function ZeppAppleHealthSetupStudy() {
   const searchParams = useSearchParams();
   const open = searchParams?.get("zeppSetupStudy") === "open";
@@ -387,3 +388,4 @@ export function AppleHealthRelaySetupStudy() {
     </>
   );
 }
+
