@@ -185,10 +185,22 @@ describe('murph.attach_response_card', () => {
       'Before every daily_nutrition attachment, even with five active goals or on a scheduled closeout',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'known underweight, frailty, malnutrition risk, and calorie targets below 1,200 kcal/day without flooring them upward',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'nutrition-strategy/references/daily-nutrition-card-goals.md',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'save one paused canonical proposal',
+      'Save one paused canonical proposal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'explicit numeric-card request authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'hold explicit targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'an infeasible bundle means ordinary text and no mutation',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'activate it only after member acceptance',

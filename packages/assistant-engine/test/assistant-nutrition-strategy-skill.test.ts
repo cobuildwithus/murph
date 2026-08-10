@@ -185,6 +185,8 @@ describe('assistant nutrition strategy skill', () => {
       'https://www.ncbi.nlm.nih.gov/books/NBK208874/',
       'https://link.springer.com/article/10.1186/s12970-017-0177-8',
       'https://www.ncbi.nlm.nih.gov/books/NBK208887/',
+      'https://www.ncbi.nlm.nih.gov/books/NBK591042/',
+      'https://www.ncbi.nlm.nih.gov/books/NBK278991/',
       'https://pubmed.ncbi.nlm.nih.gov/35233712/',
       'https://pubmed.ncbi.nlm.nih.gov/31247944/',
       'https://pubmed.ncbi.nlm.nih.gov/34623696/',
@@ -196,20 +198,55 @@ describe('assistant nutrition strategy skill', () => {
     expect(cardGoals).toContain('5-10% above maintenance')
     expect(cardGoals).toContain('10-20% below maintenance')
     expect(cardGoals).toContain('1.6 g/kg/day')
-    expect(cardGoals).toContain('1.4 g/kg/day')
-    expect(cardGoals).toContain('0.8 g/kg/day')
-    expect(cardGoals).toContain('adult 10-35% protein AMDR')
-    expect(cardGoals).toContain('45-65% AMDR')
-    expect(cardGoals).toContain('fat within 20-35%')
+    expect(compactGoals).toContain('1.4 g/kg/day')
+    expect(compactGoals).toContain('0.8 g/kg/day')
+    expect(cardGoals).toContain('10-35% protein AMDR')
+    expect(cardGoals).toContain('carbohydrate within 45-65%')
+    expect(compactGoals).toContain('Fat must remain within 20-35%')
     expect(cardGoals).toContain('14 g per 1,000 kcal')
     expect(cardGoals).toContain('Round the final target to the nearest 100 kcal')
-    expect(compactGoals).toContain('Round to the nearest 5 g')
+    expect(compactGoals).toContain(
+      'Round each derived missing macro to the nearest 5 g',
+    )
+    expect(compactGoals).toContain(
+      'If the adjusted or rounded target is below 1,200 kcal/day, stop',
+    )
+    expect(compactGoals).toContain(
+      'Hold the calorie target and every explicit protein, carbohydrate, and fat target fixed.',
+    )
+    expect(compactGoals).toContain(
+      'With exactly one macro missing, assign that macro the remaining energy.',
+    )
+    expect(compactGoals).toContain(
+      'clamp it to the feasible value nearest that preference',
+    )
+    expect(compactGoals).toContain(
+      'choose the feasible fat share closest to 30%, or closest to 25% when running or another endurance demand is material',
+    )
+    expect(compactGoals).toContain(
+      '`4*protein + 4*carbohydrate + 9*fat` must be within 50 kcal of the calorie target.',
+    )
+    expect(compactGoals).toContain(
+      'If the residual is negative, the feasible interval is empty, rounding breaks an AMDR or the 50 kcal tolerance, or known inputs cannot prove one result, do not write or update the Goal.',
+    )
+    expect(compactGoals).toContain(
+      'explicit 2,000 kcal, 150 g protein, and 250 g carbohydrate',
+    )
+    expect(compactGoals).toContain(
+      'With the same calories and protein but explicit 300 g carbohydrate',
+    )
 
     expect(compactGoals).toContain(
       'Reuse at most one Goal with slug `murph-daily-nutrition-starting-targets`.',
     )
     expect(compactGoals).toContain(
       'Use this only after an explicit interactive request to set nutrition targets or to receive a numeric daily nutrition card',
+    )
+    expect(compactGoals).toContain(
+      'It authorizes only the one paused canonical proposal below so the provisional values do not live in transient assistant state; it does not accept, activate, or use those targets.',
+    )
+    expect(nutrition).toContain(
+      'explicit numeric-card request authorizes that canonical draft',
     )
     expect(compactGoals).toContain(
       'A scheduled closeout may use an already accepted active bundle, but it must not use this workflow to ask for inputs, derive or save targets, or surface a proposal.',
@@ -309,6 +346,18 @@ describe('assistant nutrition strategy skill', () => {
     const compactSafety = cardSafety.replace(/\s+/gu, ' ').trim()
 
     expect(compactSafety).toContain('under-fueling or RED-S concern')
+    expect(compactSafety).toContain(
+      'known underweight (including adult BMI below 18.5 when current height and weight are available), frailty, or malnutrition risk',
+    )
+    expect(compactSafety).toContain(
+      "Treat a calorie target below 1,200 kcal/day as outside this product's self-directed numeric-card boundary.",
+    )
+    expect(compactSafety).toContain(
+      'This applies both to an active canonical target at card time and to an adjusted or rounded derived result before any Goal write.',
+    )
+    expect(compactSafety).toContain(
+      'Do not raise it to the boundary and continue',
+    )
     expect(cardSafety).toContain('anyone under 18')
     expect(compactSafety).toContain('pregnancy or breastfeeding')
     expect(compactSafety).toContain('glucose-lowering medication')

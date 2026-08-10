@@ -11,6 +11,12 @@ Before using this workflow, read and apply `daily-nutrition-card-safety.md`. If
 its card-time gate suppresses numeric goals, stop here and keep the owning
 non-numeric or clinical path.
 
+A numeric card request explicitly asks for Murph's goal-aware daily-card
+experience. It authorizes only the one paused canonical proposal below so the
+provisional values do not live in transient assistant state; it does not accept,
+activate, or use those targets. The explanation and explicit later acceptance
+remain required before the proposal can affect a card.
+
 ## Target authority
 
 - Read already-known goals, body measurements, training, weight trend, activity,
@@ -57,19 +63,47 @@ Keep population guidance separate from Murph's product judgment.
    judgment informed by limited athlete literature, not DRI prescriptions.
    Round the final target to the nearest 100 kcal and plan to adjust from a
    multi-week trend, training performance, hunger, and recovery.
-2. **Protein.** For a generally healthy adult with regular resistance training
-   or a muscle-gain goal, start near 1.6 g/kg/day. Use about 1.4 g/kg/day for
-   other regularly exercising adults and 0.8 g/kg/day for a generally healthy
-   non-exercising adult when weight is a responsible reference. Round to the
-   nearest 5 g. Reject a result outside the adult 10-35% protein AMDR rather
-   than forcing the arithmetic.
-3. **Fat and carbohydrate.** After protein, start fat near 30% of calories and
-   assign carbohydrate the remaining energy, using 4 kcal/g for protein and
-   carbohydrate and 9 kcal/g for fat. Keep carbohydrate within the adult
-   45-65% AMDR and fat within 20-35%; favor carbohydrate within that range when
-   running or other endurance demand is material. Round each to the nearest 5 g
-   and recheck the energy total. Never bend an explicit target to make the
-   bundle add up.
+   If the adjusted or rounded target is below 1,200 kcal/day, stop under
+   `daily-nutrition-card-safety.md`; do not floor it upward, save a Goal, or
+   attach a goal-comparison card.
+2. **Protein preference.** For a generally healthy adult with regular resistance
+   training or a muscle-gain goal, start near 1.6 g/kg/day. Use about 1.4
+   g/kg/day for other regularly exercising adults and 0.8 g/kg/day for a
+   generally healthy non-exercising adult when weight is a responsible
+   reference. Round to the nearest 5 g. This is the preferred derived protein
+   value when more than one macro is missing, not authority to override an
+   explicit metric or an energy-feasibility check.
+3. **One residual-energy algorithm.** Hold the calorie target and every explicit
+   protein, carbohydrate, and fat target fixed. Use 4 kcal/g for protein and
+   carbohydrate and 9 kcal/g for fat. Then derive only missing macros:
+
+   - With exactly one macro missing, assign that macro the remaining energy.
+   - With protein plus another macro missing, start from the weight-based protein
+     preference, but clamp it to the feasible value nearest that preference
+     inside the 10-35% protein AMDR that leaves the other missing macro inside
+     its AMDR. If no such value exists, the bundle is infeasible.
+   - With fat and carbohydrate both missing, choose the feasible fat share
+     closest to 30%, or closest to 25% when running or another endurance demand
+     is material; carbohydrate receives the remainder. Fat must remain within
+     20-35% and carbohydrate within 45-65%.
+   - With all three macros missing, apply the protein rule first, then the
+     fat-and-carbohydrate rule.
+
+   Round each derived missing macro to the nearest 5 g, then recompute the full
+   bundle once. Every explicit value must remain unchanged, each macro must be
+   inside its adult AMDR, and `4*protein + 4*carbohydrate + 9*fat` must be within
+   50 kcal of the calorie target. Do not independently reapply percentage
+   defaults after an explicit value consumes part of the energy budget. If the
+   residual is negative, the feasible interval is empty, rounding breaks an
+   AMDR or the 50 kcal tolerance, or known inputs cannot prove one result, do
+   not write or update the Goal. Explain the conflict and ask which explicit
+   target the member wants to change.
+
+   Example: with explicit 2,000 kcal, 150 g protein, and 250 g carbohydrate,
+   fat is the sole missing macro. Residual energy gives about 44 g, which rounds
+   to 45 g; the 2,005 kcal macro total and all three shares pass. With the same
+   calories and protein but explicit 300 g carbohydrate, the residual fat is
+   below its 20% AMDR, so the bundle is infeasible and no Goal write is allowed.
 4. **Fiber.** Start from the adult reference density of 14 g per 1,000 kcal and
    round to the nearest 5 g. This is population guidance, not a personalized
    gastrointestinal prescription.
@@ -148,6 +182,8 @@ Use the existing canonical Goal owner; add no new state surface.
 - [National Academies adult AMDR and DRI reference tables](https://www.ncbi.nlm.nih.gov/books/NBK208874/)
 - [ISSN position stand: protein and exercise](https://link.springer.com/article/10.1186/s12970-017-0177-8)
 - [National Academies fiber reference method](https://www.ncbi.nlm.nih.gov/books/NBK208887/)
+- [National Academies energy-risk context and the adult underweight boundary](https://www.ncbi.nlm.nih.gov/books/NBK591042/)
+- [NIH/NHLBI low-calorie diet guidance and nutrient-adequacy limits](https://www.ncbi.nlm.nih.gov/books/NBK278991/)
 - [Critical review of athlete weight-gain guidance and its evidence limits](https://pubmed.ncbi.nlm.nih.gov/35233712/)
 - [Off-season bodybuilding review: surplus and rate-of-gain context](https://pubmed.ncbi.nlm.nih.gov/31247944/)
 - [Meta-analysis: energy deficiency and resistance-training lean-mass gains](https://pubmed.ncbi.nlm.nih.gov/34623696/)
