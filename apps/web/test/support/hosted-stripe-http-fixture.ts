@@ -22,7 +22,9 @@ export interface HostedStripeHttpFixture {
 }
 
 export async function startHostedStripeHttpFixture(input: {
+  beforeBillingPortalSession?: () => Promise<void>;
   beforeResumeSubscription?: (subscriptionId: string) => Promise<void>;
+  billingPortalSessionUrl?: string;
   events?: Readonly<Record<string, Stripe.Event>>;
   prices?: Readonly<Record<string, Stripe.Price>>;
   resumedSubscriptions?: Readonly<Record<string, Stripe.Subscription>>;
@@ -40,6 +42,20 @@ export async function startHostedStripeHttpFixture(input: {
       search: url.search,
     } satisfies ObservedHostedStripeHttpRequest;
     observedRequests.push(observed);
+
+    if (
+      observed.method === "POST" &&
+      url.pathname === "/v1/billing_portal/sessions" &&
+      input.billingPortalSessionUrl
+    ) {
+      await input.beforeBillingPortalSession?.();
+      writeJsonResponse(response, 200, {
+        id: "bps_hosted_http_fixture",
+        object: "billing_portal.session",
+        url: input.billingPortalSessionUrl,
+      });
+      return;
+    }
 
     const eventId = readResourceId(url.pathname, "/v1/events/");
     if (observed.method === "GET" && eventId) {

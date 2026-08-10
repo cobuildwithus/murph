@@ -23,6 +23,7 @@ import {
 import {
   HOSTED_PULSE_TRIAL_OFFER,
   isHostedBillingPlanImmediateUpgrade,
+  isHostedPulseTrialBillingState,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
@@ -242,14 +243,34 @@ export async function writeHostedMemberStripeBillingTx(input: {
     billingRef: currentMember.billingRef,
     dispatchContext: input.dispatchContext,
   });
+  const currentPlanCode = parseHostedBillingPlanCode(
+    currentMember.billingRef?.currentBillingPlanCode,
+  );
+  const preserveIncompletePulseTrialTarget =
+    currentMember.core.billingStatus === HostedBillingStatus.incomplete
+    && nextBillingStatus === HostedBillingStatus.incomplete
+    && (
+      currentPlanCode === "launch_group_monthly"
+      || currentPlanCode === "launch_monthly"
+    )
+    && parseHostedBillingCheckoutOffer(
+      currentMember.billingRef?.currentCheckoutOffer,
+    ) === HOSTED_PULSE_TRIAL_OFFER
+    && isHostedPulseTrialBillingState({
+      currentBillingPhase: currentMember.billingRef?.currentBillingPhase,
+      currentCheckoutOffer: currentMember.billingRef?.currentCheckoutOffer,
+    });
+  const currentBillingPlanCode = preserveIncompletePulseTrialTarget
+    ? currentPlanCode
+    : input.currentBillingPlanCode;
   const appliedScheduledPlan =
-    input.currentBillingPlanCode !== undefined
-    && input.currentBillingPlanCode !== null
-    && input.currentBillingPlanCode === currentMember.billingRef?.scheduledBillingPlanCode;
+    currentBillingPlanCode !== undefined
+    && currentBillingPlanCode !== null
+    && currentBillingPlanCode === currentMember.billingRef?.scheduledBillingPlanCode;
   const usagePlanTransition = resolveHostedUsagePlanTransitionWrite({
     billingRef: currentMember.billingRef,
     currentBillingPhase: input.currentBillingPhase,
-    currentBillingPlanCode: input.currentBillingPlanCode,
+    currentBillingPlanCode,
     currentCheckoutOffer: input.currentCheckoutOffer,
     eventCreatedAt: input.dispatchContext.eventCreatedAt,
   });
@@ -257,7 +278,7 @@ export async function writeHostedMemberStripeBillingTx(input: {
   const writeBillingRef = () => writeHostedMemberStripeBillingRefTx({
     memberId: currentMember.core.id,
     currentBillingPhase: input.currentBillingPhase,
-    currentBillingPlanCode: input.currentBillingPlanCode,
+    currentBillingPlanCode,
     currentCheckoutOffer: input.currentCheckoutOffer,
     currentPeriodEnd: input.currentPeriodEnd,
     currentPeriodStart: input.currentPeriodStart,

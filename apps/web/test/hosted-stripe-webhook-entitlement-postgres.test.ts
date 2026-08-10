@@ -74,6 +74,7 @@ import {
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   startHostedPulseTrialPaidPlan,
+  startHostedTrialPaidPlan,
 } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
 import {
   readHostedPersonalAiUsageStatus,
@@ -382,7 +383,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("keeps Family blocked when a paused-plan resume succeeds after its fence transaction", async () => {
+    it("keeps the Core recovery target and Family fence while a paused receipt races the resume response", async () => {
       const blockerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const resumeClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const familyClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -390,6 +391,7 @@ describe.skipIf(!runPostgresProof)(
       const fixtureId = randomUUID();
       const ownerMemberId = `hbm_family_resume_owner_${fixtureId}`;
       const memberId = `hbm_family_resume_member_${fixtureId}`;
+      const confirmedGroupId = `hg_family_resume_${fixtureId}`;
       const groupId = `hbag_family_resume_${fixtureId}`;
       const inviteId = `hbagi_family_resume_${fixtureId}`;
       const inviteCode = `family-resume-${fixtureId}`;
@@ -397,6 +399,7 @@ describe.skipIf(!runPostgresProof)(
       const stripeSubscriptionId = `sub_family_resume_${fixtureId}`;
       const stripeEventId = `evt_family_resume_paused_${fixtureId}`;
       const pulsePriceId = `price_family_resume_pulse_${fixtureId}`;
+      const groupPriceId = `price_family_resume_group_${fixtureId}`;
       const edgePriceId = `price_family_resume_edge_${fixtureId}`;
       const webhookSecret = "whsec_hosted_family_resume_fixture";
       const paymentMethodId = `pm_family_resume_${fixtureId}`;
@@ -412,10 +415,17 @@ describe.skipIf(!runPostgresProof)(
         status: "paused",
         subscriptionId: stripeSubscriptionId,
       });
+      const cleanedCoreSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        paymentMethodId,
+        priceId: groupPriceId,
+        status: "paused",
+        subscriptionId: stripeSubscriptionId,
+      });
       const pausedEvent = buildSubscriptionUpdatedEvent({
         created: Math.floor(now.getTime() / 1_000),
         eventId: stripeEventId,
-        subscription: pausedSubscription,
+        subscription: cleanedCoreSubscription,
       });
       const resumedSubscription = buildPulseResumeSubscription({
         customerId: stripeCustomerId,
@@ -425,7 +435,7 @@ describe.skipIf(!runPostgresProof)(
           subscriptionId: stripeSubscriptionId,
         }),
         paymentMethodId,
-        priceId: pulsePriceId,
+        priceId: groupPriceId,
         status: "active",
         subscriptionId: stripeSubscriptionId,
       });
@@ -438,6 +448,10 @@ describe.skipIf(!runPostgresProof)(
           [stripeEventId]: pausedEvent,
         },
         prices: {
+          [groupPriceId]: buildHostedMonthlyPrice({
+            priceId: groupPriceId,
+            unitAmount: 350,
+          }),
           [pulsePriceId]: buildHostedMonthlyPrice({
             priceId: pulsePriceId,
             unitAmount: 800,
@@ -450,16 +464,17 @@ describe.skipIf(!runPostgresProof)(
           [stripeSubscriptionId]: pausedSubscription,
         },
         updatedSubscriptions: {
-          [stripeSubscriptionId]: pausedSubscription,
+          [stripeSubscriptionId]: cleanedCoreSubscription,
         },
       });
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
       let blockerPromise: Promise<unknown> | null = null;
-      let startPromise: ReturnType<typeof startHostedPulseTrialPaidPlan> | null = null;
+      let startPromise: ReturnType<typeof startHostedTrialPaidPlan> | null = null;
       let familyPromise: Promise<unknown> | null = null;
 
       configureHostedStripeFixtureEnvironment({
         edgePriceId,
+        groupPriceId,
         pulsePriceId,
         stripe: stripeFixture.stripe,
         webhookSecret,
@@ -487,6 +502,19 @@ describe.skipIf(!runPostgresProof)(
             tx,
           })
         );
+        await resumeClient.hostedGroup.create({
+          data: {
+            id: confirmedGroupId,
+            members: {
+              create: {
+                id: `hgm_family_resume_${fixtureId}`,
+                joinedAt: now,
+                memberId,
+              },
+            },
+            ownerMemberId,
+          },
+        });
         await resumeClient.hostedAccountGroup.create({
           data: {
             billingStatus: HostedBillingStatus.active,
@@ -513,10 +541,12 @@ describe.skipIf(!runPostgresProof)(
         }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
         await blockerLocked.promise;
 
-        startPromise = startHostedPulseTrialPaidPlan({
+        startPromise = startHostedTrialPaidPlan({
           memberId,
           now,
           prisma: resumeClient,
+          targetPlanCode: "launch_group_monthly",
+          timing: "now",
         });
         await waitForBlockedBackend({ observer, pid: resumePid });
 
@@ -551,13 +581,16 @@ describe.skipIf(!runPostgresProof)(
           memberId,
           prisma: resumeClient,
         })).resolves.toMatchObject({
-          billingRef: { currentTrialEndsAt: now },
+          billingRef: {
+            currentBillingPlanCode: "launch_group_monthly",
+            currentTrialEndsAt: now,
+          },
           core: { billingStatus: HostedBillingStatus.incomplete },
         });
         await familyRejection;
         allowResumeResponse.resolve();
         await expect(startPromise).resolves.toEqual({
-          billingPlanCode: "launch_monthly",
+          billingPlanCode: "launch_group_monthly",
           status: "billing_pending",
         });
 
@@ -565,6 +598,10 @@ describe.skipIf(!runPostgresProof)(
           memberId,
           prisma: resumeClient,
         })).resolves.toMatchObject({
+          billingRef: {
+            currentBillingPlanCode: "launch_group_monthly",
+            currentTrialEndsAt: now,
+          },
           core: { billingStatus: HostedBillingStatus.incomplete },
         });
         await expect(resumeClient.hostedAccountGroupInvite.findUnique({
@@ -597,6 +634,9 @@ describe.skipIf(!runPostgresProof)(
         await resumeClient.hostedStripeEvent.deleteMany({
           where: { eventId: stripeEventId },
         });
+        await resumeClient.hostedGroup.deleteMany({
+          where: { id: confirmedGroupId },
+        });
         await resumeClient.hostedAccountGroup.deleteMany({
           where: { id: groupId },
         });
@@ -608,6 +648,154 @@ describe.skipIf(!runPostgresProof)(
           familyClient.$disconnect(),
           observer.$disconnect(),
           resumeClient.$disconnect(),
+        ]);
+      }
+    }, 60_000);
+
+    it("commits the direct recovery fence before opening card setup", async () => {
+      const directClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const familyClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const ownerMemberId = `hbm_family_portal_owner_${fixtureId}`;
+      const memberId = `hbm_family_portal_member_${fixtureId}`;
+      const groupId = `hbag_family_portal_${fixtureId}`;
+      const inviteId = `hbagi_family_portal_${fixtureId}`;
+      const inviteCode = `family-portal-${fixtureId}`;
+      const stripeCustomerId = `cus_family_portal_${fixtureId}`;
+      const stripeSubscriptionId = `sub_family_portal_${fixtureId}`;
+      const pulsePriceId = `price_family_portal_pulse_${fixtureId}`;
+      const edgePriceId = `price_family_portal_edge_${fixtureId}`;
+      const webhookSecret = "whsec_hosted_family_portal_fixture";
+      const now = new Date("2026-07-01T13:46:00.000Z");
+      const portalRequested = createDeferred();
+      const allowPortalResponse = createDeferred();
+      const pausedSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        paymentMethodId: "",
+        priceId: pulsePriceId,
+        status: "paused",
+        subscriptionId: stripeSubscriptionId,
+      });
+      pausedSubscription.default_payment_method = null;
+      const stripeFixture = await startHostedStripeHttpFixture({
+        beforeBillingPortalSession: async () => {
+          portalRequested.resolve();
+          await allowPortalResponse.promise;
+        },
+        billingPortalSessionUrl: "https://billing.stripe.test/family-portal",
+        prices: {
+          [pulsePriceId]: buildHostedMonthlyPrice({
+            priceId: pulsePriceId,
+            unitAmount: 800,
+          }),
+        },
+        subscriptions: {
+          [stripeSubscriptionId]: pausedSubscription,
+        },
+      });
+      const runtimeGlobals = readHostedStripeRuntimeGlobals();
+      let startPromise: ReturnType<typeof startHostedPulseTrialPaidPlan> | null = null;
+
+      configureHostedStripeFixtureEnvironment({
+        edgePriceId,
+        pulsePriceId,
+        stripe: stripeFixture.stripe,
+        webhookSecret,
+      });
+
+      try {
+        await directClient.hostedMember.createMany({
+          data: [
+            { id: ownerMemberId },
+            {
+              billingStatus: HostedBillingStatus.paused,
+              id: memberId,
+            },
+          ],
+        });
+        await directClient.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            currentBillingPhase: null,
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+            currentTrialEndsAt: now,
+            memberId,
+            stripeCustomerId,
+            stripeSubscriptionId,
+            tx,
+          })
+        );
+        await directClient.hostedAccountGroup.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: groupId,
+            ownerMemberId,
+          },
+        });
+        await directClient.hostedAccountGroupInvite.create({
+          data: {
+            expiresAt: new Date(now.getTime() + 60_000),
+            groupId,
+            id: inviteId,
+            inviteCode,
+            invitedByMemberId: ownerMemberId,
+          },
+        });
+
+        startPromise = startHostedPulseTrialPaidPlan({
+          memberId,
+          now,
+          paymentMethodContinuation: "settings",
+          prisma: directClient,
+        });
+        await portalRequested.promise;
+
+        await expect(familyClient.$transaction((tx) =>
+          acceptHostedFamilyInviteTx({
+            acceptedMemberId: memberId,
+            inviteCode,
+            now,
+            tx,
+          }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS)
+        ).rejects.toMatchObject({
+          code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+        });
+        await expect(readHostedMemberBillingSnapshot({
+          memberId,
+          prisma: directClient,
+        })).resolves.toMatchObject({
+          billingRef: {
+            currentBillingPlanCode: "launch_monthly",
+            currentTrialEndsAt: now,
+          },
+          core: { billingStatus: HostedBillingStatus.incomplete },
+        });
+
+        allowPortalResponse.resolve();
+        await expect(startPromise).resolves.toEqual({
+          billingPlanCode: "launch_monthly",
+          paymentUrl: "https://billing.stripe.test/family-portal",
+          resumeStartAfterPaymentMethodSetup: true,
+          status: "payment_required",
+        });
+        await expect(directClient.hostedAccountGroupInvite.findUnique({
+          select: { status: true },
+          where: { id: inviteId },
+        })).resolves.toEqual({ status: "pending" });
+      } finally {
+        allowPortalResponse.resolve();
+        await Promise.allSettled(startPromise ? [startPromise] : []);
+        clearHostedStripeFixtureEnvironment(runtimeGlobals);
+        await stripeFixture.stop();
+        await directClient.hostedAccountGroup.deleteMany({
+          where: { id: groupId },
+        });
+        await directClient.hostedMember.deleteMany({
+          where: { id: { in: [ownerMemberId, memberId] } },
+        });
+        await Promise.all([
+          directClient.$disconnect(),
+          familyClient.$disconnect(),
         ]);
       }
     }, 60_000);
@@ -2404,6 +2592,7 @@ function configureHostedStripeFixtureEnvironment(input: {
   edgePriceId: string;
   familyEdgePriceId?: string;
   familyPulsePriceId?: string;
+  groupPriceId?: string;
   pulsePriceId: string;
   stripe: Stripe;
   webhookSecret: string;
@@ -2417,6 +2606,12 @@ function configureHostedStripeFixtureEnvironment(input: {
     "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
     input.edgePriceId,
   );
+  if (input.groupPriceId) {
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY",
+      input.groupPriceId,
+    );
+  }
   if (input.familyPulsePriceId) {
     vi.stubEnv(
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",

@@ -51,6 +51,7 @@ import {
 import {
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
+  writeHostedMemberStripeBillingRefTx,
 } from "./hosted-member-billing-store";
 import {
   readHostedMemberCoreState,
@@ -351,7 +352,11 @@ async function transitionHostedPulseTrialPaidPlan<
     });
   }
 
-  assertHostedPulseTrialStartPaidRecoverableSourceState({ billingRef });
+  assertHostedPulseTrialStartPaidRecoverableSourceState({
+    billingRef,
+    billingStatus: member.billingStatus,
+    targetPlanCode: input.targetPlanCode,
+  });
   const currentBillingPhase =
     parseHostedBillingPhase(billingRef?.currentBillingPhase);
   const canStart = currentBillingPhase === "trial";
@@ -575,11 +580,33 @@ async function transitionHostedPulseTrialPaidPlan<
 
 function assertHostedPulseTrialStartPaidRecoverableSourceState(input: {
   billingRef: Awaited<ReturnType<typeof readHostedMemberStripeBillingRef>>;
+  billingStatus: HostedBillingStatus;
+  targetPlanCode: HostedTrialPaidPlanCode;
 }): void {
+  const currentPlanCode = parseHostedBillingPlanCode(
+    input.billingRef?.currentBillingPlanCode,
+  );
   if (
-    parseHostedBillingPlanCode(input.billingRef?.currentBillingPlanCode) === START_PAID_PULSE_PLAN &&
-    parseHostedBillingCheckoutOffer(input.billingRef?.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER
+    parseHostedBillingCheckoutOffer(input.billingRef?.currentCheckoutOffer) !==
+      HOSTED_PULSE_TRIAL_OFFER
   ) {
+    throw buildHostedPulseTrialStartPaidUnsupportedError();
+  }
+
+  if (input.billingStatus === HostedBillingStatus.incomplete) {
+    if (currentPlanCode === input.targetPlanCode) {
+      return;
+    }
+    if (
+      currentPlanCode === "launch_group_monthly" ||
+      currentPlanCode === "launch_monthly"
+    ) {
+      throw buildHostedPulseTrialStartPaidChoiceChangedError();
+    }
+    throw buildHostedPulseTrialStartPaidUnsupportedError();
+  }
+
+  if (currentPlanCode === START_PAID_PULSE_PLAN) {
     return;
   }
 
@@ -1177,10 +1204,9 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
     readHostedStripeSubscriptionPaymentMethodUpdate(input.subscription);
 
   // Family acceptance uses the same member row lock. Commit the non-lapsed
-  // fence before any provider mutation so an irreversible Stripe resume can
-  // never outlive a rolled-back local projection. A later retry can safely
-  // continue from canonical Stripe `paused`; invoice reconciliation alone may
-  // promote this projection to `active`.
+  // fence and its exact target before a portal or provider mutation. The first
+  // selection is therefore durable beyond Stripe's bounded idempotency cache,
+  // and invoice reconciliation alone may promote the projection to `active`.
   await withHostedMemberStripeMutationLock({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -1197,13 +1223,36 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
       if (familyClaim) {
         throw buildHostedFamilyBillingClaimError(familyClaim);
       }
-      if (paymentMethodUpdate) {
-        await updateHostedMemberCoreState({
-          billingStatus: HostedBillingStatus.incomplete,
-          memberId: input.memberId,
-          prisma: tx,
+      const lockedMember = await readHostedMemberCoreState({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      const lockedBillingRef = await readHostedMemberStripeBillingRef({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      if (!lockedMember) {
+        throw hostedOnboardingError({
+          code: "HOSTED_MEMBER_NOT_FOUND",
+          httpStatus: 403,
+          message: "Finish signup from your latest Murph link before continuing.",
         });
       }
+      assertHostedPulseTrialStartPaidRecoverableSourceState({
+        billingRef: lockedBillingRef,
+        billingStatus: lockedMember.billingStatus,
+        targetPlanCode: input.targetPlanCode,
+      });
+      await writeHostedMemberStripeBillingRefTx({
+        currentBillingPlanCode: input.targetPlanCode,
+        memberId: input.memberId,
+        tx,
+      });
+      await updateHostedMemberCoreState({
+        billingStatus: HostedBillingStatus.incomplete,
+        memberId: input.memberId,
+        prisma: tx,
+      });
     },
   });
 
@@ -1261,6 +1310,7 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
           idempotencyKey:
             buildHostedPulseTrialStartPaidCleanupIdempotencyKey({
               memberId: input.memberId,
+              priceId: input.priceId,
               stripeSubscriptionId: input.stripeSubscriptionId,
               trialEnd: input.trialEnd,
             }),
@@ -1611,12 +1661,14 @@ function buildHostedPulseTrialStartPaidIdempotencyKey(input: {
 
 function buildHostedPulseTrialStartPaidCleanupIdempotencyKey(input: {
   memberId: string;
+  priceId: string;
   stripeSubscriptionId: string;
   trialEnd: Date | null;
 }): string {
   return `hosted-billing-start-paid-pulse:paused-cleanup:${sha256Hex(JSON.stringify({
     memberId: input.memberId,
-    operation: "paused-pre-resume-v3",
+    operation: "paused-pre-resume-v4",
+    priceId: input.priceId,
     stripeSubscriptionId: input.stripeSubscriptionId,
     trialEnd: input.trialEnd?.toISOString() ?? null,
   }))}`;

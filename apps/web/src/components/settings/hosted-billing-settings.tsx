@@ -115,10 +115,21 @@ export function HostedBillingSettings(props: {
       currentBillingPhase: props.currentBillingPhase,
       currentCheckoutOffer: props.currentCheckoutOffer,
     });
+  const pulseTrialRecoveryTarget =
+    props.billingStatus === "incomplete" &&
+    (
+      currentPlanCode === "launch_group_monthly" ||
+      currentPlanCode === "launch_monthly"
+    )
+      ? currentPlanCode
+      : null;
   const pulseTrialRecoverable =
     !familyCurrent &&
     props.canStartPaidPulse === true &&
-    currentPlanCode === "launch_monthly" &&
+    (
+      currentPlanCode === "launch_monthly" ||
+      pulseTrialRecoveryTarget === "launch_group_monthly"
+    ) &&
     isHostedPulseTrialBillingState({
       currentBillingPhase: props.currentBillingPhase,
       currentCheckoutOffer: props.currentCheckoutOffer,
@@ -130,7 +141,7 @@ export function HostedBillingSettings(props: {
   const pulseCurrent =
     (ownPaidBillingActive && currentPlanCode === "launch_monthly") ||
     pulseTrialActive ||
-    pulseTrialRecoverable;
+    (pulseTrialRecoverable && currentPlanCode === "launch_monthly");
   const edgeCurrent =
     ownPaidBillingActive && currentPlanCode === "launch_edge_monthly";
   const maxCurrent =
@@ -169,6 +180,12 @@ export function HostedBillingSettings(props: {
       return <FamilyBillingChangeButton block targetPlanName="Pulse" />;
     }
     if (sponsoredMember) {
+      return null;
+    }
+    if (
+      pulseTrialBillingPending &&
+      pulseTrialRecoveryTarget !== "launch_monthly"
+    ) {
       return null;
     }
     if (groupCurrent && props.canUpgradeToPulse === true) {
@@ -223,6 +240,9 @@ export function HostedBillingSettings(props: {
   })();
 
   const edgeAction: ReactNode = (() => {
+    if (pulseTrialBillingPending) {
+      return null;
+    }
     if (familyOwner) {
       return <FamilyBillingChangeButton block targetPlanName="Edge" />;
     }
@@ -270,6 +290,9 @@ export function HostedBillingSettings(props: {
   })();
 
   const maxAction: ReactNode = (() => {
+    if (pulseTrialBillingPending) {
+      return null;
+    }
     if (familyCurrent) {
       return null;
     }
@@ -305,7 +328,11 @@ export function HostedBillingSettings(props: {
     ...(props.showGroupPlan === true && !familyCurrent
       ? [
           {
-            action: groupCurrent
+            action:
+              pulseTrialBillingPending &&
+              pulseTrialRecoveryTarget !== "launch_group_monthly"
+                ? null
+              : groupCurrent
               ? <CurrentPlanButton />
               : hasPendingGroupSwitch
                 ? null
@@ -466,7 +493,7 @@ export function HostedBillingSettings(props: {
         ]
       : []),
     {
-      action: sponsoredMember
+      action: pulseTrialBillingPending || sponsoredMember
         ? null
         : familyOwner
           ? <CurrentPlanButton />
@@ -486,7 +513,8 @@ export function HostedBillingSettings(props: {
   ];
 
   const planResolved =
-    groupCurrent || pulseCurrent || edgeCurrent || maxCurrent || familyCurrent;
+    groupCurrent || pulseCurrent || edgeCurrent || maxCurrent || familyCurrent ||
+    pulseTrialBillingPending;
   const planGridColumns = cards.length >= 5
     ? "sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5"
     : cards.length === 4
@@ -554,7 +582,7 @@ export function HostedBillingSettings(props: {
         ))}
       </div>
       <div className="flex justify-end">
-        {familyState === "sponsored" ? (
+        {pulseTrialBillingPending ? null : familyState === "sponsored" ? (
           <p className="text-sm text-muted-foreground">
             Billing is managed by your Family plan owner.
           </p>

@@ -89,7 +89,7 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
-        label="Pulse trial resume is claimed and awaiting Stripe confirmation"
+        label="Core trial conversion is claimed and awaiting Stripe confirmation"
         state="payment-recovery-pending"
       >
         <div inert>
@@ -99,7 +99,7 @@ export function GroupMemberPlanStudy() {
             canStartPaidPulse
             canSwitchToGroup
             currentBillingPhase="trial"
-            currentBillingPlanCode="launch_monthly"
+            currentBillingPlanCode="launch_group_monthly"
             currentCheckoutOffer="pulse_trial_7d"
             showGroupPlan
           />

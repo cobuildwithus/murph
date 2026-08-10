@@ -296,13 +296,17 @@ sponsored access, and every Checkout, subscription, and invoice replay for the
 different personal subscription remains in the existing receipt-owned
 cancellation path until Stripe confirms terminal cleanup. Direct paused-plan
 resume rechecks that Family claim under the same member mutation lock. If
-resume wins the lock, it commits `incomplete` in a short database-only phase
-before provider mutation and retains that fence until invoice reconciliation;
-the request path never projects `active` from the resume response, and paused
-subscription receipts cannot move the same Pulse-trial projection backward.
-The resume path rechecks Family ownership before opening Stripe payment-method
-setup, so a sponsored member is never sent to a direct-billing portal. If
-Family wins, the stale resume performs no provider mutation. A locally
+resume wins the lock, it commits `incomplete` and the exact Pulse-or-Core
+recovery target in the existing member billing reference before either a
+provider mutation or payment-method portal. That durable claim remains
+Family-blocking until invoice reconciliation; Stripe idempotency retention is
+not the owner of product intent. Same-target retries recover the transition,
+while a different target fails stale before provider access. The request path
+never projects `active` from the resume response, and paused subscription
+receipts preserve the claimed target while the projection remains
+`incomplete`. Settings and assistant recovery expose only that target. If
+Family wins the lock, the stale recovery opens no portal and performs no
+provider mutation. A locally
 reconciled paid invoice is the authority for the `active` promotion and
 executes any Family-sponsored cleanup outcome after its transaction rather
 than discarding it. The owner exception remains limited to the exact direct

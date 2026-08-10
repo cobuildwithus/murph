@@ -1259,7 +1259,7 @@ describe("HostedBillingSettings", () => {
     assert.match(ineligibleMarkup, />Choose Pulse<\/button>/);
   });
 
-  test("keeps exact billing status checks available while a trial resume settles", async () => {
+  test("keeps only the selected Pulse status check available while a trial resume settles", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -1277,7 +1277,33 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Check Pulse status/);
+    assert.doesNotMatch(markup, /Check Core status/);
+    assert.doesNotMatch(markup, /Choose Edge/);
+    assert.doesNotMatch(markup, /Manage billing/);
+  });
+
+  test("keeps only the selected Core status check available while a trial resume settles", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      billingStatus: "incomplete",
+      canStartPaidPulse: true,
+      canSwitchToGroup: true,
+      currentBillingPhase: null,
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentBillingPlanCode: "launch_group_monthly",
+      showGroupPlan: true,
+    }));
+
     assert.match(markup, /Check Core status/);
+    assert.doesNotMatch(markup, /Check Pulse status/);
+    assert.doesNotMatch(markup, /Choose Edge/);
+    assert.doesNotMatch(markup, /Manage billing/);
+    assert.doesNotMatch(markup, /Core is not active/);
   });
 
   test("suppresses every Start Pulse action with action-neutral copy while continuation is pending", async () => {

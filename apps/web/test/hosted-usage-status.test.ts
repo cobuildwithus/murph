@@ -984,6 +984,71 @@ describe("readHostedPersonalAiUsageStatus", () => {
     },
   );
 
+  it("keeps an incomplete Core conversion bound to Core across assistant retries", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: "incomplete",
+      suspendedAt: null,
+    });
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_group_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      allowanceSource: "direct_trial",
+      reason: "trial_expired_pending_billing",
+      spentUsdMicros: 0n,
+    }));
+    const prisma = buildPrisma(null) as never;
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_trial_pending_core",
+      now: NOW,
+      prisma,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toMatchObject({
+      availablePlans: [
+        {
+          code: "launch_group_monthly",
+          displayName: "Group",
+          monthlyPriceUsdCents: 350,
+          selectable: true,
+        },
+      ],
+      reason: "trial_conversion_pending",
+      recommendedPlanCode: "launch_group_monthly",
+      recommendedAction: {
+        kind: "change_plan",
+        label: "Start Core now ($3.50/month)",
+        targetPlanCode: "launch_group_monthly",
+      },
+      subscriptionActionQuote: {
+        action: "change_plan",
+        targetPlanCode: "launch_group_monthly",
+        timing: "now",
+      },
+    });
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_trial_pending_core",
+      now: NOW,
+      prisma,
+      publicBaseUrl: "https://example.test",
+      subscriptionActionTargetPlanCode: "launch_monthly",
+    })).resolves.toEqual({
+      generatedAt: NOW.toISOString(),
+      reason: "trial_conversion_pending",
+      recommendedAction: null,
+      subscriptionActionQuote: null,
+      status: "unavailable",
+    });
+  });
+
   it("does not recommend trial conversion without complete billing references", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: "paused",

@@ -98,13 +98,18 @@ brief reconciliation window where the retained Pulse-trial offer is canonical
 but the phase projection is still null. A local-trial/provider-paid race fails
 stale instead of scheduling one paid cycle late.
 
-A paused Pulse-trial recovery claims its provider transition with one
-deterministic key that is independent of the selected paid target. The request
-body carries the exact Pulse or Core choice. Exact same-target retries replay
-the claim, while a different target conflicts before Stripe resume and returns
-the existing stale-choice recovery. While invoice confirmation is pending,
-Settings and assistant offers keep the existing exact status-check actions
-available instead of reducing recovery to a generic billing-portal link.
+A paused Pulse-trial recovery commits `incomplete` and its exact Pulse-or-Core
+target to the existing member billing reference under the member lock before
+opening payment setup or mutating Stripe. That database projection, rather than
+Stripe's bounded idempotency cache, owns the first selected target. Provider
+cleanup keys include that target. Exact same-target retries recover the claim,
+while a different target conflicts before provider access and returns the
+existing stale-choice recovery. Subscription receipts preserve the target
+while invoice confirmation remains incomplete. Settings and assistant offers
+expose only that exact status-check action instead of another plan choice or a
+generic billing-portal link. The claim has no automatic expiry: Murph cannot
+prove that an interrupted request did not already mutate the provider, so
+releasing it on a timer would reopen the direct-versus-Family charge race.
 
 Public checkout accepts only the explicit public billing-code allowlist. Adding
 Core to the private catalog must not make it publicly selectable.

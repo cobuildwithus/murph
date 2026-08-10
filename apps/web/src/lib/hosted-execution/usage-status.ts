@@ -588,8 +588,30 @@ async function resolveAvailableSubscriptionOffer(input: {
       groupPlanConfigured: groupPlanAvailable,
       hasConfirmedGroupMembership,
     });
+    const currentPlanCode = parseHostedBillingPlanCode(
+      billingState.currentBillingPlanCode,
+    );
+    const pendingTargetPlanCode =
+      member.billingStatus === "incomplete" &&
+      (
+        currentPlanCode === "launch_group_monthly" ||
+        currentPlanCode === "launch_monthly"
+      )
+        ? currentPlanCode
+        : null;
+    if (
+      pendingTargetPlanCode &&
+      input.requestedTargetPlanCode &&
+      input.requestedTargetPlanCode !== pendingTargetPlanCode
+    ) {
+      return EMPTY_SUBSCRIPTION_OFFER;
+    }
+    const availablePlanCodes = pendingTargetPlanCode
+      ? [pendingTargetPlanCode]
+      : trialOffer.availablePlanCodes;
     const targetPlanCode =
-      input.requestedTargetPlanCode
+      pendingTargetPlanCode
+      ?? input.requestedTargetPlanCode
       ?? trialOffer.recommendedPlanCode;
     if (
       targetPlanCode !== "launch_group_monthly"
@@ -597,7 +619,7 @@ async function resolveAvailableSubscriptionOffer(input: {
     ) {
       return EMPTY_SUBSCRIPTION_OFFER;
     }
-    if (!trialOffer.availablePlanCodes.includes(targetPlanCode)) {
+    if (!availablePlanCodes.includes(targetPlanCode)) {
       return EMPTY_SUBSCRIPTION_OFFER;
     }
     if (
@@ -609,7 +631,7 @@ async function resolveAvailableSubscriptionOffer(input: {
       return EMPTY_SUBSCRIPTION_OFFER;
     }
     return {
-      availablePlans: trialOffer.availablePlanCodes.map((planCode) => {
+      availablePlans: availablePlanCodes.map((planCode) => {
         const definition = getHostedBillingPlanDefinition(planCode);
         return {
           code: planCode,
@@ -629,7 +651,8 @@ async function resolveAvailableSubscriptionOffer(input: {
         targetPlanCode,
         timing: input.trialTiming ?? "now",
       }),
-      recommendedPlanCode: trialOffer.recommendedPlanCode,
+      recommendedPlanCode:
+        pendingTargetPlanCode ?? trialOffer.recommendedPlanCode,
     };
   }
 

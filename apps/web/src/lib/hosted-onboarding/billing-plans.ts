@@ -507,16 +507,27 @@ export function canStartHostedPulseTrialPaidPlan(input: {
   suspendedAt?: unknown;
 }): boolean {
   const phase = parseHostedBillingPhase(input.currentBillingPhase);
+  const currentPlanCode = parseHostedBillingPlanCode(
+    input.currentBillingPlanCode,
+  );
   const canStartActiveTrial =
     input.billingStatus === "active" &&
-    phase === "trial";
-  const canRecoverLapsedOrPendingTrial =
-    (input.billingStatus === "paused" || input.billingStatus === "incomplete") &&
+    phase === "trial" &&
+    currentPlanCode === "launch_monthly";
+  const canRecoverLapsedTrial =
+    input.billingStatus === "paused" &&
+    currentPlanCode === "launch_monthly" &&
+    isHostedPulseTrialBillingState(input);
+  const canRecoverPendingTrial =
+    input.billingStatus === "incomplete" &&
+    (
+      currentPlanCode === "launch_group_monthly" ||
+      currentPlanCode === "launch_monthly"
+    ) &&
     isHostedPulseTrialBillingState(input);
 
-  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
-    parseHostedBillingCheckoutOffer(input.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER &&
-    (canStartActiveTrial || canRecoverLapsedOrPendingTrial) &&
+  return parseHostedBillingCheckoutOffer(input.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER &&
+    (canStartActiveTrial || canRecoverLapsedTrial || canRecoverPendingTrial) &&
     !(input.suspendedAt instanceof Date) &&
     input.hasStripeCustomerId === true &&
     input.hasStripeSubscriptionId === true;

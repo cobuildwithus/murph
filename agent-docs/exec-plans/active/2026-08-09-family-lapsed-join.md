@@ -29,11 +29,12 @@ Updated: 2026-08-09
   an `incomplete` own-billing fence before any Stripe mutation.
 - A paused-plan request never publishes `active` from a Stripe resume response;
   paid-invoice reconciliation remains the sole authority for that promotion.
-- A paused subscription receipt cannot erase a committed resume fence, and one
-  deterministic provider claim serializes conflicting Pulse/Core choices.
-- Family ownership is rechecked before a cardless paused member is sent to
-  Stripe payment setup, and pending Settings/assistant recovery remains
-  actionable without a forced refresh.
+- A paused subscription receipt cannot erase a committed resume fence or its
+  target; the existing billing-plan projection durably owns the first
+  Pulse/Core choice before provider access.
+- The direct recovery claim is committed before cardless payment setup, so
+  Family-first returns no portal while direct-first remains exactly recoverable
+  from Settings and assistant without a forced refresh.
 - Existing Family membership, identity binding, seat-capacity, activation, and
   Stripe loser-cleanup behavior remains unchanged.
 - The focused Family-plan regression suite, hosted billing guard, Web
@@ -151,6 +152,23 @@ Updated: 2026-08-09
   any payment portal call, and reuse the existing pending confirmation UI and
   assistant offer. This adds no database field, lease, queue, or lifecycle
   owner.
+- Final ReviewGPT round 4 proved that the round-3 continuation still left the
+  target only in Stripe's bounded idempotency cache and released the member
+  lock without a claim before cardless portal handoff. A Core receipt could
+  therefore preserve `incomplete` while overwriting the local plan and deleting
+  its exact recovery action; Family could also commit after the preflight and
+  before the browser redirect.
+- Round 4 requirement decision: the existing
+  `hosted_member_billing_ref.current_billing_plan_code` owns the selected target
+  while `billing_status=incomplete`. Commit both values under the member lock
+  before either portal creation or provider mutation, preserve that target
+  against intermediate receipts, and make Settings/assistant expose only its
+  exact retry. Family-first returns no portal; direct-first remains a
+  non-expiring, recoverable claim until invoice reconciliation. Automatic
+  abandonment is intentionally excluded because expiring a possibly
+  provider-mutated claim could admit overlapping sponsorship. This replaces
+  provider-cache target ownership without a new field, queue, lease, enum, or
+  lifecycle owner.
 - The required Claude Code UI double-check was attempted against the final
   desktop/mobile catalog evidence and stopped on explicit Fable usage-credit
   exhaustion. Per the completion workflow, no second Claude request or local
@@ -162,7 +180,7 @@ Updated: 2026-08-09
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-family-plan.test.ts`
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts`
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-stripe-billing-status.test.ts apps/web/test/hosted-onboarding-billing-plans.test.ts apps/web/test/hosted-billing-settings.test.tsx apps/web/test/hosted-usage-status.test.ts`
-  - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_dev_family_lapsed_join MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-stripe-webhook-entitlement-postgres.test.ts -t 'rejects Family acceptance after Checkout binds before status projection|keeps Family blocked when a paused-plan resume succeeds after its fence transaction'`
+  - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_dev_family_lapsed_join MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-stripe-webhook-entitlement-postgres.test.ts -t 'rejects Family acceptance after Checkout binds before status projection|keeps the Core recovery target and Family fence while a paused receipt races the resume response|commits the direct recovery fence before opening card setup'`
   - `pnpm hosted-billing:ci-guard`
   - `pnpm --dir apps/web typecheck`
   - `pnpm --dir apps/web lint`
@@ -175,9 +193,9 @@ Updated: 2026-08-09
     commits `incomplete` before Stripe and never request-projects `active`;
     a paused receipt cannot erase the fence; paid-invoice cleanup is not
     discarded.
-  - Exact paused-plan retries reuse one provider claim; conflicting Pulse/Core
-    choices fail stale before a second resume, and pending recovery remains
-    visible in Settings and assistant output.
+  - Exact paused-plan retries reuse the target-specific provider claim;
+    conflicting Pulse/Core choices fail stale before provider access, and only
+    the claimed recovery remains visible in Settings and assistant output.
   - Billing request-shape/contract guards, typecheck, and lint remain green.
   - No new persisted state, external call, dependency, component, or UI screen
     appears.

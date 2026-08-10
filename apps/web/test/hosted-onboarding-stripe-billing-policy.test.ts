@@ -858,6 +858,66 @@ describe("hosted onboarding stripe billing policy", () => {
     });
   });
 
+  it("preserves the durable Core recovery target while an incomplete trial receipt settles", async () => {
+    const trialEndedAt = new Date("2026-06-21T12:00:00.000Z");
+    const pendingCoreSnapshot = makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_group_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialEndsAt: trialEndedAt,
+        currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
+        lastStripeEventCreatedAt: new Date("2026-06-22T12:00:00.000Z"),
+        memberId: "member_123",
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
+        stripeCustomerId: "cus_trial",
+        stripeSubscriptionId: "sub_trial",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.incomplete,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(pendingCoreSnapshot)
+      .mockResolvedValueOnce(pendingCoreSnapshot);
+
+    await expect(writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.paused,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentTrialEndsAt: trialEndedAt,
+      currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-22T12:00:01.000Z"),
+        occurredAt: "2026-06-22T12:00:01.000Z",
+        sourceEventId: "evt_pending_core_receipt",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      member: pendingCoreSnapshot,
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
+      stripeCustomerId: "cus_trial",
+      stripeSubscriptionId: "sub_trial",
+      tx: {} as never,
+    })).resolves.toMatchObject({
+      billingRef: {
+        currentBillingPlanCode: "launch_group_monthly",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.incomplete,
+      },
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPlanCode: "launch_group_monthly",
+      }),
+    );
+  });
+
   it("does not preserve active access for an active subscription event after Pulse Trial expiry", async () => {
     const trialEndedAt = new Date("2026-06-21T12:00:00.000Z");
 
