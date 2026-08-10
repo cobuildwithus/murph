@@ -227,6 +227,7 @@ import {
   asRecord,
   ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION,
+  GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -3577,6 +3578,7 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
         ? {
             offeredAt: response.result.offeredAt,
             recencyEvidence: 'eligible' as const,
+            responseHandling: GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
           }
         : { recencyEvidence: 'unavailable' as const }),
       presentation: 'native' as const,

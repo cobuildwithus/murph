@@ -28,6 +28,10 @@ import { Separator } from "@/src/components/ui/separator";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
+import {
+  projectHostedVaultShareProjectionDisplays,
+  resolveHostedGroupAccessOfferProjectionScopes,
+} from "@/src/lib/hosted-groups/join-policy";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
@@ -550,7 +554,11 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Group join invites, current and legacy sharing, and setup recovery">
-        <GroupJoinStudy />
+        <GroupJoinStudy
+          comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
+            resolveHostedGroupAccessOfferProjectionScopes(undefined),
+          )}
+        />
       </StudySection>
 
       <Separator />

@@ -839,10 +839,13 @@ Last verified: 2026-08-09
   armed. A post-expiry event does not terminate the row during that grace, so
   pre-expiry provider evidence delivered later can still qualify; the first
   referrer-serialized expiry boundary after the grace is authoritative
-  finality. The immediate ingress handoff and a bounded
-  Vercel-authenticated minute recovery pass both retry idempotent reward
-  reconciliation. The source mailbox append and its completion fence commit
-  atomically after reward commit. Group appends carry live thread authority;
+  finality. The immediate ingress handoff for conversational referrals and a
+  bounded Vercel-authenticated minute recovery pass both retry idempotent
+  reward reconciliation. For stable signup-link activations, that recovery
+  pass is the normal settlement owner and scans oldest first in a fixed 50-row
+  batch; no immediate activation handoff exists. The source mailbox append and
+  its completion fence commit atomically after reward commit. Group appends
+  carry live thread authority;
   personal appends revalidate the frozen blinded source conversation and never
   drift to another preferred channel. Personal Linq appends use an explicit
   fixed target, so provider entry rejects source-route loss instead of applying

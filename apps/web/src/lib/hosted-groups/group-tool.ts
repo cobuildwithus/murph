@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
@@ -45,6 +46,7 @@ import {
   getHostedLinqChatSummary,
   type HostedLinqChatHandleSummary,
   sendHostedLinqChatMessage,
+  sendHostedLinqReactionBoundChatMessage,
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
@@ -124,9 +126,9 @@ import {
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
-  normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
+  resolveHostedGroupAccessOfferProjectionScopes,
 } from "./join-policy";
 import { sha256Hex } from "../primitives";
 import {
@@ -142,12 +144,13 @@ import {
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
 
-const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v2:";
+const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v3:";
 const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH = 40;
 
 export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   groupId: string;
   joinCode: string;
+  offerGeneration: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
@@ -162,6 +165,7 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   const digest = sha256Hex(JSON.stringify({
     groupId: input.groupId,
     joinCode: input.joinCode,
+    offerGeneration: input.offerGeneration,
     projectionScopeKeys,
   }));
   return `${HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX}${digest.slice(
@@ -1050,10 +1054,9 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
       return { kind: ownerAccess.unavailableReason };
     }
     const requestedVaultShareProjectionScopes =
-      normalizeHostedGroupAccessOfferProjectionScopes(
+      resolveHostedGroupAccessOfferProjectionScopes(
         input.joinLink?.requestedVaultShareProjectionScopes
-          ?? input.joinLink?.requestedVaultShareProjectionKinds
-          ?? [],
+          ?? input.joinLink?.requestedVaultShareProjectionKinds,
       );
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
@@ -1256,10 +1259,9 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
+  const projectionScopes = resolveHostedGroupAccessOfferProjectionScopes(
     input.joinOffer?.projectionScopes
-      ?? input.joinOffer?.projectionKinds
-      ?? [],
+      ?? input.joinOffer?.projectionKinds,
   );
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
@@ -1279,6 +1281,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     });
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
+      now,
       projectionScopes,
       tx,
     });
@@ -1314,6 +1317,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       },
     };
   }
+  const offerGeneration = created.offerPost.offerGeneration;
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
@@ -1322,11 +1326,12 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
-    sent = await sendHostedLinqChatMessage({
+    sent = await sendHostedLinqReactionBoundChatMessage({
       chatId: authorized.chatId,
       idempotencyKey: buildHostedGroupJoinOfferProviderIdempotencyKey({
         groupId: created.group.id,
         joinCode: created.offerPost.joinCode,
+        offerGeneration,
         projectionScopes,
       }),
       message,
@@ -1362,6 +1367,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   try {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
+        expectedOfferGeneration: offerGeneration,
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
         postedAt,
@@ -1538,16 +1544,20 @@ async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
   return { status: "ok", chatId: authorized.chatId };
 }
 
-function buildHostedGroupJoinOfferMessage(input: {
+export function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  // The link stays as the control for choosing different permissions, and works
-  // for everyone.
-  return `Like or heart this message if these default sharing choices look right: ${
-    renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  }. Use ${input.joinUrl} to choose different permissions.`;
+  return HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE
+    .replace(
+      HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+      () => renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
+    )
+    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, () => input.joinUrl);
 }
+
+const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
+const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
   group: {

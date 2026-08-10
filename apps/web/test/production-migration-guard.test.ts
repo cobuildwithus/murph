@@ -1642,7 +1642,26 @@ describe("hosted web production migration guard", () => {
       ),
       {
         path: "/api/internal/hosted-execution/product-feedback/digest/cron",
-        schedule: "*/10 * * * *",
+        schedule: "*/10 22,23 * * *",
+      },
+    );
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) =>
+          cron.path === "/api/internal/hosted-growth/usage-referral/cron",
+      ),
+      {
+        path: "/api/internal/hosted-growth/usage-referral/cron",
+        schedule: "* * * * *",
+      },
+    );
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) => cron.path === "/api/internal/hosted-onboarding/stripe/cron",
+      ),
+      {
+        path: "/api/internal/hosted-onboarding/stripe/cron",
+        schedule: "* * * * *",
       },
     );
     assert.deepEqual(

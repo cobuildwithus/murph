@@ -208,6 +208,16 @@ export function GroupJoinAcceptForm(props: {
     ),
     [props.permissions, initialSelectedScopeKeys],
   );
+  const usesScrollablePermissionReview = permissionGroups.length > 12;
+  const selectedPermissionGroupCount = permissionGroups.reduce(
+    (count, group) => (
+      group.scopeKeys.every((scopeKey) => selected.has(scopeKey))
+      || group.legacyScopeKeys.some((scopeKey) => selected.has(scopeKey))
+        ? count + 1
+        : count
+    ),
+    0,
+  );
   const secondaryLabel = props.postJoinDestination === "/join"
     ? GROUP_JOIN_SETUP_LABEL
     : props.alreadyActiveMember
@@ -306,8 +316,38 @@ export function GroupJoinAcceptForm(props: {
             <p className="text-[13px] leading-5 text-muted-foreground">
               Uncheck anything you don&apos;t want to share. Join either way. Change anytime.
             </p>
+            {usesScrollablePermissionReview ? (
+              <div className="flex min-h-10 items-center justify-between gap-3">
+                <p
+                  aria-live="polite"
+                  className="text-[12px] leading-5 text-muted-foreground tabular-nums"
+                >
+                  {selectedPermissionGroupCount} of {permissionGroups.length} choices selected. Scroll to review every choice.
+                </p>
+                <Button
+                  className="min-h-10 shrink-0 px-2 text-xs text-muted-foreground"
+                  disabled={status === "submitting" || selectedPermissionGroupCount === 0}
+                  onClick={() => setSelected(() => new Set())}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Clear optional sharing
+                </Button>
+              </div>
+            ) : null}
           </div>
-          <div className="flex flex-col gap-2.5">
+          <div
+            aria-label={usesScrollablePermissionReview ? "Sharing choices" : undefined}
+            className={cn(
+              "flex flex-col gap-2.5",
+              usesScrollablePermissionReview
+                ? "max-h-[26rem] overflow-y-auto overscroll-contain rounded-xl pr-1"
+                : null,
+            )}
+            role={usesScrollablePermissionReview ? "region" : undefined}
+            tabIndex={usesScrollablePermissionReview ? 0 : undefined}
+          >
             {permissionGroups.map((group) => {
               const currentSelected = group.scopeKeys.every((scopeKey) =>
                 selected.has(scopeKey)
@@ -320,7 +360,7 @@ export function GroupJoinAcceptForm(props: {
                 <div
                   key={group.key}
                   className={cn(
-                    "overflow-hidden rounded-xl border transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+                    "shrink-0 overflow-hidden rounded-xl border transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
                     checked
                       ? "border-primary bg-primary/[0.06]"
                       : "border-border bg-card hover:border-primary/40",
