@@ -1,4 +1,4 @@
-name: Rebase final PR 1484 candidate
+name: Validate rebased PR 1484 head
 
 on:
   push:
@@ -6,29 +6,80 @@ on:
       - agent/pr1484-audit-snapshot-20260810
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  rebase:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
     steps:
-      - name: Check out exact PR branch
+      - name: Check out exact PR head
         uses: actions/checkout@v4
         with:
-          ref: agent/member-owned-provider-applications
+          ref: d3909088373a19452b698b5f15159c2778d6c8d7
           fetch-depth: 0
 
-      - name: Rebase onto latest audited main
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm -C apps/web run prisma:generate
+
+      - name: Validate Prisma schema
+        run: pnpm -C apps/web exec prisma validate
+
+      - name: Typecheck device sync
+        run: pnpm -C packages/device-syncd run typecheck
+
+      - name: Typecheck assistant runtime
+        run: pnpm -C packages/assistant-runtime run typecheck
+
+      - name: Typecheck Web
+        run: pnpm -C apps/web run typecheck
+
+      - name: Lint Web
+        run: pnpm -C apps/web run lint
+
+      - name: Run focused Web tests
         shell: bash
         run: |
           set -euo pipefail
-          expected_head=e207abf716fedae5d7708adbc787841f92b6f41c
-          audited_main=d1a42bf9a7aba1f65d35f4fcee332a9cc9c989d7
-          test "$(git rev-parse HEAD)" = "$expected_head"
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git rebase "$audited_main"
-          git diff --check "$audited_main"..HEAD
-          git push --force-with-lease=refs/heads/agent/member-owned-provider-applications:"$expected_head" \
-            origin HEAD:refs/heads/agent/member-owned-provider-applications
+          pnpm -C apps/web exec vitest run --config vitest.workspace.ts --no-coverage \
+            test/device-provider-application-crypto.test.ts \
+            test/device-provider-application-ingress-store.test.ts \
+            test/device-provider-application-store.test.ts \
+            test/device-provider-application-types.test.ts \
+            test/device-sync-hosted-runtime-authority.test.ts \
+            test/device-sync-internal-runtime.test.ts \
+            test/device-sync-providers.test.ts \
+            test/hosted-account-data-service.test.ts \
+            test/prisma-store-oauth-connection.test.ts \
+            test/prisma-store-oauth-sessions.test.ts
+
+      - name: Run assistant-runtime tests
+        run: pnpm -C packages/assistant-runtime run test
+
+      - name: Run device-sync package tests
+        run: pnpm -C packages/device-syncd run test
+
+      - name: Run smoke checks
+        run: pnpm test:smoke
+
+      - name: Verify generated and source cleanliness
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -z "$(git status --short --untracked-files=no)" || {
+            git status --short
+            exit 1
+          }
