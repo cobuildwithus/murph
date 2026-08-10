@@ -1,0 +1,239 @@
+name: One-shot newsletter automation core refactor v3
+
+on:
+  push:
+    branches: [codex/newsletter-as-group-automation]
+    paths: [.github/workflows/one-shot-newsletter-automation-core-v3.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/newsletter-as-group-automation
+      - name: Apply core refactor
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def read(path: str) -> str:
+              return Path(path).read_text()
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text)
+
+          def sub_once(text: str, pattern: str, replacement: str, label: str) -> str:
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return updated
+
+          def drop_once(text: str, value: str, label: str) -> str:
+              count = text.count(value)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return text.replace(value, "", 1)
+
+          write(
+              "packages/assistant-engine/src/assistant/group-newsletter-automation.ts",
+              """const LEGACY_GROUP_NEWSLETTER_CONFIGURATION_MARKER =
+            'Murph group newsletter configuration v1.'
+          const LEGACY_GROUP_NEWSLETTER_RUNTIME_SENTENCE =
+            'These are configuration values. The runtime appends the current execution contract on every scheduled run.'
+
+          export function isLegacyGroupNewsletterAutomationInstructions(
+            instructions: string,
+          ): boolean {
+            return instructions.startsWith(
+              `${LEGACY_GROUP_NEWSLETTER_CONFIGURATION_MARKER}\\n`,
+            )
+          }
+
+          export function appendLegacyGroupNewsletterSkillInstructions(
+            instructions: string,
+          ): string {
+            if (!isLegacyGroupNewsletterAutomationInstructions(instructions)) {
+              return instructions
+            }
+            return [
+              'Compatibility instructions for a newsletter automation saved before newsletters became skill-authored group automations:',
+              '- Open and follow `$MURPH_SKILLS_ROOT/group-newsletter/SKILL.md` before doing anything else.',
+              '- Treat the saved configuration below as the requested recipe. The skill owns execution; the runtime does not append a newsletter contract.',
+              '- Use only the ordinary group/shared-data and group-email actions described by that skill.',
+              '',
+              instructions.replace(
+                LEGACY_GROUP_NEWSLETTER_RUNTIME_SENTENCE,
+                'Legacy saved configuration:',
+              ),
+            ].join('\\n')
+          }
+          """.replace("          ", ""),
+          )
+
+          path = "packages/assistant-engine/src/assistant-codex/dynamic-tools/automation.ts"
+          text = read(path)
+          text = drop_once(text, "  automationScheduleCronSchema,\n", "automation cron import")
+          text = sub_once(
+              text,
+              r"import \{\n  buildGroupNewsletterAutomationSaveRequest,.*?\n\} from '../../assistant/group-newsletter-automation\.js'\n",
+              "",
+              "newsletter compiler import",
+          )
+          text = sub_once(
+              text,
+              r"\nconst saveGroupNewsletterArgumentsSchema = z\.object\(\{.*?\n\}\)\n\nconst automationArgumentsSchema",
+              "\nconst automationArgumentsSchema",
+              "save_newsletter schema",
+          )
+          text = drop_once(text, "  saveGroupNewsletterArgumentsSchema,\n", "save_newsletter union entry")
+          text = sub_once(
+              text,
+              r" save_newsletter creates or replaces this group\\'s one health newsletter.*?authoring newsletter instructions\.",
+              "",
+              "save_newsletter description",
+          )
+          for key in ("customNote", "delivery", "healthScopes", "newsletterName", "tone"):
+              text = drop_once(text, f"      '{key}',\n", f"newsletter root key {key}")
+          text = sub_once(
+              text,
+              r"\n            : parsed\.args\.action === 'save_newsletter'.*?\n              : parsed\.args,",
+              "\n            : parsed.args,",
+              "save_newsletter request compiler",
+          )
+          for needle in ("save_newsletter", "buildGroupNewsletterAutomationSaveRequest", "GROUP_NEWSLETTER_"):
+              if needle in text:
+                  raise SystemExit(f"automation tool still contains {needle}")
+          write(path, text)
+
+          path = "packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts"
+          text = read(path)
+          for name in (
+              "GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG",
+              "GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG",
+              "GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG",
+              "hasGroupNewsletterDeliveryTag",
+              "isCanonicalGroupNewsletterAutomationInstructions",
+          ):
+              text = drop_once(text, f"  {name},\n", f"hosted writer import {name}")
+          text = sub_once(
+              text,
+              r"\n        const isGroupNewsletter =.*?\n        assertHostedAutomationSaveRequest\(\{.*?\n        \}\);",
+              '\n        const status = request.status ?? "active";',
+              "hosted newsletter save special case",
+          )
+          text = sub_once(
+              text,
+              r"\n      assertHostedAutomationPatchRequest\(\{ existing, request \}\);",
+              "",
+              "hosted newsletter patch assertion",
+          )
+          text = sub_once(
+              text,
+              r"\nfunction assertHostedAutomationSaveRequest\(.*?\nfunction normalizeHostedAutomationSupportTags",
+              "\nfunction normalizeHostedAutomationSupportTags",
+              "hosted newsletter assertion helpers",
+          )
+          for needle in (
+              "isGroupNewsletter",
+              "assertHostedAutomationSaveRequest",
+              "assertHostedAutomationPatchRequest",
+              "hasGroupNewsletterDeliveryTag",
+              "isCanonicalGroupNewsletterAutomationInstructions",
+          ):
+              if needle in text:
+                  raise SystemExit(f"hosted writer still contains {needle}")
+          write(path, text)
+
+          path = "packages/assistant-engine/src/assistant/cron/canonical-jobs.ts"
+          text = read(path)
+          text = sub_once(
+              text,
+              r"import \{\n  buildGroupNewsletterScheduledExecutionPrompt,\n  resolveGroupNewsletterAutomationDelivery,\n\} from '../group-newsletter-automation\.js'",
+              "import {\n  appendLegacyGroupNewsletterSkillInstructions,\n} from '../group-newsletter-automation.js'",
+              "canonical newsletter import",
+          )
+          text = sub_once(
+              text,
+              r"    case 'automation': \{\n      const newsletterDelivery = resolveGroupNewsletterAutomationDelivery\(source\).*?\n    \}",
+              "    case 'automation':\n      return appendLegacyGroupNewsletterSkillInstructions(source.instructions)",
+              "canonical newsletter prompt branch",
+          )
+          write(path, text)
+
+          path = "packages/assistant-engine/src/assistant/cron/execution.ts"
+          text = read(path)
+          text = sub_once(
+              text,
+              r"import \{\n  resolveGroupNewsletterAutomationDelivery,\n\} from '../group-newsletter-automation\.js'\n",
+              "",
+              "cron newsletter import",
+          )
+          text = sub_once(
+              text,
+              r"const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =\n  'Group health newsletter delivery did not complete\.'\n",
+              "",
+              "forced newsletter delivery error",
+          )
+          text = text.replace(
+              "GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS",
+              "SCHEDULED_GROUP_EMAIL_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS",
+          )
+          text = text.replace("scheduledNewsletterAuthority", "scheduledGroupEmailAuthority")
+          text = text.replace("newsletterRecoveryAuthorized", "groupEmailRecoveryAuthorized")
+          text = text.replace(
+              "resolveAssistantCronScheduledNewsletterAuthority",
+              "resolveAssistantCronScheduledGroupEmailAuthority",
+          )
+          text = sub_once(
+              text,
+              r"\n          const postTurnDeliveryFailure =\n            resolveAssistantCronPostTurnDeliveryFailure\(\{.*?\n          \}\n",
+              "\n",
+              "forced post-turn newsletter delivery",
+          )
+          text = sub_once(
+              text,
+              r"\nfunction resolveAssistantCronPostTurnDeliveryFailure\(.*?\nfunction resolveAssistantCronNewsletterPendingDeliveryIntentId",
+              "\nfunction resolveAssistantCronNewsletterPendingDeliveryIntentId",
+              "forced newsletter delivery helper",
+          )
+          text = sub_once(
+              text,
+              r"    input\.job\.source\.schedule\.kind !== 'cron' \|\|\n    resolveGroupNewsletterAutomationDelivery\(input\.job\.source\) !== 'group_email'",
+              "    input.job.source.schedule.kind !== 'cron' ||\n    input.job.source.route.threadIsDirect !== false ||\n    (\n      input.job.source.route.channel !== 'linq' &&\n      input.job.source.route.channel !== 'telegram'\n    )",
+              "generic scheduled group email authority",
+          )
+          for needle in (
+              "resolveGroupNewsletterAutomationDelivery",
+              "resolveAssistantCronPostTurnDeliveryFailure",
+              "ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR",
+              "scheduledNewsletterAuthority",
+          ):
+              if needle in text:
+                  raise SystemExit(f"cron still contains {needle}")
+          write(path, text)
+
+          Path(".github/workflows/one-shot-newsletter-automation-core-v3.yml").unlink()
+
+      - name: Commit source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: make newsletters ordinary group automations"
+          git push origin HEAD:codex/newsletter-as-group-automation
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Typecheck affected packages
+        run: |
+          pnpm --filter @murphai/assistant-engine typecheck
+          pnpm --filter @murphai/assistant-runtime typecheck
