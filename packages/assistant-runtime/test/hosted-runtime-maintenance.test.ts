@@ -33,12 +33,18 @@ const mocks = vi.hoisted(() => ({
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
 
-vi.mock("@murphai/device-syncd/config", () => ({
-  createConfiguredDeviceSyncProvidersFromConfigs:
-    mocks.createConfiguredDeviceSyncProvidersFromConfigs,
-  readConfiguredJunctionDeviceSyncProviderConfig:
-    mocks.readConfiguredJunctionDeviceSyncProviderConfig,
-}));
+vi.mock("@murphai/device-syncd/config", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/device-syncd/config")
+  >();
+  return {
+    ...actual,
+    createConfiguredDeviceSyncProvidersFromConfigs:
+      mocks.createConfiguredDeviceSyncProvidersFromConfigs,
+    readConfiguredJunctionDeviceSyncProviderConfig:
+      mocks.readConfiguredJunctionDeviceSyncProviderConfig,
+  };
+});
 
 vi.mock("@murphai/device-syncd/registry", () => ({
   createDeviceSyncRegistry: mocks.createDeviceSyncRegistry,
