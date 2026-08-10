@@ -13,6 +13,20 @@ const MAX_FACTORS = 6;
 const MIN_MATCHED_DAYS = 5;
 const MIN_WINDOW_DAYS = 21;
 const COMPARISON_SEARCH_DAYS = 35;
+const OUTCOME_LIKE_FACTOR_TOKENS = new Set([
+  "heart-rate-variability",
+  "hrv",
+  "readiness",
+  "readiness-score",
+  "recovery",
+  "recovery-score",
+  "resting-heart-rate",
+  "rhr",
+  "sleep",
+  "sleep-efficiency",
+  "sleep-score",
+  "total-sleep",
+]);
 
 export type PersonalPatternStage =
   | "insufficient"
@@ -100,12 +114,15 @@ export function buildPersonalPatternReportFromWearableBundle(
   const asOfDate = resolveAsOfDate(options.asOf);
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
-  const factors = collectFactors(vault.events, fromDate, asOfDate)
+  const factorAccumulators = collectFactorAccumulators(vault.events, fromDate, asOfDate);
+  const factors = collectFactors(factorAccumulators)
     .sort((left, right) =>
       right.observedDays - left.observedDays || left.label.localeCompare(right.label)
     )
     .slice(0, MAX_FACTORS);
-  const factorDatesById = collectFactorDates(vault.events, fromDate, asOfDate);
+  const factorDatesById = new Map(
+    [...factorAccumulators.values()].map((factor) => [factor.token, factor.dates] as const),
+  );
   const outcomes = collectOutcomeSeries(wearableBundle, fromDate, addDays(asOfDate, 1));
   const cells = factors.flatMap((factor) =>
     outcomes.map((outcome) => buildPatternCell(
@@ -156,11 +173,8 @@ export function emptyPersonalPatternReport(asOfDate: string): PersonalPatternRep
 }
 
 function collectFactors(
-  events: readonly CanonicalEntity[],
-  fromDate: string,
-  toDate: string,
+  accumulators: ReadonlyMap<string, FactorAccumulator>,
 ): PersonalPatternFactor[] {
-  const accumulators = collectFactorAccumulators(events, fromDate, toDate);
   return [...accumulators.values()].map((factor) => ({
     id: factor.token,
     kind: factor.kinds.size === 2
@@ -169,17 +183,6 @@ function collectFactors(
     label: humanizeToken(factor.token),
     observedDays: factor.dates.size,
   }));
-}
-
-function collectFactorDates(
-  events: readonly CanonicalEntity[],
-  fromDate: string,
-  toDate: string,
-): Map<string, Set<string>> {
-  return new Map(
-    [...collectFactorAccumulators(events, fromDate, toDate).values()]
-      .map((factor) => [factor.token, factor.dates] as const),
-  );
 }
 
 function collectFactorAccumulators(
@@ -220,7 +223,9 @@ function readFactorCandidate(
     const token = canonicalFactorToken(normalizeActivityKindToken(
       readString(event.attributes.activityType) ?? readString(event.attributes.activityKind),
     ));
-    return token && token !== "sleep" ? { kind: "activity", token } : null;
+    return token && !OUTCOME_LIKE_FACTOR_TOKENS.has(token)
+      ? { kind: "activity", token }
+      : null;
   }
 
   if (event.kind === "intervention_session") {
@@ -229,7 +234,9 @@ function readFactorCandidate(
     const token = canonicalFactorToken(
       normalizeActivityKindToken(readString(event.attributes.interventionType)),
     );
-    return token ? { kind: "intervention", token } : null;
+    return token && !OUTCOME_LIKE_FACTOR_TOKENS.has(token)
+      ? { kind: "intervention", token }
+      : null;
   }
 
   return null;

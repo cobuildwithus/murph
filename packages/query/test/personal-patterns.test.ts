@@ -123,6 +123,42 @@ test("Personal Patterns suppresses factors without enough matched history", () =
   assert.equal(report.testedCellCount, 0);
 });
 
+test("Personal Patterns suppresses outcome-like activity and intervention factors", () => {
+  const start = "2026-01-05";
+  const factorDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const entities: CanonicalEntity[] = [
+    ...factorDates.flatMap((date, index) => [
+      event(`sleep_${index}`, date, "intervention_session", {
+        interventionType: "sleep",
+        sessionStatus: "completed",
+      }),
+      event(`hrv_${index}`, date, "activity_session", {
+        activityType: "hrv",
+      }),
+    ]),
+    ...Array.from({ length: 112 }, (_, index) => {
+      const date = addDays(start, index);
+      return observation(
+        `sleep_score_${index}`,
+        date,
+        "sleep-score",
+        factorDates.includes(addDays(date, -1)) ? 90 : 70,
+        "score",
+      );
+    }),
+  ];
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities,
+    vaultRoot: "test://personal-patterns",
+  }), {
+    asOf: "2026-04-27T12:00:00.000Z",
+  });
+
+  assert.deepEqual(report.factors, []);
+  assert.deepEqual(report.cells, []);
+  assert.equal(report.testedCellCount, 0);
+});
+
 test("Personal Patterns runtime reuses projected wearable summaries without exposing raw observations", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-personal-pattern-runtime-"));
   const start = "2026-01-05";

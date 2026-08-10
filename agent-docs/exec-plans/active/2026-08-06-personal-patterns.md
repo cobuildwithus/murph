@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-10
 
 ## Goal
 
@@ -44,8 +44,9 @@ Updated: 2026-08-06
 3. [x] Add an assistant-callable `vault-cli wearables patterns --format json` read.
 4. [x] Point Weekly health insight at the deterministic read before open-ended search.
 5. [x] Add the production Overview section and design-catalog study.
-6. [ ] Verify focused query, CLI, assistant, web, desktop, and mobile behavior.
-7. [ ] Complete the required review, PR, and CI workflow.
+6. [x] Suppress outcome-like factors and document the V1 evidence policy.
+7. [ ] Verify focused query, CLI, assistant, web, desktop, and mobile behavior.
+8. [ ] Complete the required review, PR, and CI workflow.
 
 ## Separate process correction
 
