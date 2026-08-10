@@ -5,7 +5,7 @@ import {
   getHostedDefaultBillingPlanCode,
   getHostedFamilyBillingOfferDefinition,
   type HostedBillingPlanCode,
-  type HostedPlanCode,
+  type HostedFamilyPlanCode,
 } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
@@ -308,9 +308,9 @@ function buildHostedBillingPriceConfigurationError(
 }
 
 export function requireHostedStripeFamilyPlanConfig(input: {
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
 }): {
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   priceId: string;
   stripe: Stripe;
 } {
