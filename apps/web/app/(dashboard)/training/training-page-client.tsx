@@ -81,18 +81,22 @@ export function TrainingPageView({
   training: BrowserTrainingView | null;
 }) {
   const activeSession = training?.activeSession ?? null;
-  const primaryContactOption = activeSession
-    ? continueContactOptions[0] ?? null
-    : startContactOptions[0] ?? null;
-  const primaryActionLabel = activeSession
-    ? "Continue workout"
-    : "Start workout";
-  const preparing =
-    status === "loading" || (status === "empty" && refreshPending);
   const hasTraining = Boolean(
     training
       && (training.activeSession || training.recentSessions.length > 0),
   );
+  const primaryContactOption = activeSession
+    ? continueContactOptions[0] ?? null
+    : hasTraining
+      ? startContactOptions[0] ?? null
+      : null;
+  const primaryActionLabel = activeSession
+    ? "Continue workout"
+    : hasTraining
+      ? "Start workout"
+      : null;
+  const preparing =
+    status === "loading" || (status === "empty" && refreshPending);
 
   return (
     <div className="flex flex-col gap-8">
@@ -100,14 +104,16 @@ export function TrainingPageView({
         <PageHeader
           eyebrow="Your private log"
           title="Training"
-          description="Log sets by messaging Murph. Review every workout and see what is improving here."
+          description="Log sets by messaging Murph. Review recent workouts and see what is improving here."
         />
-        <ContactAction
-          authenticated={authenticated}
-          className="w-full sm:w-auto"
-          label={primaryActionLabel}
-          option={primaryContactOption}
-        />
+        {primaryActionLabel ? (
+          <ContactAction
+            authenticated={authenticated}
+            className="w-full sm:w-auto"
+            label={primaryActionLabel}
+            option={primaryContactOption}
+          />
+        ) : null}
       </div>
 
       {preparing ? <TrainingSkeleton /> : null}
@@ -274,9 +280,9 @@ function ActiveExercise({ exercise }: { exercise: TrainingExerciseView }) {
           {exercise.name}
         </p>
         {exercise.note ? (
-          <p className="truncate text-xs text-white/45">{exercise.note}</p>
+          <p className="truncate text-xs text-white/60">{exercise.note}</p>
         ) : null}
-        <p className="text-xs text-white/45">
+        <p className="text-xs text-white/60">
           {completed}/{exercise.sets.length} sets
         </p>
       </div>

@@ -274,6 +274,51 @@ test("browser training projection fails closed on impractically large sessions",
   });
 });
 
+test("browser training projection fails closed on aggregate session set limits", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T12:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "training-projection-aggregate-bound",
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("event", "strength_aggregate_oversized", {
+          attributes: {
+            activityType: "strength-training",
+            source: "manual",
+            workout: {
+              endedAt: "2026-08-09T11:00:00.000Z",
+              exercises: Array.from({ length: 3 }, (_, exerciseIndex) => ({
+                name: `Exercise ${exerciseIndex + 1}`,
+                order: exerciseIndex + 1,
+                sets: Array.from({ length: 101 }, (_, setIndex) => ({
+                  order: setIndex + 1,
+                  reps: 1,
+                })),
+              })),
+              startedAt: "2026-08-09T10:00:00.000Z",
+            },
+          },
+          date: "2026-08-09",
+          kind: "activity_session",
+          occurredAt: "2026-08-09T10:00:00.000Z",
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const projected = replica.entities.find(
+    (entity) => entity.id === "strength_aggregate_oversized",
+  );
+  assert.ok(projected);
+  assert.equal("training" in projected.attributes, false);
+  assert.deepEqual(projected.attributes, {
+    activityKind: "strength-training",
+    source: "manual",
+  });
+});
+
 function requireRecord(value: unknown): Record<string, unknown> {
   assert.ok(value && typeof value === "object" && !Array.isArray(value));
   return value as Record<string, unknown>;

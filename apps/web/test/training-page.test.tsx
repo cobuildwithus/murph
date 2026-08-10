@@ -21,7 +21,9 @@ vi.mock("@/src/components/ui/auth-button", () => ({
     createElement("button", null, children),
 }));
 
-import TrainingPageClient from "../app/(dashboard)/training/training-page-client";
+import TrainingPageClient, {
+  TrainingPageView,
+} from "../app/(dashboard)/training/training-page-client";
 import { TrainingDashboardStudy } from "../app/design/training-dashboard-study";
 
 const trainingFixture: BrowserTrainingView = {
@@ -226,6 +228,8 @@ test("Training renders live progress, history and a continuation action for the 
   );
 
   assert.match(markup, /Your private log/);
+  assert.match(markup, /Review recent workouts and see what is improving here/);
+  assert.doesNotMatch(markup, /Review every workout/);
   assert.match(markup, /In progress/);
   assert.match(markup, /1 of 2 sets logged/);
   assert.match(markup, /role="progressbar"/);
@@ -280,6 +284,65 @@ test("Training gives a zero-data member one clear conversational start", () => {
   );
   assert.doesNotMatch(markup, /Last 30 days/);
   assert.equal((markup.match(/Just tell Murph what happened/g) ?? []).length, 0);
+});
+
+test("Training exposes workout actions only when vault state is known", () => {
+  for (const status of ["loading", "error"] as const) {
+    const markup = renderToStaticMarkup(
+      createElement(TrainingPageView, {
+        authenticated: true,
+        continueContactOptions,
+        error: status === "error" ? "Refresh failed." : null,
+        onRefresh: () => {},
+        refreshPending: false,
+        startContactOptions,
+        status,
+        training: null,
+      }),
+    );
+
+    assert.doesNotMatch(markup, /Start workout|Continue workout/);
+    assert.doesNotMatch(markup, /body=Start%20a%20workout/);
+    assert.doesNotMatch(markup, /body=Continue%20my%20active%20workout/);
+    assert.match(
+      markup,
+      status === "loading" ? /Loading your training log/ : /Retry/,
+    );
+  }
+
+  for (const status of ["loading", "error"] as const) {
+    const markup = renderToStaticMarkup(
+      createElement(TrainingPageView, {
+        authenticated: true,
+        continueContactOptions,
+        error: status === "error" ? "Refresh failed." : null,
+        onRefresh: () => {},
+        refreshPending: false,
+        startContactOptions,
+        status,
+        training: trainingFixture,
+      }),
+    );
+
+    assert.match(markup, /Continue workout/);
+    assert.match(markup, /body=Continue%20my%20active%20workout/);
+    assert.doesNotMatch(markup, /body=Start%20a%20workout/);
+  }
+
+  const resolvedEmptyMarkup = renderToStaticMarkup(
+    createElement(TrainingPageView, {
+      authenticated: true,
+      continueContactOptions,
+      error: null,
+      onRefresh: () => {},
+      refreshPending: false,
+      startContactOptions,
+      status: "empty",
+      training: null,
+    }),
+  );
+  assert.match(resolvedEmptyMarkup, /Start workout/);
+  assert.match(resolvedEmptyMarkup, /body=Start%20a%20workout/);
 });
 
 test("Training handles an empty active workout without presenting false zero-percent failure", () => {
