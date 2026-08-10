@@ -1,4 +1,4 @@
-name: Validate final PR 1484 exact head
+name: Validate final PR 1484 repository guards
 
 on:
   push:
@@ -34,47 +34,29 @@ jobs:
       - name: Generate Prisma client
         run: pnpm -C apps/web run prisma:generate
 
-      - name: Validate Prisma schema
-        run: pnpm -C apps/web exec prisma validate
+      - name: Run diff-aware verification
+        run: pnpm test:diff:local
 
-      - name: Typecheck device sync
-        run: pnpm -C packages/device-syncd run typecheck
+      - name: Run scenario integrity smoke check
+        run: pnpm test:scenario-integrity
 
-      - name: Typecheck assistant runtime
-        run: pnpm -C packages/assistant-runtime run typecheck
+      - name: Run hosted crypto boundary guard
+        run: pnpm hosted-crypto:guard
 
-      - name: Typecheck Web
-        run: pnpm -C apps/web run typecheck
+      - name: Run provider request boundary guard
+        run: pnpm provider-requests:guard
 
-      - name: Lint Web
-        run: pnpm -C apps/web run lint
+      - name: Run dependency policy guard
+        run: pnpm deps:guard
 
-      - name: Run focused Web tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm -C apps/web exec vitest run --config vitest.workspace.ts --no-coverage \
-            test/agent-session-provider-service.test.ts \
-            test/agent-session-service.test.ts \
-            test/device-provider-application-crypto.test.ts \
-            test/device-provider-application-ingress-store.test.ts \
-            test/device-provider-application-store.test.ts \
-            test/device-provider-application-types.test.ts \
-            test/device-sync-hosted-runtime-authority.test.ts \
-            test/device-sync-internal-runtime.test.ts \
-            test/device-sync-providers.test.ts \
-            test/hosted-account-data-service.test.ts \
-            test/prisma-store-oauth-connection.test.ts \
-            test/prisma-store-oauth-sessions.test.ts
+      - name: Verify workspace boundaries
+        run: pnpm verify:workspace-boundaries
 
-      - name: Run assistant-runtime tests
-        run: pnpm -C packages/assistant-runtime run test
+      - name: Verify workspace package cycles
+        run: pnpm verify:workspace-package-cycles
 
-      - name: Run device-sync package tests
-        run: pnpm -C packages/device-syncd run test
-
-      - name: Run smoke checks
-        run: pnpm test:smoke
+      - name: Verify no generated JavaScript sidecars
+        run: pnpm no-js
 
       - name: Verify generated and source cleanliness
         shell: bash
