@@ -860,6 +860,107 @@ test('linq runtime sends a terminal payment URL as a separate rich-link message'
   ])
 })
 
+test('linq runtime preserves accepted primary media ownership when the rich-link request fails', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestCount = 0
+  const fetchImplementation = vi.fn(async () => {
+    requestCount += 1
+    if (requestCount === 1) {
+      return createJsonResponse({
+        chat_id: 'chat-123',
+        message: { id: 'message-generated-image' },
+      })
+    }
+    return createJsonResponse(
+      { error: 'rich-link request failed' },
+      { status: 401 },
+    )
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-123',
+        idempotencyKey: 'generated-image-123',
+        media: [{ url: 'https://cdn.example.test/generated-image.png' }],
+        message: 'Generated image\nhttps://example.test/source',
+      },
+      { env, fetchImplementation },
+    ),
+    (error) => {
+      const partial = error as {
+        code?: unknown
+        context?: { providerMessageEffects?: unknown }
+        providerMessageIds?: unknown
+      }
+      assert.deepEqual(partial.context?.providerMessageEffects, [{
+        carriesIntentMedia: true,
+        message: 'Generated image',
+        providerMessageId: 'message-generated-image',
+      }])
+      return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+        && JSON.stringify(partial.providerMessageIds)
+          === JSON.stringify(['message-generated-image'])
+    },
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
+test('linq runtime preserves created-chat media ownership when the rich-link request fails', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestCount = 0
+  const fetchImplementation = vi.fn(async () => {
+    requestCount += 1
+    if (requestCount === 1) {
+      return createJsonResponse({
+        chat: {
+          id: 'chat-created',
+          message: { id: 'message-generated-image' },
+        },
+      })
+    }
+    return createJsonResponse(
+      { error: 'rich-link request failed' },
+      { status: 401 },
+    )
+  })
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        idempotencyKey: 'created-generated-image-123',
+        media: [{ url: 'https://cdn.example.test/generated-image.png' }],
+        message: 'Generated image\nhttps://example.test/source',
+        to: ['+15550000001'],
+      },
+      { env, fetchImplementation },
+    ),
+    (error) => {
+      const partial = error as {
+        code?: unknown
+        context?: { providerMessageEffects?: unknown }
+        providerMessageIds?: unknown
+      }
+      assert.deepEqual(partial.context?.providerMessageEffects, [{
+        carriesIntentMedia: true,
+        message: 'Generated image',
+        providerMessageId: 'message-generated-image',
+      }])
+      return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+        && JSON.stringify(partial.providerMessageIds)
+          === JSON.stringify(['message-generated-image'])
+    },
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
 test.each(incompleteTwoPartMessageIdentityCases)(
   'linq runtime keeps an existing-chat rich-link delivery terminal with $label',
   async ({

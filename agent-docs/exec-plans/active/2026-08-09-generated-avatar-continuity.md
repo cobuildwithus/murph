@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — ReviewGPT round 5 rollback-floor remediation
+Status: active — ReviewGPT round 6 accepted-primary remediation
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -248,3 +248,27 @@ Updated: 2026-08-10
   at 8,999,437-byte vault CLI total and a 1,659,616-byte runner entry,
   8,019,870-byte static closure, and 9,996,978-byte runner total without a
   budget change.
+- Final ReviewGPT round 6 accepted the rollback-floor proof and found one
+  remaining review-induced delivery gap: Linq retains an accepted primary
+  image when its terminal rich-link sibling fails, but the partial checkpoint
+  discarded the new physical media-owner effect and exact reply lookup admitted
+  only fully sent intents. A member replying to the visible image before the
+  scheduled link retry therefore lost an otherwise exact media join.
+- The correction carries the primary effect through the existing Linq partial
+  error and delivery checkpoint, then admits only an explicit Linq native reply
+  to a retryable, non-confirmation-pending delivery with an exact marked media
+  effect. Generic retryable or confirmation-pending records remain excluded;
+  no new state owner or positional inference was added.
+- Production-shaped proof uses the real Linq attachment, primary-message, and
+  rich-link endpoints, persists and reloads the one-id retryable checkpoint,
+  resolves a pre-retry native reply under fresh planning with a second generated
+  image present, and then converges on the same provider idempotency keys. The
+  primary is accepted once, the link sibling never inherits media, and the
+  already-processed inbound is not replayed. Seven affected files pass 372
+  tests, and the Assistant Engine and Operator Config typechecks pass.
+- The first exact assembly exposed a 961-byte vault CLI overage. Reusing the
+  existing effect parser and deleting redundant private error-call fields kept
+  the same persisted evidence without raising a ratchet. Final hosted-local
+  assembly passes at 8,999,779-byte vault CLI total, 1,659,616-byte runner
+  entry, 8,020,212-byte static closure, and 9,997,320-byte runner total; the
+  42-test bundle-policy file and docs drift check pass.

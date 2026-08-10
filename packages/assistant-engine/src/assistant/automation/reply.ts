@@ -4607,6 +4607,7 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
     (replyToMessageId) => replyToMessageId !== null,
   )
     ? await listAssistantAutoReplyMatchingOutboxDeliveries({
+        allowRetryableMedia: true,
         deliveryTarget: input.deliveryTarget,
         historyReader: input.historyReader,
         input: input.input,
@@ -4896,6 +4897,7 @@ type AssistantAutoReplyOutboxMessageDelivery = Extract<
 >
 
 async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
+  allowRetryableMedia?: boolean
   deliveryTarget: string | null
   historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
@@ -4908,7 +4910,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
 
   const intents = await input.historyReader.readOutboxIntents()
   return intents.flatMap((intent) => {
-    if (intent.status !== 'sent' || intent.operation !== null) {
+    if (intent.operation !== null) {
       return []
     }
 
@@ -4927,9 +4929,26 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       return []
     }
 
-    // A sent delivery is attested by its provider message id even when it
-    // carries only response media; media-only records keep a null message so
-    // no consumer can quote text that never existed.
+    const providerMessageIds =
+      readAssistantAutoReplyOutboxDeliveryProviderMessageIds(delivery)
+    const providerMessageEffects = delivery.providerMessageEffects ?? []
+    const retryableAttestedLinqMedia =
+      input.allowRetryableMedia &&
+      intent.status === 'retryable' &&
+      !intent.deliveryConfirmationPending &&
+      delivery.channel === 'linq' &&
+      providerMessageEffects.some((effect) =>
+        effect.carriesIntentMedia === true &&
+        providerMessageIds.includes(effect.providerMessageId),
+      )
+    if (intent.status !== 'sent' && !retryableAttestedLinqMedia) {
+      return []
+    }
+
+    // A provider delivery is attested by its provider message id even when it
+    // carries only response media. The only non-sent exception is the exact
+    // accepted Linq primary admitted above; media-only records keep a null
+    // message so no consumer can quote text that never existed.
     const message = normalizeNullableString(intent.message)
     const sentAtMs = Date.parse(delivery.sentAt)
     if (
@@ -4942,10 +4961,8 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       intentId: intent.intentId,
       media: intent.media ?? [],
       message: message ?? null,
-      providerMessageEffects: delivery.providerMessageEffects ?? [],
-      providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
-        delivery,
-      ),
+      providerMessageEffects,
+      providerMessageIds,
       sentAtMs,
       sessionId: intent.sessionId,
       turnId: intent.turnId,
