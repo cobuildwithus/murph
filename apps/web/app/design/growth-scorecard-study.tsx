@@ -209,6 +209,7 @@ const MONTHLY_REVENUE_SERIES = buildHostedGrowthMonthlyRevenueSeries({
 const TRIAL_START_ATTRIBUTION = {
   counts: {
     companion_onboarding: 8,
+    legacy_trial_migration: 2,
     linq_instant_start: 5,
     unknown: 3,
     web_onboarding: 11,
@@ -245,6 +246,7 @@ const TRIAL_START_ATTRIBUTION = {
 const EMPTY_TRIAL_START_ATTRIBUTION = {
   counts: {
     companion_onboarding: 0,
+    legacy_trial_migration: 0,
     linq_instant_start: 0,
     unknown: 0,
     web_onboarding: 0,

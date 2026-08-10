@@ -10,6 +10,7 @@ describe("ops growth trial-start attribution", () => {
         attribution={{
           counts: {
             companion_onboarding: 1,
+            legacy_trial_migration: 0,
             linq_instant_start: 1,
             unknown: 1,
             web_onboarding: 0,
@@ -33,7 +34,7 @@ describe("ops growth trial-start attribution", () => {
       />,
     );
 
-    expect(markup).toContain("Trial start paths");
+    expect(markup).toContain("Starter activation paths");
     expect(markup).toContain("Direct iMessage");
     expect(markup).toContain("Inbound iMessage");
     expect(markup).not.toContain("SMS");
@@ -49,6 +50,7 @@ describe("ops growth trial-start attribution", () => {
         attribution={{
           counts: {
             companion_onboarding: 0,
+            legacy_trial_migration: 0,
             linq_instant_start: 0,
             unknown: 0,
             web_onboarding: 0,
@@ -59,7 +61,7 @@ describe("ops growth trial-start attribution", () => {
       />,
     );
 
-    expect(markup).toContain("No trial starts since Jul 1, 2026");
+    expect(markup).toContain("No starter activations since Jul 1, 2026");
     expect(markup).not.toContain("No phone hint");
   });
 });

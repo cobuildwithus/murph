@@ -280,6 +280,29 @@ brief is incomplete, preserve the unresolved slots and resume intake on the
 next ordinary conversational turn instead of announcing that Murph is ready to
 place the real call.
 
+## Create the default private reminder
+
+In a private conversation, a booked or otherwise confirmed future care
+appointment—whether Murph booked it or the user clearly says it exists—is
+explicit owning-tool authorization for exactly one private one-shot reminder.
+A tentative discussion, proposed slot, availability list, waitlist, or
+unverified booking is not enough. Create the reminder before the appointment
+workflow's final report or stop, without separate confirmation unless the user
+opts out.
+
+Use the appointment's stated timezone, otherwise the vault timezone. For an
+appointment before noon local, schedule the prior evening at a known pre-bed
+reminder time or 8:00 PM. For noon or later, schedule 8:00 AM local that day.
+If that default instant is already past while the appointment is still future,
+use the earliest useful future time. If only the date is known, use 8:00 PM the
+prior evening. If no date is known, ask only for it.
+
+Reuse one stable automation identity for repeated mentions. Patch it when a
+reschedule is confirmed and archive it when cancellation is confirmed. Keep
+the subject privacy-safe but unmistakable, include the appointment time when
+known, and follow the existing save-verification rules before claiming it is
+active.
+
 ## Verify and report
 
 Treat the action as complete only when the tool or destination verifies the
