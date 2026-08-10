@@ -1316,19 +1316,32 @@ During gradual rollout, Worker code and runner container state may disagree for 
 
 The non-expiring Starter plan-usage schema is a bidirectional hard cut between
 Web and the runner bundle. Suspend the production Render
-`murph-temporal-worker` background-worker service, confirm both declared
-instances have stopped and no `ensureRuntimeProcessing` activity remains in
-flight, then apply the Starter migrations and deploy Web plus Cloudflare from
-the same commit while that worker stays suspended. Dispatch the protected
-production workflow with `container_rollout=immediate`; do not resume after
-only one plane succeeds. Managed-container smoke must report the exact new
-runner-bundle fingerprint, and signed active and exhausted Starter plan-usage
-reads plus an eligible subscription quote must succeed before the Render worker
-resumes.
+`murph-temporal-worker` background-worker service and confirm both declared
+instances have stopped. That does not block Web's direct latency path. Also
+remove `HOSTED_EXECUTION_CONTROL_URL` from Vercel Production and redeploy the
+exact commit behind the current production alias. Prove the alias SHA and that
+the deployment omits the variable; mailbox acceptance and Temporal signaling
+remain durable, while the existing optional control client starts no direct
+`ensure-processing` request. Wait the full ten-minute runtime request lifetime
+plus deployment drain margin, and require zero new Cloudflare
+`runtime-ensure-processing` accepts plus zero runtime-log rows with a non-null
+attempt id after the boundary.
+
+Only after that two-plane drain may the Starter migrations commit. Deploy Web
+plus Cloudflare from the same commit while the control URL remains absent and
+the Render worker stays suspended. Dispatch the protected production workflow
+with `container_rollout=immediate`; do not reopen after only one plane succeeds.
+Managed-container smoke must report the exact new runner-bundle fingerprint,
+and signed active and exhausted Starter plan-usage reads plus an eligible
+subscription quote must succeed. Restore the canonical production control URL,
+redeploy that exact Web commit, prove the production alias SHA, and only then
+resume the Render worker. Verify one already-accepted canary mailbox item
+processes exactly once.
 
 Before the Starter migration commits, the complete prior Web/runner pair
-remains a rollback target. After it commits, the migrated ledger establishes a
-forward-only floor: keep the Render worker suspended and forward-fix or
+remains a rollback target after the canonical control URL is restored. After it
+commits, the migrated ledger establishes a forward-only floor: leave the Web
+control URL absent, keep the Render worker suspended, and forward-fix or
 redeploy the exact current Web/runner pair. Neither prior plane is a resumable
 target against the migrated database.
 

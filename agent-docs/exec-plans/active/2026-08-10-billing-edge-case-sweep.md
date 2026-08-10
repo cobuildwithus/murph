@@ -213,7 +213,14 @@ function-state matrix and verification ledger. The accepted defects are:
   study inert without adding billing state.
 - Final ReviewGPT round 10's rollback finding was reproduced against the prior
   allowance and credit-settlement owners and accepted. The correction deletes
-  the unsafe post-migration rollback promise: the existing Render Temporal
-  worker suspension is the cutover gate, and migration commit establishes a
+  the unsafe post-migration rollback promise: migration commit establishes a
   forward-only Web/runner floor without a compatibility parser or second ledger
-  owner.
+  owner. Its first cutover draft relied only on Render worker suspension.
+- Final ReviewGPT round 11 correctly found that suspending Temporal alone did
+  not stop Web's post-signal direct Cloudflare ensure. The cutover now uses the
+  existing optional Web control client as the second pause: deploy the current
+  production Web commit without `HOSTED_EXECUTION_CONTROL_URL`, drain the full
+  runtime lifetime, keep that deployment boundary through migration and the
+  exact Web/runner release, then restore the URL and redeploy only after signed
+  plan reads, quote proof, and runner fingerprint pass. This adds no flag,
+  queue, state owner, or compatibility parser.

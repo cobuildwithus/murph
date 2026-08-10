@@ -150,38 +150,53 @@ required to drain already-created provider objects.
 Use this rollout order:
 
 1. suspend the production Render `murph-temporal-worker` background-worker
-   service, confirm both declared instances have stopped, and confirm no
-   `ensureRuntimeProcessing` activity remains in flight;
-2. while that worker remains suspended, apply the additive
+   service and confirm both declared instances have stopped;
+2. remove `HOSTED_EXECUTION_CONTROL_URL` from the Vercel Production
+   environment and redeploy the exact commit behind the current production
+   alias. Prove that the alias still names that commit and that the deployed
+   functions omit the variable. This is the existing Web-to-Cloudflare pause:
+   mailbox writes and Temporal signals remain durable, while the shared
+   control client returns `null` and starts no direct `ensure-processing`;
+3. keep both pauses in place for the full ten-minute runtime request lifetime
+   plus the deployment drain margin. Require zero new Cloudflare
+   `runtime-ensure-processing` accepts and zero runtime-log rows with a
+   non-null attempt id after the drain boundary. Do not infer quiescence from
+   the Render worker state alone;
+4. while both pauses remain active, apply the additive
    ledger-kind/check-constraint migration and Starter backfill, then deploy Web
    and the Cloudflare Worker/runner bundle from the same commit with
    `container_rollout=immediate`;
-3. require the exact runner-bundle fingerprint, signed active and exhausted
+5. require the exact runner-bundle fingerprint, signed active and exhausted
    Starter plan-usage reads, and one eligible subscription quote before
-   resuming the Render worker;
-4. confirm every old Web deployment capable of creating a Stripe trial is
+   reopening execution. Restore the canonical production
+   `HOSTED_EXECUTION_CONTROL_URL`, redeploy that exact Web commit, prove the
+   production alias SHA, and only then resume the Render worker. Verify one
+   already-accepted canary mailbox item processes exactly once;
+6. confirm every old Web deployment capable of creating a Stripe trial is
    drained, then let delayed Stripe events and the runtime compatibility owner
    convert exact post-migration legacy objects through the canonical Starter
    grant path;
    keep the configured legacy Pulse Price unchanged through this drain and the
    delayed-event horizon so exact old objects remain verifiable;
-5. run `pnpm --dir apps/web stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>`
+7. run `pnpm --dir apps/web stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>`
    in dry-run mode and review the aggregate candidate and provider-status
    counts;
-6. apply only with the exact observed count using `--apply
+8. apply only with the exact observed count using `--apply
    --expected-candidates=<count>`; any potentially paid provider state aborts
    the entire preflight before mutation;
-7. rerun the dry-run until it reports zero candidates; and
-8. after the delayed-event horizon has passed, remove the legacy offer fields,
+9. rerun the dry-run until it reports zero candidates; and
+10. after the delayed-event horizon has passed, remove the legacy offer fields,
    wire actions, cleanup owner, and operator command together.
 
 The complete prior Web/runner pair remains a rollback target only until the
-Starter migration commits. After commit, keep the Render worker suspended and
-forward-fix or redeploy the exact current Web/runner pair; neither prior plane
-may resume against the migrated ledger. The operator command requires an
-explicit Stripe mode and verifies that it matches the configured credential,
-defaults to dry-run, prevalidates every candidate before applying, and is safe
-to rerun.
+Starter migration commits. Before commit, restore the canonical control URL,
+redeploy the previous Web/runner pair, and resume Temporal together. After
+commit, leave the Web-to-Cloudflare control URL absent, keep the Render worker
+suspended, and forward-fix or redeploy the exact current Web/runner pair;
+neither prior plane may resume against the migrated ledger. The operator
+command requires an explicit Stripe mode and verifies that it matches the
+configured credential, defaults to dry-run, prevalidates every candidate
+before applying, and is safe to rerun.
 
 After deploy, verify:
 
@@ -207,5 +222,5 @@ Stripe event horizon has elapsed. Analytics-only cohort names and immutable
 historical records are not runtime compatibility and may remain.
 
 Do not revert the Starter migration: its ledger kind and historical entries are
-accounting history. Recovery after migration commit is forward-only under the
-same suspended-worker gate.
+accounting history. Recovery after migration commit is forward-only while both
+the Web direct-control deployment and the Temporal worker remain paused.
