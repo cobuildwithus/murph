@@ -281,19 +281,27 @@ customer plus event freshness watermark so both direct and Family checkout can
 recover without allowing an older event to reclaim billing. An older unbound
 attempt remains an ambiguous claim and requires support rather than permitting
 a blind second provider start. A non-owner sponsored member may not retain a
-bound live direct subscription. Invite acceptance rejects a bound direct
-subscription whose own-billing status can still grant, settle, or retry direct
-billing: `active`, `incomplete`, `past_due`, or `unpaid`. A `paused` or
-`canceled` direct subscription is lapsed, does not add a manual cancellation
-step to Family acceptance, and keeps its provider reference only as historical
-and reconciliation evidence. If that provider object later changes, the
-existing Family-sponsored Stripe event and exact-subscription cleanup owners
-remain authoritative. If Family sponsorship and direct Checkout race, the locked Family claim
-wins without disabling sponsored access, and every Checkout, subscription, and
-invoice replay for the different personal subscription remains in the existing
-receipt-owned cancellation path until Stripe confirms terminal cleanup. The
-owner exception remains limited to the exact direct subscription being handed
-to the Family group.
+bound live direct subscription. A bound subscription can precede its Stripe
+status projection, so invite acceptance treats every bound direct subscription
+as live or ambiguous unless own-billing status is explicitly `paused` or
+`canceled`. Those two statuses are lapsed, do not add a manual cancellation step
+to Family acceptance, and keep the provider reference only as historical and
+reconciliation evidence. This lapsed-status exception belongs only to invite
+acceptance; Family owner activation, capacity changes, and member-tier
+management retain the stricter direct-subscription guard. If that provider
+object later changes, the existing Family-sponsored Stripe event and
+exact-subscription cleanup owners remain authoritative. If Family sponsorship
+and direct Checkout race, the locked Family claim wins without disabling
+sponsored access, and every Checkout, subscription, and invoice replay for the
+different personal subscription remains in the existing receipt-owned
+cancellation path until Stripe confirms terminal cleanup. Direct paused-plan
+resume rechecks that Family claim under the same member mutation lock. If
+resume wins the lock, it projects a non-lapsed own-billing state before provider
+mutation and retains that fence for ambiguous or still-paused provider results;
+if Family wins, the stale resume performs no provider mutation. A locally
+reconciled paid invoice executes any Family-sponsored cleanup outcome after its
+transaction rather than discarding it. The owner exception remains limited to
+the exact direct subscription being handed to the Family group.
 
 If a direct checkout opened before Family billing claimed the member and
 completes afterward, reconciliation leaves it unbound and cancels that

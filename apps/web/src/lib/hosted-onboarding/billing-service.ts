@@ -69,6 +69,7 @@ import {
   prepareHostedMemberSubscriptionCheckout,
 } from "./subscription-checkout-store";
 import {
+  buildHostedFamilyBillingClaimError,
   readHostedMemberFamilyBillingClaim,
   type HostedMemberFamilyBillingClaim,
 } from "./family-plan";
@@ -361,7 +362,7 @@ async function prepareHostedBillingCheckoutAttempt(input: {
     prisma: input.tx,
   });
   if (familyClaim) {
-    throw buildHostedFamilyBillingClaimCheckoutError(familyClaim);
+    throw buildHostedFamilyBillingClaimError(familyClaim);
   }
 
   const resolvedOffer = resolveHostedBillingCheckoutOffer({
@@ -466,7 +467,7 @@ async function runHostedBillingCheckoutAttempt(input: {
         stripe: input.stripe,
       });
       if (revalidation.kind === "family_claim") {
-        throw buildHostedFamilyBillingClaimCheckoutError(
+        throw buildHostedFamilyBillingClaimError(
           revalidation.familyClaim,
         );
       }
@@ -512,7 +513,7 @@ async function runHostedBillingCheckoutAttempt(input: {
     HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   );
   if (preCreateState.kind === "family_claim") {
-    throw buildHostedFamilyBillingClaimCheckoutError(
+    throw buildHostedFamilyBillingClaimError(
       preCreateState.familyClaim,
     );
   }
@@ -648,7 +649,7 @@ async function runHostedBillingCheckoutAttempt(input: {
       stripe: input.stripe,
     });
     if (bindResult.kind === "family_claim") {
-      throw buildHostedFamilyBillingClaimCheckoutError(
+      throw buildHostedFamilyBillingClaimError(
         bindResult.familyClaim,
       );
     }
@@ -839,20 +840,6 @@ export function deriveHostedBillingCheckoutOfferBindingKey(input: {
   };
 
   return `offer:${sha256Hex(JSON.stringify(binding)).slice(0, 12)}`;
-}
-
-function buildHostedFamilyBillingClaimCheckoutError(
-  claim: HostedMemberFamilyBillingClaim,
-) {
-  return hostedOnboardingError({
-    code: claim.kind === "active_sponsorship"
-      ? "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED"
-      : "HOSTED_FAMILY_BILLING_IN_PROGRESS",
-    httpStatus: 409,
-    message: claim.kind === "active_sponsorship"
-      ? "Your Murph access is already covered by a Family plan."
-      : "Family billing is already in progress for this account.",
-  });
 }
 
 function buildHostedBillingCheckoutStateChangedError() {

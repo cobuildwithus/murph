@@ -324,6 +324,20 @@ export type HostedMemberFamilyBillingClaim =
       ownerMemberId: string;
     };
 
+export function buildHostedFamilyBillingClaimError(
+  claim: HostedMemberFamilyBillingClaim,
+) {
+  return hostedOnboardingError({
+    code: claim.kind === "active_sponsorship"
+      ? "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED"
+      : "HOSTED_FAMILY_BILLING_IN_PROGRESS",
+    httpStatus: 409,
+    message: claim.kind === "active_sponsorship"
+      ? "Your Murph access is already covered by a Family plan."
+      : "Family billing is already in progress for this account.",
+  });
+}
+
 export interface HostedAccountGroupBillingLookup {
   billingRef: HostedAccountGroupBillingRefSnapshot;
   group: HostedAccountGroupAccessSnapshot;
@@ -4435,6 +4449,7 @@ export async function acceptHostedFamilyInviteTx(input: {
     tx: input.tx,
   });
   await assertHostedFamilyMemberNotDirectPaidTx({
+    allowPausedDirectSubscription: true,
     memberId: input.acceptedMemberId,
     tx: input.tx,
   });
@@ -5517,6 +5532,7 @@ async function assertHostedFamilyOwnerIsPersonalMember(input: {
 
 async function assertHostedFamilyMemberNotDirectPaidTx(input: {
   allowDirectPaidOwner?: boolean;
+  allowPausedDirectSubscription?: boolean;
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
@@ -5524,6 +5540,7 @@ async function assertHostedFamilyMemberNotDirectPaidTx(input: {
     return;
   }
   if (await hasHostedFamilyMemberLiveDirectSubscription({
+    allowPausedDirectSubscription: input.allowPausedDirectSubscription,
     memberId: input.memberId,
     prisma: input.tx,
   })) {
@@ -5536,6 +5553,7 @@ async function assertHostedFamilyMemberNotDirectPaidTx(input: {
 }
 
 async function hasHostedFamilyMemberLiveDirectSubscription(input: {
+  allowPausedDirectSubscription?: boolean;
   memberId: string;
   prisma: HostedOnboardingReadClient;
 }): Promise<boolean> {
@@ -5555,11 +5573,10 @@ async function hasHostedFamilyMemberLiveDirectSubscription(input: {
 
   return (
     Boolean(member?.billingRef?.stripeSubscriptionIdEncrypted)
+    && member?.billingStatus !== HostedBillingStatus.canceled
     && (
-      member?.billingStatus === HostedBillingStatus.active
-      || member?.billingStatus === HostedBillingStatus.incomplete
-      || member?.billingStatus === HostedBillingStatus.past_due
-      || member?.billingStatus === HostedBillingStatus.unpaid
+      !input.allowPausedDirectSubscription
+      || member?.billingStatus !== HostedBillingStatus.paused
     )
   );
 }

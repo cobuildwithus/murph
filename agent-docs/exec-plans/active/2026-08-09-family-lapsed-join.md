@@ -17,8 +17,15 @@ Updated: 2026-08-09
 - A member with a stored direct subscription reference and `paused` own-billing
   status can accept a valid Family invite through the canonical acceptance
   owner.
-- Members with active, incomplete, past-due, or unpaid direct subscriptions
-  remain blocked by the recoverable transfer guard.
+- Members with a bound direct subscription in any status other than explicitly
+  lapsed `paused` or `canceled` remain blocked by the recoverable transfer
+  guard, including a Checkout binding whose status projection is still
+  `not_started`.
+- The lapsed-status exception applies only to invite acceptance; Family owner
+  activation and management keep their existing stricter guard.
+- Family sponsorship and a stale paused-plan resume serialize on the member
+  lock: Family-first performs no Stripe mutation, while resume-first publishes
+  a non-lapsed own-billing projection before releasing the lock.
 - Existing Family membership, identity binding, seat-capacity, activation, and
   Stripe loser-cleanup behavior remains unchanged.
 - The focused Family-plan regression suite, hosted billing guard, Web
@@ -32,6 +39,8 @@ Updated: 2026-08-09
 - In scope:
   - Correct the direct-subscription liveness predicate at the existing Family
     invite-admission boundary.
+  - Preserve Family sponsorship when it races a stale direct paused-plan resume
+    and execute any resulting invoice-owned cleanup outcome.
   - Add focused regression coverage for lapsed and genuinely live statuses.
   - Clarify the live-direct-subscription rule in the Family product contract.
 - Out of scope:
@@ -64,9 +73,15 @@ Updated: 2026-08-09
 2. Risk: A dormant provider object later changes after Family acceptance.
    Mitigation: Preserve the existing active-sponsorship reconciliation and
    exact-subscription cleanup owners; do not add a second cleanup lifecycle.
-3. Risk: The fix changes adjacent owner-conversion behavior.
-   Mitigation: Change only the shared liveness predicate and exercise invitee
-   admission plus existing live-status cases in the focused owner suite.
+3. Risk: A shared liveness helper changes adjacent Family owner or management
+   behavior.
+   Mitigation: Pass the paused exception only from invite acceptance and prove
+   that a paused direct owner remains blocked from capacity management.
+4. Risk: A stale Settings or assistant resume action restarts direct billing
+   after Family sponsorship.
+   Mitigation: Re-read the Family claim under the existing member mutation lock,
+   publish a blocking projection before provider mutation, and retain it for
+   ambiguous or still-lapsed resume responses.
 
 ## Tasks
 
@@ -90,19 +105,32 @@ Updated: 2026-08-09
   `paused`, its stored period has ended, and only the dormant subscription
   reference causes the current `status !== canceled` predicate to classify it
   as live.
-- The smallest durable correction is to derive liveness from the closed set of
-  own-billing statuses that can still represent a payable or access-bearing
-  direct subscription. No new state or provider call is required.
+- The preliminary specialist review proved that direct Checkout can bind its
+  subscription before the own-billing status projection advances from
+  `not_started`. The smallest durable correction is therefore fail-closed:
+  only bound `paused` and `canceled` subscriptions are explicitly lapsed; every
+  other bound status remains live or ambiguous. The invite-admission correction
+  itself requires no new state or provider call.
+- The final ReviewGPT gate identified that the shared predicate also governs
+  Family owner operations and that a stale paused-plan resume could race Family
+  sponsorship. The exception is now invite-only. Resume and invite acceptance
+  share the member lock, and paid-invoice reconciliation delegates any Family
+  loser cleanup to the existing cleanup owner.
 
 ## Verification
 
 - Commands to run:
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-family-plan.test.ts`
+  - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts`
+  - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_dev_family_lapsed_join MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-stripe-webhook-entitlement-postgres.test.ts -t 'rejects Family acceptance after Checkout binds before status projection'`
   - `pnpm hosted-billing:ci-guard`
   - `pnpm --dir apps/web typecheck`
   - `pnpm --dir apps/web lint`
   - `git diff --check` and secret-safe final diff inspection
 - Expected outcomes:
-  - Paused/lapsed acceptance passes; live direct statuses remain blocked.
+  - Paused/lapsed invite acceptance passes; live or ambiguous direct statuses
+    and paused direct Family owners remain blocked.
+  - Family-first blocks stale resume without Stripe mutation; resume-first
+    publishes a non-lapsed projection; paid-invoice cleanup is not discarded.
   - Billing request-shape/contract guards, typecheck, and lint remain green.
   - No new persisted state, external call, dependency, or UI surface appears.
