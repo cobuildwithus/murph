@@ -419,11 +419,17 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
   if (activeSenderMemberId) {
     return true;
   }
-  if (
+  const firstContactContentDisposition =
     resolveHostedLinqFirstContactContentDisposition({
-        event: messageEvent,
-        participantContact,
-      }) !== "allow"
+      event: messageEvent,
+      participantContact,
+    });
+  if (
+    (
+      candidateSender
+        ? firstContactContentDisposition === "blocked"
+        : firstContactContentDisposition !== "allow"
+    )
     || input.participantMemberIds.length === 0
   ) {
     return false;
