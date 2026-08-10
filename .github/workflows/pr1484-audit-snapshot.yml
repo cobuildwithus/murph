@@ -39,105 +39,138 @@ jobs:
           test "$(git rev-parse HEAD)" = "$expected_head"
           python - <<'PY'
           from pathlib import Path
+          from textwrap import dedent
 
           service_path = Path("apps/web/src/lib/device-sync/agent-session-service.ts")
           source = service_path.read_text()
 
-          runtime_imports = '''import {
-            resolveDeviceProviderApplicationForConnection,
-          } from "./provider-applications";
-          import {
-            createHostedDeviceSyncRegistryWithProviderConfigs,
-          } from "./providers";
-          '''
-          if source.count(runtime_imports) != 1:
-              raise SystemExit("expected one provider-runtime import block")
-          source = source.replace(runtime_imports, "", 1)
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected one {label}")
+              return text.replace(old, new, 1)
 
-          options_marker = '''export interface HostedDeviceSyncAgentSessionOptions {
-            readonly registry?: DeviceSyncRegistry | null;
-          }'''
-          options_replacement = '''export type HostedDeviceSyncRefreshProviderResolver = (input: {
-            connectionId: string;
-            prisma: PrismaDeviceSyncControlPlaneStore["prisma"];
-            providerId: string;
-            userId: string;
-          }) => Promise<DeviceSyncProvider | null>;
+          source = replace_once(
+              source,
+              dedent('''\
+              import {
+                resolveDeviceProviderApplicationForConnection,
+              } from "./provider-applications";
+              import {
+                createHostedDeviceSyncRegistryWithProviderConfigs,
+              } from "./providers";
+              '''),
+              "",
+              "provider-runtime import block",
+          )
 
-          export interface HostedDeviceSyncAgentSessionOptions {
-            readonly registry?: DeviceSyncRegistry | null;
-            readonly resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
-          }'''
-          if source.count(options_marker) != 1:
-              raise SystemExit("expected one agent-session options interface")
-          source = source.replace(options_marker, options_replacement, 1)
+          source = replace_once(
+              source,
+              dedent('''\
+              export interface HostedDeviceSyncAgentSessionOptions {
+                readonly registry?: DeviceSyncRegistry | null;
+              }
+              '''),
+              dedent('''\
+              export type HostedDeviceSyncRefreshProviderResolver = (input: {
+                connectionId: string;
+                prisma: PrismaDeviceSyncControlPlaneStore["prisma"];
+                providerId: string;
+                userId: string;
+              }) => Promise<DeviceSyncProvider | null>;
 
-          field_marker = '''  private registry: DeviceSyncRegistry | null;
+              export interface HostedDeviceSyncAgentSessionOptions {
+                readonly registry?: DeviceSyncRegistry | null;
+                readonly resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
+              }
+              '''),
+              "agent-session options interface",
+          )
 
-            constructor(input: {
-              request: Request;
-              store: PrismaDeviceSyncControlPlaneStore;
-              registry?: DeviceSyncRegistry | null;
-            }) {
-              this.store = input.store;
-              this.registry = input.registry ?? null;'''
-          field_replacement = '''  private readonly registry: DeviceSyncRegistry | null;
-            private readonly resolveRefreshProvider:
-              | HostedDeviceSyncRefreshProviderResolver
-              | null;
+          source = replace_once(
+              source,
+              dedent('''\
+                private registry: DeviceSyncRegistry | null;
 
-            constructor(input: {
-              request: Request;
-              store: PrismaDeviceSyncControlPlaneStore;
-              registry?: DeviceSyncRegistry | null;
-              resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
-            }) {
-              this.store = input.store;
-              this.registry = input.registry ?? null;
-              this.resolveRefreshProvider = input.resolveRefreshProvider ?? null;'''
-          if source.count(field_marker) != 1:
-              raise SystemExit("expected one agent-session constructor block")
-          source = source.replace(field_marker, field_replacement, 1)
+                constructor(input: {
+                  request: Request;
+                  store: PrismaDeviceSyncControlPlaneStore;
+                  registry?: DeviceSyncRegistry | null;
+                }) {
+                  this.store = input.store;
+                  this.registry = input.registry ?? null;
+                  this.agentSessions = new HostedAgentSessionService({
+              '''),
+              dedent('''\
+                private registry: DeviceSyncRegistry | null;
+                private readonly resolveRefreshProvider:
+                  | HostedDeviceSyncRefreshProviderResolver
+                  | null;
 
-          provider_marker = '''    const application = await resolveDeviceProviderApplicationForConnection({
-              connectionId: input.connectionId,
-              memberId: input.userId,
-              prisma: this.store.prisma,
-            });
-            const registry = application
-              ? createHostedDeviceSyncRegistryWithProviderConfigs({
-                  providerConfigs: application.providerConfigs,
-                })
-              : await this.requireRegistry();
-            const provider = registry.get(input.providerId);'''
-          provider_replacement = '''    const provider = this.resolveRefreshProvider
-              ? await this.resolveRefreshProvider({
-                  ...input,
-                  prisma: this.store.prisma,
-                })
-              : (await this.requireRegistry()).get(input.providerId);'''
-          if source.count(provider_marker) != 1:
-              raise SystemExit("expected one inline refresh-provider resolution block")
-          source = source.replace(provider_marker, provider_replacement, 1)
+                constructor(input: {
+                  request: Request;
+                  store: PrismaDeviceSyncControlPlaneStore;
+                  registry?: DeviceSyncRegistry | null;
+                  resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
+                }) {
+                  this.store = input.store;
+                  this.registry = input.registry ?? null;
+                  this.resolveRefreshProvider = input.resolveRefreshProvider ?? null;
+                  this.agentSessions = new HostedAgentSessionService({
+              '''),
+              "agent-session constructor block",
+          )
 
-          context_marker = '''    agentSessions: new HostedDeviceSyncAgentSessionService({
-              registry: options.registry ?? null,
-              request,
-              store,
-            }),'''
-          context_replacement = '''    agentSessions: new HostedDeviceSyncAgentSessionService({
-              registry: options.registry ?? null,
-              request,
-              resolveRefreshProvider: options.resolveRefreshProvider ?? null,
-              store,
-            }),'''
-          if source.count(context_marker) != 1:
-              raise SystemExit("expected one agent-session context construction")
-          source = source.replace(context_marker, context_replacement, 1)
+          provider_start_marker = (
+              "    const application = await "
+              "resolveDeviceProviderApplicationForConnection({"
+          )
+          provider_end_marker = "    const provider = registry.get(input.providerId);"
+          provider_start = source.find(provider_start_marker)
+          if provider_start < 0:
+              raise SystemExit("missing inline refresh-provider resolution start")
+          provider_end = source.find(provider_end_marker, provider_start)
+          if provider_end < 0:
+              raise SystemExit("missing inline refresh-provider resolution end")
+          provider_end += len(provider_end_marker)
+          provider_replacement = dedent('''\
+              const provider = this.resolveRefreshProvider
+                ? await this.resolveRefreshProvider({
+                    ...input,
+                    prisma: this.store.prisma,
+                  })
+                : (await this.requireRegistry()).get(input.providerId);
+          ''')
+          source = (
+              source[:provider_start]
+              + "    "
+              + provider_replacement
+              + source[provider_end:]
+          )
+
+          source = replace_once(
+              source,
+              dedent('''\
+                  agentSessions: new HostedDeviceSyncAgentSessionService({
+                    registry: options.registry ?? null,
+                    request,
+                    store,
+                  }),
+              '''),
+              dedent('''\
+                  agentSessions: new HostedDeviceSyncAgentSessionService({
+                    registry: options.registry ?? null,
+                    request,
+                    resolveRefreshProvider: options.resolveRefreshProvider ?? null,
+                    store,
+                  }),
+              '''),
+              "agent-session context construction",
+          )
           service_path.write_text(source)
 
           adapter_path = Path("apps/web/src/lib/device-sync/agent-session-provider-service.ts")
-          adapter_path.write_text('''import "server-only";
+          adapter_path.write_text(dedent('''\
+          import "server-only";
 
           import {
             createHostedDeviceSyncAgentSessionService,
@@ -175,10 +208,11 @@ jobs:
               resolveRefreshProvider,
             });
           }
-          ''')
+          '''))
 
           test_path = Path("apps/web/test/agent-session-provider-service.test.ts")
-          test_path.write_text('''import { beforeEach, describe, expect, it, vi } from "vitest";
+          test_path.write_text(dedent('''\
+          import { beforeEach, describe, expect, it, vi } from "vitest";
 
           const mocks = vi.hoisted(() => ({
             createAgentSessionService: vi.fn(),
@@ -208,7 +242,17 @@ jobs:
           } from "@/src/lib/device-sync/agent-session-provider-service";
           import type {
             HostedDeviceSyncAgentSessionOptions,
+            HostedDeviceSyncRefreshProviderResolver,
           } from "@/src/lib/device-sync/agent-session-service";
+
+          function readResolver(): HostedDeviceSyncRefreshProviderResolver {
+            const options = mocks.createAgentSessionService.mock.calls[0]?.[1] as
+              | HostedDeviceSyncAgentSessionOptions
+              | undefined;
+            expect(options?.resolveRefreshProvider).toBeTypeOf("function");
+            return options?.resolveRefreshProvider as
+              HostedDeviceSyncRefreshProviderResolver;
+          }
 
           describe("member-owned provider agent-session adapter", () => {
             beforeEach(() => {
@@ -242,11 +286,10 @@ jobs:
                 "https://murph.example/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
               );
               const service = createHostedDeviceSyncProviderAgentSessionService(request);
-              const options = mocks.createAgentSessionService.mock.calls[0]?.[1]
-                as HostedDeviceSyncAgentSessionOptions;
+              const resolveRefreshProvider = readResolver();
               const prisma = { marker: "prisma" } as never;
 
-              await expect(options.resolveRefreshProvider?.({
+              await expect(resolveRefreshProvider({
                 connectionId: "dsc_123",
                 prisma,
                 providerId: "strava",
@@ -274,10 +317,9 @@ jobs:
               createHostedDeviceSyncProviderAgentSessionService(
                 new Request("https://murph.example/refresh"),
               );
-              const options = mocks.createAgentSessionService.mock.calls[0]?.[1]
-                as HostedDeviceSyncAgentSessionOptions;
+              const resolveRefreshProvider = readResolver();
 
-              await expect(options.resolveRefreshProvider?.({
+              await expect(resolveRefreshProvider({
                 connectionId: "dsc_shared",
                 prisma: {} as never,
                 providerId: "whoop",
@@ -304,10 +346,9 @@ jobs:
               createHostedDeviceSyncProviderAgentSessionService(
                 new Request("https://murph.example/refresh"),
               );
-              const options = mocks.createAgentSessionService.mock.calls[0]?.[1]
-                as HostedDeviceSyncAgentSessionOptions;
+              const resolveRefreshProvider = readResolver();
 
-              await expect(options.resolveRefreshProvider?.({
+              await expect(resolveRefreshProvider({
                 connectionId: "dsc_private",
                 prisma: {} as never,
                 providerId: "strava",
@@ -317,7 +358,7 @@ jobs:
               expect(mocks.sharedGet).not.toHaveBeenCalled();
             });
           });
-          ''')
+          '''))
           PY
           git diff --check
 
