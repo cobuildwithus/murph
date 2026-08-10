@@ -208,22 +208,24 @@ When a hosted job needs device-sync access, Cloudflare must call the signed inte
 That execution-time access does not make Cloudflare the durable owner of hosted device-sync authority.
 
 Paused companion access uses the existing `system_mailbox` invocation mode as
-a narrow execution lane. Web admits only device-sync system lag after companion
-access and historical health consent are rechecked. The runner preserves the
-ordinary lane-contiguous import of older accepted system work and its bounded
-import-owned durability effects, then executes only `run-device-sync-wake` and
-crosses the ordinary durable checkpoint and dirty-ack boundary. It does not
-execute unrelated pending route actions, conversation, delivery, assistant, or
-model work, and the restricted device-sync run suppresses new device-activity
-automation scheduling. Dirty acknowledgement and the following pending-dirty
-query run in the same health-data admission transaction used by companion
-ingress. If an acknowledgement remains dirty, the runtime clears the spent
-post-checkpoint record and requeues that same exact device item for execution.
-Preparation or receipt failure, a still-dirty acknowledgement, or another exact
-local device item retains the `device-sync.reconcile` wake and persisted
-paused-companion retry marker. A successful clean receipt for the last device
-item clears them. All other workspace wakes stay projected out while billing is
-paused.
+a narrow execution lane. Web admits pending system-lane lag after companion
+access and historical health consent are rechecked; exact route selection stays
+runtime-owned. The runner preserves the ordinary lane-contiguous import of older
+accepted system work and its bounded import-owned durability effects, then
+executes only `run-device-sync-wake` and crosses the ordinary durable checkpoint
+and dirty-ack boundary. It does not execute unrelated pending route actions,
+conversation, delivery, assistant, or model work, and the restricted
+device-sync run suppresses new device-activity automation scheduling. Dirty
+acknowledgement and the following pending-dirty query run in the same health-data
+admission transaction used by companion ingress. If an acknowledgement remains
+dirty, the runtime clears the spent post-checkpoint record and requeues that same
+exact device item for execution. Preparation or receipt failure, a still-dirty
+acknowledgement, or another exact local device item retains the
+`device-sync.reconcile` wake and persisted paused-companion retry marker. A
+successful clean receipt for the last device item clears them. The restricted
+pass commits that post-receipt queue, marker, and wake state in its normal final
+`idle_shutdown` snapshot before returning. All other workspace wakes stay
+projected out while billing is paused.
 
 ### Local runtime
 

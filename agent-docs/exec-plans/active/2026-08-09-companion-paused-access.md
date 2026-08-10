@@ -121,6 +121,9 @@ Updated: 2026-08-10
   its existing health-data admission lock across the dirty acknowledgement and
   pending-dirty query, serializing both commit orders with companion ingress.
   Only a successful clean receipt for the last device item clears the marker.
+  The restricted pass always commits the post-receipt exact local queue,
+  marker, and wake in its normal final `idle_shutdown` snapshot before return,
+  so a cold restore cannot strand a locally retained retry.
 - The native repository has no release tag or other durable mapping from the
   App Store binary to a source commit. Compatibility is therefore based on the
   unchanged HTTP shapes plus inspection of the current native resume/connect
@@ -134,8 +137,8 @@ Updated: 2026-08-10
   and reconciliation (8 files, 371 tests).
 - Passed after the final reconciliation tightening: focused reconciliation
   facts suite (1 file, 48 tests).
-- Passed after the round-4 corrections: focused runtime event, system-mailbox,
-  assistant-phase, and entrypoint suites (4 files, 603 tests), including dirty
+- Passed after the round-5 correction: focused runtime event, system-mailbox,
+  assistant-phase, and entrypoint suites (4 files, 604 tests), including dirty
   continuation after a successful receipt, clean marker clearing, restricted
   automation suppression, exact-item re-execution, remaining-item marker
   retention, device-only route execution, and preservation of unrelated
@@ -148,8 +151,9 @@ Updated: 2026-08-10
 - Passed: ESLint over every changed Web TypeScript file.
 - Passed: focused Cloudflare runner identity/egress-fence proof (2 files,
   3 selected tests).
-- Passed: hosted runner bundle assembly and parity probes; measured total
-  9,950,458 bytes under the 9,983,226-byte ratcheted ceiling.
+- Passed after the round-5 correction: hosted runner bundle assembly and parity
+  probes; measured total 9,951,954 bytes under the 9,984,722-byte ratcheted
+  ceiling.
 - Authored: a production-path hosted local E2E that cold-restores a paused
   member, submits 17 distinct companion observations without waiting for each
   one to drain, crosses the dirty-ack boundary, and asserts zero
@@ -180,5 +184,13 @@ Updated: 2026-08-10
   requeuing the same item without its spent receipt, sharing the existing
   health-data admission lock, and deriving marker retention from exact local
   device work.
-- Required after remediation: final ReviewGPT round 5 and exact-head GitHub
-  Actions.
+- A diagnostic round-5 capture had inconclusive textual model attestation but
+  identified a real final durability gap: the restricted branch returned its
+  post-receipt marker and wake without committing the ordinary final
+  `idle_shutdown` snapshot. The correction reuses that existing snapshot owner,
+  and a focused entrypoint regression proves the exact local item, marker, and
+  wake are inside the committed snapshot before return. The same substantive
+  round number must be retried because the diagnostic capture is not a valid
+  reviewed round.
+- Required after remediation: final ReviewGPT round-5 retry and exact-head
+  GitHub Actions.

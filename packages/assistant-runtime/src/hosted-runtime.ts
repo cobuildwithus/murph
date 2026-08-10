@@ -2244,15 +2244,54 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             : null,
         },
       ]);
-      const invocationResult = {
+      emitPhaseLog({
+        details: {
+          nextWakeAtPresent: nextWake.nextWakeAt !== null,
+          nextWakeReasonPresent: nextWake.nextWakeReason !== null,
+        },
+        input,
+        phase: "checkpoint",
+        requestId,
+        stage: "workspace.checkpoint.idle_shutdown",
+        status: "start",
+      });
+      const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+        assertRuntimeNotAborted,
+        checkpointRequestBuilder,
+        expectedUserId: input.request.userId,
+        inboxMediaRetentionWakeAt: passWorkspace?.inboxMediaRetentionWakeAt ?? null,
+        issueExportPort: runtime.platform.issueExportPort ?? null,
         nextWakeAt: nextWake.nextWakeAt,
-        ...(nextWake.nextWakeReason
-          ? { nextWakeReason: nextWake.nextWakeReason }
-          : {}),
+        nextWakeReason: nextWake.nextWakeReason,
         redactedStatus,
+        runtimeAbortSignal: runtimeAbortController.signal,
+        vaultRoot: restored.vaultRoot,
+        workspacePort: foregroundWorkspacePort,
+      });
+      emitPhaseLog({
+        details: {
+          checkpointed: checkpoint.checkpointed,
+          checkpointWorkspaceVersion: checkpoint.workspace.version,
+        },
+        input,
+        phase: "checkpoint",
+        requestId,
+        stage: "workspace.checkpoint.idle_shutdown",
+        status: "done",
+      });
+      const checkpointWake = {
+        nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+        nextWakeReason: checkpoint.workspace.nextWakeReason ?? null,
+      };
+      const invocationResult = {
+        nextWakeAt: checkpointWake.nextWakeAt,
+        ...(checkpointWake.nextWakeReason
+          ? { nextWakeReason: checkpointWake.nextWakeReason }
+          : {}),
+        redactedStatus: checkpoint.workspace.redactedStatus ?? redactedStatus,
         status: resolveHostedWorkspaceInvocationStatus({
           mailboxBudgetExhausted: mailboxBudgetExhausted(),
-          nextWakeAt: nextWake.nextWakeAt,
+          nextWakeAt: checkpointWake.nextWakeAt,
         }),
       };
       emitPhaseLog({
