@@ -1,6 +1,6 @@
 # Polish the iMessage nutrition card presentation
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -66,7 +66,11 @@ Updated: 2026-08-10
   provider-owned.
 - Keep the short date and meal-count caption as the minimum useful card label.
 - Omit `subcaption` rather than sending an empty string for complete nutrition
-  cards; retain only a short partial-state warning when totals are incomplete.
+  cards without assessed context; retain only a short partial-state warning and
+  concise assessed-goal directions, never repeated totals or target amounts.
+- Continue the existing `buildLinqIMessageAppLayout` subcaption derivation as
+  the sole static semantic owner after the required anomaly retrospective; do
+  not add alternate text channels, delivery branches, or fallback-value leaks.
 
 ## Verification
 
@@ -83,12 +87,21 @@ Updated: 2026-08-10
   subcaption formatter; compact-table captions remain unchanged.
 - [x] Updated exact layout/provider expectations and the design, architecture,
   reliability, deliverability, and index contracts.
-- [x] Passed 8 focused Web tests, 72 operator-config layout/runtime tests, Web,
+- [x] Passed 10 focused Web tests, 72 operator-config layout/runtime tests, Web,
   operator-config, and Cloudflare TypeScript checks, scoped Web lint, doc drift,
   diff checks, and the frontend-design-proof guard tests.
 - [x] Captured and inspected synthetic desktop 2x and mobile 3x catalog proofs;
   the mobile proof also caught and resolved a catalog-only overflow.
 - [x] Attempted the required Claude Code UI double-check; Fable reported
   explicit usage-credit exhaustion, so no substitute review was run.
-- [ ] Push the candidate, attach hosted design proof, complete exact-head CI and
-  ReviewGPT, close the plan, merge, deploy Web then Cloudflare, and verify live.
+- [x] Pushed the candidate and attached hosted desktop/mobile design proof;
+  exact-head required CI passed.
+- [x] Completed the preliminary specialist pass and three substantive final
+  rounds. The first two findings restored partial/unavailable truth and concise
+  assessed-goal direction at the existing owner; the completed retrospective
+  justified that irreducible shape, and the same-head round-3 retry passed with
+  no remaining finding.
+- [x] Proved a clean merge tree against current `main`. The approved source
+  candidate is ready for the required post-merge Vercel-first, Cloudflare-second
+  production rollout and live provider checks.
+Completed: 2026-08-10
