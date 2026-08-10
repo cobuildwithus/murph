@@ -17,7 +17,7 @@ Key decisions:
 - Run that restored arbitration before both background and fresh foreground selection, and bound the joined cohort to same-route conversation events strictly after the completion's trusted origin input.
 
 State:
-- In progress.
+- Complete.
 
 Done:
 - Reproduced the production delay and proved generation/canonical capture completed well before delivery.
@@ -36,12 +36,16 @@ Done:
 - Moved pending-completion arbitration to the foreground/background selection boundary. Fresh mode inspects pending state only for structurally trusted completions, falls back to fresh-only work on unrelated or malformed state, and never generically merges pending backlog.
 - Added an origin-only trusted completion parser for ready and failed envelopes. Restored selection loads that existing origin event and admits only same-route conversation input with a strictly later canonical cursor; an unprovable origin delivers the completion alone.
 - Extended the production two-invocation proof with a new group message between invocations. The replacement invocation now admits `[completion, prior follow-up, newest message]`, keeps the newest message current, delivers once, records terminal evidence, and empties the admitted pending cohort without a duplicate completion pass.
+- Accepted the round-5 complexity finding and deleted the duplicate `hostedImageCompletionInputIds` side channel from the runner batch, batch builders and filters, assistant phase, maintenance API, and foreground selector API.
+- Fresh structural completions now derive their identity from the already-loaded event and skip restored pending-state discovery. Restored invocations derive the same identity from the ordinary pending event only when fresh events contain no completion.
+- Re-ran the focused engine/runtime suites, both package typechecks, the same-invocation and two-invocation production entrypoint regressions, docs drift, diff checks, and privacy scan successfully.
+- Final ReviewGPT round 6 passed the exact deletion-focused candidate with no qualifying findings, and all required GitHub Actions passed that reviewed head.
 
 Now:
-- Run focused verification and package typechecks for the foreground/origin correction.
+- No implementation work remains. The PR is reviewed, mergeable, and ready for deployment after merge.
 
 Next:
-- Commit and push the corrected candidate, update the PR evidence, then run the next final ReviewGPT round and required CI against that exact head.
+- Deploy the hosted runner/Cloudflare release with immediate container rollout and verify bundle convergence plus completion-to-delivery timing.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -57,3 +61,6 @@ Working set (files/ids/commands):
 - `ARCHITECTURE.md`
 - `docs/contracts/00-invariants.md`
 - `agent-docs/references/hosted-runtime-protocol.md`
+Status: completed
+Updated: 2026-08-10
+Completed: 2026-08-10
