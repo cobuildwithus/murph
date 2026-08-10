@@ -203,7 +203,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'connected-apps',
     name: 'connected-apps',
     triggerHint:
-      'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; or connected-app context for another action. Owns account selection, narrow discovery and reads, limited calendar writes, privacy, and untrusted provider content.',
+      'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; connected-app context for another action; or a verified manual export or one-time import fallback for a health or fitness source without a proven direct Murph connection. Owns account selection, narrow discovery and reads, limited calendar writes, verified provider export handoffs, privacy, and untrusted provider content.',
   },
   {
     slug: 'computer-use',
