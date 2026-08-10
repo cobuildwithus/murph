@@ -122,11 +122,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Group sleep checks use fresh shared data",
         summary:
-          "Murph now checks the current shared sleep record before answering and counts reported Deep and REM sleep as soon as those values are shared.",
+          "Murph now checks the current shared sleep record before answering, counts reported Deep and REM sleep as soon as those values are shared, and includes explicit manual corrections.",
         details:
-          "Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
+          "Manual corrections are labeled Manual instead of a connected source. Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
         relevanceTags: ["groups", "sleep", "health-data", "connections"],
-        sourcePullRequests: [1565],
+        sourcePullRequests: [1565, 1593],
       },
       {
         id: "public-referral-home",

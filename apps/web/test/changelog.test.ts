@@ -290,6 +290,13 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("group-sleep-challenges-use-fresh-data")).toMatchObject({
+      sourcePullRequests: [1565, 1593],
+      summary: expect.stringContaining("explicit manual corrections"),
+      details: expect.stringContaining(
+        "labeled Manual instead of a connected source",
+      ),
+    });
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
