@@ -4,20 +4,15 @@ original_args=("$@")
 original_arg_count=$#
 
 usage() {
-  printf 'Usage: %s [--creating-worktree] [--current-worktree <path>] [--reserve-worktree] [--target-path <path>]\n' "$(basename "$0")" >&2
+  printf 'Usage: %s [--current-worktree <path>] [--reserve-worktree] [--target-path <path>]\n' "$(basename "$0")" >&2
   exit 2
 }
 
 reserve=0
 target_path=''
-creating_worktree=0
 current_worktree_path="${MURPH_WORKTREE_GUARD_CURRENT_WORKTREE:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --creating-worktree)
-      creating_worktree=1
-      shift
-      ;;
     --current-worktree)
       [[ $# -ge 2 && -n "$2" ]] || usage
       current_worktree_path="$2"
@@ -35,14 +30,6 @@ while [[ $# -gt 0 ]]; do
     *) usage ;;
   esac
 done
-
-if [[ -n "$current_worktree_path" ]] \
-  && (( creating_worktree == 1 || reserve == 1 || ${#target_path} > 0 )); then
-  usage
-fi
-if (( creating_worktree == 1 && reserve == 0 )) && [[ -z "$target_path" ]]; then
-  usage
-fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 max_regular="${MURPH_WORKTREE_MAX_LIVE:-100}"
@@ -226,7 +213,7 @@ if (( current_worktree_unauthorized == 1 )); then
   printf 'worktree storage guard: current worktree bypassed scripts/create-worktree\n' >&2
   exit 1
 fi
-if (( unauthorized_count > 0 && creating_worktree == 0 )) && [[ -z "$current_worktree_path" ]]; then
+if (( unauthorized_count > 0 )) && [[ -z "$current_worktree_path" ]]; then
   printf 'worktree storage guard: %d worktree(s) bypassed scripts/create-worktree\n' \
     "$unauthorized_count" >&2
   exit 1

@@ -146,7 +146,7 @@ function installLegacyWorktreeEntrypoints(primary: string): void {
   )
   executable(
     path.join(primary, 'scripts', 'create-worktree'),
-    currentCreate.replaceAll('--creating-worktree ', ''),
+    currentCreate.replaceAll('--current-worktree "$repo_root" ', ''),
   )
   executable(
     path.join(primary, 'scripts', 'worktree-storage-guard'),
@@ -206,7 +206,7 @@ describe('worktree storage guard', () => {
       readFileSync(path.join(sourceRoot, 'scripts', 'install-git-hooks'), 'utf8'),
     ).toContain('MURPH_WORKTREE_GUARD_CURRENT_WORKTREE="$repo_root"')
     expect(readFileSync(path.join(sourceRoot, 'scripts', 'create-worktree'), 'utf8')).toContain(
-      '--creating-worktree',
+      '--current-worktree "$repo_root"',
     )
     expect(readFileSync(path.join(sourceRoot, 'scripts', 'committer'), 'utf8')).toContain(
       'scripts/install-git-hooks',
@@ -275,18 +275,16 @@ touch hook-installed
     expect(result.stderr).toContain('custom maximum requires isolated state')
   })
 
-  it('keeps scoped commit and sanctioned creation modes disjoint', () => {
+  it('composes scoped authorization with sanctioned creation budgets', () => {
     const harness = createHarness()
-    expect(
-      runScript(harness, 'worktree-storage-guard', [
-        '--creating-worktree',
-        '--current-worktree',
-        harness.primary,
-        '--target-path',
-        path.join(harness.root, 'target'),
-      ]).status,
-    ).toBe(2)
-    expect(runScript(harness, 'worktree-storage-guard', ['--creating-worktree']).status).toBe(2)
+    const result = runScript(harness, 'worktree-storage-guard', [
+      '--current-worktree',
+      harness.primary,
+      '--reserve-worktree',
+      '--target-path',
+      path.join(harness.root, 'target'),
+    ])
+    expect(result.status, result.stderr).toBe(0)
   })
 
   it('fails closed on malformed local ceiling state', () => {
@@ -1164,7 +1162,8 @@ done
       reservationHarness,
       'worktree-storage-guard',
       [
-        '--creating-worktree',
+        '--current-worktree',
+        reservationHarness.primary,
         '--reserve-worktree',
         '--target-path',
         path.join(reservationHarness.root, 'next'),
@@ -1249,7 +1248,12 @@ done
     const creatingDisk = runScript(
       diskHarness,
       'worktree-storage-guard',
-      ['--creating-worktree', '--target-path', path.join(diskHarness.root, 'next')],
+      [
+        '--current-worktree',
+        diskHarness.primary,
+        '--target-path',
+        path.join(diskHarness.root, 'next'),
+      ],
       {
         MURPH_TEST_LOW_DISK_PATH: diskRawCanonical,
         MURPH_WORKTREE_MAX_LIVE: '2',

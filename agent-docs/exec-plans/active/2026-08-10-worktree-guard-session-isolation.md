@@ -25,15 +25,15 @@ Updated: 2026-08-10
   raw sibling exists.
 - An authorized checkout on the current guard can use those entrypoints while
   the primary checkout still has the preceding guard and no raw sibling exists;
-  the older primary remains globally fail-closed if a raw sibling exists.
+  the older primary remains globally fail-closed if clean raw state exists.
 - No guard publishes authorization for a raw checkout, so a later primary
   downgrade cannot reinterpret durable compatibility state as authority.
 - If the rejected intermediate authorization-plus-isolation state exists, the
   primary advances first and retires authorization first under the guard lock;
   task-local scans never mutate it and malformed nodes fail closed.
-- Every preceding-primary entrypoint remains globally fail-closed around a raw
-  sibling until the primary advances; current-version creation is then
-  checkout-scoped.
+- Every preceding-primary entrypoint remains globally fail-closed around clean
+  raw state until the primary advances; current-version creation then composes
+  checkout scope with the existing resource checks.
 - The explicit no-argument guard continues to fail when any unauthorized
   registered worktree exists when run from the primary checkout.
 
@@ -47,7 +47,8 @@ Updated: 2026-08-10
 
 ## Tasks
 
-1. Add explicit committing-checkout and sanctioned-creation guard modes.
+1. Add explicit committing-checkout scope and compose it with sanctioned
+   creation's existing resource checks.
 2. Prove cross-session isolation and continued raw-checkout rejection.
 3. Run focused verification, required ReviewGPT audit, and exact-head CI.
 4. Archive the plan after the workflow PR is green and ready to land.
@@ -78,7 +79,9 @@ Updated: 2026-08-10
   passed all 522 tests plus every preceding check again. Round 6 then exposed
   the incompatible task-first continuity claim. After its requirement-level
   correction, the focused suite passed all 29 tests and the complete serialized
-  diff suite passed all 522 tests plus every preceding check again.
+  diff suite passed all 522 tests plus every preceding check again. After the
+  round 7 simplification, the focused suite passed all 29 tests and the complete
+  serialized diff suite passed all 522 tests plus every preceding check again.
 - The current-main merge had one documentation conflict. Its resolution keeps
   the upstream changelog and shared-guard requirements together with this
   change's scoped rollout and downgrade guarantees; no code conflict occurred.
@@ -112,6 +115,21 @@ Updated: 2026-08-10
   entrypoint stays globally fail-closed until primary advancement. If a
   rejected marker pair exists, primary-first bounded retirement is a rollout
   prerequisite. Task-local retirement is removed, and no new authority or
-  cleanup lifecycle is added.
-  All accepted findings await exact-head reruns.
+  cleanup lifecycle is added. Round 7 accepted a complexity collapse in the
+  original PR: sanctioned creation did not need a second guard mode. The
+  correction deletes `--creating-worktree`, composes the existing checkout
+  scope with reservation and target-filesystem checks, and removes the implicit
+  dependency on the installer authenticating a later creation call.
+- Hard-cap retrospective: the original requirement remains isolated authorized
+  sessions with fail-closed raw commits and global budgets. The first-reviewed
+  head added checkout scope plus a dedicated creation mode; review-driven
+  growth was concentrated in mixed-version, legacy-state, resource-budget, and
+  malformed-state proof. Rounds 2 through 6 removed all compatibility
+  publication and task-owned cleanup, leaving one primary retirement owner.
+  Round 7 removes the remaining duplicate creation-mode concept and reduces
+  production shell code. No marker, owner, queue, lifecycle, migration, repair,
+  or reconciliation remains. The user's explicit instruction to run ReviewGPT
+  audits until green supplies the continuation decision for one exact-head
+  round 8 after this accepted hard-cap finding is fixed.
+  All accepted findings await the exact-head continuation rerun.
 - Pending: exact-head ReviewGPT and GitHub Actions.

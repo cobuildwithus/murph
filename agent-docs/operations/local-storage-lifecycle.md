@@ -95,7 +95,7 @@ primary guard advances. The branch-independent hook then supplies the
 committing checkout, so a raw worktree fails its own commit without blocking an
 authorized sibling. Every registered worktree still consumes the global
 numeric and disk budget. No guard publishes legacy authorization for a raw
-checkout. A preceding primary remains globally fail-closed around a raw
+checkout. A preceding primary remains globally fail-closed around clean raw
 sibling, including for authorized current-task entrypoints, until the primary
 advances. If an isolation marker from the rejected intermediate guard exists,
 advancing the primary first is a rollout prerequisite. The current primary
@@ -109,8 +109,9 @@ retaining the preceding guard's no-argument command surface, so either the
 primary or task checkout may advance first without an argument outage when no
 raw sibling exists. An authorized historical checkout can still install hooks
 and commit after the primary advances, but every preceding-primary entrypoint
-remains globally fail-closed while a raw sibling exists. Current-version
-sanctioned creation becomes scoped after the primary advances. Once the bounded
+remains globally fail-closed while clean raw state exists. Current-version
+sanctioned creation composes checkout scope with the existing global resource
+checks after the primary advances. Once the bounded
 intermediate state is retired, a later primary downgrade leaves both the old
 global audit and old shared hook fail-closed.
 Running the primary checkout's `scripts/worktree-storage-guard` without a
