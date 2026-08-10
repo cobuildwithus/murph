@@ -570,12 +570,24 @@ Set these in the selected GitHub environment as vars:
 
 `MURPH_ANDROID_APP_ENABLED` is an optional, fail-closed rollout variable. Leave
 it unset until the public Android app and the compatible Web, Worker, and runner
-code are deployed. To activate, set its exact value to `1` in both the Vercel
-Web environment and the selected Cloudflare GitHub Environment, deploy Web,
-then deploy Cloudflare with `container_rollout=immediate`, and verify the new
-runner fingerprint before checking the Connect Devices card and assistant
-guidance. Disable by clearing both values; a missing or different value hides
-the Android-only surfaces.
+code are deployed. Private `cobuildwithus/murph-cloud` must map the raw value in
+`.github/workflows/deploy-cloudflare-hosted.yml`, under the `deploy` job's
+`env`, from `${{ vars.MURPH_ANDROID_APP_ENABLED }}`. That job selects the
+`preview` or `production` GitHub Environment name from its workflow input;
+`production` is the current protected environment, while the absent preview
+value stays fail-closed. Adding either Environment value is inert until this
+private mapping has landed.
+
+To activate, set the exact value `1` in both the matching Vercel Web environment
+and the selected Cloudflare `preview` or `production` GitHub Environment. Deploy
+Web, then deploy Cloudflare with `container_rollout=immediate`. Confirm that the
+generated Wrangler config and deployed Worker binding contain canonical `1`,
+the new runner fingerprint is active, and a direct-assistant turn includes the
+Android Play guidance before checking the Connect Devices card. Disable by
+clearing both values and redeploying both sides; confirm that the generated
+Wrangler config, deployed binding, assistant guidance, and card no longer expose
+the Android journey. A missing value—or any value other than exact `1`—keeps it
+hidden.
 
 `CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
 `HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the canonical Worker R2 binding. Deploy preflight requires the canonical runtime and preview buckets to be ENAM Standard. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
@@ -957,6 +969,7 @@ Opt-in runtime integrations:
 - `HOSTED_EMAIL_FROM_ADDRESS`
 - `HOSTED_EMAIL_LOCAL_PART`
 - `HOSTED_PHYSICAL_NOTES_ENABLED`
+- `MURPH_ANDROID_APP_ENABLED`
 - `LINQ_API_BASE_URL`
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
