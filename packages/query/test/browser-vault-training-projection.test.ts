@@ -224,7 +224,7 @@ test("browser vault replicas expose a bounded sanitized training projection with
   assert.equal(liveTraining.state, "in_progress");
   assert.equal("sourceApp" in liveTraining, false);
   assert.deepEqual(liveTraining.exercises, []);
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 5);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 6);
 });
 
 test("browser training projection preserves completed next-local-day sessions before UTC midnight", async () => {
