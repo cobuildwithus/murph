@@ -45,6 +45,9 @@ Success criteria:
    completed-set target/actual semantics, keep continuation copy
    channel-neutral, derive `Next` from the first pending set, and size wrapped
    rasters from the same deterministic layout calculation.
+10. Match the corrected nutrition fallback's provider-chrome ownership: keep
+    compact-table and workout bitmaps rectangular and badge-free, remove the
+    generated icon gutter, and leave the app icon and outer mask to Messages.
 
 ## Review disposition
 
@@ -105,6 +108,11 @@ Success criteria:
   correct single semantic owner, but the non-obvious persisted surface and its
   regression proof are now explicit; the canonical workout remains the sole
   authority.
+- Accepted from the final static-presentation comparison: compact-table and
+  workout rasters still owned a generated badge, outer corner mask, clipping,
+  and reserved header gutter that the corrected nutrition raster had already
+  removed. The shared renderer now follows the same provider-owned chrome
+  contract, while inner progress and set-state rounding remain unchanged.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
 - Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. PR #1502 merged externally before that gate closed; the follow-up must stay draft until the missing evidence is captured.
 
@@ -158,6 +166,13 @@ Success criteria:
   eight-row, four-column boundary card with measured wrapping and no visible
   overlap or clipping. These direct rasters do not replace the open hosted
   catalog and physical Messages evidence.
+- Static provider-chrome parity passed the 12-test Web route/render suite, Web
+  typecheck, scoped Web ESLint, documentation drift, and diff hygiene. Fresh
+  raw workout and dense-table PNGs are rectangular and badge-free; the real
+  catalog component passed synthetic desktop 2x and mobile 3x Playwright
+  capture with legible content and no overflow. The required Claude UI
+  double-check was attempted, but Fable reported explicit usage-credit
+  exhaustion, so no substitute review was run.
 
 ## Parent product-experience revalidation
 

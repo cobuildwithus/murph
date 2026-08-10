@@ -3,17 +3,14 @@ import type {
   WorkoutSessionExerciseV1,
 } from "@murphai/contracts";
 
-import {
-  IMESSAGE_CARD_COLOR,
-  ImessageCardBadge,
-} from "./card-image-chrome";
+import { IMESSAGE_CARD_COLOR } from "./card-image-chrome";
 
 export const IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH = 1_200;
 
 const CARD_HORIZONTAL_PADDING = 45;
 const CARD_CONTENT_WIDTH =
   IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH - CARD_HORIZONTAL_PADDING * 2;
-const HEADER_TEXT_WIDTH = CARD_CONTENT_WIDTH - 155;
+const HEADER_TEXT_WIDTH = CARD_CONTENT_WIDTH;
 const GENERIC_ROW_LABEL_WIDTH = CARD_CONTENT_WIDTH * 0.38;
 const GENERIC_VALUES_WIDTH = CARD_CONTENT_WIDTH * 0.62;
 
@@ -59,7 +56,11 @@ export function getCompactTableCardImageSize(
   };
 }
 
-/** Mirrors the shipping SwiftUI compact-table snapshot at a wider raster size. */
+/**
+ * Mirrors the shipping SwiftUI compact-table snapshot at a wider raster size.
+ * Messages owns the app icon and outer corner mask, so the bitmap stays
+ * rectangular and badge-free.
+ */
 export function CompactTableCardImage({
   card,
 }: {
@@ -74,23 +75,19 @@ export function CompactTableCardImage({
         display: "flex",
         width: "100%",
         height: "100%",
-        overflow: "hidden",
         flexDirection: "column",
-        borderRadius: 105,
         padding: `38px ${CARD_HORIZONTAL_PADDING}px 42px`,
         backgroundColor: IMESSAGE_CARD_COLOR.balloon,
         color: IMESSAGE_CARD_COLOR.primary,
         fontFamily: "DM Sans",
       }}
     >
-      <ImessageCardBadge top={30} left={30} />
       <div
         style={{
           display: "flex",
           height: layout.headerHeight,
           flexDirection: "column",
           justifyContent: "center",
-          marginLeft: 155,
           gap: 8,
         }}
       >

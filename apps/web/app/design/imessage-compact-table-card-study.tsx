@@ -113,7 +113,8 @@ export function ImessageCompactTableCardStudy() {
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The image fallback keeps a targetless first pending set honest and
           measures every wrapped row in the dense four-column boundary.
-          Provider captions retain the complete values if the raster cannot
+          Messages supplies the app icon and outer corner mask; provider
+          captions retain the complete values if the rectangular raster cannot
           load.
         </p>
       </div>

@@ -324,6 +324,9 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, /Upper body/u);
   assert.match(serialized, /Wednesday/u);
   assert.match(serialized, />16</u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
+  assert.doesNotMatch(serialized, /margin-left:155px/u);
 });
 
 test("response-card image route restores and renders the exact compact V4 workout snapshot", async () => {
@@ -354,6 +357,9 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.doesNotMatch(serialized, /Tap an exercise/u);
   assert.match(serialized, /data-workout-progress="0\.5000"/u);
   assert.match(serialized, /data-exercise-state="in-progress"/u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
+  assert.doesNotMatch(serialized, /margin-left:155px/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
 });
 
