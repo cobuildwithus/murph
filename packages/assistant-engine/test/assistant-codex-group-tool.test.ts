@@ -4447,7 +4447,8 @@ describe("murph.group dynamic tool", () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-pending-"));
     const imageRef = "raw/captures/2026/08/pending-avatar/avatar.png";
     const sessionId = "session_pending_generated_avatar";
-    const turnId = "turn_pending_generated_avatar";
+    const completionTurnId = "turn_pending_generated_avatar_completion";
+    const deliveryTurnId = "turn_pending_generated_avatar_delivery";
     const media = {
       alt: "Pending generated avatar",
       contentType: "image/png",
@@ -4478,7 +4479,7 @@ describe("murph.group dynamic tool", () => {
             ref: media.ref,
             sha256: media.sha256,
             sizeBytes: media.sizeBytes,
-            turnId,
+            turnId: completionTurnId,
           }),
         }],
       );
@@ -4490,7 +4491,7 @@ describe("murph.group dynamic tool", () => {
         sessionId,
         threadId: "thread-pending-avatar",
         threadIsDirect: false,
-        turnId,
+        turnId: deliveryTurnId,
         vault: vaultRoot,
       });
 
@@ -4622,10 +4623,34 @@ describe("murph.group dynamic tool", () => {
       })).toBe(true);
       expect(resolveAssistantGeneratedImageDelivery({
         imageRef,
+        intents: [{
+          ...intent,
+          delivery: delivered,
+          status: "sending",
+        }],
+        sessionId: "session_pending_generated_avatar_other",
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
         intents: [{ ...intent, delivery: delivered, status: "sending" }],
         sessionId,
         transcriptEntries,
       })).toBe(true);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: delivered,
+          media: [{
+            ...media,
+            sha256: "b".repeat(64),
+          }],
+          status: "sending",
+        }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
       expect(resolveAssistantGeneratedImageDelivery({
         imageRef,
         intents: [{ ...intent, delivery: delivered, status: "failed" }],

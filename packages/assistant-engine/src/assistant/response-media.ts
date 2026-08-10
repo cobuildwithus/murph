@@ -138,7 +138,6 @@ export function resolveAssistantGeneratedImageDelivery(input: {
     return input.intents.some((intent) =>
       intent.operation === null &&
       intent.sessionId === input.sessionId &&
-      intent.turnId === marker.turnId &&
       matchesAssistantGeneratedImageDeliveryIntentMedia(intent, marker) &&
       hasAssistantOutboxDeliveryEvidence(intent, true)
     )
