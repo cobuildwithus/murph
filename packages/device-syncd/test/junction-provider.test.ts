@@ -17,6 +17,7 @@ import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-defin
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
+import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,
@@ -3476,6 +3477,8 @@ test("Junction account jobs keep a concurrently disconnected source out of proje
     }), "Fitbit source key should be available."),
     sourceProviderSlug: "fitbit",
     status: "disconnected",
+    lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+    lastErrorMessage: "Source disconnected by member.",
   });
   let liveSources = [garminSource, fitbitSource];
   const importedSnapshots: Array<{
@@ -4606,7 +4609,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   }
 
   requests.length = 0;
-  const scheduledResult = await executeJunctionJob(
+  let scheduledResult = await executeJunctionJob(
     provider,
     createJunctionJobContext({
       account: createAccount({
@@ -4625,6 +4628,30 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       dedupeKey: schedulerJob.dedupeKey ?? null,
     },
   );
+  const scheduledFollowUp = scheduledResult.scheduledJobs?.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "blood_pressure"
+  );
+  if (scheduledFollowUp) {
+    scheduledResult = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+          },
+          sources: [garminSource],
+        }),
+        importSnapshot: async () => ({
+          canonicalEventCount: 2,
+          durableDeliveryAccepted: true,
+        }),
+      }),
+      {
+        ...createJob(scheduledFollowUp.kind, scheduledFollowUp.payload ?? {}),
+        dedupeKey: scheduledFollowUp.dedupeKey ?? null,
+      },
+    );
+  }
 
   assert.equal(
     requests.some((request) =>
@@ -8888,7 +8915,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(sources.length, 1);
+  assert.equal(sources.length, 2);
   assert.equal(sources[0]?.sourceProviderSlug, "oura");
   assert.equal(sources[0]?.status, "connected");
   assert.equal(
@@ -8908,6 +8935,8 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(sources[0]?.resourceAvailabilitySummary.provider_connection_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.provider_name, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.device_id, undefined);
+  assert.equal(sources[1]?.sourceProviderSlug, "fitbit");
+  assert.equal(sources[1]?.status, "connected");
   assert.equal(sources[0]?.resourceAvailabilitySummary.deviceName, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_name, undefined);

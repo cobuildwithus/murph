@@ -2746,6 +2746,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             historicalBackfill: true,
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
+            historicalUnresolvedProviderRecordIdentitiesJson:
+              "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
             historicalUnresolvedProviderRecordCount: 2,
             historicalWindowStart: "2026-03-01T00:00:00Z",
             timeseriesCursor: "2026-04-02T00:00:00Z",
@@ -2761,6 +2763,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       historicalBackfill: true,
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
+      historicalUnresolvedProviderRecordIdentitiesJson:
+        "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
       historicalUnresolvedProviderRecordCount: 2,
       historicalWindowStart: "2026-03-01T00:00:00.000Z",
       timeseriesCursor: "2026-04-02T00:00:00.000Z",

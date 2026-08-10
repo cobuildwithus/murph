@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
+import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
 import type {
@@ -11,6 +12,7 @@ import type {
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   ProviderJobContext,
+  ProviderJobResult,
   StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
@@ -194,8 +196,18 @@ function createJobContext(input: {
     now: input.now ?? NOW,
     importSnapshot: input.importSnapshot ?? (async (snapshot) => {
       input.importedSnapshots?.push(snapshot);
+      const parsedSnapshot = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
+      const normalized = await junctionProviderAdapter.normalizeSnapshot(parsedSnapshot);
+      const canonicalEventExternalRefResourceIds = (normalized.events ?? []).flatMap(
+        (event) => event.externalRef?.resourceId ? [event.externalRef.resourceId] : [],
+      );
+      const canonicalEventCount = input.canonicalEventCount
+        ?? normalized.events?.length
+        ?? 0;
       return {
-        canonicalEventCount: input.canonicalEventCount ?? 1,
+        canonicalEventCount,
+        canonicalEventExternalRefResourceIds:
+          canonicalEventExternalRefResourceIds.slice(0, canonicalEventCount),
         durableDeliveryAccepted: true,
       };
     }),
@@ -230,11 +242,18 @@ function createJobContext(input: {
 
 async function importWithRealJunctionNormalizer(
   snapshot: unknown,
-): Promise<{ canonicalEventCount: number; durableDeliveryAccepted: true }> {
+): Promise<{
+  canonicalEventCount: number;
+  canonicalEventExternalRefResourceIds: string[];
+  durableDeliveryAccepted: true;
+}> {
   const parsedSnapshot = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
   const normalized = await junctionProviderAdapter.normalizeSnapshot(parsedSnapshot);
   return {
     canonicalEventCount: normalized.events?.length ?? 0,
+    canonicalEventExternalRefResourceIds: (normalized.events ?? []).flatMap(
+      (event) => event.externalRef?.resourceId ? [event.externalRef.resourceId] : [],
+    ),
     durableDeliveryAccepted: true,
   };
 }
@@ -357,6 +376,36 @@ function findBloodPressureJob(jobs: readonly DeviceSyncJobInput[]): DeviceSyncJo
   ));
 }
 
+async function executeImmediateBloodPressureContinuations(input: {
+  context: ProviderJobContext;
+  job: DeviceSyncJobRecord;
+  provider: ReturnType<typeof createProvider>;
+  startingIndex?: number;
+}): Promise<{
+  executionCount: number;
+  result: ProviderJobResult;
+}> {
+  const executor = requireValue(input.provider.jobExecutor);
+  let currentJob = input.job;
+  let executionCount = 0;
+  let nextIndex = input.startingIndex ?? 10_000;
+
+  while (executionCount < 400) {
+    const result = await executor.executeJob(input.context, currentJob);
+    executionCount += 1;
+    const continuation = result.scheduledJobs?.find((job) =>
+      job.kind === "resource" && job.payload?.resource === "blood_pressure"
+    );
+    if (!continuation || continuation.availableAt) {
+      return { executionCount, result };
+    }
+    currentJob = toJobRecord(continuation, nextIndex);
+    nextIndex += 1;
+  }
+
+  throw new Error("Blood-pressure history did not reach a delayed or terminal result.");
+}
+
 test("the persisted-source scheduler gives sparse blood pressure its own full-history resumable job", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({ requests });
@@ -412,13 +461,15 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
   );
   requests.length = 0;
 
-  const result = await executor.executeJob(
-    createJobContext(),
-    admittedBloodPressure,
-  );
+  const { executionCount, result } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: admittedBloodPressure,
+    provider,
+  });
   const bloodPressureRequests = requests.filter(
     (request) => request.resource === "blood_pressure",
   );
+  assert.equal(executionCount, 30);
   assert.equal(bloodPressureRequests.length, 30);
   assert.equal(bloodPressureRequests[0]?.start, "2026-05-12T00:00:00.000Z");
   assert.equal(bloodPressureRequests.at(-1)?.end, BACKFILL_WINDOW_END);
@@ -515,10 +566,11 @@ test("empty blood-pressure history retries are bounded and mark source coverage 
       emptyBackfillAttempts: 4,
     },
   };
-  const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    toJobRecord(exhausted, 1),
-  );
+  const { result } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: toJobRecord(exhausted, 1),
+    provider,
+  });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
@@ -554,14 +606,15 @@ test("a source-scoped terminal pass preserves completed sibling coverage", async
       sourceProviderSlug: "omron",
     },
   };
-  const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
+  const { result } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
       account: createAccount({
         metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|withings" },
       }),
     }),
-    toJobRecord(sourceScoped, 1),
-  );
+    job: toJobRecord(sourceScoped, 1),
+    provider,
+  });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron,withings");
@@ -589,15 +642,16 @@ test("a newly confirmed source backfills older blood pressure after sibling cove
     },
   };
 
-  const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
+  const { result } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
       account: createAccount({
         metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|withings" },
       }),
       importedSnapshots,
     }),
-    toJobRecord(sourceScoped, 1),
-  );
+    job: toJobRecord(sourceScoped, 1),
+    provider,
+  });
 
   assert.equal(importedSnapshots.length, 1);
   assert.equal(
@@ -693,10 +747,11 @@ test("a Link reconnect cannot narrow or certify an older persisted-source window
     schedulerJob.dedupeKey,
   );
 
-  const completed = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ now: callbackAt }),
-    toJobRecord(schedulerJob, 1),
-  );
+  const { result: completed } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ now: callbackAt }),
+    job: toJobRecord(schedulerJob, 1),
+    provider,
+  });
   assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
   assert.equal(requests[0]?.start, "2026-02-18T00:00:00.000Z");
   assert.equal(requests.at(-1)?.end, "2026-03-20T00:00:00.000Z");
@@ -888,10 +943,11 @@ test("live blood-pressure capability gates provider egress and terminal coverage
 
   assert.equal(recreated.dedupeKey, original.dedupeKey);
   assert.equal(recreated.payload?.windowStart, original.payload?.windowStart);
-  const completed = await requireValue(recoveredProvider.jobExecutor).executeJob(
-    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
-    toJobRecord(recreated, 2),
-  );
+  const { result: completed } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    job: toJobRecord(recreated, 2),
+    provider: recoveredProvider,
+  });
   assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
   assert.equal(
     recoveredRequests.some((request) => request.resource === "blood_pressure"),
@@ -996,12 +1052,13 @@ test("live capability loss preserves carried history evidence until authority re
       systolic: 121,
       diastolic: 79,
     });
-    const completed = await requireValue(provider.jobExecutor).executeJob(
-      createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
-      toJobRecord(stillRecoverable, index + 20),
-    );
-    assert.equal(completed.scheduledJobs?.length ?? 0, 0);
-    assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+    const { result: completed } = await executeImmediateBloodPressureContinuations({
+      context: createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
+      job: toJobRecord(stillRecoverable, index + 20),
+      provider,
+    });
+    assert.equal(completed.scheduledJobs?.length ?? 0, 1);
+    assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
   }
 
   const canonicalState: MutableProviderState = {
@@ -1104,10 +1161,11 @@ test("a fetched blood-pressure record completes without an empty retry", async (
     requests: [],
   });
   const bloodPressure = createScheduledBloodPressureJob(provider);
-  const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    toJobRecord(bloodPressure, 1),
-  );
+  const { result } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: toJobRecord(bloodPressure, 1),
+    provider,
+  });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
@@ -1130,10 +1188,11 @@ test("partial optional failure retries from the anchored window after importing 
   const admittedBloodPressure = toJobRecord(bloodPressure, 1);
   admittedBloodPressure.dedupeKey = `hosted-device-sync:${"d".repeat(64)}`;
 
-  const partial = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ importedSnapshots }),
-    admittedBloodPressure,
-  );
+  const { result: partial } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ importedSnapshots }),
+    job: admittedBloodPressure,
+    provider,
+  });
   const retry = findBloodPressureJob(partial.scheduledJobs ?? []);
 
   assert.equal(importedSnapshots.length, 1);
@@ -1144,10 +1203,11 @@ test("partial optional failure retries from the anchored window after importing 
   assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
   assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
 
-  const completed = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    toJobRecord(retry, 2),
-  );
+  const { result: completed } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: toJobRecord(retry, 2),
+    provider,
+  });
   assert.equal(completed.scheduledJobs?.length ?? 0, 0);
   assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
   assert.equal(
@@ -1189,10 +1249,11 @@ test("retryable provider failure after raw rows preserves evidence through later
   }, 1);
   exhausted.dedupeKey = `hosted-device-sync:${"6".repeat(64)}`;
 
-  const partial = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ canonicalEventCount: 0 }),
-    exhausted,
-  );
+  const { result: partial } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ canonicalEventCount: 0 }),
+    job: exhausted,
+    provider,
+  });
   const retained = findBloodPressureJob(partial.scheduledJobs ?? []);
 
   assert.equal(partial.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1231,10 +1292,11 @@ test("retryable provider failure after raw rows preserves evidence through later
   );
   providerListRequestFailure.active = false;
   bloodPressureRecords.length = 0;
-  const empty = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ now: "2026-06-17T12:00:00.000Z" }),
-    toJobRecord(retainedAcrossOutage, 7),
-  );
+  const { result: empty } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ now: "2026-06-17T12:00:00.000Z" }),
+    job: toJobRecord(retainedAcrossOutage, 7),
+    provider,
+  });
   const stillRecoverable = findBloodPressureJob(empty.scheduledJobs ?? []);
 
   assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1243,15 +1305,16 @@ test("retryable provider failure after raw rows preserves evidence through later
   assert.equal(stillRecoverable.payload?.historicalProviderRecordsSeen, true);
 
   bloodPressureRecords.push({
-    id: "bp-recovered-after-retryable-failure",
-    timestamp: "2026-05-20T08:30:00.000Z",
+    id: "bp-malformed-before-retryable-failure",
+    timestamp: "2026-05-12T08:30:00.000Z",
     systolic: 121,
     diastolic: 79,
   });
-  const recovered = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ now: "2026-06-18T12:00:00.000Z" }),
-    toJobRecord(stillRecoverable, 8),
-  );
+  const { result: recovered } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ now: "2026-06-18T12:00:00.000Z" }),
+    job: toJobRecord(stillRecoverable, 8),
+    provider,
+  });
 
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
   assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
@@ -1287,14 +1350,13 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
       retryable: true,
     });
     let sourceStateReads = 0;
-    let yieldChecks = 0;
     const failed = await requireValue(provider.jobExecutor).executeJob(
       createJobContext({
         ...(boundary === "source-state"
           ? {
               listConnectionSources: async () => {
                 sourceStateReads += 1;
-                if (sourceStateReads === 1) {
+                if (sourceStateReads <= 2) {
                   return [];
                 }
                 throw failure;
@@ -1305,10 +1367,6 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
                 throw failure;
               },
             }),
-        shouldYield: () => {
-          yieldChecks += 1;
-          return yieldChecks > 1;
-        },
       }),
       exhausted,
     );
@@ -1328,10 +1386,11 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
     assert.equal(retry.payload?.windowEnd, original.payload?.windowEnd);
 
     records.length = 0;
-    const empty = await requireValue(provider.jobExecutor).executeJob(
-      createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
-      toJobRecord(retry, 42),
-    );
+    const { result: empty } = await executeImmediateBloodPressureContinuations({
+      context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+      job: toJobRecord(retry, 42),
+      provider,
+    });
     const stillRecoverable = findBloodPressureJob(empty.scheduledJobs ?? []);
 
     assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1340,18 +1399,23 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
     assert.equal(stillRecoverable.payload?.windowStart, original.payload?.windowStart);
 
     records.push({
-      id: `bp-after-${boundary}-recovery`,
-      timestamp: "2026-05-20T08:30:00.000Z",
+      id: `bp-before-${boundary}-failure`,
+      timestamp: "2026-05-12T08:30:00.000Z",
       systolic: 121,
       diastolic: 79,
     });
-    const recovered = await requireValue(provider.jobExecutor).executeJob(
-      createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
-      toJobRecord(stillRecoverable, 43),
-    );
+    const { result: recovered } = await executeImmediateBloodPressureContinuations({
+      context: createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
+      job: toJobRecord(stillRecoverable, 43),
+      provider,
+    });
 
-    assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
-    assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+    assert.equal(recovered.scheduledJobs?.length ?? 0, 0, boundary);
+    assert.equal(
+      recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY],
+      "v1|omron",
+      boundary,
+    );
   }
 });
 
@@ -1360,7 +1424,7 @@ test("nonretryable post-fetch failures keep ordinary failure semantics", async (
     const provider = createProvider({
       bloodPressureRecords: [{
         id: `bp-before-nonretryable-${boundary}-failure`,
-        timestamp: "2026-05-20T08:30:00.000Z",
+        timestamp: "2026-05-12T08:30:00.000Z",
         systolic: 121,
         diastolic: 79,
       }],
@@ -1374,18 +1438,12 @@ test("nonretryable post-fetch failures keep ordinary failure semantics", async (
       message: `Permanent hosted device-sync ${boundary} failure.`,
       retryable: false,
     });
-    let sourceStateReads = 0;
-
     await assert.rejects(
       () => requireValue(provider.jobExecutor).executeJob(
         createJobContext(
           boundary === "source-state"
             ? {
                 listConnectionSources: async () => {
-                  sourceStateReads += 1;
-                  if (sourceStateReads === 1) {
-                    return [];
-                  }
                   throw failure;
                 },
               }
@@ -1463,10 +1521,11 @@ test("source history partial failure stays recoverable after the empty retry lad
   }, 1);
   exhausted.dedupeKey = `hosted-device-sync:${"f".repeat(64)}`;
 
-  const partial = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    exhausted,
-  );
+  const { result: partial } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: exhausted,
+    provider,
+  });
   const retry = findBloodPressureJob(partial.scheduledJobs ?? []);
 
   assert.equal(partial.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1476,10 +1535,11 @@ test("source history partial failure stays recoverable after the empty retry lad
   assert.equal(retry.payload?.historicalRecordsSeen, true);
   assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
 
-  const recovered = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
-    toJobRecord(retry, 2),
-  );
+  const { result: recovered } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    job: toJobRecord(retry, 2),
+    provider,
+  });
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
   assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
@@ -1507,10 +1567,11 @@ test("source-scoped partial failure stays recoverable after the empty retry ladd
   }, 1);
   exhausted.dedupeKey = `hosted-device-sync:${"9".repeat(64)}`;
 
-  const partial = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    exhausted,
-  );
+  const { result: partial } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: exhausted,
+    provider,
+  });
   const retry = findBloodPressureJob(partial.scheduledJobs ?? []);
 
   assert.equal(partial.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1521,10 +1582,11 @@ test("source-scoped partial failure stays recoverable after the empty retry ladd
   assert.equal(retry.payload?.sourceProviderSlug, "omron");
   assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
 
-  const recovered = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
-    toJobRecord(retry, 2),
-  );
+  const { result: recovered } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    job: toJobRecord(retry, 2),
+    provider,
+  });
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
   assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
@@ -1539,10 +1601,11 @@ test("raw provider rows without canonical imported events remain on the retry la
     requests: [],
   });
   const bloodPressure = createScheduledBloodPressureJob(provider);
-  const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ canonicalEventCount: 0 }),
-    toJobRecord(bloodPressure, 1),
-  );
+  const { result } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ canonicalEventCount: 0 }),
+    job: toJobRecord(bloodPressure, 1),
+    provider,
+  });
   const retry = findBloodPressureJob(result.scheduledJobs ?? []);
 
   assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1569,10 +1632,11 @@ test("exhausted malformed provider rows stay recoverable until canonical import 
   }, 1);
   exhausted.dedupeKey = `hosted-device-sync:${"7".repeat(64)}`;
 
-  const malformed = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ canonicalEventCount: 0 }),
-    exhausted,
-  );
+  const { result: malformed } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ canonicalEventCount: 0 }),
+    job: exhausted,
+    provider,
+  });
   const retry = findBloodPressureJob(malformed.scheduledJobs ?? []);
 
   assert.equal(malformed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1586,10 +1650,11 @@ test("exhausted malformed provider rows stay recoverable until canonical import 
     ...bloodPressureRecords[0],
     diastolic: 78,
   };
-  const recovered = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
-    toJobRecord(retry, 2),
-  );
+  const { result: recovered } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    job: toJobRecord(retry, 2),
+    provider,
+  });
 
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
   assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
@@ -1620,10 +1685,11 @@ test("mixed canonical and malformed history stays unresolved until a complete re
   }, 60);
   exhausted.dedupeKey = `hosted-device-sync:${"a".repeat(64)}`;
 
-  const mixed = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
-    exhausted,
-  );
+  const { result: mixed } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    job: exhausted,
+    provider,
+  });
   const mixedContinuation = findBloodPressureJob(mixed.scheduledJobs ?? []);
 
   assert.equal(mixed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1637,17 +1703,18 @@ test("mixed canonical and malformed history stays unresolved until a complete re
   );
   assert.equal(
     mixedContinuation.payload?.windowStart,
-    bloodPressure.payload?.historicalWindowStart,
+    "2026-05-21T00:00:00.000Z",
   );
 
   bloodPressureRecords.length = 0;
-  const empty = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
+  const { result: empty } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
       importSnapshot: importWithRealJunctionNormalizer,
       now: "2026-06-12T12:00:00.000Z",
     }),
-    toJobRecord(mixedContinuation, 61),
-  );
+    job: toJobRecord(mixedContinuation, 61),
+    provider,
+  });
   const emptyContinuation = findBloodPressureJob(empty.scheduledJobs ?? []);
 
   assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1672,16 +1739,209 @@ test("mixed canonical and malformed history stays unresolved until a complete re
       diastolic: 78,
     },
   );
-  const repaired = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
+  const { result: repaired } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
       importSnapshot: importWithRealJunctionNormalizer,
       now: "2026-06-13T12:00:00.000Z",
     }),
-    toJobRecord(emptyContinuation, 62),
-  );
+    job: toJobRecord(emptyContinuation, 62),
+    provider,
+  });
 
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
   assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("an unrelated canonical reading cannot clear a malformed provider row", async () => {
+  const bloodPressureRecords: Record<string, unknown>[] = [
+    {
+      id: "bp-valid-before-unrelated-repair",
+      timestamp: "2026-05-20T08:00:00.000Z",
+      systolic: 121,
+      diastolic: 79,
+    },
+    {
+      id: "bp-malformed-needing-exact-repair",
+      timestamp: "2026-05-20T09:00:00.000Z",
+      systolic: 120,
+    },
+  ];
+  const provider = createProvider({ bloodPressureRecords, requests: [] });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const exhausted = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+    },
+  }, 67);
+  exhausted.dedupeKey = `hosted-device-sync:${"d".repeat(64)}`;
+
+  const { result: mixed } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    job: exhausted,
+    provider,
+  });
+  const unresolved = findBloodPressureJob(mixed.scheduledJobs ?? []);
+  const unresolvedIdentities =
+    unresolved.payload?.historicalUnresolvedProviderRecordIdentitiesJson;
+  assert.equal(typeof unresolvedIdentities, "string");
+  assert.equal(unresolved.payload?.historicalUnresolvedProviderRecordCount, 1);
+
+  bloodPressureRecords.splice(0, bloodPressureRecords.length, {
+    id: "bp-unrelated-canonical-reading",
+    timestamp: "2026-05-20T10:00:00.000Z",
+    systolic: 118,
+    diastolic: 76,
+  });
+  const unrelated = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-12T12:00:00.000Z",
+    }),
+    toJobRecord(unresolved, 68),
+  );
+  const stillUnresolved = findBloodPressureJob(unrelated.scheduledJobs ?? []);
+  assert.equal(unrelated.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(
+    stillUnresolved.payload?.historicalUnresolvedProviderRecordIdentitiesJson,
+    unresolvedIdentities,
+  );
+
+  bloodPressureRecords.splice(0, bloodPressureRecords.length, {
+    id: "bp-malformed-needing-exact-repair",
+    timestamp: "2026-05-20T09:00:00.000Z",
+    systolic: 120,
+    diastolic: 78,
+  });
+  const { result: repaired } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-13T12:00:00.000Z",
+    }),
+    job: toJobRecord(stillUnresolved, 69),
+    provider,
+  });
+  assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
+  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("every malformed provider identity must be repaired before coverage completes", async () => {
+  const bloodPressureRecords: Record<string, unknown>[] = [
+    {
+      id: "bp-first-malformed-identity",
+      timestamp: "2026-05-20T08:00:00.000Z",
+      systolic: 121,
+    },
+    {
+      id: "bp-second-malformed-identity",
+      timestamp: "2026-05-20T09:00:00.000Z",
+      systolic: 119,
+    },
+  ];
+  const provider = createProvider({ bloodPressureRecords, requests: [] });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const { result: malformed } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    job: toJobRecord({
+      ...bloodPressure,
+      payload: {
+        ...bloodPressure.payload,
+        emptyBackfillAttempts: 4,
+      },
+    }, 70),
+    provider,
+  });
+  const bothUnresolved = findBloodPressureJob(malformed.scheduledJobs ?? []);
+  assert.equal(bothUnresolved.payload?.historicalUnresolvedProviderRecordCount, 2);
+
+  bloodPressureRecords[0] = {
+    ...bloodPressureRecords[0],
+    diastolic: 79,
+  };
+  const oneRepair = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-12T12:00:00.000Z",
+    }),
+    toJobRecord(bothUnresolved, 71),
+  );
+  const oneUnresolved = findBloodPressureJob(oneRepair.scheduledJobs ?? []);
+  assert.equal(oneRepair.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(oneUnresolved.payload?.historicalUnresolvedProviderRecordCount, 1);
+
+  bloodPressureRecords[1] = {
+    ...bloodPressureRecords[1],
+    diastolic: 77,
+  };
+  const { result: fullyRepaired } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-13T12:00:00.000Z",
+    }),
+    job: toJobRecord(oneUnresolved, 72),
+    provider,
+  });
+  assert.equal(fullyRepaired.scheduledJobs?.length ?? 0, 0);
+  assert.equal(fullyRepaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("legacy and identity-less unresolved evidence cannot be cleared speculatively", async () => {
+  const cases = [
+    {
+      label: "legacy boolean",
+      payload: { historicalProviderRecordsSeen: true },
+      record: {
+        id: "bp-unrelated-to-legacy-evidence",
+        timestamp: "2026-05-12T08:30:00.000Z",
+        systolic: 121,
+        diastolic: 79,
+      },
+    },
+    {
+      label: "identity-less row",
+      payload: {},
+      record: {
+        timestamp: "2026-05-12T08:30:00.000Z",
+        systolic: 121,
+      },
+    },
+  ] as const;
+
+  for (const [index, testCase] of cases.entries()) {
+    const records: Record<string, unknown>[] = [testCase.record];
+    const provider = createProvider({ bloodPressureRecords: records, requests: [] });
+    const bloodPressure = createScheduledBloodPressureJob(provider);
+    const initial = toJobRecord({
+      ...bloodPressure,
+      payload: {
+        ...bloodPressure.payload,
+        emptyBackfillAttempts: 4,
+        ...testCase.payload,
+      },
+    }, 73 + index);
+    const first = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+      initial,
+    );
+    const unresolved = findBloodPressureJob(first.scheduledJobs ?? []);
+
+    if (testCase.label === "identity-less row") {
+      records[0] = {
+        ...records[0],
+        diastolic: 78,
+      };
+    }
+    const second = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({
+        importSnapshot: importWithRealJunctionNormalizer,
+        now: "2026-06-12T12:00:00.000Z",
+      }),
+      toJobRecord(unresolved, 75 + index),
+    );
+    assert.equal(second.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined, testCase.label);
+    assert.equal(second.scheduledJobs?.length ?? 0, 1, testCase.label);
+  }
 });
 
 test("exact provider duplicates do not create false unresolved history", async () => {
@@ -1696,10 +1956,11 @@ test("exact provider duplicates do not create false unresolved history", async (
     requests: [],
   });
   const bloodPressure = createScheduledBloodPressureJob(provider);
-  const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
-    toJobRecord(bloodPressure, 63),
-  );
+  const { result } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    job: toJobRecord(bloodPressure, 63),
+    provider,
+  });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
@@ -1743,10 +2004,11 @@ test("a malformed post-yield segment requires one repaired anchored scan", async
   );
   assert.equal(yieldedContinuation.payload?.windowStart, "2026-05-13T00:00:00.000Z");
 
-  const malformedTail = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
-    toJobRecord(yieldedContinuation, 65),
-  );
+  const { result: malformedTail } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    job: toJobRecord(yieldedContinuation, 65),
+    provider,
+  });
   const anchoredRetry = findBloodPressureJob(malformedTail.scheduledJobs ?? []);
 
   assert.equal(malformedTail.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1757,27 +2019,30 @@ test("a malformed post-yield segment requires one repaired anchored scan", async
   );
   assert.equal(
     anchoredRetry.payload?.windowStart,
-    bloodPressure.payload?.historicalWindowStart,
+    "2026-05-13T00:00:00.000Z",
   );
 
   bloodPressureRecords[1] = {
     ...bloodPressureRecords[1],
     diastolic: 77,
   };
-  const repaired = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
+  const { result: repaired } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
       importSnapshot: importWithRealJunctionNormalizer,
       now: "2026-06-12T12:00:00.000Z",
     }),
-    toJobRecord(anchoredRetry, 66),
-  );
+    job: toJobRecord(anchoredRetry, 66),
+    provider,
+  });
 
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
   assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
 
-test("source admission rejection cannot certify historical coverage", async () => {
+test("a concurrent user-disconnect fence blocks pressure history before provider egress", async () => {
   const importedSnapshots: unknown[] = [];
+  const providerListRequests = { count: 0 };
+  const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     bloodPressureRecords: [{
       id: "bp-disconnected-source",
@@ -1787,32 +2052,47 @@ test("source admission rejection cannot certify historical coverage", async () =
       systolic: 120,
       diastolic: 78,
     }],
-    requests: [],
+    providerListRequests,
+    requests,
   });
   const bloodPressure = createScheduledBloodPressureJob(provider);
+  const fencedSource = createSourceSummary("omron", NOW, "disconnected");
+  fencedSource.lastErrorCode = DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE;
+  const context = createJobContext({
+    account: createAccount(),
+    importedSnapshots,
+    listConnectionSources: async () => [fencedSource],
+  });
+  const { result } = await executeImmediateBloodPressureContinuations({
+    context,
+    provider,
+    job: toJobRecord(bloodPressure, 1),
+  });
+
+  assert.equal(providerListRequests.count, 1);
+  assert.equal(requests.length, 0);
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(result.metadataPatch, undefined);
+  assert.equal(result.scheduledJobs, undefined);
+});
+
+test("an explicit user-disconnect fence blocks pressure history recovery before provider egress", async () => {
+  const providerListRequests = { count: 0 };
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ providerListRequests, requests });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const source = createSourceSummary("omron", NOW, "disconnected");
+  source.lastErrorCode = DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE;
+
   const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
-      account: createAccount({
-        sources: [{
-          displayName: "Omron",
-          firstSeenAt: NOW,
-          lastDataAt: null,
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSeenAt: NOW,
-          resourceCount: 1,
-          sourceProviderSlug: "omron",
-          status: "disconnected",
-        }],
-      }),
-      importedSnapshots,
-    }),
-    toJobRecord(bloodPressure, 1),
+    createJobContext({ account: createAccount({ sources: [source] }) }),
+    toJobRecord(bloodPressure, 80),
   );
 
-  assert.equal(importedSnapshots.length, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
-  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(providerListRequests.count, 0);
+  assert.equal(requests.length, 0);
+  assert.equal(result.scheduledJobs, undefined);
+  assert.equal(result.metadataPatch, undefined);
 });
 
 test("source-scoped partial failure retries instead of abandoning remaining history", async () => {
@@ -1836,10 +2116,11 @@ test("source-scoped partial failure retries instead of abandoning remaining hist
   }, 1);
   sourceScoped.dedupeKey = `hosted-device-sync:${"e".repeat(64)}`;
 
-  const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    sourceScoped,
-  );
+  const { result } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: sourceScoped,
+    provider,
+  });
   const retry = findBloodPressureJob(result.scheduledJobs ?? []);
 
   assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1909,10 +2190,11 @@ test("yielded blood-pressure history keeps one identity and remembers earlier re
   assert.equal(followUp.payload?.windowEnd, BACKFILL_WINDOW_END);
 
   bloodPressureRecords.length = 0;
-  const completed = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    toJobRecord(followUp, 2),
-  );
+  const { result: completed } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: toJobRecord(followUp, 2),
+    provider,
+  });
   assert.equal(completed.scheduledJobs?.length ?? 0, 0);
   assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
@@ -1949,14 +2231,15 @@ test("malformed rows before a yield cannot become terminal empty coverage", asyn
   assert.equal(continuation.dedupeKey, exhausted.dedupeKey);
   assert.equal(continuation.payload?.emptyBackfillAttempts, 4);
   assert.equal(continuation.payload?.historicalProviderRecordsSeen, true);
-  assert.equal(continuation.payload?.historicalRecordsSeen, false);
-  assert.equal(continuation.payload?.windowStart, "2026-05-13T00:00:00.000Z");
+  assert.equal(continuation.payload?.historicalRecordsSeen, undefined);
+  assert.equal(continuation.payload?.windowStart, "2026-05-12T00:00:00.000Z");
 
   bloodPressureRecords.length = 0;
-  const completedContinuation = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    toJobRecord(continuation, 2),
-  );
+  const { result: completedContinuation } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: toJobRecord(continuation, 2),
+    provider,
+  });
   const retry = findBloodPressureJob(completedContinuation.scheduledJobs ?? []);
 
   assert.equal(completedContinuation.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
@@ -1983,10 +2266,11 @@ test("an empty yielded scan retries from the original anchored window", async ()
     admittedBloodPressure,
   );
   const followUp = findBloodPressureJob(yielded.scheduledJobs ?? []);
-  const completedScan = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    toJobRecord(followUp, 2),
-  );
+  const { result: completedScan } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext(),
+    job: toJobRecord(followUp, 2),
+    provider,
+  });
   const retry = findBloodPressureJob(completedScan.scheduledJobs ?? []);
 
   assert.equal(retry.dedupeKey, admittedBloodPressure.dedupeKey);

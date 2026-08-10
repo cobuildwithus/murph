@@ -11,6 +11,7 @@ import {
 import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
+  identifyJunctionBloodPressureProviderRecords,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
@@ -58,6 +59,7 @@ import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isDeviceSyncSourceAdmitted,
+  isDeviceSyncSourceDisconnectFenced,
   isJunctionHistoricalResetProviderSlug,
   requiresHistoricalResetDeviceSyncSource,
 } from "../public-account.ts";
@@ -159,10 +161,13 @@ interface JunctionTimeseriesImportResult {
 }
 
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
   fetchComplete: boolean;
   providerRecordCount: number;
+  unresolvedProviderRecordIdentities: readonly string[];
   unresolvedProviderRecordCount: number;
+  unresolvedProviderRecordsWithoutStableIdentity: boolean;
 }
 
 interface JunctionPreciseTimeseriesImportOptions {
@@ -176,8 +181,14 @@ interface JunctionDirectSummaryImportResult {
 }
 
 interface JunctionImportAdmissionSource {
+  lastErrorCode?: string | null;
   sourceProviderSlug: string;
   status: DeviceConnectionSourceStatus;
+}
+
+interface JunctionHistoricalUnresolvedProviderRecords {
+  identities: readonly string[];
+  withoutStableIdentity: boolean;
 }
 
 interface PreparedJunctionImportSnapshot {
@@ -331,6 +342,10 @@ const EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS = Object.freeze([
   6 * 60 * 60_000,
   24 * 60 * 60_000,
 ] as const);
+const JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITIES_VERSION = 1;
+const JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT = 64;
+const JUNCTION_BLOOD_PRESSURE_PROVIDER_RECORD_IDENTITY_PATTERN =
+  /^blood-pressure-[0-9a-f]{16}$/u;
 const JUNCTION_SCHEDULED_RECONCILE_PRIORITY = 40;
 const JUNCTION_HISTORICAL_BACKFILL_PRIORITY = 30;
 const JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY = 50;
@@ -1733,6 +1748,14 @@ export function createJunctionDeviceSyncProvider(
         context.account.sources ?? [],
         sourceProviderSlug,
       )
+      && (
+        resource === null
+        || !isJunctionExtendedTimeseriesBackfillJob(job, resource)
+        || isJunctionSourceProjectionFenced(
+          context.account.sources ?? [],
+          sourceProviderSlug,
+        )
+      )
     ) {
       return {};
     }
@@ -1872,8 +1895,15 @@ export function createJunctionDeviceSyncProvider(
         const extendedHistoricalBackfill =
           isJunctionExtendedTimeseriesBackfillJob(job, effectiveResource);
         let sourceProviders: readonly JunctionProviderConnection[];
+        let currentSourceAdmission: "admitted" | "fenced" | "pending" = "admitted";
         try {
           sourceProviders = await loadAndProjectSourceProviders();
+          if (extendedHistoricalBackfill && sourceProviderSlug) {
+            currentSourceAdmission = await resolveJunctionCurrentSourceAdmission(
+              context,
+              sourceProviderSlug,
+            );
+          }
         } catch (error) {
           if (
             extendedHistoricalBackfill
@@ -1886,10 +1916,13 @@ export function createJunctionDeviceSyncProvider(
             return withJunctionExtendedTimeseriesBackfillFollowUp({
               context,
               importResult: {
+                canonicalProviderRecordIdentities: [],
                 canonicalEventCount: 0,
                 fetchComplete: false,
                 providerRecordCount: 0,
+                unresolvedProviderRecordIdentities: [],
                 unresolvedProviderRecordCount: 0,
+                unresolvedProviderRecordsWithoutStableIdentity: false,
                 yieldedAt: null,
               },
               job,
@@ -1902,14 +1935,20 @@ export function createJunctionDeviceSyncProvider(
           }
           throw error;
         }
+        if (currentSourceAdmission === "fenced") {
+          return {};
+        }
         if (
           extendedHistoricalBackfill
-          && !isJunctionSourceResourceCurrentlyAvailable({
-            connectionId: context.account.id,
-            providers: sourceProviders,
-            resource: effectiveResource,
-            sourceProviderSlug,
-          })
+          && (
+            currentSourceAdmission !== "admitted"
+            || !isJunctionSourceResourceCurrentlyAvailable({
+              connectionId: context.account.id,
+              providers: sourceProviders,
+              resource: effectiveResource,
+              sourceProviderSlug,
+            })
+          )
         ) {
           const result = {
             nextReconcileAt: clampWebhookJobNextReconcileAt(context),
@@ -1923,10 +1962,13 @@ export function createJunctionDeviceSyncProvider(
           return withJunctionExtendedTimeseriesBackfillFollowUp({
             context,
             importResult: {
+              canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
               fetchComplete: false,
               providerRecordCount: 0,
+              unresolvedProviderRecordIdentities: [],
               unresolvedProviderRecordCount: 0,
+              unresolvedProviderRecordsWithoutStableIdentity: false,
               yieldedAt: null,
             },
             job,
@@ -1953,23 +1995,42 @@ export function createJunctionDeviceSyncProvider(
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
           : undefined;
-        const historicalUnresolvedProviderRecordCount = extendedHistoricalBackfill
-          ? Math.max(
-              readHistoricalUnresolvedProviderRecordCount(job),
-              timeseriesImport.unresolvedProviderRecordCount,
+        const historicalUnresolvedProviderRecords = extendedHistoricalBackfill
+          ? resolveJunctionHistoricalUnresolvedProviderRecords(
+              job,
+              timeseriesImport,
             )
           : undefined;
+        const historicalUnresolvedProviderRecordCount =
+          historicalUnresolvedProviderRecords === undefined
+            ? undefined
+            : countJunctionHistoricalUnresolvedProviderRecords(
+                historicalUnresolvedProviderRecords,
+              );
+        const historicalUnresolvedProviderRecordIdentitiesJson =
+          historicalUnresolvedProviderRecords === undefined
+            ? undefined
+            : encodeJunctionHistoricalUnresolvedProviderRecords(
+                historicalUnresolvedProviderRecords,
+              );
         const historicalProviderRecordsSeen =
           historicalUnresolvedProviderRecordCount === undefined
             ? undefined
             : historicalUnresolvedProviderRecordCount > 0;
-        if (timeseriesImport.yieldedAt) {
+        if (
+          timeseriesImport.yieldedAt
+          && (
+            !extendedHistoricalBackfill
+            || historicalUnresolvedProviderRecordCount === 0
+          )
+        ) {
           return withJunctionSkippedResourceMetadata(
             context,
             buildYieldedJunctionJobResult({
               context,
               historicalProviderRecordsSeen,
               historicalRecordsSeen,
+              historicalUnresolvedProviderRecordIdentitiesJson,
               historicalUnresolvedProviderRecordCount,
               job,
               windowEnd: window.windowEnd,
@@ -2122,24 +2183,15 @@ export function createJunctionDeviceSyncProvider(
     const recordsSeen =
       input.job.payload.historicalRecordsSeen === true
       || input.importResult.canonicalEventCount > 0;
-    const carriedUnresolvedProviderRecordCount =
-      readHistoricalUnresolvedProviderRecordCount(input.job);
-    // Extended history is BP-only: after fetch-side dedupe, each admitted,
-    // valid provider row produces exactly one canonical measurement event.
-    // A complete anchored rescan may clear carried unresolved evidence only
-    // when it contains at least as many fully canonical rows; partial or empty
-    // scans must keep the existing obligation alive.
-    const currentScanCanResolveCarriedRecords =
-      input.importResult.fetchComplete
-      && input.window.windowStart === historicalWindowStart
-      && input.importResult.unresolvedProviderRecordCount === 0
-      && input.importResult.providerRecordCount >= carriedUnresolvedProviderRecordCount;
-    const unresolvedProviderRecordCount = currentScanCanResolveCarriedRecords
-      ? 0
-      : Math.max(
-          carriedUnresolvedProviderRecordCount,
-          input.importResult.unresolvedProviderRecordCount,
-        );
+    const unresolvedProviderRecords =
+      resolveJunctionHistoricalUnresolvedProviderRecords(
+        input.job,
+        input.importResult,
+      );
+    const unresolvedProviderRecordCount =
+      countJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
+    const unresolvedProviderRecordIdentitiesJson =
+      encodeJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
     const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
 
     if (
@@ -2192,12 +2244,16 @@ export function createJunctionDeviceSyncProvider(
           emptyBackfillAttempts,
           historicalProviderRecordsSeen: unresolvedProviderRecordsSeen,
           historicalRecordsSeen: recordsSeen,
+          historicalUnresolvedProviderRecordIdentitiesJson:
+            unresolvedProviderRecordIdentitiesJson,
           historicalUnresolvedProviderRecordCount: unresolvedProviderRecordCount,
           historicalWindowStart,
           resource: input.resource,
           sourceProviderSlug,
           windowEnd: input.window.windowEnd,
-          windowStart: historicalWindowStart,
+          windowStart: unresolvedProviderRecordsSeen
+            ? input.window.windowStart
+            : historicalWindowStart,
         }),
       ],
     };
@@ -2579,9 +2635,11 @@ export function createJunctionDeviceSyncProvider(
     let executionWindowStart: string | null = null;
     let fetchComplete = true;
     let yieldedAt: string | null = null;
+    let canonicalProviderRecordIdentities: readonly string[] = [];
     let canonicalEventCount = 0;
 
-    for (const window of buildPreciseTimeseriesWindows(windowStart, windowEnd)) {
+    const preciseWindows = buildPreciseTimeseriesWindows(windowStart, windowEnd);
+    for (const [index, window] of preciseWindows.entries()) {
       if (context.shouldYield?.()) {
         fetchComplete = false;
         yieldedAt = window.windowStart;
@@ -2607,7 +2665,10 @@ export function createJunctionDeviceSyncProvider(
             options.historicalProviderRecordsSeen === true
             || hasJunctionSnapshotRecords(accumulatedTimeseries)
           )
-          && isRetryableDeviceSyncFailure(error)
+          && (
+            isRetryableDeviceSyncFailure(error)
+            || isJunctionJobSignalAbort(error, context.signal)
+          )
         ) {
           fetchComplete = false;
           break;
@@ -2628,12 +2689,44 @@ export function createJunctionDeviceSyncProvider(
           ...records,
         ];
       }
+      if (
+        options.preservePartialRetryableFailure === true
+        && index < preciseWindows.length - 1
+      ) {
+        fetchComplete = false;
+        yieldedAt = window.windowEnd;
+        break;
+      }
     }
 
     const dedupedTimeseries = dedupeJunctionTimeseriesSnapshotRecords(accumulatedTimeseries);
     const providerRecordCount = countJunctionSnapshotRecords(dedupedTimeseries);
+    let unresolvedProviderRecordIdentities: readonly string[] = [];
     let unresolvedProviderRecordCount = providerRecordCount;
+    let unresolvedProviderRecordsWithoutStableIdentity = providerRecordCount > 0;
     if (executionWindowStart && executionWindowEnd && providerRecordCount > 0) {
+      const fetchedProviderRecordIdentityEvidence =
+        identifyJunctionBloodPressureProviderRecords({
+          connections: sanitizeJunctionImportConnections(sourceProviders),
+          importedAt: executionWindowEnd,
+          timeseries: sanitizeJunctionImportSnapshots(
+            dedupedTimeseries,
+            sourceProviders,
+          ),
+          windowStart: executionWindowStart,
+          windowEnd: executionWindowEnd,
+        });
+      unresolvedProviderRecordIdentities = uniqueJunctionProviderRecordIdentities(
+        fetchedProviderRecordIdentityEvidence.repairStableExternalRefResourceIds,
+      );
+      unresolvedProviderRecordsWithoutStableIdentity =
+        fetchedProviderRecordIdentityEvidence.providerRecordCount !== providerRecordCount
+        || fetchedProviderRecordIdentityEvidence.repairStableExternalRefResourceIds.some(
+          (identity) => identity === null,
+        );
+      unresolvedProviderRecordCount =
+        unresolvedProviderRecordIdentities.length
+        + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
       try {
         const preparedImport = await prepareJunctionImportSnapshot(
           context,
@@ -2641,6 +2734,14 @@ export function createJunctionDeviceSyncProvider(
           sourceProviders,
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+          const providerRecordIdentityEvidence =
+            identifyJunctionBloodPressureProviderRecords({
+              connections: preparedImport.connections,
+              importedAt: executionWindowEnd,
+              timeseries: preparedImport.snapshots,
+              windowStart: executionWindowStart,
+              windowEnd: executionWindowEnd,
+            });
           const receipt = await context.importSnapshot({
             provider: "junction",
             accountId: buildJunctionImportAccountId(context.account.externalAccountId),
@@ -2653,10 +2754,23 @@ export function createJunctionDeviceSyncProvider(
             timeseries: preparedImport.snapshots,
           });
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
-          unresolvedProviderRecordCount = Math.max(
-            providerRecordCount - canonicalEventCount,
-            0,
-          );
+          const resolutionEvidence =
+            resolveJunctionBloodPressureProviderRecordResolutionEvidence({
+              canonicalEventCount,
+              canonicalEventExternalRefResourceIds:
+                readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt),
+              providerRecordCount,
+              providerRecordIdentityEvidence,
+            });
+          canonicalProviderRecordIdentities =
+            resolutionEvidence.canonicalProviderRecordIdentities;
+          unresolvedProviderRecordIdentities =
+            resolutionEvidence.unresolvedProviderRecordIdentities;
+          unresolvedProviderRecordsWithoutStableIdentity =
+            resolutionEvidence.unresolvedProviderRecordsWithoutStableIdentity;
+          unresolvedProviderRecordCount =
+            unresolvedProviderRecordIdentities.length
+            + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
         }
       } catch (error) {
         if (
@@ -2665,13 +2779,19 @@ export function createJunctionDeviceSyncProvider(
             options.historicalProviderRecordsSeen === true
             || providerRecordCount > 0
           )
-          && isRetryableDeviceSyncFailure(error)
+          && (
+            isRetryableDeviceSyncFailure(error)
+            || isJunctionJobSignalAbort(error, context.signal)
+          )
         ) {
           return {
+            canonicalProviderRecordIdentities: [],
             canonicalEventCount: 0,
             fetchComplete: false,
             providerRecordCount,
-            unresolvedProviderRecordCount: providerRecordCount,
+            unresolvedProviderRecordIdentities,
+            unresolvedProviderRecordCount,
+            unresolvedProviderRecordsWithoutStableIdentity,
             yieldedAt: null,
           };
         }
@@ -2680,10 +2800,13 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return {
+      canonicalProviderRecordIdentities,
       canonicalEventCount,
       fetchComplete,
       providerRecordCount,
+      unresolvedProviderRecordIdentities,
       unresolvedProviderRecordCount,
+      unresolvedProviderRecordsWithoutStableIdentity,
       yieldedAt,
     };
   }
@@ -2879,6 +3002,7 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext;
     historicalProviderRecordsSeen?: boolean;
     historicalRecordsSeen?: boolean;
+    historicalUnresolvedProviderRecordIdentitiesJson?: string;
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
@@ -2897,6 +3021,7 @@ export function createJunctionDeviceSyncProvider(
   function buildYieldedJunctionFollowUpJob(input: {
     historicalProviderRecordsSeen?: boolean;
     historicalRecordsSeen?: boolean;
+    historicalUnresolvedProviderRecordIdentitiesJson?: string;
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
@@ -2942,7 +3067,7 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, unknown> = stripUndefined({
       ...input.job.payload,
       ...(input.historicalProviderRecordsSeen === undefined
         ? {}
@@ -2950,16 +3075,19 @@ export function createJunctionDeviceSyncProvider(
       ...(input.historicalRecordsSeen === undefined
         ? {}
         : { historicalRecordsSeen: input.historicalRecordsSeen }),
-      ...(input.historicalUnresolvedProviderRecordCount
-          && input.historicalUnresolvedProviderRecordCount > 0
-        ? {
-            historicalUnresolvedProviderRecordCount:
-              input.historicalUnresolvedProviderRecordCount,
-          }
-        : {}),
+      historicalUnresolvedProviderRecordIdentitiesJson:
+        input.historicalUnresolvedProviderRecordIdentitiesJson === undefined
+          ? input.job.payload.historicalUnresolvedProviderRecordIdentitiesJson
+          : input.historicalUnresolvedProviderRecordIdentitiesJson,
+      historicalUnresolvedProviderRecordCount:
+        input.historicalUnresolvedProviderRecordCount === undefined
+          ? input.job.payload.historicalUnresolvedProviderRecordCount
+          : input.historicalUnresolvedProviderRecordCount > 0
+            ? input.historicalUnresolvedProviderRecordCount
+            : undefined,
       windowEnd: input.windowEnd,
       windowStart: input.windowStart,
-    };
+    });
     return {
       kind: "resource",
       payload,
@@ -3210,6 +3338,25 @@ function classifyOptionalJunctionResourceFailure(
 
 function isRetryableDeviceSyncFailure(error: unknown): boolean {
   return isDeviceSyncError(error) && error.retryable;
+}
+
+function isJunctionJobSignalAbort(
+  error: unknown,
+  signal: AbortSignal | undefined,
+  depth = 0,
+): boolean {
+  if (!signal?.aborted) {
+    return false;
+  }
+  if (error === signal.reason) {
+    return true;
+  }
+  if (depth >= 4 || typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const cause = "cause" in error ? (error as { cause?: unknown }).cause : undefined;
+  return cause !== undefined && isJunctionJobSignalAbort(cause, signal, depth + 1);
 }
 
 function buildJunctionOptionalResourceResponseDetail(input: {
@@ -5613,18 +5760,97 @@ function readHistoricalBackfillJobEmptyAttempts(job: DeviceSyncJobRecord): numbe
   return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts > 0 ? rawAttempts : 0;
 }
 
-function readHistoricalUnresolvedProviderRecordCount(
+function readJunctionHistoricalUnresolvedProviderRecords(
   job: DeviceSyncJobRecord,
-): number {
-  const rawCount = job.payload.historicalUnresolvedProviderRecordCount;
-  if (
-    typeof rawCount === "number"
-    && Number.isSafeInteger(rawCount)
-    && rawCount > 0
-  ) {
-    return rawCount;
+): JunctionHistoricalUnresolvedProviderRecords {
+  const encoded = job.payload.historicalUnresolvedProviderRecordIdentitiesJson;
+  if (typeof encoded === "string") {
+    try {
+      const parsed = readPlainObject(JSON.parse(encoded));
+      const rawIdentities = parsed?.i;
+      const version = parsed?.v;
+      if (
+        version !== JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITIES_VERSION
+        || !Array.isArray(rawIdentities)
+      ) {
+        return { identities: [], withoutStableIdentity: true };
+      }
+
+      const validIdentities = rawIdentities.filter((identity): identity is string =>
+        typeof identity === "string"
+        && JUNCTION_BLOOD_PRESSURE_PROVIDER_RECORD_IDENTITY_PATTERN.test(identity)
+      );
+      const identities = [...new Set(validIdentities)]
+        .sort()
+        .slice(0, JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT);
+      return {
+        identities,
+        withoutStableIdentity:
+          parsed?.u === true
+          || validIdentities.length !== rawIdentities.length
+          || rawIdentities.length > JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT,
+      };
+    } catch {
+      return { identities: [], withoutStableIdentity: true };
+    }
   }
-  return job.payload.historicalProviderRecordsSeen === true ? 1 : 0;
+
+  const legacyUnresolvedEvidence =
+    job.payload.historicalProviderRecordsSeen === true
+    || (
+      typeof job.payload.historicalUnresolvedProviderRecordCount === "number"
+      && Number.isSafeInteger(job.payload.historicalUnresolvedProviderRecordCount)
+      && job.payload.historicalUnresolvedProviderRecordCount > 0
+    );
+  return {
+    identities: [],
+    withoutStableIdentity: legacyUnresolvedEvidence,
+  };
+}
+
+function resolveJunctionHistoricalUnresolvedProviderRecords(
+  job: DeviceSyncJobRecord,
+  importResult: JunctionPreciseTimeseriesImportResult,
+): JunctionHistoricalUnresolvedProviderRecords {
+  const carried = readJunctionHistoricalUnresolvedProviderRecords(job);
+  const identities = new Set(carried.identities);
+  for (const identity of importResult.canonicalProviderRecordIdentities) {
+    identities.delete(identity);
+  }
+  for (const identity of importResult.unresolvedProviderRecordIdentities) {
+    identities.add(identity);
+  }
+
+  const sortedIdentities = [...identities].sort();
+  const overflow =
+    sortedIdentities.length
+      > JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT;
+  return {
+    identities: sortedIdentities.slice(
+      0,
+      JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITY_LIMIT,
+    ),
+    withoutStableIdentity:
+      carried.withoutStableIdentity
+      || importResult.unresolvedProviderRecordsWithoutStableIdentity
+      || overflow,
+  };
+}
+
+function countJunctionHistoricalUnresolvedProviderRecords(
+  unresolved: JunctionHistoricalUnresolvedProviderRecords,
+): number {
+  return unresolved.identities.length + (unresolved.withoutStableIdentity ? 1 : 0);
+}
+
+function encodeJunctionHistoricalUnresolvedProviderRecords(
+  unresolved: JunctionHistoricalUnresolvedProviderRecords,
+): string {
+  return JSON.stringify({
+    v: JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITIES_VERSION,
+    i: unresolved.identities,
+    ...(unresolved.withoutStableIdentity ? { u: true } : {}),
+  });
 }
 
 function buildConnectHistoricalBackfillWindow(
@@ -5728,6 +5954,7 @@ function buildExtendedTimeseriesBackfillJob(input: {
   emptyBackfillAttempts?: number;
   historicalProviderRecordsSeen?: boolean;
   historicalRecordsSeen?: boolean;
+  historicalUnresolvedProviderRecordIdentitiesJson?: string;
   historicalUnresolvedProviderRecordCount?: number;
   historicalWindowStart: string;
   resource: string;
@@ -5745,6 +5972,12 @@ function buildExtendedTimeseriesBackfillJob(input: {
       : {}),
     ...(input.historicalRecordsSeen
       ? { historicalRecordsSeen: true }
+      : {}),
+    ...(input.historicalUnresolvedProviderRecordIdentitiesJson
+      ? {
+          historicalUnresolvedProviderRecordIdentitiesJson:
+            input.historicalUnresolvedProviderRecordIdentitiesJson,
+        }
       : {}),
     ...(input.historicalUnresolvedProviderRecordCount
         && input.historicalUnresolvedProviderRecordCount > 0
@@ -6856,7 +7089,7 @@ async function projectJunctionSources(
       context.listConnectionSources
         ? existingSources
         : context.account.sources ?? [];
-    if (!isJunctionSourceAdmittedForImport(admissionSources, source.sourceProviderSlug)) {
+    if (isJunctionSourceProjectionFenced(admissionSources, source.sourceProviderSlug)) {
       continue;
     }
     const existingByInstanceKey = new Map(
@@ -6922,6 +7155,36 @@ function isJunctionSourceAdmittedForImport(
   );
   return matchingSources.length === 0
     || matchingSources.some((source) => source.status !== "disconnected");
+}
+
+function isJunctionSourceProjectionFenced(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string | null | undefined,
+): boolean {
+  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  if (!normalizedSourceProviderSlug) {
+    return false;
+  }
+
+  return sources.some((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
+    && isDeviceSyncSourceDisconnectFenced(source)
+  );
+}
+
+async function resolveJunctionCurrentSourceAdmission(
+  context: ProviderJobContext,
+  sourceProviderSlug: string,
+): Promise<"admitted" | "fenced" | "pending"> {
+  const sources = context.listConnectionSources
+    ? await context.listConnectionSources({ sourceProviderSlug })
+    : context.account.sources ?? [];
+  if (isJunctionSourceProjectionFenced(sources, sourceProviderSlug)) {
+    return "fenced";
+  }
+  return isJunctionSourceAdmittedForImport(sources, sourceProviderSlug)
+    ? "admitted"
+    : "pending";
 }
 
 async function isJunctionCompanionSourceCurrentlyAdmitted(
@@ -7258,6 +7521,100 @@ function readProviderSnapshotCanonicalEventCount(value: unknown): number {
       && canonicalEventCount >= 0
     ? canonicalEventCount
     : 0;
+}
+
+function readProviderSnapshotCanonicalEventExternalRefResourceIds(
+  value: unknown,
+): readonly string[] | null {
+  const record = readPlainObject(value);
+  if (!record || !("canonicalEventExternalRefResourceIds" in record)) {
+    return null;
+  }
+  const resourceIds = record.canonicalEventExternalRefResourceIds;
+  return Array.isArray(resourceIds)
+      && resourceIds.every((resourceId) => typeof resourceId === "string")
+    ? resourceIds
+    : null;
+}
+
+function uniqueJunctionProviderRecordIdentities(
+  identities: readonly (string | null)[],
+): string[] {
+  return [...new Set(identities.filter((identity): identity is string =>
+    identity !== null && JUNCTION_BLOOD_PRESSURE_PROVIDER_RECORD_IDENTITY_PATTERN.test(identity)
+  ))].sort();
+}
+
+function resolveJunctionBloodPressureProviderRecordResolutionEvidence(input: {
+  canonicalEventCount: number;
+  canonicalEventExternalRefResourceIds: readonly string[] | null;
+  providerRecordCount: number;
+  providerRecordIdentityEvidence: ReturnType<
+    typeof identifyJunctionBloodPressureProviderRecords
+  >;
+}): {
+  canonicalProviderRecordIdentities: readonly string[];
+  unresolvedProviderRecordIdentities: readonly string[];
+  unresolvedProviderRecordsWithoutStableIdentity: boolean;
+} {
+  const rawIdentities =
+    input.providerRecordIdentityEvidence.repairStableExternalRefResourceIds;
+  const stableIdentities = uniqueJunctionProviderRecordIdentities(rawIdentities);
+  const identityEvidenceIncomplete =
+    input.providerRecordIdentityEvidence.providerRecordCount !== input.providerRecordCount
+    || rawIdentities.some((identity) =>
+      identity !== null
+      && !JUNCTION_BLOOD_PRESSURE_PROVIDER_RECORD_IDENTITY_PATTERN.test(identity)
+    );
+
+  // Older unit seams may only expose the aggregate count. They can prove an
+  // all-canonical current scan, but never clear an exact carried obligation.
+  if (input.canonicalEventExternalRefResourceIds === null) {
+    const allCurrentRecordsCanonical =
+      !identityEvidenceIncomplete
+      && input.canonicalEventCount >= input.providerRecordCount;
+    return {
+      canonicalProviderRecordIdentities: [],
+      unresolvedProviderRecordIdentities: allCurrentRecordsCanonical
+        ? []
+        : stableIdentities,
+      unresolvedProviderRecordsWithoutStableIdentity:
+        !allCurrentRecordsCanonical
+        && (
+          identityEvidenceIncomplete
+          || rawIdentities.some((identity) => identity === null)
+        ),
+    };
+  }
+
+  const canonicalResourceIds = new Set(
+    input.canonicalEventExternalRefResourceIds.filter((resourceId) =>
+      JUNCTION_BLOOD_PRESSURE_PROVIDER_RECORD_IDENTITY_PATTERN.test(resourceId)
+    ),
+  );
+  const stableIdentitySet = new Set(stableIdentities);
+  const canonicalProviderRecordIdentities = stableIdentities.filter((identity) =>
+    canonicalResourceIds.has(identity)
+  );
+  const unresolvedProviderRecordIdentities = stableIdentities.filter((identity) =>
+    !canonicalResourceIds.has(identity)
+  );
+  const providerRecordsWithoutStableIdentity = rawIdentities.filter(
+    (identity) => identity === null,
+  ).length;
+  const canonicalRecordsWithoutStableIdentity =
+    input.canonicalEventExternalRefResourceIds.filter((resourceId) =>
+      !stableIdentitySet.has(resourceId)
+    ).length;
+
+  return {
+    canonicalProviderRecordIdentities,
+    unresolvedProviderRecordIdentities,
+    unresolvedProviderRecordsWithoutStableIdentity:
+      identityEvidenceIncomplete
+      || input.canonicalEventExternalRefResourceIds.length !== input.canonicalEventCount
+      || canonicalRecordsWithoutStableIdentity < providerRecordsWithoutStableIdentity,
+  };
 }
 
 function base32UrlEncode(input: Buffer): string {
