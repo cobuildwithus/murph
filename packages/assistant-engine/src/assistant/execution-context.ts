@@ -207,9 +207,13 @@ export type AssistantHostedAutomationToolResponse =
       action: 'patch' | 'save'
       automationId: string
       created: boolean
+      effectiveTimeZone: string | null
       lookupId: string
+      nextRunAt: string | null
       routeBinding: 'current_conversation' | 'preserved'
+      schedule: AutomationSchedule
       status: AutomationStatus
+      timingVerified: boolean
     }
   | {
       action: 'reconcile'

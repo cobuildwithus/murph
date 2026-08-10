@@ -254,23 +254,35 @@ describe('hosted domain dynamic tools', () => {
     })).toMatchObject({ kind: 'invalid-device-arguments' })
   })
 
-  it('executes automation through the injected port and returns only typed fields', async () => {
+  it('executes automation through the injected port and returns verified timing fields', async () => {
     const abortController = new AbortController()
     const automationTool = {
       request: vi.fn(async () => ({
         action: 'save' as const,
         automationId: 'automation-1',
         created: true,
+        effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
+        nextRunAt: null,
         path: '/internal/automations/evening-wind-down.md',
         routeBinding: 'current_conversation' as const,
+        schedule: {
+          kind: 'dailyLocal' as const,
+          localTime: '22:30',
+          timeZone: 'America/Chicago',
+        },
         status: 'paused' as const,
+        timingVerified: true,
       })),
     }
     const request = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send a short reminder to wind down.',
-      schedule: { kind: 'dailyLocal', localTime: '22:30' },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '22:30',
+        timeZone: 'America/Chicago',
+      },
       status: 'paused',
       title: 'Evening wind-down',
     })
@@ -291,7 +303,11 @@ describe('hosted domain dynamic tools', () => {
     expect(automationTool.request).toHaveBeenCalledWith({
       action: 'save',
       instructions: 'Send a short reminder to wind down.',
-      schedule: { kind: 'dailyLocal', localTime: '22:30' },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '22:30',
+        timeZone: 'America/Chicago',
+      },
       status: 'paused',
       title: 'Evening wind-down',
     }, { signal: abortController.signal })
@@ -299,9 +315,17 @@ describe('hosted domain dynamic tools', () => {
       action: 'save',
       automationId: 'automation-1',
       created: true,
+      effectiveTimeZone: 'America/Chicago',
       lookupId: 'evening-wind-down',
+      nextRunAt: null,
       routeBinding: 'current_conversation',
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '22:30',
+        timeZone: 'America/Chicago',
+      },
       status: 'paused',
+      timingVerified: true,
     })
 
     const mismatchedTool = {
@@ -309,9 +333,17 @@ describe('hosted domain dynamic tools', () => {
         action: 'patch' as const,
         automationId: 'automation-1',
         created: false,
+        effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
+        nextRunAt: '2026-08-10T03:30:00.000Z',
         routeBinding: 'preserved' as const,
+        schedule: {
+          kind: 'dailyLocal' as const,
+          localTime: '22:30',
+          timeZone: 'America/Chicago',
+        },
         status: 'active' as const,
+        timingVerified: true,
       })),
     }
     const mismatched = await executeMurphDynamicToolRequest({

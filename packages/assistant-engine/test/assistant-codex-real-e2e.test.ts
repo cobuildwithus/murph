@@ -3791,14 +3791,21 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected an automation save request.')
+                }
                 automationRequests.push(request)
                 return {
                   action: 'save',
                   automationId: 'automation-midnight-watch',
                   created: true,
+                  effectiveTimeZone: 'America/New_York',
                   lookupId: 'midnight-watch-reminder',
+                  nextRunAt: '2026-07-28T04:00:00.000Z',
                   routeBinding: 'current_conversation',
+                  schedule: request.schedule,
                   status: 'active',
+                  timingVerified: true,
                 }
               },
             },
@@ -3895,14 +3902,21 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
               request: async (
                 request: AssistantHostedAutomationToolRequest,
               ) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected an automation save request.')
+                }
                 automationRequests.push(request)
                 return {
                   action: 'save',
                   automationId: 'automation-dense-desk-reset',
                   created: true,
+                  effectiveTimeZone: 'America/New_York',
                   lookupId: 'dense-desk-reset-check-in',
+                  nextRunAt: '2026-07-29T13:00:00.000Z',
                   routeBinding: 'current_conversation',
+                  schedule: request.schedule,
                   status: 'active',
+                  timingVerified: true,
                 } as const
               },
             },

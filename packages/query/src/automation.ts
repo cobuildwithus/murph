@@ -12,6 +12,7 @@ import {
   automationScheduleKindValues,
   automationStatusValues,
   automationSupportKindValues,
+  normalizeIanaTimeZone,
   parseAutomationSupportSeriesTag,
   VAULT_LAYOUT,
   type AutomationAssistantTargetOverride,
@@ -177,10 +178,20 @@ function assertDeviceActivityCursorShape(input: {
   }
 }
 
-function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
-  if (Object.hasOwn(object, "timeZone")) {
-    throw new Error("schedule.timeZone is not supported for canonical automation schedules.");
+function normalizeRecurringScheduleTimeZone(
+  object: Record<string, unknown>,
+): string | undefined {
+  if (!Object.hasOwn(object, "timeZone") || object.timeZone === undefined) {
+    return undefined;
   }
+
+  const timeZone = requireStringValue(object.timeZone, "schedule.timeZone");
+  const normalized = normalizeIanaTimeZone(timeZone);
+  if (normalized === null) {
+    throw new Error("schedule.timeZone must be a valid IANA timezone.");
+  }
+
+  return normalized;
 }
 
 function normalizeAutomationStatus(value: unknown): AutomationStatus {
@@ -268,23 +279,26 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
         everyMs,
       };
     }
-    case "cron":
-      rejectRecurringScheduleTimeZone(object);
+    case "cron": {
+      const timeZone = normalizeRecurringScheduleTimeZone(object);
       return {
         kind,
         expression: requireStringValue(object.expression, "schedule.expression"),
+        ...(timeZone === undefined ? {} : { timeZone }),
       };
+    }
     case "dailyLocal": {
       const localTime = requireStringValue(object.localTime, "schedule.localTime");
       if (!dailyLocalTimePattern.test(localTime)) {
         throw new Error("schedule.localTime must use HH:MM format.");
       }
 
-      rejectRecurringScheduleTimeZone(object);
+      const timeZone = normalizeRecurringScheduleTimeZone(object);
 
       return {
         kind,
         localTime,
+        ...(timeZone === undefined ? {} : { timeZone }),
       };
     }
     case "deviceActivity": {

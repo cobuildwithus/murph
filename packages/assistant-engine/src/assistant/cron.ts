@@ -98,6 +98,7 @@ export {
   repairPendingAssistantCronDeliveries,
 }
 export { listAssistantCronPendingDeliveryIntentIds } from './cron/delivery-reconciliation.ts'
+export { resolveAssistantCronDefaultTimeZone } from './cron/canonical-jobs.ts'
 export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
 export type {
   AddAssistantCronJobInput,

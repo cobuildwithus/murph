@@ -8,6 +8,7 @@ import {
   executableScheduleIntentEverySchema,
   isValidExecutableCronExpression,
   MIN_EXECUTABLE_SCHEDULE_EVERY_MS,
+  scheduleIntentTimeZoneSchema,
 } from "./schedule-intent.ts";
 import { assistantReasoningEffortValues } from "./assistant.ts";
 import { withContractMetadata } from "./schema-metadata.ts";
@@ -178,8 +179,30 @@ function validateAutomationLifecycleFields(
 export const isValidAutomationCronExpression = isValidExecutableCronExpression;
 export const automationScheduleAtSchema = executableScheduleIntentAtSchema;
 export const automationScheduleEverySchema = executableScheduleIntentEverySchema;
-export const automationScheduleCronSchema = executableScheduleIntentCronSchema;
-export const automationScheduleDailyLocalSchema = executableScheduleIntentDailyLocalSchema;
+export const automationScheduleCronSchema = executableScheduleIntentCronSchema
+  .extend({
+    timeZone: scheduleIntentTimeZoneSchema
+      .optional()
+      .describe(
+        "Optional IANA timezone for these recurring wall-clock fields. Omit only to follow the vault timezone.",
+      ),
+  })
+  .strict()
+  .describe(
+    "A five-field recurring cron evaluated as wall-clock fields in timeZone, or in the vault timezone when timeZone is omitted.",
+  );
+export const automationScheduleDailyLocalSchema = executableScheduleIntentDailyLocalSchema
+  .extend({
+    timeZone: scheduleIntentTimeZoneSchema
+      .optional()
+      .describe(
+        "Optional IANA timezone for this recurring wall-clock time. Omit only to follow the vault timezone.",
+      ),
+  })
+  .strict()
+  .describe(
+    "A recurring local wall-clock time in timeZone, or in the vault timezone when timeZone is omitted.",
+  );
 
 export const automationTimeScheduleSchema = z.discriminatedUnion("kind", [
   automationScheduleAtSchema,

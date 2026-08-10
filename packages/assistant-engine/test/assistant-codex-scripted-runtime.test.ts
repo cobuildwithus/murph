@@ -518,6 +518,9 @@ text(JSON.stringify(result));
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
             expect((await readFile(commandLog, 'utf8')).trim()).toBe(
               'assistant onboarding complete --reason user_answered',
             )
@@ -526,9 +529,13 @@ text(JSON.stringify(result));
               action: 'save',
               automationId: 'automation-first-personal-read',
               created: true,
+              effectiveTimeZone: null,
               lookupId: 'onboarding-first-personal-read',
+              nextRunAt: '2026-08-07T13:00:00.000Z',
               routeBinding: 'current_conversation',
+              schedule: request.schedule,
               status: 'active',
+              timingVerified: true,
             }
           },
         },
@@ -1420,14 +1427,21 @@ if (!tool) {
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
             automationRequests.push(request)
             return {
               action: 'save',
               automationId: 'automation-native-deferred',
               created: true,
+              effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
+              nextRunAt: '2026-08-08T13:00:00.000Z',
               routeBinding: 'current_conversation',
+              schedule: request.schedule,
               status: 'active',
+              timingVerified: true,
             }
           },
         },
@@ -1608,14 +1622,21 @@ if (!tool) {
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
             automationRequests.push(request)
             return {
               action: 'save',
               automationId: 'automation-native-search',
               created: true,
+              effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
+              nextRunAt: '2026-08-08T13:00:00.000Z',
               routeBinding: 'current_conversation',
+              schedule: request.schedule,
               status: 'active',
+              timingVerified: true,
             }
           },
         },

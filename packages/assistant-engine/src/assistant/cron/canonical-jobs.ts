@@ -309,7 +309,7 @@ export function resolveAssistantCronResolvedSchedule(input: {
     return {
       kind: 'cron',
       expression: input.schedule.expression,
-      timeZone: input.timeZone ?? 'UTC',
+      timeZone: input.schedule.timeZone ?? input.timeZone ?? 'UTC',
     }
   }
 
@@ -317,7 +317,7 @@ export function resolveAssistantCronResolvedSchedule(input: {
     return {
       kind: 'dailyLocal',
       localTime: input.schedule.localTime,
-      timeZone: input.timeZone ?? 'UTC',
+      timeZone: input.schedule.timeZone ?? input.timeZone ?? 'UTC',
     }
   }
 
@@ -432,7 +432,7 @@ function normalizeCanonicalAssistantCronRecord(
     tags: [...record.tags],
     timeZone:
       record.schedule.kind === 'cron' || record.schedule.kind === 'dailyLocal'
-        ? timeZone
+        ? record.schedule.timeZone ?? timeZone
         : null,
     title: record.title,
     updatedAt: record.updatedAt,
@@ -536,6 +536,7 @@ function normalizeAssistantCronPublicSchedule(
     return assistantCronScheduleSchema.parse({
       kind: 'cron',
       expression: schedule.expression,
+      ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
     })
   }
 
@@ -543,6 +544,7 @@ function normalizeAssistantCronPublicSchedule(
     return assistantCronScheduleSchema.parse({
       kind: 'dailyLocal',
       localTime: schedule.localTime,
+      ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
     })
   }
 
