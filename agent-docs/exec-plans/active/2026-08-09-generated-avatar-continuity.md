@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — ReviewGPT round 3 remediation awaiting exact-head review
+Status: active — ReviewGPT round 4 remediation awaiting exact-head review
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -183,3 +183,29 @@ Updated: 2026-08-10
   Final exact assembly passes at 8,999,581-byte vault CLI total and a
   1,659,616-byte runner entry, 8,018,907-byte static closure, and
   9,996,725-byte runner total.
+- Final ReviewGPT round 4 found that ordered position is not a generic physical
+  media-owner fact: successful Linq text-plus-voice delivery sends the text
+  first and the actual voice memo second, so the round-3 index-zero heuristic
+  erased exact media context when a member replied to the voice bubble. The
+  required retrospective records the corrected invariant on PR #1533 before
+  remediation.
+- The correction deletes positional ownership inference and adds one optional
+  true-only fact to the existing provider-message effect. The Linq body owner
+  sets it when a physical message includes intent media; the dedicated voice
+  endpoint owner sets it on its single successful effect. Multi-message records
+  without the fact retain no media, while single-message legacy deliveries stay
+  unambiguous. No database migration, queue, service, state machine, or new
+  authority owner is introduced.
+- A production-shaped regression now dispatches text plus a voice memo through
+  the real Linq message and dedicated voice endpoints, reloads the persisted
+  outbox intent, and resolves native replies to both physical ids. The text
+  reply receives only attested text; the voice reply receives the exact
+  media/no-text context without transcript, filename, or provider-id leakage.
+  The split voice-fallback and both generated-image primary/link journeys remain
+  green.
+- Focused verification passes 251 Assistant Engine outbox/channel/reply tests,
+  the 64-test Operator Config Linq runtime file, and both affected package
+  typechecks. After removing redundant projection code instead of raising a
+  ratchet, exact hosted-local assembly passes at 8,999,571-byte vault CLI total
+  and a 1,659,616-byte runner entry, 8,018,897-byte static closure, and
+  9,996,715-byte runner total.

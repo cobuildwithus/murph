@@ -31,7 +31,10 @@ import {
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
-import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
+import {
+  sendLinqMessage,
+  sendLinqVoiceMemoMessage,
+} from '../src/assistant/channels/runtime.ts'
 
 const replyEventPathMocks = vi.hoisted(() => ({
   listAssistantOutboxIntents: vi.fn(),
@@ -697,12 +700,14 @@ describe('assistant auto-reply event-first path', () => {
     expect(messageCount).toBe(2)
     expect(firstDelivery.delivery).toMatchObject({
       providerMessageEffects: [{
+        carriesIntentMedia: true,
         message: 'Generated image',
         providerMessageId: 'linq-msg-first-generated-avatar',
       }],
     })
     expect(secondDelivery.delivery).toMatchObject({
       providerMessageEffects: [{
+        carriesIntentMedia: true,
         message: 'Generated image',
         providerMessageId: 'linq-msg-second-generated-avatar',
       }],
@@ -790,6 +795,160 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('prior assistant media delivery')
     expect(prompt).not.toContain('linq-msg-murph-fallback-target')
     expect(prompt).not.toContain('memo-fallback.m4a')
+  })
+
+  it('binds split Linq text and voice replies to their exact physical effects', async () => {
+    const vault = await createTempVault()
+    const intent = await createAssistantOutboxIntent({
+      actorId: null,
+      channel: 'linq',
+      dedupeToken: 'split-text-and-voice',
+      explicitTarget: 'thread-1',
+      identityId: 'identity-1',
+      media: [{
+        filename: 'reply-target.m4a',
+        kind: 'voice_memo',
+        transcript: 'A private transcript that must not be projected.',
+        transport: {
+          attachmentId: 'attachment-reply-target',
+          kind: 'linq_attachment',
+        },
+      }],
+      message: 'Listen to this',
+      sessionId: 'session-split-text-and-voice',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+      turnId: 'turn-split-text-and-voice',
+      vault,
+    })
+    const providerBodies: Array<Record<string, unknown>> = []
+    const fetchImplementation = vi.fn(async (request, init) => {
+      const url = String(request)
+      providerBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+      if (url.endsWith('/chats/thread-1/messages')) {
+        return new Response(JSON.stringify({
+          chat_id: 'thread-1',
+          message: { id: 'linq-msg-split-voice-text' },
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.endsWith('/chats/thread-1/voicememo')) {
+        return new Response(JSON.stringify({
+          voice_memo: {
+            chat: { id: 'thread-1' },
+            id: 'linq-msg-split-voice-media',
+            voice_memo: { id: 'attachment-reply-target' },
+          },
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected Linq request: ${init?.method} ${url}`)
+    })
+    const linqRuntime = {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation,
+    }
+    const sendLinq = vi.fn(async (request) =>
+      await sendLinqMessage(request, linqRuntime),
+    )
+    const sendLinqVoiceMemo = vi.fn(async (request) =>
+      await sendLinqVoiceMemoMessage(request, linqRuntime),
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq, sendLinqVoiceMemo },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-08-07T21:09:00.000Z'),
+      vault,
+    })
+    expect(dispatched.intent.status).toBe('sent')
+    expect(providerBodies).toEqual([
+      { message: { idempotency_key: expect.any(String), parts: [{
+        type: 'text',
+        value: 'Listen to this',
+      }] } },
+      { attachment_id: 'attachment-reply-target' },
+    ])
+    const persisted = await readAssistantOutboxIntent(vault, intent.intentId)
+    if (!persisted) {
+      throw new Error('expected persisted split text-and-voice Linq delivery')
+    }
+    expect(persisted.delivery).toMatchObject({
+      providerMessageEffects: [
+        {
+          message: 'Listen to this',
+          providerMessageId: 'linq-msg-split-voice-text',
+        },
+        {
+          carriesIntentMedia: true,
+          message: null,
+          providerMessageId: 'linq-msg-split-voice-media',
+        },
+      ],
+      providerMessageIds: [
+        'linq-msg-split-voice-text',
+        'linq-msg-split-voice-media',
+      ],
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([persisted])
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createLinqGroupCandidate({
+        inputId: 'ain_19191919191919191919191919191919',
+        messageId: 'linq-msg-reply-to-split-voice-text',
+        occurredAt: '2026-08-07T21:10:00.000Z',
+        replyToMessageId: 'linq-msg-split-voice-text',
+        text: 'What is this?',
+      })),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const textPrompt = readSentPrompt()
+    expect(textPrompt).toContain(
+      'The sender explicitly replied to this exact prior assistant message:',
+    )
+    expect(textPrompt).toContain('Listen to this')
+    expect(textPrompt).not.toContain('prior assistant media delivery')
+    expect(textPrompt).not.toContain('A private transcript')
+    expect(textPrompt).not.toContain('reply-target.m4a')
+
+    replyEventPathMocks.sendAssistantMessage.mockClear()
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createLinqGroupCandidate({
+        inputId: 'ain_20202020202020202020202020202020',
+        messageId: 'linq-msg-reply-to-split-voice-media',
+        occurredAt: '2026-08-07T21:11:00.000Z',
+        replyToMessageId: 'linq-msg-split-voice-media',
+        text: 'Do another one.',
+      })),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const voicePrompt = readSentPrompt()
+    expect(voicePrompt).toContain(
+      'The exact reply target is an assistant media delivery with no text.',
+    )
+    expect(voicePrompt).not.toContain('Listen to this')
+    expect(voicePrompt).not.toContain('A private transcript')
+    expect(voicePrompt).not.toContain('reply-target.m4a')
+    expect(voicePrompt).not.toContain('linq-msg-split-voice-text')
+    expect(voicePrompt).not.toContain('linq-msg-split-voice-media')
   })
 
   it.each([
@@ -1000,6 +1159,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(persisted.delivery).toMatchObject({
       providerMessageEffects: [
         {
+          carriesIntentMedia: true,
           message: 'Generated image',
           providerMessageId: 'linq-msg-generated-image-primary',
         },

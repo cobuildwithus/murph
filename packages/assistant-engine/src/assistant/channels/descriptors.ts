@@ -414,6 +414,7 @@ function summarizeTelegramVoiceMemoDelivery(input: {
     | {
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
+        providerMessageEffects?: AssistantProviderMessageEffect[] | null
         target?: string | null
         targetKind?: 'explicit' | 'participant' | 'thread' | null
       }
@@ -1108,7 +1109,6 @@ function appendDeliveredProviderMessageEffects(
     | {
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
-        providerMessageEffects?: AssistantProviderMessageEffect[] | null
       }
     | void,
 ): void {
@@ -1124,24 +1124,21 @@ function appendDeliveredProviderMediaEffects(
     | {
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
-        providerMessageEffects?: AssistantProviderMessageEffect[] | null
       }
     | void,
 ): void {
-  const deliveredEffects = readDeliveredProviderMessageEffects(delivered)
-  if (deliveredEffects) {
-    output.push(...deliveredEffects)
-    return
-  }
-
   const providerMessageIds =
     readDeliveredProviderMessageIds(delivered) ??
     [readDeliveredProviderMessageId(delivered)].filter(
       (providerMessageId): providerMessageId is string =>
         providerMessageId !== null,
     )
-  for (const providerMessageId of providerMessageIds) {
-    output.push({ message: null, providerMessageId })
+  if (providerMessageIds.length === 1) {
+    output.push({
+      carriesIntentMedia: true,
+      message: null,
+      providerMessageId: providerMessageIds[0]!,
+    })
   }
 }
 

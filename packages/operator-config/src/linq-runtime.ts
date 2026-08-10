@@ -1394,6 +1394,9 @@ function buildLinqProviderMessageEffects(input: {
   )
   const text = textParts.length === 1 ? textParts[0]!.value : null
   return [{
+    ...(input.body.message.parts?.some((part) => part.type === 'media') === true
+      ? { carriesIntentMedia: true as const }
+      : {}),
     message: typeof text === 'string' && text.length > 0 ? text : null,
     providerMessageId,
   }]

@@ -1141,6 +1141,7 @@ test('linq runtime keeps created-chat media on the primary message before the ri
   assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
   assert.deepEqual(result.providerMessageEffects, [
     {
+      carriesIntentMedia: true,
       message: 'Generated image',
       providerMessageId: 'message-text',
     },

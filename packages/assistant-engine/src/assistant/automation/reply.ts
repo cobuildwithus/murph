@@ -4876,6 +4876,7 @@ interface AssistantAutoReplyMatchingOutboxDelivery {
   media: readonly AssistantResponseMedia[]
   message: string | null
   providerMessageEffects: Array<{
+    carriesIntentMedia?: true
     message: string | null
     providerMessageId: string
   }>
@@ -4941,11 +4942,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       intentId: intent.intentId,
       media: intent.media ?? [],
       message: message ?? null,
-      providerMessageEffects:
-        delivery.providerMessageEffects?.map((effect) => ({
-          message: effect.message,
-          providerMessageId: effect.providerMessageId,
-        })) ?? [],
+      providerMessageEffects: delivery.providerMessageEffects ?? [],
       providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
         delivery,
       ),
@@ -4968,19 +4965,21 @@ function resolveAssistantAutoReplyExactOutboxDelivery(
   }
 
   const delivery = matchingDeliveries[0]!
+  const matchingEffects = delivery.providerMessageEffects.filter((effect) =>
+    effect.providerMessageId === providerMessageId,
+  )
   const matchedDelivery = {
     ...delivery,
-    media: delivery.providerMessageIds[0] === providerMessageId
-      ? delivery.media
-      : [],
+    media:
+      delivery.providerMessageIds.length === 1 ||
+      matchingEffects[0]?.carriesIntentMedia === true
+        ? delivery.media
+        : [],
   }
   if (delivery.providerMessageEffects.length === 0) {
     return matchedDelivery
   }
 
-  const matchingEffects = delivery.providerMessageEffects.filter((effect) =>
-    effect.providerMessageId === providerMessageId,
-  )
   return matchingEffects.length === 1
     ? {
         ...matchedDelivery,
