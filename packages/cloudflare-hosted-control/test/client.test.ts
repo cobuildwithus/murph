@@ -47,7 +47,7 @@ describe("createCloudflareHostedControlClient", () => {
 
   it("verifies a bounded inference candidate through the user-bound route", async () => {
     const fetchImpl = vi.fn(async () => createJsonResponse({
-      verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+      verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
       verified: true,
     })) as typeof fetch;
     const client = createCloudflareHostedControlClient({
@@ -67,7 +67,7 @@ describe("createCloudflareHostedControlClient", () => {
       },
       userId: "user_123",
     })).resolves.toEqual({
-      verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+      verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
       verified: true,
     });
 

@@ -1,9 +1,9 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from "vitest";
 
 import {
   executeMurphDynamicToolRequest,
   MURPH_IMESSAGE_CONTACT_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
 import type {
@@ -21,7 +21,7 @@ describe("assistant iMessage contact tool", () => {
   });
 
   it("uses one current user input and returns the assigned number", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {},
@@ -77,7 +77,7 @@ describe("assistant iMessage contact tool", () => {
   });
 
   it("rejects arguments that could select another member or number", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: { phoneNumber: "+15550100009" },
@@ -88,7 +88,7 @@ describe("assistant iMessage contact tool", () => {
   });
 
   it("gives safe recovery guidance when no number is assigned", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {},
@@ -120,7 +120,7 @@ describe("assistant iMessage contact tool", () => {
   });
 
   it("explains how to connect an iMessage sender identity before assignment", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {},
@@ -152,7 +152,7 @@ describe("assistant iMessage contact tool", () => {
   });
 
   it("does not claim assignment status when the request cannot be confirmed", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {},

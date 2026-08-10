@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from "vitest";
 
 const preferenceMocks = vi.hoisted(() => ({
@@ -21,7 +22,6 @@ vi.mock("@murphai/vault-usecases/preferences", () => ({
 
 import {
   executeMurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
 import {
   createAssistantHostedScheduledRequestKey,
@@ -118,6 +118,7 @@ describe("scheduled assistant tool authority", () => {
       {
         automationId: "automation_scheduled_tools",
         occurrenceAt: OCCURRENCE_AT,
+        toolCallId: "call-test",
       },
     );
   });
@@ -165,6 +166,7 @@ describe("scheduled assistant tool authority", () => {
       {
         automationId: "automation_scheduled_tools",
         occurrenceAt: OCCURRENCE_AT,
+        toolCallId: "call-test",
       },
     );
   });
@@ -236,7 +238,7 @@ function hostedToolContext(
 }
 
 function parseTool(tool: string, args: unknown) {
-  const request = readMurphDynamicToolRequest({
+  const request = readTestMurphDynamicToolRequest({
     method: "item/tool/call",
     params: {
       arguments: args,
@@ -249,7 +251,7 @@ function parseTool(tool: string, args: unknown) {
 }
 
 async function execute(
-  request: NonNullable<ReturnType<typeof readMurphDynamicToolRequest>>,
+  request: NonNullable<ReturnType<typeof readTestMurphDynamicToolRequest>>,
   hostedToolContext: AssistantHostedToolContext,
   options: { vaultRoot?: string } = {},
 ) {

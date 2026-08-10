@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,7 +8,6 @@ import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vau
 import {
   executeMurphDynamicToolRequest,
   MURPH_GROUP_ROOM_MODEL_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
@@ -547,7 +547,7 @@ function requireGroupRoomModelRequest(args: unknown) {
 }
 
 function readRequest(args: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     method: 'item/tool/call',
     params: {
       arguments: args,

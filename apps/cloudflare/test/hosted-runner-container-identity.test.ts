@@ -430,7 +430,7 @@ describe("hosted runner container identity", () => {
       protocol: "responses",
       revision: 7,
       supportsImages: false,
-      verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+      verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
     };
     const runtimeTarget = {
       auth: {

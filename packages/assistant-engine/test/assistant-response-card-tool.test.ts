@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { Buffer } from 'node:buffer'
 
 import { describe, expect, it } from 'vitest'
@@ -8,7 +9,6 @@ import type { AssistantResponseCard } from '@murphai/operator-config/assistant-r
 import {
   executeMurphDynamicToolRequest,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
-  readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 const CARD: AssistantResponseCard = {
@@ -74,7 +74,7 @@ function executeCardTool(input: {
 }
 
 function readCardToolRequest(argumentsValue: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     id: 1,
     method: 'item/tool/call',
     params: {

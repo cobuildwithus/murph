@@ -1,9 +1,9 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from "vitest";
 
 import {
   executeMurphDynamicToolRequest,
   MURPH_PLAN_USAGE_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
 import type {
@@ -43,7 +43,7 @@ describe("assistant plan usage tool", () => {
   });
 
   it("accepts empty arguments and returns the bound member's overall projection", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {},
@@ -118,7 +118,7 @@ describe("assistant plan usage tool", () => {
   });
 
   it("projects the legacy Group wire name as Core for the assistant", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -195,7 +195,7 @@ describe("assistant plan usage tool", () => {
   });
 
   it("rejects extra arguments", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: { memberId: "member_other" },
@@ -206,7 +206,7 @@ describe("assistant plan usage tool", () => {
   });
 
   it("requests a quote only for an explicit direct plan target", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -226,7 +226,7 @@ describe("assistant plan usage tool", () => {
 
   it("does not expose hosted read failures", async () => {
     const backendError = "sensitive usage-store failure detail";
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {},
@@ -258,7 +258,7 @@ describe("assistant plan usage tool", () => {
   });
 
   it("fails safely when the hosted read port is absent", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {},

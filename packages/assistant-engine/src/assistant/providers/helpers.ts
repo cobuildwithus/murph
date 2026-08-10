@@ -407,23 +407,33 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
   turnId: string | null
 }): AssistantCodexTokenUsageEvent[] {
   const turnStartedEventIndex = findAssistantCodexTurnStartedEventIndex(input)
+  const currentTurnOutputEventIndex =
+    findAssistantCodexCurrentTurnOutputEventIndex({
+      ...input,
+      turnStartedEventIndex,
+    })
 
-  return input.rawEvents.flatMap((rawEvent, index) => {
+  const events = input.rawEvents.flatMap((rawEvent, index) => {
     const pair = readAssistantCodexTokenUsagePairFromEvent(rawEvent)
     if (
       !pair ||
       (input.turnId !== null && pair.turnId !== input.turnId) ||
-      (
-        input.turnId === null &&
-        turnStartedEventIndex !== null &&
-        index < turnStartedEventIndex
-      )
+      (turnStartedEventIndex !== null && index < turnStartedEventIndex)
     ) {
       return []
     }
 
     return [{ index, ...pair }]
   })
+
+  if (currentTurnOutputEventIndex === null) {
+    return events
+  }
+
+  const postOutputEvents = events.filter(
+    (event) => event.index >= currentTurnOutputEventIndex,
+  )
+  return postOutputEvents.length > 0 ? postOutputEvents : events
 }
 
 function sanitizeCodexUsage(
@@ -886,6 +896,73 @@ function findAssistantCodexTurnStartedEventIndex(input: {
   }
 
   return fallbackIndex
+}
+
+function findAssistantCodexCurrentTurnOutputEventIndex(input: {
+  rawEvents: readonly unknown[]
+  turnId: string | null
+  turnStartedEventIndex: number | null
+}): number | null {
+  const startIndex = input.turnStartedEventIndex ?? 0
+  for (let index = startIndex; index < input.rawEvents.length; index += 1) {
+    const notification = readCodexServerNotification(input.rawEvents[index])
+    if (
+      !notification ||
+      (
+        input.turnId !== null &&
+        readCodexNotificationTurnId(notification) !== input.turnId
+      )
+    ) {
+      continue
+    }
+
+    if (isAssistantCodexCurrentTurnOutputNotification(notification)) {
+      return index
+    }
+  }
+
+  return null
+}
+
+function readCodexNotificationTurnId(
+  notification: NonNullable<ReturnType<typeof readCodexServerNotification>>,
+): string | null {
+  return readCodexNonEmptyString(notification.params.turnId) ??
+    readCodexNonEmptyString(readCodexRecord(notification.params.turn)?.id)
+}
+
+function isAssistantCodexCurrentTurnOutputNotification(
+  notification: NonNullable<ReturnType<typeof readCodexServerNotification>>,
+): boolean {
+  if (
+    notification.method === 'item/agentMessage/delta' ||
+    notification.method === 'item/plan/delta' ||
+    notification.method === 'item/reasoning/summaryPartAdded' ||
+    notification.method === 'item/reasoning/summaryTextDelta' ||
+    notification.method === 'item/reasoning/textDelta' ||
+    notification.method === 'rawResponseItem/completed'
+  ) {
+    return true
+  }
+
+  if (
+    notification.method !== 'item/started' &&
+    notification.method !== 'item/completed'
+  ) {
+    return false
+  }
+
+  const itemType = readCodexNonEmptyString(
+    readCodexRecord(notification.params.item)?.type,
+  )
+  return itemType === 'agentMessage' ||
+    itemType === 'plan' ||
+    itemType === 'reasoning' ||
+    itemType === 'commandExecution' ||
+    itemType === 'fileChange' ||
+    itemType === 'mcpToolCall' ||
+    itemType === 'dynamicToolCall' ||
+    itemType === 'webSearch'
 }
 
 export function isAssistantCodexTokenUsageEventType(

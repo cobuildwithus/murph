@@ -1,4 +1,4 @@
-ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.145.0
+ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.147.0
 
 FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions
 

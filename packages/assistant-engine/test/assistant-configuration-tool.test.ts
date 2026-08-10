@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,7 +13,6 @@ import {
   executeMurphDynamicToolRequest,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
 import type {
@@ -52,7 +52,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("saves an explicit group room model for the next turn", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -118,7 +118,7 @@ describe("assistant configuration tool", () => {
       { provider: "venice" as const },
       { reasoningEffort: "high" as const },
     ]) {
-      const request = readMurphDynamicToolRequest({
+      const request = readTestMurphDynamicToolRequest({
         method: "item/tool/call",
         params: {
           arguments: { action: "update", ...change },
@@ -151,7 +151,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("reads the saved next-turn target without rewriting the current turn", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: { action: "read" },
@@ -207,7 +207,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("requires accepted user input before updating configuration", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: { action: "update", model: HOSTED_ASSISTANT_LUNA_MODEL },
@@ -240,7 +240,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("saves an explicit model and reasoning change directly for the next turn", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -311,7 +311,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("confirms an unchanged target through the input-bound update", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -373,7 +373,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("saves an explicit core-reply provider from normal conversation", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -443,7 +443,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("returns the authoritative Edge upgrade requirement from the update", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -505,7 +505,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("preserves the requested field mask", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -565,7 +565,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("clears dormant Sol intent when the member explicitly chooses Terra", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -628,7 +628,7 @@ describe("assistant configuration tool", () => {
   });
 
   it("rejects empty updates and unsupported reasoning effort", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: { action: "update" },
@@ -636,7 +636,7 @@ describe("assistant configuration tool", () => {
         tool: "assistant_configuration",
       },
     })?.kind).toBe("invalid-assistant-configuration-arguments");
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {

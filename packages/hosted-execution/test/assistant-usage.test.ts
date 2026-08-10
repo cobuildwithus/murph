@@ -106,6 +106,7 @@ test("native Codex memory usage is exact and replay-idempotent", () => {
     providerRequestId: "resp_memory_123",
     providerRequestOutcome: "succeeded" as const,
     rawUsageJson: {
+      cacheWriteInputTokens: 50,
       input_tokens: 1_500,
       input_tokens_details: {
         cache_write_tokens: 50,

@@ -55,8 +55,8 @@ import {
   createCatalogModel,
 } from '../src/assistant/providers/catalog.ts'
 import {
-  buildAssistantCodexTurnProfileJson,
-  extractCodexAssistantProviderUsage,
+  buildAssistantCodexTurnProfileJson as buildExactAssistantCodexTurnProfileJson,
+  extractCodexAssistantProviderUsage as extractExactCodexAssistantProviderUsage,
   resolveCodexAssistantProviderTokenPricingBasis,
   resolveAssistantProviderPrompt as resolveAssistantProviderPromptUnchecked,
 } from '../src/assistant/providers/helpers.ts'
@@ -94,6 +94,116 @@ function testCodexResume(codexThreadId: string) {
   return {
     codexThreadId,
   }
+}
+
+function extractCodexAssistantProviderUsage(
+  input: Parameters<typeof extractExactCodexAssistantProviderUsage>[0],
+) {
+  return extractExactCodexAssistantProviderUsage({
+    ...input,
+    rawEvents: completeTestCodexProtocolEvents(
+      input.rawEvents,
+      resolveTestTurnId(input.rawEvents),
+    ),
+  })
+}
+
+function buildAssistantCodexTurnProfileJson(
+  input: Parameters<typeof buildExactAssistantCodexTurnProfileJson>[0],
+) {
+  return buildExactAssistantCodexTurnProfileJson({
+    ...input,
+    rawEvents: completeTestCodexProtocolEvents(input.rawEvents, input.turnId),
+  })
+}
+
+function completeTestCodexProtocolEvents(
+  events: readonly unknown[],
+  turnId: string | null,
+): unknown[] {
+  return events.map((event) => {
+    const record = readTestRecord(event)
+    const params = readTestRecord(record?.params)
+    if (!record || !params || typeof record.method !== 'string') {
+      return event
+    }
+
+    const completedParams = {
+      threadId: 'thread-test',
+      ...(turnId ? { turnId } : {}),
+      ...params,
+    }
+    const tokenUsage = readTestRecord(params?.tokenUsage)
+    if (record.method !== 'thread/tokenUsage/updated' || !tokenUsage) {
+      return {
+        ...record,
+        params: completedParams,
+      }
+    }
+
+    const last = completeTestTokenUsageBreakdown(tokenUsage.last)
+    const total = completeTestTokenUsageBreakdown(
+      tokenUsage.total ?? tokenUsage.last,
+    )
+    if (!last || !total) {
+      return event
+    }
+
+    return {
+      ...record,
+      params: {
+        ...completedParams,
+        tokenUsage: {
+          modelContextWindow: null,
+          ...tokenUsage,
+          last,
+          total,
+        },
+      },
+    }
+  })
+}
+
+function resolveTestTurnId(events: readonly unknown[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const params = readTestRecord(readTestRecord(events[index])?.params)
+    const turnId = typeof params?.turnId === 'string'
+      ? params.turnId
+      : readTestRecord(params?.turn)?.id
+    if (typeof turnId === 'string' && turnId.length > 0) {
+      return turnId
+    }
+  }
+  return null
+}
+
+function completeTestTokenUsageBreakdown(
+  value: unknown,
+): Record<string, unknown> | null {
+  const breakdown = readTestRecord(value)
+  const inputTokens = typeof breakdown?.inputTokens === 'number'
+    ? breakdown.inputTokens
+    : 0
+  const outputTokens = typeof breakdown?.outputTokens === 'number'
+    ? breakdown.outputTokens
+    : 0
+  return breakdown
+    ? {
+        cacheWriteInputTokens: 0,
+        cachedInputTokens: 0,
+        inputTokens,
+        outputTokens,
+        reasoningOutputTokens: 0,
+        totalTokens: inputTokens + outputTokens,
+        ...breakdown,
+      }
+    : null
+}
+
+function readTestRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 function resolveAssistantProviderPrompt(
@@ -436,7 +546,7 @@ describe('Codex assistant registry helpers', () => {
                 usage: {},
               },
             },
-            type: 'turn.completed',
+            method: 'turn/completed',
           },
         ],
         serviceTier: 'flex',
@@ -444,7 +554,7 @@ describe('Codex assistant registry helpers', () => {
     ).toMatchObject({
       providerName: 'openai',
       requestedModel: 'gpt-5.6-terra',
-      servedModel: 'openai-production-alias',
+      servedModel: 'gpt-5.6-terra',
       tokenPricingBasis: 'openai-flex',
     })
     expect(
@@ -531,6 +641,15 @@ describe('Codex assistant registry helpers', () => {
         {
           method: 'turn/started',
           params: { turn: { id: 'turn_profile' } },
+        },
+        {
+          method: 'item/started',
+          params: {
+            item: {
+              id: 'item_1',
+              type: 'commandExecution',
+            },
+          },
         },
         {
           method: 'thread/tokenUsage/updated',
@@ -1335,6 +1454,7 @@ describe('Codex assistant registry helpers', () => {
         total_tokens: 26,
       },
       expectedSourcePath: 'params.usage',
+      legacy: true,
       name: 'OpenAI chat-completions usage aliases',
       rawEvents: [
         {
@@ -1356,7 +1476,7 @@ describe('Codex assistant registry helpers', () => {
               total_tokens: 26,
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1380,6 +1500,7 @@ describe('Codex assistant registry helpers', () => {
         total_tokens: 41,
       },
       expectedSourcePath: 'params.usage',
+      legacy: true,
       name: 'OpenAI responses usage detail aliases',
       rawEvents: [
         {
@@ -1400,7 +1521,7 @@ describe('Codex assistant registry helpers', () => {
               total_tokens: 41,
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1420,6 +1541,7 @@ describe('Codex assistant registry helpers', () => {
         total_tokens: 53,
       },
       expectedSourcePath: 'params.usage',
+      legacy: true,
       name: 'OpenAI chat usage prompt token detail aliases',
       rawEvents: [
         {
@@ -1437,7 +1559,7 @@ describe('Codex assistant registry helpers', () => {
               total_tokens: 53,
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1459,6 +1581,7 @@ describe('Codex assistant registry helpers', () => {
         totalTokens: 34,
       },
       expectedSourcePath: 'params.turn.usage',
+      legacy: true,
       name: 'camel-case prompt and completion aliases',
       rawEvents: [
         {
@@ -1476,7 +1599,7 @@ describe('Codex assistant registry helpers', () => {
               },
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1498,6 +1621,7 @@ describe('Codex assistant registry helpers', () => {
         total_tokens: 32,
       },
       expectedSourcePath: 'params.metrics.usage',
+      legacy: true,
       name: 'snake-case Murph usage aliases',
       rawEvents: [
         {
@@ -1517,7 +1641,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1569,7 +1693,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1589,6 +1713,7 @@ describe('Codex assistant registry helpers', () => {
         totalTokens: 31,
       },
       expectedSourcePath: 'thread.tokenUsage.total.delta',
+      legacy: true,
       name: 'Codex normalized dotted thread token usage notification',
       rawEvents: [
         {
@@ -1621,7 +1746,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1696,7 +1821,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1748,7 +1873,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1823,7 +1948,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1972,7 +2097,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -2026,13 +2151,11 @@ describe('Codex assistant registry helpers', () => {
           },
         },
         {
-          method: 'assistant.message.delta',
+          method: 'item/agentMessage/delta',
           params: {
             delta: 'OK',
-            item: {
-              id: 'assistant-resume-delta',
-              type: 'assistant_message',
-            },
+            itemId: 'assistant-resume-delta',
+            threadId: 'thread-resume-assistant-delta-token-usage',
             turnId: 'turn-resume-assistant-delta-token-usage',
           },
         },
@@ -2066,7 +2189,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -2085,7 +2208,7 @@ describe('Codex assistant registry helpers', () => {
         reasoningOutputTokens: 8,
         totalTokens: 118,
       },
-      expectedSourcePath: 'thread.tokenUsage.last',
+      expectedSourcePath: 'thread.tokenUsage.total.delta',
       name: 'Codex token usage notification with empty completion usage',
       rawEvents: [
         {
@@ -2112,7 +2235,7 @@ describe('Codex assistant registry helpers', () => {
               usage: {},
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -2120,23 +2243,36 @@ describe('Codex assistant registry helpers', () => {
     expected,
     expectedRawUsageJson,
     expectedSourcePath,
+    legacy = false,
     rawEvents,
   }) => {
-    expect(
-      extractCodexAssistantProviderUsage({
-        providerConfig: normalizeAssistantProviderConfig({
-          provider: 'codex-cli',
-          model: 'gpt-5.4',
-          modelProvider: 'openai',
-          oss: false,
-        }),
-        rawEvents,
+    const usage = extractCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'gpt-5.4',
+        modelProvider: 'openai',
+        oss: false,
       }),
-    ).toMatchObject({
-      cacheWriteTokens: null,
+      rawEvents,
+    })
+    if (legacy) {
+      expect(usage).toMatchObject({
+        inputTokens: null,
+        outputTokens: null,
+        rawUsageJson: null,
+        usageExtractionSourcePath: null,
+      })
+      return
+    }
+
+    expect(usage).toMatchObject({
+      cacheWriteTokens: 0,
       providerName: 'openai',
       providerRequestId: expect.stringMatching(/^turn-/u),
-      rawUsageJson: expectedRawUsageJson,
+      rawUsageJson: {
+        cacheWriteInputTokens: 0,
+        ...expectedRawUsageJson,
+      },
       rawUsageJsonHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       servedModel: 'gpt-5.4',
       usageExtractionSourcePath: expectedSourcePath,

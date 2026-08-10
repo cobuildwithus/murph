@@ -1648,7 +1648,7 @@ function assistantMaintenanceRawEventsIncludeMutation(
     }
     return (
       event.kind === 'status_item' &&
-      event.itemType === 'command.execution' &&
+      event.itemType === 'commandExecution' &&
       event.itemState === 'completed' &&
       event.exitCode === 0 &&
       isAssistantMaintenanceMutationCommand(event.commandLabel, profile)
@@ -1676,26 +1676,20 @@ function assistantGroupRoomModelDynamicMutationCompleted(
   event: ReturnType<typeof normalizeCodexEvent>,
 ): boolean {
   if (
-    event.kind !== 'status_item' ||
+    event.kind !== 'tool_call' ||
     event.itemState !== 'completed' ||
-    event.itemType !== 'dynamic.tool.call'
+    event.toolServer !== 'murph' ||
+    event.toolName !== 'group_room_model'
   ) {
     return false
   }
   const record = readAssistantNotificationRecord(event.rawEvent)
-  const item =
-    readAssistantNotificationRecord(record?.item) ??
-    readAssistantNotificationRecord(
-      readAssistantNotificationRecord(record?.params)?.item,
-    ) ??
-    readAssistantNotificationRecord(
-      readAssistantNotificationRecord(record?.data)?.item,
-    )
+  const item = readAssistantNotificationRecord(
+    readAssistantNotificationRecord(record?.params)?.item,
+  )
   const args = readAssistantNotificationRecord(item?.arguments)
   return (
     item?.success === true &&
-    item.namespace === 'murph' &&
-    (item.tool === 'group_room_model' || item.name === 'group_room_model') &&
     (args?.action === 'upsert' || args?.action === 'delete')
   )
 }

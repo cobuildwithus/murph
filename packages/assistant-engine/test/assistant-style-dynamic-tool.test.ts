@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const preferenceMocks = vi.hoisted(() => ({
@@ -16,7 +17,6 @@ vi.mock('@murphai/vault-usecases/preferences', () => preferenceMocks)
 import {
   executeMurphDynamicToolRequest,
   MURPH_ASSISTANT_STYLE_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 
@@ -46,6 +46,7 @@ describe('assistant style dynamic tool', () => {
     expect(readStyleRequest({ action: 'show' })).toEqual({
       args: { action: 'show' },
       kind: 'assistant-style',
+      toolCallId: 'call-test',
     })
     expect(readStyleRequest({
       action: 'set',
@@ -54,6 +55,7 @@ describe('assistant style dynamic tool', () => {
     })).toEqual({
       args: { action: 'set', setting: 'humor', value: 0 },
       kind: 'assistant-style',
+      toolCallId: 'call-test',
     })
     expect(readStyleRequest({
       action: 'reset',
@@ -61,6 +63,7 @@ describe('assistant style dynamic tool', () => {
     })).toEqual({
       args: { action: 'reset', setting: 'all' },
       kind: 'assistant-style',
+      toolCallId: 'call-test',
     })
     expect(readStyleRequest({
       action: 'set',
@@ -155,12 +158,14 @@ describe('assistant style dynamic tool', () => {
       personality: { humor: 8 },
     }, {
       assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+      toolCallId: 'call-test',
     })
     expect(hostedMocks.requestPersonalization).toHaveBeenNthCalledWith(2, {
       action: 'update_personality',
       personality: { detail: null, humor: null, push: null, unhinged: null },
     }, {
       assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+      toolCallId: 'call-test',
     })
     expect(JSON.parse(show.rpcResult.contentItems[0]!.text)).toMatchObject({
       settings: personalitySettings(),
@@ -199,6 +204,7 @@ describe('assistant style dynamic tool', () => {
       personality: { push: null },
     }, {
       assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+      toolCallId: 'call-test',
     })
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({
       outcomes: { push: 'saved' },
@@ -252,6 +258,7 @@ describe('assistant style dynamic tool', () => {
       personality: { unhinged: 8 },
     }, {
       assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+      toolCallId: 'call-test',
     })
     expect(JSON.parse(set.rpcResult.contentItems[0]!.text)).toMatchObject({
       outcomes: { unhinged: 'saved' },
@@ -264,10 +271,12 @@ describe('assistant style dynamic tool', () => {
     expect(readStyleRequest({ action: 'set', setting: 'unhinged', value: 9 })).toEqual({
       args: { action: 'set', setting: 'unhinged', value: 9 },
       kind: 'assistant-style',
+      toolCallId: 'call-test',
     })
     expect(readStyleRequest({ action: 'reset', setting: 'unhinged' })).toEqual({
       args: { action: 'reset', setting: 'unhinged' },
       kind: 'assistant-style',
+      toolCallId: 'call-test',
     })
   })
 
@@ -541,7 +550,7 @@ function personalitySettings(overrides: Partial<{
 }
 
 function readStyleRequest(argumentsValue: unknown, toolCallId?: string) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     method: 'item/tool/call',
     params: {
       arguments: argumentsValue,

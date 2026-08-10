@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -45,7 +46,6 @@ import {
 import {
   executeMurphDynamicToolRequest,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
@@ -2838,7 +2838,7 @@ test.each([
           const hostedToolContext = providerInput.hostedToolContext
           expect(hostedToolContext?.newsletterTool).not.toBeNull()
           const executeNewsletterRequest = async (argumentsValue: unknown) => {
-            const request = readMurphDynamicToolRequest({
+            const request = readTestMurphDynamicToolRequest({
               method: 'item/tool/call',
               params: {
                 arguments: argumentsValue,
@@ -3029,7 +3029,7 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
       expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
       expect(groupSharedRead).not.toHaveBeenCalled()
 
-      const request = readMurphDynamicToolRequest({
+      const request = readTestMurphDynamicToolRequest({
         method: 'item/tool/call',
         params: {
           arguments: {
@@ -3056,7 +3056,7 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
       expect(result.rpcResult.success).toBe(true)
       expect(groupSharedRead).toHaveBeenCalledTimes(1)
 
-      const permissionOfferRequest = readMurphDynamicToolRequest({
+      const permissionOfferRequest = readTestMurphDynamicToolRequest({
         method: 'item/tool/call',
         params: {
           arguments: {
@@ -5402,12 +5402,15 @@ function createProviderResult(input?: {
 
 function createCodexCommandCompletedEvent(command: string): unknown {
   return {
-    type: 'item.completed',
-    item: {
-      id: `cmd_${Buffer.from(command).toString('hex').slice(0, 12)}`,
-      type: 'command.execution',
-      command,
-      exit_code: 0,
+    method: 'item/completed',
+    params: {
+      item: {
+        aggregatedOutput: '',
+        command,
+        exitCode: 0,
+        id: `cmd_${Buffer.from(command).toString('hex').slice(0, 12)}`,
+        type: 'commandExecution',
+      },
     },
   }
 }

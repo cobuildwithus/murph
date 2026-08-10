@@ -1,9 +1,9 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from "vitest";
 
 import {
   executeMurphDynamicToolRequest,
   MURPH_FAMILY_PLAN_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
 import {
@@ -21,7 +21,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("parses and executes structured family invite requests", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -132,7 +132,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("parses email-only family invite requests", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -162,7 +162,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("parses and executes Family checkout requests with optional next invite context", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -276,7 +276,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("rejects invite requests without a phone number, Telegram username, or email", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {

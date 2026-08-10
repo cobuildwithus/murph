@@ -4635,7 +4635,7 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       normalizedEvent.kind !== 'status_item' ||
-      normalizedEvent.itemType !== 'context.compaction'
+      normalizedEvent.itemType !== 'contextCompaction'
     ) {
       input.onTraceEvent?.({
         codexThreadId,
@@ -5225,7 +5225,6 @@ async function runCodexAppServerTurnOnProcess(
     acceptTurnStartResultTurnId(extractCodexTurnIdFromResult(turnResult))
     lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
-    registerLiveTurn()
 
     lifecycleStage = 'turn_running'
     await turnCompleted
@@ -5872,21 +5871,17 @@ function extractCodexProviderActionKey(
   normalizedEvent: CodexNormalizedEvent,
   rawEvent: CodexRpcMessage,
 ): string | null {
+  if (isCodexProductFeedbackDynamicToolEvent(rawEvent)) {
+    return null
+  }
   if (normalizedEvent.kind === 'status_item') {
     if (
-      normalizedEvent.itemType !== 'command.execution' &&
-      normalizedEvent.itemType !== 'dynamic.tool.call' &&
-      normalizedEvent.itemType !== 'file.change'
+      normalizedEvent.itemType !== 'commandExecution' &&
+      normalizedEvent.itemType !== 'dynamicToolCall' &&
+      normalizedEvent.itemType !== 'fileChange'
     ) {
       return null
     }
-    if (
-      normalizedEvent.itemType === 'dynamic.tool.call' &&
-      isCodexProductFeedbackDynamicToolEvent(rawEvent)
-    ) {
-      return null
-    }
-
     return (
       normalizedEvent.itemId ??
       providerActionFallbackKeyFromNormalized(normalizedEvent)
@@ -5909,19 +5904,11 @@ function extractCodexProviderActionKey(
 function isCodexProductFeedbackDynamicToolEvent(
   event: CodexRpcMessage,
 ): boolean {
-  const params = readCodexRecordField(event, 'params')
-  const data = readCodexRecordField(event, 'data')
-  const item =
-    readCodexRecordField(event, 'item') ??
-    readCodexRecordField(params, 'item') ??
-    readCodexRecordField(data, 'item')
-  const itemType = readCodexStringField(item, 'type')
-    ?.replaceAll(/[._-]/gu, '')
-    .toLowerCase()
+  const item = readCodexRecord(readCodexRecord(event.params)?.item)
   return (
-    itemType === 'dynamictoolcall' &&
-    readCodexStringField(item, 'namespace') === 'murph' &&
-    readCodexStringField(item, 'tool') === 'submit_product_feedback'
+    item?.type === 'dynamicToolCall' &&
+    item.namespace === 'murph' &&
+    item.tool === 'submit_product_feedback'
   )
 }
 

@@ -1,9 +1,9 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from "vitest";
 
 import {
   executeMurphDynamicToolRequest,
   MURPH_SUBSCRIPTION_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
 import type {
@@ -25,7 +25,7 @@ describe("assistant subscription tool", () => {
     "start_pulse_now",
     "upgrade_edge",
   ] as const)("keeps legacy %s parsing only for backend compatibility", (action) => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: { action },
@@ -54,7 +54,7 @@ describe("assistant subscription tool", () => {
   });
 
   it("keeps input authority out of model arguments", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -65,7 +65,7 @@ describe("assistant subscription tool", () => {
         tool: "subscription",
       },
     })?.kind).toBe("invalid-subscription-arguments");
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: { action: "cancel" },
@@ -263,7 +263,7 @@ describe("assistant subscription tool", () => {
 function readSubscriptionRequest(
   action: "continue_pulse" | "start_pulse_now" | "upgrade_edge",
 ) {
-  const request = readMurphDynamicToolRequest({
+  const request = readTestMurphDynamicToolRequest({
     method: "item/tool/call",
     params: {
       arguments: { action },
@@ -278,7 +278,7 @@ function readSubscriptionRequest(
 }
 
 function readQuotedSubscriptionRequest() {
-  const request = readMurphDynamicToolRequest({
+  const request = readTestMurphDynamicToolRequest({
     method: "item/tool/call",
     params: {
       arguments: {

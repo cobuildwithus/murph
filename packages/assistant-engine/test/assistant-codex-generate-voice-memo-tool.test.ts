@@ -1,10 +1,10 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ELEVENLABS_TTS_MAX_TEXT_LENGTH } from '@murphai/operator-config/elevenlabs-runtime'
 
 import {
   executeMurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   createVoiceMemoToolRuntimeFromEnv,
@@ -637,7 +637,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
   })
 
   it('rejects voice memo payloads on the image-only attach response media tool', async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 10,
       method: 'item/tool/call',
       params: {
@@ -687,7 +687,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
   })
 
   it('returns an invalid-arguments result for malformed voice memo tool calls', async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 11,
       method: 'item/tool/call',
       params: {
@@ -728,7 +728,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
   })
 
   it('rejects voice memo generation when response media is already attached', async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 12,
       method: 'item/tool/call',
       params: {
@@ -850,7 +850,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 
       throw new Error(`Unexpected request: ${url}`)
     })
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 10,
       method: 'item/tool/call',
       params: {
