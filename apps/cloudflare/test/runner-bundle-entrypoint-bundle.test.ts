@@ -606,11 +606,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
 
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
-    expect(budgets).toEqual({
-      entryBytes: 1_641_254 + 48_000,
-      staticClosureBytes: 7_885_509 + 96_000,
-      totalBytes: 9_933_847 + 32_768,
-    });
+      expect(budgets).toEqual({
+        entryBytes: 1_641_254 + 48_000,
+        staticClosureBytes: 8_015_234 + 96_000,
+        totalBytes: 9_990_365 + 32_768,
+      });
   });
 
   it("gates the entry chunk at the production ratchet boundary", () => {

@@ -3801,7 +3801,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: true,
                   effectiveTimeZone: 'America/New_York',
                   lookupId: 'midnight-watch-reminder',
-                  nextRunAt: '2026-07-28T04:00:00.000Z',
+                  nextOccurrenceAt: '2026-07-28T04:00:00.000Z',
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
@@ -3868,6 +3868,101 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
+    'preserves a foreign wall clock and reports a successful save without unverified timing',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-central-time-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected an automation save request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation-central-evening',
+                  created: true,
+                  effectiveTimeZone: 'America/Chicago',
+                  lookupId: 'central-evening-reminder',
+                  nextOccurrenceAt: null,
+                  routeBinding: 'current_conversation',
+                  schedule: request.schedule,
+                  status: 'active',
+                  timingVerified: false,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Remind me here every day at 9 PM Central',
+            'to start winding down. Save it now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        const request = automationRequests[0]
+        expect(request).toMatchObject({ action: 'save' })
+        if (request?.action !== 'save') {
+          throw new Error('Expected a saved automation request.')
+        }
+        if (request.schedule.kind === 'dailyLocal') {
+          expect(request.schedule.timeZone).toBe('America/Chicago')
+          expect(request.schedule.localTime).toBe('21:00')
+        } else if (request.schedule.kind === 'cron') {
+          expect(request.schedule.timeZone).toBe('America/Chicago')
+          expect(request.schedule.expression).toMatch(/^0 21 /u)
+        } else {
+          throw new Error('Expected a recurring wall-clock schedule.')
+        }
+        expect(result.finalMessage).toMatch(/saved|set up|created/iu)
+        expect(result.finalMessage).toMatch(
+          /could not verify|couldn't verify|unable to verify/iu,
+        )
+        expect(result.finalMessage).toMatch(/inspect|check|review|update|change/iu)
+        expect(result.finalMessage).not.toMatch(
+          /9\s*(?::00)?\s*p\.?m\.?|21:00|central time|america\/chicago/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'saves one finite dense reminder conversation and stays quiet after its sent grace',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -3912,7 +4007,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: true,
                   effectiveTimeZone: 'America/New_York',
                   lookupId: 'dense-desk-reset-check-in',
-                  nextRunAt: '2026-07-29T13:00:00.000Z',
+                  nextOccurrenceAt: '2026-07-29T13:00:00.000Z',
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',

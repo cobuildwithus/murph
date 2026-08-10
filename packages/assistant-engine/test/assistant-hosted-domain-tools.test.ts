@@ -263,7 +263,7 @@ describe('hosted domain dynamic tools', () => {
         created: true,
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
-        nextRunAt: null,
+        nextOccurrenceAt: null,
         path: '/internal/automations/evening-wind-down.md',
         routeBinding: 'current_conversation' as const,
         schedule: {
@@ -317,7 +317,7 @@ describe('hosted domain dynamic tools', () => {
       created: true,
       effectiveTimeZone: 'America/Chicago',
       lookupId: 'evening-wind-down',
-      nextRunAt: null,
+      nextOccurrenceAt: null,
       routeBinding: 'current_conversation',
       schedule: {
         kind: 'dailyLocal',
@@ -335,7 +335,7 @@ describe('hosted domain dynamic tools', () => {
         created: false,
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
-        nextRunAt: '2026-08-10T03:30:00.000Z',
+        nextOccurrenceAt: '2026-08-10T03:30:00.000Z',
         routeBinding: 'preserved' as const,
         schedule: {
           kind: 'dailyLocal' as const,

@@ -195,7 +195,7 @@ describe('onboarding first personal read', () => {
           created: true,
           effectiveTimeZone: null,
           lookupId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
-          nextRunAt: '2026-08-07T13:00:00.000Z',
+          nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
           routeBinding: 'current_conversation',
           schedule: request.schedule,
           status: 'active',

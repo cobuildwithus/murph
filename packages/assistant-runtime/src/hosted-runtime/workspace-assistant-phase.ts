@@ -36,7 +36,7 @@ import {
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   applyMurphManagedAutomations,
-  getAssistantCronJob,
+  getAssistantCronAutomationTimingProjection,
   getAssistantCronStatus,
   hasGroupNewsletterDeliveryTag,
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
@@ -46,7 +46,7 @@ import {
   readAssistantInputEvent,
   readAssistantOutboxIntent,
   refreshReminderAvailability,
-  resolveAssistantCronDefaultTimeZone,
+  resolveAssistantCronDefaultTimeZoneProjection,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
@@ -1797,18 +1797,22 @@ async function buildHostedAutomationToolResponse(input: {
     schedule.kind === "cron" || schedule.kind === "dailyLocal"
       ? schedule.timeZone ?? null
       : null;
-  let nextRunAt: string | null = null;
+  let nextOccurrenceAt: string | null = null;
   let timingVerified = true;
-  if (
-    (schedule.kind === "cron" || schedule.kind === "dailyLocal")
-    && effectiveTimeZone === null
-  ) {
-    try {
-      effectiveTimeZone = await resolveAssistantCronDefaultTimeZone(
-        input.vaultRoot,
-      );
-    } catch {
-      timingVerified = false;
+  let defaultTimeZone: string | undefined;
+  if (schedule.kind !== "deviceActivity") {
+    const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
+      input.vaultRoot,
+    );
+    defaultTimeZone = timeZoneProjection.timeZone;
+    if (
+      (schedule.kind === "cron" || schedule.kind === "dailyLocal")
+      && effectiveTimeZone === null
+    ) {
+      effectiveTimeZone = timeZoneProjection.timeZone;
+      if (!timeZoneProjection.vaultTimeZoneVerified) {
+        timingVerified = false;
+      }
     }
   }
   if (
@@ -1816,14 +1820,36 @@ async function buildHostedAutomationToolResponse(input: {
     && schedule.kind !== "deviceActivity"
   ) {
     try {
-      const job = await getAssistantCronJob(
+      if (defaultTimeZone === undefined) {
+        throw new Error("Automation timing projection requires a default timezone.");
+      }
+      const projection = await getAssistantCronAutomationTimingProjection(
         input.vaultRoot,
-        input.result.record.automationId,
+        input.result.record.relativePath,
+        defaultTimeZone,
       );
-      nextRunAt = job.state.nextRunAt;
+      const { job } = projection;
+      nextOccurrenceAt = projection.nextOccurrenceAt;
+      if (!projection.occurrenceVerified) {
+        timingVerified = false;
+      }
+      if (
+        job.updatedAt !== input.result.record.updatedAt
+        || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
+      ) {
+        timingVerified = false;
+      }
     } catch {
       timingVerified = false;
     }
+  }
+  if (
+    input.result.record.status === "active"
+    && (schedule.kind === "cron" || schedule.kind === "dailyLocal")
+    && nextOccurrenceAt !== null
+    && Date.parse(nextOccurrenceAt) <= Date.parse(input.result.record.updatedAt)
+  ) {
+    timingVerified = false;
   }
   return {
     action: input.action,
@@ -1831,7 +1857,7 @@ async function buildHostedAutomationToolResponse(input: {
     created: input.result.created,
     effectiveTimeZone,
     lookupId: input.result.record.slug,
-    nextRunAt,
+    nextOccurrenceAt,
     routeBinding: input.routeBinding,
     schedule,
     status: input.result.record.status,

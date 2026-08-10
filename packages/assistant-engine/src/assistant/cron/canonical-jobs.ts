@@ -1,4 +1,5 @@
 import {
+  normalizeIanaTimeZone,
   resolveSystemTimeZone,
   type AutomationSupportKind,
 } from '@murphai/contracts'
@@ -6,6 +7,7 @@ import { loadVault, upsertAutomation } from '@murphai/core'
 import {
   listAutomations as listCanonicalAutomations,
   listScheduledLogs as listCanonicalScheduledLogs,
+  readAutomationByRelativePath as readCanonicalAutomationByRelativePath,
   type AutomationQueryRecord,
 } from '@murphai/query'
 import {
@@ -118,6 +120,34 @@ export function requireCanonicalAssistantCronRecord(
   }
 
   return normalized
+}
+
+export async function readCanonicalAssistantCronAutomationByRelativePath(input: {
+  defaultTimeZone: string
+  relativePath: string
+  vault: string
+}): Promise<CanonicalAutomationAssistantCronJobRecord> {
+  const record = await readCanonicalAutomationByRelativePath(
+    input.vault,
+    input.relativePath,
+  )
+  if (!record) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_JOB_NOT_FOUND',
+      'Canonical automation was not found at its persisted path.',
+    )
+  }
+  const source = requireCanonicalAssistantCronRecord(
+    record,
+    input.defaultTimeZone,
+  )
+  if (source.kind !== 'automation') {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_AUTOMATION',
+      'Canonical automation timing projection resolved a non-automation source.',
+    )
+  }
+  return source
 }
 
 export function findCanonicalAssistantCronRecordInList(
@@ -260,6 +290,59 @@ export function resolveCanonicalAssistantCronOccurrenceAt(
   source: CanonicalAssistantCronJobRecord,
   runtimeState: AssistantCronCanonicalRuntimeRecord,
 ): string | null {
+  return boundCanonicalAssistantCronOccurrenceByActiveUntil(
+    source,
+    resolveCanonicalAssistantCronUnboundedOccurrenceAt(source, runtimeState),
+  )
+}
+
+export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection(
+  source: CanonicalAssistantCronJobRecord,
+  runtimeState: AssistantCronCanonicalRuntimeRecord,
+): {
+  nextOccurrenceAt: string | null
+  verified: boolean
+} {
+  if (
+    runtimeState.state.pendingOccurrenceAt !== null ||
+    runtimeState.state.retryAfterAt !== null ||
+    runtimeState.state.pendingDeliveryIntentId !== null ||
+    runtimeState.state.runningAt !== null
+  ) {
+    return {
+      nextOccurrenceAt: null,
+      verified: false,
+    }
+  }
+
+  const occurrenceAt = resolveCanonicalAssistantCronUnboundedOccurrenceAt(
+    source,
+    runtimeState,
+  )
+  if (
+    occurrenceAt === null ||
+    source.kind !== 'automation' ||
+    source.activeUntil === null
+  ) {
+    return {
+      nextOccurrenceAt: occurrenceAt,
+      verified: true,
+    }
+  }
+
+  return {
+    nextOccurrenceAt:
+      Date.parse(occurrenceAt) < Date.parse(source.activeUntil)
+        ? occurrenceAt
+        : null,
+    verified: true,
+  }
+}
+
+function resolveCanonicalAssistantCronUnboundedOccurrenceAt(
+  source: CanonicalAssistantCronJobRecord,
+  runtimeState: AssistantCronCanonicalRuntimeRecord,
+): string | null {
   if (!isCanonicalAssistantCronSourceEnabled(source)) {
     return null
   }
@@ -279,6 +362,7 @@ export function resolveCanonicalAssistantCronOccurrenceAt(
 
   const anchorAt = resolveCanonicalAssistantCronScheduleAnchorAt({
     pendingOccurrenceIgnored: Boolean(runtimeState.state.pendingOccurrenceAt),
+    runtimeUpdatedAt: runtimeState.updatedAt,
     source,
     state: runtimeState.state,
   })
@@ -286,15 +370,12 @@ export function resolveCanonicalAssistantCronOccurrenceAt(
     return null
   }
 
-  return boundCanonicalAssistantCronOccurrenceByActiveUntil(
-    source,
-    computeAssistantCronNextRunAt(
-      resolveAssistantCronResolvedSchedule({
-        schedule: source.schedule,
-        timeZone: source.timeZone,
-      }),
-      new Date(anchorAt),
-    ),
+  return computeAssistantCronNextRunAt(
+    resolveAssistantCronResolvedSchedule({
+      schedule: source.schedule,
+      timeZone: source.timeZone,
+    }),
+    new Date(anchorAt),
   )
 }
 
@@ -381,13 +462,32 @@ export function buildVisibleLocalAssistantCronStore(
 export async function resolveAssistantCronDefaultTimeZone(
   vault: string,
 ): Promise<string> {
+  return (await resolveAssistantCronDefaultTimeZoneProjection(vault)).timeZone
+}
+
+export async function resolveAssistantCronDefaultTimeZoneProjection(
+  vault: string,
+): Promise<{
+  timeZone: string
+  vaultTimeZoneVerified: boolean
+}> {
+  const vaultTimeZone = await resolveAssistantCronVaultTimeZone(vault)
+  return {
+    timeZone: vaultTimeZone ?? resolveSystemTimeZone(),
+    vaultTimeZoneVerified: vaultTimeZone !== null,
+  }
+}
+
+export async function resolveAssistantCronVaultTimeZone(
+  vault: string,
+): Promise<string | null> {
   try {
     const loadedVault = await loadVault({
       vaultRoot: vault,
     })
-    return loadedVault.metadata.timezone ?? resolveSystemTimeZone()
+    return normalizeIanaTimeZone(loadedVault.metadata.timezone)
   } catch {
-    return resolveSystemTimeZone()
+    return null
   }
 }
 
@@ -696,10 +796,17 @@ function isCanonicalPendingOccurrenceForCurrentSchedule(input: {
 
 function resolveCanonicalAssistantCronScheduleAnchorAt(input: {
   pendingOccurrenceIgnored: boolean
+  runtimeUpdatedAt: string
   source: CanonicalAssistantCronJobRecord
   state: AssistantCronCanonicalRuntimeState
 }): string | null {
-  if (input.pendingOccurrenceIgnored) {
+  if (
+    input.pendingOccurrenceIgnored ||
+    canonicalSourceChangedAfterRuntimeState({
+      runtimeUpdatedAt: input.runtimeUpdatedAt,
+      source: input.source,
+    })
+  ) {
     return input.source.updatedAt
   }
 
@@ -714,7 +821,8 @@ function resolveCanonicalAssistantCronConsumedAnchorAt(
   return latestAssistantCronTimestamp([
     state.lastSucceededAt,
     consumedFailedAt,
-  ]) ?? state.activatedAt
+    state.activatedAt,
+  ])
 }
 
 function latestAssistantCronTimestamp(

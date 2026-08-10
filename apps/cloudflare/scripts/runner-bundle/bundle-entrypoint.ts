@@ -172,9 +172,16 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // remain within their existing ceilings and no forbidden subsystem enters the
 // boot graph, so ratchet only the total ceiling and keep both startup baselines
 // and all tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_933_847 + 32_768;
+//
+// Preserving explicit recurring timezones and separating deliverable
+// occurrences from retry and cutoff wakes adds the canonical schedule contract
+// and read-only timing projection to the runner. Exact macOS assembly measured
+// an 8,015,234B static closure and 9,990,365B total on 2026-08-10; the entry
+// chunk remains within its existing ceiling, so ratchet the static and total
+// measurements while retaining the cross-platform tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_990_365 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_015_234;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

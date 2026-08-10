@@ -209,7 +209,7 @@ export type AssistantHostedAutomationToolResponse =
       created: boolean
       effectiveTimeZone: string | null
       lookupId: string
-      nextRunAt: string | null
+      nextOccurrenceAt: string | null
       routeBinding: 'current_conversation' | 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus

@@ -3059,6 +3059,12 @@ describe('assistant conversation scope', () => {
       'confirm timing only from a result with `timingVerified: true`',
     )
     expect(prompt).toContain(
+      'a verified null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
+    )
+    expect(prompt).toContain(
+      'When `timingVerified` is false, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write.',
+    )
+    expect(prompt).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',
     )
     expect(prompt).toContain('Ordinary patches preserve its stored route.')

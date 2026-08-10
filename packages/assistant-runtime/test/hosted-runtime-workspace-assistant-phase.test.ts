@@ -76,6 +76,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedOldestAssistantInputOccurredAt: vi.fn(),
   resolveHostedOldestPendingAssistantInputAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
+  resolveAssistantCronDefaultTimeZoneProjection: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedDeviceSyncNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
@@ -120,6 +121,8 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
     DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT:
       automation.DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
     getAssistantCronStatus: mocks.getAssistantCronStatus,
+    resolveAssistantCronDefaultTimeZoneProjection:
+      mocks.resolveAssistantCronDefaultTimeZoneProjection,
     readAssistantInputEvent: mocks.readAssistantInputEvent,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
     refreshReminderAvailability: mocks.refreshReminderAvailability,
@@ -221,6 +224,7 @@ import {
   buildGroupNewsletterAutomationSaveRequest,
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   completeAssistantOnboarding,
+  getAssistantCronJob,
   GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
   markAssistantContextSnapshotDirty,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
@@ -230,6 +234,7 @@ import {
   saveAssistantSession,
   upsertAssistantInputEvent,
   type AssistantAutomationOperationScope,
+  type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
   parseAssistantSessionRecord,
@@ -395,6 +400,14 @@ const PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.resolveAssistantCronDefaultTimeZoneProjection.mockImplementation(
+    async (vaultRoot: string) => {
+      const actual = await vi.importActual<
+        typeof import("@murphai/assistant-engine")
+      >("@murphai/assistant-engine");
+      return await actual.resolveAssistantCronDefaultTimeZoneProjection(vaultRoot);
+    },
+  );
   mocks.buildHostedLinqChannelEnv.mockImplementation((input) => {
     const env: Record<string, string> = {};
     const token = input.userEnv.LINQ_API_TOKEN ?? input.forwardedEnv.LINQ_API_TOKEN;
@@ -5100,7 +5113,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         created: true,
         effectiveTimeZone: "America/Chicago",
         lookupId: "group-check-in",
-        nextRunAt: expect.any(String),
+        nextOccurrenceAt: expect.any(String),
         routeBinding: "current_conversation",
         schedule: {
           kind: "dailyLocal",
@@ -5213,6 +5226,168 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "other-group-check-in",
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({ status: "active" }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("returns the scheduler's exact future occurrence after reactivation and schedule revision", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-01T12:00:00.000Z"));
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-timing-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_44444444444444444444444444444444";
+
+    try {
+      await initializeVault({
+        createdAt: "2026-08-01T12:00:00.000Z",
+        timezone: "America/New_York",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "linq_identity_timing",
+          actorId: "linq_participant_timing",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_thread_timing",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "linq_message_timing",
+          threadId: "linq_chat_timing",
+        },
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        vaultRoot,
+      }));
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+
+      const requestAutomation = async (
+        request: Parameters<
+          NonNullable<
+            NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
+          >["request"]
+        >[0],
+      ) => await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(request);
+        },
+        turnEnvironment: null,
+      });
+
+      await expect(requestAutomation({
+        action: "save",
+        instructions: "Send the daily evening reminder.",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
+        slug: "daily-evening-reminder",
+        status: "paused",
+        title: "Daily evening reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "paused",
+        timingVerified: true,
+      }));
+
+      vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "daily-evening-reminder",
+        status: "active",
+      })).resolves.toEqual(expect.objectContaining({
+        effectiveTimeZone: "America/Chicago",
+        nextOccurrenceAt: "2026-08-10T02:00:00.000Z",
+        timingVerified: true,
+      }));
+      await expect(getAssistantCronJob(
+        vaultRoot,
+        "daily-evening-reminder",
+      )).resolves.toMatchObject({
+        state: { nextRunAt: "2026-08-10T02:00:00.000Z" },
+      });
+
+      vi.setSystemTime(new Date("2026-08-10T00:28:19.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "daily-evening-reminder",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "22:00",
+          timeZone: "America/Chicago",
+        },
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "22:00",
+          timeZone: "America/Chicago",
+        },
+        timingVerified: true,
+      }));
+      await expect(getAssistantCronJob(
+        vaultRoot,
+        "daily-evening-reminder",
+      )).resolves.toMatchObject({
+        state: { nextRunAt: "2026-08-10T03:00:00.000Z" },
+      });
+
+      mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValueOnce({
+        timeZone: "America/New_York",
+        vaultTimeZoneVerified: false,
+      });
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "daily-evening-reminder",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "23:00",
+        },
+      })).resolves.toEqual(expect.objectContaining({
+        action: "patch",
+        effectiveTimeZone: "America/New_York",
+        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "23:00",
+        },
+        timingVerified: false,
+      }));
+
+      await expect(requestAutomation({
+        action: "patch",
+        activeUntil: "2026-08-10T02:30:00.000Z",
+        lookup: "daily-evening-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "patch",
+        nextOccurrenceAt: null,
+        timingVerified: true,
+      }));
+      await expect(getAssistantCronJob(
+        vaultRoot,
+        "daily-evening-reminder",
+      )).resolves.toMatchObject({
+        state: { nextRunAt: "2026-08-10T02:30:00.000Z" },
+      });
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }

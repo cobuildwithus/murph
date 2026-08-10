@@ -15243,7 +15243,7 @@ describe('assistant codex runtime', () => {
         created: false,
         effectiveTimeZone: 'America/New_York',
         lookupId: 'hidden',
-        nextRunAt: null,
+        nextOccurrenceAt: null,
         routeBinding: 'preserved' as const,
         schedule: {
           kind: 'dailyLocal' as const,
