@@ -413,3 +413,9 @@ Updated: 2026-08-10
   with the existing 32 KiB reviewed-addition allowance; the entry and static
   measurements remain inside their established tolerances and no forbidden
   boot input entered the graph.
+- `main` advanced by four additional merged PRs during verification. The second
+  ordinary merge had no conflicts. Fresh full assembly on that exact merged
+  tree passes: Vault CLI 9,030,122 of 9,100,000 bytes; runner entry 1,672,620
+  bytes, static closure 8,045,861 bytes, and total 10,026,794 bytes. The current
+  exact total is the final measured runner baseline with the same 32 KiB
+  allowance.

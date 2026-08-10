@@ -190,9 +190,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Bounded group-tool failure diagnostics, the strict included-usage read,
 // mainline Health Commons knowledge, and generated-image continuity measured a
-// 10,022,379B total in exact post-merge assembly on 2026-08-10. Ratchet to the
+// 10,026,794B total in exact post-merge assembly on 2026-08-10. Ratchet to the
 // combined measurement and retain the established reviewed-addition allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_022_379 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_026_794 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_016_324;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
