@@ -1,0 +1,373 @@
+name: One-shot generic group email effect
+
+on:
+  push:
+    branches: [codex/newsletter-as-group-automation]
+    paths: [.github/workflows/one-shot-group-email-effect.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/newsletter-as-group-automation
+      - name: Expose email as a generic group effect
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def read(path: str) -> str:
+              return Path(path).read_text()
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text)
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one exact match, found {count}")
+              return text.replace(old, new, 1)
+
+          def sub_once(text: str, pattern: str, replacement: str, label: str) -> str:
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one regex match, found {count}")
+              return updated
+
+          path = 'packages/assistant-engine/src/assistant-codex/dynamic-tool-catalog.ts'
+          text = read(path)
+          text = replace_once(
+              text,
+              "          'read_shared',\n",
+              "          'read_shared',\n          'prepare_email',\n          'send_email',\n",
+              'group email action enum',
+          )
+          text = replace_once(
+              text,
+              "          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, optional bounded health projections offered as one fixed permission request. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',",
+              "          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For prepare_email, the exact bounded projections allowed into this scheduled group-email composition; the trusted host resolves eligible recipients and live grants. For offer_access, optional bounded health projections offered as one fixed permission request. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',",
+              'projection scope description',
+          )
+          email_properties = """      subject: {
+                type: 'string',
+                minLength: 1,
+                maxLength: HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
+              },
+              html: {
+                type: 'string',
+                minLength: 1,
+                maxLength: HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
+              },
+              text: {
+                anyOf: [
+                  {
+                    type: 'string',
+                    maxLength: HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+                  },
+                  { type: 'null' },
+                ],
+                default: null,
+              },
+          """.replace('          ', '')
+          text = replace_once(
+              text,
+              "      standaloneLink: {",
+              email_properties + "      standaloneLink: {",
+              'group email schema properties',
+          )
+          text = replace_once(
+              text,
+              "  MURPH_NEWSLETTER_TOOL,\n",
+              "",
+              'standalone newsletter base tool',
+          )
+          text = replace_once(
+              text,
+              "    newsletterAvailable?: boolean | null\n",
+              "",
+              'newsletter availability field',
+          )
+          text = replace_once(
+              text,
+              "    [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],\n",
+              "",
+              'standalone newsletter availability rule',
+          )
+          write(path, text)
+
+          path = 'packages/assistant-engine/src/assistant/codex-turn/planning.ts'
+          text = read(path)
+          text = sub_once(
+              text,
+              r"\n\s*newsletterAvailable:\n\s*hostedToolContext\?\.newsletterTool != null,",
+              "",
+              'planning newsletter availability',
+          )
+          write(path, text)
+
+          path = 'packages/assistant-engine/src/assistant-codex/dynamic-tools.ts'
+          text = read(path)
+          text = replace_once(
+              text,
+              "import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'\n",
+              "",
+              'legacy newsletter scope import',
+          )
+
+          offer_access_anchor = """  z
+                .object({
+                  action: z.literal('offer_access'),
+          """.replace('          ', '')
+          group_email_schemas = """  z
+                .object({
+                  action: z.literal('prepare_email'),
+                  projectionScopes: z
+                    .array(groupVaultShareProjectionScopeSchema)
+                    .min(1)
+                    .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
+                    .refine(
+                      (projectionScopes) =>
+                        new Set(
+                          projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
+                        ).size === projectionScopes.length,
+                      { message: 'projectionScopes must contain unique exact scopes' },
+                    ),
+                })
+                .strict(),
+              z
+                .object({
+                  action: z.literal('send_email'),
+                  html: z
+                    .string()
+                    .trim()
+                    .min(1)
+                    .max(HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH),
+                  subject: z
+                    .string()
+                    .trim()
+                    .min(1)
+                    .max(HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH),
+                  text: z
+                    .string()
+                    .trim()
+                    .max(HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH)
+                    .nullable()
+                    .optional(),
+                })
+                .strict(),
+          """.replace('          ', '')
+          text = replace_once(
+              text,
+              offer_access_anchor,
+              group_email_schemas + offer_access_anchor,
+              'group email argument schemas',
+          )
+
+          read_shared_union = """  | {
+                action: 'read_shared'
+                projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
+              }
+          """.replace('          ', '')
+          group_email_union = read_shared_union + """  | {
+                action: 'prepare_email'
+                projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
+              }
+            | {
+                action: 'send_email'
+                html: string
+                subject: string
+                text?: string | null
+              }
+          """.replace('          ', '')
+          text = replace_once(
+              text,
+              read_shared_union,
+              group_email_union,
+              'group email request union',
+          )
+
+          text = replace_once(
+              text,
+              "  if (parsed.data.action === 'offer_access') {",
+              """  if (
+                parsed.data.action === 'prepare_email' ||
+                parsed.data.action === 'send_email'
+              ) {
+                return {
+                  ok: true,
+                  request: parsed.data,
+                }
+              }
+              if (parsed.data.action === 'offer_access') {
+          """.replace('              ', ''),
+              'group email parser branch',
+          )
+
+          execute_group_anchor = """}): Promise<MurphDynamicToolExecutionResult> {
+            if (input.request.action === 'read_shared') {
+          """.replace('          ', '')
+          execute_group_email = """}): Promise<MurphDynamicToolExecutionResult> {
+            if (
+              input.request.action === 'prepare_email' ||
+              input.request.action === 'send_email'
+            ) {
+              return executeNewsletterTool({
+                hostedToolContext: input.hostedToolContext,
+                request:
+                  input.request.action === 'prepare_email'
+                    ? { action: 'prepare' }
+                    : {
+                        action: 'send',
+                        html: input.request.html,
+                        subject: input.request.subject,
+                        ...(input.request.text === undefined
+                          ? {}
+                          : { text: input.request.text }),
+                      },
+                requestedProjectionScopes:
+                  input.request.action === 'prepare_email'
+                    ? input.request.projectionScopes
+                    : null,
+                vaultRoot: input.vaultRoot,
+              })
+            }
+            if (input.request.action === 'read_shared') {
+          """.replace('          ', '')
+          text = replace_once(
+              text,
+              execute_group_anchor,
+              execute_group_email,
+              'group email execution branch',
+          )
+
+          text = replace_once(
+              text,
+              """async function executeNewsletterTool(input: {
+                hostedToolContext: AssistantHostedToolContext | null
+                request: HostedRuntimeNewsletterToolRequest
+                vaultRoot: string | null
+              }): Promise<MurphDynamicToolExecutionResult> {
+          """.replace('              ', ''),
+              """async function executeNewsletterTool(input: {
+                hostedToolContext: AssistantHostedToolContext | null
+                request: HostedRuntimeNewsletterToolRequest
+                requestedProjectionScopes?:
+                  | readonly HostedVaultShareSelectableProjectionScope[]
+                  | null
+                vaultRoot: string | null
+              }): Promise<MurphDynamicToolExecutionResult> {
+          """.replace('              ', ''),
+              'newsletter adapter input',
+          )
+          text = replace_once(
+              text,
+              """      participants: result.result.participants,
+                    referenceAt,
+                    vaultRoot: input.vaultRoot,
+          """.replace('          ', ''),
+              """      participants: result.result.participants,
+                    requestedProjectionScopes: input.requestedProjectionScopes ?? null,
+                    referenceAt,
+                    vaultRoot: input.vaultRoot,
+          """.replace('          ', ''),
+              'requested scopes into weekly reader',
+          )
+          text = replace_once(
+              text,
+              """async function readNewsletterWeeklyMembers(input: {
+                groupSharedReader: AssistantHostedGroupSharedReader | null
+                participants: readonly HostedRuntimeNewsletterParticipantSummary[]
+                referenceAt: string | null
+                vaultRoot: string | null
+              }): Promise<SharedGroupWeeklyMember[] | null> {
+          """.replace('              ', ''),
+              """async function readNewsletterWeeklyMembers(input: {
+                groupSharedReader: AssistantHostedGroupSharedReader | null
+                participants: readonly HostedRuntimeNewsletterParticipantSummary[]
+                requestedProjectionScopes:
+                  | readonly HostedVaultShareSelectableProjectionScope[]
+                  | null
+                referenceAt: string | null
+                vaultRoot: string | null
+              }): Promise<SharedGroupWeeklyMember[] | null> {
+          """.replace('              ', ''),
+              'weekly reader input',
+          )
+          text = replace_once(
+              text,
+              """  const projectionScopes = readNewsletterAuthorizedProjectionScopes(
+                input.participants,
+              )
+          """.replace('              ', ''),
+              """  const projectionScopes = readNewsletterAuthorizedProjectionScopes(
+                input.participants,
+                input.requestedProjectionScopes,
+              )
+          """.replace('              ', ''),
+              'weekly reader requested scopes',
+          )
+          text = sub_once(
+              text,
+              r"// The newsletter reads the global selectable registry.*?const NEWSLETTER_ALLOWED_PROJECTION_KINDS = new Set<string>\(\n  GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES,\n\)\n\n",
+              "",
+              'legacy newsletter scope allowlist',
+          )
+          text = replace_once(
+              text,
+              """function readNewsletterAuthorizedProjectionScopes(
+                participants: readonly HostedRuntimeNewsletterParticipantSummary[],
+              ): HostedVaultShareSelectableProjectionScope[] {
+          """.replace('              ', ''),
+              """function readNewsletterAuthorizedProjectionScopes(
+                participants: readonly HostedRuntimeNewsletterParticipantSummary[],
+                requestedProjectionScopes:
+                  | readonly HostedVaultShareSelectableProjectionScope[]
+                  | null,
+              ): HostedVaultShareSelectableProjectionScope[] {
+          """.replace('              ', ''),
+              'authorized scope reader input',
+          )
+          text = replace_once(
+              text,
+              """  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter(
+                (projectionScope) =>
+                  NEWSLETTER_ALLOWED_PROJECTION_KINDS.has(projectionScope.projectionKind) &&
+                  authorizedScopeKeys.has(
+          """.replace('              ', ''),
+              """  return (
+                requestedProjectionScopes ?? HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES
+              ).filter(
+                (projectionScope) =>
+                  authorizedScopeKeys.has(
+          """.replace('              ', ''),
+              'authorized requested scope intersection',
+          )
+          if 'GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES' in text:
+              raise SystemExit('legacy newsletter scope constant remains')
+          write(path, text)
+
+          Path('.github/workflows/one-shot-group-email-effect.yml').unlink()
+
+      - name: Commit source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: expose scheduled email as a group effect"
+          git push origin HEAD:codex/newsletter-as-group-automation
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Typecheck affected packages
+        run: |
+          pnpm --filter @murphai/assistant-engine typecheck
+          pnpm --filter @murphai/assistant-runtime typecheck
