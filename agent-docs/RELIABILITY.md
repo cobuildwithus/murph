@@ -659,9 +659,15 @@ Last verified: 2026-08-10
   Stripe I/O; that row and the single purchase-status lifecycle are the durable
   ambiguity fence. While the purchase is unfulfilled and its provider-final
   `grantSlotReleasedAt` marker is null, it also reserves one future grant slot.
-  Local expiry or ambiguous failure does not release that reservation. Only
-  provider-correlated final no-payment evidence records the marker, and
-  existing unfulfilled null-marker rows remain conservatively reserved. Every
+  Local expiry or ambiguous failure does not release that reservation. Exact
+  expired-and-unpaid Checkout evidence may release from webhook, explicit
+  retrieve/expire, binding, or account-deletion finalization; an exact canceled
+  saved-card PaymentIntent may release from its explicit terminal owner. A
+  saved-card release fallback, recoverable provider state, and ordinary local
+  expiry remain reserved. The migration backfill marks only rows whose durable
+  references plus terminal reconciliation prove those same provider-final
+  cases, excludes automatic-refill ordinals from reference-free proof, and
+  leaves every other historical null-marker row conservatively reserved. Every
   create retry during the first 30 minutes uses the same purchase-derived
   Stripe idempotency key, leaving at least 60 minutes on the frozen Session
   expiry. An ambiguous response must not mint a replacement purchase or create
@@ -672,7 +678,8 @@ Last verified: 2026-08-10
   checkout/refill admission. A beneficiary may have at most 32 occupied grant
   slots: positive active grant projections plus unfulfilled purchases whose
   release marker is null. Every capacity inspection reads at most 33 combined
-  rows, and the 33rd is a fail-closed invariant violation. Personal, Family,
+  rows through the partial active-grant and unfulfilled-reservation indexes,
+  and the 33rd is a fail-closed invariant violation. Personal, Family,
   and group Checkout purchases, automatic sponsorship refills, explicit
   recovery reacquisition, and unreserved referral grants share this contract
   under beneficiary-before-distinct-payer lock order. Exact replay does not
@@ -680,6 +687,17 @@ Last verified: 2026-08-10
   capacity; overflow fails as an invariant. Recovery reacquires capacity before
   clearing a prior release, and fulfillment at 32 may only replace the exact
   purchase reservation with its active grant.
+- Refund and dispute adjustment convergence performs one final shared capacity
+  read after its negative and positive passes. If restoration would leave more
+  than 32 active grant projections, the whole transition rolls back before the
+  Stripe receipt binds and remains retryable; no transient intermediate pass is
+  accepted as the final contract.
+- A genuinely new personal, Family, or group checkout at capacity returns the
+  structured `HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT` 409. Exact request-key and
+  matching active-purchase replay resolve first, while true eligibility failures
+  remain 403. Group checkout performs its first serialized capacity admission
+  before Customer preparation and revalidates afterward so an already-full
+  beneficiary does not create provider state.
 - Current-policy personal, Family, and group funding may create one unconfirmed
   saved-card PaymentIntent with a purchase-derived idempotency key. Frozen v2
   purchases retain the legacy selection behavior for groups only, frozen v3

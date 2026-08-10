@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -91,6 +91,25 @@ Updated: 2026-08-09
   not impose a lifetime bound on unused purchase or referral grants.
 - The current risk is structural: settlement selects every positive grant with
   `FOR UPDATE` and no limit, then performs multiple awaited writes per row.
+- The accepted SQL keeps one beneficiary serialization point, reads at most 33
+  indexed positive projections, rejects the corrupt 33rd row, and settles up to
+  32 FIFO grants in one data-modifying CTE with one beneficiary projection
+  update and one ledger insert statement.
+- The grant projection carries immutable beneficiary/FIFO identity so the
+  bounded return is backed by a partial active-grant index instead of a scan of
+  historical zero-balance projections. Unfulfilled reservations use a matching
+  partial beneficiary index.
+- Purchase reservations release only from exact provider-final no-payment
+  owners. Local expiry, saved-card fallback, and ambiguous or recoverable
+  provider states remain conservatively reserved; the migration backfill uses
+  the same proof bar and excludes automatic-refill ordinals from reference-free
+  proof.
+- Refund and dispute convergence performs one final shared capacity inspection
+  after both signed-adjustment passes. Overflow rolls back before receipt
+  binding and remains in the existing Stripe retry lane.
+- A new purchase at the 32-slot boundary returns a distinct structured 409;
+  true eligibility stays 403 and exact replay resolves first. The shared dialog
+  presents one truthful temporary-block state with no alternate-amount advice.
 
 ## Verification
 
@@ -102,3 +121,28 @@ Updated: 2026-08-09
   FIFO purchase/referral consumption and projection conservation hold; maximum
   work is deterministic; no connection remains checked out for non-database
   work; PR CI and both ReviewGPT gates pass on the final pushed head.
+
+Current local proof:
+
+- 233 focused unit/migration tests and 56 production/migration guards passed
+  after provider-final release remediation.
+- A fresh isolated schema applied all 171 migrations, then all 32 guarded real
+  PostgreSQL usage-credit tests passed.
+- The affected purchase suite passed 176 tests after exact release owners were
+  added.
+- The capacity-response slice passed 310 focused service, route, dialog, and
+  design-catalog tests, web TypeScript, scoped ESLint, and the frontend
+  design-proof contract.
+- Desktop 1440 CSS-pixel and mobile 390 CSS-pixel catalog renders exercised the
+  real synthetic inert dialog state and showed the exact guidance with only a
+  dismiss action. The in-app browser had no attached backend, so the documented
+  repository Playwright fallback supplied the captures.
+- The required fresh Claude Fable UI check stopped on explicit usage-credit
+  exhaustion; completion policy records that as a non-blocking evidence gap and
+  forbids a substitute request.
+- Parent corrected-head product revalidation: the capacity state is the
+  smallest complete experience for personal, Family, and group funding—an
+  immediate truthful explanation, one dismiss action, no misleading amount
+  choice, and no new screen or lifecycle owner. No findings remain.
+- Exact-head GitHub Actions and final ReviewGPT round 2 remain pending until the
+  remediation commits and updated PR contract are pushed.

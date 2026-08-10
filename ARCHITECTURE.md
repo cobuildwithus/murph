@@ -886,7 +886,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   beneficiary may occupy at most 32 grant slots: a positive active grant
   projection or an unfulfilled purchase whose provider-final release marker,
   `grantSlotReleasedAt`, is null. Every shared capacity inspection reads at most
-  33 combined occupied rows; a 33rd fails closed as overflow. At the boundary,
+  33 combined occupied rows; a 33rd fails closed as overflow. Grant projections
+  carry immutable beneficiary/FIFO identity behind a partial active-grant index,
+  and unfulfilled reservations have a matching partial beneficiary index, so
+  those bounded reads do not scan zero-balance or terminal history. At the boundary,
   purchase fulfillment may replace only its exact reservation; an unreserved
   grant is rejected. Settlement similarly locks and inspects at most 33
   positive grants, rejects more than 32, and computes FIFO allocation with
@@ -894,12 +897,23 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   purchase projections set-wise, updates the beneficiary projection once, and
   inserts every debit.
   Replay reads at most 33 debit rows and rejects more than 32 before bounded
-  validation. Purchase and referral producers share that immutable ledger; only
+  validation. Refund and dispute convergence performs one final shared capacity
+  inspection after all signed adjustments; crossing the slot boundary rolls the
+  transaction back before the Stripe receipt binds so its existing retry owner
+  can replay. Purchase and referral producers share that immutable ledger; only
   purchase-backed entries participate in Stripe refund/dispute reversal, while
   earned referral rewards are final. Web derives Settings and read-only
   `murph.plan_usage` from that same owner without persisting a forecast or
   granting runtime billing authority; synthetic thread containers receive a
   bounded unavailable result rather than personal plan facts.
+
+  A genuinely new personal, Family, or group purchase that reaches the 32-slot
+  boundary returns the distinct `HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT` HTTP 409;
+  true eligibility failures remain 403 and exact purchase replay resolves before
+  capacity admission. Group funding preflights that serialized capacity before
+  Customer preparation, then revalidates after preparation before reserving a
+  slot. The shared top-up dialog maps only that exact code to a truthful temporary
+  block with no alternate-amount suggestion.
 
   Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
   one-time offers. Hosted-group funding keeps the same purchase owner and

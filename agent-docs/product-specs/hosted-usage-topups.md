@@ -609,6 +609,11 @@ positive active grant projection or an unfulfilled purchase whose
 provider-final `grantSlotReleasedAt` marker is null. Every capacity inspection
 used for admission reads at most 33 combined occupied rows. Finding a 33rd row
 is an invariant violation and fails closed; there is no second capacity owner.
+The grant projection stores immutable beneficiary and FIFO sequence copies and
+uses a partial positive-balance index, while reservations use a partial
+unfulfilled-purchase index. Historical zero-balance grants and released or
+fulfilled purchases therefore cannot turn a bounded return into an unbounded
+historical scan.
 
 New personal, Family, and group Checkout purchases, automatic group-sponsorship
 refills, explicit recovery reacquisition, and unreserved referral grants all
@@ -617,11 +622,23 @@ lock follows the beneficiary lock. Exact purchase replay observes the existing
 reservation and does not reserve again. At capacity, ordinary automatic refill
 admission returns no refill, while overflow is an invariant failure.
 
+A genuinely new personal, Family, or group checkout that sees exactly 32
+occupied slots returns `HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT` with HTTP 409.
+True eligibility errors keep `HOSTED_USAGE_CREDIT_NOT_ELIGIBLE` and HTTP 403,
+and exact request-key or matching active-purchase replay resolves before this
+admission. The shared top-up dialog maps only the capacity code to a temporary
+block explaining that existing credit must be used or a pending payment must
+resolve; it does not suggest another amount.
+
 A new purchase reserves its future grant slot before provider work by persisting
 an unfulfilled row with a null release marker. Local expiry and ambiguous
 failure do not release it. Only provider-correlated final no-payment evidence
-records `grantSlotReleasedAt`; existing unfulfilled rows whose marker is null
-remain conservatively reserved. Explicit recovery may clear a prior release
+records `grantSlotReleasedAt`: exact expired-and-unpaid Checkout evidence from
+webhook, retrieve/expire, binding, or account-deletion finalization, or an exact
+canceled saved-card PaymentIntent from its explicit terminal owner. Saved-card
+release fallback, local expiry, and ambiguous or recoverable provider state stay
+reserved. Existing unfulfilled rows whose marker is null remain conservatively
+reserved. Explicit recovery may clear a prior release
 only after reacquiring capacity. At exactly 32 occupied slots, fulfillment is
 allowed only when the exact purchase reservation is replaced by its positive
 active grant; an unreserved grant is rejected at that boundary.
@@ -757,6 +774,10 @@ Available credit is the sum of effective entries and has a nonnegative
 invariant. A refund or dispute can revoke only unused credit attributable to
 that purchase. Already-consumed value is not turned into negative usage credit,
 deducted from a later purchase, or used to suspend an otherwise valid plan.
+After both signed-adjustment convergence passes, one final shared capacity read
+must still observe at most 32 positive grant projections. Overflow rolls back
+the entire transition before receipt binding so the existing Stripe retry owner
+can replay it.
 
 ## Usage Settlement
 
@@ -878,13 +899,17 @@ funding route share this sequence:
    exact active, nonsuspended, personal member. Active group funding does not
    require the payer to hold an individual paid plan.
 7. Resolve the canonical Stripe Customer only after authorization. Personal
-   and group funding use the payer's customer, creating it through the existing
-   owner when needed. Family funding uses the existing Family-group customer
-   and never creates a replacement member customer.
-8. Under the beneficiary lock, apply the shared bounded capacity inspection,
-   then create the durable purchase for the client request key with a null
-   `grantSlotReleasedAt` marker. This reserves its future grant slot before
-   provider work; exact replay continues the existing reservation.
+   funding uses the payer's existing billing customer. Family funding uses the
+   existing Family-group customer and never creates a replacement member
+   customer. Group funding first runs exact replay and the serialized capacity
+   inspection without a Customer; only an admitted new request prepares the
+   payer's Customer through the existing owner.
+8. Under the beneficiary lock, apply or reapply the shared bounded capacity
+   inspection, then create the durable purchase for the client request key with
+   a null `grantSlotReleasedAt` marker. Group funding revalidates here after
+   Customer preparation because capacity may have changed while no beneficiary
+   lock was held. This reserves its future grant slot before later provider
+   work; exact replay continues the existing reservation.
 9. Freeze the offer, Price, Customer, return URLs, 90-minute expiry, and request
    policy in the `created` purchase before provider I/O.
 10. Recheck that the purchase has not expired, retrieve the
