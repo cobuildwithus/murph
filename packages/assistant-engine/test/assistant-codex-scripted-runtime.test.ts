@@ -15,6 +15,9 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -1504,6 +1507,42 @@ if (!tool) {
   it('preserves both response-card shapes through the real App Server boundary', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
+    const completedWorkoutCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Lower body strength',
+      subtitle: '24 of 24 sets complete',
+      footer: 'Workout completed.',
+      tracking: {
+        kind: 'workout',
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        snapshotAt: '2026-08-09T19:45:00.000Z',
+      },
+      workout: {
+        version: 1,
+        state: 'completed',
+        exercises: [
+          'Dumbbell Single-Leg Romanian Deadlift',
+          'Dumbbell Bulgarian Split Squat',
+          'Dumbbell Walking Lunge in Place',
+          'Split Squat with Front Heel Lift',
+          'Dumbbell Reverse Lunge',
+          'Dumbbell Step-Up',
+        ].map((name) => ({
+          name,
+          sets: [
+            ['55 lb × 8–10', '55 lb × 9'],
+            ['55 lb × 10', '55 lb × 10'],
+            ['65 lb × 10–12', '65 lb × 11'],
+            ['65 lb × 12', '65 lb × 12'],
+          ].map(([target, actual]) => ({
+            status: 'completed' as const,
+            target: target ?? null,
+            actual: actual ?? null,
+          })),
+        })),
+      },
+    } satisfies AssistantResponseCard
     const cards = [
       {
         kind: 'compact_table',
@@ -1519,30 +1558,7 @@ if (!tool) {
         footer: null,
         tracking: null,
       },
-      {
-        kind: 'compact_table',
-        version: 1,
-        title: 'Push day',
-        subtitle: null,
-        footer: null,
-        tracking: {
-          kind: 'workout',
-          entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
-          snapshotAt: '2026-08-09T19:45:00.000Z',
-        },
-        workout: {
-          version: 1,
-          state: 'active',
-          exercises: [{
-            name: 'Bench press',
-            sets: [{
-              status: 'pending',
-              target: '185 lb × 6–8',
-              actual: null,
-            }],
-          }],
-        },
-      },
+      completedWorkoutCard,
       {
         kind: 'daily_nutrition',
         version: 2,

@@ -11,6 +11,7 @@ import {
   renderAssistantResponseCardText,
   renderAssistantResponseCardTranscriptText,
   type AssistantResponseCard,
+  type CompactTableResponseCardV1,
 } from '../src/assistant-response-cards.js'
 
 const ACTIVE_WORKOUT_CARD = {
@@ -108,22 +109,22 @@ describe('workout session response cards', () => {
         u: '3 of 6 sets complete',
         s: 'a',
         e: [
-          {
-            n: 'Bench press',
-            s: [
-              { s: 'c', t: '185 lb × 8', a: '185 lb × 8' },
-              { s: 'c', t: '185 lb × 8', a: '185 lb × 7' },
-              { s: 'p', t: '185 lb × 6–8', a: null },
+          [
+            'Bench press',
+            [
+              ['c', '185 lb × 8', '185 lb × 8'],
+              ['c', '185 lb × 8', '185 lb × 7'],
+              ['p', '185 lb × 6–8', null],
             ],
-          },
-          {
-            n: 'Incline dumbbell press',
-            s: [
-              { s: 'c', t: '55 lb × 10', a: '55 lb × 10' },
-              { s: 'p', t: '55 lb × 8–10', a: null },
-              { s: 'p', t: null, a: null },
+          ],
+          [
+            'Incline dumbbell press',
+            [
+              ['c', '55 lb × 10', '55 lb × 10'],
+              ['p', '55 lb × 8–10', null],
+              ['p', null, null],
             ],
-          },
+          ],
         ],
         f: 'Tap an exercise to log or correct a set.',
       },
@@ -144,6 +145,68 @@ describe('workout session response cards', () => {
         title: 'Push day',
       },
     })
+  })
+
+  it('keeps realistic initial, late-active, and completed 6×4 cards within the native URL limit', () => {
+    const exerciseNames = [
+      'Dumbbell Single-Leg Romanian Deadlift',
+      'Dumbbell Bulgarian Split Squat',
+      'Dumbbell Walking Lunge in Place',
+      'Split Squat with Front Heel Lift',
+      'Dumbbell Reverse Lunge',
+      'Dumbbell Step-Up',
+    ]
+    const targets = [
+      '55 lb × 8–10',
+      '55 lb × 10',
+      '65 lb × 10–12',
+      '65 lb × 12',
+    ]
+    const actuals = [
+      '55 lb × 9',
+      '55 lb × 10',
+      '65 lb × 11',
+      '65 lb × 12',
+    ]
+    const buildCard = (
+      state: 'active' | 'completed',
+      completedSetCount: number,
+    ): CompactTableResponseCardV1 => ({
+      ...ACTIVE_WORKOUT_CARD,
+      title: 'Lower body strength',
+      subtitle: `${completedSetCount} of 24 sets complete`,
+      footer: state === 'active'
+        ? 'Tap an exercise to log or correct a set.'
+        : 'Workout completed.',
+      workout: {
+        version: 1,
+        state,
+        exercises: exerciseNames.map((name, exerciseIndex) => ({
+          name,
+          sets: targets.map((target, setIndex) => {
+            const isCompleted =
+              exerciseIndex * targets.length + setIndex < completedSetCount
+            return {
+              status: isCompleted ? 'completed' : 'pending',
+              target,
+              actual: isCompleted ? actuals[setIndex] ?? target : null,
+            }
+          }),
+        })),
+      },
+    })
+
+    const urls = [
+      buildCard('active', 0),
+      buildCard('active', 18),
+      buildCard('completed', 24),
+    ].map((card) => {
+      expect(assistantResponseCardSchema.parse(card)).toEqual(card)
+      return encodeWorkoutSessionAppCardUrl(card)
+    })
+
+    expect(urls.map((url) => url.length)).toEqual([1399, 1609, 1651])
+    expect(urls.every((url) => url.length < 2_048)).toBe(true)
   })
 
   it('renders a useful fallback and keeps tracking private to transcript context', () => {
@@ -328,8 +391,22 @@ describe('workout session response cards', () => {
         u: null,
         f: null,
         e: [
-          { s: [{ s: 'c' }, { s: 'c' }, { s: 's' }] },
-          { s: [{ s: 'c' }, { s: 's' }, { s: 's' }] },
+          [
+            'Bench press',
+            [
+              ['c', '185 lb × 8', '185 lb × 8'],
+              ['c', '185 lb × 8', '185 lb × 7'],
+              ['s', '185 lb × 6–8', null],
+            ],
+          ],
+          [
+            'Incline dumbbell press',
+            [
+              ['c', '55 lb × 10', '55 lb × 10'],
+              ['s', '55 lb × 8–10', null],
+              ['s', null, null],
+            ],
+          ],
         ],
       },
     })

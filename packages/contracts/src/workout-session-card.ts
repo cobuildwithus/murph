@@ -140,14 +140,18 @@ export type WorkoutSessionAppCardEnvelopeV4 = {
     t: string;
     u: string | null;
     s: "a" | "c";
-    e: Array<{
-      n: string;
-      s: Array<{
-        s: "p" | "c" | "s";
-        t: string | null;
-        a: string | null;
-      }>;
-    }>;
+    e: Array<
+      [
+        name: string,
+        sets: Array<
+          [
+            status: "p" | "c" | "s",
+            target: string | null,
+            actual: string | null,
+          ]
+        >,
+      ]
+    >;
     f: string | null;
   };
 };
@@ -166,19 +170,18 @@ export function buildWorkoutSessionAppCardEnvelopeV4(input: {
       t: input.title,
       u: input.subtitle,
       s: input.workout.state === "active" ? "a" : "c",
-      e: input.workout.exercises.map((exercise) => ({
-        n: exercise.name,
-        s: exercise.sets.map((set) => ({
-          s:
-            set.status === "pending"
-              ? "p"
-              : set.status === "completed"
-                ? "c"
-                : "s",
-          t: set.target,
-          a: set.actual,
-        })),
-      })),
+      e: input.workout.exercises.map((exercise) => [
+        exercise.name,
+        exercise.sets.map((set) => [
+          set.status === "pending"
+            ? "p"
+            : set.status === "completed"
+              ? "c"
+              : "s",
+          set.target,
+          set.actual,
+        ]),
+      ]),
       f: input.footer,
     },
   };

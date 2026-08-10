@@ -258,36 +258,63 @@ describe("workout session compact-table contract", () => {
     ).toBe(false);
   });
 
-  it("keeps realistic sessions under the inline URL limit", () => {
-    const workout = workoutSessionDetailV1Schema.parse({
-      version: 1,
-      state: "active",
-      exercises: Array.from({ length: 6 }, (_, exerciseIndex) => ({
-        name: `Exercise ${exerciseIndex + 1}`,
-        sets: Array.from({ length: 4 }, (_, setIndex) => ({
-          status:
-            exerciseIndex === 5 && setIndex === 3
-              ? ("pending" as const)
-              : ("completed" as const),
-          target: `${setIndex + 1}`,
-          actual:
-            exerciseIndex === 5 && setIndex === 3
-              ? null
-              : `${setIndex + 1}`,
-        })),
-      })),
-    });
-    const sixExerciseSession: CompactTableResponseCardV1 = {
+  it("keeps realistic initial, late-active, and completed sessions under the inline URL limit", () => {
+    const exerciseNames = [
+      "Dumbbell Single-Leg Romanian Deadlift",
+      "Dumbbell Bulgarian Split Squat",
+      "Dumbbell Walking Lunge in Place",
+      "Split Squat with Front Heel Lift",
+      "Dumbbell Reverse Lunge",
+      "Dumbbell Step-Up",
+    ];
+    const targets = [
+      "55 lb × 8–10",
+      "55 lb × 10",
+      "65 lb × 10–12",
+      "65 lb × 12",
+    ];
+    const actuals = [
+      "55 lb × 9",
+      "55 lb × 10",
+      "65 lb × 11",
+      "65 lb × 12",
+    ];
+    const buildCard = (
+      state: "active" | "completed",
+      completedSetCount: number,
+    ): CompactTableResponseCardV1 => ({
       ...TRACKED_WORKOUT_CARD,
-      title: "T".repeat(workoutSessionCardV1Bounds.title),
-      subtitle: null,
-      footer: null,
-      workout,
-    };
+      title: "Lower body strength",
+      subtitle: `${completedSetCount} of 24 sets complete`,
+      footer:
+        state === "active"
+          ? "Tap an exercise to log or correct a set."
+          : "Workout completed.",
+      workout: {
+        version: 1,
+        state,
+        exercises: exerciseNames.map((name, exerciseIndex) => ({
+          name,
+          sets: targets.map((target, setIndex) => {
+            const isCompleted =
+              exerciseIndex * targets.length + setIndex < completedSetCount;
+            return {
+              status: isCompleted ? "completed" : "pending",
+              target,
+              actual: isCompleted ? actuals[setIndex] : null,
+            };
+          }),
+        })),
+      },
+    });
 
-    expect(
-      compactTableResponseCardV1Schema.parse(sixExerciseSession),
-    ).toEqual(sixExerciseSession);
+    for (const card of [
+      buildCard("active", 0),
+      buildCard("active", 18),
+      buildCard("completed", 24),
+    ]) {
+      expect(compactTableResponseCardV1Schema.parse(card)).toEqual(card);
+    }
 
     const oversizedWorkout = {
       version: 1 as const,

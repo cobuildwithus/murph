@@ -44,6 +44,46 @@ const CARD_V2: AssistantResponseCard = {
   },
 }
 
+const REALISTIC_LATE_WORKOUT_CARD: AssistantResponseCard = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Lower body strength',
+  subtitle: '18 of 24 sets complete',
+  footer: 'Tap an exercise to log or correct a set.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: [
+      'Dumbbell Single-Leg Romanian Deadlift',
+      'Dumbbell Bulgarian Split Squat',
+      'Dumbbell Walking Lunge in Place',
+      'Split Squat with Front Heel Lift',
+      'Dumbbell Reverse Lunge',
+      'Dumbbell Step-Up',
+    ].map((name, exerciseIndex) => ({
+      name,
+      sets: [
+        ['55 lb × 8–10', '55 lb × 9'],
+        ['55 lb × 10', '55 lb × 10'],
+        ['65 lb × 10–12', '65 lb × 11'],
+        ['65 lb × 12', '65 lb × 12'],
+      ].map(([target, actual], setIndex) => {
+        const isCompleted = exerciseIndex * 4 + setIndex < 18
+        return {
+          status: isCompleted ? 'completed' : 'pending',
+          target: target ?? null,
+          actual: isCompleted ? actual ?? null : null,
+        }
+      }),
+    })),
+  },
+}
+
 const IMAGE: AssistantResponseMedia = {
   alt: null,
   kind: 'image',
@@ -188,6 +228,10 @@ describe('murph.attach_response_card', () => {
     })
     expect(readCardToolRequest({ card: CARD_V2 })).toEqual({
       card: CARD_V2,
+      kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest({ card: REALISTIC_LATE_WORKOUT_CARD })).toEqual({
+      card: REALISTIC_LATE_WORKOUT_CARD,
       kind: 'attach-response-card',
     })
     expect(readCardToolRequest({ card: CARD, extra: true })).toMatchObject({
