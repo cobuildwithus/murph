@@ -37,12 +37,6 @@ import {
   persistProviderTokenRefreshErrorStatus,
   refreshProviderTokens,
 } from "./agent-session-token-refresh";
-import {
-  resolveDeviceProviderApplicationForConnection,
-} from "./provider-applications";
-import {
-  createHostedDeviceSyncRegistryWithProviderConfigs,
-} from "./providers";
 import { toIsoTimestamp } from "./shared";
 
 export type { HostedTokenExport } from "./agent-session-token-bundle";
@@ -63,8 +57,16 @@ export interface HostedDeviceSyncAgentSessionContext {
   readonly store: PrismaDeviceSyncControlPlaneStore;
 }
 
+export type HostedDeviceSyncRefreshProviderResolver = (input: {
+  connectionId: string;
+  prisma: PrismaDeviceSyncControlPlaneStore["prisma"];
+  providerId: string;
+  userId: string;
+}) => Promise<DeviceSyncProvider | null>;
+
 export interface HostedDeviceSyncAgentSessionOptions {
   readonly registry?: DeviceSyncRegistry | null;
+  readonly resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
 }
 
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
@@ -139,14 +141,19 @@ export class HostedDeviceSyncAgentSessionService {
   readonly store: PrismaDeviceSyncControlPlaneStore;
   readonly agentSessions: HostedAgentSessionService;
   private registry: DeviceSyncRegistry | null;
+  private readonly resolveRefreshProvider:
+    | HostedDeviceSyncRefreshProviderResolver
+    | null;
 
   constructor(input: {
     request: Request;
     store: PrismaDeviceSyncControlPlaneStore;
     registry?: DeviceSyncRegistry | null;
+    resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
   }) {
     this.store = input.store;
     this.registry = input.registry ?? null;
+    this.resolveRefreshProvider = input.resolveRefreshProvider ?? null;
     this.agentSessions = new HostedAgentSessionService({
       request: input.request,
       store: input.store,
@@ -1154,17 +1161,13 @@ export class HostedDeviceSyncAgentSessionService {
     providerId: string;
     userId: string;
   }): Promise<DeviceSyncProvider> {
-    const application = await resolveDeviceProviderApplicationForConnection({
-      connectionId: input.connectionId,
-      memberId: input.userId,
-      prisma: this.store.prisma,
-    });
-    const registry = application
-      ? createHostedDeviceSyncRegistryWithProviderConfigs({
-          providerConfigs: application.providerConfigs,
+    const provider = this.resolveRefreshProvider
+      ? await this.resolveRefreshProvider({
+          ...input,
+          prisma: this.store.prisma,
         })
-      : await this.requireRegistry();
-    const provider = registry.get(input.providerId);
+      : (await this.requireRegistry()).get(input.providerId);
+
     if (!provider) {
       throw deviceSyncError({
         code: "PROVIDER_NOT_CONFIGURED",
@@ -1200,6 +1203,7 @@ export function createHostedDeviceSyncAgentSessionContext(
     agentSessions: new HostedDeviceSyncAgentSessionService({
       registry: options.registry ?? null,
       request,
+      resolveRefreshProvider: options.resolveRefreshProvider ?? null,
       store,
     }),
     env,
