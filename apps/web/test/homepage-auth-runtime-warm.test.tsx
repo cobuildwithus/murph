@@ -95,7 +95,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-test("warms one shared Privy runtime after homepage idle and reuses it on click", async () => {
+test("loads one shared Privy runtime on auth intent and reuses it on click", async () => {
   vi.useFakeTimers();
   const { HomepageAuthRuntimeProvider } = await import(
     "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
@@ -117,12 +117,23 @@ test("warms one shared Privy runtime after homepage idle and reuses it on click"
   cleanupRender = rendered.cleanup;
 
   expect(mocks.runtimeMount).not.toHaveBeenCalled();
+  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
   expect(mocks.authDialogProps).toMatchObject({ open: false });
   expect(mocks.authDialogProps?.autoSendPastedPhoneNumber).toBe(true);
   expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_200);
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+  await flushRuntimeLoad();
+
+  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
+  expect(mocks.runtimeMount).not.toHaveBeenCalled();
+
+  await act(async () => {
+    rendered.button.dispatchEvent(
+      new rendered.window.Event("pointerdown", { bubbles: true }),
+    );
   });
   await flushRuntimeLoad();
 

@@ -1,8 +1,9 @@
 "use client";
 
 import {
+  lazy,
+  Suspense,
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -15,15 +16,11 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 import { AuthContext } from "./auth-dialog-provider";
 import { AuthDialog } from "./auth-dialog";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
-import { HostedAuthRuntime } from "./hosted-auth-runtime";
 
-type WindowWithIdleCallback = typeof window & {
-  cancelIdleCallback?: (handle: number) => void;
-  requestIdleCallback?: (
-    callback: () => void,
-    options?: { timeout?: number },
-  ) => number;
-};
+const HostedAuthRuntime = lazy(async () => {
+  const runtimeModule = await import("./hosted-auth-runtime");
+  return { default: runtimeModule.HostedAuthRuntime };
+});
 
 export function HomepageAuthRuntimeProvider({
   authenticated,
@@ -64,32 +61,6 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
     setOpen(true);
   }, [prepareAuth]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const prepare = () => {
-      if (!cancelled) {
-        prepareAuth();
-      }
-    };
-    const idleWindow = window as WindowWithIdleCallback;
-
-    if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(prepare, { timeout: 2500 });
-
-      return () => {
-        cancelled = true;
-        idleWindow.cancelIdleCallback?.(handle);
-      };
-    }
-
-    const handle = window.setTimeout(prepare, 1200);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [prepareAuth]);
-
   const handleAuthCompleted = useCallback(
     (payload: HostedPrivyCompletionPayload) => {
       if (!isHostedOnboardingAccessibleStage(payload.stage)) {
@@ -124,11 +95,13 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
     <AuthContext.Provider value={value}>
       {children}
       {runtimeRequested ? (
-        <HostedAuthRuntime>
-          {(runtime) => (
-            <AuthDialog {...dialogProps} privyRuntime={runtime} />
-          )}
-        </HostedAuthRuntime>
+        <Suspense fallback={<AuthDialog {...dialogProps} />}>
+          <HostedAuthRuntime>
+            {(runtime) => (
+              <AuthDialog {...dialogProps} privyRuntime={runtime} />
+            )}
+          </HostedAuthRuntime>
+        </Suspense>
       ) : (
         <AuthDialog {...dialogProps} />
       )}
