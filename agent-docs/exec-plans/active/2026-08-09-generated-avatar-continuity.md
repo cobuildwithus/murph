@@ -456,6 +456,17 @@ Updated: 2026-08-10
   static boot closure 8,047,551 bytes; total 10,028,548 bytes of 10,059,562;
   no forbidden boot input entered the graph. Round 10 full-patch review,
   exact-head CI, and final mergeability proof remain.
+- Current `main` then advanced twice. The first ordinary merge combined the
+  reviewed bundle ceilings with main's newer entry/static baselines and
+  regenerated the CLI skill hash from the built command tree; the second had
+  only that generated-hash conflict and used the same canonical generator.
+  No PR behavior source conflicted. Post-merge proof passes the 176-test
+  compound/delivery suite, Assistant Engine typecheck, nine focused CLI hash
+  tests, CLI package-shape verification, and 50 runner bundle-policy tests.
+- Exact full assembly on the final merged tree passes at 8,690,837-byte Vault
+  CLI total, 1,596,214-byte runner entry, 7,728,184-byte static boot closure,
+  and 9,619,852-byte runner total with no forbidden boot input. Round 10 must
+  review the pushed merged head; exact-head CI and final mergeability remain.
 - `main` advanced again after the remediation push. The ordinary merge retained
   mainline's recurring-timezone, workout-card, and Codex protocol additions;
   retained this PR's generated-image continuity; regenerated the CLI skill
