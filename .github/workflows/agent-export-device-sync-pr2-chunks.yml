@@ -1,0 +1,24 @@
+name: Export device-sync PR2 chunks
+
+on:
+  push:
+    branches:
+      - agent/device-sync-pr2-patch-export
+    paths:
+      - .github/workflows/agent-export-device-sync-pr2-chunks.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload chunks
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-sync-pr2-chunks
+          path: .agent/device-sync-pr2.patch.*
+          if-no-files-found: error
+          retention-days: 1
