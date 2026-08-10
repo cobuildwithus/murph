@@ -50,5 +50,21 @@ Updated: 2026-08-09
 - Scoped Web ESLint passed; Assistant Engine has no package lint script and is
   covered by its typecheck and focused Vitest lane.
 - `git diff --check` and the added-lines identifier/secret scan passed.
+- Exact-head Linux CI measured the intended dynamic-tool recovery projection at
+  9,927,719B total runner output, 7,510B above the previous ceiling. The
+  forbidden startup-input guard passed. A clean macOS production assembly then
+  measured 9,974,661B total and a 7,997,170B static closure; both baselines are
+  ratcheted to the higher exact cross-platform measurements while retaining the
+  established 32KB and 96KB allowances. The focused budget test passed 42/42,
+  and the assemble-only production probe passed with a 1,672,790B entry,
+  7,997,170B static closure, and 9,974,661B total output plus a successful boot
+  probe. The Cloudflare package typecheck passed. A scoped root ESLint attempt
+  could not run because this workspace has no root `eslint` binary and the
+  Cloudflare package exposes no lint script; typecheck and focused Vitest cover
+  the changed TypeScript.
+- The first preliminary specialist attempt was tooling-invalid: it returned a
+  completion marker after 77 seconds, below the required five-minute credibility
+  floor. Its result is untrusted and does not count; retry the same pass on the
+  corrected exact head using the retained review thread.
 - Preliminary specialist ReviewGPT, final ReviewGPT round 2, exact-head CI,
   parent final review, and clean-merge proof remain pending.
