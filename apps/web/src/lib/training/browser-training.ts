@@ -485,9 +485,20 @@ function normalizedLoadKg(set: TrainingSetView): number {
 }
 
 function hasComparableBestMeasurement(set: TrainingSetView): boolean {
-  return set.weight === null
-    || isPoundUnit(set.weightUnit)
-    || isKilogramUnit(set.weightUnit);
+  if (
+    set.weight !== null
+    && !isPoundUnit(set.weightUnit)
+    && !isKilogramUnit(set.weightUnit)
+  ) {
+    return false;
+  }
+
+  return set.weight !== null
+    || set.addedWeightKg !== null
+    || set.assistanceKg !== null
+    || set.reps !== null
+    || set.durationSeconds !== null
+    || set.distanceMeters !== null;
 }
 
 function isPoundUnit(value: string | null): boolean {

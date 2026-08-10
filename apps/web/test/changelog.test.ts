@@ -281,6 +281,14 @@ describe("changelog registry", () => {
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
 
+    expect(items.get("private-training-review")).toMatchObject({
+      sourcePullRequests: [1495],
+      summary: expect.stringContaining("workouts already saved with Murph"),
+      details: expect.stringContaining(
+        "intentionally stays out of Home navigation",
+      ),
+      tryIt: { href: "/training", label: "Review training" },
+    });
     expect(items.get("reminders-keep-requested-timezone")).toMatchObject({
       sourcePullRequests: [1546],
       summary: expect.stringContaining("preserves that local time"),
@@ -490,7 +498,10 @@ describe("changelog registry", () => {
     ).toEqual([
       {
         id: "2026-08-10",
-        itemIds: ["reminders-keep-requested-timezone"],
+        itemIds: [
+          "private-training-review",
+          "reminders-keep-requested-timezone",
+        ],
       },
       {
         id: "2026-08-09",

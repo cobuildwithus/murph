@@ -65,10 +65,26 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Reminders that keep their local time",
+    title: "Review your training, keep reminders on time",
     summary:
-      "Recurring reminders now keep the local time and timezone you asked for, even after later edits, and confirm only a time the scheduler can actually deliver.",
+      "A private Training page brings your saved workouts into one view, while recurring reminders keep the local time and timezone you asked for.",
     items: [
+      {
+        id: "private-training-review",
+        kind: "feature",
+        priority: 5,
+        title: "Review your training in one private view",
+        summary:
+          "Open Training to see your active workout, recent sessions, 30-day consistency, and exercise progress from workouts already saved with Murph.",
+        details:
+          "The page is read-only and intentionally stays out of Home navigation. Keep logging and changes in your private Murph conversation; while an older vault view refreshes, Training waits instead of calling saved history empty.",
+        relevanceTags: ["workouts", "training", "dashboard", "privacy"],
+        sourcePullRequests: [1495],
+        tryIt: {
+          href: "/training",
+          label: "Review training",
+        },
+      },
       {
         id: "reminders-keep-requested-timezone",
         kind: "improvement",

@@ -95,7 +95,11 @@ export function TrainingPageView({
     : hasTraining
       ? "Start workout"
       : null;
-  const preparing = status === "loading" || (!hasTraining && refreshPending);
+  const preparing = status === "loading";
+  const awaitingRefresh = !preparing
+    && status !== "error"
+    && !hasTraining
+    && refreshPending;
 
   return (
     <div className="flex flex-col gap-8">
@@ -139,11 +143,34 @@ export function TrainingPageView({
         </Alert>
       ) : null}
 
+      {awaitingRefresh ? (
+        <Alert>
+          <AlertTitle>Preparing your training view</AlertTitle>
+          <AlertDescription>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span>
+                Murph is still checking for saved workouts. If this takes more
+                than a moment, check again.
+              </span>
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={onRefresh}
+              >
+                <RefreshCw aria-hidden="true" />
+                Check again
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {!preparing && hasTraining && training ? (
         <TrainingDashboard training={training} />
       ) : null}
 
-      {!preparing && status !== "error" && !hasTraining ? (
+      {!preparing && !awaitingRefresh && status !== "error" && !hasTraining ? (
         <EmptyTraining
           authenticated={authenticated}
           contactOption={startContactOptions[0] ?? null}

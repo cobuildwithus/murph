@@ -59,7 +59,8 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(markup).toContain("Reminders that keep their local time");
+    expect(markup).toContain("Review your training, keep reminders on time");
+    expect(markup).toContain("Review your training in one private view");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(
       "Exact experiment links and steadier background work",
@@ -141,6 +142,8 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('href="/settings#subscription"');
     expect(markup).toContain("Browse connections");
     expect(markup).toContain('href="/connect"');
+    expect(markup).toContain("Review training");
+    expect(markup).toContain('href="/training"');
     expect(
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(

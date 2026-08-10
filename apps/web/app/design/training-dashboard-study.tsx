@@ -296,6 +296,13 @@ export function TrainingDashboardStudy() {
         training={null}
       />
       <TrainingStudyPage
+        id="refresh-pending"
+        refreshPending
+        status="ready"
+        title="Preparing older workout history · recovery available"
+        training={null}
+      />
+      <TrainingStudyPage
         id="empty"
         status="empty"
         title="Empty history"
@@ -332,6 +339,7 @@ function TrainingStudyPage({
   error = null,
   id,
   messagingConfigured = true,
+  refreshPending = false,
   status,
   title,
   training,
@@ -340,6 +348,7 @@ function TrainingStudyPage({
   error?: string | null;
   id: string;
   messagingConfigured?: boolean;
+  refreshPending?: boolean;
   status: "empty" | "error" | "loading" | "ready";
   title: string;
   training: BrowserTrainingView | null;
@@ -353,7 +362,7 @@ function TrainingStudyPage({
         continueContactOptions={contactOptions}
         error={error}
         onRefresh={() => undefined}
-        refreshPending={false}
+        refreshPending={refreshPending}
         startContactOptions={contactOptions}
         status={status}
         training={training}

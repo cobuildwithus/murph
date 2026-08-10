@@ -25,6 +25,7 @@ import TrainingPageClient, {
   TrainingPageView,
 } from "../app/(dashboard)/training/training-page-client";
 import { TrainingDashboardStudy } from "../app/design/training-dashboard-study";
+import { renderClientComponent } from "./render-client-component";
 
 const trainingFixture: BrowserTrainingView = {
   activeSession: {
@@ -301,7 +302,9 @@ test("Training waits for a generation refresh before declaring workout history e
     }),
   );
 
-  assert.match(staleMarkup, /Loading your training log/);
+  assert.match(staleMarkup, /Preparing your training view/);
+  assert.match(staleMarkup, /Check again/);
+  assert.doesNotMatch(staleMarkup, /Loading your training log/);
   assert.doesNotMatch(staleMarkup, /Your workout log starts with one message/);
   assert.doesNotMatch(staleMarkup, /Start workout/);
 
@@ -322,6 +325,34 @@ test("Training waits for a generation refresh before declaring workout history e
   assert.match(refreshedMarkup, /Push day/);
   assert.equal((refreshedMarkup.match(/Pause at the chest/g) ?? []).length, 1);
   assert.doesNotMatch(refreshedMarkup, /Your workout log starts with one message/);
+});
+
+test("Training keeps a delayed generation refresh actionable after background polling ends", async () => {
+  const onRefresh = vi.fn();
+  const rendered = await renderClientComponent(
+    createElement(TrainingPageView, {
+      authenticated: true,
+      continueContactOptions,
+      error: null,
+      onRefresh,
+      refreshPending: true,
+      startContactOptions,
+      status: "ready",
+      training: null,
+    }),
+  );
+
+  try {
+    assert.match(rendered.container.textContent ?? "", /Preparing your training view/);
+    assert.match(rendered.container.textContent ?? "", /Check again/);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Loading your training log/);
+    rendered.button.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    assert.equal(onRefresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("Training exposes workout actions only when vault state is known", () => {
@@ -450,6 +481,9 @@ test("Training design study renders the production dashboard with synthetic data
   assert.match(markup, /135 lb × 10/);
   assert.match(markup, /data-training-study-state="loading"/);
   assert.match(markup, /Loading your training log/);
+  assert.match(markup, /data-training-study-state="refresh-pending"/);
+  assert.match(markup, /Preparing your training view/);
+  assert.match(markup, /Check again/);
   assert.match(markup, /Could not refresh your training log/);
   assert.match(markup, /Log in to start training/);
   assert.match(markup, /Set up messaging/);

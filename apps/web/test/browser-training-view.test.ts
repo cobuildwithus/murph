@@ -442,6 +442,24 @@ test("Training ranks only explicitly unit-bearing weights as best sets", async (
                   sets: [{ order: 1, reps: 12, weight: 110 }],
                   sourceExerciseId: "EX_AMBIGUOUS",
                 },
+                {
+                  name: "Mobility drill",
+                  order: 5,
+                  sets: [{ note: "Looser through the right side", order: 1 }],
+                  sourceExerciseId: "EX_NOTE_ONLY",
+                },
+                {
+                  name: "Technique practice",
+                  order: 6,
+                  sets: [{ order: 1, rpe: 7 }],
+                  sourceExerciseId: "EX_RPE_ONLY",
+                },
+                {
+                  name: "Push-up",
+                  order: 7,
+                  sets: [{ note: "Strong lockout", order: 1, reps: 12 }],
+                  sourceExerciseId: "EX_MEASURABLE_NOTE",
+                },
               ],
               startedAt: "2026-08-09T17:00:00.000Z",
             },
@@ -468,6 +486,34 @@ test("Training ranks only explicitly unit-bearing weights as best sets", async (
   assert.equal(progress.get("EX_OVERRIDE")?.bestSet?.weightUnit, "kg");
   assert.equal(progress.get("EX_AMBIGUOUS")?.bestSet, null);
   assert.equal(progress.get("EX_AMBIGUOUS")?.lastSet?.weight, 110);
+  assert.equal(progress.get("EX_NOTE_ONLY")?.bestSet, null);
+  assert.equal(
+    progress.get("EX_NOTE_ONLY")?.lastSet?.note,
+    "Looser through the right side",
+  );
+  assert.equal(progress.get("EX_RPE_ONLY")?.bestSet, null);
+  assert.equal(progress.get("EX_RPE_ONLY")?.lastSet?.rpe, 7);
+  assert.equal(progress.get("EX_MEASURABLE_NOTE")?.bestSet?.reps, 12);
+  assert.equal(
+    progress.get("EX_MEASURABLE_NOTE")?.bestSet?.note,
+    "Strong lockout",
+  );
+
+  const latest = view.recentSessions.find(
+    (session) => session.id === "comparable_loads_latest",
+  );
+  assert.equal(
+    latest?.exercises.find((exercise) =>
+      exercise.sourceExerciseId === "EX_NOTE_ONLY"
+    )?.sets[0]?.completed,
+    true,
+  );
+  assert.equal(
+    latest?.exercises.find((exercise) =>
+      exercise.sourceExerciseId === "EX_RPE_ONLY"
+    )?.sets[0]?.completed,
+    true,
+  );
 });
 
 
