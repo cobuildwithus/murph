@@ -1,0 +1,39 @@
+name: PR 1484 audit export
+
+on:
+  push:
+    branches:
+      - agent/pr1484-audit-export
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact audit head
+        uses: actions/checkout@v4
+        with:
+          ref: agent/pr1484-audit-export
+          fetch-depth: 0
+
+      - name: Package source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude=.next \
+            --exclude=.github/workflows/pr1484-audit-export.yml \
+            -czf /tmp/pr1484-head.tar.gz .
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1484-head
+          path: /tmp/pr1484-head.tar.gz
+          retention-days: 1
+          if-no-files-found: error
