@@ -124,6 +124,23 @@ const TABLE_CARD: CompactTablePresentationCardV1 = {
   footer: "Adjust load when form slows down.",
 };
 
+const DENSE_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Eight-exercise workout",
+  subtitle: "Verified canonical workout snapshot for today",
+  rowHeader: "Exercise",
+  columns: ["Set 1", "Set 2", "Set 3", "Set 4"],
+  rows: Array.from({ length: 8 }, (_, rowIndex) => ({
+    label: `Exercise ${rowIndex + 1} movement pattern`,
+    values: Array.from({ length: 4 }, (_, columnIndex) => {
+      const cellLength = rowIndex === 7 && columnIndex === 3 ? 17 : 22;
+      return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, "x");
+    }),
+  })),
+  footer: "Assists and spotted reps remain on the exact set note.",
+};
+
 const WORKOUT_CARD: Extract<
   CompactTablePresentationCardV1,
   { workout: unknown }
@@ -132,7 +149,7 @@ const WORKOUT_CARD: Extract<
   version: 1,
   title: "Push day",
   subtitle: "3 of 6 sets complete",
-  footer: "Tap an exercise to log or correct a set.",
+  footer: "Reply with the exercise, set, and result to log or correct it.",
   workout: {
     version: 1,
     state: "active",
@@ -328,9 +345,72 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /Push day/u);
   assert.match(serialized, /Bench press/u);
   assert.match(serialized, /Next: 185 lb × 6–8/u);
+  assert.match(
+    serialized,
+    /Reply with the exercise, set, and result to\s+log or correct it\./u,
+  );
+  assert.doesNotMatch(serialized, /Tap an exercise/u);
   assert.match(serialized, /data-workout-progress="0\.5000"/u);
   assert.match(serialized, /data-exercise-state="in-progress"/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
+});
+
+test("workout image keeps Next on the first pending set when it has no target", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const targetlessNextCard = {
+    ...WORKOUT_CARD,
+    workout: {
+      ...WORKOUT_CARD.workout,
+      exercises: [
+        {
+          name: "Bench press",
+          sets: [
+            { status: "pending", target: null, actual: null },
+            { status: "pending", target: "135 lb × 8", actual: null },
+          ],
+        },
+      ],
+    },
+  } satisfies typeof WORKOUT_CARD;
+  const payload = encodePayload(buildWorkoutSessionAppCardEnvelopeV4({
+    title: targetlessNextCard.title,
+    subtitle: targetlessNextCard.subtitle,
+    footer: targetlessNextCard.footer,
+    workout: targetlessNextCard.workout,
+  }));
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+
+  assert.match(serialized, /Next set — no target/u);
+  assert.doesNotMatch(serialized, /Next: 135 lb × 8/u);
+});
+
+test("dense contract-valid tables wrap every value into measured row height", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const { getCompactTableCardImageSize } = await import(
+    "@/src/components/imessage/compact-table-card-image"
+  );
+  const payload = encodePayload({ schemaVersion: 3, card: DENSE_TABLE_CARD });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree, init] = getImageResponseCall();
+  const expectedSize = getCompactTableCardImageSize(DENSE_TABLE_CARD);
+  assert.equal(init.height, expectedSize.height);
+  assert.ok(expectedSize.height > 1_120);
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /data-card-text-lines="4"/u);
+  assert.match(serialized, /white-space:pre-wrap/u);
+  assert.match(serialized, /11xxxx\nxxxxxx\nxxxxx/u);
 });
 
 test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {

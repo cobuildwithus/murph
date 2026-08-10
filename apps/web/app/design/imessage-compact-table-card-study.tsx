@@ -15,7 +15,7 @@ const SYNTHETIC_WORKOUT_CARD: Extract<
   version: 1,
   title: "Push day",
   subtitle: "3 of 6 sets complete",
-  footer: "Tap an exercise to log or correct a set.",
+  footer: "Reply with the exercise, set, and result to log or correct it.",
   workout: {
     version: 1,
     state: "active",

@@ -134,6 +134,12 @@ The outer card remains `compact_table` V1. Set `workout` to:
 
 Use `state="completed"` only after replacing every remaining `pending` set with `skipped`. A completed set always carries `actual`; pending and skipped sets never do.
 
+The footer is shared verbatim by the interactive native card and the static
+fallback. Keep it channel-neutral: never tell the member to tap an exercise or
+use another control that is unavailable on macOS or without the extension.
+When continuation guidance is useful, tell them to reply with the exercise,
+set, and result.
+
 Set `tracking` to `{ "kind": "workout", "entityId": "<exact evt id>", "snapshotAt": "<canonical verified UTC instant>" }`. The backend keeps tracking in durable transcript text and strips it from the native URL.
 
 ## Card refresh behavior

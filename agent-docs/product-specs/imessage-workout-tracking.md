@@ -44,6 +44,14 @@ generic-table balloon. The provider captions independently retain every table
 cell or every workout state, set status, target, and actual value, so image
 failure does not erase the response semantics.
 
+Shared workout footer copy must remain truthful on both projections: it may ask
+the member to reply with an exercise, set, and result, but must not promise a
+native-only tap control. The static workout summary derives `Next` from the
+first pending set in order; a targetless first pending set stays visibly
+targetless instead of borrowing a later set's target. Static text wraps at a
+deterministic display width, and the same calculation owns the raster height so
+every contract-valid title, row, cell, and footer remains inside the image.
+
 The image URL carries the exact same strict authority-free V3 or V4 presentation
 envelope as the native fragment in a bounded queryless path. V3 tracking remains
 in the semantic transcript only and is stripped before either encoding; V4 has

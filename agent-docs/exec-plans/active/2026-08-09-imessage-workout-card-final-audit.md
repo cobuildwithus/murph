@@ -41,6 +41,10 @@ Success criteria:
 7. Remove temporary remediation artifacts and run focused verification.
 8. Reuse the nutrition image route for strict V3/V4 envelopes, render the native
    compact-table presentation, and preserve complete provider captions.
+9. Correct the merged static fallback in a follow-up PR: preserve labeled
+   completed-set target/actual semantics, keep continuation copy
+   channel-neutral, derive `Next` from the first pending set, and size wrapped
+   rasters from the same deterministic layout calculation.
 
 ## Review disposition
 
@@ -69,8 +73,24 @@ Success criteria:
   inspected. The total budget is narrowly ratcheted to 9,030,000; the 20,000-byte
   entry budget and all runner entry, static-closure, and total tolerances remain
   unchanged.
+- Accepted from final ReviewGPT round 7: completed-set captions retained only
+  the actual value, losing the completed status and distinct planned target in
+  both provider and definitive text fallbacks. The existing semantic projection
+  now labels status, actual, and target without adding a second formatter.
+- Accepted from final ReviewGPT round 7 and the preliminary specialist pass:
+  shared workout footer copy promised native-only taps, and the image renderer
+  could skip a targetless first pending set to show a later target as `Next`.
+  Workout authoring now requires channel-neutral reply guidance, and the static
+  summary derives `Next` from the first pending set in order.
+- Accepted from the preliminary specialist pass: contract-valid long table
+  values could overlap or clip because raster height depended only on row count.
+  One deterministic wrapping calculation now owns both visible line breaks and
+  image height while retaining the ordinary compact layout for short content.
+- External rollout event: PR #1502 merged before round 7 and the specialist pass
+  completed. Their accepted behavior findings therefore land in a separate
+  follow-up PR; round 8 is not started on the merged PR.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
-- Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. Neither coordinated PR is ready or merged.
+- Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. PR #1502 merged externally before that gate closed; the follow-up must stay draft until the missing evidence is captured.
 
 ## Verification
 
@@ -97,7 +117,7 @@ Success criteria:
 - The real App Server boundary passed after submitting generic compact-table, structured-workout, and nutrition authoring calls.
 - The focused resident-prompt ratchet passed at 56,896 characters before the current-main merge and 56,973 after it, under the unchanged 57,000 ratchet.
 - The current-main runner-budget conflict was resolved from a combined assembly: 9,994,210 total bytes, 8,019,079 static-closure bytes, and 1,659,616 entry bytes. The total and static baselines use those measurements; the entry baseline and every tolerance remain unchanged.
-- ReviewGPT round 4 passed the pre-merge remediation head. Round 5 on the merged head found the realistic V4 wire-capacity failure described above. Its tuple-wire remediation passed 7 contract tests, 9 operator encoder/fixture tests, 2 focused assistant boundary/tool tests, all 3 affected package typechecks, documentation drift, and the 42-test runner bundle budget policy suite. Full runner assembly passed at 9,994,191 total bytes, 8,019,060 static-closure bytes, and 1,659,616 entry bytes under the reviewed baselines and unchanged tolerances. Final backend ReviewGPT round 6 passed the exact product head `caac73f092ef68c3c3272e7ea8e38733987f8f57`, and all exact-head GitHub Actions passed. The coordinated native decoder passed SwiftFormat and all 45 Messages-extension tests; native ReviewGPT round 4 and both exact-head verification lanes passed `399d90b5eba89a826ecb8d0cef6f3c7e29169ef4`. Physical-device Messages proof remains the only open release gate, so both PRs remain draft and unmerged.
+- ReviewGPT round 4 passed the pre-merge remediation head. Round 5 on the merged head found the realistic V4 wire-capacity failure described above. Its tuple-wire remediation passed 7 contract tests, 9 operator encoder/fixture tests, 2 focused assistant boundary/tool tests, all 3 affected package typechecks, documentation drift, and the 42-test runner bundle budget policy suite. Full runner assembly passed at 9,994,191 total bytes, 8,019,060 static-closure bytes, and 1,659,616 entry bytes under the reviewed baselines and unchanged tolerances. Final backend ReviewGPT round 6 passed the exact product head `caac73f092ef68c3c3272e7ea8e38733987f8f57`, and all exact-head GitHub Actions passed. The coordinated native decoder passed SwiftFormat and all 45 Messages-extension tests; native ReviewGPT round 4 and both exact-head verification lanes passed `399d90b5eba89a826ecb8d0cef6f3c7e29169ef4`. At that checkpoint physical-device Messages proof was the only open release gate and both coordinated PRs remained draft; PR #1502 later merged externally before that gate closed.
 - The shared response-card route rendered a real 1200×580 active-workout PNG and
   a real 1200×670 generic-table PNG from their exact V4 and V3 envelopes.
   Focused Web route/render tests passed for nutrition, generic-table, workout,
@@ -113,6 +133,14 @@ Success criteria:
   tests respectively; documentation drift passed. The expanded operator sweep
   also corrected its retained boundary fixture to prove the tighter static-image
   URL and native-fragment limits together.
+- Follow-up remediation passed the touched Web, contracts, operator-config, and
+  assistant-engine typechecks; 12 Web route/render tests, 23 contract tests, 27
+  operator tests, 10 assistant card/skill tests, and 73 assistant model-behavior
+  tests; focused Web lint; documentation drift; and diff hygiene. The exact
+  route rendered a 1200×580 targetless-next workout card and a 1200×1442 dense
+  eight-row, four-column boundary card with measured wrapping and no visible
+  overlap or clipping. These direct rasters do not replace the open hosted
+  catalog and physical Messages evidence.
 
 ## Parent product-experience revalidation
 
