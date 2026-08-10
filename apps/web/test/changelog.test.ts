@@ -321,11 +321,11 @@ describe("changelog registry", () => {
     });
     expect(items.get("runtime-replacement-continuity")).toMatchObject({
       sourcePullRequests: [1472, 1522],
-      details: expect.stringContaining("A shorter save"),
+      details: expect.stringContaining("A faster save"),
     });
     expect(items.get("paused-member-retention-cleanup")).toMatchObject({
       sourcePullRequests: [1493],
-      details: expect.stringContaining("retention-only path"),
+      details: expect.stringContaining("already-approved retention cleanup"),
     });
     expect(items.get("background-results-use-less-shared-capacity")).toMatchObject({
       sourcePullRequests: [1475, 1510],
@@ -335,6 +335,17 @@ describe("changelog registry", () => {
       sourcePullRequests: [1465],
       details: expect.stringContaining("excludes raw conversation wording"),
     });
+  });
+
+  it("keeps the August 5 through August 9 copy outcome-oriented", () => {
+    const copy = listPublishedChangelogItems()
+      .filter((item) => item.publishedOn >= "2026-08-05")
+      .map((item) => `${item.title} ${item.summary} ${item.details ?? ""}`)
+      .join(" ");
+
+    expect(copy).not.toMatch(
+      /\b(?:Codex|Composio|Linq)\b|approved owners|byte-transfer|database (?:contention|lock)|existing runtime|hosted group container|provider (?:payloads?|work)|server clock/iu,
+    );
   });
 
   it("keeps the August 5 and August 6 recovery claims attached to their owners", () => {
@@ -352,7 +363,7 @@ describe("changelog registry", () => {
     });
     expect(items.get("late-media-origin-continuity")).toMatchObject({
       sourcePullRequests: [1334, 1346, 1374, 1389],
-      details: expect.stringContaining("never triggers a blind second reservation"),
+      details: expect.stringContaining("will not make a blind second attempt"),
     });
     expect(items.get("support-escalation-issue-summary")).toMatchObject({
       sourcePullRequests: [1284, 1305],
@@ -364,7 +375,7 @@ describe("changelog registry", () => {
     });
     expect(items.get("maintenance-without-global-pause")).toMatchObject({
       sourcePullRequests: [1318],
-      details: expect.stringContaining("accepted conversation input stays durable"),
+      details: expect.stringContaining("Messages already received remain available"),
     });
     expect(items.get("interactive-imessage-cards-restored")).toMatchObject({
       sourcePullRequests: [1394, 1426],

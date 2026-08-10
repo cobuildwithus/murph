@@ -107,6 +107,19 @@ Updated: 2026-08-09
 - Rebasing onto the latest `main` shifted the archive page boundaries. Updated
   the visual regression fixture to render the three real seven-day windows
   containing its assertions, then reran the exact-head checks successfully.
+- Preliminary `completion-specialists` ReviewGPT reviewed pushed head
+  `1ebceeb537` with the requested GPT-5.6 Sol target and returned findings after
+  the five-minute trust floor. Accepted the public-jargon and registry-proof
+  findings; the frontend lens returned no finding and no patch artifact.
+- Rewrote the affected public entries around observable outcomes and added a
+  regression assertion against the named internal terms. Strengthened the PR
+  guard to resolve every declared date/item pair against the authoritative
+  registry and reject unknown, wrong-date, duplicate, malformed-extra, and
+  mixed valid/invalid references.
+- Rejected the reported missing marketing-context owner: the exact pushed
+  checkout tracks `agent-docs/product-marketing-context.md`, and `git cat-file`
+  proved every path in the skill's required preflight exists. The review ZIP
+  omitted that unchanged document; the repository and skill reference agree.
 
 ## Decisions
 
@@ -124,11 +137,15 @@ Updated: 2026-08-09
 - Enforce an explicit `updated` or `not applicable` PR-body disposition, with
   a changed-path check for `updated`, instead of attempting unreliable path-
   based inference about whether a change is member-visible.
+- Read the authoritative TypeScript changelog literal with one strict,
+  fail-closed delimiter scanner in the Node guard. This avoids a generated
+  mirror and a new parser dependency; unsupported future registry structure
+  fails the PR check instead of silently accepting an unverified reference.
 
 ## Verification
 
-- Passed: skill quick validation; eight changelog-disposition guard tests and
-  ten frontend-proof guard tests; 40 focused Web Vitest assertions for
+- Passed: skill quick validation; nine changelog-disposition guard tests and
+  ten frontend-proof guard tests; 41 focused Web Vitest assertions for
   registry, page, feed/card/API behavior; Web typecheck; scoped ESLint;
   `pnpm docs:drift`; `git diff --check`; privacy and public-copy punctuation
   scans.

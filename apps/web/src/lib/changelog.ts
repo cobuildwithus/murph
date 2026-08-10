@@ -111,7 +111,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Ask Murph in a private iMessage conversation for a new contact photo and get one saveable contact card with the generated square image and your current Murph line.",
         details:
-          "The request is one-shot and stays bound to the turn that asked for it. Murph refuses an ambiguous route before generation and never reports a card as delivered unless the send owner established that result.",
+          "The request is one-shot and stays bound to the turn that asked for it. Murph refuses an ambiguous route before generation and never reports a card as delivered unless the sending service confirms it.",
         relevanceTags: ["contacts", "images", "imessage", "privacy"],
         sourcePullRequests: [1458, 1488],
         tryIt: {
@@ -144,7 +144,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Murph can start a live structured workout, add exercises, log or correct one exact set, clear a mistake without shifting later sets, and finish with the elapsed duration.",
         details:
-          "Saved routine targets remain plans, never completed work. Repeating an explicit set update changes the same canonical set, and repeated same-day workout tallies now count planned occurrences without inventing missing repetitions.",
+          "Saved routine targets remain plans, never completed work. Repeating an explicit set update changes the same recorded set, and repeated same-day workout tallies now count planned occurrences without inventing missing repetitions.",
         relevanceTags: ["workouts", "tracking", "assistant", "health-data"],
         sourcePullRequests: [1455, 1504],
         tryIt: {
@@ -159,7 +159,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Connections explain the route before you leave",
         summary:
-          "Vital-backed connections now explain the handoff before authorization, Apple Health relay sources use recognizable provider marks, and unsupported sources get verified export guidance.",
+          "Direct connections now explain the handoff before authorization, Apple Health relay sources use recognizable service icons, and unsupported sources get verified export guidance.",
         details:
           "Relay cards still make Apple Health ownership clear. Manual exports are described as snapshots rather than live sync, private files move to your private Murph, and Murph does not invent an export menu it cannot verify.",
         relevanceTags: ["connections", "wearables", "imports", "privacy"],
@@ -177,7 +177,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Murph now routes weight loss, weight gain, cutting, bulking, recomposition, and maintenance into one evidence-backed body-composition approach.",
         details:
-          "The guidance keeps nutrition and training ownership clear, compares trends in consistent units, minimizes tracking burden, and uses separate safety handling when pregnancy, postpartum recovery, breastfeeding, or under-fueling changes the answer.",
+          "The guidance keeps the roles of nutrition and training clear, compares trends in consistent units, minimizes tracking burden, and uses separate safety handling when pregnancy, postpartum recovery, breastfeeding, or under-fueling changes the answer.",
         relevanceTags: ["body-composition", "nutrition", "training", "safety"],
         sourcePullRequests: [1512],
         tryIt: {
@@ -216,9 +216,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Response cards survive long turns and newer messages",
         summary:
-          "Private nutrition and compact-table cards now keep their full schema through Codex compaction, use Murph's public origin, and accept iMessage app-card fallback text when it is usable.",
+          "Private nutrition and compact-table cards now keep their full structure when a long conversation is condensed and still use Murph's verified web address.",
         details:
-          "The result still returns as one same-thread card with truthful static or text fallback. Missing content does not wake Murph, and malformed external payloads continue to fail closed.",
+          "The result returns as one card in the same conversation with an accurate static or text fallback. Empty fallbacks stay silent, and invalid card data is rejected.",
         relevanceTags: ["imessage", "cards", "nutrition", "reliability"],
         sourcePullRequests: [1473, 1489, 1501],
       },
@@ -228,7 +228,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Typing can warm Murph before you send",
         summary:
-          "For an established private chat, an authenticated typing hint can best-effort warm the existing runtime while you compose the message.",
+          "For an established private chat, an authenticated typing hint can help Murph get ready while you compose the message.",
         details:
           "Typing is never treated as a message, permission, or delivery claim. Unknown or ineligible hints quietly fall back to the normal path, and the later accepted message still owns the reply.",
         relevanceTags: ["performance", "messaging", "privacy", "reliability"],
@@ -242,7 +242,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Dynamic recurring automations can now use a small recent-output history to avoid substantially repeating the same quote, fact, prompt, suggestion, or recommendation.",
         details:
-          "The history stays tied to the current automation revision. Exact-text reminders remain exact, and old output is treated as untrusted history rather than new instruction.",
+          "The history stays tied to the current version of the automation. Exact-text reminders remain exact, and old output is treated as history rather than a new instruction.",
         relevanceTags: ["automations", "assistant", "personalization", "reliability"],
         sourcePullRequests: [1494],
       },
@@ -252,7 +252,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "The iOS app is one click from the website",
         summary:
-          "Murph's public footer now includes a direct link to the canonical iOS App Store listing alongside the existing product links.",
+          "Murph's public footer now includes a direct link to the official iOS App Store listing alongside the existing product links.",
         details:
           "The link opens in a new tab with the existing external-link safeguards and keeps the current footer hierarchy intact on desktop and mobile.",
         relevanceTags: ["ios", "website", "navigation", "mobile"],
@@ -266,7 +266,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "When Murph restarts while saving its latest work, the new instance now waits for that exact handoff instead of restoring an older conversation.",
         details:
-          "The handoff remains automatic and bounded. A shorter save preserves the same replay and fresh-input rules without adding routine startup delay.",
+          "The handoff remains automatic and limited in time. A faster save preserves the same protection for restored and newly arrived messages without adding routine startup delay.",
         relevanceTags: ["assistant", "continuity", "reliability", "performance"],
         sourcePullRequests: [1472, 1522],
       },
@@ -278,7 +278,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Pausing Murph no longer blocks already-authorized cleanup of expired private inbox media.",
         details:
-          "Ordinary assistant and model work stays disabled. Only the existing signed, retention-only path can restore the workspace, delete expired media, and checkpoint the result.",
+          "Ordinary replies stay paused. Only already-approved retention cleanup can briefly resume, remove expired media, and save the cleaned state.",
         relevanceTags: ["privacy", "retention", "media", "reliability"],
         sourcePullRequests: [1493],
       },
@@ -290,7 +290,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Proactive follow-ups and completed phone-call results now do less blocking background work, leaving current replies more room to run during busy moments.",
         details:
-          "Reply ownership, card and call destinations, duplicate protection, and recovery stay unchanged.",
+          "Current replies still keep priority, while card and call destinations, duplicate protection, and recovery stay unchanged.",
         relevanceTags: ["performance", "calls", "messaging", "reliability"],
         sourcePullRequests: [1475, 1510],
       },
@@ -302,7 +302,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "When a product problem has useful reproduction evidence, Murph can include concise steps and safe environment context in the existing feedback summary.",
         details:
-          "The summary excludes raw conversation wording, health or personal details, identifiers, contact information, secrets, and provider payloads. Feature interest stays concise.",
+          "The summary excludes raw conversation wording, health or personal details, identifiers, contact information, secrets, and raw service data. Feature interest stays concise.",
         relevanceTags: ["feedback", "privacy", "support", "reliability"],
         sourcePullRequests: [1465],
       },
@@ -351,7 +351,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Group funding has one clear recovery path",
         summary:
-          "Monthly sponsorship and one-time contributions now return to the same group-funding owner when checkout needs to resume, reconcile, or explain what happened.",
+          "Monthly sponsorship and one-time contributions now return to the same group-funding flow when checkout needs to resume, reconcile, or explain what happened.",
         details:
           "A verified payment still owns the credit grant, an uncertain checkout stays recoverable without a second charge, and group usage can continue independently of optional public creative output.",
         relevanceTags: ["groups", "billing", "usage", "reliability"],
@@ -365,7 +365,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Group-room memory maintenance now preserves the latest trustworthy room context when a long conversation needs compaction or a background refresh fails.",
         details:
-          "The room keeps one bounded source of truth. A maintenance failure does not replace known context with an empty or misleading status.",
+          "The room keeps one trusted, limited history. A maintenance failure does not replace known context with an empty or misleading status.",
         relevanceTags: ["groups", "memory", "assistant", "reliability"],
         sourcePullRequests: [1449],
       },
@@ -375,9 +375,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "A backlog of automations clears more cleanly",
         summary:
-          "When several scheduled jobs become due together, Murph can admit and drain the bounded set in one coordinated pass instead of repeatedly waking around the same backlog.",
+          "When several scheduled jobs become due together, Murph can collect and clear the limited backlog in one coordinated pass instead of repeatedly waking around the same work.",
         details:
-          "Each occurrence keeps its existing authority and delivery path. Capacity stays bounded, and one congested lane cannot silently create duplicate work.",
+          "Each occurrence keeps its existing approval and delivery path. Capacity stays limited, and one busy lane cannot silently create duplicate work.",
         relevanceTags: ["automations", "performance", "reliability", "scheduling"],
         sourcePullRequests: [1434],
       },
@@ -395,11 +395,11 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "device-sync-webhook-recovery",
         kind: "improvement",
         priority: 4,
-        title: "Device sync recovers from brief database contention",
+        title: "Device sync recovers from brief service contention",
         summary:
-          "A device-sync wake now keeps its database lock short and returns a retryable response when a transaction expires, so a provider can safely try again.",
+          "If a sync update briefly collides with another write, Murph releases the contested step quickly and asks the wearable service to try again.",
         details:
-          "The retry preserves the existing sync owner and does not turn one webhook into a second import or duplicate health event.",
+          "The retry stays with the same sync job and cannot turn one update into a second import or duplicate health event.",
         relevanceTags: ["wearables", "sync", "health-data", "reliability"],
         sourcePullRequests: [1454],
       },
@@ -409,9 +409,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Proactive group messages return to the right room",
         summary:
-          "A hosted group container can now prove its own durable Linq thread before a proactive message is sent, keeping the result tied to the intended room.",
+          "Before sending a proactive group update, Murph now verifies that the saved conversation route belongs to that exact room.",
         details:
-          "The container cannot borrow another member's route or infer a room from private identity. Ambiguous thread authority still fails closed.",
+          "It cannot borrow another member's route or guess a room from private identity. If the room is ambiguous, nothing sends.",
         relevanceTags: ["groups", "messaging", "routing", "reliability"],
         sourcePullRequests: [1468],
       },
@@ -432,7 +432,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "After completed onboarding, Murph can offer one specific interpretation grounded in your available health evidence and one optional low-burden next action.",
         details:
-          "The read is private, bounded, and scheduled only once. It does not automatically create a plan, habit, experiment, or reminder, and it stays honest when the evidence is too thin for a useful interpretation.",
+          "The read is private, focused, and scheduled only once. It does not automatically create a plan, habit, experiment, or reminder, and it stays honest when the evidence is too thin for a useful interpretation.",
         relevanceTags: ["onboarding", "insights", "health-data", "assistant"],
         sourcePullRequests: [1390],
       },
@@ -454,7 +454,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Scheduled help can complete real tasks",
         summary:
-          "A scheduled Murph turn can now use the same bounded composable tools as an ordinary private turn, including placing an approved call or sending an approved connected-app email.",
+          "Scheduled Murph work can now use the same approved tools as an ordinary private conversation, including placing an approved call or sending an approved connected-app email.",
         details:
           "Each action keeps its own confirmation and audience rules. Group call previews were removed rather than exposing private call setup, and an uncertain email send is reconciled before Murph suggests another attempt.",
         relevanceTags: ["automations", "calls", "email", "connected-apps"],
@@ -468,7 +468,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "When current evidence would materially improve an answer, Murph can run one bounded research lookup over a finite public health scope and map the answer back to usable sources.",
         details:
-          "Names, private notes, arbitrary question prose, and account data never enter the provider request. If the scope cannot be represented or no source is usable, Murph says the live lookup did not run or found nothing usable.",
+          "Names, private notes, arbitrary question prose, and account data never enter the live research request. If the scope cannot be represented or no source is usable, Murph says the lookup did not run or found nothing usable.",
         relevanceTags: ["research", "evidence", "assistant", "privacy"],
         sourcePullRequests: [1393],
       },
@@ -534,7 +534,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Cancel a file that has not been delivered",
         summary:
-          "Murph can now cancel a pending generated-file delivery before provider work begins, without deleting the underlying private file or affecting an already entered send.",
+          "Murph can now cancel a pending generated-file delivery before the send begins, without deleting the underlying private file or affecting a delivery that already started.",
         relevanceTags: ["files", "messaging", "privacy", "reliability"],
         sourcePullRequests: [1387],
       },
@@ -617,7 +617,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "A first message gets moving sooner",
         summary:
-          "First-contact admission now uses the faster welcome path and begins warming the hosted shell after enrollment, reducing avoidable startup work before Murph's first useful reply.",
+          "First contact now uses the faster welcome path and starts preparing the conversation after enrollment, reducing avoidable work before Murph's first useful reply.",
         details:
           "Consent and activation still finish before the assistant can use member data. A failed prewarm quietly falls back to the ordinary durable message path.",
         relevanceTags: ["onboarding", "performance", "messaging", "reliability"],
@@ -631,7 +631,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "A nutrition card or generated image that finishes late now resumes in its exact originating conversation and session instead of attaching to newer work.",
         details:
-          "Attachment upload can retry only at the confirmed-safe byte-transfer step. Ambiguous provider entry never triggers a blind second reservation or duplicate media send.",
+          "Attachment transfer retries only before the send could have started. If delivery is ambiguous, Murph will not make a blind second attempt or duplicate the media.",
         relevanceTags: ["images", "cards", "messaging", "reliability"],
         sourcePullRequests: [1334, 1346, 1374, 1389],
       },
@@ -664,7 +664,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Connections now includes guided Apple Health relay paths for Huawei Health, Xiaomi or Mi Fitness, Zepp or Amazfit, COROS, Suunto, and RingConn.",
         details:
-          "Each card explains that Apple Health remains the sync source and opens the existing companion setup guide. Relay providers never pretend to be direct connections or expose a false disconnect state.",
+          "Each card explains that Apple Health remains the sync source and opens the existing companion setup guide. Relay source cards never appear as direct connections or show a false disconnect state.",
         relevanceTags: ["wearables", "apple-health", "connections", "companion"],
         sourcePullRequests: [1316],
         tryIt: {
@@ -690,7 +690,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Structured answers can arrive as compact tables",
         summary:
-          "Murph can now return a bounded tracked or untracked table in a private iMessage card when rows and columns make the answer easier to scan.",
+          "Murph can now return a small tracked or untracked table in a private iMessage card when rows and columns make the answer easier to scan.",
         details:
           "The card stays presentation-only unless the request has an explicit tracking contract. It keeps a deterministic text fallback and returns to the originating thread as one response.",
         relevanceTags: ["imessage", "cards", "tracking", "assistant"],
@@ -702,7 +702,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "See the connected-app handoff before leaving Murph",
         summary:
-          "Before a Composio authorization opens, Murph now shows a short first-party preview that explains the external handoff and lets you continue manually.",
+          "Before a connected-app authorization opens, Murph now shows a short first-party preview that explains the external handoff and lets you continue manually.",
         details:
           "The countdown pauses when the page is hidden, authorization does not start before the handoff is visible, and closing the preview leaves the existing connection flow unchanged.",
         relevanceTags: ["connected-apps", "authorization", "privacy", "web"],
@@ -740,7 +740,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "When heat, cold, or outdoor air quality matters, Murph can check the official alert for your location and use it as added health context.",
         details:
-          "Murph uses the provider's location-specific alert instead of applying one temperature or air-quality threshold everywhere. An alert alone does not trigger outreach, unrelated hazards stay out of health reasoning, and a failed check does not block the rest of the answer.",
+          "Murph uses the official service's location-specific alert instead of applying one temperature or air-quality threshold everywhere. An alert alone does not trigger outreach, unrelated hazards stay out of health reasoning, and a failed check does not block the rest of the answer.",
         relevanceTags: ["assistant", "weather", "air-quality", "recovery"],
         sourcePullRequests: [1307],
         tryIt: {
@@ -769,7 +769,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Onboarding follow-up now expires after three days, and a group join can recover after activation without replaying setup that already finished.",
         details:
-          "The companion sync status also exposes the server clock for a trustworthy freshness comparison. Recovery uses the existing activation and sync owners rather than inventing a second state.",
+          "The companion sync status also uses the server time for a trustworthy freshness comparison. Recovery resumes the existing activation and sync instead of starting a second one.",
         relevanceTags: ["onboarding", "groups", "companion", "reliability"],
         sourcePullRequests: [1309, 1314, 1321],
       },
@@ -781,7 +781,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "The model choice now states, in shorter language, that Venice can use included AI capacity faster before you commit the setting.",
         details:
-          "The explanation applies to future usage and keeps the actual provider-rate accounting already introduced on the previous day.",
+          "The explanation applies to future usage and keeps the actual model-rate accounting already introduced on the previous day.",
         relevanceTags: ["models", "venice", "usage", "settings"],
         sourcePullRequests: [1319, 1324],
       },
@@ -825,9 +825,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Storage maintenance no longer needs a global pause",
         summary:
-          "Murph can keep ordinary replies, checkpoints, attachments, and uploads available while hosted storage moves between its approved owners.",
+          "Murph can keep ordinary replies, saved conversations, attachments, and uploads available while its saved data moves safely.",
         details:
-          "The migration remains fail-closed when destination correctness is uncertain, while accepted conversation input stays durable for recovery.",
+          "If Murph cannot confirm that the new storage is ready, the move stops safely. Messages already received remain available when the conversation resumes.",
         relevanceTags: ["reliability", "storage", "messaging", "maintenance"],
         sourcePullRequests: [1318],
       },
