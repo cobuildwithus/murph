@@ -66,7 +66,7 @@ export interface HostedThreadRouteSnapshot {
    * do not become a second source of truth.
    */
   deliveryRouteState?: {
-    deliveryRouteEncrypted?: string | null;
+    deliveryRouteEncrypted: string | null;
     deliveryRouteEncryptedPresent: boolean;
     threadIdentityLookupKey: string;
     threadLookupKey: string;

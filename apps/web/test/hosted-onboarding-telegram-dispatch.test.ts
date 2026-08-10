@@ -95,6 +95,7 @@ const mocks = vi.hoisted(() => {
       channel: "telegram";
       containerMemberId: string;
       deliveryRouteState?: {
+        deliveryRouteEncrypted: string | null;
         deliveryRouteEncryptedPresent: boolean;
         threadIdentityLookupKey: string;
         threadLookupKey: string;
@@ -827,6 +828,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       channel: "telegram",
       containerMemberId: "member_existing_group_container",
       deliveryRouteState: {
+        deliveryRouteEncrypted: "existing-delivery-route",
         deliveryRouteEncryptedPresent: true,
         threadIdentityLookupKey,
         threadLookupKey,
@@ -1212,6 +1214,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       channel: "telegram",
       containerMemberId,
       deliveryRouteState: {
+        deliveryRouteEncrypted: routeRow.deliveryRouteEncrypted,
         deliveryRouteEncryptedPresent: true,
         threadIdentityLookupKey,
         threadLookupKey,
