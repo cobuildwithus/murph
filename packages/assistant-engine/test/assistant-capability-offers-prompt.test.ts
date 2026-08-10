@@ -155,6 +155,9 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')
     expect(section).toContain('`action="read_shared"` as the only hosted path')
     expect(section).toContain('resolves live authority lazily after the tool call')
+    expect(section).not.toContain('explicit current visibility of a consented shared metric')
+    expect(section).not.toContain('call exact-scope `read_shared` once first')
+    expect(section).not.toContain('granted plus missing means not currently visible')
     expect(section).toContain('Model-size `status="partial"` lists current `omittedParticipantIds`')
     expect(section).toContain('never infer their departure, score, diagnostics, or permission')
     expect(section).toContain('or call the standings complete')
@@ -279,6 +282,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('sleep timing/total; source-aware deep/REM')
     expect(prompt).toContain('`workouts.v0`: day-local start/duration/type')
     expect(prompt).toContain('canonical event zone (vault fallback)')
+    expect(prompt).toContain('explicit current visibility of a consented shared metric')
+    expect(prompt).toContain('call exact-scope `read_shared` once first')
+    expect(prompt).toContain('granted plus missing means not currently visible, cause unknown')
+    expect(prompt).toContain('unrelated "now"/"yet" questions')
     expect(prompt).toContain(
       'no timestamp/route/location/HR/provider ID',
     )

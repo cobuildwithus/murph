@@ -1743,12 +1743,7 @@ async function readHostedUsageReferralSnapshot(input: {
           rewardUsdMicros: POLICIES[code].rewardUsdMicros,
         }),
       })),
-    trialCreditNotice:
-      personalUsage !== null
-      && personalUsage.status !== "unavailable"
-      && personalUsage.accessKind === "trial"
-        ? "Bonus usage does not extend the trial end date."
-        : null,
+    trialCreditNotice: null,
   };
 }
 

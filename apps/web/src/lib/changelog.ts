@@ -65,10 +65,26 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Starter access, patterns, reminders, and web search",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, and managed OpenAI web search can reach current information again.",
     items: [
+      {
+        id: "non-expiring-starter-access",
+        kind: "feature",
+        priority: 5,
+        title: "Start with usage that does not expire",
+        summary:
+          "Eligible new members receive a Starter usage balance that remains available until it is used, with remaining usage and paid plan choices visible in Settings.",
+        details:
+          "Eligible legacy trial value carries into Starter. When the balance is exhausted, Murph pauses AI work without deleting account state and Settings offers eligible paid plans; usage top-ups remain available only to active paid-plan owners.",
+        relevanceTags: ["starter", "usage", "billing", "settings"],
+        sourcePullRequests: [1464],
+        tryIt: {
+          href: "/settings#subscription",
+          label: "View Starter usage",
+        },
+      },
       {
         id: "personal-patterns",
         kind: "feature",
@@ -107,6 +123,18 @@ const RAW_CHANGELOG_EDITIONS = [
           prompt: "Remind me every day at 9 PM Central to wind down.",
         },
       },
+      {
+        id: "web-search-restored",
+        kind: "improvement",
+        priority: 5,
+        title: "Managed OpenAI web search works again",
+        summary:
+          "When Murph uses managed OpenAI, its built-in web search can reach current information again instead of stopping with a forbidden-request error.",
+        details:
+          "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
+        relevanceTags: ["assistant", "search", "research", "reliability"],
+        sourcePullRequests: [1583],
+      },
     ],
   },
   {
@@ -116,6 +144,18 @@ const RAW_CHANGELOG_EDITIONS = [
     summary:
       "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, clearer connection paths, and stronger conversation recovery all landed together.",
     items: [
+      {
+        id: "group-sleep-challenges-use-fresh-data",
+        kind: "improvement",
+        priority: 4,
+        title: "Group sleep checks use fresh shared data",
+        summary:
+          "Murph now checks the current shared sleep record before answering and counts reported Deep and REM sleep as soon as those values are shared.",
+        details:
+          "Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
+        relevanceTags: ["groups", "sleep", "health-data", "connections"],
+        sourcePullRequests: [1565],
+      },
       {
         id: "public-referral-home",
         kind: "feature",

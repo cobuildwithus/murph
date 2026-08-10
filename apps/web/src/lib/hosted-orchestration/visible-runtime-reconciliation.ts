@@ -66,7 +66,7 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
     blockedReason === "ai_usage_denied"
     && isHostedLinqConversationMessageWake(wake)
   ) {
-    // The canonical reconciliation path already owns Linq usage/trial notices.
+    // The canonical reconciliation path already owns Linq usage notices.
     // This adapter exists only to fill the missing Telegram channel and to
     // explain access loss that happened after either channel admitted a message.
     return facts;
@@ -87,9 +87,9 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
   }
 
   // Entitlement must be judged at the same clock the canonical reconciliation
-  // just used. The wake timestamp is message metadata: a trial that was valid
-  // when the message was admitted can have expired by the time runtime
-  // processes it, which is exactly the case this adapter exists to explain.
+  // just used. The wake timestamp is message metadata; access can change between
+  // admission and runtime processing, which is exactly the case this adapter
+  // exists to explain.
   const access = await resolveHostedRecognizedInboundAccess({
     allowSignupFallback: true,
     inviteChannel: isHostedLinqConversationMessageWake(wake) ? "linq" : "web",

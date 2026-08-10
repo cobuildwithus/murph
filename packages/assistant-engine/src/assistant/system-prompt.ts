@@ -38,6 +38,9 @@ import type { AssistantMaintenanceProfile } from "./maintenance-evidence.js";
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from "./generated-delivery-files.js";
+import {
+  ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION,
+} from "./group-shared-freshness.js";
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
@@ -458,7 +461,7 @@ function buildAssistantLowUsageGuidanceText(
     "Low hosted usage:",
     "- Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before answering an explicit hosted plan, AI-usage, billing, Family-member usage, or group-funding request, or acting on trusted low-usage context. On a trusted low-usage turn, complete the user's current request first.",
     `- Follow the skill's explicit-request or first-heads-up route as applicable. Use its single final usage-segment contract only for an assistant-initiated heads-up. ${assistantInitiatedHeadsUpShape} Do not send a separate warning or repeat one already visible in the recent conversation.`,
-    `- Billing truth: \`murph.plan_usage\` is read-only and changes neither billing, Family state, nor usage credit. For a personal or Family owner-self add-usage request that passes the relevant skill's authorization gates, use only that skill's selector-bearing handoff; never add or substitute the generic Settings route. For any other explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`, or \`reason\` is \`trial_conversion_pending\`; never provide it for \`group_not_supported\` or \`hosted_access_inactive\`. For a target-specific personal plan change, use only signed \`change_plan\` after \`plan_usage\` returns the exact target, price, and timing and the member confirms those current terms; never use an unquoted legacy subscription action.`,
+    `- Billing truth: \`murph.plan_usage\` is read-only and changes neither billing, Family state, nor usage credit. For a personal or Family owner-self add-usage request that passes the relevant skill's authorization gates, use only that skill's selector-bearing handoff; never add or substitute the generic Settings route. For any other explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`; never provide it for \`group_not_supported\` or \`hosted_access_inactive\`. For a target-specific personal plan change, use only signed \`change_plan\` after \`plan_usage\` returns the exact target, price, and timing and the member confirms those current terms; never use an unquoted legacy subscription action.`,
   ].join("\n");
 }
 
@@ -632,6 +635,11 @@ function buildAssistantHostedGroupGuidanceText(
         ]
       : []),
     `- \`murph.group action="read_current"\` is membership/permission setup only, never shared records. Use \`action="read_shared"\` as the only hosted path for shared facts. Request one to three exact \`projectionScopes\` for an ordinary read; the generic scheduled group-email audience accepts the exact bounded scope list its skill supplies. The host resolves live authority lazily after the tool call. \`status="ok"\` is complete. Model-size \`status="partial"\` lists current \`omittedParticipantIds\`; never infer their departure, score, diagnostics, or permission, or call the standings complete. For attribution, an exact \`Sender:\` handle must appear in exactly one returned member's \`currentTurnHandles\`; use that row's group-scoped \`participantId\`, never name, order, values, \`Profile name (display only):\`, \`${currentTurnOwnerContactLabel}\`, \`Speaker name:\`, or global id. Scheduled and detached reads have no current-turn handles. Keep \`not_granted\`, \`granted\` plus \`missing\`, and \`available\` distinct; never use raw \`vault-share/**\` files.`,
+    ...(conversationScope === "group"
+      ? [
+          `- ${ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION}`,
+        ]
+      : []),
     "- After read_current, use the group-chat skill's core permissions only for `status=none`; existing groups use workflow scopes.",
     "- When `action=\"read_chat_participants\"` and `action=\"share_contact_card\"` are available for the current group chat, check the participants once on your first reply. If someone does not use Murph, share the card and naturally mention that they can save your contact, text you to get set up, and come back and say hi in the group once setup is done. Use your own words, not a fixed script. Do not repeat the invitation unprompted or when someone joins later. If someone asks you to resend the card, share it again. If someone asks why they have not been added or how to get Murph, answer directly and remind them to save your contact and text you to get set up. If you are not sure whether this is your first reply in the room, skip the card and invitation. SMS supports the same roster and group-access workflow; only provider-specific reactions, attachments, and chat customization may be unavailable. `action=\"offer_access\"` is the sole model-facing join or permission action. The trusted host returns `presentation=\"native\"` when it handled the native consent path; this does not prove UI was newly posted or is currently visible. It returns `presentation=\"link\"` with the exact first-party URL to include once, or `status=\"unavailable\"` when no consent surface is proven. Existing members keep their membership and other grants unchanged.",
     ...(conversationScope === "group"

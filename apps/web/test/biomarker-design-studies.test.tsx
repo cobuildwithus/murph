@@ -126,7 +126,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
     "Group sponsorship purchase, signed-out management, cancellation, and completion",
   );
   expect(sectionsMarkup).toContain(
-    "Subscription recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and exact usage status",
+    "Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status",
   );
   expect(sectionsMarkup).toContain(
     "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
@@ -165,7 +165,6 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-state="monthly-management-sign-in"');
   expect(sectionsMarkup).toContain('data-design-state="monthly-canceled"');
   expect(sectionsMarkup).toContain('data-design-state="sponsored-one-time-recovery"');
-  expect(sectionsMarkup).toContain('data-design-state="trial-family-confirmation"');
   expect(sectionsMarkup).toContain('data-design-state="family-billing-recovery"');
   expect(sectionsMarkup).toContain("Your Family plan needs billing attention");
   expect(sectionsMarkup).toContain("Monthly sponsorship canceled");
@@ -191,6 +190,18 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).not.toContain("$8.42");
   expect(sectionsMarkup).not.toContain("remaining usage credit");
   expect(sectionsMarkup).not.toContain("usage credit remaining");
+  const starterFamilyChoiceStart = sectionsMarkup.indexOf(
+    'data-design-state="starter-family-choice"',
+  );
+  const activeCoreUsageStart = sectionsMarkup.indexOf(
+    'data-design-state="active-core-usage"',
+    starterFamilyChoiceStart,
+  );
+  expect(starterFamilyChoiceStart).toBeGreaterThan(-1);
+  expect(activeCoreUsageStart).toBeGreaterThan(starterFamilyChoiceStart);
+  expect(
+    sectionsMarkup.slice(starterFamilyChoiceStart, activeCoreUsageStart),
+  ).toContain('inert=""');
   expect(sectionsMarkup).toContain("inert=\"\"");
   expect(sectionsMarkup).toContain("max-w-7xl");
 
@@ -203,6 +214,10 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).toContain("Preview WHOOP completion");
   expect(componentsMarkup).toContain("Preview capacity fallback");
   expect(componentsMarkup).toContain("Preview capacity fallback without contact route");
+  expect(componentsMarkup).toContain("Preview capacity response");
+  expect(componentsMarkup).toContain(
+    'data-design-state="usage-top-up-capacity-conflict"',
+  );
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-preparing"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-index"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
