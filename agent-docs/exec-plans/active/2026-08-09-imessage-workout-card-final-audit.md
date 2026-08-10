@@ -63,6 +63,12 @@ Success criteria:
   image route and native visual language, while complete captions retain every
   cell and workout-set semantic independently of raster availability. V3
   tracking remains transcript-only and V4 remains authority-free.
+- Accepted from exact combined assembly: current main independently measured a
+  9,014,016-byte CLI bundle against the stale 9,000,000-byte ceiling. The merged
+  candidate measured 9,027,632 bytes after the reported largest inputs were
+  inspected. The total budget is narrowly ratcheted to 9,030,000; the 20,000-byte
+  entry budget and all runner entry, static-closure, and total tolerances remain
+  unchanged.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
 - Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. Neither coordinated PR is ready or merged.
 
@@ -98,6 +104,10 @@ Success criteria:
   malformed, oversized, tracked, and query-bearing inputs. The in-app browser
   exposed no usable tab, so hosted desktop/mobile catalog screenshots remain an
   explicit evidence gap rather than a claimed proof.
+- The exact merged Cloudflare assembly passed at 9,027,632 CLI bytes with a
+  793-byte CLI entry, plus a 1,672,620-byte runner entry, 8,047,715-byte static
+  boot closure, and 10,025,716 total runner bytes. The 50 CLI and runner bundle
+  policy tests passed before assembly.
 
 ## Parent product-experience revalidation
 
