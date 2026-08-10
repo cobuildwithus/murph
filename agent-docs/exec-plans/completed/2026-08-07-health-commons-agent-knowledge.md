@@ -1,6 +1,6 @@
 # Health Commons agent knowledge retrieval
 
-Status: active
+Status: completed
 Created: 2026-08-07
 Updated: 2026-08-10
 
@@ -64,7 +64,7 @@ Updated: 2026-08-10
 6. [complete] Add the exact release-guard exception for the public index.
 7. [complete] Move general eye-health and recovery-modality guidance into
    Health Commons and delete their topic skills.
-8. [in progress] Run final verification, exact-head review, CI, and close the
+8. [complete] Run final verification, exact-head review, CI, and close the
    plan.
 
 ## Decisions
@@ -116,3 +116,13 @@ Updated: 2026-08-10
   98 tests with 6 skips, Cloudflare packaging 57 tests, and release guard 22
   tests. The real-model file compiled with 6 deterministic tests and 40 opt-in
   tests skipped without credentials.
+- Final Health Commons verification passed with 146 tests after moving general
+  eye-health and recovery-modality guidance into Health Commons.
+- Assistant focused tests passed with 97 tests and 6 skips. Focused CLI
+  knowledge tests passed with 14 tests. Web typecheck passed.
+- Exact-head GitHub checks passed for release builds, package coverage, app
+  verification, CLI host matrices, permissions, overflow, fixtures, billing,
+  and artifact hygiene. The user explicitly accepted the failed hosted design
+  proof because the frontend change only corrects existing GitHub link targets
+  and labels; both desktop and mobile captures were inspected locally.
+Completed: 2026-08-10
