@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => {
     readOAuthStateProviderApplicationBinding: vi.fn(),
     resolveDeviceProviderApplication: vi.fn(),
     resolveDeviceProviderApplicationForConnection: vi.fn(),
+    revokeStravaDeviceSyncAccess: vi.fn(),
     readHostedDeviceSyncEnvironment: vi.fn(),
     registryGet: vi.fn(),
     registryList: vi.fn(),
@@ -92,6 +93,10 @@ vi.mock("@murphai/device-syncd/public-ingress", async () => {
     isDeviceSyncError: actual.isDeviceSyncError,
   };
 });
+
+vi.mock("@murphai/device-syncd/providers/strava", () => ({
+  revokeStravaDeviceSyncAccess: mocks.revokeStravaDeviceSyncAccess,
+}));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => mocks.prisma),
@@ -425,6 +430,7 @@ vi.mock("@/src/lib/device-sync/shared", () => ({
 import {
   HostedDeviceSyncControlPlane,
 } from "@/src/lib/device-sync/control-plane";
+import { DeviceProviderApplicationError } from "@/src/lib/device-sync/provider-applications";
 import {
   createHostedDeviceSyncPublicIngressService,
 } from "@/src/lib/device-sync/public-ingress-service";
@@ -460,6 +466,8 @@ describe("hosted device-sync wakes", () => {
     mocks.readOAuthStateProviderApplicationBinding.mockReset();
     mocks.resolveDeviceProviderApplication.mockReset();
     mocks.resolveDeviceProviderApplicationForConnection.mockReset();
+    mocks.revokeStravaDeviceSyncAccess.mockReset();
+    mocks.revokeStravaDeviceSyncAccess.mockResolvedValue(undefined);
     mocks.upsertConnectionSource.mockReset();
     mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
     mocks.createHostedDeviceSyncRegistryWithProviderConfigs.mockImplementation(() => ({
@@ -2809,6 +2817,122 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.scopedRegistryGet).toHaveBeenCalledWith("strava");
     expect(mocks.registryGet).not.toHaveBeenCalled();
     expect(revokeAccess).toHaveBeenCalledWith(storedConnection);
+  });
+
+  it("uses stored Strava authority to disconnect and purge when private credentials require repair", async () => {
+    const activeConnection = buildHostedConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    const storedConnection = buildStoredConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    mocks.resolveDeviceProviderApplicationForConnection.mockRejectedValue(
+      new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_INVALID",
+        "Private provider application credentials are invalid.",
+      ),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
+    mocks.getStoredConnectionAccountForUser
+      .mockResolvedValueOnce(storedConnection)
+      .mockResolvedValueOnce(storedConnection);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect",
+      ),
+    );
+
+    await expect(controlPlane.disconnectConnection(
+      "user-123",
+      buildPublicConnectionId("dsc_123"),
+    )).resolves.toMatchObject({
+      connection: {
+        provider: "strava",
+        status: "disconnected",
+      },
+    });
+
+    expect(mocks.revokeStravaDeviceSyncAccess).toHaveBeenCalledWith(storedConnection);
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      clearRefreshLease: true,
+      connectionId: "dsc_123",
+      externalAccountId: storedConnection.externalAccountId,
+      provider: "strava",
+      tokenBundle: null,
+      tx: mocks.prismaTx,
+    });
+  });
+
+  it("propagates transient private-application failures before disconnect mutation", async () => {
+    const transientError = Object.assign(new Error("KMS unavailable"), {
+      name: "KmsUnavailableError",
+    });
+    const activeConnection = buildHostedConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    mocks.resolveDeviceProviderApplicationForConnection.mockRejectedValue(transientError);
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect",
+      ),
+    );
+
+    await expect(controlPlane.disconnectConnection(
+      "user-123",
+      buildPublicConnectionId("dsc_123"),
+    )).rejects.toBe(transientError);
+
+    expect(mocks.revokeStravaDeviceSyncAccess).not.toHaveBeenCalled();
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("finishes consent-withdrawal disconnect when private Strava credentials require repair", async () => {
+    const activeConnection = buildHostedConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    const storedConnection = buildStoredConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    mocks.prisma.hostedConsentGrant.findUnique.mockResolvedValue({
+      scope: "launch.health-data",
+      status: "revoked",
+    });
+    mocks.resolveDeviceProviderApplicationForConnection.mockRejectedValue(
+      new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_INVALID",
+        "Private provider application credentials are invalid.",
+      ),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
+    mocks.getStoredConnectionAccountForUser
+      .mockResolvedValueOnce(storedConnection)
+      .mockResolvedValueOnce(storedConnection);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/legal/health-data-consent"),
+    );
+
+    await expect(controlPlane.disconnectAllConnections("user-123")).resolves.toEqual({
+      attemptedCount: 1,
+      disconnectedCount: 1,
+      failedCount: 0,
+    });
+
+    expect(mocks.revokeStravaDeviceSyncAccess).toHaveBeenCalledWith(storedConnection);
+    expect(mocks.registryGet).not.toHaveBeenCalled();
   });
 
   it("preserves established Junction siblings and blocks a new source until target cleanup succeeds", async () => {

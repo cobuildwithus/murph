@@ -8,8 +8,9 @@ This index is the table of contents for the current canonical docs in this repos
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
 Member-owned device provider application ownership, exact OAuth and connection
-revision binding, invocation-scoped credential projection, and permanent-versus-
-transient credential failure handling are jointly specified by
+revision binding, invocation-scoped credential projection, exact token-return
+authority, credential-free stored-token cleanup without operator fallback, and
+permanent-versus-transient credential failure handling are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/RELIABILITY.md`.
 

@@ -69,6 +69,7 @@ import {
   createHostedDeviceSyncRegistry,
   createHostedDeviceSyncRegistryWithProviderConfigs,
 } from "./providers";
+import { resolveHostedDeviceSyncConnectionCleanup } from "./provider-application-cleanup";
 
 export class HostedDeviceSyncPublicIngressService {
   private readonly ingress;
@@ -661,13 +662,18 @@ export class HostedDeviceSyncPublicIngressService {
     warning?: { code: string; historicalResetIncomplete?: true; message: string };
   }> {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
-    const registry = await this.resolveRegistryForConnection(
-      userId,
-      connection.id,
-    );
+    const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
+      connectionId: connection.id,
+      memberId: userId,
+      prisma: this.context.store.prisma,
+      provider: connection.provider,
+      resolveSharedRegistry: () => this.registry,
+    });
     const disconnected = await disconnectHostedDeviceSyncConnection({
       connectionId: connection.id,
-      registry,
+      registry: cleanup.registry ?? this.registry,
+      revokeAccess: cleanup.revokeAccessOverride,
+      revokeUnavailableWarning: cleanup.warning,
       store: this.context.store,
       userId,
     });
@@ -729,13 +735,18 @@ export class HostedDeviceSyncPublicIngressService {
       }
       attemptedCount += 1;
       try {
-        const registry = await this.resolveRegistryForConnection(
-          userId,
-          connection.id,
-        );
+        const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
+          connectionId: connection.id,
+          memberId: userId,
+          prisma: this.context.store.prisma,
+          provider: connection.provider,
+          resolveSharedRegistry: () => this.registry,
+        });
         await disconnectHostedDeviceSyncConnection({
           connectionId: connection.id,
-          registry,
+          registry: cleanup.registry ?? this.registry,
+          revokeAccess: cleanup.revokeAccessOverride,
+          revokeUnavailableWarning: cleanup.warning,
           store: this.context.store,
           userId,
         });

@@ -3,6 +3,7 @@ export {
   DEVICE_PROVIDER_APPLICATION_SELECT,
   DeviceProviderApplicationError,
   isDeviceProviderApplicationError,
+  isRepairableDeviceProviderApplicationStateError,
   readDeviceProviderApplicationView,
   resolveDeviceProviderApplication,
   resolveDeviceProviderApplicationForConnection,

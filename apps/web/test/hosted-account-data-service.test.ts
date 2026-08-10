@@ -34,6 +34,11 @@ const serviceMocks = vi.hoisted(() => ({
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
   resolveDeviceProviderApplicationForConnection: vi.fn(),
+  revokeStravaDeviceSyncAccess: vi.fn(),
+}));
+
+vi.mock("@murphai/device-syncd/providers/strava", () => ({
+  revokeStravaDeviceSyncAccess: serviceMocks.revokeStravaDeviceSyncAccess,
 }));
 
 vi.mock("@/src/lib/connected-apps/composio", async (importOriginal) => ({
@@ -56,7 +61,8 @@ vi.mock("@/src/lib/device-sync/providers", () => ({
     serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs,
 }));
 
-vi.mock("@/src/lib/device-sync/provider-applications", () => ({
+vi.mock("@/src/lib/device-sync/provider-applications", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/device-sync/provider-applications")>()),
   resolveDeviceProviderApplicationForConnection:
     serviceMocks.resolveDeviceProviderApplicationForConnection,
 }));
@@ -151,6 +157,7 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { DeviceProviderApplicationError } from "@/src/lib/device-sync/provider-applications";
 import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
 } from "@/src/lib/hosted-execution/product-feedback";
@@ -308,6 +315,8 @@ beforeEach(() => {
   });
   serviceMocks.resolveDeviceProviderApplicationForConnection.mockReset();
   serviceMocks.resolveDeviceProviderApplicationForConnection.mockResolvedValue(null);
+  serviceMocks.revokeStravaDeviceSyncAccess.mockReset();
+  serviceMocks.revokeStravaDeviceSyncAccess.mockResolvedValue(undefined);
   serviceMocks.deleteHostedPrivyUser.mockReset();
   serviceMocks.deleteHostedPrivyUser.mockResolvedValue(true);
   serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockReset();
@@ -3186,6 +3195,77 @@ describe("deleteHostedAccountData", () => {
     });
     expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
     expect(revokeAccess).toHaveBeenCalledWith(storedAccount);
+    expect(result.providerRevocations).toEqual([{
+      connectionId: "dsc_strava",
+      errorCode: null,
+      providerLabel: "Strava",
+      status: "revoked",
+      warningCode: null,
+    }]);
+  });
+
+  it("uses stored Strava authority and proceeds with deletion when private credentials require repair", async () => {
+    const storedAccount = {
+      accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
+      connectedAt: "2026-04-27T00:07:00.000Z",
+      createdAt: "2026-04-27T00:07:00.000Z",
+      credential: {
+        kind: "oauth_tokens" as const,
+        tokens: {
+          accessToken: "cleanup-access-token",
+          accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
+          refreshToken: "cleanup-refresh-token",
+        },
+      },
+      disconnectGeneration: 0,
+      displayName: "Strava",
+      externalAccountId: "strava-athlete-123",
+      id: "dsc_strava",
+      keyVersion: "key-v1",
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: null,
+      provider: "strava",
+      scopes: ["read", "activity:read_all"],
+      setupExpiresAt: null,
+      setupPhase: null,
+      status: "active" as const,
+      tokenVersion: 1,
+      updatedAt: "2026-04-27T00:07:00.000Z",
+    };
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [{
+        id: "dsc_strava",
+        provider: "strava",
+        providerAccountBlindIndex: "blind-index",
+      }],
+      onTransaction: () => undefined,
+    });
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        getStoredConnectionAccountForUser: vi.fn(async () => storedAccount),
+        prisma,
+      },
+    });
+    serviceMocks.resolveDeviceProviderApplicationForConnection.mockRejectedValue(
+      new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_INVALID",
+        "Private provider application credentials are invalid.",
+      ),
+    );
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(serviceMocks.revokeStravaDeviceSyncAccess).toHaveBeenCalledWith(storedAccount);
+    expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
+    expect(serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs).not.toHaveBeenCalled();
     expect(result.providerRevocations).toEqual([{
       connectionId: "dsc_strava",
       errorCode: null,

@@ -64,7 +64,17 @@ export type HostedDeviceSyncRefreshProviderResolver = (input: {
   userId: string;
 }) => Promise<DeviceSyncProvider | null>;
 
+export type HostedDeviceSyncTokenExportAuthorityValidator = (input: {
+  connectionId: string;
+  prisma:
+    | PrismaDeviceSyncControlPlaneStore["prisma"]
+    | HostedPrismaTransactionClient;
+  providerId: string;
+  userId: string;
+}) => Promise<void>;
+
 export interface HostedDeviceSyncAgentSessionOptions {
+  readonly assertTokenExportAuthority?: HostedDeviceSyncTokenExportAuthorityValidator | null;
   readonly registry?: DeviceSyncRegistry | null;
   readonly resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
 }
@@ -144,16 +154,21 @@ export class HostedDeviceSyncAgentSessionService {
   private readonly resolveRefreshProvider:
     | HostedDeviceSyncRefreshProviderResolver
     | null;
+  private readonly assertTokenExportAuthority:
+    | HostedDeviceSyncTokenExportAuthorityValidator
+    | null;
 
   constructor(input: {
     request: Request;
     store: PrismaDeviceSyncControlPlaneStore;
+    assertTokenExportAuthority?: HostedDeviceSyncTokenExportAuthorityValidator | null;
     registry?: DeviceSyncRegistry | null;
     resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
   }) {
     this.store = input.store;
     this.registry = input.registry ?? null;
     this.resolveRefreshProvider = input.resolveRefreshProvider ?? null;
+    this.assertTokenExportAuthority = input.assertTokenExportAuthority ?? null;
     this.agentSessions = new HostedAgentSessionService({
       request: input.request,
       store: input.store,
@@ -242,7 +257,14 @@ export class HostedDeviceSyncAgentSessionService {
           };
         }
 
-        const tokenBundle = buildTokenExport(storedTokenBundle, now);
+        const tokenBundle = await this.buildAuthorizedTokenExport({
+          connectionId,
+          now,
+          prisma: tx,
+          providerId: storedAccount.provider,
+          storedTokenBundle,
+          userId: session.userId,
+        });
         await this.recordTokenAudit({
           userId: session.userId,
           connectionId,
@@ -364,7 +386,14 @@ export class HostedDeviceSyncAgentSessionService {
         options.expectedTokenVersion > 0 &&
         currentTokenBundle.tokenVersion !== options.expectedTokenVersion
       ) {
-        const tokenBundle = buildTokenExport(currentTokenBundle, now);
+        const tokenBundle = await this.buildAuthorizedTokenExport({
+          connectionId,
+          now,
+          prisma: tx,
+          providerId: currentConnection.provider,
+          storedTokenBundle: currentTokenBundle,
+          userId: session.userId,
+        });
         await this.recordTokenAudit({
           userId: session.userId,
           connectionId,
@@ -391,7 +420,14 @@ export class HostedDeviceSyncAgentSessionService {
       }
 
       if (!forceRefresh && !shouldRefreshHostedToken(currentTokenBundle.accessTokenExpiresAt ?? null, now)) {
-        const tokenBundle = buildTokenExport(currentTokenBundle, now);
+        const tokenBundle = await this.buildAuthorizedTokenExport({
+          connectionId,
+          now,
+          prisma: tx,
+          providerId: currentConnection.provider,
+          storedTokenBundle: currentTokenBundle,
+          userId: session.userId,
+        });
         await this.recordTokenAudit({
           userId: session.userId,
           connectionId,
@@ -522,7 +558,14 @@ export class HostedDeviceSyncAgentSessionService {
           tx,
           userId: input.session.userId,
         });
-        const tokenBundle = buildTokenExport(currentTokenBundle, input.now);
+        const tokenBundle = await this.buildAuthorizedTokenExport({
+          connectionId: input.connectionId,
+          now: input.now,
+          prisma: tx,
+          providerId: currentAccount.provider,
+          storedTokenBundle: currentTokenBundle,
+          userId: input.session.userId,
+        });
         await this.recordTokenAudit({
           userId: input.session.userId,
           connectionId: input.connectionId,
@@ -762,7 +805,14 @@ export class HostedDeviceSyncAgentSessionService {
             tx,
             userId: input.session.userId,
           });
-          const tokenBundle = buildTokenExport(currentTokenBundle, input.now);
+          const tokenBundle = await this.buildAuthorizedTokenExport({
+            connectionId: input.connectionId,
+            now: input.now,
+            prisma: tx,
+            providerId: currentAccount.provider,
+            storedTokenBundle: currentTokenBundle,
+            userId: input.session.userId,
+          });
           await this.recordTokenAudit({
             userId: input.session.userId,
             connectionId: input.connectionId,
@@ -937,7 +987,14 @@ export class HostedDeviceSyncAgentSessionService {
             tx,
             userId: input.session.userId,
           });
-          const tokenBundle = buildTokenExport(currentTokenBundle, input.now);
+          const tokenBundle = await this.buildAuthorizedTokenExport({
+            connectionId: input.connectionId,
+            now: input.now,
+            prisma: tx,
+            providerId: currentAccount.provider,
+            storedTokenBundle: currentTokenBundle,
+            userId: input.session.userId,
+          });
           await this.recordTokenAudit({
             userId: input.session.userId,
             connectionId: input.connectionId,
@@ -1008,7 +1065,14 @@ export class HostedDeviceSyncAgentSessionService {
           tokenVersion: currentTokenBundle.tokenVersion + 1,
         };
         const tokenVersionChanged = nextStoredTokenBundle.tokenVersion !== currentTokenBundle.tokenVersion;
-        const tokenBundle = buildTokenExport(nextStoredTokenBundle, input.now);
+        const tokenBundle = await this.buildAuthorizedTokenExport({
+          connectionId: input.connectionId,
+          now: input.now,
+          prisma: tx,
+          providerId: currentAccount.provider,
+          storedTokenBundle: nextStoredTokenBundle,
+          userId: input.session.userId,
+        });
         const nextConnection: PublicDeviceSyncAccount = {
           ...currentConnection,
           accessTokenExpiresAt: nextStoredTokenBundle.accessTokenExpiresAt,
@@ -1156,6 +1220,25 @@ export class HostedDeviceSyncAgentSessionService {
     return this.registry;
   }
 
+  private async buildAuthorizedTokenExport(input: {
+    connectionId: string;
+    now: string;
+    prisma:
+      | PrismaDeviceSyncControlPlaneStore["prisma"]
+      | HostedPrismaTransactionClient;
+    providerId: string;
+    storedTokenBundle: HostedStoredTokenBundle;
+    userId: string;
+  }): Promise<HostedTokenExport> {
+    await this.assertTokenExportAuthority?.({
+      connectionId: input.connectionId,
+      prisma: input.prisma,
+      providerId: input.providerId,
+      userId: input.userId,
+    });
+    return buildTokenExport(input.storedTokenBundle, input.now);
+  }
+
   private async requireConfiguredRefreshProvider(input: {
     connectionId: string;
     providerId: string;
@@ -1201,6 +1284,7 @@ export function createHostedDeviceSyncAgentSessionContext(
 
   return {
     agentSessions: new HostedDeviceSyncAgentSessionService({
+      assertTokenExportAuthority: options.assertTokenExportAuthority ?? null,
       registry: options.registry ?? null,
       request,
       resolveRefreshProvider: options.resolveRefreshProvider ?? null,

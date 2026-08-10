@@ -17,6 +17,7 @@ vi.mock("@/src/lib/device-sync/provider-applications/crypto", () => ({
 
 import {
   DeviceProviderApplicationError,
+  isRepairableDeviceProviderApplicationStateError,
   resolveDeviceProviderApplication,
   saveDeviceProviderApplication,
 } from "@/src/lib/device-sync/provider-applications/store";
@@ -44,6 +45,28 @@ describe("member-owned device provider application store", () => {
       httpStatus: 409,
       retryable: false,
     });
+  });
+
+  it("distinguishes repairable application state from ownership and operational failures", () => {
+    expect(isRepairableDeviceProviderApplicationStateError(
+      new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_INVALID",
+        "Private provider application credentials are invalid.",
+      ),
+    )).toBe(true);
+    expect(isRepairableDeviceProviderApplicationStateError(
+      new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_REVISION_MISMATCH",
+        "Private provider application changed.",
+      ),
+    )).toBe(true);
+    expect(isRepairableDeviceProviderApplicationStateError(
+      new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_PERSONAL_MEMBER_REQUIRED",
+        "A personal member is required.",
+      ),
+    )).toBe(false);
+    expect(isRepairableDeviceProviderApplicationStateError(new Error("KMS unavailable"))).toBe(false);
   });
 
   it("resolves only the exact member, provider, and revision", async () => {

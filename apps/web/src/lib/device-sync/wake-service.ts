@@ -8,6 +8,7 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
 import type {
+  DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
   DeviceSyncJobInput,
   DeviceSyncRegistry,
@@ -960,6 +961,8 @@ export async function cleanupRejectedHostedDeviceSyncConnectionSource(input: {
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
   registry: DeviceSyncRegistry;
+  revokeAccess?: DeviceConnectionHandler["revokeAccess"] | null;
+  revokeUnavailableWarning?: { code: string; message: string } | null;
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<{
@@ -1016,8 +1019,9 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   let revokeFailure: { code: string; message: string } | undefined;
 
   if (storedAccount) {
-    const provider = input.registry.get(existing.provider);
-    const revokeAccess = provider?.connectionHandler?.revokeAccess;
+    const revokeAccess = input.revokeAccess === undefined
+      ? input.registry.get(existing.provider)?.connectionHandler?.revokeAccess
+      : input.revokeAccess ?? undefined;
 
     const shouldRevoke = revokeAccess && (
       existing.status !== "disconnected"
@@ -1038,6 +1042,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
         revokeFailure = { code, message };
       }
+    } else if (input.revokeUnavailableWarning) {
+      revokeFailure = input.revokeUnavailableWarning;
     }
   }
 

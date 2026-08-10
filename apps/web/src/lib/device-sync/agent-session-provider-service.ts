@@ -4,6 +4,7 @@ import {
   createHostedDeviceSyncAgentSessionService,
   type HostedDeviceSyncRefreshProviderResolver,
 } from "./agent-session-service";
+import { assertHostedDeviceSyncTokenExportAuthority } from "./agent-session-provider-authority-service";
 import {
   resolveDeviceProviderApplicationForConnection,
 } from "./provider-applications";
@@ -30,6 +31,7 @@ export function createHostedDeviceSyncProviderAgentSessionService(request: Reque
   };
 
   return createHostedDeviceSyncAgentSessionService(request, {
+    assertTokenExportAuthority: assertHostedDeviceSyncTokenExportAuthority,
     resolveRefreshProvider,
   });
 }

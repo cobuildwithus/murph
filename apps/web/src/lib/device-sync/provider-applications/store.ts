@@ -88,6 +88,19 @@ export function isDeviceProviderApplicationError(
   return value instanceof DeviceProviderApplicationError;
 }
 
+export function isRepairableDeviceProviderApplicationStateError(
+  value: unknown,
+): value is DeviceProviderApplicationError {
+  if (!isDeviceProviderApplicationError(value)) {
+    return false;
+  }
+
+  return value.code === "DEVICE_PROVIDER_APPLICATION_INVALID"
+    || value.code === "DEVICE_PROVIDER_APPLICATION_NOT_FOUND"
+    || value.code === "DEVICE_PROVIDER_APPLICATION_PROVIDER_MISMATCH"
+    || value.code === "DEVICE_PROVIDER_APPLICATION_REVISION_MISMATCH";
+}
+
 export async function readDeviceProviderApplicationView(input: {
   memberId: string;
   prisma?: DeviceProviderApplicationReadClient;

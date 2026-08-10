@@ -460,6 +460,53 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     expect(createTokenAudit).not.toHaveBeenCalled();
   });
 
+  it("rejects export and refresh fast paths before returning tokens when app authority is invalid", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const harness = createRetrySafeStoreHarness("hbds_agent_token");
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "unexpected-refreshed-token",
+        accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+        refreshToken: "unexpected-refresh-token",
+      }));
+      const registry = createDeviceSyncRegistry([createWhoopProvider({ refreshTokens })]);
+      const authorityError = deviceSyncError({
+        code: "DEVICE_PROVIDER_APPLICATION_INVALID",
+        httpStatus: 409,
+        message: "Private provider application credentials require repair.",
+        retryable: false,
+      });
+      const assertTokenExportAuthority = vi.fn(async () => {
+        throw authorityError;
+      });
+      const service = new HostedDeviceSyncAgentSessionService({
+        assertTokenExportAuthority,
+        request: createAgentRequest("https://murph.example/api/device-sync/agent", "hbds_agent_token"),
+        store: harness.store,
+        registry,
+      });
+
+      await expect(service.exportTokenBundle(SESSION, "conn-1")).rejects.toBe(authorityError);
+      await expect(service.refreshTokenBundle(SESSION, "conn-1", {
+        expectedTokenVersion: 1,
+        force: true,
+      })).rejects.toBe(authorityError);
+      await expect(service.refreshTokenBundle(SESSION, "conn-1")).rejects.toBe(authorityError);
+
+      expect(assertTokenExportAuthority).toHaveBeenCalledTimes(3);
+      expect(assertTokenExportAuthority).toHaveBeenCalledWith(expect.objectContaining({
+        connectionId: "conn-1",
+        providerId: "whoop",
+        userId: "user-1",
+      }));
+      expect(refreshTokens).not.toHaveBeenCalled();
+      expect(harness.audits).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("lets export-token-bundle retry with the original bearer after a lost response", async () => {
     vi.useFakeTimers();
     try {

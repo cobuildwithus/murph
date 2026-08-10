@@ -5,10 +5,7 @@ import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-run
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
-import {
-  createHostedDeviceSyncRegistry,
-  createHostedDeviceSyncRegistryWithProviderConfigs,
-} from "../device-sync/providers";
+import { createHostedDeviceSyncRegistry } from "../device-sync/providers";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
 import {
@@ -21,9 +18,7 @@ import {
   readHostedConnectedAppsConfig,
 } from "../connected-apps/config";
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
-import {
-  resolveDeviceProviderApplicationForConnection,
-} from "../device-sync/provider-applications";
+import { resolveHostedDeviceSyncConnectionCleanup } from "../device-sync/provider-application-cleanup";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
 import { createHostedPrivyUserLookupKey } from "../hosted-onboarding/contact-privacy";
 import {
@@ -2454,21 +2449,30 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      const providerApplication =
-        await resolveDeviceProviderApplicationForConnection({
-          connectionId: connection.id,
-          memberId: input.memberId,
-          prisma: controlPlane.store.prisma,
-        });
-      const connectionRegistry = providerApplication
-        ? createHostedDeviceSyncRegistryWithProviderConfigs({
-            providerConfigs: providerApplication.providerConfigs,
-          })
-        : (registry ??= createHostedDeviceSyncRegistry(process.env));
-      const provider = connectionRegistry.get(connection.provider);
-      const revokeAccess = provider?.connectionHandler?.revokeAccess;
+      const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
+        connectionId: connection.id,
+        memberId: input.memberId,
+        prisma: controlPlane.store.prisma,
+        provider: connection.provider,
+        resolveSharedRegistry: () =>
+          (registry ??= createHostedDeviceSyncRegistry(process.env)),
+      });
+      const revokeAccess = cleanup.revokeAccessOverride === undefined
+        ? cleanup.registry?.get(connection.provider)?.connectionHandler?.revokeAccess
+        : cleanup.revokeAccessOverride ?? undefined;
 
       if (!revokeAccess) {
+        if (cleanup.repairRequired) {
+          results.push({
+            connectionId: connection.id,
+            errorCode: null,
+            providerLabel: resolveDeviceConnectionProviderLabel(connection),
+            status: "warning",
+            warningCode: cleanup.warning?.code ?? "DEVICE_PROVIDER_APPLICATION_REPAIR_REQUIRED",
+          });
+          continue;
+        }
+
         results.push({
           connectionId: connection.id,
           errorCode: storedAccount.credential.kind === "provider_config"

@@ -26,7 +26,16 @@ import {
 import type {
   HostedDeviceSyncAgentSessionOptions,
   HostedDeviceSyncRefreshProviderResolver,
+  HostedDeviceSyncTokenExportAuthorityValidator,
 } from "@/src/lib/device-sync/agent-session-service";
+
+function readAuthorityValidator(): HostedDeviceSyncTokenExportAuthorityValidator {
+  const options = mocks.createAgentSessionService.mock.calls[0]?.[1] as
+    | HostedDeviceSyncAgentSessionOptions
+    | undefined;
+  expect(options?.assertTokenExportAuthority).toBeTypeOf("function");
+  return options?.assertTokenExportAuthority as HostedDeviceSyncTokenExportAuthorityValidator;
+}
 
 function readResolver(): HostedDeviceSyncRefreshProviderResolver {
   const options = mocks.createAgentSessionService.mock.calls[0]?.[1] as
@@ -108,6 +117,32 @@ describe("member-owned provider agent-session adapter", () => {
 
     expect(mocks.sharedGet).toHaveBeenCalledWith("whoop");
     expect(mocks.createScopedRegistry).not.toHaveBeenCalled();
+  });
+
+  it("validates app authority before token export without selecting shared credentials", async () => {
+    const invalidApplication = new Error("private application requires repair");
+    mocks.resolveApplication.mockRejectedValue(invalidApplication);
+
+    createHostedDeviceSyncProviderAgentSessionService(
+      new Request("https://murph.example/export"),
+    );
+    const assertTokenExportAuthority = readAuthorityValidator();
+    const prisma = { marker: "transaction" } as never;
+
+    await expect(assertTokenExportAuthority({
+      connectionId: "dsc_private",
+      prisma,
+      providerId: "strava",
+      userId: "member_123",
+    })).rejects.toBe(invalidApplication);
+
+    expect(mocks.resolveApplication).toHaveBeenCalledWith({
+      connectionId: "dsc_private",
+      memberId: "member_123",
+      prisma,
+    });
+    expect(mocks.scopedGet).not.toHaveBeenCalled();
+    expect(mocks.sharedGet).not.toHaveBeenCalled();
   });
 
   it("does not fall back to shared credentials when an app-bound registry lacks the provider", async () => {

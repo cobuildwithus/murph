@@ -592,9 +592,14 @@ Last verified: 2026-08-10
   is active and clears disconnected bindings plus unconsumed application state
   before advancing the epoch. A missing, malformed, or permanently
   undecryptable application makes the affected connection require
-  reauthorization without running provider work. Transient secure-box,
-  root-key, database, and KMS failures propagate as operational failures so a
-  valid credential is never misclassified as member-repairable state.
+  reauthorization without running credential-dependent provider work, and
+  every agent token-return path revalidates that exact application authority.
+  Disconnect, consent withdrawal, and account deletion may still use the
+  connection's stored OAuth access token for a provider's credential-free
+  revoke operation before the existing local purge; they never fall back to
+  operator credentials. Transient secure-box, root-key, database, and KMS
+  failures propagate as operational failures so a valid credential is never
+  misclassified as member-repairable state.
 - Companion Apple Health metadata and WHOOP overnight summaries recheck their
   exact source inside the health-data admission lock and again before runtime
   import by rereading the durable source row rather than trusting the queued
