@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 
 ## Current Guardrails
 
@@ -586,6 +586,15 @@ Last verified: 2026-08-09
   idempotent target-only revoke. The initiating operation follows the newest
   same-purpose claim before returning, while separate start-cleanup and user-
   disconnect phase codes preserve the intended terminal state.
+- A member-owned device provider application's revision is its credential
+  epoch. OAuth state and established connections retain the exact application
+  id and revision; credential replacement is blocked while a bound connection
+  is active and clears disconnected bindings plus unconsumed application state
+  before advancing the epoch. A missing, malformed, or permanently
+  undecryptable application makes the affected connection require
+  reauthorization without running provider work. Transient secure-box,
+  root-key, database, and KMS failures propagate as operational failures so a
+  valid credential is never misclassified as member-repairable state.
 - Companion Apple Health metadata and WHOOP overnight summaries recheck their
   exact source inside the health-data admission lock and again before runtime
   import by rereading the durable source row rather than trusting the queued

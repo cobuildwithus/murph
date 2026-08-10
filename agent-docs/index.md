@@ -7,6 +7,12 @@ Last verified: 2026-08-10
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Member-owned device provider application ownership, exact OAuth and connection
+revision binding, invocation-scoped credential projection, and permanent-versus-
+transient credential failure handling are jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
+`agent-docs/RELIABILITY.md`.
+
 Hosted cold-start ownership keeps established-member startup on the ordinary
 post-Temporal direct ensure so container boot can overlap fenced invocation
 preparation. The separate first-contact shell hint is serialized by the
