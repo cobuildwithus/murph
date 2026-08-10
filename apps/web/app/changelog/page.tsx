@@ -24,6 +24,10 @@ import {
   type ResolvedChangelogTryIt,
 } from "./changelog-edition-section";
 import { PhoneMock } from "./phone-mock";
+import {
+  GROUP_FUNDING_USAGE_CREDIT_VISUAL,
+  GROUP_SPONSORSHIP_USAGE_CREDIT_VISUAL,
+} from "./usage-credit-visuals";
 import { StickyNav } from "../sticky-nav";
 import {
   AppGrid,
@@ -112,15 +116,7 @@ const VISUALS: Record<string, ReactNode> = {
     />
   ),
   "group-sponsorship-moments": (
-    <PreferenceCard
-      label="Sponsor this group"
-      meta="Monthly maximum"
-      entries={[
-        { label: "Cost-weighted usage credit", value: "$5" },
-        { label: "Cost-weighted usage credit", value: "$10" },
-        { label: "Cost-weighted usage credit", value: "$20" },
-      ]}
-    />
+    <PreferenceCard {...GROUP_SPONSORSHIP_USAGE_CREDIT_VISUAL} />
   ),
   "generated-media-private-path": (
     <div className="mt-5 w-full max-w-[320px]">
@@ -188,15 +184,7 @@ const VISUALS: Record<string, ReactNode> = {
     />
   ),
   "group-funding-speaks-in-messages": (
-    <PreferenceCard
-      label="Keep Murph going"
-      meta="Usage credit"
-      entries={[
-        { label: "Cost-weighted credit", value: "$5" },
-        { label: "Cost-weighted credit", value: "$10" },
-        { label: "Cost-weighted credit", value: "$25" },
-      ]}
-    />
+    <PreferenceCard {...GROUP_FUNDING_USAGE_CREDIT_VISUAL} />
   ),
   "group-replies-stay-short": (
     <PhoneMock
