@@ -927,9 +927,11 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
   });
 
-  it("returns a conversion path for an ended trial without inventing usage", async () => {
+  it.each(["paused", "incomplete"] as const)(
+    "returns a conversion path for a %s trial without inventing usage",
+    async (billingStatus) => {
     mocks.readHostedMemberCoreState.mockResolvedValue({
-      billingStatus: "paused",
+      billingStatus,
       suspendedAt: null,
     });
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
@@ -948,7 +950,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
 
     await expect(readHostedPersonalAiUsageStatus({
       includeSubscriptionActionQuote: true,
-      memberId: "member_trial_ended",
+      memberId: `member_trial_${billingStatus}`,
       now: NOW,
       prisma: buildPrisma(null) as never,
       publicBaseUrl: "https://example.test",
@@ -979,7 +981,8 @@ describe("readHostedPersonalAiUsageStatus", () => {
       },
       status: "unavailable",
     });
-  });
+    },
+  );
 
   it("does not recommend trial conversion without complete billing references", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue({

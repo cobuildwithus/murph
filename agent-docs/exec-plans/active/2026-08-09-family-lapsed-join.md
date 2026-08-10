@@ -28,6 +28,11 @@ Updated: 2026-08-09
   an `incomplete` own-billing fence before any Stripe mutation.
 - A paused-plan request never publishes `active` from a Stripe resume response;
   paid-invoice reconciliation remains the sole authority for that promotion.
+- A paused subscription receipt cannot erase a committed resume fence, and one
+  deterministic provider claim serializes conflicting Pulse/Core choices.
+- Family ownership is rechecked before a cardless paused member is sent to
+  Stripe payment setup, and pending Settings/assistant recovery remains
+  actionable without a forced refresh.
 - Existing Family membership, identity binding, seat-capacity, activation, and
   Stripe loser-cleanup behavior remains unchanged.
 - The focused Family-plan regression suite, hosted billing guard, Web
@@ -43,11 +48,14 @@ Updated: 2026-08-09
     invite-admission boundary.
   - Preserve Family sponsorship when it races a stale direct paused-plan resume
     and execute any resulting invoice-owned cleanup outcome.
+  - Preserve the exact pending recovery actions in the existing Settings plan
+    cards and assistant offer projection.
   - Add focused regression coverage for lapsed and genuinely live statuses.
   - Clarify the live-direct-subscription rule in the Family product contract.
 - Out of scope:
   - Changing Stripe subscription state during invite acceptance.
-  - Adding a new transfer workflow, queue, billing state, or UI screen.
+  - Adding a new transfer workflow, queue, billing state, UI screen, or
+    component.
   - Repairing or mutating production account or invite rows.
 
 ## Constraints
@@ -130,12 +138,27 @@ Updated: 2026-08-09
   mutated; ordinary retry can resume an interrupted attempt from canonical
   Stripe `paused`, and invoice reconciliation alone can publish `active`. This
   adds no persisted state, queue, lifecycle owner, or invite-side provider call.
+- Final ReviewGPT round 3 found three continuations of the same coupling gap:
+  a paused receipt could move the fence backward; different paid targets did
+  not share a provider transition claim; and recovery could open payment setup
+  before the Family recheck or disappear behind generic Settings billing.
+- Round 3 recurrence decision: keep `incomplete` monotonic for the exact
+  Pulse-trial resume, use one target-independent deterministic Stripe cleanup
+  key whose body owns the selected target, perform the Family recheck before
+  any payment portal call, and reuse the existing pending confirmation UI and
+  assistant offer. This adds no database field, lease, queue, or lifecycle
+  owner.
+- The required Claude Code UI double-check was attempted against the final
+  desktop/mobile catalog evidence and stopped on explicit Fable usage-credit
+  exhaustion. Per the completion workflow, no second Claude request or local
+  substitute was added.
 
 ## Verification
 
 - Commands to run:
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-family-plan.test.ts`
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts`
+  - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-stripe-billing-status.test.ts apps/web/test/hosted-onboarding-billing-plans.test.ts apps/web/test/hosted-billing-settings.test.tsx apps/web/test/hosted-usage-status.test.ts`
   - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_dev_family_lapsed_join MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-stripe-webhook-entitlement-postgres.test.ts -t 'rejects Family acceptance after Checkout binds before status projection|keeps Family blocked when a paused-plan resume succeeds after its fence transaction'`
   - `pnpm hosted-billing:ci-guard`
   - `pnpm --dir apps/web typecheck`
@@ -146,6 +169,11 @@ Updated: 2026-08-09
     and paused direct Family owners remain blocked.
   - Family-first blocks stale resume without Stripe mutation; resume-first
     commits `incomplete` before Stripe and never request-projects `active`;
-    paid-invoice cleanup is not discarded.
+    a paused receipt cannot erase the fence; paid-invoice cleanup is not
+    discarded.
+  - Exact paused-plan retries reuse one provider claim; conflicting Pulse/Core
+    choices fail stale before a second resume, and pending recovery remains
+    visible in Settings and assistant output.
   - Billing request-shape/contract guards, typecheck, and lint remain green.
-  - No new persisted state, external call, dependency, or UI surface appears.
+  - No new persisted state, external call, dependency, component, or UI screen
+    appears.

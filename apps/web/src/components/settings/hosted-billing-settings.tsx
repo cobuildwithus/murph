@@ -123,6 +123,8 @@ export function HostedBillingSettings(props: {
       currentBillingPhase: props.currentBillingPhase,
       currentCheckoutOffer: props.currentCheckoutOffer,
     });
+  const pulseTrialBillingPending =
+    pulseTrialRecoverable && props.billingStatus === "incomplete";
   const groupCurrent =
     ownPaidBillingActive && currentPlanCode === "launch_group_monthly";
   const pulseCurrent =
@@ -185,7 +187,14 @@ export function HostedBillingSettings(props: {
       return isPulseTrial
         && props.canStartPaidPulse === true
         && !pulseTrialBillingContinuationPending
-        ? <StartPaidPulseButton block>Start Pulse plan</StartPaidPulseButton>
+        ? (
+            <StartPaidPulseButton
+              block
+              initialStatus={pulseTrialBillingPending ? "billing_pending" : undefined}
+            >
+              Start Pulse plan
+            </StartPaidPulseButton>
+          )
         : <CurrentPlanButton />;
     }
     if (scheduledPlanCode !== null) {
@@ -301,12 +310,13 @@ export function HostedBillingSettings(props: {
               : hasPendingGroupSwitch
                 ? null
                 : props.canSwitchToGroup === true
-                  ? pulseTrialActive
+                  ? isPulseTrial
                     ? (
                         <StartPaidPulseButton
                           block
+                          initialStatus={pulseTrialBillingPending ? "billing_pending" : undefined}
                           targetPlanCode="launch_group_monthly"
-                          timing="at_trial_end"
+                          timing={pulseTrialActive ? "at_trial_end" : "now"}
                         >
                           Choose {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
                         </StartPaidPulseButton>
@@ -321,10 +331,11 @@ export function HostedBillingSettings(props: {
                           Choose {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
                         </HostedPlanChangeButton>
                       )
-                  : pulseTrialActive && props.canStartPaidPulse === true
+                  : isPulseTrial && props.canStartPaidPulse === true
                     ? (
                         <StartPaidPulseButton
                           block
+                          initialStatus={pulseTrialBillingPending ? "billing_pending" : undefined}
                           targetPlanCode="launch_group_monthly"
                           timing="now"
                         >

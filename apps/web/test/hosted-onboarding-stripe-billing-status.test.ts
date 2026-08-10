@@ -44,6 +44,30 @@ describe("resolveHostedSubscriptionBillingStatus", () => {
     ).toBe(HostedBillingStatus.incomplete);
   });
 
+  it("keeps a claimed Pulse Trial resume incomplete when a paused receipt arrives", () => {
+    expect(
+      resolveHostedSubscriptionBillingStatus({
+        currentBillingPhase: null,
+        currentBillingStatus: HostedBillingStatus.incomplete,
+        currentCheckoutOffer: "pulse_trial_7d",
+        nextBillingStatus: HostedBillingStatus.paused,
+        sourceType: "stripe.customer.subscription.updated",
+      }),
+    ).toBe(HostedBillingStatus.incomplete);
+  });
+
+  it("still projects paused outside a claimed Pulse Trial resume", () => {
+    expect(
+      resolveHostedSubscriptionBillingStatus({
+        currentBillingPhase: "paid",
+        currentBillingStatus: HostedBillingStatus.incomplete,
+        currentCheckoutOffer: "standard",
+        nextBillingStatus: HostedBillingStatus.paused,
+        sourceType: "stripe.customer.subscription.updated",
+      }),
+    ).toBe(HostedBillingStatus.paused);
+  });
+
   it("downgrades first active subscription events to incomplete until invoice confirmation arrives", () => {
     expect(
       resolveHostedSubscriptionBillingStatus({

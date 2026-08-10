@@ -1,6 +1,9 @@
 import { HostedBillingStatus } from "@prisma/client";
 
-import { HOSTED_PULSE_TRIAL_OFFER } from "./billing-plans";
+import {
+  HOSTED_PULSE_TRIAL_OFFER,
+  isHostedPulseTrialBillingState,
+} from "./billing-plans";
 
 export function resolveHostedSubscriptionBillingStatus(input: {
   currentBillingPhase?: string | null;
@@ -11,6 +14,14 @@ export function resolveHostedSubscriptionBillingStatus(input: {
   nextBillingStatus: HostedBillingStatus;
   sourceType?: string | null;
 }): HostedBillingStatus {
+  if (
+    input.currentBillingStatus === HostedBillingStatus.incomplete
+    && input.nextBillingStatus === HostedBillingStatus.paused
+    && isHostedPulseTrialBillingState(input)
+  ) {
+    return HostedBillingStatus.incomplete;
+  }
+
   if (input.nextBillingStatus === HostedBillingStatus.active) {
     if (isExpiredPulseTrialSubscriptionStatusWrite(input)) {
       return HostedBillingStatus.incomplete;

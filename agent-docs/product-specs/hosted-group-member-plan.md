@@ -98,6 +98,14 @@ brief reconciliation window where the retained Pulse-trial offer is canonical
 but the phase projection is still null. A local-trial/provider-paid race fails
 stale instead of scheduling one paid cycle late.
 
+A paused Pulse-trial recovery claims its provider transition with one
+deterministic key that is independent of the selected paid target. The request
+body carries the exact Pulse or Core choice. Exact same-target retries replay
+the claim, while a different target conflicts before Stripe resume and returns
+the existing stale-choice recovery. While invoice confirmation is pending,
+Settings and assistant offers keep the existing exact status-check actions
+available instead of reducing recovery to a generic billing-portal link.
+
 Public checkout accepts only the explicit public billing-code allowlist. Adding
 Core to the private catalog must not make it publicly selectable.
 

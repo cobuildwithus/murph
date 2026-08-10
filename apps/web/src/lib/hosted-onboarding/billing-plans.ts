@@ -510,13 +510,13 @@ export function canStartHostedPulseTrialPaidPlan(input: {
   const canStartActiveTrial =
     input.billingStatus === "active" &&
     phase === "trial";
-  const canRecoverPausedTrial =
-    input.billingStatus === "paused" &&
+  const canRecoverLapsedOrPendingTrial =
+    (input.billingStatus === "paused" || input.billingStatus === "incomplete") &&
     isHostedPulseTrialBillingState(input);
 
   return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
     parseHostedBillingCheckoutOffer(input.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER &&
-    (canStartActiveTrial || canRecoverPausedTrial) &&
+    (canStartActiveTrial || canRecoverLapsedOrPendingTrial) &&
     !(input.suspendedAt instanceof Date) &&
     input.hasStripeCustomerId === true &&
     input.hasStripeSubscriptionId === true;

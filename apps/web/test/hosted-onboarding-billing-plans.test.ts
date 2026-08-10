@@ -175,6 +175,14 @@ describe("hosted billing launch plan Stripe configuration", () => {
       hasStripeSubscriptionId: true,
     })).toBe(true);
     expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "incomplete",
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    })).toBe(true);
+    expect(canStartHostedPulseTrialPaidPlan({
       billingStatus: "active",
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",

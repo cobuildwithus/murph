@@ -62,6 +62,7 @@ export function StartPaidPulseButton(props: {
   block?: boolean;
   children?: ReactNode;
   disabled?: boolean;
+  initialStatus?: Extract<StartPaidPulseStatus, "billing_pending"> | undefined;
   onPendingChange?: (pending: boolean) => void;
   presentation?: "banner" | "settings";
   successHref?: string;
@@ -74,17 +75,21 @@ export function StartPaidPulseButton(props: {
   const router = useRouter();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [status, setStatus] = useState<StartPaidPulseStatus>("idle");
+  const [status, setStatus] = useState<StartPaidPulseStatus>(
+    props.initialStatus ?? "idle",
+  );
   const isSubmitting = status === "submitting";
   const label = isSubmitting
     ? "Starting..."
-    : props.children ?? `Start ${targetPlan.displayName} plan`;
+    : status === "billing_pending"
+      ? `Check ${targetPlan.displayName} status`
+      : props.children ?? `Start ${targetPlan.displayName} plan`;
   const disabled = props.disabled === true || isSubmitting;
 
   function setConfirmationOpenState(open: boolean) {
     setConfirmationOpen(open);
     if (!open) {
-      setStatus("idle");
+      setStatus(props.initialStatus ?? "idle");
       setErrorMessage(null);
     }
   }
@@ -113,7 +118,6 @@ export function StartPaidPulseButton(props: {
 
       if (result.status === "billing_pending") {
         setStatus("billing_pending");
-        router.refresh();
         return;
       }
 

@@ -189,9 +189,19 @@ describe("startHostedPulseTrialPaidPlan", () => {
       trialEnd: null,
     }));
     mocks.stripe.subscriptions.update.mockImplementation(
-      async (_subscriptionId: string, params?: Stripe.SubscriptionUpdateParams) =>
-        params?.trial_end === "now"
+      async (_subscriptionId: string, params?: Stripe.SubscriptionUpdateParams) => {
+        const selectedPriceId = readUpdatedSubscriptionPriceId(params);
+        const items = selectedPriceId
+          ? [makeSubscriptionItem({
+              priceId: selectedPriceId,
+              quantity: 1,
+              usageType: "licensed",
+            })]
+          : undefined;
+
+        return params?.trial_end === "now"
           ? makeSubscription({
+            items,
             latestInvoice: makeInvoice({ status: "draft" }),
             status: "active",
             trialEnd: null,
@@ -201,10 +211,12 @@ describe("startHostedPulseTrialPaidPlan", () => {
               ? null
               : params?.default_payment_method,
             defaultSource: params?.default_source,
+            items,
             latestInvoice: null,
             status: "paused",
             trialEnd: null,
-          }),
+          });
+      },
     );
   });
 
@@ -1361,12 +1373,15 @@ describe("startHostedPulseTrialPaidPlan", () => {
       {
         default_payment_method: "pm_123",
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
+        items: [{
+          id: "si_price_pulse_recurring",
+          price: "price_pulse_recurring",
+          quantity: 1,
+        }],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
       },
       {
-        idempotencyKey: expect.stringMatching(
-          /^hosted-billing-start-paid-pulse:paused-cleanup:[0-9a-f-]{36}$/u,
-        ),
+        idempotencyKey: buildExpectedPausedCleanupIdempotencyKey(),
       },
     );
     expect(
@@ -1424,6 +1439,49 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
+  test("checks Family ownership before opening payment setup for a cardless paused trial", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+      billingStatus: HostedBillingStatus.paused,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+      currentBillingPhase: null,
+    }));
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: null,
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+      status: "paused",
+      trialEnd: null,
+    }));
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce({
+      groupId: "family_group_123",
+      kind: "active_sponsorship",
+      ownerMemberId: "family_owner_123",
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "settings",
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+  });
+
   test("clears a prepared extension target before resuming paused paid billing", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValueOnce({
       billingStatus: HostedBillingStatus.paused,
@@ -1475,12 +1533,15 @@ describe("startHostedPulseTrialPaidPlan", () => {
       {
         default_payment_method: "pm_123",
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
+        items: [{
+          id: "si_price_pulse_recurring",
+          price: "price_pulse_recurring",
+          quantity: 1,
+        }],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
       },
       {
-        idempotencyKey: expect.stringMatching(
-          /^hosted-billing-start-paid-pulse:paused-cleanup:[0-9a-f-]{36}$/u,
-        ),
+        idempotencyKey: buildExpectedPausedCleanupIdempotencyKey(),
       },
     );
     expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
@@ -1491,7 +1552,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     );
   });
 
-  test("retries a committed resume fence with a fresh paused-cleanup key", async () => {
+  test("retries a committed resume fence with the same paused-plan claim", async () => {
     mocks.readHostedMemberCoreState
       .mockResolvedValueOnce({
         billingStatus: HostedBillingStatus.paused,
@@ -1532,15 +1593,74 @@ describe("startHostedPulseTrialPaidPlan", () => {
       mocks.stripe.subscriptions.update.mock.calls[0]?.[2]?.idempotencyKey;
     const secondCleanupKey =
       mocks.stripe.subscriptions.update.mock.calls[1]?.[2]?.idempotencyKey;
-    expect(firstCleanupKey).toMatch(
-      /^hosted-billing-start-paid-pulse:paused-cleanup:[0-9a-f-]{36}$/u,
-    );
-    expect(secondCleanupKey).toMatch(
-      /^hosted-billing-start-paid-pulse:paused-cleanup:[0-9a-f-]{36}$/u,
-    );
-    expect(secondCleanupKey).not.toBe(firstCleanupKey);
+    expect(firstCleanupKey).toBe(buildExpectedPausedCleanupIdempotencyKey());
+    expect(secondCleanupKey).toBe(firstCleanupKey);
+    expect(mocks.stripe.subscriptions.update.mock.calls[1]?.[1])
+      .toEqual(mocks.stripe.subscriptions.update.mock.calls[0]?.[1]);
     expect(mocks.stripe.subscriptions.resume.mock.calls[0]?.[2]?.idempotencyKey)
       .toBe(mocks.stripe.subscriptions.resume.mock.calls[1]?.[2]?.idempotencyKey);
+  });
+
+  test("rejects a conflicting paused-plan choice before another resume", async () => {
+    mocks.readHostedMemberCoreState
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.paused,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.incomplete,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:01.000Z"),
+      });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
+      currentBillingPhase: null,
+    }));
+    const pausedSubscription = makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: "pm_customer_123",
+        defaultSource: null,
+      }),
+      status: "paused",
+      trialEnd: null,
+    });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(pausedSubscription);
+    mocks.stripe.subscriptions.update
+      .mockResolvedValueOnce(pausedSubscription)
+      .mockRejectedValueOnce({
+        statusCode: 400,
+        type: "StripeIdempotencyError",
+      });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toMatchObject({ status: "billing_pending" });
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.update.mock.calls[0]?.[2]?.idempotencyKey)
+      .toBe(mocks.stripe.subscriptions.update.mock.calls[1]?.[2]?.idempotencyKey);
+    expect(mocks.stripe.subscriptions.update.mock.calls[0]?.[1]).toMatchObject({
+      items: [{ price: "price_pulse_recurring" }],
+    });
+    expect(mocks.stripe.subscriptions.update.mock.calls[1]?.[1]).toMatchObject({
+      items: [{ price: "price_group_recurring" }],
+      proration_behavior: "none",
+    });
+    expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
   });
 
   test("canonical-reconciles an ambiguous paused metadata cleanup without resuming", async () => {
@@ -1834,12 +1954,15 @@ describe("startHostedPulseTrialPaidPlan", () => {
       {
         default_payment_method: "pm_customer_123",
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
+        items: [{
+          id: "si_price_pulse_recurring",
+          price: "price_pulse_recurring",
+          quantity: 1,
+        }],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
       },
       {
-        idempotencyKey: expect.stringMatching(
-          /^hosted-billing-start-paid-pulse:paused-cleanup:[0-9a-f-]{36}$/u,
-        ),
+        idempotencyKey: buildExpectedPausedCleanupIdempotencyKey(),
       },
     );
     const expectedResumeParams: Stripe.SubscriptionResumeParams = {
@@ -2477,6 +2600,26 @@ function buildExpectedStartPaidPulseIdempotencyKey(
   return `hosted-billing-start-paid-pulse:${
     createHash("sha256").update(JSON.stringify(keyPayload)).digest("hex")
   }`;
+}
+
+function buildExpectedPausedCleanupIdempotencyKey(): string {
+  const payload = {
+    memberId: "member_123",
+    operation: "paused-pre-resume-v3",
+    stripeSubscriptionId: "sub_123",
+    trialEnd: "2026-05-13T00:00:00.000Z",
+  };
+
+  return `hosted-billing-start-paid-pulse:paused-cleanup:${
+    createHash("sha256").update(JSON.stringify(payload)).digest("hex")
+  }`;
+}
+
+function readUpdatedSubscriptionPriceId(
+  params?: Stripe.SubscriptionUpdateParams,
+): string | null {
+  const price = params?.items?.[0]?.price;
+  return typeof price === "string" ? price : null;
 }
 
 function makeSubscription(input: {

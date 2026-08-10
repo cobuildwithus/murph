@@ -1230,7 +1230,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
-  test("shows only the authorized Pulse recovery action for a paused Pulse trial", async () => {
+  test("shows the authorized recovery choices for a paused Pulse trial", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const recoveryProps = {
@@ -1253,10 +1253,31 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(eligibleMarkup, /Start Pulse plan/);
-    assert.doesNotMatch(eligibleMarkup, />Start Core<\/button>/);
+    assert.match(eligibleMarkup, />Start Core<\/button>/);
     assert.doesNotMatch(eligibleMarkup, />Choose Pulse<\/button>/);
     assert.doesNotMatch(ineligibleMarkup, /Start Pulse plan/);
     assert.match(ineligibleMarkup, />Choose Pulse<\/button>/);
+  });
+
+  test("keeps exact billing status checks available while a trial resume settles", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      billingStatus: "incomplete",
+      canStartPaidPulse: true,
+      canSwitchToGroup: true,
+      currentBillingPhase: null,
+      currentCheckoutOffer: "pulse_trial_7d",
+      currentBillingPlanCode: "launch_monthly",
+      showGroupPlan: true,
+    }));
+
+    assert.match(markup, /Check Pulse status/);
+    assert.match(markup, /Check Core status/);
   });
 
   test("suppresses every Start Pulse action with action-neutral copy while continuation is pending", async () => {
@@ -1692,7 +1713,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(rendered.window.document.body.textContent ?? "", /Billing is still finishing/);
     assert.match(rendered.window.document.body.textContent ?? "", /Check status/);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
     assert.equal(rendered.assign.mock.calls.length, 0);
 
     await rendered.cleanup();

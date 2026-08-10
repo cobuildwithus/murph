@@ -395,6 +395,7 @@ describe.skipIf(!runPostgresProof)(
       const inviteCode = `family-resume-${fixtureId}`;
       const stripeCustomerId = `cus_family_resume_${fixtureId}`;
       const stripeSubscriptionId = `sub_family_resume_${fixtureId}`;
+      const stripeEventId = `evt_family_resume_paused_${fixtureId}`;
       const pulsePriceId = `price_family_resume_pulse_${fixtureId}`;
       const edgePriceId = `price_family_resume_edge_${fixtureId}`;
       const webhookSecret = "whsec_hosted_family_resume_fixture";
@@ -410,6 +411,11 @@ describe.skipIf(!runPostgresProof)(
         priceId: pulsePriceId,
         status: "paused",
         subscriptionId: stripeSubscriptionId,
+      });
+      const pausedEvent = buildSubscriptionUpdatedEvent({
+        created: Math.floor(now.getTime() / 1_000),
+        eventId: stripeEventId,
+        subscription: pausedSubscription,
       });
       const resumedSubscription = buildPulseResumeSubscription({
         customerId: stripeCustomerId,
@@ -427,6 +433,9 @@ describe.skipIf(!runPostgresProof)(
         beforeResumeSubscription: async () => {
           resumeRequested.resolve();
           await allowResumeResponse.promise;
+        },
+        events: {
+          [stripeEventId]: pausedEvent,
         },
         prices: {
           [pulsePriceId]: buildHostedMonthlyPrice({
@@ -519,18 +528,33 @@ describe.skipIf(!runPostgresProof)(
             tx,
           }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
         await waitForBlockedBackend({ observer, pid: familyPid });
+        const familyRejection = expect(familyPromise).rejects.toMatchObject({
+          code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+        });
 
         releaseBlocker.resolve();
         await resumeRequested.promise;
+        await postSignedHostedStripeEvent({
+          event: pausedEvent,
+          stripe: stripeFixture.stripe,
+          webhookSecret,
+        });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId: stripeEventId,
+          prisma: resumeClient,
+          timeoutMs: 5_000,
+        })).resolves.toEqual({
+          accepted: true,
+          required: false,
+        });
         await expect(readHostedMemberBillingSnapshot({
           memberId,
           prisma: resumeClient,
         })).resolves.toMatchObject({
+          billingRef: { currentTrialEndsAt: now },
           core: { billingStatus: HostedBillingStatus.incomplete },
         });
-        await expect(familyPromise).rejects.toMatchObject({
-          code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
-        });
+        await familyRejection;
         allowResumeResponse.resolve();
         await expect(startPromise).resolves.toEqual({
           billingPlanCode: "launch_monthly",
@@ -570,6 +594,9 @@ describe.skipIf(!runPostgresProof)(
         ]);
         clearHostedStripeFixtureEnvironment(runtimeGlobals);
         await stripeFixture.stop();
+        await resumeClient.hostedStripeEvent.deleteMany({
+          where: { eventId: stripeEventId },
+        });
         await resumeClient.hostedAccountGroup.deleteMany({
           where: { id: groupId },
         });
