@@ -138,16 +138,17 @@ function normalizeCodexSchemaForSize(value: unknown): unknown {
 
 describe('murph.attach_response_card', () => {
   it('keeps the complete input schema below the Codex compaction boundary', () => {
-    const serializedBytes = Buffer.byteLength(
-      JSON.stringify(normalizeCodexSchemaForSize(
+    const normalizedSchema = JSON.stringify(
+      normalizeCodexSchemaForSize(
         MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema,
-      )),
-      'utf8',
+      ),
     )
+    const serializedBytes = Buffer.byteLength(normalizedSchema, 'utf8')
 
     // Mirrors the supported-key projection used for the pinned App Server's
     // 5,000-byte compaction decision; compaction erases nested card shapes.
     expect(serializedBytes).toBeLessThan(5_000)
+    expect(normalizedSchema).toContain('"fiberGrams"')
   })
 
   it('describes the private on-demand canonical-read contract', () => {

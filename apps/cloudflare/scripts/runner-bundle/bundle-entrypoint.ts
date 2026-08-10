@@ -164,14 +164,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // while reducing total lazy output to 9,851,385B. Ratchet the total ceiling to
 // retain that removal without changing the startup tolerances.
 //
-// Adding the personalized generated contact card puts its request contract,
-// exact-shape parser, direct route resolution, and acknowledgement handling in
-// the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
-// on 2026-08-09; startup entry and static closure are unchanged, so ratchet
-// only the total ceiling and keep both startup baselines and all tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_887_441 + 32_768;
+// Adding the workout response-card contract, canonical command reconciliation,
+// and generated CLI option puts their code in the runner output. Exact Ubuntu
+// assembly measured a 9,922,798B total on 2026-08-10. The matching macOS
+// assembly measured a 9,969,877B total and 7,994,746B static boot closure; use
+// the larger cross-host measurements while keeping the entry baseline and all
+// tolerances unchanged.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_969_877 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_994_746;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

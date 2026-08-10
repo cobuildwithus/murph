@@ -62,25 +62,19 @@ describe('assistant response cards', () => {
           additionalProperties: false,
           properties: {
             goals: {
-              additionalProperties: {
-                additionalProperties: false,
-                properties: {
-                  target: {
-                    exclusiveMinimum: 0,
-                    maximum: 2_000,
-                    type: 'number',
+              additionalProperties: false,
+              patternProperties: {
+                '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': {
+                  additionalProperties: false,
+                  properties: {
+                    target: {
+                      exclusiveMinimum: 0,
+                      maximum: 2_000,
+                      type: 'number',
+                    },
                   },
+                  type: ['object', 'null'],
                 },
-                type: ['object', 'null'],
-              },
-              propertyNames: {
-                enum: [
-                  'calories',
-                  'proteinGrams',
-                  'carbsGrams',
-                  'fatGrams',
-                  'fiberGrams',
-                ],
               },
               properties: {
                 calories: {
@@ -104,6 +98,13 @@ describe('assistant response cards', () => {
                   },
                   type: ['object', 'null'],
                 },
+                proteinGrams: {
+                  additionalProperties: false,
+                  type: ['object', 'null'],
+                },
+                carbsGrams: {},
+                fatGrams: {},
+                fiberGrams: {},
               },
             },
             kind: { const: 'daily_nutrition' },
@@ -117,29 +118,23 @@ describe('assistant response cards', () => {
               type: 'integer',
             },
             totals: {
-              additionalProperties: {
-                additionalProperties: false,
-                properties: {
-                  mealCount: {
-                    maximum: 100,
-                    minimum: 0,
-                    type: 'integer',
-                  },
-                  total: {
-                    maximum: 2_000,
-                    minimum: 0,
-                    type: ['number', 'null'],
+              additionalProperties: false,
+              patternProperties: {
+                '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': {
+                  additionalProperties: false,
+                  properties: {
+                    mealCount: {
+                      maximum: 100,
+                      minimum: 0,
+                      type: 'integer',
+                    },
+                    total: {
+                      maximum: 2_000,
+                      minimum: 0,
+                      type: ['number', 'null'],
+                    },
                   },
                 },
-              },
-              propertyNames: {
-                enum: [
-                  'calories',
-                  'proteinGrams',
-                  'carbsGrams',
-                  'fatGrams',
-                  'fiberGrams',
-                ],
               },
               properties: {
                 calories: {
@@ -157,6 +152,19 @@ describe('assistant response cards', () => {
                     },
                   },
                 },
+                proteinGrams: {
+                  additionalProperties: false,
+                  properties: {
+                    total: {
+                      maximum: 2_000,
+                      minimum: 0,
+                      type: ['number', 'null'],
+                    },
+                  },
+                },
+                carbsGrams: {},
+                fatGrams: {},
+                fiberGrams: {},
               },
             },
             version: { const: 2 },

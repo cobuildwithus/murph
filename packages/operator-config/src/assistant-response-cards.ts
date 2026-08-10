@@ -673,22 +673,23 @@ function createAssistantResponseCardJsonSchema() {
       mealCount: nutritionMealCount,
       totals: {
         type: 'object',
-        propertyNames: {
-          enum: [
-            'calories',
-            'proteinGrams',
-            'carbsGrams',
-            'fatGrams',
-            'fiberGrams',
-          ],
+        additionalProperties: false,
+        patternProperties: {
+          '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': metric(
+            assistantResponseCardV1Bounds.macroGrams,
+            false,
+          ),
         },
         properties: {
           calories: metric(assistantResponseCardV1Bounds.calories, true),
+          proteinGrams: metric(
+            assistantResponseCardV1Bounds.macroGrams,
+            false,
+          ),
+          carbsGrams: {},
+          fatGrams: {},
+          fiberGrams: {},
         },
-        additionalProperties: metric(
-          assistantResponseCardV1Bounds.macroGrams,
-          false,
-        ),
         required: [
           'calories',
           'proteinGrams',
@@ -699,19 +700,19 @@ function createAssistantResponseCardJsonSchema() {
       },
       goals: {
         type: 'object',
-        propertyNames: {
-          enum: [
-            'calories',
-            'proteinGrams',
-            'carbsGrams',
-            'fatGrams',
-            'fiberGrams',
-          ],
+        additionalProperties: false,
+        patternProperties: {
+          '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': goal(
+            assistantResponseCardV1Bounds.macroGrams,
+          ),
         },
         properties: {
           calories: goal(assistantResponseCardV1Bounds.calories),
+          proteinGrams: goal(assistantResponseCardV1Bounds.macroGrams),
+          carbsGrams: {},
+          fatGrams: {},
+          fiberGrams: {},
         },
-        additionalProperties: goal(assistantResponseCardV1Bounds.macroGrams),
         required: [
           'calories',
           'proteinGrams',

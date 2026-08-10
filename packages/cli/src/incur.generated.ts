@@ -331,7 +331,7 @@ declare module 'incur' {
       'workout manifest': { args: { id: string }; options: { requestId?: string } }
       'workout payload-schema': { args: {}; options: {} }
       'workout set clear': { args: { exercise?: string }; options: { requestId?: string; workoutId?: string; exerciseId?: string; exerciseOrder?: number; setOrder: number } }
-      'workout set log': { args: { exercise?: string }; options: { requestId?: string; workoutId?: string; exerciseId?: string; exerciseOrder?: number; setOrder: number; type?: "normal" | "warmup" | "dropset" | "failure"; note?: string; reps?: number; weight?: number; weightUnit?: "lb" | "kg"; durationSeconds?: number; distanceMeters?: number; rpe?: number; bodyweightKg?: number; assistanceKg?: number; addedWeightKg?: number } }
+      'workout set log': { args: { exercise?: string }; options: { requestId?: string; workoutId?: string; exerciseId?: string; exerciseOrder?: number; setOrder: number; requireExistingSet?: boolean; type?: "normal" | "warmup" | "dropset" | "failure"; note?: string; reps?: number; weight?: number; weightUnit?: "lb" | "kg"; durationSeconds?: number; distanceMeters?: number; rpe?: number; bodyweightKg?: number; assistanceKg?: number; addedWeightKg?: number } }
       'workout show': { args: { id: string }; options: { requestId?: string } }
       'workout start': { args: { name?: string }; options: { requestId?: string; routine?: string; type?: string; note?: string; startedAt?: string } }
       'workout units set': { args: {}; options: { requestId?: string; weight?: "lb" | "kg"; bodyMeasurement?: "cm" | "in"; recordedAt?: string } }
