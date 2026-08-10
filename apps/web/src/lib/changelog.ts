@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Patterns, local-time reminders, and cleaner workout cards",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "Patterns can compare repeated actions with next-day recovery, recurring reminders keep the local time you asked for, and workout cards stay compact in Messages.",
     items: [
       {
         id: "personal-patterns",
@@ -106,6 +106,18 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Schedule a local-time reminder",
           prompt: "Remind me every day at 9 PM Central to wind down.",
         },
+      },
+      {
+        id: "cleaner-workout-cards-in-messages",
+        kind: "improvement",
+        priority: 4,
+        title: "Workout cards stay compact in Messages",
+        summary:
+          "Structured workout cards keep exercise and set detail inside the card instead of repeating the full workout beneath the static image.",
+        details:
+          "The fallback shows the workout title and derived set progress, older sent cards remain readable, and generic tables keep their optional subtitle.",
+        relevanceTags: ["workouts", "imessage", "cards", "design"],
+        sourcePullRequests: [1588],
       },
     ],
   },

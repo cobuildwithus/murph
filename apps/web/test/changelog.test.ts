@@ -290,6 +290,14 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("cleaner-workout-cards-in-messages")).toMatchObject({
+      sourcePullRequests: [1588],
+      summary: expect.stringContaining("inside the card"),
+      details: expect.stringContaining("older sent cards remain readable"),
+    });
+    expect(
+      items.get("cleaner-workout-cards-in-messages")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -493,6 +501,7 @@ describe("changelog registry", () => {
         itemIds: [
           "personal-patterns",
           "reminders-keep-requested-timezone",
+          "cleaner-workout-cards-in-messages",
         ],
       },
       {

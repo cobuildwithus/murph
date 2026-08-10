@@ -60,8 +60,9 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Patterns and reminders that keep their local time",
+      "Patterns, local-time reminders, and cleaner workout cards",
     );
+    expect(markup).toContain("Workout cards stay compact in Messages");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(
       "Exact experiment links and steadier background work",
