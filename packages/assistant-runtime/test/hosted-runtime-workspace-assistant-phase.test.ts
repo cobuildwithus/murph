@@ -5359,7 +5359,63 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         timingVerified: true,
       }));
 
+      await expect(requestAutomation({
+        action: "save",
+        activeUntil: "2026-08-01T12:45:00.000Z",
+        instructions: "Send the finite one-time reminder.",
+        schedule: {
+          at: "2026-08-01T12:30:00.000Z",
+          kind: "at",
+        },
+        slug: "finite-one-time-reminder",
+        status: "paused",
+        title: "Finite one-time reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "paused",
+        timingVerified: true,
+      }));
+
+      await expect(requestAutomation({
+        action: "save",
+        instructions: "Send the recurring interval reminder.",
+        schedule: {
+          everyMs: 86_400_000,
+          kind: "every",
+        },
+        slug: "recurring-interval-reminder",
+        title: "Recurring interval reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: "2026-08-02T12:00:00.000Z",
+        status: "active",
+        timingVerified: true,
+      }));
+
+      vi.setSystemTime(new Date("2026-08-01T13:00:00.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "finite-one-time-reminder",
+        status: "active",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "active",
+        timingVerified: true,
+      }));
+
       vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        instructions: "Send the revised recurring interval reminder.",
+        lookup: "recurring-interval-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        schedule: {
+          everyMs: 86_400_000,
+          kind: "every",
+        },
+        status: "active",
+        timingVerified: false,
+      }));
       await expect(requestAutomation({
         action: "patch",
         lookup: "one-time-evening-reminder",

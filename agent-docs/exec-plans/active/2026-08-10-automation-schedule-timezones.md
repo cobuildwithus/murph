@@ -19,7 +19,7 @@ Key decisions:
 - Update the existing schedule-owner documentation and focused contract/core/assistant/runtime tests rather than adding a new service or state owner.
 
 State:
-- ReviewGPT round six verified every prior correction, then found that reactivating a stale one-shot could return its expired timestamp as a verified next deliverable occurrence even though execution would archive it without sending. The contradiction was reproduced through the hosted patch response and canonical projection; both now share the existing execution freshness policy.
+- ReviewGPT round seven verified every prior correction, then found two sibling original-PR gaps: stale recurring occurrences bypass the shared freshness predicate in projection, and an occurrence before `activeUntil` can still be certified after that finite window has closed. Both are reachable through ordinary non-timing patches/reactivation and would be discarded by execution.
 
 Done:
 - Proved the production failure mechanism: a UTC-converted cron hour was persisted and then evaluated in the vault timezone.
@@ -67,12 +67,19 @@ Done:
 - Passed the complete assistant cron suite (211), hosted assistant-phase suite (280), and prompt/tool/scripted/opt-in model set (121 with 38 provider-gated skips), plus all four affected package typechecks and the complete 30-project workspace typecheck.
 - The stale-one-shot explanation adds 27 `o200k_harmony` tokens and 131 UTF-8 bytes to both initial runtimes relative to round six: direct is now 24,015 tokens / 111,030 bytes versus base 23,701 / 109,497 (+314, +1.3248%, +1,533 bytes); group is 20,487 / 95,479 versus base 20,173 / 93,946 (+314, +1.5565%, +1,533 bytes). Prompt content is now 14,876 tokens / 72,942 bytes direct and 11,448 / 57,522 group. The deferred automation tool serialization is 4,597 tokens / 15,774 bytes when loaded.
 - Rebuilt the complete hosted runner closure after the shared freshness correction. The runner entrypoint remains 1,661,608 bytes, its static boot closure is 8,020,719 bytes, and total output is 9,995,850 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed.
+- ReviewGPT round seven found that projection invoked the shared deliverability predicate only for `at` schedules even though execution invokes it for every canonical automation, and that projection bounded occurrence time by `activeUntil` without checking whether the current time had already reached the cutoff. The findings are accepted pending failing production-path regressions.
+- Added failing canonical and hosted fake-clock regressions for a stale `every` occurrence and a one-shot reactivated after its finite cutoff while still inside the ordinary freshness allowance. Projection now applies the shared predicate to every automation schedule, reports stale recurring timing as unverified rather than exhausted, and returns verified null once `activeUntil` is reached. The redundant hosted cron/daily-local past-time guard is deleted.
+- Added scripted App Server and opt-in actual-model coverage proving an unverified stale recurrence is not described as permanently exhausted. Existing scheduler proof confirms the stale recurrence sends nothing and advances, finite windows archive at their boundary, future/exact-boundary/open-window occurrences remain deliverable, and scheduled logs retain their existing behavior.
+- Passed the complete assistant cron suite (212), hosted assistant-phase suite (280), and prompt/tool/scripted/opt-in model set (122 with 39 provider-gated skips), plus all four affected package typechecks and the complete 30-project workspace typecheck.
+- Rebuilt the complete hosted runner closure after the final eligibility correction. The runner entrypoint is 1,661,357 bytes, its static boot closure is 8,020,513 bytes, and total output is 9,995,644 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed. Provider-visible input is unchanged from round seven because the final correction changes projection, hosted response assembly, and tests only.
+- Corrected the PR shape from the exact merge-base diff rather than carrying forward additive round estimates: current authored source is 541/100, tests are 2,274/87, docs are 102/3, config/tooling is 9/2, generated is 22/3, and total is 2,948/195. Relative to the immutable first-reviewed source shape, remediation adds 403 and deletes 67 source lines.
+- The ReviewGPT hard cap is now reached. After correcting and verifying accepted round-seven findings, do not start round eight without an explicit continuation decision; the exact round-seven head passed all required GitHub checks.
 
 Now:
-- Complete candidate diff/privacy review, then commit and push the shared freshness correction.
+- Complete candidate diff/privacy and parent correctness review, then commit and push the round-seven remediation.
 
 Next:
-- Commit and push the exact remediation head, update PR #1546's evidence, and run sensitive full-snapshot ReviewGPT round seven concurrently with exact-head CI.
+- Run focused and workspace verification, push the round-seven remediation, complete parent review and exact-head CI, then pause before any round-eight ReviewGPT run.
 
 Open questions (UNCONFIRMED if needed):
 - None. The timing result now reuses the canonical scheduler owners through an exact-file projection instead of the broad public job lookup.

@@ -4159,6 +4159,90 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
+    'does not describe an unverified stale recurrence as exhausted',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-stale-recurring-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'patch') {
+                  throw new Error('Expected an automation patch request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'patch',
+                  automationId: 'automation-daily-interval',
+                  created: false,
+                  effectiveTimeZone: null,
+                  lookupId: 'daily-interval-reminder',
+                  nextOccurrenceAt: null,
+                  routeBinding: 'preserved',
+                  schedule: { everyMs: 86_400_000, kind: 'every' },
+                  status: 'active',
+                  timingVerified: false,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Change the instructions for my daily-interval-reminder to',
+            'send the revised daily interval reminder. Save that edit now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'patch',
+          lookup: 'daily-interval-reminder',
+        })
+        expect(result.finalMessage).toMatch(
+          /could not verify|couldn't verify|unable to verify/iu,
+        )
+        expect(result.finalMessage).toMatch(/inspect|check|review|update/iu)
+        expect(result.finalMessage).not.toMatch(
+          /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'confirms an active device trigger without claiming future delivery is exhausted',
     async () => {
       const config = await resolveRealCodexE2eConfig()

@@ -1843,14 +1843,6 @@ async function buildHostedAutomationToolResponse(input: {
       timingVerified = false;
     }
   }
-  if (
-    input.result.record.status === "active"
-    && (schedule.kind === "cron" || schedule.kind === "dailyLocal")
-    && nextOccurrenceAt !== null
-    && Date.parse(nextOccurrenceAt) <= Date.parse(input.result.record.updatedAt)
-  ) {
-    timingVerified = false;
-  }
   return {
     action: input.action,
     automationId: input.result.record.automationId,

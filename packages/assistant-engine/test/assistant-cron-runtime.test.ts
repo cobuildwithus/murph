@@ -1145,6 +1145,11 @@ describe('assistant cron runtime orchestration', () => {
       at: '2026-08-10T07:00:00.000Z',
       slug: 'finite-one-shot-projection',
     })
+    const elapsedFinite = await saveOneShot({
+      activeUntil: '2026-08-10T08:45:00.000Z',
+      at: '2026-08-10T08:30:00.000Z',
+      slug: 'elapsed-finite-one-shot-projection',
+    })
     vi.setSystemTime(new Date('2026-08-10T09:00:00.000Z'))
 
     await expect(getAssistantCronAutomationTimingProjection(
@@ -1178,6 +1183,59 @@ describe('assistant cron runtime orchestration', () => {
     )).resolves.toMatchObject({
       nextOccurrenceAt: '2026-08-10T07:00:00.000Z',
       occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      elapsedFinite.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: true,
+    })
+  })
+
+  it('does not certify a stale recurring occurrence that execution will consume', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-recurring-projection-freshness-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: { timezone: 'America/New_York' },
+    })
+    const job = await upsertAssistantCronAutomation({
+      instructions: 'Send the daily check-in.',
+      now: new Date('2026-08-01T09:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'recurring-projection-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'recurring-projection-room',
+        threadIsDirect: false,
+      },
+      schedule: { everyMs: 86_400_000, kind: 'every' },
+      slug: 'stale-recurring-projection',
+      title: 'Daily check-in',
+      vault: vaultRoot,
+    })
+    if (!job) {
+      throw new Error('Expected recurring automation to be saved.')
+    }
+    const source = findCanonicalAutomation(vaultRoot, job.jobId)
+    if (!source?.relativePath) {
+      throw new Error('Expected recurring automation source.')
+    }
+
+    vi.setSystemTime(new Date('2026-08-03T12:00:00.000Z'))
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      source.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: false,
     })
   })
 

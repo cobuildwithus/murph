@@ -326,7 +326,8 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
     occurrenceAt === null ||
     (source.kind === 'automation' &&
       source.activeUntil !== null &&
-      Date.parse(occurrenceAt) >= Date.parse(source.activeUntil))
+      (now.getTime() >= Date.parse(source.activeUntil) ||
+        Date.parse(occurrenceAt) >= Date.parse(source.activeUntil)))
   ) {
     return {
       nextOccurrenceAt: null,
@@ -336,7 +337,6 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
 
   if (
     source.kind === 'automation' &&
-    source.schedule.kind === 'at' &&
     !isCanonicalAssistantCronNotificationOccurrenceDeliverable({
       now,
       occurrenceAt,
@@ -345,7 +345,7 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
   ) {
     return {
       nextOccurrenceAt: null,
-      verified: true,
+      verified: source.schedule.kind === 'at',
     }
   }
 

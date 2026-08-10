@@ -1671,6 +1671,78 @@ text(JSON.stringify(result));
     expect(result.finalMessage).toMatch(/new time|reschedule/iu)
   })
 
+  it('does not describe an unverified stale recurrence as exhausted', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'The reminder wording was updated, but I could not verify its next occurrence. I can inspect or update the schedule if you want.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            return {
+              action: 'patch',
+              automationId: 'automation-daily-interval',
+              created: false,
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved',
+              schedule: { everyMs: 86_400_000, kind: 'every' },
+              status: 'active',
+              timingVerified: false,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Update the wording of my daily interval reminder now.',
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"every"')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
+    expect(toolOutputs).toContain('"timingVerified":false')
+    expect(result.finalMessage).toMatch(/could not verify/iu)
+    expect(result.finalMessage).toMatch(/inspect|update/iu)
+    expect(result.finalMessage).not.toMatch(
+      /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+    )
+  })
+
   it('keeps active device-triggered saves distinct from exhausted clock schedules', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
