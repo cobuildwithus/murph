@@ -11,11 +11,16 @@ import pg from "pg";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
+  appendHostedUsageCreditGrantTx,
   grantHostedUsageCreditForPurchaseTx,
   lockHostedUsageCreditBeneficiaryTx,
   readHostedUsageCreditProjection,
   settleHostedUsageCreditForUsageTx,
 } from "@/src/lib/hosted-execution/usage-credits";
+import {
+  HOSTED_USAGE_CREDIT_MAX_OCCUPIED_GRANT_SLOTS,
+  readHostedUsageCreditGrantCapacityTx,
+} from "@/src/lib/hosted-execution/usage-credit-grant-capacity";
 import {
   decodeHostedMailboxStoredPayload,
 } from "@/src/lib/hosted-mailbox/store";
@@ -230,8 +235,127 @@ async function createUsageCreditFixture(input: {
   };
 }
 
+async function seedActivePurchaseGrantFragments(input: {
+  count: number;
+  fixture: UsageCreditFixture;
+  grantUsdMicros?: bigint;
+}): Promise<{
+  entryIds: string[];
+  purchaseIds: string[];
+  totalUsdMicros: bigint;
+}> {
+  if (
+    !Number.isSafeInteger(input.count)
+    || input.count <= 0
+    || input.count > HOSTED_USAGE_CREDIT_MAX_OCCUPIED_GRANT_SLOTS + 1
+  ) {
+    throw new TypeError("Active purchase-grant fixture count is out of bounds.");
+  }
+  const grantUsdMicros = input.grantUsdMicros ?? 1_000_000n;
+  const fixtureId = randomUUID();
+  const paidAt = new Date("2026-07-16T12:00:00.000Z");
+  const purchaseIds = Array.from(
+    { length: input.count },
+    (_, index) => `hucp_settlement_${fixtureId}_${index}`,
+  );
+  const entryIds = Array.from(
+    { length: input.count },
+    (_, index) => `huce_settlement_${fixtureId}_${index}`,
+  );
+  const totalUsdMicros = grantUsdMicros * BigInt(input.count);
+
+  await input.fixture.observer.$transaction(async (tx) => {
+    await tx.hostedUsageCreditPurchase.createMany({
+      data: purchaseIds.map((purchaseId, index) => ({
+        beneficiaryMemberId: input.fixture.beneficiaryMemberId,
+        cashAmountMinor: 100,
+        cashCurrency: "usd",
+        checkoutCancelUrl: "https://example.test/settings?usage=cancelled",
+        checkoutExpiresAt: new Date("2026-07-16T13:00:00.000Z"),
+        checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
+        checkoutSuccessUrl: "https://example.test/settings?usage=return",
+        clientRequestKey: `settlement:${fixtureId}:${index}`,
+        grantUsdMicros,
+        id: purchaseId,
+        offerCode: "usage_test_fragment",
+        paidAt,
+        payerMemberId: input.fixture.beneficiaryMemberId,
+        remainingCreditUsdMicros: grantUsdMicros,
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+        stripeCustomerIdEncrypted: `encrypted-customer:${fixtureId}:${index}`,
+        stripeCustomerLookupKey: `customer:${fixtureId}:${index}`,
+        stripeLiveMode: false,
+        stripePriceIdEncrypted: `encrypted-price:${fixtureId}:${index}`,
+        stripePriceLookupKey: `price:${fixtureId}:${index}`,
+        terminalAt: paidAt,
+      })),
+    });
+    await tx.hostedUsageCreditEntry.createMany({
+      data: entryIds.map((entryId, index) => ({
+        amountUsdMicros: grantUsdMicros,
+        beneficiaryMemberId: input.fixture.beneficiaryMemberId,
+        beneficiarySequence: BigInt(index + 1),
+        effectiveAt: paidAt,
+        id: entryId,
+        kind: "purchase_grant",
+        purchaseId: purchaseIds[index],
+        semanticSourceKey:
+          `hosted-usage-credit:purchase:${purchaseIds[index]}:grant:v1`,
+      })),
+    });
+    await tx.hostedUsageCreditGrant.createMany({
+      data: entryIds.map((entryId) => ({
+        entryId,
+        remainingUsdMicros: grantUsdMicros,
+      })),
+    });
+    await tx.hostedMember.update({
+      data: {
+        usageCreditBalanceUsdMicros: totalUsdMicros,
+        usageCreditLedgerVersion: BigInt(input.count),
+      },
+      where: { id: input.fixture.beneficiaryMemberId },
+    });
+  }, transactionOptions);
+
+  return { entryIds, purchaseIds, totalUsdMicros };
+}
+
+async function createRewardedUsageReferralFixture(input: {
+  beneficiaryMemberId: string;
+  observer: PrismaClient;
+  rewardUsdMicros: bigint;
+}): Promise<string> {
+  const fixtureId = randomUUID();
+  const referralId = `hur_settlement_${fixtureId}`;
+  const armedAt = new Date("2026-07-16T11:00:00.000Z");
+  const targetBoundAt = new Date("2026-07-16T11:05:00.000Z");
+  const qualifiedAt = new Date("2026-07-16T11:10:00.000Z");
+
+  await input.observer.hostedUsageReferral.create({
+    data: {
+      armedAt,
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      expiresAt: new Date("2026-07-17T11:00:00.000Z"),
+      id: referralId,
+      policyCode: "new_person_activation_v1",
+      policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+      qualifiedAt,
+      referrerMemberId: input.beneficiaryMemberId,
+      referrerSubjectKey: "authenticated-member",
+      rewardedAt: new Date("2026-07-16T11:15:00.000Z"),
+      rewardUsdMicros: input.rewardUsdMicros,
+      status: "rewarded",
+      targetBoundAt,
+    },
+  });
+
+  return referralId;
+}
+
 async function cleanupUsageCreditFixture(
   fixture: UsageCreditFixture,
+  input: { referralIds?: string[] } = {},
 ): Promise<void> {
   try {
     await fixture.observer.hostedUsageCreditGrant.deleteMany({
@@ -242,6 +366,11 @@ async function cleanupUsageCreditFixture(
     await fixture.observer.hostedUsageCreditEntry.deleteMany({
       where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
     });
+    if (input.referralIds && input.referralIds.length > 0) {
+      await fixture.observer.hostedUsageReferral.deleteMany({
+        where: { id: { in: input.referralIds } },
+      });
+    }
     await fixture.observer.hostedUsageCreditPurchase.deleteMany({
       where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
     });
@@ -1025,6 +1154,436 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           ...(settlementTransaction ? [settlementTransaction] : []),
         ]);
         await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it("settles mixed purchase and referral grants FIFO with coupled projections", async () => {
+      const fixture = await createUsageCreditFixture();
+      const paidAt = new Date("2026-07-16T12:20:00.000Z");
+      const sourceUsageId = `usage_mixed_fifo_${randomUUID()}`;
+      let referralId: string | null = null;
+
+      try {
+        const purchaseGrant = await fixture.firstClient.$transaction((tx) =>
+          grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions
+        );
+        const createdReferralId = await createRewardedUsageReferralFixture({
+          beneficiaryMemberId: fixture.beneficiaryMemberId,
+          observer: fixture.observer,
+          rewardUsdMicros: 3_000_000n,
+        });
+        referralId = createdReferralId;
+        const referralGrant = await fixture.secondClient.$transaction(async (tx) => {
+          const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            tx,
+          });
+          return appendHostedUsageCreditGrantTx({
+            effectiveAt: new Date("2026-07-16T12:21:00.000Z"),
+            grantUsdMicros: 3_000_000n,
+            lockedBeneficiary,
+            semanticSourceKey:
+              `hosted-usage-credit:referral:${createdReferralId}:grant:v1`,
+            source: { kind: "referral", referralId: createdReferralId },
+            tx,
+          });
+        }, transactionOptions);
+
+        await expect(fixture.thirdClient.$transaction((tx) =>
+          settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            debitUsdMicros: 6_000_000n,
+            effectiveAt: new Date("2026-07-16T12:22:00.000Z"),
+            sourceUsageId,
+            tx,
+          }), transactionOptions
+        )).resolves.toEqual({
+          absorbedUsdMicros: 0n,
+          balanceUsdMicros: 2_000_000n,
+          debitedUsdMicros: 6_000_000n,
+          ledgerVersion: 4n,
+        });
+
+        const [member, purchase, grants, debits] = await Promise.all([
+          fixture.observer.hostedMember.findUniqueOrThrow({
+            select: {
+              usageCreditBalanceUsdMicros: true,
+              usageCreditLedgerVersion: true,
+            },
+            where: { id: fixture.beneficiaryMemberId },
+          }),
+          fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            select: {
+              remainingCreditUsdMicros: true,
+              status: true,
+            },
+            where: { id: fixture.purchaseId },
+          }),
+          fixture.observer.hostedUsageCreditEntry.findMany({
+            orderBy: { beneficiarySequence: "asc" },
+            select: {
+              beneficiarySequence: true,
+              grant: { select: { remainingUsdMicros: true } },
+              id: true,
+              kind: true,
+              purchaseId: true,
+              referralId: true,
+            },
+            where: { id: { in: [purchaseGrant.entryId, referralGrant.entryId] } },
+          }),
+          fixture.observer.hostedUsageCreditEntry.findMany({
+            orderBy: { beneficiarySequence: "asc" },
+            select: {
+              amountUsdMicros: true,
+              beneficiarySequence: true,
+              parentGrantEntryId: true,
+              purchaseId: true,
+              referralId: true,
+              sourceUsageId: true,
+            },
+            where: {
+              kind: "usage_debit",
+              sourceUsageId,
+            },
+          }),
+        ]);
+
+        expect(member).toEqual({
+          usageCreditBalanceUsdMicros: 2_000_000n,
+          usageCreditLedgerVersion: 4n,
+        });
+        expect(purchase).toEqual({
+          remainingCreditUsdMicros: 0n,
+          status: HostedUsageCreditPurchaseStatus.fulfilled,
+        });
+        expect(grants).toEqual([
+          {
+            beneficiarySequence: 1n,
+            grant: { remainingUsdMicros: 0n },
+            id: purchaseGrant.entryId,
+            kind: "purchase_grant",
+            purchaseId: fixture.purchaseId,
+            referralId: null,
+          },
+          {
+            beneficiarySequence: 2n,
+            grant: { remainingUsdMicros: 2_000_000n },
+            id: referralGrant.entryId,
+            kind: "referral_grant",
+            purchaseId: null,
+            referralId,
+          },
+        ]);
+        expect(debits).toEqual([
+          {
+            amountUsdMicros: -5_000_000n,
+            beneficiarySequence: 3n,
+            parentGrantEntryId: purchaseGrant.entryId,
+            purchaseId: fixture.purchaseId,
+            referralId: null,
+            sourceUsageId,
+          },
+          {
+            amountUsdMicros: -1_000_000n,
+            beneficiarySequence: 4n,
+            parentGrantEntryId: referralGrant.entryId,
+            purchaseId: null,
+            referralId,
+            sourceUsageId,
+          },
+        ]);
+      } finally {
+        await cleanupUsageCreditFixture(fixture, {
+          referralIds: referralId ? [referralId] : [],
+        });
+      }
+    });
+
+    it("settles exactly 32 active grant fragments in one usage call", async () => {
+      const fixture = await createUsageCreditFixture();
+      const sourceUsageId = `usage_32_fragments_${randomUUID()}`;
+
+      try {
+        await fixture.observer.hostedUsageCreditPurchase.delete({
+          where: { id: fixture.purchaseId },
+        });
+        const seeded = await seedActivePurchaseGrantFragments({
+          count: 32,
+          fixture,
+        });
+
+        await expect(fixture.firstClient.$transaction((tx) =>
+          settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            debitUsdMicros: seeded.totalUsdMicros,
+            effectiveAt: new Date("2026-07-16T12:30:00.000Z"),
+            sourceUsageId,
+            tx,
+          }), transactionOptions
+        )).resolves.toEqual({
+          absorbedUsdMicros: 0n,
+          balanceUsdMicros: 0n,
+          debitedUsdMicros: 32_000_000n,
+          ledgerVersion: 64n,
+        });
+
+        const [member, grants, purchases, debits] = await Promise.all([
+          fixture.observer.hostedMember.findUniqueOrThrow({
+            select: {
+              usageCreditBalanceUsdMicros: true,
+              usageCreditLedgerVersion: true,
+            },
+            where: { id: fixture.beneficiaryMemberId },
+          }),
+          fixture.observer.hostedUsageCreditGrant.findMany({
+            orderBy: { entryId: "asc" },
+            select: {
+              entryId: true,
+              remainingUsdMicros: true,
+            },
+            where: { entryId: { in: seeded.entryIds } },
+          }),
+          fixture.observer.hostedUsageCreditPurchase.findMany({
+            orderBy: { id: "asc" },
+            select: {
+              id: true,
+              remainingCreditUsdMicros: true,
+              status: true,
+            },
+            where: { id: { in: seeded.purchaseIds } },
+          }),
+          fixture.observer.hostedUsageCreditEntry.findMany({
+            orderBy: { beneficiarySequence: "asc" },
+            select: {
+              amountUsdMicros: true,
+              beneficiarySequence: true,
+              parentGrantEntryId: true,
+            },
+            where: {
+              kind: "usage_debit",
+              sourceUsageId,
+            },
+          }),
+        ]);
+
+        expect(member).toEqual({
+          usageCreditBalanceUsdMicros: 0n,
+          usageCreditLedgerVersion: 64n,
+        });
+        expect(grants).toHaveLength(32);
+        expect(grants.every(({ remainingUsdMicros }) =>
+          remainingUsdMicros === 0n)).toBe(true);
+        expect(purchases).toHaveLength(32);
+        expect(purchases.every((purchase) =>
+          purchase.remainingCreditUsdMicros === 0n
+          && purchase.status === HostedUsageCreditPurchaseStatus.fulfilled))
+          .toBe(true);
+        expect(debits).toHaveLength(32);
+        expect(debits.map(({ beneficiarySequence }) => beneficiarySequence))
+          .toEqual(Array.from({ length: 32 }, (_, index) => BigInt(index + 33)));
+        expect(debits.map(({ parentGrantEntryId }) => parentGrantEntryId))
+          .toEqual(seeded.entryIds);
+        expect(debits.reduce(
+          (total, { amountUsdMicros }) => total + amountUsdMicros,
+          0n,
+        )).toBe(-32_000_000n);
+      } finally {
+        await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it("rolls back a corrupt 33-grant settlement without any coupled mutation", async () => {
+      const fixture = await createUsageCreditFixture();
+      const sourceUsageId = `usage_33_fragments_${randomUUID()}`;
+
+      try {
+        await fixture.observer.hostedUsageCreditPurchase.delete({
+          where: { id: fixture.purchaseId },
+        });
+        const seeded = await seedActivePurchaseGrantFragments({
+          count: 33,
+          fixture,
+        });
+        const readCoupledState = async () => {
+          const [member, grants, purchases, debits] = await Promise.all([
+            fixture.observer.hostedMember.findUniqueOrThrow({
+              select: {
+                updatedAt: true,
+                usageCreditBalanceUsdMicros: true,
+                usageCreditLedgerVersion: true,
+              },
+              where: { id: fixture.beneficiaryMemberId },
+            }),
+            fixture.observer.hostedUsageCreditGrant.findMany({
+              orderBy: { entryId: "asc" },
+              select: {
+                entryId: true,
+                remainingUsdMicros: true,
+                updatedAt: true,
+              },
+              where: { entryId: { in: seeded.entryIds } },
+            }),
+            fixture.observer.hostedUsageCreditPurchase.findMany({
+              orderBy: { id: "asc" },
+              select: {
+                id: true,
+                remainingCreditUsdMicros: true,
+                status: true,
+                updatedAt: true,
+              },
+              where: { id: { in: seeded.purchaseIds } },
+            }),
+            fixture.observer.hostedUsageCreditEntry.findMany({
+              select: { id: true },
+              where: {
+                kind: "usage_debit",
+                sourceUsageId,
+              },
+            }),
+          ]);
+          return { debits, grants, member, purchases };
+        };
+        const before = await readCoupledState();
+
+        await expect(fixture.firstClient.$transaction((tx) =>
+          settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            debitUsdMicros: 1_000_000n,
+            effectiveAt: new Date("2026-07-16T12:40:00.000Z"),
+            sourceUsageId,
+            tx,
+          }), transactionOptions
+        )).rejects.toThrow(
+          "Hosted usage-credit settlement exceeds the temporary active grant limit.",
+        );
+
+        await expect(readCoupledState()).resolves.toEqual(before);
+      } finally {
+        await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it("replaces an exact purchase reservation at the 32-slot boundary", async () => {
+      const fixture = await createUsageCreditFixture();
+      const paidAt = new Date("2026-07-16T12:50:00.000Z");
+      let referralId: string | null = null;
+
+      try {
+        const seeded = await seedActivePurchaseGrantFragments({
+          count: 31,
+          fixture,
+        });
+        const createdReferralId = await createRewardedUsageReferralFixture({
+          beneficiaryMemberId: fixture.beneficiaryMemberId,
+          observer: fixture.observer,
+          rewardUsdMicros: 1_000_000n,
+        });
+        referralId = createdReferralId;
+
+        await expect(fixture.firstClient.$transaction(async (tx) => {
+          const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            tx,
+          });
+          return readHostedUsageCreditGrantCapacityTx({
+            expectedPurchaseId: fixture.purchaseId,
+            lockedBeneficiary,
+            tx,
+          });
+        }, transactionOptions)).resolves.toEqual({
+          expectedPurchaseOwnsReservation: true,
+          state: "at_capacity",
+        });
+
+        await expect(fixture.secondClient.$transaction((tx) =>
+          grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions
+        )).resolves.toMatchObject({
+          balanceUsdMicros: seeded.totalUsdMicros + 5_000_000n,
+          granted: true,
+          ledgerVersion: 32n,
+        });
+
+        await expect(fixture.firstClient.$transaction(async (tx) => {
+          const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            tx,
+          });
+          return readHostedUsageCreditGrantCapacityTx({
+            expectedPurchaseId: fixture.purchaseId,
+            lockedBeneficiary,
+            tx,
+          });
+        }, transactionOptions)).resolves.toEqual({
+          expectedPurchaseOwnsReservation: false,
+          state: "at_capacity",
+        });
+
+        await expect(fixture.thirdClient.$transaction(async (tx) => {
+          const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            tx,
+          });
+          return appendHostedUsageCreditGrantTx({
+            effectiveAt: new Date("2026-07-16T12:51:00.000Z"),
+            grantUsdMicros: 1_000_000n,
+            lockedBeneficiary,
+            semanticSourceKey:
+              `hosted-usage-credit:referral:${createdReferralId}:grant:v1`,
+            source: { kind: "referral", referralId: createdReferralId },
+            tx,
+          });
+        }, transactionOptions)).rejects.toThrow(
+          "Hosted usage-credit active grant capacity is full.",
+        );
+
+        await expect(Promise.all([
+          fixture.observer.hostedMember.findUniqueOrThrow({
+            select: {
+              usageCreditBalanceUsdMicros: true,
+              usageCreditLedgerVersion: true,
+            },
+            where: { id: fixture.beneficiaryMemberId },
+          }),
+          fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            select: {
+              remainingCreditUsdMicros: true,
+              status: true,
+            },
+            where: { id: fixture.purchaseId },
+          }),
+          fixture.observer.hostedUsageCreditGrant.count({
+            where: {
+              entry: { beneficiaryMemberId: fixture.beneficiaryMemberId },
+              remainingUsdMicros: { gt: 0n },
+            },
+          }),
+          fixture.observer.hostedUsageCreditEntry.count({
+            where: { referralId: createdReferralId },
+          }),
+        ])).resolves.toEqual([
+          {
+            usageCreditBalanceUsdMicros: 36_000_000n,
+            usageCreditLedgerVersion: 32n,
+          },
+          {
+            remainingCreditUsdMicros: 5_000_000n,
+            status: HostedUsageCreditPurchaseStatus.fulfilled,
+          },
+          32,
+          0,
+        ]);
+      } finally {
+        await cleanupUsageCreditFixture(fixture, {
+          referralIds: referralId ? [referralId] : [],
+        });
       }
     });
 

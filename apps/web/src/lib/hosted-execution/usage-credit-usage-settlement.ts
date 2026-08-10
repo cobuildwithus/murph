@@ -72,8 +72,14 @@ export async function settleHostedUsageCreditForUsageTx(input: {
       beneficiaryMemberId: true,
       parentGrantEntryId: true,
     },
+    take: ACTIVE_SPENDABLE_GRANT_INSPECTION_LIMIT,
   });
 
+  if (existingDebits.length > MAX_ACTIVE_SPENDABLE_GRANTS) {
+    throw new TypeError(
+      "Hosted usage-credit replay exceeds the temporary active grant limit.",
+    );
+  }
   if (existingDebits.length > 0) {
     let debitedUsdMicros = 0n;
     for (const entry of existingDebits) {

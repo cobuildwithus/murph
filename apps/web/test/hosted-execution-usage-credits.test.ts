@@ -1068,6 +1068,18 @@ describe("hosted usage credits", () => {
       throw new Error(`Unexpected SQL: ${sql}`);
     });
     const entryCreate = vi.fn();
+    const entryFindMany = vi.fn().mockResolvedValue([
+      {
+        amountUsdMicros: -5_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        parentGrantEntryId: "grant_1",
+      },
+      {
+        amountUsdMicros: -2_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        parentGrantEntryId: "grant_2",
+      },
+    ]);
     const purchaseUpdateMany = vi.fn();
 
     await expect(settleHostedUsageCreditForUsageTx({
@@ -1079,18 +1091,7 @@ describe("hosted usage credits", () => {
         $queryRaw: queryRaw,
         hostedUsageCreditEntry: {
           create: entryCreate,
-          findMany: vi.fn().mockResolvedValue([
-            {
-              amountUsdMicros: -5_000_000n,
-              beneficiaryMemberId: BENEFICIARY_ID,
-              parentGrantEntryId: "grant_1",
-            },
-            {
-              amountUsdMicros: -2_000_000n,
-              beneficiaryMemberId: BENEFICIARY_ID,
-              parentGrantEntryId: "grant_2",
-            },
-          ]),
+          findMany: entryFindMany,
         },
         hostedUsageCreditGrant: {
           updateMany: vi.fn(),
@@ -1106,8 +1107,60 @@ describe("hosted usage credits", () => {
       ledgerVersion: 8n,
     });
 
+    expect(entryFindMany).toHaveBeenCalledExactlyOnceWith({
+      orderBy: { beneficiarySequence: "asc" },
+      select: {
+        amountUsdMicros: true,
+        beneficiaryMemberId: true,
+        parentGrantEntryId: true,
+      },
+      take: 33,
+      where: {
+        kind: "usage_debit",
+        sourceUsageId: "usage_replay",
+      },
+    });
     expect(entryCreate).not.toHaveBeenCalled();
     expect(purchaseUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before inspecting a corrupt 33-row usage replay", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql }) => {
+      expect(sql).toContain('FROM "hosted_member"');
+      return [{
+        balanceUsdMicros: 9_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 35n,
+      }];
+    });
+    const entryFindMany = vi.fn().mockResolvedValue(Array.from(
+      { length: 33 },
+      () => ({
+        amountUsdMicros: 0n,
+        beneficiaryMemberId: "corrupt-beneficiary",
+        parentGrantEntryId: null,
+      }),
+    ));
+
+    await expect(settleHostedUsageCreditForUsageTx({
+      beneficiaryMemberId: BENEFICIARY_ID,
+      debitUsdMicros: 7_000_000n,
+      effectiveAt: EFFECTIVE_AT,
+      sourceUsageId: "usage_replay_overflow",
+      tx: {
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          findMany: entryFindMany,
+        },
+      } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit replay exceeds the temporary active grant limit.",
+    );
+
+    expect(entryFindMany).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ take: 33 }),
+    );
+    expect(queryRaw).toHaveBeenCalledOnce();
   });
 
   it("converges a refund net reversal and reports credit it could not recover", async () => {
