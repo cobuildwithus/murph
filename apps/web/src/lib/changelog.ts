@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Patterns, reliable referral celebrations, and local-time reminders",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "Patterns can now compare repeated actions with next-day sleep and recovery, referral celebrations stay with their intended conversation, and recurring reminders keep the local time and timezone you asked for.",
     items: [
       {
         id: "personal-patterns",
@@ -90,6 +90,18 @@ const RAW_CHANGELOG_EDITIONS = [
           href: "/patterns",
           label: "View your patterns",
         },
+      },
+      {
+        id: "referral-notification-route-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Referral celebrations stay in the right conversation",
+        summary:
+          "Referral reward celebrations now stay attached to their intended direct conversation, and an interrupted one can safely resume without leaving later work waiting behind it.",
+        details:
+          "Murph rechecks that the route still belongs to the same member and conversation before retrying. If it no longer matches, nothing is sent to a different conversation.",
+        relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
+        sourcePullRequests: [1592],
       },
       {
         id: "reminders-keep-requested-timezone",

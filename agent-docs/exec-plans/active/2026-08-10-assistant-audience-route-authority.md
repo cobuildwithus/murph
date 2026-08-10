@@ -43,5 +43,6 @@ Allow validated direct Linq assistant notifications to pass the existing audienc
 - The hosted-runtime event suite passed 45 tests, including exact authority and every fail-closed mismatch.
 - The assistant-engine audience-authority integration suite passed 8 tests through the real guard.
 - Web, assistant-runtime, and assistant-engine typechecks passed.
+- The public changelog now describes the member-visible referral recovery without exposing incident details; its focused page, route, and contract suite passed 42 tests.
 - `pnpm docs:drift` and `git diff --check` passed.
 - Exact-head CI and the preliminary and final ReviewGPT PR gates remain pending on the pushed candidate.

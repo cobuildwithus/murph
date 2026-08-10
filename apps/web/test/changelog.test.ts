@@ -290,6 +290,16 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("referral-notification-route-recovery")).toMatchObject({
+      sourcePullRequests: [1592],
+      summary: expect.stringContaining("intended direct conversation"),
+      details: expect.stringContaining(
+        "nothing is sent to a different conversation",
+      ),
+    });
+    expect(
+      items.get("referral-notification-route-recovery")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -492,6 +502,7 @@ describe("changelog registry", () => {
         id: "2026-08-10",
         itemIds: [
           "personal-patterns",
+          "referral-notification-route-recovery",
           "reminders-keep-requested-timezone",
         ],
       },
