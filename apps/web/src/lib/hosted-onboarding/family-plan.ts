@@ -2998,6 +2998,7 @@ export async function updateHostedFamilyPlanCapacities(input: {
         });
       }
       await assertHostedFamilyOwnerCanStartBillingTx({
+        allowDirectPaidOwner: true,
         groupId: group.id,
         ownerMemberId: group.ownerMemberId,
         tx,
