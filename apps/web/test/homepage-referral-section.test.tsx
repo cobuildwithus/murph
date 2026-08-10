@@ -9,6 +9,11 @@ import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
 
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
+
 test("ReferralSection presents every available referral path on the homepage", () => {
   const markup = renderToStaticMarkup(
     createElement(ReferralSection, {
@@ -22,14 +27,14 @@ test("ReferralSection presents every available referral path on the homepage", (
   assert.match(markup, /Invite someone to Murph/);
   assert.match(markup, /Bring someone new to Murph/);
   assert.match(markup, /Start an active group/);
-  assert.match(markup, /10 days of Murph/);
-  assert.match(markup, /14 days of Murph/);
-  assert.doesNotMatch(markup, /≈|\$[0-9]/);
+  assert.match(markup, /About 10 more days of Murph usage/);
+  assert.match(markup, /About 14 more days of Murph usage/);
   assert.match(markup, /href="\/refer"/);
   assert.match(markup, /See ways to earn/);
   assert.match(markup, /Typical-use estimate\. Actual capacity varies\./);
   assert.doesNotMatch(markup, /If eligible/);
-  assert.doesNotMatch(markup, /Dollar labels state exact cost-weighted usage credit/);
+  assert.doesNotMatch(markup, /\$|≈|usage credit/i);
+  assert.doesNotMatch(markup, RETIRED_USAGE_TERM_PATTERN);
   assert.doesNotMatch(markup, /applies earned usage automatically when/);
 });
 
@@ -57,9 +62,16 @@ test("ReferralSection keeps disabled referral paths out of its copy and rewards"
   assert.match(groupMarkup, /Start a fresh group with Murph\./);
   assert.match(groupMarkup, /Bring someone new to Murph/);
   assert.match(groupMarkup, /Start an active group/);
-  assert.match(groupMarkup, /10 days of Murph/);
-  assert.match(groupMarkup, /14 days of Murph/);
-  assert.doesNotMatch(groupMarkup, /≈|\$[0-9]/);
+  assert.match(groupMarkup, /About 10 more days of Murph usage/);
+  assert.match(groupMarkup, /About 14 more days of Murph usage/);
+  assert.doesNotMatch(
+    `${signupMarkup}${groupMarkup}`,
+    /\$|≈|usage credit/i,
+  );
+  assert.doesNotMatch(
+    `${signupMarkup}${groupMarkup}`,
+    RETIRED_USAGE_TERM_PATTERN,
+  );
   assert.doesNotMatch(groupMarkup, /personal link/i);
   assert.doesNotMatch(groupMarkup, /Invite someone to Murph/);
 

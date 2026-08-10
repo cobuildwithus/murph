@@ -21,6 +21,7 @@ import {
 } from './vault-usecase-helpers.js'
 
 const DEFAULT_LIST_LIMIT = 5
+const MAX_LIST_LIMIT = 200
 const TRACKED_WORKOUT_EVENT_KINDS = ['activity_session', 'body_measurement'] as const
 
 type TrackedWorkoutEventKind = (typeof TRACKED_WORKOUT_EVENT_KINDS)[number]
@@ -102,7 +103,7 @@ async function listTrackedWorkoutRecords(input: {
   const readModel = await query.readVault(input.vault)
   const limit =
     typeof input.limit === 'number' && Number.isFinite(input.limit)
-      ? Math.max(1, Math.min(DEFAULT_LIST_LIMIT * 4, Math.round(input.limit)))
+      ? Math.max(1, Math.min(MAX_LIST_LIMIT, Math.round(input.limit)))
       : DEFAULT_LIST_LIMIT
   const items = query
     .listEntities(readModel, {

@@ -501,7 +501,10 @@ describe("startHostedRuntimeShellPrewarmBestEffort", () => {
     })).resolves.toBeUndefined();
 
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith("member_123");
+    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith({
+      source: "linq-instant-start",
+      userId: "member_123",
+    });
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 
@@ -512,7 +515,10 @@ describe("startHostedRuntimeShellPrewarmBestEffort", () => {
     })).resolves.toBeUndefined();
 
     expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith("member_123");
+    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith({
+      source: "linq-typing-started",
+      userId: "member_123",
+    });
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 

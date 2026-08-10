@@ -39,7 +39,10 @@ export function startHostedRuntimeShellPrewarmBestEffort(input: {
 
   try {
     return client
-      .prewarmRuntimeShell(input.userId)
+      .prewarmRuntimeShell({
+        source: input.source,
+        userId: input.userId,
+      })
       .then((result) => {
         console.info("Hosted runtime shell prewarm accepted.", {
           accepted: result.accepted,

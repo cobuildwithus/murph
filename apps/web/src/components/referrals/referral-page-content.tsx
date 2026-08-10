@@ -86,10 +86,10 @@ function buildFaqs(input: {
   signupAvailable: boolean;
 }) {
   const ownerDescription = input.signupAvailable && input.groupAvailable
-    ? "Signup rewards go to your Murph. Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the same credit faster."
+    ? "Signup rewards go to your Murph. Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster."
     : input.signupAvailable
     ? "Signup rewards go to your personal Murph."
-    : "Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the same credit faster.";
+    : "Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster.";
   const tellMurphAnswer = input.signupAvailable && input.groupAvailable
     ? "Your personal referral link works without asking Murph first. Group missions need one extra step: tell Murph which mission you want, and wait for the confirmation before creating the fresh group."
     : input.signupAvailable
@@ -98,7 +98,7 @@ function buildFaqs(input: {
   const faqs = [
     {
       answer:
-        `Each option above shows its fixed cost-weighted usage credit. Actual message capacity varies with the model, tools, media, task complexity, and response length. ${ownerDescription}`,
+        `Each option above estimates days of Murph usage. Actual capacity varies with the model, tools, media, task complexity, and response length. The reward adds usage capacity; it does not extend a trial or subscription period. ${ownerDescription}`,
       question: "How much usage do I earn?",
     },
     {
@@ -227,13 +227,13 @@ export function ReferralPageContent({
               <ArrowDown aria-hidden="true" className="size-4" />
             </a>
             <p className="mt-6 max-w-[56ch] text-xs leading-[1.7] text-[#f5f0e8]/55">
-              Rewards are usage, not cash. Dollar labels state exact
-              cost-weighted usage credit; message capacity varies with the
-              model, tools, media, and task complexity.
+              Rewards add usage capacity, not cash or extra calendar time. Day
+              estimates reflect typical Murph use; actual capacity varies with
+              the model, tools, media, and task complexity.
             </p>
           </div>
 
-          <ReferralHeroArtifact reward={artifactReward} />
+          <ReferralRewardReceiptPreview reward={artifactReward} />
         </div>
       </section>
 
@@ -292,62 +292,7 @@ export function ReferralPageContent({
             </p>
           </div>
 
-          <div className="mt-12 grid gap-5 lg:grid-cols-3">
-            {rewards.map((reward, index) => {
-              const Icon = REWARD_ICONS[reward.id];
-              return (
-                <article
-                  className={`rounded-[1.75rem] border p-7 sm:p-8 ${
-                    index === 0
-                      ? "border-[#5a6e32]/35 bg-[#253321] text-[#f5f0e8]"
-                      : "border-[#c4a882]/35 bg-[#faf7f1] text-[#2d3436]"
-                  }`}
-                  key={reward.id}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <span
-                      className={`inline-flex size-11 items-center justify-center rounded-2xl ${
-                        index === 0
-                          ? "bg-white/10 text-[#d4b87a]"
-                          : "bg-[#5a6e32]/10 text-[#5a6e32]"
-                      }`}
-                    >
-                      <Icon aria-hidden="true" className="size-5" />
-                    </span>
-                    <span
-                      className={`rounded-full border px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.09em] ${
-                        index === 0
-                          ? "border-white/15 bg-white/[0.05] text-[#f5f0e8]/70"
-                          : "border-[#c4a882]/35 bg-white/55 text-[#736a58]"
-                      }`}
-                    >
-                      {reward.availabilityLabel}
-                    </span>
-                  </div>
-
-                  <p
-                    className={`mt-9 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.12em] ${
-                      index === 0 ? "text-[#d4b87a]" : "text-[#736a58]"
-                    }`}
-                  >
-                    {formatHostedPublicReferralRewardValue(
-                      reward.rewardUsdMicros,
-                    )}
-                  </p>
-                  <h3 className="mt-3 text-balance font-serif text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.04em]">
-                    {reward.title}
-                  </h3>
-                  <p
-                    className={`mt-5 text-[0.9375rem] leading-[1.72] ${
-                      index === 0 ? "text-[#f5f0e8]/74" : "text-[#4a4036]"
-                    }`}
-                  >
-                    {reward.description}
-                  </p>
-                </article>
-              );
-            })}
-          </div>
+          <ReferralRewardCards className="mt-12" rewards={rewards} />
         </div>
       </section>
 
@@ -511,18 +456,83 @@ function ReferralUnavailableContent() {
   );
 }
 
-function ReferralHeroArtifact({
+export function ReferralRewardCards({
+  className,
+  rewards,
+}: {
+  className?: string;
+  rewards: readonly HostedPublicReferralReward[];
+}) {
+  return (
+    <div className={`grid gap-5 lg:grid-cols-3 ${className ?? ""}`}>
+      {rewards.map((reward, index) => {
+        const Icon = REWARD_ICONS[reward.id];
+        return (
+          <article
+            className={`rounded-[1.75rem] border p-7 sm:p-8 ${
+              index === 0
+                ? "border-[#5a6e32]/35 bg-[#253321] text-[#f5f0e8]"
+                : "border-[#c4a882]/35 bg-[#faf7f1] text-[#2d3436]"
+            }`}
+            key={reward.id}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <span
+                className={`inline-flex size-11 items-center justify-center rounded-2xl ${
+                  index === 0
+                    ? "bg-white/10 text-[#d4b87a]"
+                    : "bg-[#5a6e32]/10 text-[#5a6e32]"
+                }`}
+              >
+                <Icon aria-hidden="true" className="size-5" />
+              </span>
+              <span
+                className={`rounded-full border px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.09em] ${
+                  index === 0
+                    ? "border-white/15 bg-white/[0.05] text-[#f5f0e8]/70"
+                    : "border-[#c4a882]/35 bg-white/55 text-[#736a58]"
+                }`}
+              >
+                {reward.availabilityLabel}
+              </span>
+            </div>
+
+            <p
+              className={`mt-9 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.12em] ${
+                index === 0 ? "text-[#d4b87a]" : "text-[#736a58]"
+              }`}
+            >
+              {formatHostedPublicReferralRewardValue(reward)}
+            </p>
+            <h3 className="mt-3 text-balance font-serif text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.04em]">
+              {reward.title}
+            </h3>
+            <p
+              className={`mt-5 text-[0.9375rem] leading-[1.72] ${
+                index === 0 ? "text-[#f5f0e8]/74" : "text-[#4a4036]"
+              }`}
+            >
+              {reward.description}
+            </p>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+export function ReferralRewardReceiptPreview({
   reward,
 }: {
   reward: HostedPublicReferralReward;
 }) {
   const rewardMessage = reward.id === "signup-link"
     ? `Your referral came through. ${formatHostedPublicReferralRewardValue(
-      reward.rewardUsdMicros,
-    )} is already added to your Murph.`
+      reward,
+    )} — already added to your Murph.`
     : `Your group mission is complete. ${formatHostedPublicReferralRewardValue(
-      reward.rewardUsdMicros,
-    )} is already added to the Murph it was accepted for.`;
+      reward,
+    )} — already added to the Murph it was accepted for.`;
   const privacyMessage = reward.id === "signup-link"
     ? "No claim needed. Who joined and what they share privately with Murph stays private."
     : "No claim needed. Private chats and health data stay private. Shared-group messages remain visible to that group.";

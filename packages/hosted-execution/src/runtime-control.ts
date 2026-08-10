@@ -2120,6 +2120,19 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
+    shellPrewarmFirstHintAtEpochMs?: number;
+    shellPrewarmFinishedAtEpochMs?: number;
+    shellPrewarmOperationElapsedMs?: number;
+    shellPrewarmHintCount?: number;
+    shellPrewarmOutcome?:
+      | "cold_start_observed"
+      | "failed"
+      | "start_issued_warm"
+      | "superseded";
+    shellPrewarmSource?:
+      | "linq-instant-start"
+      | "linq-typing-started"
+      | "unknown";
     workspaceReadElapsedMs?: number;
     runtimeStoreEnsureElapsedMs?: number;
     runtimeInvocationPreparationElapsedMs?: number;
@@ -2186,6 +2199,18 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     mailboxImportDoneToAssistantPhaseMs?: number;
     workspaceAssistantPreAutomationMs?: number;
     automationLaneToAssistantServiceMs?: number;
+    // These adjacent nested leaves exactly partition
+    // automationLaneToAssistantServiceMs when all are present.
+    automationReadinessMs?: number;
+    automationInputSelectionMs?: number;
+    automationPassSetupMs?: number;
+    automationCandidateScanMs?: number;
+    automationGroupAndOperationScopeMs?: number;
+    automationTerminalEvidenceMs?: number;
+    automationSessionPreflightMs?: number;
+    automationCrossSessionContextMs?: number;
+    automationPromptPreparationMs?: number;
+    automationServiceHandoffMs?: number;
     executionTargetHydrateMs?: number;
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
@@ -2232,6 +2257,106 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     preProviderSetupMs?: number;
     providerPlanAndGateMs?: number;
     linqEgressGuardMs?: number;
+  };
+}
+
+export const HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS = [
+  "automationReadinessMs",
+  "automationInputSelectionMs",
+  "automationPassSetupMs",
+  "automationCandidateScanMs",
+  "automationGroupAndOperationScopeMs",
+  "automationTerminalEvidenceMs",
+  "automationSessionPreflightMs",
+  "automationCrossSessionContextMs",
+  "automationPromptPreparationMs",
+  "automationServiceHandoffMs",
+] as const;
+
+type HostedRuntimeAutomationLaneTimingSubdivision = Required<Pick<
+  NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+  (typeof HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS)[number]
+>>;
+
+export type HostedRuntimeAutomationLaneTimingSubdivisionInspection =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | {
+      kind: "complete";
+      subdivision: HostedRuntimeAutomationLaneTimingSubdivision;
+    };
+
+export function inspectHostedRuntimeAutomationLaneTimingSubdivision(
+  preProvider: NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+): HostedRuntimeAutomationLaneTimingSubdivisionInspection {
+  const {
+    automationCandidateScanMs,
+    automationCrossSessionContextMs,
+    automationGroupAndOperationScopeMs,
+    automationInputSelectionMs,
+    automationPassSetupMs,
+    automationPromptPreparationMs,
+    automationReadinessMs,
+    automationServiceHandoffMs,
+    automationSessionPreflightMs,
+    automationTerminalEvidenceMs,
+  } = preProvider;
+  if (
+    automationCandidateScanMs === undefined
+    && automationCrossSessionContextMs === undefined
+    && automationGroupAndOperationScopeMs === undefined
+    && automationInputSelectionMs === undefined
+    && automationPassSetupMs === undefined
+    && automationPromptPreparationMs === undefined
+    && automationReadinessMs === undefined
+    && automationServiceHandoffMs === undefined
+    && automationSessionPreflightMs === undefined
+    && automationTerminalEvidenceMs === undefined
+  ) {
+    return { kind: "absent" };
+  }
+  if (
+    automationCandidateScanMs === undefined
+    || automationCrossSessionContextMs === undefined
+    || automationGroupAndOperationScopeMs === undefined
+    || automationInputSelectionMs === undefined
+    || automationPassSetupMs === undefined
+    || automationPromptPreparationMs === undefined
+    || automationReadinessMs === undefined
+    || automationServiceHandoffMs === undefined
+    || automationSessionPreflightMs === undefined
+    || automationTerminalEvidenceMs === undefined
+  ) {
+    return { kind: "invalid" };
+  }
+
+  const subdivision = {
+    automationReadinessMs,
+    automationInputSelectionMs,
+    automationPassSetupMs,
+    automationCandidateScanMs,
+    automationGroupAndOperationScopeMs,
+    automationTerminalEvidenceMs,
+    automationSessionPreflightMs,
+    automationCrossSessionContextMs,
+    automationPromptPreparationMs,
+    automationServiceHandoffMs,
+  };
+  const values = Object.values(subdivision);
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    return { kind: "invalid" };
+  }
+  const sum = values.reduce<number>((total, value) => total + value, 0);
+  if (
+    !Number.isSafeInteger(sum)
+    || !Number.isSafeInteger(preProvider.automationLaneToAssistantServiceMs)
+    || preProvider.automationLaneToAssistantServiceMs !== sum
+  ) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "complete",
+    subdivision,
   };
 }
 
@@ -2297,6 +2422,12 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",
+    "shellPrewarmFirstHintAtEpochMs",
+    "shellPrewarmFinishedAtEpochMs",
+    "shellPrewarmOperationElapsedMs",
+    "shellPrewarmHintCount",
+    "shellPrewarmOutcome",
+    "shellPrewarmSource",
     "workspaceReadElapsedMs",
     "runtimeStoreEnsureElapsedMs",
     "runtimeInvocationPreparationElapsedMs",
@@ -2343,6 +2474,16 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "mailboxImportDoneToAssistantPhaseMs",
     "workspaceAssistantPreAutomationMs",
     "automationLaneToAssistantServiceMs",
+    "automationReadinessMs",
+    "automationInputSelectionMs",
+    "automationPassSetupMs",
+    "automationCandidateScanMs",
+    "automationGroupAndOperationScopeMs",
+    "automationTerminalEvidenceMs",
+    "automationSessionPreflightMs",
+    "automationCrossSessionContextMs",
+    "automationPromptPreparationMs",
+    "automationServiceHandoffMs",
     "executionTargetHydrateMs",
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
@@ -2399,6 +2540,89 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "preProvider.receiptScanPerformed",
   ] as const;
 
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
+  Readonly<Record<string, readonly string[]>> = {
+    "orchestration.shellPrewarmOutcome": [
+      "cold_start_observed",
+      "failed",
+      "start_issued_warm",
+      "superseded",
+    ],
+    "orchestration.shellPrewarmSource": [
+      "linq-instant-start",
+      "linq-typing-started",
+      "unknown",
+    ],
+  };
+
+export type HostedRuntimeLatencyPhaseBreakdownLeafRule =
+  | { kind: "boolean" }
+  | { kind: "enum_string"; values: readonly string[] }
+  | { kind: "lease_generation" }
+  | { kind: "orchestration_attempt_id" }
+  | { kind: "safe_integer" };
+
+export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES: Readonly<
+  Record<
+    HostedRuntimeLatencyPhaseBreakdownPhase,
+    Readonly<Record<string, HostedRuntimeLatencyPhaseBreakdownLeafRule>>
+  >
+> = {
+  assistant: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("assistant"),
+  boot: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("boot"),
+  dispatch: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("dispatch"),
+  import: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("import"),
+  orchestration: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("orchestration"),
+  preProvider: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("preProvider"),
+  provider: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("provider"),
+  restore: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("restore"),
+  wake: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("wake"),
+};
+
+function buildHostedRuntimeLatencyPhaseBreakdownLeafRules(
+  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
+): Readonly<Record<string, HostedRuntimeLatencyPhaseBreakdownLeafRule>> {
+  return Object.fromEntries(
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS[phase].map(
+      (leafKey): [string, HostedRuntimeLatencyPhaseBreakdownLeafRule] => [
+        leafKey,
+        readHostedRuntimeLatencyPhaseBreakdownLeafRule(phase, leafKey),
+      ],
+    ),
+  );
+}
+
+function readHostedRuntimeLatencyPhaseBreakdownLeafRule(
+  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
+  leafKey: string,
+): HostedRuntimeLatencyPhaseBreakdownLeafRule {
+  if (
+    phase === "orchestration"
+    && (
+      leafKey === "directEnsureOrchestrationAttemptId"
+      || leafKey === "runtimeInvocationOrchestrationAttemptId"
+    )
+  ) {
+    return { kind: "orchestration_attempt_id" };
+  }
+  const allowedStringValues =
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES[`${phase}.${leafKey}`];
+  if (allowedStringValues) {
+    return { kind: "enum_string", values: allowedStringValues };
+  }
+  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
+    return { kind: "lease_generation" };
+  }
+  if (
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS.some(
+      (key) => key === `${phase}.${leafKey}`,
+    )
+  ) {
+    return { kind: "boolean" };
+  }
+  return { kind: "safe_integer" };
+}
+
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
@@ -2436,10 +2660,6 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   assistant: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.assistant),
   provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
 };
-
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET = new Set<string>(
-  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
-);
 
 export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
   value: unknown,
@@ -2641,25 +2861,23 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
-  if (
-    phase === "orchestration"
-    && (
-      leafKey === "directEnsureOrchestrationAttemptId"
-      || leafKey === "runtimeInvocationOrchestrationAttemptId"
-    )
-  ) {
-    return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+  const rule = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES[phase][leafKey];
+  switch (rule?.kind) {
+    case "boolean":
+      return typeof value === "boolean";
+    case "enum_string":
+      return typeof value === "string" && rule.values.includes(value);
+    case "lease_generation":
+      return typeof value === "string"
+        && value.length <= 20
+        && /^(?:0|[1-9]\d*)$/u.test(value);
+    case "orchestration_attempt_id":
+      return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+    case "safe_integer":
+      return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
+    default:
+      return false;
   }
-  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
-    return typeof value === "string"
-      && value.length <= 20
-      && /^(?:0|[1-9]\d*)$/u.test(value);
-  }
-  if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
-    return typeof value === "boolean";
-  }
-
-  return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
 }
 
 export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(

@@ -1,9 +1,11 @@
 import {
   type LinqMessageEditedEvent,
+  type LinqMessageReceivedPartsInspection,
   type LinqMessageReceivedEvent,
   type LinqParticipantChangedEvent,
   type LinqTypingIndicatorStartedEvent,
   type LinqWebhookEvent,
+  inspectLinqMessageReceivedParts,
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   parseLinqMessageEditedEvent,
@@ -28,6 +30,7 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 export type HostedLinqWebhookEvent = LinqWebhookEvent;
 export type HostedLinqMessageEditedEvent = LinqMessageEditedEvent;
 export type HostedLinqMessageReceivedEvent = LinqMessageReceivedEvent;
+export type HostedLinqMessageReceivedPartsInspection = LinqMessageReceivedPartsInspection;
 export type HostedLinqParticipantChangedEvent = LinqParticipantChangedEvent;
 export type HostedLinqTypingIndicatorStartedEvent = LinqTypingIndicatorStartedEvent;
 
@@ -67,6 +70,12 @@ export function requireHostedLinqMessageReceivedEvent(
 
     throw error;
   }
+}
+
+export function inspectHostedLinqMessageReceivedParts(
+  event: HostedLinqWebhookEvent,
+): HostedLinqMessageReceivedPartsInspection | null {
+  return inspectLinqMessageReceivedParts(event);
 }
 
 export function requireHostedLinqMessageEditedEvent(

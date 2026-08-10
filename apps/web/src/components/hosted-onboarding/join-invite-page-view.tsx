@@ -8,14 +8,32 @@ import {
   resolveJoinInviteTitle,
 } from "./join-invite-state";
 import type { JoinInvitePageModel } from "./join-invite-page-model";
-import { JoinInviteStatusRefreshIsland } from "./join-invite-islands";
+import {
+  JoinInviteSignOutButtonIsland,
+  JoinInviteStatusRefreshIsland,
+} from "./join-invite-islands";
 import { JoinInviteCenteredShell, JoinInviteShell } from "./join-invite-shell";
+import { JoinInviteSignedInMismatchView } from "./join-invite-signed-in-mismatch-view";
 import {
   isJoinInviteAutoPulseTrialReady,
   JoinInviteStageServer,
 } from "./join-invite-stage-server";
 
 export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
+  const signedInWithDifferentAccount = model.status.stage === "verify"
+    && model.status.session.authenticated
+    && !model.status.session.matchesInvite;
+
+  if (signedInWithDifferentAccount) {
+    return (
+      <JoinInviteSignedInMismatchView
+        signOutAction={
+          <JoinInviteSignOutButtonIsland idleLabel="Sign out and use invite" />
+        }
+      />
+    );
+  }
+
   const autoPulseTrialStarting = !model.launchConsent.gateActive
     && model.status.stage === "checkout"
     && isJoinInviteAutoPulseTrialReady(
