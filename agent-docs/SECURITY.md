@@ -569,9 +569,12 @@ Last verified: 2026-08-09
 - Paused companion device-sync ingress may wake the existing hosted runtime only
   through a system-lane mailbox pointer after companion access and historical
   launch consent are rechecked. Reconciliation exposes only pending system lag,
-  removes conversation lag and workspace wake authority, and blocks again once
-  that deterministic backlog drains. The existing `system_mailbox` invocation
-  remains model-free, Web projects `platformAiUsageAllowed: false`, and the
+  removes conversation lag and ordinary workspace wake authority, and blocks
+  again once that deterministic backlog drains. The existing `system_mailbox`
+  invocation imports and executes only `run-device-sync-wake` and remains
+  model-free. A failed preparation or receipt may preserve only an exact
+  `device-sync.reconcile` wake with the persisted paused-companion retry marker;
+  success clears it. Web projects `platformAiUsageAllowed: false`, and the
   write-fence provider-egress guard remains the final fail-closed boundary.
 - Automatic meal-photo enrollment, activation, and upload retain active paid
   access. Enrollment and activation translate the canonical inactive-access

@@ -207,6 +207,17 @@ When a hosted job needs device-sync access, Cloudflare must call the signed inte
 
 That execution-time access does not make Cloudflare the durable owner of hosted device-sync authority.
 
+Paused companion access uses the existing `system_mailbox` invocation mode as
+a narrow execution lane. Web admits only device-sync system lag after companion
+access and historical health consent are rechecked. The runner imports and
+executes only `run-device-sync-wake`, then crosses the ordinary durable
+checkpoint and dirty-ack boundary; it cannot enter conversation, delivery,
+assistant automation, or model work. If preparation or post-checkpoint receipt
+recording fails, the workspace may retain only an exact
+`device-sync.reconcile` wake paired with the persisted paused-companion retry
+marker. A successful receipt clears that marker. All other workspace wakes stay
+projected out while billing is paused.
+
 ### Local runtime
 
 The local vault runtime keeps:

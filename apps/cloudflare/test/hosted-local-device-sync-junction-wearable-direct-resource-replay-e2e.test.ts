@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   buildCloudflareHostedControlUserStatusPath,
@@ -67,12 +67,20 @@ import {
 import {
   expectJunctionWearableBiomarkerExpectationsToMatchProduction,
 } from "./helpers/junction-wearable-biomarker-contract.js";
+import {
+  seedHostedCompanionHrvRmssdObservation,
+  seedHostedLaunchConsentForTest,
+  updateHostedMemberBillingStatusForTest,
+} from "#hosted-web-testing";
+
+vi.mock("server-only", () => ({}));
 
 const runId = randomUUID().replace(/-/gu, "").slice(0, 16);
 const userId = `member_local_junction_wearable_${runId}`;
 const signedWebhookUserId = `member_local_junction_webhook_${runId}`;
 const retriedWebhookUserId = `member_local_junction_webhook_retry_${runId}`;
 const experimentAdherenceUserId = `member_local_junction_adherence_${runId}`;
+const pausedCompanionUserId = `member_local_junction_paused_companion_${runId}`;
 const experimentAdherenceChatId = `chat_local_junction_adherence_${runId}`;
 const experimentAdherenceSlug = `hosted-running-block-${runId}`;
 const experimentActivityNudgeSlug = `experiment-activity-nudge-${experimentAdherenceSlug}`;
@@ -197,6 +205,95 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(requireReplayResource("whoop_v2", "summary", "activity").recordCount).toBeGreaterThanOrEqual(5);
     expect(requireReplayResource("whoop_v2", "summary", "sleep").recordCount).toBeGreaterThanOrEqual(5);
   });
+
+  it("drains more than the companion backlog cap for a paused member without model egress", async () => {
+    const activeScenario = requireScenario();
+    const connectedAt = new Date().toISOString();
+
+    await activeScenario.seedActiveHostedMember({ memberId: pausedCompanionUserId });
+    await activeScenario.runWake(
+      buildMemberActivatedWake(
+        connectedAt,
+        pausedCompanionUserId,
+        "paused-companion",
+      ),
+      pausedCompanionUserId,
+      { timeoutMs: 300_000 },
+    );
+    await assertHostedRunnerCompletedWithoutError({
+      context: "paused companion activation",
+      scenario: activeScenario,
+      userId: pausedCompanionUserId,
+    });
+    await seedHostedLaunchConsentForTest({
+      environment: activeScenario.runtimeEnv,
+      memberId: pausedCompanionUserId,
+    });
+    const connection = await activeScenario.seedJunctionDeviceSyncConnection({
+      connectedAt,
+      displayName: "WHOOP",
+      externalAccountId: `junction-paused-companion-${runId}`,
+      memberId: pausedCompanionUserId,
+      sources: [{
+        displayName: "WHOOP",
+        sourceProviderSlug: "whoop_v2",
+      }],
+    });
+    await updateHostedMemberBillingStatusForTest({
+      billingStatus: "paused",
+      environment: activeScenario.runtimeEnv,
+      memberId: pausedCompanionUserId,
+    });
+    const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
+
+    // Expiring the completed activation container proves the first paused
+    // companion signal restores the workspace into a fresh runner process.
+    await activeScenario.harness.expireRunnerActivityForTest(pausedCompanionUserId);
+
+    const observationCount = 17;
+    for (let index = 0; index < observationCount; index += 1) {
+      const acceptedAt = new Date(Date.now() + index).toISOString();
+      const nightDate = new Date(Date.UTC(2026, 6, index + 1))
+        .toISOString()
+        .slice(0, 10);
+      await seedHostedCompanionHrvRmssdObservation({
+        acceptedAt,
+        connectionId: connection.connectionId,
+        environment: activeScenario.runtimeEnv,
+        memberId: pausedCompanionUserId,
+        observation: {
+          acceptedWindowCount: 72,
+          completedWindowCount: 96,
+          methodVersion: "prv-rmssd-5m-mean-scheduled-0000-0800-local-v1",
+          nightDate,
+          rmssdMs: 50 + index / 10,
+          schema: "murph.companion.overnight-prv-rmssd.v1",
+        },
+      });
+      await waitForPausedCompanionDirtyDrain({
+        connectionId: connection.connectionId,
+        scenario: activeScenario,
+        userId: pausedCompanionUserId,
+      });
+    }
+
+    const finalStatus = await assertHostedRunnerCompletedWithoutError({
+      context: "paused companion backlog drain",
+      scenario: activeScenario,
+      userId: pausedCompanionUserId,
+    });
+    expect(finalStatus.workspace).not.toBeNull();
+    expect(activeScenario.assistantProviderRequests).toHaveLength(
+      providerRequestBaseline,
+    );
+    expect(await activeScenario.readJunctionDeviceSyncReplayDrainStatus({
+      connectionId: connection.connectionId,
+      memberId: pausedCompanionUserId,
+    })).toMatchObject({
+      hasPendingDirtyConnection: false,
+      hasPendingDirtyConnectionForUser: false,
+    });
+  }, 720_000);
 
   it("keeps signed Junction imports equivalent when the provider retries a lost acknowledgement", async () => {
     const replayPlan = requirePlan();
@@ -718,6 +815,40 @@ async function assertHostedRunnerCompletedWithoutError(input: {
     ]));
   }
   return status;
+}
+
+async function waitForPausedCompanionDirtyDrain(input: {
+  connectionId: string;
+  scenario: HostedLocalFullStackScenario;
+  userId: string;
+}): Promise<void> {
+  const deadline = Date.now() + 180_000;
+  let latest = await input.scenario.readJunctionDeviceSyncReplayDrainStatus({
+    connectionId: input.connectionId,
+    memberId: input.userId,
+  });
+  while (
+    Date.now() < deadline
+    && (
+      latest.hasPendingDirtyConnection
+      || latest.hasPendingDirtyConnectionForUser
+    )
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    latest = await input.scenario.readJunctionDeviceSyncReplayDrainStatus({
+      connectionId: input.connectionId,
+      memberId: input.userId,
+    });
+  }
+  if (
+    latest.hasPendingDirtyConnection
+    || latest.hasPendingDirtyConnectionForUser
+  ) {
+    throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+      "Paused companion dirty state did not reach the authoritative acknowledgement boundary.",
+      `dirty drain status: ${JSON.stringify(latest)}`,
+    ]));
+  }
 }
 
 function countAssistantResponsesApiRequests(): number {

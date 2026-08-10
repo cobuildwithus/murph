@@ -486,15 +486,19 @@ reply after its deadline.
 If a `system_mailbox` invocation owns the active fence when foreground/default
 work arrives, the runner uses the same exact-child abort and identity-cleared
 replacement path. It must start a default-mode child rather than coalescing the
-wake because system-mailbox mode imports only system work and returns before
-assistant admission. A system-mailbox request behind an active default runtime
-remains deferred and cannot broaden that child's admission authority.
+wake because system-mailbox mode is bounded to selected system work and returns
+before assistant admission. A system-mailbox request behind an active default
+runtime remains deferred and cannot broaden that child's admission authority.
 The Web-owned paused-companion exception can select this mode only from pending
 device-sync system-lane lag after companion access and historical consent are
-rechecked. Its reconciliation projection omits conversation lag and every
-workspace wake, and the workspace read projects managed AI usage denied. The
-mode therefore cannot enter assistant admission, and the bound fence continues
-to reject metered provider egress if an unexpected path reaches it.
+rechecked. Its reconciliation projection omits conversation lag and ordinary
+workspace wakes, and the workspace read projects managed AI usage denied. The
+runtime imports and executes only `run-device-sync-wake` through the existing
+checkpoint and dirty-ack path. A failed preparation or post-checkpoint receipt
+may retain only an exact persisted paused-companion retry marker paired with a
+`device-sync.reconcile` wake; success clears the marker. The mode therefore
+cannot enter assistant admission, and the bound fence continues to reject
+metered provider egress if an unexpected path reaches it.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -1748,10 +1752,11 @@ caller sends its existing ensure-processing HTTP timeout as an internal header.
 An expected managed AI usage denial observed by the workspace read is not a
 transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
-`system_mailbox` path, which imports eligible model-free system work and exits
-before foreground assistant admission. It binds that effective processing mode
-into the same fence so controller priority, preemption, and the container job
-cannot diverge; the fence also rejects all metered provider egress if the runtime
+`system_mailbox` path. For the paused companion exception, that path imports and
+executes only the model-free `run-device-sync-wake` route and exits before
+foreground assistant admission. It binds that effective processing mode into
+the same fence so controller priority, preemption, and the container job cannot
+diverge; the fence also rejects all metered provider egress if the runtime
 reaches one unexpectedly. Explicit media
 retention remains model-free, and custom inference keeps its selected route.
 This keeps a racing payloadless direct wake from manufacturing `runtime_error`

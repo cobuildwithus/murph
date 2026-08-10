@@ -1706,6 +1706,104 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).not.toHaveBeenCalled();
   });
 
+  it("admits only the exact paused companion device-sync record retry wake", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "paused",
+    }));
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
+      billingStatus: "paused",
+    }));
+    mocks.hostedConsentGrantFindUnique.mockResolvedValue({
+      scope: "launch.health-data",
+      status: "granted",
+    });
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "device-sync.reconcile",
+      redactedStatusJson: {
+        hostedPausedCompanionDeviceSyncRetryPending: true,
+        systemImportedSeq: "33",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "33" },
+    ]);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts).toEqual({
+      blocked: null,
+      mailboxLag: [{
+        importedSeq: "33",
+        lag: "0",
+        lane: "system",
+        maxSeq: "33",
+      }],
+      workspace: {
+        inboxMediaRetentionWakeAt: null,
+        nextWakeAt: FIXED_NOW,
+        nextWakeReason: "device-sync.reconcile",
+        version: "4",
+      },
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxConsumedSeqByLane).not.toHaveBeenCalled();
+  });
+
+  it("rejects a paused companion retry marker paired with an assistant wake", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "paused",
+    }));
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
+      billingStatus: "paused",
+    }));
+    mocks.hostedConsentGrantFindUnique.mockResolvedValue({
+      scope: "launch.health-data",
+      status: "granted",
+    });
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW,
+      nextWakeReason: "assistant",
+      redactedStatusJson: {
+        hostedPausedCompanionDeviceSyncRetryPending: true,
+        systemImportedSeq: "33",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "33" },
+    ]);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts).toEqual({
+      blocked: {
+        reason: "user_not_active",
+        retryAt: null,
+      },
+      mailboxLag: [],
+      workspace: {
+        inboxMediaRetentionWakeAt: null,
+        nextWakeAt: FIXED_NOW,
+        nextWakeReason: "assistant",
+        version: "4",
+      },
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxConsumedSeqByLane).not.toHaveBeenCalled();
+  });
+
   it("keeps paused companion conversation-only lag behind active access", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "paused",

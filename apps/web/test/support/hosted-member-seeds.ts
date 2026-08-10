@@ -8,10 +8,17 @@ import {
 import {
   decodeHostedDeviceRoutingIndexKey,
 } from "../../src/lib/device-sync/routing-index";
+import type {
+  CompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 
 const prismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
 const deviceSyncPrismaStoreModuleSpecifier = new URL(
   "../../src/lib/device-sync/prisma-store.ts",
+  import.meta.url,
+).href;
+const deviceSyncWakeServiceModuleSpecifier = new URL(
+  "../../src/lib/device-sync/wake-service.ts",
   import.meta.url,
 ).href;
 const contactPrivacyModuleSpecifier = new URL(
@@ -172,6 +179,14 @@ export interface HostedJunctionDeviceSyncReplayDrainStatus {
   historicalBackfillEvidence: string | null;
   historicalBackfillLastEmptyAt: string | null;
   historicalBackfillStatus: string | null;
+}
+
+export interface HostedCompanionHrvRmssdObservationSeedInput {
+  acceptedAt: string;
+  connectionId: string;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+  observation: CompanionHrvRmssdObservation;
 }
 
 export interface HostedAppSessionForTestInput {
@@ -362,7 +377,11 @@ interface HostedDeviceSyncControlPlaneStore {
   getStoredConnectionAccountForUser(
     userId: string,
     connectionId: string,
-  ): Promise<{ metadata: Record<string, unknown> } | null>;
+  ): Promise<{
+    id: string;
+    metadata: Record<string, unknown>;
+    provider: string;
+  } | null>;
   listConnectionsForUser(userId: string): Promise<Array<{
     id: string;
     provider: string;
@@ -454,6 +473,20 @@ interface HostedJunctionDeviceSyncReplaySeedModules {
   createPrismaClient: HostedMemberSeedPrismaModule["createPrismaClient"];
   PrismaDeviceSyncControlPlaneStore:
     HostedDeviceSyncPrismaStoreModule["PrismaDeviceSyncControlPlaneStore"];
+}
+
+interface HostedCompanionHrvRmssdSeedModules
+  extends HostedJunctionDeviceSyncReplaySeedModules {
+  acceptHostedCompanionHrvRmssdObservation(input: {
+    acceptedAt: string;
+    account: { id: string; provider: string };
+    resource: unknown;
+    store: HostedDeviceSyncControlPlaneStore;
+    userId: string;
+  }): Promise<void>;
+  buildHostedCompanionHrvRmssdDirtyResource(
+    observation: CompanionHrvRmssdObservation,
+  ): unknown;
 }
 
 interface HostedAppSessionModule {
@@ -938,6 +971,53 @@ export async function seedHostedJunctionDeviceSyncConnection(
   });
 }
 
+export async function seedHostedCompanionHrvRmssdObservation(
+  input: HostedCompanionHrvRmssdObservationSeedInput,
+): Promise<void> {
+  if (!input.memberId.trim() || !input.connectionId.trim()) {
+    throw new Error(
+      "Hosted companion HRV seed requires member id and connection id.",
+    );
+  }
+
+  await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedCompanionHrvRmssdSeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({ environment, modules });
+    const store = new modules.PrismaDeviceSyncControlPlaneStore({
+      prisma,
+      providerAccountBlindIndexKey:
+        readHostedJunctionReplayProviderAccountBlindIndexKey(environment),
+    });
+
+    try {
+      const account = await store.getStoredConnectionAccountForUser(
+        input.memberId,
+        input.connectionId,
+      );
+      if (
+        !account
+        || account.id !== input.connectionId
+        || account.provider !== "junction"
+      ) {
+        throw new Error(
+          "Hosted companion HRV seed requires one matching Junction connection.",
+        );
+      }
+      await modules.acceptHostedCompanionHrvRmssdObservation({
+        acceptedAt: input.acceptedAt,
+        account,
+        resource: modules.buildHostedCompanionHrvRmssdDirtyResource(
+          input.observation,
+        ),
+        store,
+        userId: input.memberId,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
 export async function seedHostedJunctionDeviceSyncReplay(
   input: HostedJunctionDeviceSyncReplaySeedInput,
 ): Promise<HostedJunctionDeviceSyncReplaySeedResult> {
@@ -1349,6 +1429,28 @@ async function loadHostedJunctionDeviceSyncReplaySeedModules(
     createPrismaClient: typedPrismaModule.createPrismaClient,
     PrismaDeviceSyncControlPlaneStore:
       typedDeviceSyncPrismaStoreModule.PrismaDeviceSyncControlPlaneStore,
+  };
+}
+
+async function loadHostedCompanionHrvRmssdSeedModules(
+  environment: NodeJS.ProcessEnv,
+): Promise<HostedCompanionHrvRmssdSeedModules> {
+  const [modules, wakeServiceModule] = await Promise.all([
+    loadHostedJunctionDeviceSyncReplaySeedModules(environment),
+    import(deviceSyncWakeServiceModuleSpecifier),
+  ]);
+  const typedWakeServiceModule =
+    wakeServiceModule as Pick<
+      HostedCompanionHrvRmssdSeedModules,
+      | "acceptHostedCompanionHrvRmssdObservation"
+      | "buildHostedCompanionHrvRmssdDirtyResource"
+    >;
+  return {
+    ...modules,
+    acceptHostedCompanionHrvRmssdObservation:
+      typedWakeServiceModule.acceptHostedCompanionHrvRmssdObservation,
+    buildHostedCompanionHrvRmssdDirtyResource:
+      typedWakeServiceModule.buildHostedCompanionHrvRmssdDirtyResource,
   };
 }
 

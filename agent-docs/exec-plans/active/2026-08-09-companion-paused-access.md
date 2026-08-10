@@ -62,8 +62,10 @@ Updated: 2026-08-10
    active-access gated, or relaxing that gate admits model-capable work.
    Mitigation: admit only pending system-lane lag after companion access,
    historical launch consent, and health-data consent checks; remove
-   conversation and workspace wake authority and retain the existing model-free
-   system-mailbox mode and provider-egress fence.
+   conversation and ordinary workspace-wake authority; execute only the
+   existing `run-device-sync-wake` route in model-free system-mailbox mode; and
+   retain the provider-egress fence. An exact persisted retry marker may retain
+   only that device-sync route's `device-sync.reconcile` wake.
 5. Risk: a native signed contact-card handoff still fails at the browser
    redemption boundary.
    Mitigation: bind companion redemption to the exact HMAC-signed, server-owned
@@ -83,8 +85,10 @@ Updated: 2026-08-10
 
 ## Decisions
 
-- Ship this as a Web/backend compatibility change. No native request, response,
-  error, or state-machine contract changes.
+- Ship this as a backend compatibility change across Web/Vercel and the hosted
+  runtime/Cloudflare container. No native request, response, error, or
+  state-machine contract changes, so no App Store or Play Store release is
+  required.
 - Keep meal-photo capture enrollment and upload on active paid access because
   they can authorize assistant/model processing and are not required to open
   or sync the companion.
@@ -96,9 +100,13 @@ Updated: 2026-08-10
   Canceled, unpaid, suspended, and other inactive states retain the canonical
   account-level access response.
 - Process accepted paused health ingress only through the existing
-  `system_mailbox` runtime mode. Reconciliation exposes system lag alone and
-  removes conversation/default/workspace wake authority, so no assistant or
-  model admission is opened.
+  `system_mailbox` runtime mode. Reconciliation normally exposes system lag
+  alone and removes conversation/default/workspace wake authority. The runtime
+  imports and executes only `run-device-sync-wake` through the existing durable
+  checkpoint and acknowledgement flow; it does not enter assistant automation,
+  conversation work, delivery, or model admission. A failed preparation or
+  post-checkpoint receipt may persist one exact device-sync retry marker and
+  `device-sync.reconcile` wake, which is cleared after a successful receipt.
 - The native repository has no release tag or other durable mapping from the
   App Store binary to a source commit. Compatibility is therefore based on the
   unchanged HTTP shapes plus inspection of the current native resume/connect
@@ -111,17 +119,32 @@ Updated: 2026-08-10
   contact-card redemption, meal-photo paid-boundary mapping, runtime signal,
   and reconciliation (8 files, 371 tests).
 - Passed after the final reconciliation tightening: focused reconciliation
-  facts suite (1 file, 46 tests).
-- Passed: `pnpm --dir apps/web typecheck:prepared`.
+  facts suite (1 file, 48 tests).
+- Passed: complete focused assistant runtime phase and entrypoint suites
+  (2 files, 551 tests), including preparation retry, receipt retry, successful
+  marker clearing, device-only execution, and preservation of unrelated
+  system-work wake authority.
+- Passed: `pnpm --dir apps/web typecheck:prepared`, assistant-runtime
+  typecheck, and Cloudflare typecheck.
 - Passed: ESLint over every changed Web TypeScript file.
 - Passed: focused Cloudflare runner identity/egress-fence proof (2 files,
-  3 selected tests) and assistant-runtime system-mailbox proof (1 selected
-  test).
+  3 selected tests).
+- Passed: hosted runner bundle assembly and parity probes; measured total
+  9,948,429 bytes under the 9,981,197-byte ratcheted ceiling.
+- Authored: a production-path hosted local E2E that cold-restores a paused
+  member, accepts 17 distinct companion observations, crosses the dirty-ack
+  boundary, and asserts zero assistant-provider requests. Local execution is
+  blocked before test start because Docker is not installed (`spawn docker
+  ENOENT`); the test remains available for a Docker-capable hosted-local lane.
 - Passed: `git diff --check` and changed-line direct-identifier review; only
   pre-existing synthetic fixtures appeared in whole-file scanning.
 - Passed on the first reviewed head: exact-head GitHub Actions, preliminary
   specialist ReviewGPT, and final ReviewGPT round 1. Accepted round-1 findings
   produced the lifecycle, contact-card, meal mapping, and deterministic runtime
   remediations above.
-- Required after remediation: final ReviewGPT round 2 and exact-head GitHub
+- Final ReviewGPT round 2 found that import-only paused processing could advance
+  the Web watermark while leaving device-sync dirty state local and unexecuted.
+  The accepted finding is remediated by the exact device-only execution and
+  retry contract above.
+- Required after remediation: final ReviewGPT round 3 and exact-head GitHub
   Actions.

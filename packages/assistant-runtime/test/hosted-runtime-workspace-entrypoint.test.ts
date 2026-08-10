@@ -31,6 +31,7 @@ import {
 } from "@murphai/inboxd";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
@@ -9164,9 +9165,6 @@ describe("hosted workspace runtime entrypoint", () => {
               workspace: createWorkspaceState(),
             }),
           }),
-          async runAssistantPhase() {
-            throw new Error("System mailbox processing must not enter assistant phase.");
-          },
           vaultRoot,
         },
       );
@@ -9200,9 +9198,12 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       });
       assert.ok(cronStatus.nextRunAt);
-      assert.ok(importCheckpoint?.nextWakeAt);
-      assert.equal(importCheckpoint?.nextWakeReason, "assistant");
-      assert.equal(result.nextWakeAt, importCheckpoint?.nextWakeAt);
+      const scheduledCheckpoint = checkpointRequests
+        .slice()
+        .reverse()
+        .find((request) => request.nextWakeReason === "assistant");
+      assert.ok(scheduledCheckpoint?.nextWakeAt);
+      assert.equal(result.nextWakeAt, scheduledCheckpoint.nextWakeAt);
       assert.equal(result.nextWakeReason, "assistant");
       assert.equal(result.status, "scheduled");
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
@@ -9223,6 +9224,131 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         status: "active",
       });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("system mailbox mode executes only device-sync wakes without entering model work", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const deviceSyncItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:paused-companion",
+      id: "mailbox_item_system_mailbox_device_sync",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const memberActivatedItem = createMailboxItem({
+      dedupeKey: "member.activated:paused-companion",
+      id: "mailbox_item_system_mailbox_member_activated",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "2",
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const platform = createPlatform({
+        deviceSyncPort,
+        mailboxPort: createMailboxPort({
+          events,
+          fetchRequests,
+          items: [
+            deviceSyncItem,
+            memberActivatedItem,
+            createMailboxItem({
+              id: "mailbox_item_system_mailbox_conversation",
+              laneSeq: "1",
+            }),
+          ],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState(),
+        }),
+      });
+      const bridgeImporter = createHostedWorkspaceBridgeMailboxImporter({
+        decodeMailboxPayload: {
+          async decode(request) {
+            if (request.itemRef.id === deviceSyncItem.id) {
+              return {
+                status: "decoded",
+                wake: buildHostedExecutionDeviceSyncWake({
+                  eventId: deviceSyncItem.dedupeKey,
+                  occurredAt: deviceSyncItem.occurredAt,
+                  reason: "webhook_hint",
+                  userId: TEST_USER_ID,
+                }),
+              };
+            }
+            return {
+              status: "decoded",
+              wake: buildHostedExecutionMemberActivatedWake({
+                eventId: memberActivatedItem.dedupeKey,
+                memberChannels: {
+                  email: false,
+                  linq: false,
+                  telegram: false,
+                },
+                memberId: TEST_USER_ID,
+                occurredAt: memberActivatedItem.occurredAt,
+                signupWelcome: null,
+                timeZone: "UTC",
+              }),
+            };
+          },
+        },
+        runtime: normalizeHostedAssistantRuntimeConfig({}, platform),
+        vaultRoot,
+      });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_device_sync",
+            processingMode: "system_mailbox",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-device-sync.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          importItem: bridgeImporter,
+          platform,
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(
+        fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
+        [["system"], ["system"], ["system"]],
+      );
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 1);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(result.redactedStatus?.hostedSystemMailboxRecorded, 0);
+      assert.equal(result.redactedStatus?.hostedSystemMailboxPrepared, 1);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.status, "scheduled");
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({
+          routeAction: item.routeAction,
+          status: item.status,
+        })),
+        [{ routeAction: "apply-member-activation", status: "pending" }],
+      );
+      assert.ok(checkpointRequests.length > 0);
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
     } finally {
       await removeTempRoot(vaultRoot);
     }

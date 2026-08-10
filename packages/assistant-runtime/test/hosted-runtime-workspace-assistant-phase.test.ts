@@ -12428,6 +12428,148 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
   });
 
+  it("marks an explicit paused companion device-sync preparation retry", async () => {
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      errorCode: "system_mailbox.retryable",
+      errorMessage: "redacted",
+      itemId: "system_mailbox_item_device_sync_retryable",
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      status: "retryable_failed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      foregroundCausalOnly: true,
+      now: () => "2026-04-27T00:00:00.000Z",
+      systemMailboxRouteActions: ["run-device-sync-wake"],
+      workspace: createDueAssistantWorkspace(),
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      redactedStatus: expect.objectContaining({
+        hostedPausedCompanionDeviceSyncRetryPending: true,
+      }),
+    }));
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedRouteActions: ["run-device-sync-wake"],
+      }),
+    );
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
+  });
+
+  it("clears the paused companion retry marker after its device-sync receipt records", async () => {
+    const deviceSyncItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "run-device-sync-wake" as const,
+      wake: {
+        eventId: "evt_synthetic_device_sync_retry_recorded",
+        kind: "device-sync.wake" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        reason: "connected" as const,
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: deviceSyncItem,
+      itemId: "system_mailbox_item_device_sync_retry_recorded",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt: null,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      failed: 0,
+      nextWakeAt: null,
+      recorded: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      foregroundCausalOnly: true,
+      now: () => "2026-04-27T00:00:00.000Z",
+      systemMailboxRouteActions: ["run-device-sync-wake"],
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:00:00.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: {
+          hostedPausedCompanionDeviceSyncRetryPending: true,
+        },
+      }),
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      redactedStatus: expect.objectContaining({
+        hostedPausedCompanionDeviceSyncRetryPending: false,
+        hostedSystemMailboxRecorded: 1,
+      }),
+    }));
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
+  });
+
+  it("marks an explicit paused companion device-sync receipt retry", async () => {
+    const retryAt = "2026-04-27T00:01:00.000Z";
+    const deviceSyncItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "run-device-sync-wake" as const,
+      wake: {
+        eventId: "evt_synthetic_device_sync_receipt_retry",
+        kind: "device-sync.wake" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        reason: "connected" as const,
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: deviceSyncItem,
+      itemId: "system_mailbox_item_device_sync_receipt_retry",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt: null,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      failed: 1,
+      nextWakeAt: retryAt,
+      recorded: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      foregroundCausalOnly: true,
+      now: () => "2026-04-27T00:00:00.000Z",
+      systemMailboxRouteActions: ["run-device-sync-wake"],
+      workspace: createDueAssistantWorkspace(),
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: retryAt,
+      nextWakeReason: "device-sync.reconcile",
+      redactedStatus: expect.objectContaining({
+        hostedPausedCompanionDeviceSyncRetryPending: true,
+        hostedSystemMailboxRecordFailed: 1,
+      }),
+    }));
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
+  });
+
   it("preserves a device-sync mailbox follow-up wake after recording the mailbox item", async () => {
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
     const deviceSyncItem = {
@@ -17355,6 +17497,7 @@ function createPhaseInput(input: {
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
   signal?: HostedWorkspaceRuntimeAssistantPhaseInput["signal"];
+  systemMailboxRouteActions?: HostedWorkspaceRuntimeAssistantPhaseInput["systemMailboxRouteActions"];
   runtimeActionApprovalPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
   >;
@@ -17554,6 +17697,7 @@ function createPhaseInput(input: {
     runtimeEnv: input.runtimeEnv ?? {},
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     signal: input.signal,
+    systemMailboxRouteActions: input.systemMailboxRouteActions,
     workspace: input.workspace ?? null,
   };
 }

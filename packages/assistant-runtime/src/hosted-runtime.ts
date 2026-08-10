@@ -191,6 +191,7 @@ import {
 import {
   enqueueHostedSystemMailboxItem,
   resolveHostedSystemMailboxNextWakeCandidate,
+  type HostedSystemMailboxRouteAction,
 } from "./hosted-runtime/system-mailbox.ts";
 import {
   createHostedDetachedAssistantAskController,
@@ -1853,9 +1854,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     if (initialMailboxImportResult.bootstrapPending) {
       return await returnInitialMailboxImportBeforeForeground();
     }
-    if (input.request.processingMode === "system_mailbox") {
-      return await returnInitialMailboxImportBeforeForeground();
-    }
     if (
       shouldCheckpointHostedReplayBudgetProgressBeforeForeground({
         mailboxBudgetExhausted: mailboxBudget.exhausted,
@@ -1956,6 +1954,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
       requestId: string;
       signal?: AbortSignal;
+      systemMailboxRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedWorkspaceRunnerResult> => {
       const passSignal = passInput.signal ?? runtimeAbortController.signal;
@@ -2045,6 +2044,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 ...phaseInput,
                 foregroundCausalOnly:
                   passInput.foregroundCausalOnly === true,
+                systemMailboxRouteActions:
+                  passInput.systemMailboxRouteActions ?? null,
                 currentAssistantInputId: () => currentAssistantInputId,
                 imageGenerationLauncher:
                   imageGenerationController?.launcher ?? null,
@@ -2163,6 +2164,110 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         throw error;
       }
     };
+    if (input.request.processingMode === "system_mailbox") {
+      const systemMailboxRouteActions = ["run-device-sync-wake"] as const;
+      const deviceSyncSystemMailboxWake =
+        await resolveHostedSystemMailboxNextWakeCandidate({
+          allowedRouteActions: systemMailboxRouteActions,
+          vaultRoot: restored.vaultRoot,
+        });
+      if (!deviceSyncSystemMailboxWake.at) {
+        return await returnInitialMailboxImportBeforeForeground();
+      }
+      let passWorkspace = activeWorkspace;
+      let passInitialMailboxImport: HostedWorkspaceRunnerInput["initialMailboxImport"] =
+        initialMailboxImport;
+      let passInitialMailboxImportContext: HostedWorkspaceRunnerMailboxImportContext | null =
+        initialMailboxImportContext;
+      let passInitialMailboxPrefetch: HostedMailboxPrefixPrefetch | null =
+        initialMailboxImportResult.prefetch;
+      let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> = {};
+      let result!: HostedWorkspaceRunnerResult;
+      let passOrdinal = 0;
+
+      do {
+        passOrdinal += 1;
+        result = await runWorkspaceForegroundPass({
+          foregroundCausalOnly: true,
+          initialMailboxImport: passInitialMailboxImport,
+          initialMailboxImportContext: passInitialMailboxImportContext,
+          initialMailboxPrefetch: passInitialMailboxPrefetch,
+          requestId: `${requestId}:system-mailbox:${passOrdinal}`,
+          systemMailboxRouteActions,
+          workspace: passWorkspace,
+        });
+        redactedStatus = mergeHostedWorkspaceInvocationRedactedStatus(
+          redactedStatus,
+          buildHostedWorkspaceRunnerRedactedStatus(result),
+        );
+        passWorkspace = resolveHostedWorkspaceRunnerCommittedWorkspace({
+          result,
+          workspace: passWorkspace,
+        });
+        passInitialMailboxImport = result.latestMailboxImport;
+        passInitialMailboxImportContext = null;
+        passInitialMailboxPrefetch = null;
+      } while (
+        result.assistantPhaseResult?.progressed === true
+        && !mailboxBudgetExhausted()
+        && readHostedWorkspaceInvocationRedactedNumber(
+          buildHostedWorkspaceRunnerRedactedStatus(result),
+          "hostedSystemMailboxPrepared",
+        ) > 0
+        && readHostedWorkspaceInvocationRedactedNumber(
+          buildHostedWorkspaceRunnerRedactedStatus(result),
+          "hostedSystemMailboxRetryableFailed",
+        ) === 0
+      );
+
+      const assistantPhaseProjectsWake = result.assistantPhaseResult !== null
+        && Object.hasOwn(result.assistantPhaseResult, "nextWakeAt");
+      const nextWake = selectEarliestHostedRuntimeWake([
+        assistantPhaseProjectsWake
+          ? {
+              at: result.assistantPhaseResult?.nextWakeAt ?? null,
+              reason: result.assistantPhaseResult?.nextWakeAt
+                ? result.assistantPhaseResult.nextWakeReason ?? "assistant"
+                : null,
+            }
+          : {
+              at: passWorkspace?.nextWakeAt ?? null,
+              reason: passWorkspace?.nextWakeReason ?? null,
+            },
+        {
+          at: result.mailboxRetryAt
+            ?? result.latestMailboxImport.importResult.nextRetryAt
+            ?? null,
+          reason: result.mailboxRetryAt
+            || result.latestMailboxImport.importResult.nextRetryAt
+            ? "mailbox"
+            : null,
+        },
+      ]);
+      const invocationResult = {
+        nextWakeAt: nextWake.nextWakeAt,
+        ...(nextWake.nextWakeReason
+          ? { nextWakeReason: nextWake.nextWakeReason }
+          : {}),
+        redactedStatus,
+        status: resolveHostedWorkspaceInvocationStatus({
+          mailboxBudgetExhausted: mailboxBudgetExhausted(),
+          nextWakeAt: nextWake.nextWakeAt,
+        }),
+      };
+      emitPhaseLog({
+        details: {
+          invocationStatus: invocationResult.status,
+          nextWakeAtPresent: invocationResult.nextWakeAt !== null,
+          systemMailboxPassCount: passOrdinal,
+        },
+        input,
+        requestId,
+        stage: "runtime.return",
+        status: "done",
+      });
+      return invocationResult;
+    }
     const runBrowserVaultRefreshMaintenance = async (maintenanceInput: {
       signal?: AbortSignal;
       workspace: HostedWorkspaceState | null;

@@ -255,10 +255,18 @@ export async function readHostedRuntimeReconciliationFacts(
   }
 
   if (!activeAccess) {
+    const companionDeviceSyncRetryPending =
+      redactedStatus?.hostedPausedCompanionDeviceSyncRetryPending === true
+      && projectedWorkspace.nextWakeAt !== null
+      && projectedWorkspace.nextWakeReason === "device-sync.reconcile";
     const companionWorkspace = projectHostedCompanionSystemMailboxWorkspace(
       projectedWorkspace,
+      companionDeviceSyncRetryPending,
     );
-    const facts = hasHostedMailboxLag(admittedMailboxLag, "system")
+    const facts = (
+      hasHostedMailboxLag(admittedMailboxLag, "system")
+      || companionDeviceSyncRetryPending
+    )
       ? parseHostedRuntimeReconciliationFacts({
           blocked: null,
           mailboxLag: admittedMailboxLag,
@@ -839,11 +847,14 @@ function projectHostedRuntimeReconciliationWorkspace(
 
 function projectHostedCompanionSystemMailboxWorkspace(
   workspace: HostedRuntimeReconciliationFactsWorkspace,
+  preserveDeviceSyncRetry = false,
 ): HostedRuntimeReconciliationFactsWorkspace {
   return {
     inboxMediaRetentionWakeAt: null,
-    nextWakeAt: null,
-    nextWakeReason: null,
+    nextWakeAt: preserveDeviceSyncRetry ? workspace.nextWakeAt : null,
+    nextWakeReason: preserveDeviceSyncRetry
+      ? "device-sync.reconcile"
+      : null,
     version: workspace.version,
   };
 }
