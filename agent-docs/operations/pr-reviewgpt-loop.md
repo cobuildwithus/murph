@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-05
+Last verified: 2026-08-10
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -100,13 +100,15 @@ or advance the final gate's baseline.
 
 Run the preliminary preset with exact-head packaging:
 
+The repo config defaults response capture to 180 minutes. The workflow commands
+inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
+
 ```bash
 REVIEW_GPT_PR_URL=<pr-url-or-number> \
 REVIEW_GPT_REVIEW_PHASE=preliminary \
 REVIEW_GPT_RENDERED_EVIDENCE_PATHS=$'audit-packages/<desktop>.png\naudit-packages/<mobile>.png' \
   pnpm review:gpt completion-specialists \
     --wait \
-    --wait-timeout 120m \
     --response-marker SPECIALIST_REVIEW_COMPLETE \
     --response-file audit-packages/pr-<number>-specialists.md \
     --prompt "Preliminary specialist review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Apply the product-experience, prompt, frontend, and coverage lenses declared in the PR body."
@@ -186,7 +188,8 @@ Run the loop when all of the following hold:
 
 1. The task used the worktree/PR lane and a PR is open.
 2. The routed work is final-ReviewGPT-eligible rather than docs/process-only,
-   prompt-primary, or trivial copy-only.
+   prompt-primary, frontend-only work that satisfies the eligibility exemption,
+   or trivial copy-only.
 3. Focused local proof and the parent's candidate review are complete, and the
    exact pushed candidate is stable enough for a full-patch audit.
 4. The preliminary specialist pass starts against the same exact head when any
@@ -233,14 +236,17 @@ preliminary specialist pass on the same head; use separate managed browser
 lanes for concurrent ReviewGPT jobs. Green CI on the final head and resolved
 results from both ReviewGPT stages remain separate merge-readiness gates.
 
-Skip the final gate for docs/process-only PRs, prompt-primary PRs, trivial
-copy-only changes, other low-risk changes that satisfy
+Skip the final gate for docs/process-only PRs, prompt-primary PRs,
+frontend-only PRs that satisfy the eligibility exemption, trivial copy-only
+changes, other low-risk changes that satisfy
 `agent-docs/operations/completion-workflow.md` § Final ReviewGPT Eligibility, or
 explicit current-task user opt-out. If ReviewGPT is opted out and the
 cross-cutting trigger still applies, route to local `deep-review` instead;
 never run both. Prompt-primary PRs still run the preliminary specialist prompt
-lens; run the separate final gate only when non-prompt scope independently
-requires it or the current user explicitly asks for it.
+lens, and exempt frontend-only PRs still run every applicable preliminary
+product, frontend, and coverage lens plus their ordinary rendered and UI proof.
+Run the separate final gate only when other scope independently requires it or
+the current user explicitly asks for it.
 
 ## One Round
 
@@ -278,7 +284,6 @@ requires it or the current user explicitly asks for it.
    REVIEW_GPT_ROUND_NUMBER=1 \
      pnpm review:gpt pr-review \
        --wait \
-       --wait-timeout 120m \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
        --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: $(git rev-parse HEAD). Round 1 full-patch audit. Use the PR body as the intent contract and immutable first-review change-shape baseline."
@@ -294,7 +299,6 @@ requires it or the current user explicitly asks for it.
    REVIEW_GPT_THREAD_URL=<current-context-chatgpt-url> \
      pnpm review:gpt pr-review \
        --wait \
-       --wait-timeout 120m \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
        --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Substantive round <k>; follow review-round.json for full-audit versus correction scope. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
@@ -511,10 +515,13 @@ requires it or the current user explicitly asks for it.
    update the current change-shape table, and push to the PR branch.
 
 7. Fire the next substantive round immediately after a pushed accepted fix
-   changes production source, runtime config, schema, behavior, or manual
-   conflict resolution. The packager selects a re-sent full audit or same-thread
-   correction from the full current PR shape. Run it in parallel with the new CI
-   run. If CI later fails on a reviewed head, the round's findings still count.
+   changes production source, runtime config, schema, behavior, or the
+   implemented contract. Conflict resolution creates a new substantive round
+   only when it makes one of those changes; the behavior-preserving base-update
+   exception below owns mechanical conflict resolution. The packager selects a
+   re-sent full audit or same-thread correction from the full current PR shape.
+   Run it in parallel with the new CI run. If CI later fails on a reviewed head,
+   the round's findings still count.
 
    Isolated regression-test additions, PR-body updates, finding-disposition
    comments, and explanatory durable-doc edits do not create a new substantive
@@ -541,15 +548,23 @@ If a round has already reached zero accepted findings and the PR later needs to
 be updated only because the base branch moved, do not start another ReviewGPT
 round just for that base update.
 
-This exception applies only when the post-review change is a normal merge or
-rebase of the PR base branch with no manual conflict resolution, new feature
-work, review finding fix, or behavior/test/config/doc edit beyond the base
-update itself. After the update, the merge path only needs PR CI green on the
-new head.
+This exception applies when the post-review change is only a normal merge or
+rebase of the PR base branch, including bounded manual conflict resolution that
+is proven behavior-preserving. For every conflict, the parent must inspect the
+resolved hunk against the already-reviewed PR side and the current base side.
+The resolution may select either side or mechanically combine both; it must not
+author new logic, change runtime configuration or schema, alter the implemented
+contract, fix a review finding, or include feature work or unrelated
+behavior/test/config/doc edits. Conflict count is orientation only and does not
+decide eligibility.
 
-If the base update requires manual conflict resolution or any non-base-update
-change, treat that as a normal PR-head change: run required verification for
-the touched surface, push it, and use the ordinary review-loop rules.
+Record the conflict paths and the preservation reason in the PR handoff, run
+focused verification for the affected surfaces, and require PR CI green on the
+new head. Do not rerun ReviewGPT solely for that update. If any resolution
+authors behavior not already represented by the reviewed PR or current base,
+materially changes the implemented contract, includes another branch-authored
+change, or cannot be confidently classified as mechanical, use the ordinary
+next-substantive-round rule.
 
 ## Stop Condition
 

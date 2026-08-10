@@ -275,7 +275,7 @@ Updated: 2026-08-10
   egress and a dormant durable payload without a retry loop, then proves the
   ordinary active pass still executes the provider lookup.
 - Passed after the sixth diagnostic correction: the three central hosted
-  runtime suites (3 files, 596 tests) and the focused Web hosted device-sync
+  runtime suites (3 files, 598 tests after reconciling current main) and the focused Web hosted device-sync
   wake suite (1 file, 117 tests). The production-shaped runtime case proves a
   deferred provider payload cannot preserve a paused marker or immediate wake,
   while the Web case proves a later accepted companion payload receives its
@@ -283,10 +283,22 @@ Updated: 2026-08-10
 - Passed after the sixth diagnostic correction: assistant-runtime and Web
   typechecks, scoped Web ESLint, agent-docs drift, `git diff --check`, and the
   changed-diff direct-identifier scan.
-- Required after remediation: final ReviewGPT round-5 retry and exact-head
-  GitHub Actions.
+- Before the user's opt-out, the remaining gates were a final ReviewGPT
+  round-5 retry and exact-head GitHub Actions. The review retry was not
+  achieved; exact-head GitHub Actions remain required.
 - Passed after the user-requested review-tool refresh: npm `latest` and the
   workspace-installed CLI both report 0.5.124; frozen install, CLI typecheck,
   and the directly coupled release/configuration coverage suite pass. The
-  final review retry must run from that workspace-installed version on the
-  exact remediated head.
+  attempted final review used that workspace-installed version on the exact
+  remediated head.
+- The user explicitly stopped further ReviewGPT attempts after the canonical
+  Brave `Default` run hit the account's rate limit. The 0.5.124 retry captured
+  an older completed turn rather than delivering the new exact-head prompt, so
+  it remains invalid and there is no round-5 `PASS`; do not retry it in this
+  task. Exact-head GitHub Actions remain required.
+- Passed after reconciling current main: assistant-runtime and Web typechecks,
+  the 598-test central hosted-runtime suites, the 117-test Web wake suite,
+  agent-docs drift, diff integrity, the 42-test runner-budget policy suite, and
+  full runner-bundle assembly. The combined bundle measured a 1,607,412-byte
+  entry, 7,714,947-byte static closure, and 9,606,003-byte total under the
+  current 10,056,956-byte ceiling.

@@ -139,6 +139,7 @@ vi.mock("@/src/components/ui/dialog", async () => {
         : null;
     },
     DialogDescription: passthrough("p"),
+    DialogFooter: passthrough("div"),
     DialogHeader: passthrough("div"),
     DialogTitle: passthrough("h2"),
     DialogTrigger(props: {
@@ -521,7 +522,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Group · Resets/);
   });
 
-  test("shows trial usage, timing, and a conservative forecast before the plan cards", async () => {
+  test("shows trial usage and timing without exposing the internal forecast", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
@@ -552,7 +553,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /aria-label="35% used, 65% remaining"/);
     assert.match(markup, /<span[^>]*>65% remaining<\/span>/u);
     assert.match(markup, /Trial ends Jul 17, 2026/);
-    assert.match(markup, /may run out in about 3 days/);
+    assert.doesNotMatch(markup, /recent pace|run out in about|days? remaining/);
     assert.ok(markup.indexOf("AI usage") < markup.indexOf("Run experiments"));
   });
 
@@ -1354,6 +1355,51 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Current plan|Free trial/);
   });
 
+  test("routes an inactive Family billing owner to the Family portal", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        billingStatus: "active",
+        canStartFamily: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        familyBillingOwner: true,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Your Family plan needs billing attention/u,
+      );
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Current plan/u);
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Choose Family/u);
+
+      const manageButton = findButtonByText(
+        rendered.window.document,
+        "Manage Family billing",
+        rendered.window,
+      );
+      await act(async () => {
+        manageButton.click();
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "POST",
+        payload: { billingScope: "family" },
+        url: "/api/settings/billing/portal",
+      });
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
   test("shows the Family card as current for the family owner", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
@@ -1419,7 +1465,7 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Choose Family/);
-    assert.match(markup, /Choose Pulse or Edge for each person/);
+    assert.match(markup, /Choose Pulse, Edge, or Max for each person/);
     assert.match(markup, /From \$7\/person/);
   });
 
@@ -1461,6 +1507,84 @@ describe("HostedBillingSettings", () => {
       url: "/api/settings/billing/family/checkout",
     });
     await rendered.cleanup();
+  });
+
+  test("requires explicit paid Family consent before ending a Pulse trial", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: null,
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        billingStatus: "active",
+        canStartFamily: true,
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const chooseFamilyButton = findButtonByText(
+        rendered.window.document,
+        "Choose Family",
+        rendered.window,
+      );
+      await act(async () => {
+        chooseFamilyButton.click();
+      });
+
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /Your free trial ends now/u,
+      );
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /\$14\/month for 2 Pulse seats/u,
+      );
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /choose Pulse, Edge, or Max for each person/u,
+      );
+
+      const cancelButton = findButtonByText(
+        rendered.window.document,
+        "Keep my trial",
+        rendered.window,
+      );
+      await act(async () => {
+        cancelButton.click();
+      });
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+
+      await act(async () => {
+        chooseFamilyButton.click();
+      });
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "End trial and start Family",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.click();
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "POST",
+        payload: { confirmedTrialConversion: true },
+        url: "/api/settings/billing/family/checkout",
+      });
+    } finally {
+      await rendered.cleanup();
+    }
   });
 
   test("posts the Join recovery Family action and keeps syncing feedback visible", async () => {

@@ -66,6 +66,7 @@ export function HostedBillingSettings(props: {
   currentBillingPlanCode?: unknown;
   currentCheckoutOffer?: unknown;
   currentPeriodEnd?: Date | null;
+  familyBillingOwner?: boolean;
   familyState?: "none" | "owner" | "sponsored";
   groupPaymentMethodSaved?: boolean;
   payerMemberId?: string | null;
@@ -104,9 +105,13 @@ export function HostedBillingSettings(props: {
 
   const familyState = props.familyState ?? "none";
   const familyCurrent = familyState === "owner" || familyState === "sponsored";
-  const familyOwner = familyState === "owner";
+  const activeFamilyOwner = familyState === "owner";
+  const familyBillingOwner = props.familyBillingOwner === true || activeFamilyOwner;
   const sponsoredMember = familyState === "sponsored";
-  const ownBillingActive = props.billingStatus === "active" && !familyCurrent;
+  const ownBillingActive =
+    props.billingStatus === "active"
+    && !familyCurrent
+    && !familyBillingOwner;
   const ownPaidBillingActive = ownBillingActive && currentPhase === "paid";
   const pulseTrialActive =
     ownBillingActive &&
@@ -163,8 +168,11 @@ export function HostedBillingSettings(props: {
     : null;
 
   const pulseAction: ReactNode = (() => {
-    if (familyOwner) {
+    if (activeFamilyOwner) {
       return <FamilyBillingChangeButton block targetPlanName="Pulse" />;
+    }
+    if (familyBillingOwner) {
+      return null;
     }
     if (sponsoredMember) {
       return null;
@@ -214,8 +222,11 @@ export function HostedBillingSettings(props: {
   })();
 
   const edgeAction: ReactNode = (() => {
-    if (familyOwner) {
+    if (activeFamilyOwner) {
       return <FamilyBillingChangeButton block targetPlanName="Edge" />;
+    }
+    if (familyBillingOwner) {
+      return null;
     }
     if (sponsoredMember) {
       return null;
@@ -261,7 +272,7 @@ export function HostedBillingSettings(props: {
   })();
 
   const maxAction: ReactNode = (() => {
-    if (familyCurrent) {
+    if (familyBillingOwner) {
       return null;
     }
     if (maxCurrent) {
@@ -296,7 +307,9 @@ export function HostedBillingSettings(props: {
     ...(props.showGroupPlan === true && !familyCurrent
       ? [
           {
-            action: groupCurrent
+            action: familyBillingOwner
+              ? null
+              : groupCurrent
               ? <CurrentPlanButton />
               : hasPendingGroupSwitch
                 ? null
@@ -354,7 +367,7 @@ export function HostedBillingSettings(props: {
       features: SETTINGS_PULSE_FEATURES,
       key: "launch_monthly",
       name: "Pulse",
-      note: familyOwner
+      note: activeFamilyOwner
         ? "If you switch away from Family, your family members lose their included access when the Family plan ends."
         : pulseCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
           ? (
@@ -378,7 +391,7 @@ export function HostedBillingSettings(props: {
       features: SETTINGS_EDGE_FEATURES,
       key: "launch_edge_monthly",
       name: "Edge",
-      note: familyOwner
+      note: activeFamilyOwner
         ? "End or change the Family plan first, then switch to an individual plan."
         : !edgeCurrent && hasPendingEdgeSwitch && pendingEdgeSwitchDate
           ? `Scheduled to start ${pendingEdgeSwitchDate}`
@@ -457,10 +470,30 @@ export function HostedBillingSettings(props: {
     {
       action: sponsoredMember
         ? null
-        : familyOwner
+        : activeFamilyOwner
           ? <CurrentPlanButton />
+          : familyBillingOwner
+            ? null
           : props.canStartFamily === true
-            ? <HostedFamilyStartButton block label="Choose Family" />
+            ? (
+                <HostedFamilyStartButton
+                  block
+                  trialConversionConfirmation={pulseTrialActive
+                    ? {
+                        cancelLabel: "Keep my trial",
+                        confirmLabel: "End trial and start Family",
+                        description: `Your free trial ends now. Paid Family billing begins immediately at ${formatHostedBillingPrice(
+                          HOSTED_FAMILY_PLAN_DISPLAY.minSeats
+                            * HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
+                        )}/month for ${HOSTED_FAMILY_PLAN_DISPLAY.minSeats} Pulse seats (${formatHostedBillingPrice(
+                          HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
+                        )} per person). You can choose Pulse, Edge, or Max for each person and add up to ${HOSTED_FAMILY_PLAN_DISPLAY.maxSeats} seats.`,
+                        title: "Start paid Family billing?",
+                      }
+                    : undefined}
+                  label="Choose Family"
+                />
+              )
             : null,
       current: familyCurrent,
       currentLabel: familyState === "sponsored" ? "Sponsored" : "Current plan",
@@ -484,7 +517,9 @@ export function HostedBillingSettings(props: {
   const retainedPlan = currentPlanCode
     ? getHostedBillingPlanDefinition(currentPlanCode)
     : null;
-  const noPlanText = retainedPlan
+  const noPlanText = familyBillingOwner && !activeFamilyOwner
+    ? "Your Family plan needs billing attention. Use Manage Family billing to repair or cancel it."
+    : retainedPlan
     ? `${retainedPlan.displayName} is not active. Choose a plan below or use Manage billing.`
     : props.billingStatus === "active"
       ? "Your billing status is still syncing. Use Manage billing if it does not resolve."
@@ -549,9 +584,9 @@ export function HostedBillingSettings(props: {
           </p>
         ) : (
           <BillingPortalButton
-            billingScope={familyOwner ? "family" : "member"}
+            billingScope={familyBillingOwner ? "family" : "member"}
             variant="ghost"
-            label={familyOwner ? "Manage Family billing" : "Manage billing"}
+            label={familyBillingOwner ? "Manage Family billing" : "Manage billing"}
           />
         )}
       </div>
@@ -648,9 +683,6 @@ function PlanUsageBand(props: {
     ? `Trial ends ${periodEndLabel}`
     : `Resets ${periodEndLabel}`;
   const action = status.recommendedAction;
-  const forecast = status.forecast
-    ? `At your recent pace, usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
-    : null;
   const usageTopUpDialog = payerMemberId ? (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
@@ -716,8 +748,6 @@ function PlanUsageBand(props: {
               ? "You've used all available usage. Add usage to continue."
               : "You've used all available usage. Murph pauses new usage until more capacity is available."}
         </p>
-      ) : forecast ? (
-        <p className="mt-3 text-sm text-pretty text-muted-foreground">{forecast}</p>
       ) : null}
       {props.usageTopUpOffers.length === 0 &&
       !props.usageTopUpActivePurchase &&

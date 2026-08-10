@@ -2,7 +2,10 @@ import {
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   type HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
-import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionStructuredLogRecord,
+  deriveHostedExecutionErrorCode,
+} from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -43,6 +46,9 @@ import {
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
+import {
+  buildHostedRunnerRedactedErrorJson,
+} from "../src/user-runner/diagnostics.ts";
 
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
 const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
@@ -6975,15 +6981,19 @@ describe("RunnerContainer", () => {
       }),
     });
 
-    const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_non_json_failure"),
+    const thrown = await container.ensureProcessing({
+      invoke: {
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_non_json_failure"),
+        },
+        timeoutMs: 10_000,
+        userId: "member_123",
       },
-      timeoutMs: 10_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
 
+    expect(deriveHostedExecutionErrorCode(thrown)).toBe("runner_http_error");
     expect(thrown).toMatchObject({
       details: {
         responseBodyPresent: true,
@@ -7023,7 +7033,7 @@ describe("RunnerContainer", () => {
     expect(JSON.stringify(failureLogInput)).not.toContain("placeholder");
   });
 
-  it("summarizes runtime shell detail in the thrown container error", async () => {
+  it("preserves runtime phase detail through the thrown and persisted error shapes", async () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
@@ -7038,8 +7048,10 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
-            errorCodeDetail: "VAULT_FILE_MISSING",
+            errorCodeDetail: "EACCES",
             errorDetail: "Missing required file \"vault.json\".",
+            runtimeFailurePhaseCode:
+              "runtime_phase:workspace.checkpoint.idle_compact",
           },
           error: "Hosted execution runtime failed.",
           errorName: "Error",
@@ -7064,14 +7076,23 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
-        errorCodeDetail: "VAULT_FILE_MISSING",
+        errorCodeDetail: "EACCES",
         errorDetailPresent: true,
         payloadDetailsPresent: true,
+        runtimeFailurePhaseCode:
+          "runtime_phase:workspace.checkpoint.idle_compact",
       },
-      message: "Hosted execution runtime failed. Code: VAULT_FILE_MISSING. Status: 500.",
+      message: "Hosted execution runtime failed. Code: EACCES. Status: 500.",
       name: "Error",
       status: 500,
       statusCode: 500,
+    });
+    expect(deriveHostedExecutionErrorCode(thrown)).toBe("runtime_error");
+    expect(buildHostedRunnerRedactedErrorJson(thrown)).toMatchObject({
+      errorCode: "runtime_error",
+      errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
+      safeErrorDetail:
+        "Hosted execution runtime failed. Code: EACCES. Status: 500.",
     });
     expect(JSON.stringify(thrown)).not.toContain("vault.json");
   });

@@ -1,10 +1,10 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it } from 'vitest'
 
 import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
 
 import {
   executeMurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 const TRACKED_WORKOUT_CARD = {
@@ -29,7 +29,7 @@ const TRACKED_WORKOUT_CARD = {
 } satisfies AssistantResponseCard
 
 function readCardToolRequest(argumentsValue: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     id: 1,
     method: 'item/tool/call',
     params: {

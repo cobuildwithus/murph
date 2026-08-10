@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-07-30
+Last verified: 2026-08-09
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -68,6 +68,14 @@ in the PR;
 PR-lane work additionally requires green CI and, when the change is eligible,
 the separate final pushed-head ReviewGPT gate.
 
+Every PR must also make one explicit changelog decision before the review
+candidate is pushed. A member-visible feature or improvement, including a
+meaningful reliability, recovery, performance, accessibility, copy, or UX
+change, updates `apps/web/src/lib/changelog.ts` in the same PR using
+`$write-changelog`. Internal-only work records a concrete not-applicable reason
+in the PR body. Never publish private evidence, security-sensitive
+implementation detail, or an outcome the shipped code does not prove.
+
 Keep the current layer explicit: implementation, local completion, or PR/external
 gate. Do not let a later layer repeat policy owned by an earlier one, and do not
 silently advance when its prerequisites or authority are missing. A blocked
@@ -84,16 +92,27 @@ when the meaningful diff is low-risk and limited to one or more of:
 - prompt-primary changes covered by the preliminary specialist ReviewGPT pass;
 - tests, fixtures, or developer tooling that do not change production behavior;
 - static copy or content; or
-- minor frontend presentation polish such as spacing, typography, color,
-  icons, imagery, or responsive containment that does not change the user
-  workflow, UI state model, data flow, or authority boundary.
+- frontend-only `apps/web` changes whose meaningful production diff stays in
+  client-rendered presentation and interaction, including component structure,
+  local UI state, semantic copy, accessibility, styling, icons, imagery, or
+  responsive behavior.
 
-The exemption applies only when the change does not affect a product-critical
-flow; auth, privacy, security, billing, or health-safety behavior or claims;
-persisted state or schemas; public APIs; runtime or deploy boundaries; or
-ordering, retries, concurrency, or idempotency. It also does not apply to broad
-refactors or cross-owner changes. When any of those conditions are present, or
-the user explicitly requests ReviewGPT, run the normal PR loop.
+Frontend-only means the PR does not change a server action or route,
+middleware, shared backend package, persistence or schema, authorization or
+permission logic, billing, health-safety logic, external ingress or egress,
+runtime or deploy behavior, production configuration, or a cross-owner
+protocol. A UI may change its user workflow or local display state and still
+qualify; the preliminary product-experience, frontend, and coverage lenses own
+those frontend concerns.
+
+The exemption applies only when the change does not affect auth, privacy,
+security, billing, health-safety, irreversible-effect, or other trust-boundary
+behavior or claims; persisted state or schemas; public APIs; runtime or deploy
+boundaries; or ordering, retries, concurrency, or idempotency. It also does not
+apply to broad or high-risk refactors, cross-owner changes, or any other
+cross-cutting-review trigger below. When any of those conditions are present,
+or the user explicitly requests the final ReviewGPT audit, run the normal PR
+loop.
 
 Every PR that enters the final ReviewGPT loop must contain exactly one
 machine-readable `ReviewGPT context sensitivity: routine` or
@@ -143,6 +162,29 @@ product-decision owners.
    default branch, reconcile the exact candidate and run
    `pnpm verify:acceptance`.
 2. Run a scope and shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, any new persisted state is explicitly classified and versioned, and any architecture/API/trust-boundary change is documented or split into an explicit plan. This check owns simplification: delete dead code, cut speculative structure, and collapse needless indirection yourself; there is no separate simplify subagent pass.
+   During this check, invoke `$write-changelog` and classify the change. Add a
+   same-PR changelog item for every member-visible outcome, or record the
+   concrete internal-only reason that makes the changelog not applicable. Keep
+   related fixes under one user outcome while preserving every contributing
+   source PR. For priority-5 or interaction-heavy changes, add a responsive
+   explanatory visual when the behavior can be shown truthfully. Route
+   capability, authentication semantics, health-data ownership, consent scope,
+   reward ownership, and connection status remain facts of their existing
+   production owners: reuse or mechanically check those owners instead of
+   restating their state in changelog fixtures. Delete a visual when accurate
+   prose is simpler than creating a parallel authority. For asynchronous,
+   scheduled, or detached claims, trace the exact invocation scope, channel,
+   audience, current-input requirement, final destination, and retry or
+   reconciliation behavior. Do not
+   infer scheduled or cross-channel availability from a tool's ordinary
+   private-conversation availability, and do not depict completion unless the
+   production authorization and delivery owners prove that exact path. A
+   simpler choice inside one consent scope must not be described as merging
+   independently selectable permissions; name those scopes explicitly when
+   production still lets a member approve them separately. For feedback and
+   support summaries, distinguish silent best-effort capture from visible
+   acknowledgement, and distinguish raw-field exclusion or deterministic
+   pattern scrubbing from semantic removal of all private or health meaning.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips completion audits unless the user explicitly asks for them
@@ -211,6 +253,15 @@ Required:
   If no abstraction was added, say so and explain which existing contract was
   sufficient. Do not use a bare `None`, `N/A`, or placeholder. The pull-request
   body workflow checks the rendered section on every PR.
+- **Changelog.** Add one `## Changelog` section with exactly one disposition:
+  `Changelog: updated` or `Changelog: not applicable`. For `updated`, change
+  `apps/web/src/lib/changelog.ts` in the same PR and add one `Items:` bullet
+  naming the edition date and stable item IDs. For `not applicable`, add one
+  concrete `Reason:` bullet explaining why no member-visible behavior changed.
+  Use `$write-changelog` to inventory source PRs, group related outcomes, add
+  useful visuals, protect private or sensitive details, and update the focused
+  archive proof. The pull-request body workflow validates this declaration on
+  every PR.
 - **Hot reply path impact.** State whether the PR changes the
   `Foreground Reply Critical Path` defined in
   `docs/contracts/00-invariants.md`: durable acceptance of a current
@@ -284,10 +335,13 @@ Required:
   scale when a narrow mobile component crop would otherwise miss the width
   floor. Inspect each local file at native resolution and confirm that body copy
   is immediately legible before upload. Keep screenshot binaries out of the
-  repository. Capture them only in an ignored local audit path, then upload them
-  from the local machine through
+  repository. Capture them only in an ignored local audit path. Host each image
+  with either a GitHub attachment in the pull request body or Cloudflare Images.
+  For a GitHub attachment, paste or drag the image into the GitHub pull request
+  editor and keep the generated hosted image Markdown in the matching screenshot
+  item. For Cloudflare Images, use
   the [Cloudflare Images upload API](https://developers.cloudflare.com/api/resources/images/subresources/v1/methods/create/)
-  using `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
+  with `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
   token supplied only as local `CLOUDFLARE_IMAGES_API_KEY`. Set
   `requireSignedURLs=false`. From any repository worktree, run
   `pnpm design-proof:upload -- <desktop-image> <mobile-image>`; the command
@@ -303,10 +357,9 @@ Required:
   local capture only until
   required review packaging is complete, then delete it. Never print, commit,
   persist in repository files, or pass the credential to ReviewGPT or another
-  external reviewer; if the local credential is unavailable, report the
-  blocker instead of committing proof images. Proof screenshots must not
-  contain private member data. PRs without a user-facing frontend UI diff may
-  write `Not applicable`.
+  external reviewer. If the local Cloudflare credential is unavailable, use a
+  GitHub attachment instead. Proof screenshots must not contain private member
+  data. PRs without a user-facing frontend UI diff may write `Not applicable`.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 

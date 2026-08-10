@@ -810,20 +810,24 @@ describe('assistant CLI automation shape ownership', () => {
       assistantCronExpressionScheduleSchema.parse({
         kind: 'cron',
         expression: '0 9 * * *',
+        timeZone: 'America/Chicago',
       }),
     ).toEqual({
       kind: 'cron',
       expression: '0 9 * * *',
+      timeZone: 'America/Chicago',
     })
 
     expect(
       assistantCronDailyLocalScheduleSchema.parse({
         kind: 'dailyLocal',
         localTime: '09:00',
+        timeZone: 'America/Chicago',
       }),
     ).toEqual({
       kind: 'dailyLocal',
       localTime: '09:00',
+      timeZone: 'America/Chicago',
     })
 
     expect(() =>
@@ -910,60 +914,42 @@ describe('assistant CLI automation shape ownership', () => {
     })
   })
 
-  it('drops timezone from recurring cron inputs and persisted schedules', () => {
+  it('preserves explicit timezone on recurring cron inputs and persisted schedules', () => {
     expect(
       assistantCronExpressionScheduleInputSchema.parse({
         kind: 'cron',
         expression: '0 9 * * *',
+        timeZone: 'America/Los_Angeles',
       }),
     ).toEqual({
       kind: 'cron',
       expression: '0 9 * * *',
+      timeZone: 'America/Los_Angeles',
     })
 
     expect(
       assistantCronScheduleSchema.parse({
         kind: 'cron',
         expression: '0 9 * * *',
+        timeZone: 'America/Los_Angeles',
       }),
     ).toEqual({
       kind: 'cron',
       expression: '0 9 * * *',
+      timeZone: 'America/Los_Angeles',
     })
 
     expect(
       assistantCronScheduleSchema.parse({
         kind: 'dailyLocal',
         localTime: '09:00',
+        timeZone: 'America/Los_Angeles',
       }),
     ).toEqual({
       kind: 'dailyLocal',
       localTime: '09:00',
+      timeZone: 'America/Los_Angeles',
     })
-
-    expect(() =>
-      assistantCronScheduleSchema.parse({
-        kind: 'cron',
-        expression: '0 9 * * *',
-        timeZone: 'America/Los_Angeles',
-      }),
-    ).toThrow()
-
-    expect(() =>
-      automationScheduleSchema.parse({
-        kind: 'cron',
-        expression: '0 9 * * *',
-        timeZone: 'America/Los_Angeles',
-      }),
-    ).toThrow()
-
-    expect(() =>
-      assistantCronDailyLocalScheduleSchema.parse({
-        kind: 'dailyLocal',
-        localTime: '09:00',
-        timeZone: 'America/Los_Angeles',
-      }),
-    ).toThrow()
   })
 
   it('keeps the public cron job state surface stable on nextRunAt', () => {

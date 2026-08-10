@@ -3,6 +3,10 @@ import { expect, test } from "@playwright/test";
 const WIDTHS = [320, 375, 390, 768, 1280] as const;
 const REFERRAL_STUDY_WIDTHS = [390, 1440] as const;
 const OVERFLOW_TOLERANCE_PX = 1;
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
 const REFERRAL_STUDIES = [
   {
     dayLabels: [
@@ -14,9 +18,9 @@ const REFERRAL_STUDIES = [
     selector: '[data-design-section="homepage-referral-program"]',
     slug: "mixed",
     titles: [
-      "Invite someone to Murph",
+      "Share your referral link",
       "Bring someone new to Murph",
-      "Start an active group",
+      "Start a group conversation",
     ],
   },
   {
@@ -29,7 +33,7 @@ const REFERRAL_STUDIES = [
     selector:
       '[data-design-section="homepage-referral-program-group-only"]',
     slug: "group-only",
-    titles: ["Bring someone new to Murph", "Start an active group"],
+    titles: ["Bring someone new to Murph", "Start a group conversation"],
   },
   {
     dayLabels: [
@@ -40,7 +44,7 @@ const REFERRAL_STUDIES = [
     selector:
       '[data-design-section="homepage-referral-program-signup-only"]',
     slug: "signup-only",
-    titles: ["Invite someone to Murph"],
+    titles: ["Share your referral link"],
   },
 ] as const;
 
@@ -58,6 +62,8 @@ function isLoopbackUrl(rawUrl: string): boolean {
 test("referral page stays contained and actionable at every marketing breakpoint", async ({
   page,
 }) => {
+  test.setTimeout(180_000);
+
   await page.route("**/*", (route) => {
     if (isLoopbackUrl(route.request().url())) {
       route.continue();
@@ -110,27 +116,31 @@ test("referral page stays contained and actionable at every marketing breakpoint
     ).toBeGreaterThanOrEqual(44);
     await expect(
       page.getByRole("heading", {
-        name: "Choose a referral path.",
+        name: "Choose how to share Murph.",
       }),
+    ).toBeVisible();
+    await expect(page.locator("#ways-to-earn article")).toHaveCount(3);
+    await expect(
+      page.getByRole("heading", { name: "Share your referral link" }),
     ).toBeVisible();
     await expect(
       page.getByText("About 14 more days of Murph usage", { exact: true }),
     ).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(/\bmissions?\b/i);
     await expect(page.locator("body")).not.toContainText(
-      /\$|≈|cost-weighted|usage credit/i,
+      /\$|≈|usage credit/i,
+    );
+    await expect(page.locator("body")).not.toContainText(
+      RETIRED_USAGE_TERM_PATTERN,
     );
   }
 });
 
-test("referral design study hydrates without reading a member referral link", async ({
+test("referral reward studies keep member link actions share-only", async ({
   page,
 }) => {
-  const referralLinkRequests: string[] = [];
-  page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/settings/signup-referral-link") {
-      referralLinkRequests.push(request.url());
-    }
-  });
+  test.setTimeout(180_000);
+
   await page.route("**/*", (route) => {
     if (isLoopbackUrl(route.request().url())) {
       route.continue();
@@ -138,23 +148,90 @@ test("referral design study hydrates without reading a member referral link", as
       route.abort();
     }
   });
-
   const response = await page.goto(
-    "/design?tab=sections#referral-rewards-page",
+    "/design?tab=sections#referral-page-reward-states",
     { waitUntil: "networkidle" },
   );
   expect(response?.status()).toBe(200);
 
-  const study = page.locator("#referral-rewards-page");
+  const study = page.locator("#referral-page-reward-states");
   await expect(study).toBeVisible();
+  await expect(study.locator("[data-referral-reward-state]")).toHaveCount(3);
+
+  const signupOnly = study.locator(
+    '[data-referral-reward-state="signup-only"]',
+  );
+  await expect(signupOnly.locator("article")).toHaveCount(1);
   await expect(
-    study.getByText("About 10 more days of Murph usage", { exact: true }).first(),
+    signupOnly.getByText("About 10 more days of Murph usage", { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    signupOnly.getByText(
+      /Your referral came through\. About 10 more days of Murph usage/,
+    ),
+  ).toBeVisible();
+
+  const groupOnly = study.locator(
+    '[data-referral-reward-state="group-only"]',
+  );
+  await expect(groupOnly.locator("article")).toHaveCount(3);
+  await expect(
+    groupOnly.getByText("About 10 more days of Murph usage", { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    groupOnly.getByText("About 14 more days of Murph usage", { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    groupOnly.getByText(
+      /Your group referral came through\. About 10 more days of Murph usage/,
+    ),
   ).toBeVisible();
   await expect(
-    study.getByRole("button", { name: /Join Murph to start referring/ }).first(),
+    groupOnly.getByRole("heading", { name: "Share your referral link" }),
   ).toBeVisible();
-  await expect(study).not.toContainText(/\$|≈|cost-weighted|usage credit/i);
-  expect(referralLinkRequests).toEqual([]);
+  await expect(
+    groupOnly.getByText("Share only · no usage reward", { exact: true }),
+  ).toBeVisible();
+
+  const allRewards = study.locator(
+    '[data-referral-reward-state="all-rewards"]',
+  );
+  await expect(allRewards.locator("article")).toHaveCount(3);
+  await expect(
+    allRewards.getByText("About 10 more days of Murph usage", { exact: true }),
+  ).toHaveCount(2);
+  await expect(
+    allRewards.getByText("About 14 more days of Murph usage", { exact: true }),
+  ).toHaveCount(1);
+  await expect(allRewards).not.toContainText(/already added to/iu);
+  await expect(study).not.toContainText(/\bmissions?\b/i);
+  await expect(study).not.toContainText(/\$|≈|usage credit/i);
+  await expect(study).not.toContainText(RETIRED_USAGE_TERM_PATTERN);
+
+  const fullPageStudy = page.locator("#referral-rewards-page");
+  await expect(fullPageStudy).toBeVisible();
+  await expect(fullPageStudy.locator("#ways-to-earn article")).toHaveCount(3);
+  await expect(
+    fullPageStudy.getByRole("heading", { name: "Bring someone new to Murph" }),
+  ).toBeVisible();
+  await expect(
+    fullPageStudy.getByRole("heading", { name: "Start a group conversation" }),
+  ).toBeVisible();
+  await expect(
+    fullPageStudy.getByRole("heading", { name: "Share your referral link" }),
+  ).toBeVisible();
+  await expect(fullPageStudy).not.toContainText(/\bmissions?\b/i);
+
+  const memberStudy = page.locator("#referral-rewards-page-member");
+  await expect(memberStudy).toBeVisible();
+  await expect(
+    memberStudy.getByText("Share only · no usage reward", { exact: true }),
+  ).toBeVisible();
+  const copyAction = memberStudy.getByRole("button", {
+    name: "Copy referral link, your Murph referral link",
+  });
+  await expect(copyAction).toBeVisible();
+  await expect(memberStudy).not.toContainText(/\bmissions?\b/i);
 });
 
 test.describe("homepage referral design proof", () => {
@@ -217,8 +294,9 @@ test.describe("homepage referral design proof", () => {
         }
         await expect(study.getByText(/If eligible/)).toHaveCount(0);
         await expect(study).not.toContainText(
-          /\$|≈|cost-weighted|usage credit/i,
+          /\$|≈|usage credit/i,
         );
+        await expect(study).not.toContainText(RETIRED_USAGE_TERM_PATTERN);
 
         const overflowPx = await study.evaluate((element) =>
           element.scrollWidth - element.clientWidth

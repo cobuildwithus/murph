@@ -17,6 +17,11 @@ import {
   HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
 } from "@/src/lib/hosted-growth/usage-referral";
 
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
+
 function readReward(id: (typeof HOSTED_PUBLIC_REFERRAL_REWARDS)[number]["id"]) {
   const reward = HOSTED_PUBLIC_REFERRAL_REWARDS.find(
     (candidate) => candidate.id === id,
@@ -89,16 +94,15 @@ describe("public referral program projection", () => {
     expect(signup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
-    expect(signup.description).toContain(
-      "eligibility and rolling-limit checks pass",
-    );
+    expect(signup.description).toContain("the referral meets the rules");
     expect(signup.description).not.toMatch(
       /when setup completes|checks at completion/u,
     );
     expect(signup.description).not.toContain(
       "the reward is added automatically",
     );
-    expect(signup.description).not.toMatch(/\$|cost-weighted|usage credit/iu);
+    expect(signup.description).not.toMatch(/\$|usage credit/iu);
+    expect(signup.description).not.toMatch(RETIRED_USAGE_TERM_PATTERN);
     expect(newPersonGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
@@ -119,10 +123,10 @@ describe("public referral program projection", () => {
       HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS / 60_000;
 
     expect(activeGroup.description).toContain(
-      `${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_MESSAGES} human messages`,
+      `${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_MESSAGES} messages`,
     );
     expect(activeGroup.description).toContain(
-      `${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_MESSAGES} from at least ${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_SPEAKERS} other people`,
+      `${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_MESSAGES} from two or more people besides you`,
     );
     expect(activeGroup.description).toContain(
       `at least ${minimumMinutes} minutes`,

@@ -128,12 +128,48 @@ describe('assistant capability policy skills', () => {
     const skill = await readSkill('murph-family')
     const normalized = normalizeWhitespace(skill)
 
-    expect(normalized).toContain('2–6 sponsored Pulse ($7/month) or Edge ($19/month) seats')
+    // A general "Family Edge versus Max" question must be answerable from the
+    // loaded skill without an account-status tool call.
+    const generalFamilyComparisonFacts = [
+      '$15.20 on Edge',
+      '$39.20 on Max',
+      'Edge and Max share the same premium runtime/model access',
+      'Max adds included usage, not a separate model capability',
+    ]
+
+    expect(normalized).toContain(
+      '2–6 sponsored Pulse ($7/month), Edge ($19/month), or Max ($49/month) seats',
+    )
+    for (const fact of generalFamilyComparisonFacts) {
+      expect(normalized).toContain(fact)
+    }
+    expect(normalized).toContain('`planCode: "max"` for Max')
     expect(normalized).toContain('owners cannot see member conversations or health data')
     expect(normalized).toContain('`action: "read_status"`')
     expect(normalized).toContain('`action: "start_checkout"`')
     expect(normalized).toContain('`action: "create_invite"`')
-    expect(normalized).toContain('`preparedInvite`')
+    expect(normalized).toContain('before every Family invitation')
+    expect(normalized).toContain(
+      'Never pass invite context to `start_checkout`; checkout cannot create or prepare an invite.',
+    )
+    expect(normalized).toContain(
+      'If `read_status` cannot be read, say no change was attempted and that retrying the status read is safe.',
+    )
+    expect(normalized).toContain(
+      'Only call `action: "create_invite"` when the status proves all three conditions:',
+    )
+    expect(normalized).toContain('`plans.<requested plan>.remaining` is greater than zero')
+    expect(normalized).toContain(
+      'When the requested plan has no remaining paid seat, do not call `create_invite`',
+    )
+    expect(normalized).toContain('https://www.withmurph.ai/settings#family')
+    expect(normalized).toContain(
+      'The link is navigation only; never claim that opening it purchased a seat or created an invite.',
+    )
+    expect(normalized).toContain(
+      'say the request was not confirmed and ask the owner to check Family Settings before retrying',
+    )
+    expect(normalized).not.toContain('`preparedInvite`')
     expect(normalized).toContain('`already_sponsored`')
     expect(normalized).toContain('`owner: true`')
     expect(normalized).toContain('`billingActive: true`')

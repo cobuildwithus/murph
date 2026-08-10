@@ -187,9 +187,33 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // one shared pure provider-lookup predicate. Exact macOS assembly measured
 // 9,959,861B total on 2026-08-10 while leaving the static closure unchanged;
 // ratchet the total baseline and retain the existing tolerance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_959_861 + 32_768;
+// Adding the single-message group offer, exact reply ownership, and weekly
+// contextualization instructions grows only that lazy assistant output. Exact
+// ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
+// baselines and established total tolerance.
+//
+// Subsequent reviewed biomarker ranges, hosted
+// runtime-control compaction, and named-diet guidance moved exact ubuntu total
+// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
+// remain within their existing ceilings and no forbidden subsystem enters the
+// boot graph, so ratchet only the total ceiling and keep both startup baselines
+// and all tolerances.
+//
+// Bounded group-tool failure diagnostics plus the strict included-usage read
+// contract measured a 9,938,038B total on ubuntu and a 7,983,431B static
+// closure on macOS before the mainline additions above were merged. Exact local
+// production assembly of the combined graph measured a 9,986,541B total on
+// 2026-08-10. Adding the workout response-card contract and canonical command
+// reconciliation to that mainline graph measured a 9,994,210B total and
+// 8,019,079B static closure on macOS. After adding the timezone and
+// deliverable-occurrence projection, exact local production assembly measured
+// a 1,674,361B entry, 8,046,334B static closure, and 10,024,188B total. The
+// later combined graph measured the same 1,674,361B entry, an 8,044,557B static
+// closure, and a 10,022,523B total. Retain the larger reviewed measurements and
+// established cross-platform tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_024_188 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_982_116;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_019_079;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
@@ -247,6 +271,7 @@ export async function bundleRunnerContainerEntrypoint(
     format: "esm",
     logLevel: "error",
     metafile: true,
+    minifySyntax: true,
     outdir: bundleOutDir,
     platform: "node",
     splitting: true,
