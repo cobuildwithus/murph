@@ -6182,6 +6182,7 @@ function installAutomaticGroupRefillFixture(
     checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
     checkoutSuccessUrl: "https://join.example.test/groups/fund/example",
     createdAt: periodStartedAt,
+    grantSlotReleasedAt: null,
     grantUsdMicros: 5_000_000n,
     groupSponsorshipAuthorizationId: authorizationId,
     groupSponsorshipPeriodStartedAt: periodStartedAt,
@@ -6543,8 +6544,20 @@ function createFakePrisma(input: {
       if (sql.includes("bounded_occupied_slots")) {
         input.usageCreditEvents?.push("capacity-read");
         usageCreditCapacityQueryCalls.push({ queryParts, values });
+        const expectedPurchaseValue = values.at(-1);
+        const expectedPurchaseId = typeof expectedPurchaseValue === "string"
+          ? expectedPurchaseValue
+          : null;
+        const expectedPurchase = expectedPurchaseId
+          ? purchases.get(expectedPurchaseId)
+          : null;
         return [{
-          expectedPurchaseOwnsReservation: false,
+          expectedPurchaseOwnsReservation: Boolean(
+            expectedPurchase
+              && expectedPurchase.beneficiaryMemberId === values[0]
+              && expectedPurchase.status !== "fulfilled"
+              && expectedPurchase.grantSlotReleasedAt === null,
+          ),
           occupiedSlotCount:
             typeof input.occupiedUsageCreditSlotCount === "function"
               ? input.occupiedUsageCreditSlotCount()

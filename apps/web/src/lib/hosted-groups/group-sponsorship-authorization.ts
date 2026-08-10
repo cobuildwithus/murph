@@ -22,6 +22,13 @@ import {
   getHostedUsageCreditOfferDefinition,
 } from "../hosted-onboarding/usage-credit-offers";
 import {
+  readHostedUsageCreditGrantCapacityTx,
+} from "../hosted-execution/usage-credit-grant-capacity";
+import {
+  lockHostedUsageCreditBeneficiaryTx,
+  type LockedHostedUsageCreditBeneficiary,
+} from "../hosted-execution/usage-credit-ledger";
+import {
   hasHostedRuntimeActiveAccessForUpdateTx,
 } from "../hosted-mailbox/runtime-access";
 import { generateHostedRandomPrefixedId } from "../primitives";
@@ -650,6 +657,10 @@ export async function admitHostedGroupSponsorshipRefillTx(input: {
     return null;
   }
   const now = requireValidDate(input.now);
+  const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+    beneficiaryMemberId: input.beneficiaryMemberId,
+    tx: input.tx,
+  });
   const current = await readLiveHostedGroupSponsorshipAuthorizationTx({
     beneficiaryMemberId: input.beneficiaryMemberId,
     tx: input.tx,
@@ -668,10 +679,16 @@ export async function admitHostedGroupSponsorshipRefillTx(input: {
   ) {
     return null;
   }
+  if (
+    authorization.payerMemberId !== lockedBeneficiary.beneficiaryMemberId
+  ) {
+    await lockHostedMemberRow(input.tx, authorization.payerMemberId);
+  }
 
   const purchaseId = await readOrCreateHostedGroupSponsorshipRefillPurchaseTx({
     authorization,
     checkoutExpiresAt: authorization.periodEndsAt,
+    lockedBeneficiary,
     now,
     tx: input.tx,
   });
@@ -691,6 +708,10 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
 }): Promise<HostedGroupSponsorshipRecoveryPreparation> {
   const now = requireValidDate(input.now);
   const checkoutExpiresAt = requireValidDate(input.checkoutExpiresAt);
+  const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+    beneficiaryMemberId: input.beneficiaryMemberId,
+    tx: input.tx,
+  });
   const current = await readLiveHostedGroupSponsorshipAuthorizationTx({
     beneficiaryMemberId: input.beneficiaryMemberId,
     tx: input.tx,
@@ -702,7 +723,9 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
   ) {
     throw recoveryUnavailable();
   }
-  await lockHostedMemberRow(input.tx, input.payerMemberId);
+  if (input.payerMemberId !== lockedBeneficiary.beneficiaryMemberId) {
+    await lockHostedMemberRow(input.tx, input.payerMemberId);
+  }
   let authorization = await normalizeHostedGroupSponsorshipAuthorizationTx({
     authorization: current,
     now,
@@ -771,6 +794,32 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
     ) {
       return reactivateWithoutCharge();
     }
+    const capacity = await readHostedUsageCreditGrantCapacityTx({
+      ...(failed.grantSlotReleasedAt === null
+        ? { expectedPurchaseId: failed.id }
+        : {}),
+      lockedBeneficiary,
+      tx: input.tx,
+    });
+    if (capacity.state === "overflow") {
+      throw new TypeError(
+        "Hosted group sponsorship usage-credit capacity exceeds its contract.",
+      );
+    }
+    if (
+      failed.grantSlotReleasedAt === null &&
+      !capacity.expectedPurchaseOwnsReservation
+    ) {
+      throw new TypeError(
+        "Hosted group sponsorship refill purchase reservation is missing.",
+      );
+    }
+    if (
+      failed.grantSlotReleasedAt !== null &&
+      capacity.state !== "available"
+    ) {
+      throw recoveryUnavailable();
+    }
     const returnUrls = buildHostedGroupSponsorshipRefillReturnUrls({
       checkoutCancelUrl: failed.checkoutCancelUrl,
       checkoutSuccessUrl: failed.checkoutSuccessUrl,
@@ -780,6 +829,7 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
       data: {
         checkoutExpiresAt: boundedCheckoutExpiresAt,
         ...returnUrls,
+        grantSlotReleasedAt: null,
         lastReconciledAt: null,
         reconciliationVersion: { increment: 1n },
         status: HostedUsageCreditPurchaseStatus.created,
@@ -788,6 +838,7 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
       },
       where: {
         id: failed.id,
+        grantSlotReleasedAt: failed.grantSlotReleasedAt,
         reconciliationVersion: failed.reconciliationVersion,
         status: HostedUsageCreditPurchaseStatus.payment_failed,
         stripeCheckoutSessionLookupKey: null,
@@ -807,6 +858,7 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
   const purchaseId = await readOrCreateHostedGroupSponsorshipRefillPurchaseTx({
     authorization,
     checkoutExpiresAt: boundedCheckoutExpiresAt,
+    lockedBeneficiary,
     now,
     tx: input.tx,
   });
@@ -819,6 +871,7 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
 async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
   authorization: HostedGroupSponsorshipAuthorization;
   checkoutExpiresAt: Date;
+  lockedBeneficiary: LockedHostedUsageCreditBeneficiary;
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<string | null> {
@@ -829,7 +882,6 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
       "Hosted group sponsorship refill has no payer authorization.",
     );
   }
-  await lockHostedMemberRow(input.tx, payerMemberId);
   const purchases = await input.tx.hostedUsageCreditPurchase.findMany({
     orderBy: { groupSponsorshipChargeOrdinal: "asc" },
     select: {
@@ -850,6 +902,21 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
     isHostedGroupSponsorshipRefillPending,
   );
   if (pendingAutomatic) {
+    const capacity = await readHostedUsageCreditGrantCapacityTx({
+      expectedPurchaseId: pendingAutomatic.id,
+      lockedBeneficiary: input.lockedBeneficiary,
+      tx: input.tx,
+    });
+    if (capacity.state === "overflow") {
+      throw new TypeError(
+        "Hosted group sponsorship usage-credit capacity exceeds its contract.",
+      );
+    }
+    if (!capacity.expectedPurchaseOwnsReservation) {
+      throw new TypeError(
+        "Hosted group sponsorship refill purchase reservation is missing.",
+      );
+    }
     if (pendingAutomatic.status === HostedUsageCreditPurchaseStatus.created) {
       await normalizeHostedGroupSponsorshipRefillReturnUrlsTx({
         now: input.now,
@@ -912,6 +979,18 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
     checkoutSuccessUrl: activationPurchase.checkoutSuccessUrl,
     purchaseId,
   });
+  const capacity = await readHostedUsageCreditGrantCapacityTx({
+    lockedBeneficiary: input.lockedBeneficiary,
+    tx: input.tx,
+  });
+  if (capacity.state === "overflow") {
+    throw new TypeError(
+      "Hosted group sponsorship usage-credit capacity exceeds its contract.",
+    );
+  }
+  if (capacity.state === "at_capacity") {
+    return null;
+  }
 
   try {
     await input.tx.hostedUsageCreditPurchase.create({
@@ -930,6 +1009,7 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
           periodStartedAt: authorization.periodStartedAt,
         }),
         createdAt: input.now,
+        grantSlotReleasedAt: null,
         grantUsdMicros: offer.grantUsdMicros,
         groupSponsorshipAuthorizationId: authorization.id,
         groupSponsorshipChargeOrdinal: chargeOrdinal,
@@ -964,6 +1044,21 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
     });
     if (!existing || existing.id !== purchaseId) {
       throw error;
+    }
+    const existingCapacity = await readHostedUsageCreditGrantCapacityTx({
+      expectedPurchaseId: purchaseId,
+      lockedBeneficiary: input.lockedBeneficiary,
+      tx: input.tx,
+    });
+    if (existingCapacity.state === "overflow") {
+      throw new TypeError(
+        "Hosted group sponsorship usage-credit capacity exceeds its contract.",
+      );
+    }
+    if (!existingCapacity.expectedPurchaseOwnsReservation) {
+      throw new TypeError(
+        "Hosted group sponsorship refill purchase reservation is missing.",
+      );
     }
   }
 

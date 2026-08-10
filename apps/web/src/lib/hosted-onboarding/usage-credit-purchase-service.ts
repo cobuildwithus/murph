@@ -1243,8 +1243,12 @@ export async function recoverHostedGroupSponsorshipUsageCreditCheckout(input: {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const prepared = await prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.beneficiaryMemberId);
-    await lockHostedMemberRow(tx, input.payerMemberId);
+    // Keep the gate decision under the same beneficiary serialization as the
+    // recovery mutation; prepare also acquires this lock for direct callers.
+    await lockHostedUsageCreditBeneficiaryTx({
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      tx,
+    });
     const decision = await readHostedAiUsageGate({
       memberId: input.beneficiaryMemberId,
       now,
