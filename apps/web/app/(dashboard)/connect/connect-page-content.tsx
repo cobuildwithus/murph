@@ -27,13 +27,13 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
+import { APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI } from "./apple-health-relay-connect-sources";
 import { ConnectSourcesGrid } from "./connect-page-client";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 import type {
   ConnectCallbackInput,
   ConnectPageInitialLoadError,
   ConnectSource,
-  ConnectSourceSetupGuideId,
   LogoAsset,
 } from "./connect-page-types";
 
@@ -88,25 +88,6 @@ const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>([
   "zepp",
 ]);
 
-function appleHealthRelaySourceUi(input: {
-  description: string;
-  name: string;
-  setupGuideId: ConnectSourceSetupGuideId;
-}): ConnectSourceUi {
-  return {
-    description: input.description,
-    logo: logoAsset(
-      "wearable-relay.svg",
-      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-      64,
-      40,
-    ),
-    name: input.name,
-    setupGuideActionLabel: "Set up sync",
-    setupGuideId: input.setupGuideId,
-  };
-}
-
 const CONNECT_SOURCE_UI = {
   "apple-health": {
     description:
@@ -116,42 +97,7 @@ const CONNECT_SOURCE_UI = {
     unavailableActionLabel: "Download app",
     unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
   },
-  zepp: appleHealthRelaySourceUi({
-    description:
-      "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
-    name: "Zepp / Amazfit",
-    setupGuideId: "zepp-apple-health",
-  }),
-  "xiaomi-mi-fitness": appleHealthRelaySourceUi({
-    description:
-      "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
-    name: "Xiaomi / Mi Fitness",
-    setupGuideId: "xiaomi-mi-fitness-apple-health",
-  }),
-  ringconn: appleHealthRelaySourceUi({
-    description:
-      "Smart-ring sleep, activity, heart rate, and supported data through Apple Health.",
-    name: "RingConn",
-    setupGuideId: "ringconn-apple-health",
-  }),
-  coros: appleHealthRelaySourceUi({
-    description:
-      "Activity, sleep, heart rate, and supported workouts through Apple Health.",
-    name: "COROS",
-    setupGuideId: "coros-apple-health",
-  }),
-  suunto: appleHealthRelaySourceUi({
-    description:
-      "Activity, sleep, heart rate, and supported workouts through Apple Health.",
-    name: "Suunto",
-    setupGuideId: "suunto-apple-health",
-  }),
-  "huawei-health": appleHealthRelaySourceUi({
-    description:
-      "Selected watch and band data through Apple Health, where supported.",
-    name: "Huawei Health",
-    setupGuideId: "huawei-health-apple-health",
-  }),
+  ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
     logo: logoAsset(
