@@ -41,7 +41,7 @@ const COMPLETE_CARD_V2: DailyNutritionResponseCardV2 = {
   goals: {
     calories: { target: 2_100, status: 'under_target' },
     proteinGrams: { target: 100, status: 'on_target' },
-    carbsGrams: null,
+    carbsGrams: { target: 220, status: 'on_target' },
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
@@ -337,7 +337,7 @@ describe('assistant response cards', () => {
     )
 
     expect(renderAssistantResponseCardText(COMPLETE_CARD_V2)).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals.',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (UNDER TARGET) · 100g protein (ON TARGET) · 220g carbs (ON TARGET) · 40g fat (ON TARGET) · 30g fiber (UNDER TARGET).',
     )
     expect(renderAssistantResponseCardText({
       ...COMPLETE_CARD_V2,
@@ -350,8 +350,16 @@ describe('assistant response cards', () => {
         fiberGrams: { target: 30, status: 'unavailable' },
       },
     })).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals. Some nutrition estimates were partial.',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals. Targets: 2,100 calories (UNDER TARGET) · 100g protein (ON TARGET) · 220g carbs (ON TARGET) · 40g fat (ON TARGET) · 30g fiber (STATUS UNAVAILABLE). Some nutrition estimates were partial.',
     )
+
+    expect(renderAssistantResponseCardText({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        ...COMPLETE_CARD_V2.goals,
+        carbsGrams: null,
+      },
+    })).toContain('carbs target unavailable')
   })
 
   it('uses the same bounded display precision as the native card', () => {

@@ -64,14 +64,22 @@ describe('assistant automatic meal capture skill', () => {
   })
 
   it('teaches setup, background limits, import proof, and calorie-aware enrichment', async () => {
-    const skill = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        'automatic-meal-capture',
-        'SKILL.md',
+    const skillsRoot = resolveAssistantSkillsRoot()
+    const [skill, cardSafety] = await Promise.all([
+      readFile(
+        path.join(skillsRoot, 'automatic-meal-capture', 'SKILL.md'),
+        'utf8',
       ),
-      'utf8',
-    )
+      readFile(
+        path.join(
+          skillsRoot,
+          'nutrition-strategy',
+          'references',
+          'daily-nutrition-card-safety.md',
+        ),
+        'utf8',
+      ),
+    ])
 
     expect(skill).toMatch(/^---\nname: automatic-meal-capture\n/)
     expect(skill).toContain('iOS 26.1 or later')
@@ -127,16 +135,22 @@ describe('assistant automatic meal capture skill', () => {
     )
     const compactSkill = compact(skill)
     expect(compactSkill).toContain(
-      'resolve all five targets from active canonical Goals.',
+      'Only when all five scalar targets resolve from active canonical Goals',
+    )
+    expect(skill).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
     )
     expect(compactSkill).toContain(
-      'This scheduled closeout does not provide target-setting intent',
+      'before resolving a card, even when five accepted goals already exist.',
+    )
+    expect(compactSkill).toContain(
+      'This scheduled closeout uses only that card-time safety gate and does not provide target-setting intent',
     )
     expect(compactSkill).toContain(
       'do not ask for profile inputs, call `goal import-json`, create or change a paused proposal, or surface a numeric target proposal.',
     )
     expect(compactSkill).toContain(
-      'If the active target bundle is incomplete or ambiguous, retain the ordinary compact closeout and do not attach a card.',
+      'If numeric presentation is suppressed, or the active target bundle is incomplete or ambiguous, retain the ordinary compact closeout and do not attach a card.',
     )
     expect(compactSkill).not.toContain(
       'follow it exactly. Resolve all five targets from active canonical Goals.',
@@ -147,9 +161,14 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSkill).toContain(
       'When the run covers exactly one local date, the canonical read includes a calorie total',
     )
-    expect(compactSkill).toContain(
-      'numerical output is permitted for the member',
+    const compactSafety = compact(cardSafety)
+    expect(compactSafety).toContain(
+      'before every `daily_nutrition` attachment',
     )
+    expect(compactSafety).toContain('under-fueling or RED-S concern')
+    expect(compactSafety).toContain('pregnancy or breastfeeding')
+    expect(compactSafety).toContain('glucose-lowering medication')
+    expect(compactSafety).toContain('kidney disease')
     expect(skill).toContain('`murph.attach_response_card`')
     expect(skill).toContain(
       '`card: { kind: "daily_nutrition", version: 2, localDate: <the single',
@@ -180,6 +199,8 @@ describe('assistant automatic meal capture skill', () => {
     expect(
       compactSkill.indexOf('vault-cli meal totals --from <date> --to'),
     ).toBeLessThan(attachCardIndex)
+    expect(compactSkill.indexOf('daily-nutrition-card-safety.md'))
+      .toBeLessThan(attachCardIndex)
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')

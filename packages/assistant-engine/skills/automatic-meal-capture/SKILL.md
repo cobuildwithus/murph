@@ -174,20 +174,23 @@ On a scheduled run:
    replaces retained image bytes with a privacy tombstone. Any removal failure
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
-6. After inspection, enrichment, read-back, and photo cleanup, resolve all five
-   targets from active canonical Goals. This scheduled closeout does not provide
+6. After inspection, enrichment, read-back, and photo cleanup, read and apply
+   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
+   before resolving a card, even when five accepted goals already exist. This
+   scheduled closeout uses only that card-time safety gate and does not provide
    target-setting intent: do not ask for profile inputs, call `goal import-json`,
-   create or change a paused proposal, or surface a numeric target proposal. If
-   the active target bundle is incomplete or ambiguous, retain the ordinary
-   compact closeout and do not attach a card. Never infer a target from this
-   day's meal total or one wearable day.
+   create or change a paused proposal, or surface a numeric target proposal.
+   If numeric presentation is suppressed, or the active target bundle is
+   incomplete or ambiguous, retain the ordinary compact closeout and do not
+   attach a card. Never infer a target from this day's meal total or one
+   wearable day.
 7. Only when all five scalar targets resolve from active canonical Goals, run
    the exact canonical
    `vault-cli meal totals --from <date> --to <date>` read for the selected date
    range immediately before any response-card attachment; do not reuse an
    earlier total or calculate nutrition independently. When the run covers
    exactly one local date, the canonical read includes a calorie total, and
-   numerical output is permitted for the member, call
+   the card-time safety gate from step 6 still passes, call
    `murph.attach_response_card` with this exact mapping:
    `card: { kind: "daily_nutrition", version: 2, localDate: <the single
    selected date>, mealCount: <top-level mealCount>, totals: { calories,

@@ -32,9 +32,17 @@ async function readSkills(): Promise<{
   gut: string
   bodyComposition: string
   cardGoals: string
+  cardSafety: string
 }> {
   const root = resolveAssistantSkillsRoot()
-  const [nutrition, foodJournal, gut, bodyComposition, cardGoals] =
+  const [
+    nutrition,
+    foodJournal,
+    gut,
+    bodyComposition,
+    cardGoals,
+    cardSafety,
+  ] =
     await Promise.all([
       readFile(path.join(root, 'nutrition-strategy', 'SKILL.md'), 'utf8'),
       readFile(path.join(root, 'food-journal', 'SKILL.md'), 'utf8'),
@@ -49,8 +57,24 @@ async function readSkills(): Promise<{
         ),
         'utf8',
       ),
+      readFile(
+        path.join(
+          root,
+          'nutrition-strategy',
+          'references',
+          'daily-nutrition-card-safety.md',
+        ),
+        'utf8',
+      ),
     ])
-  return { nutrition, foodJournal, gut, bodyComposition, cardGoals }
+  return {
+    nutrition,
+    foodJournal,
+    gut,
+    bodyComposition,
+    cardGoals,
+    cardSafety,
+  }
 }
 
 describe('assistant nutrition strategy skill', () => {
@@ -138,11 +162,18 @@ describe('assistant nutrition strategy skill', () => {
   })
 
   it('grounds first-card goals in one researched, explanation-first owner', async () => {
-    const { bodyComposition, cardGoals, nutrition } = await readSkills()
+    const { bodyComposition, cardGoals, cardSafety, nutrition } =
+      await readSkills()
     const compactGoals = cardGoals.replace(/\s+/gu, ' ').trim()
+    const compactSafety = cardSafety.replace(/\s+/gu, ' ').trim()
 
     expect(nutrition).toContain('### Daily nutrition-card goals')
+    expect(nutrition).toContain('references/daily-nutrition-card-safety.md')
     expect(nutrition).toContain('references/daily-nutrition-card-goals.md')
+    expect(nutrition.indexOf('references/daily-nutrition-card-safety.md'))
+      .toBeLessThan(
+        nutrition.indexOf('references/daily-nutrition-card-goals.md'),
+      )
     expect(nutrition).toContain('the single canonical Goal proposal')
     expect(nutrition).toContain('explanation-before-card')
     expect(bodyComposition).toContain(
@@ -199,6 +230,12 @@ describe('assistant nutrition strategy skill', () => {
       'Read the Goal back and verify the complete retained set',
     )
     expect(compactGoals).toContain(
+      'Any write that adds or changes a derived managed value must include `status: "paused"` atomically, even when the same Goal was active',
+    )
+    expect(compactGoals).toContain(
+      'Removing an overlapping metric without adding or changing a derived value may leave the managed Goal active',
+    )
+    expect(compactGoals).toContain(
       'A turn that creates or changes the paused proposal must be ordinary text, never a card.',
     )
     expect(compactGoals).toContain(
@@ -217,7 +254,13 @@ describe('assistant nutrition strategy skill', () => {
       ),
     )
     expect(compactGoals).toContain(
-      'Only a later eligible response with five scalar values resolved from active canonical goals may attach the card.',
+      'its next unambiguous acceptance may be the first later eligible response',
+    )
+    expect(compactGoals).toContain(
+      'after activation and readback, reapply `daily-nutrition-card-safety.md`, re-read same-date canonical meal totals, and attach exactly one card in that acceptance response',
+    )
+    expect(compactGoals).toContain(
+      'A target-setting-only request, correction, decline, ambiguous acceptance, or compound request remains ordinary text with no card.',
     )
     expect(compactGoals).toContain(
       'A member- or clinician-chosen active target always wins for its metric.',
@@ -233,6 +276,12 @@ describe('assistant nutrition strategy skill', () => {
     )
     expect(compactGoals).toContain(
       'an abandoned or completed record is an opt-out and must not be recreated automatically.',
+    )
+    expect(compactSafety).toContain(
+      'before every `daily_nutrition` attachment, including when five accepted active goals already exist and during a scheduled closeout.',
+    )
+    expect(compactSafety).toContain(
+      'A scheduled occurrence uses this file only as a card-time safety check.',
     )
   })
 
@@ -251,19 +300,20 @@ describe('assistant nutrition strategy skill', () => {
   })
 
   it('protects under-fueled, eating-disorder-sensitive, and acute contexts', async () => {
-    const { cardGoals, nutrition } = await readSkills()
+    const { cardSafety, nutrition } = await readSkills()
 
     expect(nutrition).toContain('can occur at any body size')
-    expect(cardGoals).toContain(
+    expect(cardSafety).toContain(
       'Do not derive, save, or surface numeric goals',
     )
-    const compactGoals = cardGoals.replace(/\s+/gu, ' ').trim()
+    const compactSafety = cardSafety.replace(/\s+/gu, ' ').trim()
 
-    expect(compactGoals).toContain('under-fueling or RED-S concern')
-    expect(cardGoals).toContain('anyone under 18')
-    expect(compactGoals).toContain('pregnancy or breastfeeding')
-    expect(compactGoals).toContain('glucose-lowering medication')
-    expect(compactGoals).toContain('another clinician-managed nutrition context')
+    expect(compactSafety).toContain('under-fueling or RED-S concern')
+    expect(cardSafety).toContain('anyone under 18')
+    expect(compactSafety).toContain('pregnancy or breastfeeding')
+    expect(compactSafety).toContain('glucose-lowering medication')
+    expect(compactSafety).toContain('kidney disease')
+    expect(compactSafety).toContain('another clinician-managed nutrition context')
     expect(nutrition).toContain('Do not calculate energy availability or diagnose RED-S')
     expect(nutrition).toContain('little or nothing for about five days')
     expect(nutrition).toContain('refeeding can require medical monitoring')

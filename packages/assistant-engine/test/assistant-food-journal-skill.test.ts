@@ -71,15 +71,25 @@ describe('assistant food journal skill', () => {
       'Provide calorie and macro estimates by default when logging a meal',
     )
     expect(skill).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
+    )
+    expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
     )
-    expect(skill).toContain('require all five canonical daily goals')
+    expect(skill.indexOf('daily-nutrition-card-safety.md')).toBeLessThan(
+      skill.indexOf('daily-nutrition-card-goals.md'),
+    )
+    expect(skill).toContain('even when all five goals already exist')
+    expect(skill).toContain('Require all five canonical daily goals')
     expect(skill).toContain(
       'first setup response explains a paused canonical proposal in ordinary text',
     )
     expect(skill).toContain('does not attach a goal-less card')
     expect(skill).toContain(
-      'Only a later eligible response may use the\naccepted active goals in a card.',
+      'An unambiguous acceptance may complete the\npending explicit card request in that next response after activation, safety',
+    )
+    expect(skill).toContain(
+      'recheck, and a fresh same-date totals read.',
     )
     expect(skill).toContain('vault-cli food search-labels`')
     expect(skill).toContain('vault-cli food search-labels-batch`')

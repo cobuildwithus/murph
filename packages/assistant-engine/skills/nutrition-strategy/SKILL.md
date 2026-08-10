@@ -49,12 +49,13 @@ Do not give unsolicited calorie, macro, or weight-loss estimates. Past tracking 
 ### Daily nutrition-card goals
 
 An explicit request for a numeric daily nutrition card supplies numeric intent
-for that card workflow, subject to the safety rules below. Before any first card
-without five usable daily goals, read and follow
-`references/daily-nutrition-card-goals.md`. It owns evidence-grounded default
-derivation, the single canonical Goal proposal, and the explanation-before-card
-sequence. Do not send a goal-less card, create a second goal store, or reuse the
-workflow as unsolicited diet planning.
+for that card workflow, subject to the safety rules below. Before every card,
+even when five active goals already exist, read and apply
+`references/daily-nutrition-card-safety.md`. When five usable daily goals are
+missing, also read and follow `references/daily-nutrition-card-goals.md`. It
+owns evidence-grounded default derivation, the single canonical Goal proposal,
+and the explanation-before-card sequence. Do not send a goal-less card, create
+a second goal store, or reuse the workflow as unsolicited diet planning.
 
 ## Practical Levers
 
