@@ -19,6 +19,12 @@ jobs:
           ref: 5cfb1d36c54440d0453ee5b86cfa736a201c5db5
           path: main
 
+      - name: Check out PR merge base
+        uses: actions/checkout@v4
+        with:
+          ref: 337a75888b8c8046b208a75195d3e787dec83834
+          path: base
+
       - name: Check out PR head
         uses: actions/checkout@v4
         with:
@@ -30,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           tar --exclude=.git --exclude=node_modules --exclude=.next \
-            -czf /tmp/pr1484-audit-snapshots.tar.gz main pr
+            -czf /tmp/pr1484-audit-snapshots.tar.gz main base pr
 
       - name: Upload snapshots
         uses: actions/upload-artifact@v4
