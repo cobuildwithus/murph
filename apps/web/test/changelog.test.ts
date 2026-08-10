@@ -510,6 +510,7 @@ describe("changelog registry", () => {
           "personal-patterns",
           "reminders-keep-requested-timezone",
           "web-search-restored",
+          "appointment-reminders-by-default",
         ],
       },
       {
