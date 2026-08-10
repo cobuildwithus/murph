@@ -9769,6 +9769,145 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("system mailbox mode preserves successful dirty-ack follow-up wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:dirty-ack-follow-up",
+      id: "mailbox_item_system_mailbox_device_dirty_ack_follow_up",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const followUpWakeAt = "2026-04-27T00:03:00.000Z";
+    const baseDeviceSyncPort = createEmptyDeviceSyncPort();
+    let dirtyAckCalls = 0;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...baseDeviceSyncPort,
+      async ackDirtyStateProcessed(request) {
+        dirtyAckCalls += 1;
+        assert.deepEqual(request, {
+          connectionId: "device_sync_connection_synthetic",
+          processedDirtyPayloadIds: ["dirty_payload_synthetic"],
+          processedRevision: "7",
+        });
+        return {
+          connectionId: request.connectionId,
+          dirtyRevision: "8",
+          nextWakeAt: followUpWakeAt,
+          processedRevision: request.processedRevision,
+          recorded: true,
+          stillDirty: true,
+          userId: TEST_USER_ID,
+        };
+      },
+    };
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === deviceItem.id
+            ? {
+                ...item,
+                postCheckpointRecord: {
+                  connectionId: "device_sync_connection_synthetic",
+                  kind: "device-sync.dirty-processed" as const,
+                  processedDirtyPayloadIds: ["dirty_payload_synthetic"],
+                  processedRevision: "7",
+                },
+                status: "recording" as const,
+              }
+            : item
+        ),
+      }));
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-device-dirty-ack-follow-up-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_device_dirty_ack_follow_up",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-device-dirty-ack-follow-up.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Successful dirty ack must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(dirtyAckCalls, 1);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, followUpWakeAt);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, followUpWakeAt);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
+        request.nextWakeAt === followUpWakeAt
+        && request.nextWakeReason === "device-sync.reconcile"
+      );
+      assert.ok(followUpCheckpointIndex >= 0);
+      assert.equal(
+        checkpointRequests.slice(followUpCheckpointIndex + 1).some((request) =>
+          request.nextWakeAt === null && request.nextWakeReason === null
+        ),
+        false,
+      );
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("system mailbox mode keeps device-sync wake identity on dirty ack failure", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -10082,10 +10221,7 @@ describe("hosted workspace runtime entrypoint", () => {
       ...baseDeviceSyncPort,
       async ackDirtyStateProcessed() {
         dirtyAckCalls += 1;
-        return {
-          acknowledgedAt: TEST_NOW,
-          userId: TEST_USER_ID,
-        };
+        throw new Error("Foreground preemption must defer the device-sync dirty ack.");
       },
     };
 
