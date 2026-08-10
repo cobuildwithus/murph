@@ -416,6 +416,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   concurrency-capped. Crypto owners batch envelope metadata, preserve binding
   and authenticity checks, fail closed on missing or mismatched material, and
   zeroize key and plaintext buffers on success and failure.
+- An owner that starts parallel external or crypto work drains every started
+  operation before releasing its cache or zeroization scope, opening a dependent
+  transaction, or returning control to a caller that may do either. Preserve the
+  first observed failure while awaiting siblings; fail-fast observation must not
+  leave detached work mutating scoped state after finalization.
 - A database transaction holds one pooled connection for its full duration.
   Never open one transaction per collection item concurrently; batch the items
   into one transaction or process them sequentially, and count concurrent

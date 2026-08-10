@@ -1665,7 +1665,10 @@ The Linq AT_RISK home-line and recovered-setup paths genuinely inspect private
 home-line state before `BEGIN`; those speculative reads retain a failed root
 unwrap only in the existing request-scoped cache so their authoritative
 transaction rechecks fail locally instead of repeating KMS under a connection
-or authority lock.
+or authority lock. When an opted-in speculative batch fails during envelope
+metadata lookup or verification, it retains that same rejection for every
+affected uncached root reference. A later mixed cached-and-uncached request
+observes cached failures before starting new metadata or provider work.
 Established Linq direct messages resolve only a narrow blind-index/member-id
 target and unwrap the mailbox-payload ingress root; established Linq and
 Telegram group routes also retain the exact observed delivery-route ciphertext,
@@ -1674,7 +1677,10 @@ decrypt-only control root named by that ciphertext, and prewarm the mailbox
 root. For an eligible unbound group, Web generates the
 synthetic member id, prepares all four domain-root envelopes, pre-seals the
 delivery route, and prewarms the prepared control and mailbox roots before
-`BEGIN`. These reads and crypto results grant no authority: the planner repeats
+`BEGIN`. Parallel route/mailbox preparation and four-domain candidate
+preparation preserve the first observed failure but drain every started sibling
+before opening the transaction or finalizing request-scoped crypto state. These
+reads and crypto results grant no authority: the planner repeats
 route, identity, activation, access, line, pending-setup, and participant checks
 inside the transaction. A new route then commits the synthetic member,
 prepared root envelopes, container, unique external-thread route, and activation
