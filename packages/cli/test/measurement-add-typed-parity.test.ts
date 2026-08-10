@@ -261,7 +261,7 @@ test('measurement add guidance surfaces teach quoted metrics and indexed grouped
   assert.match(getOptionDescription(schema, 'measurementNote'), /2:five quiet minutes/u)
 })
 
-test('measurement entry list schema requires exact metric filters and preserves lossless entry fields', async () => {
+test('measurement entry list schema uses canonical metric identity and preserves lossless entry fields', async () => {
   const schema = await readCommandSchema(createMeasurementCli(), [
     'measurement',
     'entry',
@@ -273,7 +273,8 @@ test('measurement entry list schema requires exact metric filters and preserves 
   for (const field of ['metric', 'from', 'to', 'limit', 'vault']) {
     assert.equal(field in schema.options.properties, true, field)
   }
-  assert.match(getOptionDescription(schema, 'metric'), /matching is exact, not fuzzy/u)
+  assert.match(getOptionDescription(schema, 'metric'), /canonical metric identity/u)
+  assert.match(getOptionDescription(schema, 'metric'), /never fuzzy matching/u)
 })
 
 test('measurement entry list returns primary, legacy, and device-observation scalars without changing event list', async () => {
@@ -290,7 +291,7 @@ test('measurement entry list returns primary, legacy, and device-observation sca
         '--vault',
         vaultRoot,
         '--metric',
-        'BMI',
+        'body mass index',
         '--value',
         '17.2',
         '--unit',
@@ -316,7 +317,7 @@ test('measurement entry list returns primary, legacy, and device-observation sca
         '--unit',
         'cm',
         '--metric',
-        'weight',
+        'bodyweight',
         '--value',
         '50',
         '--unit',
@@ -409,6 +410,22 @@ test('measurement entry list returns primary, legacy, and device-observation sca
       },
     },
   })
+  const aliasedBmi = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'aliased-bmi.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-09T07:30:00.000Z',
+      source: 'device',
+      title: 'Imported BMI alias',
+      metric: 'body-mass-index',
+      value: 16.7,
+      unit: 'kg/m2',
+      observationGrain: 'summary',
+    },
+  })
   const normalBmi = await importEventPayload({
     cli,
     parentRoot,
@@ -488,9 +505,19 @@ test('measurement entry list returns primary, legacy, and device-observation sca
     to: '2026-07-31',
     limit: 200,
   })
-  assert.equal(entries.count, 7)
+  assert.equal(entries.count, 8)
   assert.equal(entries.nextCursor, null)
   assert.deepEqual(entries.items, [
+    {
+      eventId: aliasedBmi.eventId,
+      recordKind: 'observation',
+      measurementIndex: null,
+      occurredAt: '2026-07-09T07:30:00.000Z',
+      source: 'device',
+      metric: 'body-mass-index',
+      value: 16.7,
+      unit: 'kg/m2',
+    },
     {
       eventId: whoopBmi.eventId,
       recordKind: 'observation',
@@ -537,7 +564,7 @@ test('measurement entry list returns primary, legacy, and device-observation sca
       measurementIndex: 1,
       occurredAt: '2026-07-03T07:30:00.000Z',
       source: 'manual',
-      metric: 'weight',
+      metric: 'bodyweight',
       value: 50,
       unit: 'kg',
     },
@@ -547,7 +574,7 @@ test('measurement entry list returns primary, legacy, and device-observation sca
       measurementIndex: 0,
       occurredAt: '2026-07-02T07:30:00.000Z',
       source: 'device',
-      metric: 'bmi',
+      metric: 'body-mass-index',
       value: 17.2,
       unit: 'kg_m2',
     },

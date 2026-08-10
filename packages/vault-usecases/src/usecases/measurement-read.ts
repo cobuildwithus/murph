@@ -188,7 +188,7 @@ export async function listMeasurementEntries(input: {
       'measurement entry list requires at least one metric filter.',
     )
   }
-  const metricSet = new Set(metrics)
+  const metricIdentitySet = new Set(metrics.map(query.resolveMetricInputKey))
   const limit =
     typeof input.limit === 'number' && Number.isFinite(input.limit)
       ? Math.max(1, Math.min(DEFAULT_LIST_LIMIT * 4, Math.round(input.limit)))
@@ -253,7 +253,7 @@ export async function listMeasurementEntries(input: {
           }
           entry = parsedEntry.data
         }
-        if (!metricSet.has(entry.metric)) {
+        if (!metricIdentitySet.has(query.resolveMetricInputKey(entry.metric))) {
           return []
         }
 

@@ -5677,7 +5677,7 @@
                                     "minLength": 1,
                                     "maxLength": 120
                                   },
-                                  "description": "Measurement metric name or slug. Repeat --metric for OR matching. Inputs are normalized to canonical slugs; matching is exact, not fuzzy."
+                                  "description": "Measurement metric name or slug. Repeat --metric for OR matching. Registered aliases match their canonical metric identity; unknown custom metrics use normalized exact matching, never fuzzy matching."
                                 },
                                 "from": {
                                   "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",

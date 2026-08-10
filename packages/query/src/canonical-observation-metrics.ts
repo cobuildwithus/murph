@@ -1,4 +1,7 @@
-import { normalizeMetricKey } from "@murphai/health-metrics";
+import {
+  normalizeMetricKey,
+  resolveMetricInputKey,
+} from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import { isDeletionSentinelObservation } from "./observation-sentinels.ts";
@@ -54,7 +57,8 @@ function observationEntry(
   }
 
   const metric = normalizeMetricKey(rawMetric);
-  if (!metric || (metricSet && !metricSet.has(metric))) {
+  const metricIdentity = resolveMetricInputKey(rawMetric);
+  if (!metric || !metricIdentity || (metricSet && !metricSet.has(metricIdentity))) {
     return null;
   }
 
@@ -84,7 +88,7 @@ export async function listCanonicalObservationMetricEntries(
 ): Promise<CanonicalObservationMetricEntry[]> {
   const snapshot = await readVaultSourceStrict(vaultRoot);
   const metrics = filters.metrics
-    ?.map(normalizeMetricKey)
+    ?.map(resolveMetricInputKey)
     .filter((metric) => metric.length > 0);
   const metricSet = metrics && metrics.length > 0 ? new Set(metrics) : null;
   const entries = snapshot.entities

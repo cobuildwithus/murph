@@ -219,6 +219,7 @@ export {
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  resolveMetricInputKey,
   assessExperimentPrimaryMetricCapture,
   experimentSessionMetricIsDeclared,
   resolveExperimentSessionMetricSpec,

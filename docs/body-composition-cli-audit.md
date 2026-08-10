@@ -83,7 +83,7 @@ Any new surface must:
 - compose canonical owners rather than create a second store
 - preserve direct measurement, estimate, device, unit, timestamp, and provenance
 - preserve the parent `evt_*` event ID and record kind; preserve the matched entry’s original array index for array-backed records and use `null` for scalar observations
-- use the existing canonical metric-slug normalization contract
+- use the existing canonical metric-identity contract: registered aliases resolve to their owner key, while unknown custom metrics retain normalized exact identity
 - avoid silently merging different BIA devices or treating estimated tissue as measured tissue
 - avoid fuzzy metric matching, hidden unit conversion, and silent duplicate deletion
 - never change calories, exercise, targets, goals, or automations without explicit user intent
@@ -111,7 +111,8 @@ Recommended behavior:
 
 - keep `measurement list` unchanged for backward-compatible event browsing
 - repeatable `--metric` with OR semantics
-- normalize each query with the existing `normalizeMetricSlug` contract, then use exact equality against the stored canonical metric slug
+- normalize each query, then resolve both query and stored spelling through the existing health-metric identity owner
+- registered aliases compare by owner key; unknown custom metrics fall back to normalized exact equality
 - no substring, semantic, or fuzzy matching
 - flatten matching canonical entries into a typed read projection; do not persist the projection
 - return one row per matching entry with:
@@ -202,7 +203,7 @@ Suggested output:
 
 Contract:
 
-- normalize the metric argument with the same canonical slug function used by writes and entry filtering
+- normalize the metric argument through the same canonical identity owner used by entry filtering
 - require `--stat mean|median` in the first version; do not hide a default in a generic command
 - treat `--unit` as a filter
 - if more than one unit remains, return a typed `mixed_units` result and no aggregate until a shared conversion contract exists
