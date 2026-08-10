@@ -1868,9 +1868,51 @@ export function createJunctionDeviceSyncProvider(
       }
 
       if (inferredCategory === "timeseries") {
-        const sourceProviders = await loadAndProjectSourceProviders();
         const extendedHistoricalBackfill =
           isJunctionExtendedTimeseriesBackfillJob(job, effectiveResource);
+        let sourceProviders: readonly JunctionProviderConnection[];
+        try {
+          sourceProviders = await loadAndProjectSourceProviders();
+        } catch (error) {
+          if (
+            extendedHistoricalBackfill
+            && (
+              job.payload.historicalProviderRecordsSeen === true
+              || job.payload.historicalRecordsSeen === true
+            )
+            && isRetryableDeviceSyncFailure(error)
+          ) {
+            return withJunctionExtendedTimeseriesBackfillFollowUp({
+              context,
+              importResult: {
+                canonicalEventCount: 0,
+                fetchComplete: false,
+                providerRecordsSeen: false,
+                yieldedAt: null,
+              },
+              job,
+              resource: effectiveResource,
+              result: {
+                nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+              },
+              window,
+            });
+          }
+          throw error;
+        }
+        if (
+          extendedHistoricalBackfill
+          && !isJunctionSourceResourceCurrentlyAvailable({
+            connectionId: context.account.id,
+            providers: sourceProviders,
+            resource: effectiveResource,
+            sourceProviderSlug,
+          })
+        ) {
+          return {
+            nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+          };
+        }
         const timeseriesImport = await importTimeseriesPreciseSnapshots(
           context,
           sourceProviders,
@@ -2515,7 +2557,7 @@ export function createJunctionDeviceSyncProvider(
             options.historicalProviderRecordsSeen === true
             || hasJunctionSnapshotRecords(accumulatedTimeseries)
           )
-          && isRetryableJunctionApiRequestFailure(error)
+          && isRetryableDeviceSyncFailure(error)
         ) {
           fetchComplete = false;
           break;
@@ -3081,10 +3123,8 @@ function classifyOptionalJunctionResourceFailure(
   };
 }
 
-function isRetryableJunctionApiRequestFailure(error: unknown): boolean {
-  return isDeviceSyncError(error)
-    && error.code === "JUNCTION_API_REQUEST_FAILED"
-    && error.retryable;
+function isRetryableDeviceSyncFailure(error: unknown): boolean {
+  return isDeviceSyncError(error) && error.retryable;
 }
 
 function buildJunctionOptionalResourceResponseDetail(input: {
@@ -5228,6 +5268,28 @@ function isJunctionResourceAdvertisedAvailable(value: unknown): boolean {
 
   return record.available === true
     || normalizeString(record.status)?.toLowerCase() === "available";
+}
+
+function isJunctionSourceResourceCurrentlyAvailable(input: {
+  connectionId: string;
+  providers: readonly JunctionProviderConnection[];
+  resource: string;
+  sourceProviderSlug: string | null;
+}): boolean {
+  if (!input.sourceProviderSlug) {
+    return false;
+  }
+
+  return projectJunctionSourcesByProviderSlug(
+    input.connectionId,
+    input.providers,
+  ).some((source) =>
+    source.sourceProviderSlug === input.sourceProviderSlug
+    && source.status !== "disconnected"
+    && isJunctionResourceAdvertisedAvailable(
+      source.resourceAvailabilitySummary[input.resource],
+    )
+  );
 }
 
 function isJunctionHistoricalBackfillCompletionSummaryResource(

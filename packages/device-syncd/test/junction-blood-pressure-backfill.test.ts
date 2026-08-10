@@ -24,6 +24,11 @@ interface TimeseriesRequest {
   start: string | null;
 }
 
+interface MutableProviderState {
+  resourceAvailability: Record<string, unknown>;
+  status: string;
+}
+
 function createAccount(input: {
   connectedAt?: string;
   metadata?: Record<string, unknown>;
@@ -173,6 +178,10 @@ function createJobContext(input: {
   canonicalEventCount?: number;
   importedSnapshots?: unknown[];
   now?: string;
+  projectedSources?: Array<{
+    resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
+    status: string;
+  }>;
   shouldYield?: () => boolean;
 } = {}): ProviderJobContext {
   const account = input.account ?? createAccount();
@@ -186,19 +195,26 @@ function createJobContext(input: {
         durableDeliveryAccepted: true,
       };
     },
-    upsertConnectionSource: (sourceInput) => ({
-      id: "src-1",
-      connectionId: account.id,
-      ...sourceInput,
-      displayName: sourceInput.displayName ?? null,
-      resourceAvailabilitySummary: sourceInput.resourceAvailabilitySummary ?? {},
-      lastErrorCode: sourceInput.lastErrorCode ?? null,
-      lastErrorMessage: sourceInput.lastErrorMessage ?? null,
-      firstSeenAt: sourceInput.firstSeenAt ?? sourceInput.lastSeenAt,
-      lastDataAt: sourceInput.lastDataAt ?? null,
-      createdAt: sourceInput.lastSeenAt,
-      updatedAt: sourceInput.lastSeenAt,
-    }),
+    upsertConnectionSource: (sourceInput) => {
+      input.projectedSources?.push({
+        resourceAvailabilitySummary:
+          sourceInput.resourceAvailabilitySummary ?? {},
+        status: sourceInput.status,
+      });
+      return {
+        id: "src-1",
+        connectionId: account.id,
+        ...sourceInput,
+        displayName: sourceInput.displayName ?? null,
+        resourceAvailabilitySummary: sourceInput.resourceAvailabilitySummary ?? {},
+        lastErrorCode: sourceInput.lastErrorCode ?? null,
+        lastErrorMessage: sourceInput.lastErrorMessage ?? null,
+        firstSeenAt: sourceInput.firstSeenAt ?? sourceInput.lastSeenAt,
+        lastDataAt: sourceInput.lastDataAt ?? null,
+        createdAt: sourceInput.lastSeenAt,
+        updatedAt: sourceInput.lastSeenAt,
+      };
+    },
     refreshAccountTokens: async () => account,
     ...(input.shouldYield ? { shouldYield: input.shouldYield } : {}),
     logger: {},
@@ -213,10 +229,24 @@ function createProvider(input: {
     fromRequest: number;
     status: number;
   };
+  providerListRequestFailure?: {
+    active: boolean;
+    status: number;
+  };
+  providerListRequests?: { count: number };
+  providerState?: MutableProviderState;
   requests: TimeseriesRequest[];
   timeseriesBackfillDays?: number;
 }) {
   let bloodPressureRequestCount = 0;
+  const providerState = input.providerState ?? {
+    resourceAvailability: {
+      activity: true,
+      blood_pressure: true,
+      stress_level: true,
+    },
+    status: "connected",
+  };
   return createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
@@ -235,17 +265,22 @@ function createProvider(input: {
         return createJsonResponse({ user_id: "junction-user-1" });
       }
       if (url.pathname === "/v2/user/providers/junction-user-1") {
+        if (input.providerListRequests) {
+          input.providerListRequests.count += 1;
+        }
+        if (input.providerListRequestFailure?.active === true) {
+          return createJsonResponse(
+            { error: "temporary_provider_list_failure" },
+            input.providerListRequestFailure.status,
+          );
+        }
         return createJsonResponse({
           providers: [{
             id: "provider-omron-1",
             slug: "omron",
             name: "Omron",
-            status: "connected",
-            resource_availability: {
-              activity: true,
-              blood_pressure: true,
-              stress_level: true,
-            },
+            status: providerState.status,
+            resource_availability: providerState.resourceAvailability,
           }],
         });
       }
@@ -742,6 +777,98 @@ test("the scheduler waits for persisted blood-pressure capability", () => {
   );
 });
 
+test("live blood-pressure capability gates provider egress and terminal coverage", async () => {
+  const unavailableStates: readonly MutableProviderState[] = [
+    {
+      resourceAvailability: { activity: true, blood_pressure: false },
+      status: "connected",
+    },
+    {
+      resourceAvailability: { activity: true },
+      status: "connected",
+    },
+    {
+      resourceAvailability: { activity: true, blood_pressure: true },
+      status: "disconnected",
+    },
+  ];
+
+  for (const providerState of unavailableStates) {
+    const requests: TimeseriesRequest[] = [];
+    const projectedSources: Array<{
+      resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
+      status: string;
+    }> = [];
+    const provider = createProvider({ providerState, requests });
+    const admitted = createScheduledBloodPressureJob(provider, {
+      firstSeenAt: "2026-03-20T23:55:00.000Z",
+    });
+
+    const result = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ projectedSources }),
+      toJobRecord(admitted, 1),
+    );
+
+    assert.deepEqual(projectedSources, [{
+      resourceAvailabilitySummary: providerState.resourceAvailability,
+      status: providerState.status,
+    }]);
+    assert.equal(
+      requests.some((request) => request.resource === "blood_pressure"),
+      false,
+    );
+    assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  }
+
+  const records: Record<string, unknown>[] = [];
+  const recoveredState: MutableProviderState = {
+    resourceAvailability: { activity: true, blood_pressure: false },
+    status: "connected",
+  };
+  const recoveredRequests: TimeseriesRequest[] = [];
+  const recoveredProvider = createProvider({
+    bloodPressureRecords: records,
+    providerState: recoveredState,
+    requests: recoveredRequests,
+  });
+  const original = createScheduledBloodPressureJob(recoveredProvider, {
+    firstSeenAt: "2026-03-20T23:55:00.000Z",
+  });
+  const unavailable = await requireValue(recoveredProvider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(original, 1),
+  );
+  assert.equal(unavailable.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+
+  recoveredState.resourceAvailability = {
+    activity: true,
+    blood_pressure: true,
+  };
+  records.push({
+    id: "bp-after-capability-recovery",
+    timestamp: "2026-03-15T08:30:00.000Z",
+    systolic: 121,
+    diastolic: 79,
+  });
+  const recreated = createScheduledBloodPressureJob(recoveredProvider, {
+    firstSeenAt: "2026-03-20T23:55:00.000Z",
+    now: "2026-06-12T12:00:00.000Z",
+  });
+
+  assert.equal(recreated.dedupeKey, original.dedupeKey);
+  assert.equal(recreated.payload?.windowStart, original.payload?.windowStart);
+  const completed = await requireValue(recoveredProvider.jobExecutor).executeJob(
+    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    toJobRecord(recreated, 2),
+  );
+  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assert.equal(
+    recoveredRequests.some((request) => request.resource === "blood_pressure"),
+    true,
+  );
+});
+
 test("existing source obligations keep independent windows and queue identities", () => {
   const provider = createProvider({ requests: [] });
   const createScheduledJobs = requireValue(
@@ -872,9 +999,16 @@ test("retryable provider failure after raw rows preserves evidence through later
     fromRequest: 2,
     status: 500,
   };
+  const providerListRequestFailure = {
+    active: false,
+    status: 500,
+  };
+  const providerListRequests = { count: 0 };
   const provider = createProvider({
     bloodPressureRecords,
     bloodPressureRequestFailure: requestFailure,
+    providerListRequestFailure,
+    providerListRequests,
     requests: [],
   });
   const bloodPressure = createScheduledBloodPressureJob(provider);
@@ -900,6 +1034,9 @@ test("retryable provider failure after raw rows preserves evidence through later
   assert.equal(retained.payload?.historicalProviderRecordsSeen, true);
   assert.equal(retained.payload?.historicalRecordsSeen, undefined);
 
+  requestFailure.active = false;
+  providerListRequestFailure.active = true;
+  const providerListRequestsBeforeOutage = providerListRequests.count;
   let retainedAcrossOutage = retained;
   for (let outageDay = 1; outageDay <= 5; outageDay += 1) {
     const outageNow = new Date(
@@ -920,7 +1057,11 @@ test("retryable provider failure after raw rows preserves evidence through later
     );
   }
 
-  requestFailure.active = false;
+  assert.equal(
+    providerListRequests.count - providerListRequestsBeforeOutage,
+    15,
+  );
+  providerListRequestFailure.active = false;
   bloodPressureRecords.length = 0;
   const empty = await requireValue(provider.jobExecutor).executeJob(
     createJobContext({ now: "2026-06-17T12:00:00.000Z" }),
@@ -949,13 +1090,24 @@ test("retryable provider failure after raw rows preserves evidence through later
 });
 
 test("provider failures without prior rows retain their ordinary failure semantics", async () => {
-  for (const [status, retryable] of [[500, true], [401, false]] as const) {
+  for (const [boundary, status, retryable] of [
+    ["provider-list", 500, true],
+    ["provider-list", 401, false],
+    ["timeseries", 500, true],
+    ["timeseries", 401, false],
+  ] as const) {
     const provider = createProvider({
-      bloodPressureRequestFailure: {
-        active: true,
-        fromRequest: 1,
-        status,
-      },
+      ...(boundary === "provider-list"
+        ? {
+            providerListRequestFailure: { active: true, status },
+          }
+        : {
+            bloodPressureRequestFailure: {
+              active: true,
+              fromRequest: 1,
+              status,
+            },
+          }),
       requests: [],
     });
     const bloodPressure = createScheduledBloodPressureJob(provider);
