@@ -76,7 +76,7 @@ test.describe("Mobvoi Health Connect design proof", () => {
         await expect(status).toHaveCount(0);
         await expect(
           card.getByText(
-            "Supported TicWatch data through direct Health Connect sharing or a Google Fit fallback.",
+            "Supported TicWatch data reaches Murph through Health Connect.",
             { exact: true },
           ),
         ).toBeVisible();
@@ -89,7 +89,7 @@ test.describe("Mobvoi Health Connect design proof", () => {
         );
         await expect(
           card.getByText(
-            "First, enable direct Health Connect sharing in Mobvoi Health if your installed version offers it. Otherwise, enable Google Fit sharing in Mobvoi Health and Sync Fit with Health Connect in Google Fit. Then connect Health Connect in Murph for Android. If no data appears, recheck Mobvoi Health's sharing controls for your version and Health Connect permissions. Categories and history depend on what the apps write.",
+            "Turn on Health Connect in Mobvoi Health. If that option is missing, share to Google Fit and enable Sync Fit with Health Connect. In Murph for Android, connect Health Connect. No data? Recheck sharing and permissions. Categories and history depend on what Mobvoi writes.",
             { exact: true },
           ),
         ).toBeVisible();

@@ -4,9 +4,9 @@ const MURPH_ANDROID_PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=ai.withmurph.app";
 
 export const MOBVOI_HEALTH_CONNECT_SOURCE = Object.freeze({
-  connectionStatusMeaningful: false,
+  connectionAvailable: false,
   description:
-    "Supported TicWatch data through direct Health Connect sharing or a Google Fit fallback.",
+    "Supported TicWatch data reaches Murph through Health Connect.",
   id: "mobvoi-health",
   logo: {
     className: "size-11 rounded-full object-contain",
@@ -18,5 +18,5 @@ export const MOBVOI_HEALTH_CONNECT_SOURCE = Object.freeze({
   unavailableActionLabel: "Get Murph for Android",
   unavailableActionUrl: MURPH_ANDROID_PLAY_STORE_URL,
   unavailableMessage:
-    "First, enable direct Health Connect sharing in Mobvoi Health if your installed version offers it. Otherwise, enable Google Fit sharing in Mobvoi Health and Sync Fit with Health Connect in Google Fit. Then connect Health Connect in Murph for Android. If no data appears, recheck Mobvoi Health's sharing controls for your version and Health Connect permissions. Categories and history depend on what the apps write.",
+    "Turn on Health Connect in Mobvoi Health. If that option is missing, share to Google Fit and enable Sync Fit with Health Connect. In Murph for Android, connect Health Connect. No data? Recheck sharing and permissions. Categories and history depend on what Mobvoi writes.",
 } satisfies ConnectSource);

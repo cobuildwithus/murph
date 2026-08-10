@@ -317,10 +317,6 @@ const CONNECT_SOURCE_UI = {
 } satisfies Record<string, ConnectSourceUi>;
 
 const CONNECTION_SOURCES: readonly ConnectSource[] = listVisibleDeviceConnectSources();
-const CONNECT_SOURCES: readonly ConnectSource[] = [
-  ...CONNECTION_SOURCES,
-  MOBVOI_HEALTH_CONNECT_SOURCE,
-];
 
 export default async function ConnectPage({
   searchParams,
@@ -406,7 +402,7 @@ export default async function ConnectPage({
       }
       historicalResetIncompleteSourceIds =
         resolveHistoricalResetIncompleteConnectSourceIds(
-          CONNECT_SOURCES,
+          CONNECTION_SOURCES,
           response.sources,
         );
     } catch (error) {
@@ -420,17 +416,20 @@ export default async function ConnectPage({
     }
   }
 
-  const sources = resolveConfiguredConnectSources(CONNECT_SOURCES, {
-    connectedSourceIds,
-    disconnectConnectionIdBySourceId,
-    disconnectScopeBySourceId,
-    disconnectSourceProviderSlugBySourceId,
-    historicalResetIncompleteSourceIds,
-    reconnectProviderBySourceId,
-    reconnectSourceIds,
-    reconnectTargetBySourceId,
-    recoveryKindBySourceId,
-  });
+  const sources = [
+    ...resolveConfiguredConnectSources(CONNECTION_SOURCES, {
+      connectedSourceIds,
+      disconnectConnectionIdBySourceId,
+      disconnectScopeBySourceId,
+      disconnectSourceProviderSlugBySourceId,
+      historicalResetIncompleteSourceIds,
+      reconnectProviderBySourceId,
+      reconnectSourceIds,
+      reconnectTargetBySourceId,
+      recoveryKindBySourceId,
+    }),
+    MOBVOI_HEALTH_CONNECT_SOURCE,
+  ];
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-8 md:max-w-full">
@@ -476,9 +475,6 @@ function listVisibleDeviceConnectSources(): ConnectSource[] {
     return ui
       ? [
           {
-            connectionStatusMeaningful: source.routes.some(
-              (route) => route.kind !== "unavailable",
-            ),
             description: ui.description,
             id: source.connectSourceId,
             logo: ui.logo,

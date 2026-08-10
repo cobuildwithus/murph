@@ -12,7 +12,6 @@ export type ConnectSourceSetupGuideId =
   | AppleHealthRelaySetupGuideId;
 
 export type ConnectSource = {
-  connectionStatusMeaningful?: boolean;
   connectionAvailable?: boolean;
   connectProvider?: string;
   connectTarget?: string;
