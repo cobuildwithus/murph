@@ -391,6 +391,7 @@ import {
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxState,
+  updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   createHostedWorkspaceBridgeMailboxImporter,
@@ -9338,8 +9339,13 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(result.redactedStatus?.hostedSystemMailboxRecorded, 0);
       assert.equal(result.redactedStatus?.hostedSystemMailboxPrepared, 1);
-      assert.equal(result.nextWakeReason, "device-sync.reconcile");
-      assert.equal(result.status, "scheduled");
+      assert.equal(
+        result.redactedStatus?.hostedPausedCompanionDeviceSyncRetryPending,
+        false,
+      );
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.nextWakeReason, undefined);
+      assert.equal(result.status, "idle");
       assert.deepEqual(
         (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({
           routeAction: item.routeAction,
@@ -9545,6 +9551,269 @@ describe("hosted workspace runtime entrypoint", () => {
         result.redactedStatus?.hostedPausedCompanionDeviceSyncRetryPending,
         true,
       );
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("system mailbox mode retains a future paused retry across a no-progress successor import", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const retryAt = "2099-04-27T00:01:00.000Z";
+    const firstItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:paused-future-first",
+      id: "mailbox_item_system_mailbox_paused_future_first",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const successorItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:paused-fresh-successor",
+      id: "mailbox_item_system_mailbox_paused_fresh_successor",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const firstSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-paused-future-successor",
+    );
+    const cleanSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-paused-future-drained",
+    );
+    const seedPausedWorkspace = async (durableRoot: string) => {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: durableRoot });
+      const mailboxImportState = createEmptyHostedMailboxImportState();
+      mailboxImportState.watermarks.system = "1";
+      await writeMailboxImportStateFile(durableRoot, mailboxImportState);
+      await updateHostedSystemMailboxState(durableRoot, () => ({
+        pending: [{
+          attemptCount: 1,
+          itemId: firstItem.id,
+          lastAttemptAt: TEST_NOW,
+          lastErrorCode: "synthetic_backoff",
+          lastErrorMessage: "Synthetic retry backoff.",
+          mailboxDedupeKey: firstItem.dedupeKey,
+          mailboxLaneSeq: firstItem.laneSeq,
+          nextAttemptAt: retryAt,
+          occurredAt: firstItem.occurredAt,
+          postCheckpointRecord: null,
+          preferenceCausalSeq: null,
+          requestId: null,
+          routeAction: "run-device-sync-wake",
+          status: "pending",
+          wake: buildHostedExecutionDeviceSyncWake({
+            eventId: firstItem.dedupeKey,
+            occurredAt: firstItem.occurredAt,
+            reason: "webhook_hint",
+            userId: TEST_USER_ID,
+          }),
+        }],
+      }));
+    };
+
+    try {
+      const persistedWorkspace = createWorkspaceState({
+        nextWakeAt: retryAt,
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: {
+          hostedMailboxSystemImportedSeq: "1",
+          hostedPausedCompanionDeviceSyncRetryPending: true,
+        },
+        snapshotRef: firstSnapshotRef,
+      });
+      const platform = createPlatform({
+        mailboxPort: createMailboxPort({
+          events,
+          items: [successorItem],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: persistedWorkspace,
+        }),
+        workspaceSnapshotPort: {
+          async abortSnapshotSession() {
+            throw new Error("Paused future retry test should not abort snapshots.");
+          },
+          async completeSnapshotSession() {
+            throw new Error("Paused future retry test should not complete snapshots.");
+          },
+          async putSnapshotObjectDirect() {
+            throw new Error("Paused future retry test should not upload snapshots.");
+          },
+          async restoreWorkspaceSnapshot(input) {
+            await seedPausedWorkspace(input.durableRoot);
+          },
+          async startSnapshotSession() {
+            throw new Error("Paused future retry test should not start snapshots.");
+          },
+        },
+      });
+      const bridgeImporter = createHostedWorkspaceBridgeMailboxImporter({
+        decodeMailboxPayload: {
+          async decode() {
+            return {
+              status: "decoded",
+              wake: buildHostedExecutionDeviceSyncWake({
+                eventId: successorItem.dedupeKey,
+                occurredAt: successorItem.occurredAt,
+                reason: "webhook_hint",
+                userId: TEST_USER_ID,
+              }),
+            };
+          },
+        },
+        runtime: normalizeHostedAssistantRuntimeConfig({}, platform),
+        vaultRoot,
+      });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_paused_future_successor",
+            processingMode: "system_mailbox",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-paused-future.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          importItem: bridgeImporter,
+          platform,
+          vaultRoot,
+        },
+      );
+
+      const retainedCheckpoint = checkpointRequests.at(-1);
+      assert.ok(retainedCheckpoint);
+      assert.equal(retainedCheckpoint.reason, "idle_shutdown");
+      assert.equal(retainedCheckpoint.nextWakeAt, retryAt);
+      assert.equal(retainedCheckpoint.nextWakeReason, "device-sync.reconcile");
+      assert.equal(
+        retainedCheckpoint.redactedStatus
+          ?.hostedPausedCompanionDeviceSyncRetryPending,
+        true,
+      );
+      assert.equal(
+        retainedCheckpoint.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "2",
+      );
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({
+          itemId: item.itemId,
+          nextAttemptAt: item.nextAttemptAt,
+          status: item.status,
+        })),
+        [
+          {
+            itemId: firstItem.id,
+            nextAttemptAt: retryAt,
+            status: "pending",
+          },
+          {
+            itemId: successorItem.id,
+            nextAttemptAt: null,
+            status: "pending",
+          },
+        ],
+      );
+      assert.equal(result.nextWakeAt, retryAt);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
+
+      const cleanCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const cleanPlatform = createPlatform({
+        mailboxPort: createMailboxPort({ events, items: [successorItem] }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests: cleanCheckpointRequests,
+          events,
+          workspace: createWorkspaceState({
+            nextWakeAt: retainedCheckpoint.nextWakeAt,
+            nextWakeReason: retainedCheckpoint.nextWakeReason,
+            redactedStatus: retainedCheckpoint.redactedStatus,
+            snapshotRef: cleanSnapshotRef,
+            version: "2",
+          }),
+        }),
+        workspaceSnapshotPort: {
+          async abortSnapshotSession() {
+            throw new Error("Paused clean retry test should not abort snapshots.");
+          },
+          async completeSnapshotSession() {
+            throw new Error("Paused clean retry test should not complete snapshots.");
+          },
+          async putSnapshotObjectDirect() {
+            throw new Error("Paused clean retry test should not upload snapshots.");
+          },
+          async restoreWorkspaceSnapshot() {
+            assert.equal(
+              (await readHostedSystemMailboxState(vaultRoot)).pending.length,
+              2,
+            );
+          },
+          async startSnapshotSession() {
+            throw new Error("Paused clean retry test should not start snapshots.");
+          },
+        },
+      });
+      const cleanResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_paused_future_drained",
+            processingMode: "system_mailbox",
+            workspaceVersion: "2",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-paused-clean.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Paused clean retry test should not import mailbox items.");
+          },
+          platform: cleanPlatform,
+          async runAssistantPhase() {
+            await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [] }));
+            return {
+              checkpointReason: "system_mailbox_receipt",
+              nextWakeAt: retryAt,
+              nextWakeReason: "device-sync.reconcile",
+              progressed: true,
+              redactedStatus: {
+                hostedPausedCompanionDeviceSyncRetryPending: true,
+                hostedSystemMailboxPrepared: 0,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      const cleanCheckpoint = cleanCheckpointRequests.at(-1);
+      assert.ok(cleanCheckpoint);
+      assert.equal(cleanCheckpoint.nextWakeAt, null);
+      assert.equal(cleanCheckpoint.nextWakeReason, null);
+      assert.equal(
+        cleanCheckpoint.redactedStatus?.hostedPausedCompanionDeviceSyncRetryPending,
+        false,
+      );
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(cleanResult.nextWakeAt, null);
+      assert.equal(cleanResult.nextWakeReason, undefined);
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
     } finally {
       await removeTempRoot(vaultRoot);

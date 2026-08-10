@@ -11,7 +11,10 @@ Paused-companion health sync keeps its exact local device item executable until
 the Web-owned dirty acknowledgement is clean. Companion ingress and dirty
 acknowledgement share the existing member-then-connection health-data admission
 lock, while any failed, still-dirty, or remaining exact device item retains the
-single paused retry marker. This contract is jointly specified by
+single paused retry marker. Intermediate and final checkpoint projection
+re-reads that exact local queue, including future backoff items and successors
+behind them; only a final empty-queue reread clears the marker and paired wake.
+This contract is jointly specified by
 `agent-docs/SECURITY.md`, `docs/device-sync-hosted-control-plane.md`,
 `agent-docs/references/hosted-runtime-protocol.md`, and
 `agent-docs/references/hosted-temporal-orchestration.md`.

@@ -140,7 +140,7 @@ Updated: 2026-08-10
 - Passed after the final reconciliation tightening: focused reconciliation
   facts suite (1 file, 48 tests).
 - Passed after the round-5 correction: focused runtime event, system-mailbox,
-  assistant-phase, and entrypoint suites (4 files, 605 tests), including dirty
+  assistant-phase, and entrypoint suites (4 files, 606 tests), including dirty
   continuation after a successful receipt, clean marker clearing, restricted
   automation suppression, exact-item re-execution, remaining-item marker
   retention, device-only route execution, and preservation of unrelated
@@ -159,7 +159,8 @@ Updated: 2026-08-10
   recovery suite (1 file, 24 tests), including recovery of a zero-lag paused
   device continuation from an intermediate canonical commit.
 - Passed after the later round-5 correction: hosted runner bundle assembly and
-  parity probes; measured total 9,952,629 bytes under the 9,985,397-byte ratcheted
+  parity probes; the latest exact macOS assembly measured a 7,981,634-byte
+  static closure and 9,954,679-byte total under the 9,987,447-byte ratcheted
   ceiling.
 - Authored: a production-path hosted local E2E that cold-restores a paused
   member, submits 17 distinct companion observations without waiting for each
@@ -209,5 +210,15 @@ Updated: 2026-08-10
   the final checkpoint failure, Cloudflare recovery coverage preserves the
   marker and wake after transport failure, and the existing Web facts coverage
   admits that pair at zero system lag.
+- A third same-number diagnostic capture again had inconclusive textual model
+  attestation and found that a future first device item could block a fresh
+  successor without reporting progress. The raw final pass status then erased
+  the inherited marker even though both exact local items remained. The
+  correction makes intermediate and final checkpoint projection share one
+  exact local-queue reread, retains the phase-owned backoff time when present,
+  and clears an inherited paused marker and paired wake only after the final
+  reread is empty. A cold-restore entrypoint regression imports the successor,
+  proves zero-lag marker/wake retention with both local items intact, then
+  drains the queue and proves the final clean boundary clears the pair.
 - Required after remediation: final ReviewGPT round-5 retry and exact-head
   GitHub Actions.

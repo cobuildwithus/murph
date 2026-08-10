@@ -354,11 +354,14 @@ then executes only `run-device-sync-wake`; the restricted action suppresses
 device-activity automation scheduling and cannot execute unrelated pending
 route actions, delivery, or model work. Conversation/default work and an
 otherwise idle paused workflow remain blocked by canonical active access; each
-bounded system pass carries its exact continuation through any intermediate
+bounded system pass re-reads the exact local device queue at checkpoint time,
+so a future backoff item that blocks progress cannot hide a later imported
+device item. The pass carries its exact continuation through any intermediate
 canonical checkpoint that advances the system watermark, commits the
 post-receipt result in the normal final `idle_shutdown` snapshot before
-returning, then re-reads facts until the durable lag and exact dirty
-continuation are drained.
+returning, and clears an inherited paused marker and paired wake only when that
+final checkpoint's local-queue reread is empty. It then re-reads facts until the
+durable lag and exact dirty continuation are drained.
 
 Usage and product policy blocks are successful reconciliation reads with a
 non-null `blocked` object, never Temporal activity failures. Transport, auth,

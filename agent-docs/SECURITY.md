@@ -584,12 +584,16 @@ Last verified: 2026-08-09
   preparation or receipt, a still-dirty acknowledgement, or any other exact
   local device item preserves the `device-sync.reconcile` wake and persisted
   paused-companion retry marker; only a successful clean receipt for the last
-  device item clears them. Every intermediate canonical checkpoint that can
+  device item clears them. Checkpoint projection re-reads the exact local
+  device queue instead of trusting whether the current pass reported progress:
+  a future backoff item may block selection while a later imported device item
+  still remains behind it. Every intermediate canonical checkpoint that can
   advance the imported system watermark carries the same exact local marker
   and device wake, because Cloudflare may accept that committed progress after
   a later transport failure. The restricted pass's ordinary final
   `idle_shutdown` snapshot then commits the post-receipt local queue, marker,
-  and wake state or clears them after the serialized clean receipt. Web projects
+  and wake state; only an exact empty-queue reread at that final boundary clears
+  an inherited paused marker and its paired device wake. Web projects
   `platformAiUsageAllowed: false`, and the write-fence provider-egress guard
   remains the final fail-closed boundary.
 - Automatic meal-photo enrollment, activation, and upload retain active paid

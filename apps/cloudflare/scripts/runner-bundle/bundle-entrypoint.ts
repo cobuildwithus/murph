@@ -174,9 +174,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // execution path plus its explicit admission contracts to lazy runner output.
 // Exact macOS assembly measured a 9,952,629B total on 2026-08-10; startup
 // entry and static closure remain under their existing independent ceilings.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_952_629 + 32_768;
+// Re-reading paused device continuation at both checkpoint boundaries extends
+// the existing hosted-runtime startup chunk without adding a forbidden boot
+// input. Exact macOS assembly measured a 7,981,634B static closure and
+// 9,954,679B total on 2026-08-10; ratchet those baselines and retain the
+// existing tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_954_679 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_981_634;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

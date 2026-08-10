@@ -1271,6 +1271,51 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
       nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
     });
+    const projectPausedCompanionDeviceSyncContinuation = async (projection: {
+      nextWakeAt: string | null;
+      nextWakeReason: string | null;
+      redactedStatus: HostedRuntimeRedactedJson;
+    }): Promise<typeof projection & { pending: boolean }> => {
+      if (input.request.processingMode !== "system_mailbox") {
+        return {
+          ...projection,
+          pending: false,
+        };
+      }
+
+      const candidate = await resolveHostedSystemMailboxNextWakeCandidate({
+        allowedRouteActions: ["run-device-sync-wake"],
+        vaultRoot: restored.vaultRoot,
+      });
+      if (!candidate.at) {
+        return {
+          ...projection,
+          pending: false,
+        };
+      }
+
+      const hasProjectedRetryWake = projection.redactedStatus
+        .hostedPausedCompanionDeviceSyncRetryPending === true
+        && projection.nextWakeAt !== null
+        && projection.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON;
+      const projectedDeviceWake = hasProjectedRetryWake
+        ? {
+            nextWakeAt: projection.nextWakeAt,
+            nextWakeReason: projection.nextWakeReason,
+          }
+        : {
+            nextWakeAt: candidate.at,
+            nextWakeReason: candidate.reason,
+          };
+      return {
+        ...projectedDeviceWake,
+        pending: true,
+        redactedStatus: {
+          ...projection.redactedStatus,
+          hostedPausedCompanionDeviceSyncRetryPending: true,
+        },
+      };
+    };
     const foregroundWorkspacePort = guardedWorkspacePort;
     const checkpointRuntimeRedactedStatus = async (
       checkpointInput: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
@@ -1296,33 +1341,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // after a transport failure. In the paused device-only lane, every such
         // checkpoint must therefore carry the exact local continuation; the
         // final clean idle checkpoint remains the only clearing boundary.
-        const restrictedDeviceSyncWake = input.request.processingMode === "system_mailbox"
-          ? await resolveHostedSystemMailboxNextWakeCandidate({
-              allowedRouteActions: ["run-device-sync-wake"],
-              vaultRoot: restored.vaultRoot,
-            })
-          : null;
-        const systemMailboxWake = restrictedDeviceSyncWake?.at
-          ? restrictedDeviceSyncWake
-          : await resolveHostedSystemMailboxNextWakeCandidate({
-              allowedRouteActions: ["run-assistant-ask"],
-              vaultRoot: restored.vaultRoot,
-            });
-        const checkpointWake = restrictedDeviceSyncWake?.at
-          ? {
-              nextWakeAt: restrictedDeviceSyncWake.at,
-              nextWakeReason: restrictedDeviceSyncWake.reason,
-            }
-          : selectEarliestHostedRuntimeWake([
-              {
-                at: requestedCheckpointNextWakeAt,
-                reason: requestedCheckpointNextWakeReason,
-              },
-              {
-                at: systemMailboxWake.at,
-                reason: systemMailboxWake.reason,
-              },
-            ]);
+        const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+          allowedRouteActions: ["run-assistant-ask"],
+          vaultRoot: restored.vaultRoot,
+        });
+        const requestedWake = selectEarliestHostedRuntimeWake([
+          {
+            at: requestedCheckpointNextWakeAt,
+            reason: requestedCheckpointNextWakeReason,
+          },
+          {
+            at: systemMailboxWake.at,
+            reason: systemMailboxWake.reason,
+          },
+        ]);
         const canonicalRuntimeCommit = checkpointInput.reason === "canonical_runtime_commit";
         const checkpointWorkspacePort = canonicalRuntimeCommit
           ? workspacePort
@@ -1331,21 +1363,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           redactedStatus: checkpointInput.redactedStatus,
           vaultRoot: restored.vaultRoot,
         });
-        const redactedStatus = restrictedDeviceSyncWake?.at
-          ? {
-              ...handledRedactedStatus,
-              hostedPausedCompanionDeviceSyncRetryPending: true,
-            }
-          : handledRedactedStatus;
+        const projectedContinuation = await projectPausedCompanionDeviceSyncContinuation({
+          nextWakeAt: requestedWake.nextWakeAt,
+          nextWakeReason: requestedWake.nextWakeReason,
+          redactedStatus: handledRedactedStatus,
+        });
         const checkpointOperation = checkpointWorkspacePort.checkpoint({
           attemptId: checkpointMetadata.attemptId,
           expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
           inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
           leaseGeneration: checkpointMetadata.leaseGeneration,
-          nextWakeAt: checkpointWake.nextWakeAt,
-          nextWakeReason: checkpointWake.nextWakeReason,
+          nextWakeAt: projectedContinuation.nextWakeAt,
+          nextWakeReason: projectedContinuation.nextWakeReason,
           reason: checkpointInput.reason,
-          redactedStatus,
+          redactedStatus: projectedContinuation.redactedStatus,
           snapshotRef: workspace?.snapshotRef ?? null,
         });
         const checkpoint = canonicalRuntimeCommit
@@ -2278,15 +2309,44 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         stage: "workspace.checkpoint.idle_shutdown",
         status: "start",
       });
+      const projectedContinuation = await projectPausedCompanionDeviceSyncContinuation({
+        nextWakeAt: nextWake.nextWakeAt,
+        nextWakeReason: nextWake.nextWakeReason,
+        redactedStatus,
+      });
+      const pausedCompanionDeviceSyncStatusPresent =
+        redactedStatus.hostedPausedCompanionDeviceSyncRetryPending === true
+        || activeWorkspace?.redactedStatus
+          ?.hostedPausedCompanionDeviceSyncRetryPending === true;
+      const stalePausedCompanionDeviceSyncWake =
+        pausedCompanionDeviceSyncStatusPresent
+        && projectedContinuation.nextWakeReason
+          === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON;
+      const finalCheckpointProjection = projectedContinuation.pending
+        ? projectedContinuation
+        : {
+            nextWakeAt: stalePausedCompanionDeviceSyncWake
+              ? null
+              : projectedContinuation.nextWakeAt,
+            nextWakeReason: stalePausedCompanionDeviceSyncWake
+              ? null
+              : projectedContinuation.nextWakeReason,
+            redactedStatus: pausedCompanionDeviceSyncStatusPresent
+              ? {
+                  ...projectedContinuation.redactedStatus,
+                  hostedPausedCompanionDeviceSyncRetryPending: false,
+                }
+              : projectedContinuation.redactedStatus,
+          };
       const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
         assertRuntimeNotAborted,
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
         inboxMediaRetentionWakeAt: passWorkspace?.inboxMediaRetentionWakeAt ?? null,
         issueExportPort: runtime.platform.issueExportPort ?? null,
-        nextWakeAt: nextWake.nextWakeAt,
-        nextWakeReason: nextWake.nextWakeReason,
-        redactedStatus,
+        nextWakeAt: finalCheckpointProjection.nextWakeAt,
+        nextWakeReason: finalCheckpointProjection.nextWakeReason,
+        redactedStatus: finalCheckpointProjection.redactedStatus,
         runtimeAbortSignal: runtimeAbortController.signal,
         vaultRoot: restored.vaultRoot,
         workspacePort: foregroundWorkspacePort,
