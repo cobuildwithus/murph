@@ -20,7 +20,7 @@ chooses them.
 Group funding remains private by default: participants may learn that Murph is
 sponsored in the chat, but payer identity, charges, caps, balances, percentages,
 and automatic refill events stay with the authenticated sponsor. Dollar-denominated
-usage credit represents cost-weighted capacity, never a promised bundle of messages.
+usage credit represents variable AI capacity, never a promised bundle of messages.
 
 For deeper positioning, ICP detail, and brand voice see `agent-docs/product-marketing-context.md`.
 

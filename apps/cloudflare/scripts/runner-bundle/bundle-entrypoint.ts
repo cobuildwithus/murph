@@ -174,9 +174,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // deterministic scorer, bounded card mapper, and complete static presentation
 // to the runner graph. Exact macOS assembly measured an 8,002,296B static
 // closure and 9,984,952B total on 2026-08-09. No forbidden subsystem entered
-// the boot graph; ratchet those measurements and retain the established
-// tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_984_952 + 32_768;
+// the boot graph. The subsequent reviewed biomarker ranges, hosted
+// runtime-control compaction, and named-diet guidance moved exact ubuntu total
+// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
+// remain within their existing ceilings. Exact merged macOS assembly measured
+// 10,057,443B total on 2026-08-10 while the entry and static closure stayed
+// within their existing ceilings and no forbidden subsystem entered the boot
+// graph. Ratchet that measured total and retain the established tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_057_443 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_002_296;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

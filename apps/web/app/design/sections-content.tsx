@@ -16,7 +16,11 @@ import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
-import { ReferralPageContent } from "@/src/components/referrals/referral-page-content";
+import {
+  ReferralPageContent,
+  ReferralRewardCards,
+  ReferralRewardReceiptPreview,
+} from "@/src/components/referrals/referral-page-content";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
@@ -305,18 +309,57 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Referral rewards page">
+      <StudySection title="Referral page · reward presentation states">
         <div
-          id="referral-rewards-page"
-          data-design-section="referral-rewards-page"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          id="referral-page-reward-states"
+          data-design-section="referral-page-reward-states"
+          className="-mx-5 space-y-10 bg-[#ede5d8] p-5 sm:-mx-8 sm:p-8 lg:-mx-12 lg:p-12"
           inert
         >
-          <ReferralPageContent
-            authenticated={false}
-            identityKey={null}
-            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS}
-          />
+          <div className="space-y-5" data-referral-reward-state="signup-only">
+            <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
+              Signup link only
+            </h3>
+            <div className="grid gap-6 xl:grid-cols-2">
+              <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
+                <ReferralRewardReceiptPreview
+                  reward={HOSTED_PUBLIC_REFERRAL_REWARDS.find(
+                    ({ id }) => id === "signup-link",
+                  )!}
+                />
+              </div>
+              <ReferralRewardCards
+                rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+                  ({ id }) => id === "signup-link",
+                )}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-5" data-referral-reward-state="group-only">
+            <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
+              Group missions only
+            </h3>
+            <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
+              <ReferralRewardReceiptPreview
+                reward={HOSTED_PUBLIC_REFERRAL_REWARDS.find(
+                  ({ id }) => id === "new-person-group",
+                )!}
+              />
+            </div>
+            <ReferralRewardCards
+              rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+                ({ id }) => id !== "signup-link",
+              )}
+            />
+          </div>
+
+          <div className="space-y-5" data-referral-reward-state="all-rewards">
+            <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
+              Signup link and group missions
+            </h3>
+            <ReferralRewardCards rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
+          </div>
         </div>
       </StudySection>
 
@@ -338,7 +381,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage footer with vitals and split link columns">
+      <StudySection title="Homepage footer with vitals, iOS app, and split link columns">
         <div
           data-design-section="homepage-footer"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
@@ -435,7 +478,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and usage limits">
+      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and exact usage status">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -535,8 +578,10 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Boundary result detail">
-        <BiomarkerBoundaryResultStudy />
+      <StudySection title="Biomarker boundary result · published comparator provenance">
+        <div id="biomarker-boundary-result">
+          <BiomarkerBoundaryResultStudy />
+        </div>
       </StudySection>
     </div>
   );

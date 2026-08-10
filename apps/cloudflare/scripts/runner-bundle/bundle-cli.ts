@@ -71,7 +71,11 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // baseline + ~25-30% headroom. If a violation fires, investigate the listed
 // largest inputs first; only raise the budget deliberately for growth that
 // is understood and intended.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_000_000;
+// The merged group-challenge card scorer/persistence path plus reviewed
+// named-diet and biomarker additions measured 9,016,991B on 2026-08-10. The
+// external/import-surface guards remain clean, so ratchet from that exact
+// combined output with the established narrow lazy-output allowance.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_016_991 + 32_768;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
 // Known divergence the parity battery cannot reach (it would need a live
