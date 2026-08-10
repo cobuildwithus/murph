@@ -103,16 +103,21 @@ Updated: 2026-08-09
 - Focused Assistant Engine verification passed: seven affected Vitest files,
   286 tests total; the affected-package typecheck passed; the package and its
   dependency build graph passed.
-- Exact local App Server capture used base `dbfa6ae12921` and head
+- Exact local App Server capture used merge base `dbfa6ae12921` and initial head
   `5623879ce655`, pinned `gpt-5.6-terra`, low reasoning, production code mode,
   identical synthetic direct/group Linq inputs, and `gpt-tokenizer` 3.4.0
   `o200k_harmony`. It counted `include`, `input`, `instructions`,
   `parallel_tool_calls`, `text`, `tool_choice`, and `tools` after normalizing
-  paths and unstable ids. Direct moved from 38,177 tokens / 173,190 bytes to
-  38,209 / 173,361 (+32 tokens, +0.0838%; +171 bytes, +0.0987%). Group moved
-  from 30,067 / 139,329 to 30,099 / 139,500 (+32 tokens, +0.1064%; +171 bytes,
-  +0.1227%). Assembled authored instructions were byte- and token-identical; the
-  complete delta is deferred/eager tool description and generated guidance.
+  paths and unstable ids. The specialist remediation restored two conditional
+  required-field phrases; exact serialization of the complete changed group
+  tool object added another 27 tokens / 122 bytes to both captured requests.
+  Final direct input is 38,236 tokens / 173,483 bytes versus 38,177 / 173,190
+  (+59 tokens, +0.1545%; +293 bytes, +0.1692%). Final group input is 30,126 /
+  139,622 versus 30,067 / 139,329 (+59 tokens, +0.1962%; +293 bytes,
+  +0.2103%). Assembled authored instructions remain byte- and token-identical;
+  the complete delta is deferred/eager tool description and generated guidance.
+  The current remote base is a descendant of the measured merge base and does
+  not change any prompt-bearing input in this comparison.
 - Durable-doc drift and whitespace checks passed. Exact-head privacy/static
   scans, CI, preliminary specialist ReviewGPT, and final ReviewGPT remain in the
   PR gate.
@@ -132,3 +137,8 @@ Updated: 2026-08-09
   35 credential-gated live-provider cases skipped; the added finalizer seam
   passed 68 tests, the live-provider file compiled with 6 deterministic tests
   passing and 35 gated cases skipped, and the Assistant Engine typecheck passed.
+- Exact post-remediation runner assembly measured a 1,659,589-byte entry,
+  7,993,075-byte static closure, and 9,970,893-byte total without adding a
+  forbidden boot input. The static and total ratchets now use those exact
+  measurements with the established cross-platform and 32 KiB reviewed-change
+  allowances; the 42-test bundle-policy suite and exact assembly both passed.
