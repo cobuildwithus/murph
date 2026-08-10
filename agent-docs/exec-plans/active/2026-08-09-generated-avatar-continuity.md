@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — round 9 finding remediated; round 10 candidate verification
+Status: active — round 10 findings remediated locally; round 11 candidate verification
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -498,3 +498,33 @@ Updated: 2026-08-10
   prior August 10 edition title. The test now expects the member-visible title
   and the new stable item anchor. The three focused changelog/page/feedback
   files pass 52 tests; production source is unchanged by this correction.
+- Exact-head CI is fully green on `fc6ff94bbcd2`, including release, coverage,
+  frontend proof, billing, sandbox, and artifact lanes. A first round-10 retry
+  ended without an artifact. A second retry omitted the mandatory guarded PR
+  context metadata and correctly returned `ROUND_OUTCOME: INVALID`; a further
+  full-snapshot preflight rejected an old context anchor before sending. These
+  tooling/invocation failures do not advance the substantive round.
+- The valid sensitive round-10 full snapshot exactly reviewed `fc6ff94bbcd2`
+  with the immutable first-reviewed head and prior-finding ledger present. The
+  wrapper verified requested `gpt-5.6-sol` and response `gpt-5-6-pro`; the
+  result ended `ROUND_OUTCOME: FINDINGS` with two accepted defects. Adjacent
+  trusted completions could be grouped together, causing the exact-one
+  completion restriction builder to fail open into later foreground group
+  authority. Separately, a retained no-attachment provenance marker required
+  a later exact delivery intent to share the original completion turn id, so a
+  real later-turn delivery of the same immutable media remained ineligible.
+- The repeated-mechanism retrospective was recorded before the remaining
+  source correction at
+  https://github.com/cobuildwithus/murph/pull/1533#issuecomment-5246231513.
+  It preserves existing grouping, transcript, and outbox owners and rejects a
+  multi-completion authority shape, queue, manager, state machine, lifecycle,
+  compatibility path, or alternate delivery truth.
+- Focused pre-fix grouping proof failed one new assertion while the other 15
+  grouping cases passed: completion A incorrectly grouped with completion B.
+  The correction adds one early return to the existing adjacency predicate, so
+  each completion starts its own batch while the final completion can still
+  fold its later same-route foreground input. The delivery correction deletes
+  only original-turn equality from the strict marker join while retaining same
+  session, exact ref/hash/type/size, and accepted physical-delivery evidence.
+  Both focused files pass 115 tests, including later-turn positive and
+  wrong-session/hash negative cases.
