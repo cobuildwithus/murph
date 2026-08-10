@@ -59,7 +59,9 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(markup).toContain("Review your training, keep reminders on time");
+    expect(markup).toContain(
+      "Review training and patterns, keep reminders on time",
+    );
     expect(markup).toContain("Review your training in one private view");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(
@@ -103,6 +105,9 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
     expect(markup).toContain('href="/changelog?edition=2026-08-03"');
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-10#personal-patterns"',
+    );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',
     );

@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Review your training, keep reminders on time",
+    title: "Review training and patterns, keep reminders on time",
     summary:
-      "A private Training page brings your saved workouts into one view, while recurring reminders keep the local time and timezone you asked for.",
+      "A private Training view brings workouts together, Patterns compares actions with next-day health, and reminders retain the local timing you asked for.",
     items: [
       {
         id: "private-training-review",
@@ -83,6 +83,28 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/training",
           label: "Review training",
+        },
+      },
+      {
+        id: "personal-patterns",
+        kind: "feature",
+        priority: 5,
+        title: "See what tends to change after repeated actions",
+        summary:
+          "Patterns compares days with and without a repeated activity or logged experiment action, then shows how next-day sleep and recovery differed.",
+        details:
+          "It uses your existing history when enough comparable days are available, requires the direction to repeat across the observation window, and shows association rather than cause. Murph's weekly health insight checks the same evidence and stays quiet when nothing clears the bar.",
+        relevanceTags: [
+          "patterns",
+          "wearables",
+          "sleep",
+          "recovery",
+          "experiments",
+        ],
+        sourcePullRequests: [1563],
+        tryIt: {
+          href: "/patterns",
+          label: "View your patterns",
         },
       },
       {

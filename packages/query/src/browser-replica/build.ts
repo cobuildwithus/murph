@@ -1,6 +1,7 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
+import { buildPersonalPatternReport } from "../personal-patterns.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -108,6 +109,7 @@ export async function createBrowserVaultReplica(
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
+    personalPatterns: buildPersonalPatternReport(input.vault, { asOf: generatedAt }),
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: entities.map(projectSearchRow),
@@ -134,6 +136,14 @@ export async function hashBrowserVaultReplicaData(replica: BrowserVaultReplica):
   const stableReplica = {
     ...replica,
     generatedAt: "",
+    ...(replica.personalPatterns
+      ? {
+          personalPatterns: {
+            ...replica.personalPatterns,
+            asOfDate: "",
+          },
+        }
+      : {}),
     source: {
       ...replica.source,
       dataVersion: "pending",
