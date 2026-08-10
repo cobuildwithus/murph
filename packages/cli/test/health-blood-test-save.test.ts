@@ -649,14 +649,12 @@ test("blood-test import-json exposes explicit pregnancy evidence through compact
         occurredAt: "2026-07-28T12:00:00.000Z",
         title: "Recent serum result",
         testName: "serum_hcg_qualitative",
-        resultStatus: "abnormal",
         summary: "Pregnancy test: positive",
         specimenType: "serum",
         results: [
           {
             analyte: "hCG qualitative",
             textValue: "Positive",
-            flag: "abnormal",
           },
         ],
       }),
@@ -702,7 +700,7 @@ test("blood-test import-json exposes explicit pregnancy evidence through compact
     assert.equal(list.items[0]?.id, saved.eventId);
     assert.equal(list.items[0]?.kind, "test");
     assert.equal(list.items[0]?.data.testName, "serum_hcg_qualitative");
-    assert.equal(list.items[0]?.data.resultStatus, "abnormal");
+    assert.equal(list.items[0]?.data.resultStatus, "unknown");
     assert.equal(list.items[0]?.data.resultsCount, 1);
     assert.equal("results" in (list.items[0]?.data ?? {}), false);
 
@@ -718,13 +716,12 @@ test("blood-test import-json exposes explicit pregnancy evidence through compact
     assert.equal(detail.entity.id, saved.eventId);
     assert.equal(detail.entity.kind, "test");
     assert.equal(detail.entity.data.testName, "serum_hcg_qualitative");
-    assert.equal(detail.entity.data.resultStatus, "abnormal");
+    assert.equal(detail.entity.data.resultStatus, "unknown");
     assert.equal(detail.entity.data.summary, "Pregnancy test: positive");
     assert.deepEqual(detail.entity.data.results, [
       {
         analyte: "hCG qualitative",
         textValue: "Positive",
-        flag: "abnormal",
       },
     ]);
   } finally {

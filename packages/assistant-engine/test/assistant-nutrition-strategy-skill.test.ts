@@ -513,10 +513,19 @@ describe('assistant nutrition strategy skill', () => {
       'Otherwise run `vault-cli event show <event-id> --format json` for every returned test',
     )
     expect(compactSafety).toContain(
+      'Treat a test event as explicit positive pregnancy evidence only when all of these are true: its result status is not `pending`;',
+    )
+    expect(compactSafety).toContain(
       'Any explicit positive in the window suppresses numeric setup, proposal presentation, every Goal write or activation, and every card.',
     )
     expect(compactSafety).toContain(
-      'Do not infer pregnancy from a numeric hCG value, reference range, `abnormal` flag/status, test title, or non-result note alone.',
+      'Canonical `resultStatus` classifies the result rather than the source report\'s lifecycle, so `unknown` does not prove that a test is unfinished and may qualify only when the same strict test identity and explicit textual result rules pass.',
+    )
+    expect(compactSafety).toContain(
+      '`pending` is unfinished and never qualifies, even if preliminary text says positive.',
+    )
+    expect(compactSafety).toContain(
+      'Do not infer pregnancy from a numeric hCG value, reference range, `abnormal` or `unknown` status/flag alone, test title, or non-result note alone.',
     )
     expect(compactSafety).toContain(
       'It takes precedence over negative evidence in the same window, including a later negative from either pregnancy-evidence owner',

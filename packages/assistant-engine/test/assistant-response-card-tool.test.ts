@@ -316,7 +316,13 @@ describe('murph.attach_response_card', () => {
       'Otherwise event show every returned test because list output compacts results and can truncate summaries',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Do not infer pregnancy from numeric hCG, reference ranges, abnormal status/flags, titles, notes, pending/unknown results, or ambiguous text.',
+      'as positive evidence unless resultStatus is pending',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Canonical resultStatus unknown classifies the result rather than source lifecycle and may qualify only with that strict identity plus explicit text.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Do not infer pregnancy from numeric hCG, reference ranges, abnormal or unknown status/flags alone, titles, notes, or ambiguous or negated text.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A failed or unreadable memory read fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged',

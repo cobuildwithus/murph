@@ -2388,18 +2388,13 @@ if (!tool) {
       testEventItem(
         positivePregnancyTestEventId,
         'serum_hcg_qualitative',
-        'abnormal',
-        1,
+        'unknown',
+        0,
       ),
     ])
     const positivePregnancyTestEventDetail = testEventDetail({
       id: positivePregnancyTestEventId,
-      resultStatus: 'abnormal',
-      results: [{
-        analyte: 'hCG qualitative',
-        flag: 'abnormal',
-        textValue: 'Positive',
-      }],
+      resultStatus: 'unknown',
       summary: 'Pregnancy test: positive',
       testName: 'serum_hcg_qualitative',
     })
@@ -2427,36 +2422,51 @@ if (!tool) {
         pendingPregnancyTestEventId,
         'urine_pregnancy_test',
         'pending',
-        0,
+        1,
       ),
     ])
     const pendingPregnancyTestEventDetail = testEventDetail({
       id: pendingPregnancyTestEventId,
       resultStatus: 'pending',
+      results: [{ analyte: 'Pregnancy test', textValue: 'Positive' }],
+      summary: 'Preliminary pregnancy test: positive',
       testName: 'urine_pregnancy_test',
     })
     const numericHcgTestEventId = 'event_numeric_hcg_result'
     const unrelatedTestEventId = 'event_unrelated_strep_result'
+    const ambiguousHcgTestEventId = 'event_ambiguous_hcg_result'
+    const negatedHcgTestEventId = 'event_negated_hcg_result'
     const numericAndUnrelatedTestEvents = testEventListResult([
       testEventItem(
         numericHcgTestEventId,
         'quantitative_hcg',
-        'abnormal',
+        'unknown',
         1,
       ),
       testEventItem(
         unrelatedTestEventId,
         'rapid_strep_test',
-        'normal',
+        'unknown',
+        1,
+      ),
+      testEventItem(
+        ambiguousHcgTestEventId,
+        'serum_hcg_qualitative',
+        'unknown',
+        1,
+      ),
+      testEventItem(
+        negatedHcgTestEventId,
+        'serum_hcg_qualitative',
+        'unknown',
         1,
       ),
     ])
     const numericHcgTestEventDetail = testEventDetail({
       id: numericHcgTestEventId,
-      resultStatus: 'abnormal',
+      resultStatus: 'unknown',
       results: [{
         analyte: 'beta hCG',
-        flag: 'abnormal',
         unit: 'mIU/mL',
         value: 86,
       }],
@@ -2465,10 +2475,24 @@ if (!tool) {
     })
     const unrelatedTestEventDetail = testEventDetail({
       id: unrelatedTestEventId,
-      resultStatus: 'normal',
+      resultStatus: 'unknown',
       results: [{ analyte: 'Strep A', textValue: 'Negative' }],
       summary: 'No strep detected',
       testName: 'rapid_strep_test',
+    })
+    const ambiguousHcgTestEventDetail = testEventDetail({
+      id: ambiguousHcgTestEventId,
+      resultStatus: 'unknown',
+      results: [{ analyte: 'hCG qualitative', textValue: 'Equivocal' }],
+      summary: 'Pregnancy status cannot be determined',
+      testName: 'serum_hcg_qualitative',
+    })
+    const negatedHcgTestEventDetail = testEventDetail({
+      id: negatedHcgTestEventId,
+      resultStatus: 'unknown',
+      results: [{ analyte: 'hCG qualitative', textValue: 'Not detected' }],
+      summary: 'Pregnancy test: not detected',
+      testName: 'serum_hcg_qualitative',
     })
     const saturatedTestEvents = testEventListResult(
       Array.from({ length: 200 }, (_, index) =>
@@ -4010,7 +4034,7 @@ text(result.output);
         encounterCommands: [encounterListCommand],
         encounterOutputs: [[encounterListCommand, noEncounters]] as const,
         measurements: noPregnancyMeasurements,
-        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an ambiguous gastric procedure, numeric-only hCG result, and unrelated test do not prove current exclusions.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an ambiguous gastric procedure plus unknown-status numeric-only, unrelated, ambiguous, and negated tests do not prove current exclusions.',
         procedureCommands: [procedureListCommand],
         procedureOutputs: [[procedureListCommand, procedureListResult([
           procedureItem('event_ambiguous_gastric_procedure', 'gastric procedure', 'unknown'),
@@ -4019,11 +4043,15 @@ text(result.output);
           testEventListCommand,
           `event show ${numericHcgTestEventId} --format json`,
           `event show ${unrelatedTestEventId} --format json`,
+          `event show ${ambiguousHcgTestEventId} --format json`,
+          `event show ${negatedHcgTestEventId} --format json`,
         ],
         testEventOutputs: [
           [testEventListCommand, numericAndUnrelatedTestEvents],
           [`event show ${numericHcgTestEventId} --format json`, numericHcgTestEventDetail],
           [`event show ${unrelatedTestEventId} --format json`, unrelatedTestEventDetail],
+          [`event show ${ambiguousHcgTestEventId} --format json`, ambiguousHcgTestEventDetail],
+          [`event show ${negatedHcgTestEventId} --format json`, negatedHcgTestEventDetail],
         ] as const,
       },
     ]) {

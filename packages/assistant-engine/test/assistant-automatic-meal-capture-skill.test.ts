@@ -270,6 +270,9 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain(
       'Otherwise run `vault-cli event show <event-id> --format json` for every returned test',
     )
+    expect(compactSafety).toContain(
+      'Treat a test event as explicit positive pregnancy evidence only when all of these are true: its result status is not `pending`;',
+    )
     expect(compactSkill).toContain(
       'An explicit positive pregnancy-test result from either canonical owner uses the same non-numeric, no-write, no-question, no-card path.',
     )
@@ -277,7 +280,13 @@ describe('assistant automatic meal capture skill', () => {
       'It takes precedence over negative evidence in the same window, including a later negative from either pregnancy-evidence owner',
     )
     expect(compactSafety).toContain(
-      'Do not infer pregnancy from a numeric hCG value, reference range, `abnormal` flag/status, test title, or non-result note alone.',
+      'Canonical `resultStatus` classifies the result rather than the source report\'s lifecycle, so `unknown` does not prove that a test is unfinished and may qualify only when the same strict test identity and explicit textual result rules pass.',
+    )
+    expect(compactSafety).toContain(
+      '`pending` is unfinished and never qualifies, even if preliminary text says positive.',
+    )
+    expect(compactSafety).toContain(
+      'Do not infer pregnancy from a numeric hCG value, reference range, `abnormal` or `unknown` status/flag alone, test title, or non-result note alone.',
     )
     expect(compactSafety).toContain(
       '`vault-cli memory show --format json`',

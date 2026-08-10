@@ -141,19 +141,24 @@ context.
   Inspect the complete `testName`, `resultStatus`, optional `summary`, and every
   structured result's `analyte` and optional `textValue`. Treat a test event as
   explicit positive pregnancy evidence only when all of these are true: its
-  result status is final (`normal`, `abnormal`, or `mixed`, never `pending` or
-  `unknown`); either the test name identifies a urine/serum pregnancy or hCG
-  test, or a structured result analyte identifies pregnancy, hCG, beta-hCG, or
-  human chorionic gonadotropin; and the matching result `textValue` or an
-  unambiguously test-level summary explicitly says `positive`, `detected`, or
-  `pregnant` after case, punctuation, and surrounding-whitespace normalization.
+  result status is not `pending`; either the test name identifies a urine/serum
+  pregnancy or hCG test, or a structured result analyte identifies pregnancy,
+  hCG, beta-hCG, or human chorionic gonadotropin; and the matching result
+  `textValue` or an unambiguously test-level summary explicitly says
+  `positive`, `detected`, or `pregnant` after case, punctuation, and
+  surrounding-whitespace normalization.
+  Canonical `resultStatus` classifies the result rather than the source report's
+  lifecycle, so `unknown` does not prove that a test is unfinished and may
+  qualify only when the same strict test identity and explicit textual result
+  rules pass. `pending` is unfinished and never qualifies, even if preliminary
+  text says positive.
   A simple labeled phrase such as `Pregnancy test: positive` is explicit; a
   negated, qualified, or otherwise ambiguous phrase is not. Do not infer
-  pregnancy from a numeric hCG value, reference range, `abnormal` flag/status,
-  test title, or non-result note alone. Any explicit positive within the window
-  suppresses numeric setup, proposal presentation, every Goal write or
-  activation, and every card, and wins over negative evidence from either
-  pregnancy-evidence owner in the same window. Missing, negative, pending,
+  pregnancy from a numeric hCG value, reference range, `abnormal` or `unknown`
+  status/flag alone, test title, or non-result note alone. Any explicit positive
+  within the window suppresses numeric setup, proposal presentation, every Goal
+  write or activation, and every card, and wins over negative evidence from
+  either pregnancy-evidence owner in the same window. Missing, negative, pending,
   indeterminate, numeric-only, stale, unrelated, or ambiguous test evidence is
   unavailable rather than proof of non-pregnancy and is not a universal block.
   Leave an existing paused proposal unchanged. A scheduled occurrence asks no
