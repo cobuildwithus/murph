@@ -17,7 +17,10 @@ import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-defin
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
-import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
+import {
+  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+} from "../src/public-account.ts";
 import {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,
@@ -3378,7 +3381,7 @@ test("Junction unproven historical coverage saturates at a daily retry without a
   );
 });
 
-test("Junction account jobs keep a concurrently disconnected source out of projection and import", async () => {
+test("Junction account jobs keep a concurrently fenced connected source out of projection and import", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -3476,9 +3479,9 @@ test("Junction account jobs keep a concurrently disconnected source out of proje
       sourceProviderSlug: "fitbit",
     }), "Fitbit source key should be available."),
     sourceProviderSlug: "fitbit",
-    status: "disconnected",
-    lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
-    lastErrorMessage: "Source disconnected by member.",
+    status: "connected",
+    lastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+    lastErrorMessage: "Source disconnect is in progress.",
   });
   let liveSources = [garminSource, fitbitSource];
   const importedSnapshots: Array<{
@@ -3539,7 +3542,7 @@ test("Junction account jobs keep a concurrently disconnected source out of proje
   );
   assert.equal(
     liveSources.find((source) => source.sourceProviderSlug === "fitbit")?.status,
-    "disconnected",
+    "connected",
   );
   assert.deepEqual(
     importedSnapshots.flatMap((snapshot) => snapshot.summaries?.activity ?? [])

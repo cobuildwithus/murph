@@ -4,7 +4,11 @@ import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
-import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
+import {
+  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+} from "../src/public-account.ts";
 import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
 import type {
@@ -20,6 +24,11 @@ const NOW = "2026-06-11T12:00:00.000Z";
 const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
 const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
 const BP_HISTORY_COVERAGE_KEY = "junctionBloodPressureHistoryBackfillCoverage";
+const SOURCE_DISCONNECT_FENCE_CODES = [
+  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+] as const;
 
 interface TimeseriesRequest {
   end: string | null;
@@ -2044,42 +2053,48 @@ test("a malformed post-yield segment requires one repaired anchored scan", async
   assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
 
-test("a concurrent user-disconnect fence blocks pressure history before provider egress", async () => {
-  const importedSnapshots: unknown[] = [];
-  const providerListRequests = { count: 0 };
-  const requests: TimeseriesRequest[] = [];
-  const provider = createProvider({
-    bloodPressureRecords: [{
-      id: "bp-disconnected-source",
-      provider_connection_id: "provider-omron-1",
-      sourceProviderSlug: "omron",
-      timestamp: "2026-05-20T08:30:00.000Z",
-      systolic: 120,
-      diastolic: 78,
-    }],
-    providerListRequests,
-    requests,
-  });
-  const bloodPressure = createScheduledBloodPressureJob(provider);
-  const fencedSource = createSourceSummary("omron", NOW, "disconnected");
-  fencedSource.lastErrorCode = DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE;
-  const context = createJobContext({
-    account: createAccount(),
-    importedSnapshots,
-    listConnectionSources: async () => [fencedSource],
-  });
-  const { result } = await executeImmediateBloodPressureContinuations({
-    context,
-    provider,
-    job: toJobRecord(bloodPressure, 1),
-  });
+test.each(SOURCE_DISCONNECT_FENCE_CODES)(
+  "a connected %s fence that appears after pressure egress blocks durable import",
+  async (lastErrorCode) => {
+    const importedSnapshots: unknown[] = [];
+    const providerListRequests = { count: 0 };
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({
+      bloodPressureRecords: [{
+        id: "bp-disconnected-source",
+        provider_connection_id: "provider-omron-1",
+        sourceProviderSlug: "omron",
+        timestamp: "2026-05-20T08:30:00.000Z",
+        systolic: 120,
+        diastolic: 78,
+      }],
+      providerListRequests,
+      requests,
+    });
+    const bloodPressure = createScheduledBloodPressureJob(provider);
+    const admittedSource = createSourceSummary("omron");
+    const fencedSource = createSourceSummary("omron");
+    fencedSource.lastErrorCode = lastErrorCode;
+    const context = createJobContext({
+      account: createAccount({ sources: [admittedSource] }),
+      importedSnapshots,
+      listConnectionSources: async () => requests.length > 0
+        ? [fencedSource]
+        : [admittedSource],
+    });
+    const { result } = await executeImmediateBloodPressureContinuations({
+      context,
+      provider,
+      job: toJobRecord(bloodPressure, 1),
+    });
 
-  assert.equal(providerListRequests.count, 1);
-  assert.equal(requests.length, 0);
-  assert.equal(importedSnapshots.length, 0);
-  assert.equal(result.metadataPatch, undefined);
-  assert.equal(result.scheduledJobs, undefined);
-});
+    assert.equal(providerListRequests.count, 2);
+    assert.equal(requests.length, 1);
+    assert.equal(importedSnapshots.length, 0);
+    assert.equal(result.metadataPatch, undefined);
+    assert.equal(result.scheduledJobs, undefined);
+  },
+);
 
 test("a source absent from listed-only authority cannot trigger pressure egress", async () => {
   const providerListRequests = { count: 0 };
@@ -2108,24 +2123,27 @@ test("a source absent from listed-only authority cannot trigger pressure egress"
   assert.equal(result.metadataPatch, undefined);
 });
 
-test("an explicit user-disconnect fence blocks pressure history recovery before provider egress", async () => {
-  const providerListRequests = { count: 0 };
-  const requests: TimeseriesRequest[] = [];
-  const provider = createProvider({ providerListRequests, requests });
-  const bloodPressure = createScheduledBloodPressureJob(provider);
-  const source = createSourceSummary("omron", NOW, "disconnected");
-  source.lastErrorCode = DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE;
+test.each(SOURCE_DISCONNECT_FENCE_CODES)(
+  "a pre-existing connected %s fence blocks provider discovery and pressure egress",
+  async (lastErrorCode) => {
+    const providerListRequests = { count: 0 };
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({ providerListRequests, requests });
+    const bloodPressure = createScheduledBloodPressureJob(provider);
+    const source = createSourceSummary("omron");
+    source.lastErrorCode = lastErrorCode;
 
-  const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ account: createAccount({ sources: [source] }) }),
-    toJobRecord(bloodPressure, 80),
-  );
+    const result = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ account: createAccount({ sources: [source] }) }),
+      toJobRecord(bloodPressure, 80),
+    );
 
-  assert.equal(providerListRequests.count, 0);
-  assert.equal(requests.length, 0);
-  assert.equal(result.scheduledJobs, undefined);
-  assert.equal(result.metadataPatch, undefined);
-});
+    assert.equal(providerListRequests.count, 0);
+    assert.equal(requests.length, 0);
+    assert.equal(result.scheduledJobs, undefined);
+    assert.equal(result.metadataPatch, undefined);
+  },
+);
 
 test("source-scoped partial failure retries instead of abandoning remaining history", async () => {
   const provider = createProvider({

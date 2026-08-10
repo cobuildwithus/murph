@@ -4635,7 +4635,9 @@ function filterJunctionImportSnapshots(
   allowUnlistedSources = true,
 ): Record<string, unknown[]> {
   const sourceReferences = buildJunctionSourceReferenceMap(providers);
-  const hasPendingSourceAdmission = sources.some((source) => source.status === "disconnected");
+  const hasPendingSourceAdmission = sources.some((source) =>
+    source.status === "disconnected" || isDeviceSyncSourceDisconnectFenced(source)
+  );
 
   return Object.fromEntries(
     Object.entries(snapshots).map(([resource, records]) => [
@@ -7177,7 +7179,9 @@ function isJunctionSourceAdmittedForImport(
   );
   return matchingSources.length === 0
     ? allowUnlistedSources
-    : matchingSources.some((source) => source.status !== "disconnected");
+    : matchingSources.some((source) =>
+      source.status !== "disconnected" && !isDeviceSyncSourceDisconnectFenced(source)
+    );
 }
 
 function isJunctionSourceProjectionFenced(
