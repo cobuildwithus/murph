@@ -68,11 +68,12 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // the whole command surface onto the hot path with nothing watching).
 // Baselines measured from the real assembled bundle on 2026-06-11:
 // total 7,052,933 B across all chunks, entry bin.js 15,569 B. The merged
-// Health Commons knowledge command and recurring-timezone contract measure
-// 9,021,743 B on 2026-08-10. Ratchet to that reviewed graph plus one small
-// cross-platform allowance. If a violation fires, investigate the listed
-// largest inputs first; only raise the budget deliberately for growth that
-// is understood and intended.
+// Health Commons knowledge command, recurring-timezone contract, and workout
+// response-card CLI additions measured 9,020,917B in the exact combined local
+// graph on 2026-08-10. Retain the slightly larger reviewed 9,021,743B ratchet
+// plus one small cross-platform allowance. If a violation fires, investigate
+// the listed largest inputs first; only raise the budget deliberately for
+// growth that is understood and intended.
 const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_021_743 + 32_768;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
