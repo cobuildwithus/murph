@@ -1,6 +1,6 @@
 # Gate Android-only product surfaces
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -64,3 +64,4 @@ Updated: 2026-08-10
   direct-assistant activation proof is intentionally deferred to that rollout.
 - Push the exact candidate head, refresh the PR description, and complete the
   exact-head review and GitHub Actions gates.
+Completed: 2026-08-10
