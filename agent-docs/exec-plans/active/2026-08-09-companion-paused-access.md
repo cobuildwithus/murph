@@ -320,3 +320,10 @@ Updated: 2026-08-10
   9,606,277-byte total under the 10,056,956-byte ceiling. The only merge
   conflict was the documentation index, resolved by retaining both the newer
   usage-credit inventory and this change's paused-companion trust boundary.
+- The first exact-head app-verification run passed 9,695 tests and exposed one
+  stale sign-in-token route test double: it did not mock the active-access read
+  now performed after companion authentication. The fixture now supplies the
+  active read/assertion and verifies the connection-mutation option passed to
+  Junction. The corrected test plus the related companion auth/access suites
+  pass (4 files, 150 tests), along with Web typecheck and scoped lint. Fresh
+  exact-head CI remains required.

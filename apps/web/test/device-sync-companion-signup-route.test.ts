@@ -5,9 +5,11 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  assertActiveHostedMemberAccessAllowed: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   createSdkSignInSession: vi.fn(),
   getPrisma: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
   readOptionalJsonObject: vi.fn(),
   requireHostedCompanionMemberIdFromRequest: vi.fn(),
   validateCompanionSignInRequestBody: vi.fn(),
@@ -32,6 +34,12 @@ vi.mock("@/src/lib/http", async (importOriginal) => ({
 vi.mock("@/src/lib/hosted-onboarding/companion-member-access", () => ({
   requireHostedCompanionMemberIdFromRequest:
     mocks.requireHostedCompanionMemberIdFromRequest,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  assertActiveHostedMemberAccessAllowed:
+    mocks.assertActiveHostedMemberAccessAllowed,
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -79,6 +87,8 @@ describe("native companion signup token route", () => {
     mocks.requireHostedCompanionMemberIdFromRequest.mockResolvedValue(
       "member_native",
     );
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
     mocks.createSdkSignInSession.mockResolvedValue({
       environment: "sandbox",
       signInToken: "junction-token-do-not-log",
@@ -114,6 +124,7 @@ describe("native companion signup token route", () => {
       "member_native",
       "junction",
       "connect",
+      { allowConnectionMutation: true },
     );
   });
 
