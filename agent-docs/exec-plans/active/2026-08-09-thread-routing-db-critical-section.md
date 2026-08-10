@@ -86,9 +86,10 @@ Updated: 2026-08-09
 - Preserve a failed preparation's original provider/KMS error when the planner
   proves that material was required. Retry only a successfully prepared stale
   candidate or the existing unique route-write conflict.
-- Reuse the resolver's route snapshot for the initial crypto preparation so the
-  admission path performs one authority read before `BEGIN`; require every
-  conflict retry to reread the route before preparing for the winning container.
+- Make the planning resolver the initial route-observation owner for every Linq
+  `message.received` event, including self-authored echoes, and reuse that
+  snapshot for attempt-zero crypto preparation. A conflict retry rereads the
+  route before preparing for the winning container.
 - Treat a prepared creation's container id as speculative, not binding
   authority. If the unique external-thread row appears after preparation but
   before `BEGIN`, reuse its winning container unless the caller separately
@@ -105,7 +106,7 @@ Updated: 2026-08-09
   route wins with no orphaned synthetic state, and all existing routing,
   activation, privacy-rotation, and mailbox assertions remain green.
 - Local proof on the remediated candidate: the six affected crypto/Linq/
-  Telegram routing files passed 380 tests together; the PostgreSQL concurrency
+  Telegram routing files passed 382 tests together; the PostgreSQL concurrency
   lane passed 8 tests; app-local typecheck and scoped lint passed; and
   `git diff --check` passed.
 - Review remediation: the preliminary specialist and final round 1 both found
@@ -123,3 +124,9 @@ Updated: 2026-08-09
   route committed between preparation and `BEGIN`. The unique route row now
   remains authoritative in that window, with a focused regression proving the
   winner is reused without creating loser state.
+- Final ReviewGPT round 2 required an anomaly retrospective after finding that
+  self-authored Linq echoes used `null` for both an absent route and a skipped
+  lookup, deterministically spending the race retry. Planning now observes the
+  route on those paths; explicit and omitted group-metadata regressions prove
+  one observation, one preparation, and one transaction, while the existing
+  dispatch proof keeps outbound accounting at one update.

@@ -181,7 +181,10 @@ const diagnosticDetails: Array<{ details: unknown; name: string }> = [];
 let rootKeyAtTransactionOpen: number[] | null = null;
 const rootKeysAtTransactionOpen: Array<number[] | null> = [];
 
-function buildLinqMessageWebhookBody(input: { chatIsGroup?: boolean } = {}): string {
+function buildLinqMessageWebhookBody(input: {
+  chatIsGroup?: boolean;
+  isFromMe?: boolean;
+} = {}): string {
   return JSON.stringify({
     api_version: "v3",
     created_at: "2026-03-26T12:00:00.000Z",
@@ -196,8 +199,9 @@ function buildLinqMessageWebhookBody(input: { chatIsGroup?: boolean } = {}): str
           service: "sms",
         },
       },
-      direction: "inbound",
+      direction: input.isFromMe ? "outbound" : "inbound",
       id: "msg_prewarm_1",
+      is_from_me: input.isFromMe ?? false,
       parts: [{ type: "text", value: "hello" }],
       sender_handle: {
         handle: "+15555550123",
@@ -452,6 +456,88 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         "plan",
         "commit",
       ]);
+    });
+
+    it.each([
+      { chatIsGroup: true, description: "explicit group metadata" },
+      { chatIsGroup: undefined, description: "omitted group metadata" },
+    ])("prepares an established self-authored route once with $description", async ({
+      chatIsGroup,
+    }) => {
+      const { hostedOnboardingError } = await import(
+        "@/src/lib/hosted-onboarding/errors"
+      );
+      const {
+        planHostedOnboardingLinqWebhook,
+        shouldPrepareHostedLinqThreadContainerCrypto,
+      } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
+      const { prepareHostedThreadContainerCreation } = await import(
+        "@/src/lib/hosted-routing/thread-container-service"
+      );
+      const { readHostedThreadRouteByThreadIdentity } = await import(
+        "@/src/lib/hosted-routing/thread-route-store"
+      );
+      const planner = vi.mocked(planHostedOnboardingLinqWebhook);
+      const defaultPlanner = planner.getMockImplementation();
+      const shouldPrepareContainer = vi.mocked(
+        shouldPrepareHostedLinqThreadContainerCrypto,
+      );
+      const defaultShouldPrepareContainer =
+        shouldPrepareContainer.getMockImplementation();
+      if (!defaultPlanner || !defaultShouldPrepareContainer) {
+        throw new Error("Expected default Linq planning mocks.");
+      }
+      const prisma = buildPrewarmPrisma();
+
+      try {
+        shouldPrepareContainer.mockResolvedValue(false);
+        planner.mockImplementation(async (input) => {
+          calls.push("plan");
+          if (!input.preparedThreadDeliveryRoute) {
+            throw hostedOnboardingError({
+              code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+              httpStatus: 503,
+              message: "Prepared route required.",
+              retryable: true,
+            });
+          }
+          return {
+            desiredSideEffects: [],
+            response: { ignored: true, ok: true, reason: "own-message" },
+          };
+        });
+
+        const response = await handleHostedOnboardingLinqWebhook({
+          prisma: prisma as never,
+          rawBody: buildLinqMessageWebhookBody({
+            ...(chatIsGroup === undefined ? {} : { chatIsGroup }),
+            isFromMe: true,
+          }),
+          signature: null,
+          timestamp: null,
+        });
+
+        expect(response).toMatchObject({
+          ignored: true,
+          ok: true,
+          reason: "own-message",
+        });
+        expect(readHostedThreadRouteByThreadIdentity).toHaveBeenCalledTimes(1);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(prepareHostedThreadContainerCreation).not.toHaveBeenCalled();
+        expect(shouldPrepareContainer).not.toHaveBeenCalled();
+        expect(calls).toEqual([
+          "read-route",
+          "prepare-route",
+          "unwrap",
+          "begin",
+          "plan",
+          "commit",
+        ]);
+      } finally {
+        planner.mockImplementation(defaultPlanner);
+        shouldPrepareContainer.mockImplementation(defaultShouldPrepareContainer);
+      }
     });
 
     it("prepares a new group container before the planning transaction opens", async () => {

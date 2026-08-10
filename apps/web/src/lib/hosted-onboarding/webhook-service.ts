@@ -1012,13 +1012,11 @@ async function resolveHostedLinqPlanningEvent(input: {
   const webhookIsGroup = messageEvent.data.chat?.is_group;
   if (webhookIsGroup === true) {
     logHostedLinqChatClassification("webhook-group");
-    const threadRoute = messageEvent.data.is_from_me
-      ? null
-      : await readHostedThreadRouteByThreadIdentity({
-          channel: "linq",
-          prisma: input.prisma,
-          threadId: messageEvent.data.chat_id,
-        });
+    const threadRoute = await readHostedThreadRouteByThreadIdentity({
+      channel: "linq",
+      prisma: input.prisma,
+      threadId: messageEvent.data.chat_id,
+    });
     const pendingGroupRoster =
       !messageEvent.data.is_from_me && !threadRoute
         ? await resolveHostedLinqPendingGroupParticipantMemberIds({
@@ -1050,18 +1048,18 @@ async function resolveHostedLinqPlanningEvent(input: {
     };
   }
 
-  if (messageEvent.data.is_from_me) {
-    if (webhookIsGroup === false) {
-      logHostedLinqChatClassification("webhook-direct");
-    }
-    return { event: messageEvent, threadRoute: null };
-  }
-
   const threadRoute = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
     threadId: messageEvent.data.chat_id,
   });
+  if (messageEvent.data.is_from_me && !threadRoute) {
+    if (webhookIsGroup === false) {
+      logHostedLinqChatClassification("webhook-direct");
+    }
+    return { event: messageEvent, threadRoute };
+  }
+
   let resolvedIsGroup: boolean;
   let canonicalHandles: readonly HostedLinqChatHandleSummary[] | null = null;
   if (threadRoute) {
