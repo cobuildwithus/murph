@@ -1,6 +1,6 @@
 # Family Max seat
 
-Status: active — ReviewGPT round 2 correction locally proved; exact-head gates pending
+Status: active — specialist remediation locally proved; final exact-head gates pending
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -107,6 +107,12 @@ Updated: 2026-08-09
   while the replacement initially owned only vocabulary. The retrospective is
   recorded on the PR before correction. The replacement now preserves the
   whole invariant, so the historical two-tier migration can remain superseded.
+- The preliminary specialists found three bounded gaps on the corrected head:
+  Family guidance omitted the Max-versus-Edge usage distinction, the three-tier
+  selector clipped its labels, and Max downgrade interactions lacked executable
+  coverage. The correction keeps Edge/Max capability semantics explicit,
+  lets the existing selector grow to its content, and exercises Max-to-Edge and
+  Max-to-Pulse through the production component.
 
 ## Verification
 
@@ -138,17 +144,18 @@ Updated: 2026-08-09
   Family tool description was reconstructed with a single asserted
   replacement; the deferred Max enum and changed skill bodies do not enter the
   first provider request. The temporary harness and captures were removed.
-- The in-app Browser initialized but had no attached target. Its owning skill
-  disallows a substitute controller, so desktop/mobile catalog screenshots are
-  an explicit evidence gap rather than inferred proof. The fresh Claude Fable
-  UI check was attempted with that gap and stopped on explicit usage-credit
-  exhaustion, as required.
-- Live Stripe now has the recurring $49 Family Max price on the existing Murph
+- The in-app Browser initialized but had no attached target. A local isolated
+  Next server and Playwright captured the real inert design component instead.
+  Desktop and mobile evidence covers the overview, both transition directions,
+  pending/retry state, and Pulse, Edge, and Max invite selectors. The corrected
+  selector captures prove each full label and price remains inside the control;
+  automation also proved keyboard focus, selected-state semantics, and enabled
+  paid-seat CTAs for all three choices.
+- Live Stripe has the recurring $49 Family Max price on the existing Murph
   product, and Vercel Production has the encrypted price-id setting. The
-  isolated GitHub Stripe sandbox remains blocked because this machine has no
-  test-mode Stripe authority; its Family Max test price and repository variable
-  must be configured before merging to `main` so the protected-main live
-  billing lane can run.
+  isolated GitHub Stripe sandbox has one matching test-mode monthly price on
+  the same product as the Pulse and Edge prices, and its protected environment
+  variable is configured without persisting provider identifiers locally.
 - Exact pushed-head review and CI status:
 - Preliminary specialists packaged the exact first head after one transient ZIP
   race retry, then returned `INVALID` solely because required desktop/mobile
@@ -165,11 +172,8 @@ Updated: 2026-08-09
   the Max-aware hosted-execution parser and runner first, then run Web predeploy
   and deploy Web. Do not attach Max items while old Web can receive Family
   subscription events. No compatibility state machine is justified.
-- Exact-head CI produced 12 green checks. The release-app/summary failures are
-  a base-commit design-title assertion mismatch, and the viewport failure is a
-  base-commit PR-specific screenshot spec that requires an unset output
-  directory; the Family Max diff touches neither owner. Frontend design proof
-  remains blocked by the missing required screenshot artifacts.
+- Exact-head CI on the complete database correction and three-tier design-study
+  head produced a fully green required check set, including the hosted preview.
 - Final ReviewGPT round 2 returned `RETROSPECTIVE_REQUIRED`: superseding the
   historical two-tier contract migration removed its separate non-null
   assignment guarantee on fresh databases. The PR retrospective affirms one
@@ -184,11 +188,16 @@ Updated: 2026-08-09
   replacement. Both paths ended with membership, invite, and capacity
   `plan_code` columns non-null and all three validated exact Pulse/Edge/Max
   checks. Both test databases were removed after inspection.
-- Pending: push that correction, capture/retry the preliminary
-  specialist pass with desktop/mobile proof, configure the test Stripe sandbox
-  price, then run the next exact-head final ReviewGPT round and CI to green.
-- The first specialist artifact also required rendered proof of both transition
-  directions. The inert design fixture now composes one current Max member, one
-  current Edge member, and one Pulse member pending Max so the real component
-  can demonstrate downgrade choices, upgrade-to-Max choices, confirmation, and
-  the existing pending/retry state without live data or mutations.
+- The first specialist retry was invalid because its evidence omitted the
+  invite-tier and retry renders. A complete retry against the corrected head
+  returned three substantive findings: general Family guidance did not explain
+  that Max adds usage over Edge without another capability, the fixed-height
+  tier selectors clipped all three price labels, and executable interaction
+  coverage omitted Max-to-Edge/Pulse. All three are resolved in the current
+  candidate. The selector evidence was recaptured at desktop and mobile sizes;
+  the focused Web component suite passes 26 tests, the focused Family skill
+  suite passes 4 tests, both Web and Assistant Engine typechecks pass, focused
+  Web lint passes without findings, and `git diff --check` passes.
+- Pending: commit and push the specialist remediation, update the PR contract,
+  then run final ReviewGPT concurrently with exact-head CI. Merge and worktree
+  retirement remain gated on a final pass and green required checks.

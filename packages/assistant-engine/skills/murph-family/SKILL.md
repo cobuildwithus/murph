@@ -14,6 +14,10 @@ retain private Murph access; owners cannot see member conversations or health
 data. Shared records or supervision require separate consent through their
 owning flows.
 
+Each seat includes monthly AI usage equal to 80% of its price: $5.60 on Pulse,
+$15.20 on Edge, and $39.20 on Max. Edge and Max share the same premium
+runtime/model access; Max adds included usage, not a separate model capability.
+
 ## Read status before account-specific guidance
 
 Use `murph.family_plan` with `action: "read_status"` for account-specific

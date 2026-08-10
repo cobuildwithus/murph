@@ -784,6 +784,57 @@ test.each([
   }
 });
 
+test.each([
+  {
+    expectedCopy:
+      /Downgrade your plan from Max to Edge at \$19\/mo\. Any prorated credit will apply to your next invoice\./,
+    targetName: "Edge",
+    targetPlanCode: "edge" as const,
+  },
+  {
+    expectedCopy:
+      /Downgrade your plan from Max to Pulse at \$7\/mo\. Any prorated credit will apply to your next invoice\./,
+    targetName: "Pulse",
+    targetPlanCode: "pulse" as const,
+  },
+])("HostedFamilyManager can move Max access to $targetName", async ({
+  expectedCopy,
+  targetName,
+  targetPlanCode,
+}) => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: props.members.map((member) => ({
+        ...member,
+        planCode: "max" as const,
+      })),
+    }),
+    { requireButton: false },
+  );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: false });
+
+  try {
+    await clickButton(container, window, "Manage");
+    if (targetPlanCode === "pulse") {
+      await clickButton(container, window, "Pulse · $7/mo");
+    }
+    assert.match(container.textContent ?? "", expectedCopy);
+    await clickButton(container, window, `Downgrade to ${targetName}`);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { planCode: targetPlanCode },
+      url: "/api/settings/billing/family/members/member_owner",
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
 test("HostedFamilyManager disables paid-seat submit for an invalid email", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"

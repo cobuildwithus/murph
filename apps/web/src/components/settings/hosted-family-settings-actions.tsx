@@ -758,7 +758,7 @@ export function HostedFamilyManager(props: {
                     value={invitePlanCode}
                     onValueChange={setInvitePlanCode}
                     className="border-[#c4a882]/25 bg-[#f5f0e8]"
-                    itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
+                    itemClassName="h-auto min-h-12 whitespace-normal py-1.5 leading-tight text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
                   />
                 </div>
 
@@ -913,7 +913,7 @@ export function HostedFamilyManager(props: {
                   to,
                 })}
                 className="border-[#c4a882]/25 bg-[#f5f0e8]"
-                itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
+                itemClassName="h-auto min-h-12 whitespace-normal py-1.5 leading-tight text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
               />
             </div>
           ) : null}

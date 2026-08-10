@@ -128,9 +128,21 @@ describe('assistant capability policy skills', () => {
     const skill = await readSkill('murph-family')
     const normalized = normalizeWhitespace(skill)
 
+    // A general "Family Edge versus Max" question must be answerable from the
+    // loaded skill without an account-status tool call.
+    const generalFamilyComparisonFacts = [
+      '$15.20 on Edge',
+      '$39.20 on Max',
+      'Edge and Max share the same premium runtime/model access',
+      'Max adds included usage, not a separate model capability',
+    ]
+
     expect(normalized).toContain(
       '2–6 sponsored Pulse ($7/month), Edge ($19/month), or Max ($49/month) seats',
     )
+    for (const fact of generalFamilyComparisonFacts) {
+      expect(normalized).toContain(fact)
+    }
     expect(normalized).toContain('`planCode: "max"` for Max')
     expect(normalized).toContain('owners cannot see member conversations or health data')
     expect(normalized).toContain('`action: "read_status"`')
