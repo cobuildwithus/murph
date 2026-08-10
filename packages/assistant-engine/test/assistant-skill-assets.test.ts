@@ -686,21 +686,29 @@ describe('assistant skill assets', () => {
     }
 
     expect(nutritionSkill.triggerHint).toContain(
-      'meal structure and protein',
+      'meal structure, named diets and dietary patterns, protein',
     )
     expect(nutritionSkill.triggerHint).toContain(
       'real-life food-system execution',
     )
     expect(nutritionSkill.triggerHint).toContain(
-      'body-composition for fat loss/muscle gain/recomposition',
+      'body-composition for intentional body change',
     )
     expect(nutritionSkill.triggerHint).toContain(
-      'gut-digestion for digestive symptom strategy',
+      'gut-digestion for digestive symptom strategy or elimination/reintroduction',
+    )
+    expect(nutritionSkill.triggerHint).toContain(
+      'clinical owners for therapeutic diets or medically complex cases',
     )
     expect(nutritionSkill.triggerHint).not.toContain('GI comfort')
     expect(nutritionSkill.triggerHint).not.toContain(
       'body composition, training fuel',
     )
+    const registeredSkillSlugs: ReadonlySet<string> = new Set(
+      ASSISTANT_SKILLS.map((skill) => skill.slug),
+    )
+    expect(registeredSkillSlugs.has('diet-patterns')).toBe(false)
+    expect(registeredSkillSlugs.has('named-diets')).toBe(false)
 
     const nutritionText = await readSkillFile(nutritionSkill)
     expect(nutritionText).toContain(
@@ -708,6 +716,13 @@ describe('assistant skill assets', () => {
     )
     expect(nutritionText).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/gut-digestion/SKILL.md',
+    )
+    expect(nutritionText).toContain('## Named Diets And Dietary Patterns')
+    expect(nutritionText).toContain(
+      'Child references are progressive disclosure, not separately registered skills.',
+    )
+    expect(nutritionText).toContain(
+      'Mapped child references in this tranche:** none.',
     )
     expect(nutritionText).not.toContain('### Body composition')
     expect(nutritionText).not.toContain('### GI comfort and performance')

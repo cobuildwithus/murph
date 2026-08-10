@@ -1692,7 +1692,7 @@ describe('assistant consumption lookup guidance', () => {
       'Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.',
     )
     expect(prompt).toContain(
-      'Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution; body-composition weight/waist/recomposition; gut-digestion digestive symptoms; micronutrients-supplements supplement evidence, labels, dose, and safety.',
+      'Food-journal owns capture/retrospective; nutrition-strategy meals/named diets; body-composition weight/waist/recomp; gut-digestion symptoms/elimination/reintro; micronutrients-supplements supplements, labels, dose, safety.',
     )
     expect(prompt).toContain(
       'Preserve medication state correctly: completed historical courses use `vault-cli medication history add`; current medication regimens use `regimen save --kind medication` with correct status and dates; one dose taken at a specific time uses `event medication-intake add`.',
@@ -2563,6 +2563,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
+    expect(prompt).toContain('nutrition-strategy meals/named diets')
     expect(prompt).toContain('Care logistics: appointment-scheduling.')
     expect(prompt).toContain('Transports and services: connected-apps, computer-use, phone-calls.')
     expect(prompt).toContain('Account products: murph-family.')
