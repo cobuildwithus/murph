@@ -1396,6 +1396,95 @@ test("a runtime refresh wait ends after its in-memory deadline", async () => {
   await rendered.cleanup();
 });
 
+test("a stalled runtime refresh is aborted and retired at the shared deadline", async () => {
+  vi.useFakeTimers();
+  const currentRef = createReplicaRef();
+  const stalledResponse = createDeferred<Response>();
+  const stalledSignals: AbortSignal[] = [];
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockImplementationOnce((_input: unknown, init?: RequestInit) => {
+      if (init?.signal) {
+        stalledSignals.push(init.signal);
+      }
+      return stalledResponse.promise;
+    })
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "stalled runtime refresh",
+  );
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:pending`,
+  );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_001);
+  });
+  await waitForCondition(
+    () => peekBrowserVaultInFlightLoad() === null,
+    "retired runtime refresh slot",
+  );
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  assert.equal(stalledSignals[0]?.aborted, true);
+  assert.ok(getBrowserVaultReadySnapshot());
+
+  const fetchCountAtDeadline = fetchMock.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, fetchCountAtDeadline);
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === fetchCountAtDeadline + 1,
+    "replacement runtime refresh",
+  );
+  const replacementBody = JSON.parse(
+    String(fetchMock.mock.calls.at(-1)?.[1]?.body),
+  );
+  assert.equal(replacementBody.requestRefresh, true);
+
+  await rendered.cleanup();
+});
+
 test("browser-vault provider keeps access-denied recovery pages mounted without redirecting", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()

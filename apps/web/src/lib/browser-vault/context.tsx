@@ -165,6 +165,8 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       runtimeRefreshTimeoutRef.current = setTimeout(() => {
         runtimeRefreshCompletionRef.current = null;
         runtimeRefreshTimeoutRef.current = null;
+        abortBrowserVaultInFlightLoad();
+        providerStartedLoadRef.current = false;
         if (mountedRef.current) {
           setRuntimeRefreshPending(false);
         }
@@ -331,7 +333,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         expectedMemberId: initialMemberId,
         requestRefresh: requestRuntimeRefresh,
       });
-      if (startedLoad) {
+      if (startedLoad && !peekBrowserVaultInFlightLoad()) {
         providerStartedLoadRef.current = false;
       }
       if (

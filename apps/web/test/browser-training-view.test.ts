@@ -242,6 +242,131 @@ test("Training treats result-bearing sets as logged and keeps placeholders plann
   );
 });
 
+test("Training aggregates only completed sessions or performed live work", async () => {
+  const createRoutineView = async (firstSet: Record<string, unknown>) => {
+    const replica = await createBrowserVaultReplica({
+      generatedAt: "2026-08-09T18:00:00.000Z",
+      metricPoints: [],
+      sourceBundleHash: JSON.stringify(firstSet),
+      vault: createVaultReadModel({
+        entities: [
+          createWorkoutEntity(
+            "started_routine",
+            {
+              activityType: "strength-training",
+              workout: {
+                exercises: [
+                  {
+                    name: "Bench press",
+                    order: 1,
+                    sets: [firstSet, { order: 2, type: "normal" }],
+                  },
+                  {
+                    name: "Row",
+                    order: 2,
+                    sets: [
+                      { order: 1, type: "normal" },
+                      { order: 2, type: "normal" },
+                    ],
+                  },
+                ],
+                sourceApp: "murph-live",
+                startedAt: "2026-08-09T17:00:00.000Z",
+              },
+            },
+            "2026-08-09T17:00:00.000Z",
+          ),
+        ],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    });
+    return selectBrowserVaultTraining(createBrowserVaultQueryClient(replica), {
+      now: new Date("2026-08-09T19:00:00.000Z"),
+      timeZone: "UTC",
+    });
+  };
+
+  const plannedView = await createRoutineView({ order: 1, type: "normal" });
+  assert.equal(plannedView.activeSession?.completedSetCount, 0);
+  assert.equal(plannedView.activeSession?.exerciseCount, 2);
+  assert.deepEqual(plannedView.summary, {
+    exerciseCount: 0,
+    setCount: 0,
+    trainingDayCount: 0,
+    workoutCount: 0,
+  });
+  assert.equal(
+    plannedView.weeks.reduce((sum, week) => sum + week.count, 0),
+    0,
+  );
+
+  const performedView = await createRoutineView({
+    order: 1,
+    reps: 5,
+    type: "normal",
+    weight: 135,
+    weightUnit: "lb",
+  });
+  assert.equal(performedView.activeSession?.completedSetCount, 1);
+  assert.deepEqual(performedView.summary, {
+    exerciseCount: 1,
+    setCount: 1,
+    trainingDayCount: 1,
+    workoutCount: 1,
+  });
+  assert.deepEqual(
+    performedView.exerciseProgress.map((entry) => entry.name),
+    ["Bench press"],
+  );
+  assert.equal(
+    performedView.weeks.reduce((sum, week) => sum + week.count, 0),
+    1,
+  );
+
+  const completedReplica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T18:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "completed-session-without-set-details",
+    vault: createVaultReadModel({
+      entities: [
+        createWorkoutEntity(
+          "completed_without_sets",
+          {
+            activityType: "strength-training",
+            workout: {
+              endedAt: "2026-08-08T18:00:00.000Z",
+              sourceApp: "murph-live",
+              startedAt: "2026-08-08T17:00:00.000Z",
+            },
+          },
+          "2026-08-08T17:00:00.000Z",
+        ),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const completedView = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(completedReplica),
+    {
+      now: new Date("2026-08-09T19:00:00.000Z"),
+      timeZone: "UTC",
+    },
+  );
+  assert.deepEqual(completedView.summary, {
+    exerciseCount: 0,
+    setCount: 0,
+    trainingDayCount: 1,
+    workoutCount: 1,
+  });
+  assert.equal(completedView.recentSessions.length, 1);
+  assert.equal(
+    completedView.weeks.reduce((sum, week) => sum + week.count, 0),
+    1,
+  );
+});
+
 test("Training keeps legacy strength summaries visible while old records migrate", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-08-09T18:00:00.000Z",

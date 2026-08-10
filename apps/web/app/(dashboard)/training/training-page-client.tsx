@@ -115,19 +115,14 @@ export default function TrainingPageClient({
   } | null>(null);
   const [handoffRefreshBaselineSignature, setHandoffRefreshBaselineSignature]
     = useState<string | undefined>(undefined);
-  const [handoffRefreshRequestSettled, setHandoffRefreshRequestSettled] =
-    useState(false);
   const requestHandoffRefresh = useCallback(
     (projectionSignature: string) => {
       setHandoffRefreshBaselineSignature(projectionSignature);
-      setHandoffRefreshRequestSettled(false);
       void refresh({
         background: true,
         requestRuntimeRefreshUntil: (client) =>
           selectBrowserVaultTraining(client, { now: trainingNow })
             .projectionSignature !== projectionSignature,
-      }).finally(() => {
-        setHandoffRefreshRequestSettled(true);
       });
     },
     [refresh, trainingNow],
@@ -141,9 +136,9 @@ export default function TrainingPageClient({
       || replacementVisible
       || status === "error"
       ? "idle"
-      : handoffRefreshRequestSettled && !runtimeRefreshPending
-        ? "not_visible"
-        : "checking";
+      : runtimeRefreshPending
+        ? "checking"
+        : "not_visible";
   const markContactHandoff = useCallback(() => {
     refreshAfterContactRef.current = {
       projectionSignature: currentProjectionSignature,
@@ -620,7 +615,12 @@ function WorkoutDetails({
         <div className="min-w-0 flex-1">
           <h3 className="truncate font-semibold">{session.title}</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            {formatIsoDate(session.date)}
+            {formatIsoDate(session.date, {
+              day: "numeric",
+              month: "short",
+              timeZone: "UTC",
+              year: "numeric",
+            })}
             {session.durationMinutes
               ? ` · ${session.durationMinutes} min`
               : ""}
@@ -755,6 +755,7 @@ function ExerciseProgress({
                   {formatIsoDate(entry.lastPerformedDate, {
                     month: "short",
                     day: "numeric",
+                    timeZone: "UTC",
                   })}
                 </span>
               </div>

@@ -266,6 +266,52 @@ test("Training renders live progress, history and a continuation action for the 
   assert.match(markup, /Same weight, 8 reps/);
 });
 
+test("Training keeps canonical date-only labels stable across browser time zones", () => {
+  const dateOnlyTraining: BrowserTrainingView = {
+    ...trainingFixture,
+    exerciseProgress: trainingFixture.exerciseProgress.map((entry) => ({
+      ...entry,
+      lastPerformedDate: "2026-01-15",
+    })),
+    recentSessions: trainingFixture.recentSessions.map((session) => ({
+      ...session,
+      date: "2026-01-15",
+    })),
+  };
+  const previousTimeZone = process.env.TZ;
+
+  try {
+    for (const timeZone of [
+      "Pacific/Auckland",
+      "Pacific/Kiritimati",
+      "America/Los_Angeles",
+    ]) {
+      process.env.TZ = timeZone;
+      const markup = renderToStaticMarkup(
+        createElement(TrainingPageView, {
+          authenticated: true,
+          continueContactOptions,
+          error: null,
+          onRefresh: () => {},
+          refreshPending: false,
+          startContactOptions,
+          status: "ready",
+          training: dateOnlyTraining,
+        }),
+      );
+
+      assert.equal((markup.match(/Jan 15/g) ?? []).length, 2, timeZone);
+      assert.doesNotMatch(markup, /Jan 16/, timeZone);
+    }
+  } finally {
+    if (previousTimeZone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previousTimeZone;
+    }
+  }
+});
+
 test("Training requests one runtime-owned refresh after its messaging handoff returns", async () => {
   const unchangedClient = createBrowserVaultQueryClient(
     await createBrowserVaultReplica({
@@ -370,6 +416,71 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
     await Promise.resolve();
     assert.equal(refresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("Training shows bounded recovery when the runtime owner expires a stalled request", async () => {
+  let runtimeRefreshPending = false;
+  const refresh = vi.fn<BrowserVaultContextValue["refresh"]>(
+    () => new Promise<void>(() => {}),
+  );
+  mocks.useBrowserVault.mockImplementation(() => ({
+    error: null,
+    ref: {
+      sourceBundleHash: "a".repeat(64),
+    },
+    refresh,
+    refreshPending: runtimeRefreshPending,
+    runtimeRefreshPending,
+    status: "ready",
+  }));
+  const createTrainingElement = () => createElement(
+    TrainingPageClient,
+    {
+      authenticated: true,
+      continueContactOptions,
+      startContactOptions,
+    },
+  );
+  const rendered = await renderClientComponent(createTrainingElement(), {
+    requireButton: false,
+  });
+
+  try {
+    const continueLink = [...rendered.container.querySelectorAll("a")]
+      .find((link) => link.textContent?.includes("Continue workout"));
+    assert.ok(continueLink);
+    continueLink.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    runtimeRefreshPending = true;
+    await rendered.rerender(createTrainingElement());
+    await act(async () => {
+      rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+      await Promise.resolve();
+    });
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Checking for your saved update/,
+    );
+    assert.equal(refresh.mock.calls.length, 1);
+
+    runtimeRefreshPending = false;
+    await rendered.rerender(createTrainingElement());
+    assert.match(rendered.container.textContent ?? "", /Update not visible yet/);
+    assert.match(rendered.container.textContent ?? "", /Recent workouts/);
+
+    const checkAgain = [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Check again"));
+    assert.ok(checkAgain);
+    await act(async () => {
+      checkAgain.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    assert.equal(refresh.mock.calls.length, 2);
   } finally {
     await rendered.cleanup();
   }

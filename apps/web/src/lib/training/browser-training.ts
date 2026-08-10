@@ -108,7 +108,7 @@ export function selectBrowserVaultTraining(
       currentDate,
       SUMMARY_LOOKBACK_DAYS,
     )
-  );
+  ).filter(isAggregateEligibleSession);
   const progressSessions = sessions.filter((session) =>
     isIsoDateWithinLookback(
       session.date,
@@ -124,7 +124,10 @@ export function selectBrowserVaultTraining(
     projectionSignature: JSON.stringify(sessions),
     recentSessions: completedSessions.slice(0, RECENT_SESSION_LIMIT),
     summary: buildTrainingSummary(summarySessions),
-    weeks: buildTrainingWeeks(sessions, currentDate),
+    weeks: buildTrainingWeeks(
+      sessions.filter(isAggregateEligibleSession),
+      currentDate,
+    ),
   };
 }
 
@@ -308,6 +311,10 @@ function hasLoggedTrainingSet(set: Record<string, unknown>): boolean {
     || readNumber(set.addedWeightKg) !== null;
 }
 
+function isAggregateEligibleSession(session: TrainingSessionView): boolean {
+  return session.state === "completed" || session.completedSetCount > 0;
+}
+
 function buildTrainingSummary(
   sessions: readonly TrainingSessionView[],
 ): TrainingSummary {
@@ -318,7 +325,9 @@ function buildTrainingSummary(
   );
   const exerciseIds = new Set(
     sessions.flatMap((session) =>
-      session.exercises.map(progressExerciseKey)
+      session.exercises
+        .filter((exercise) => exercise.sets.some((set) => set.completed))
+        .map(progressExerciseKey)
     ),
   );
 
