@@ -953,7 +953,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("forwards Pulse Trial checkout offer through the hosted billing checkout route", async () => {
+  it("ignores a retained legacy trial offer on ordinary paid checkout", async () => {
     mocks.requireHostedInviteCodeFromRequest.mockResolvedValueOnce({
       body: {
         checkoutOffer: "pulse_trial_7d",
@@ -978,7 +978,6 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
-      checkoutOffer: "pulse_trial_7d",
       inviteCode: "invite-code",
       member: {
         id: "member_123",

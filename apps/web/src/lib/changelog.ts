@@ -65,10 +65,26 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns, reliable reminders, steady voices, and web search",
+    title: "Starter access, patterns, reminders, steady voices, and web search",
     summary:
-      "Patterns compares repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
     items: [
+      {
+        id: "non-expiring-starter-access",
+        kind: "feature",
+        priority: 5,
+        title: "Start with usage that does not expire",
+        summary:
+          "Eligible new members receive a Starter usage balance that remains available until it is used, with remaining usage and paid plan choices visible in Settings.",
+        details:
+          "Eligible legacy trial value carries into Starter. When the balance is exhausted, Murph pauses AI work without deleting account state and Settings offers eligible paid plans; usage top-ups remain available only to active paid-plan owners.",
+        relevanceTags: ["starter", "usage", "billing", "settings"],
+        sourcePullRequests: [1464],
+        tryIt: {
+          href: "/settings#subscription",
+          label: "View Starter usage",
+        },
+      },
       {
         id: "personal-patterns",
         kind: "feature",

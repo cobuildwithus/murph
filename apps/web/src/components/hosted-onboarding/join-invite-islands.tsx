@@ -10,7 +10,6 @@ import { Button } from "@/src/components/ui/button";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import type {
   HostedBillingPlanCode,
-  HostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
 import {
@@ -368,7 +367,6 @@ export function JoinInviteRefreshButtonIsland({
 export function JoinInviteCheckoutPlanButtonIsland({
   billingReady,
   className,
-  checkoutOffer,
   disabledLabel,
   idleLabel,
   inviteCode,
@@ -376,7 +374,6 @@ export function JoinInviteCheckoutPlanButtonIsland({
 }: {
   billingReady: boolean;
   className?: string;
-  checkoutOffer?: HostedPublicBillingCheckoutOffer | null;
   disabledLabel?: string;
   idleLabel: string;
   inviteCode: string;
@@ -400,7 +397,6 @@ export function JoinInviteCheckoutPlanButtonIsland({
 
     const payload = await requestHostedBillingCheckout({
       billingPlanCode: planCode,
-      ...(checkoutOffer ? { checkoutOffer } : {}),
       inviteCode,
     });
 

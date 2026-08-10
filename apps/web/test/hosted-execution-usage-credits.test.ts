@@ -393,6 +393,7 @@ describe("hosted usage credits", () => {
       parentGrantEntryId: null,
       purchaseId: null,
       referralId: "referral_replay",
+      sourceReferenceLookupKey: null,
     });
 
     await expect(appendHostedUsageCreditGrantTx({

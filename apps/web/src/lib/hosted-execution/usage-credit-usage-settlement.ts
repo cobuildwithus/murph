@@ -265,6 +265,7 @@ async function settleHostedUsageCreditAvailableGrantsTx(input: {
         entry."kind"::text AS "entryKind",
         entry."purchase_id" AS "purchaseId",
         entry."referral_id" AS "referralId",
+        entry."source_reference_lookup_key" AS "sourceReferenceLookupKey",
         grant_projection."remaining_usd_micros" AS "remainingUsdMicros",
         purchase_projection."beneficiary_member_id" AS "purchaseBeneficiaryMemberId",
         purchase_projection."grant_usd_micros" AS "purchaseGrantUsdMicros",
@@ -300,6 +301,12 @@ async function settleHostedUsageCreditAvailableGrantsTx(input: {
                 "entryKind" = 'referral_grant'
                 AND "purchaseId" IS NULL
                 AND "referralId" IS NOT NULL
+              )
+              OR (
+                "entryKind" = 'starter_grant'
+                AND "purchaseId" IS NULL
+                AND "referralId" IS NULL
+                AND "sourceReferenceLookupKey" IS NOT NULL
               )
             )
             OR "canonicalBeneficiaryMemberId"
