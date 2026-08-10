@@ -24,7 +24,7 @@
       "const": "prod-watch.snapshot.v1"
     },
     "collectorVersion": {
-      "const": "phase-1"
+      "const": "phase-2"
     },
     "generatedAt": {
       "$ref": "#/$defs/timestamp"

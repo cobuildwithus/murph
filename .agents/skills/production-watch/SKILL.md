@@ -1,6 +1,6 @@
 ---
 name: production-watch
-description: Run Murph's bounded production-watch collector, investigate a claimed redacted incident, and coordinate escalation without treating monitoring state as product truth.
+description: Run Murph's bounded production-watch collector, collect provider aggregates, investigate a claimed redacted incident, and coordinate gated remediation without treating monitoring state as product truth.
 ---
 
 Use this skill only for Murph production-watch runs and incidents.
@@ -12,10 +12,14 @@ Use this skill only for Murph production-watch runs and incidents.
 - Use `murph-prod-psql-ro` only through `pnpm --silent prod-watch`; never discover, print, persist, or pass a database connection URL.
 - Provider MCP reads must aggregate at the provider before returning data. Return only `prod-watch.provider-evidence.v1`; reject rather than summarize raw text into a free-form field.
 - Monitoring state under `.runtime/**` is operational coordination only. It is never application, account, billing, clinical, or product truth.
-- Phase 1 is read-only. Do not edit source, create a worktree, commit, push, open a pull request, merge, deploy, mutate provider state, or claim that production-watch performed a fix. A `resolved` transition is record-only and is allowed only after a fresh, complete aggregate evidence pass independently observes an externally applied fix.
+- Phase 2 scheduler automation is shadow by default. Do not edit source, create a worktree, commit, push, or open a pull request unless the production-watch CLI has granted the remediation session a global lease for an eligible database remediation candidate and the worker prompt explicitly asks for non-shadow remediation. Never merge, enable auto-merge, deploy, mutate provider state, mutate production state, or claim that production-watch performed a fix. A `resolved` transition is record-only and is allowed only after a fresh, complete aggregate evidence pass independently observes an externally applied fix.
 - Billing, authentication, privacy, deletion/data-loss, credential, payment, medical, or health-data signals are alert-and-escalate only.
 
 ## Scheduled evidence pass
+
+If invoked by the provider-child prompt with `scripts/prod-watch/schemas/provider-evidence.v1.schema.json`, do not run `pnpm --silent prod-watch` recursively. Query only aggregate provider MCP surfaces and return exactly the provider evidence JSON requested by the prompt.
+
+For an operator/supervisor run:
 
 1. Run the bounded deterministic collector:
 
@@ -56,25 +60,25 @@ Synthetic fixtures are read-only parser/scorer inputs for `collect` and tests. N
   pnpm --silent prod-watch drill-down "$INCIDENT" --session-id "$CODEX_THREAD_ID" --lookback-minutes 60
   ```
 
-- Phase 1 provider incidents are list, claim, and escalate only. Do not pass a provider envelope to `drill-down`; the command rejects provider incidents before extending their claim lease.
+- Provider incidents are list, claim, and escalate only. Do not pass a provider envelope to `drill-down`; the command rejects provider incidents before extending their claim lease.
 - Corroborate the causal chain using aggregate provider evidence, release timestamps, and relevant repository source/tests. Never broaden into raw production records.
 - For database incidents, record one evidence-backed state transition. Valid database outcomes are `investigating`, `confirmed`, `monitor_incomplete`, `false_positive`, `escalated`, or `resolved`. Missing, partial, stale, or failed evidence must lead to `monitor_incomplete` or `escalated`, never `resolved`. Provider and other sensitive incidents permit only `escalated`, even if an external fix is later observed.
 
 ## ReviewGPT and remediation boundary
 
-Phase 1 deliberately makes `pnpm --silent prod-watch remediate` fail closed.
+Scheduler-started workers use `--shadow` and stop before incident claim or edits. A non-shadow remediation worker may continue only when the CLI session is active, the incident is an eligible nonsensitive database remediation candidate, and the global remediation lease is held by that same session.
 
-A later remediation phase may proceed only after all of these are true:
+Remediation may proceed only after all of these are true:
 
 - the same stable incident fingerprint has met its consecutive-window rule;
 - relevant source coverage is complete, or a documented provider outage explains the missing source without weakening the diagnosis;
 - the incident is not in a sensitive alert-only domain;
 - a deployment-correlated causal chain is supported by at least two independent aggregate signals, or by one aggregate signal plus a deterministic regression test;
-- a later remediation phase has added and proved one global remediation lease; Phase 1 deliberately persists only triage ownership;
+- the production-watch state owner has granted one global remediation lease to this session;
 - the change fits the low-risk remediation allowlist and bounded patch budget;
 - repo-required scoped tests and typecheck pass;
 - `pnpm review:gpt` receives only the minimum redacted incident snapshot plus relevant source/test files and approves the exact patch head.
 
-Run ReviewGPT at most once per incident fingerprint and patch head. Do not retry a substantive rejection without changing the evidence or patch. Permit at most two bounded retries for invalid/tooling failures, and apply a six-hour cooldown when the fingerprint and patch head are unchanged. Never create a five-minute review conversation loop.
+Run ReviewGPT at most once per incident fingerprint and patch head. Record the result with `pnpm --silent prod-watch remediate review "$INCIDENT" --session-id "$SESSION" --patch-head "$PATCH_HEAD" --outcome approved|rejected|invalid`. Do not retry a substantive rejection without changing the evidence or patch. Permit at most two bounded retries for invalid/tooling failures, and apply a six-hour cooldown when the fingerprint and patch head are unchanged. Never create a five-minute review conversation loop.
 
-Even in a later phase, production-watch may create only a draft pull request. It must never auto-merge or auto-deploy.
+Only after an approved exact patch head may production-watch create a draft pull request. Record that with `pnpm --silent prod-watch remediate pr-opened "$INCIDENT" --session-id "$SESSION" --patch-head "$PATCH_HEAD" --pr-ref "owner/repo/pull/number"`. It must never auto-merge or auto-deploy.

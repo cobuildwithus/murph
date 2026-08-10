@@ -25,14 +25,22 @@ import {
   acquireDirectoryLock,
   buildSnapshot,
   claimIncident,
+  claimGlobalRemediationLease,
   createInitialState,
   evaluateAnomalies,
   filterSnapshotForIncident,
+  markRemediationAlertEscalated,
+  markRemediationDispatched,
   parseState,
   parseAdapterEvidence,
   parseProviderEvidence,
+  queueRemediationDispatches,
+  queueRemediationSession,
   renderActiveIncidents,
   renderIncidentHistory,
+  renderMonitorStatus,
+  recordDraftPrOpened,
+  recordRemediationReview,
   safeErrorCode,
   transitionIncident,
   updateStateFromSnapshot,
@@ -1435,6 +1443,103 @@ describe("production-watch incident coordination", () => {
       new Date("2026-08-09T20:11:00.000Z"),
     )).toThrow("incident_terminal_escalation_only");
   });
+
+  it("coordinates remediation sessions through review approval before draft PR metadata", () => {
+    const promoted = buildPromotedSuspiciousState();
+    const incident = promoted.incidents.find((candidate) => (
+      candidate.source === "database" && candidate.automationClass === "remediation_candidate"
+    ));
+    expect(incident).toBeDefined();
+
+    const queued = queueRemediationDispatches(
+      promoted,
+      [incident!.id],
+      new Date("2026-08-09T20:06:00.000Z"),
+      { maxConcurrency: 1 },
+    );
+    expect(queued.dispatches).toEqual([{
+      incidentId: incident!.id,
+      incidentFingerprint: incident!.fingerprint,
+      sessionId: queued.dispatches[0]!.sessionId,
+    }]);
+
+    let state = markRemediationDispatched(
+      queued.state,
+      queued.dispatches[0]!.sessionId,
+      new Date("2026-08-09T20:06:01.000Z"),
+      15,
+    );
+    state = claimGlobalRemediationLease(
+      state,
+      queued.dispatches[0]!.sessionId,
+      new Date("2026-08-09T20:06:02.000Z"),
+      15,
+    );
+    state = recordRemediationReview(
+      state,
+      queued.dispatches[0]!.sessionId,
+      new Date("2026-08-09T20:07:00.000Z"),
+      { patchHead: "abcdef1234567890", outcome: "approved" },
+    );
+    expect(state.remediation.sessions[0]).toMatchObject({
+      patchHead: "abcdef1234567890",
+      reviewOutcome: "approved",
+      state: "review_approved",
+    });
+    expect(() => recordRemediationReview(
+      state,
+      queued.dispatches[0]!.sessionId,
+      new Date("2026-08-09T20:08:00.000Z"),
+      { patchHead: "abcdef1234567890", outcome: "approved" },
+    )).toThrow("remediation_review_cooldown_active");
+
+    state = recordDraftPrOpened(
+      state,
+      queued.dispatches[0]!.sessionId,
+      new Date("2026-08-09T20:09:00.000Z"),
+      { patchHead: "abcdef1234567890", prRef: "murph/murph/pull/123" },
+    );
+    expect(state.remediation.sessions[0]).toMatchObject({
+      prRef: "murph/murph/pull/123",
+      state: "draft_pr_opened",
+    });
+    expect(state.remediation.globalLease).toBeUndefined();
+    expect(parseState(JSON.parse(JSON.stringify(state)) as unknown).remediation.sessions[0]?.state)
+      .toBe("draft_pr_opened");
+  });
+
+  it("records alert-escalated remediation sessions without opening an edit lane", () => {
+    const promoted = buildPromotedSuspiciousState();
+    const sensitive = promoted.incidents.find((candidate) => candidate.category === "sensitive");
+    expect(sensitive).toBeDefined();
+
+    let state = queueRemediationSession(
+      promoted,
+      sensitive!.id,
+      "session-sensitive-remediation",
+      new Date("2026-08-09T20:06:00.000Z"),
+    );
+    state = markRemediationDispatched(
+      state,
+      "session-sensitive-remediation",
+      new Date("2026-08-09T20:06:01.000Z"),
+      15,
+    );
+    state = markRemediationAlertEscalated(
+      state,
+      "session-sensitive-remediation",
+      new Date("2026-08-09T20:06:02.000Z"),
+      "automatic_remediation_ineligible",
+    );
+
+    expect(state.remediation.sessions[0]).toMatchObject({
+      state: "alert_escalated",
+      lastErrorCode: "automatic_remediation_ineligible",
+    });
+    expect(renderMonitorStatus(state)).toContain("Active remediation sessions: 0");
+    expect(parseState(JSON.parse(JSON.stringify(state)) as unknown).remediation.sessions[0]?.state)
+      .toBe("alert_escalated");
+  });
 });
 
 describe("production-watch locking and dry-run behavior", () => {
@@ -1781,6 +1886,30 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(snapshot.anomalyCandidates).toEqual([]);
   });
 
+  it("collects provider evidence through a bounded fake Codex child", () => {
+    const runtimeRoot = makeTempRoot();
+    const databaseEnv = installDatabaseFixtureHelper(runtimeRoot, "healthy");
+    const codexEnv = installFakeCodex(runtimeRoot);
+    const result = runProdWatch([
+      "collect",
+      "--provider-child",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot, {
+      ...databaseEnv,
+      ...codexEnv,
+      PATH: `${codexEnv.PATH}:${databaseEnv.PATH}`,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const snapshot = JSON.parse(result.stdout) as ProductionWatchSnapshot;
+    expect(snapshot.monitor).toMatchObject({ status: "healthy", evidenceComplete: true });
+    expect(snapshot.sourceHealth
+      .filter((source) => source.source !== "database")
+      .every((source) => source.status === "ok" && source.auth === "ok"))
+      .toBe(true);
+  });
+
   it("keeps fixture collection read-only without state or Markdown projections", () => {
     const runtimeRoot = makeTempRoot();
     const result = runProdWatch(["collect", "--fixture", "healthy"], runtimeRoot);
@@ -1918,7 +2047,7 @@ describe("production-watch locking and dry-run behavior", () => {
         "drill-down", incidentId!, "--session-id", sessionId,
       ], runtimeRoot, env);
       expect(rejectedDrillDown.status).toBe(1);
-      expect(rejectedDrillDown.stderr).toContain("provider_incident_drill_down_unavailable_phase_1");
+      expect(rejectedDrillDown.stderr).toContain("provider_incident_drill_down_unavailable");
       expect((JSON.parse(readFileSync(statePath, "utf8")) as ProviderState).incidents
         .find((incident) => incident.id === incidentId)).toEqual(claimedIncident);
 
@@ -1952,14 +2081,56 @@ describe("production-watch locking and dry-run behavior", () => {
       providerPath,
     ], runtimeRoot, env);
     expect(rejectedHiddenEvidence.status).toBe(1);
-    expect(rejectedHiddenEvidence.stderr).toContain("drill_down_provider_evidence_forbidden_phase_1");
+    expect(rejectedHiddenEvidence.stderr).toContain("drill_down_provider_evidence_forbidden");
   });
 
-  it("keeps the Phase 1 remediation command disabled at the CLI boundary", () => {
+  it("records a remediation shadow worker without claiming or editing the incident", () => {
     const runtimeRoot = makeTempRoot();
-    const result = runProdWatch(["remediate"], runtimeRoot);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("automation_disabled_phase_1");
+    const env = installDatabaseFixtureHelper(runtimeRoot, "suspicious");
+    expect(runProdWatch(["run"], runtimeRoot, env).status).toBe(0);
+    expect(runProdWatch(["run"], runtimeRoot, env).status).toBe(0);
+    const statePath = path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json");
+    const before = JSON.parse(readFileSync(statePath, "utf8")) as {
+      incidents: Array<{
+        automationClass: string;
+        category: string;
+        id: string;
+        owner?: unknown;
+        source: string;
+      }>;
+    };
+    const incident = before.incidents.find((candidate) => (
+      candidate.source === "database" && candidate.category !== "sensitive"
+    ));
+    expect(incident).toBeDefined();
+
+    const result = runProdWatch([
+      "worker",
+      incident!.id,
+      "--session-id",
+      "session-shadow",
+      "--shadow",
+    ], runtimeRoot);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      status: "shadow_skipped",
+      incidentId: incident!.id,
+      sessionId: "session-shadow",
+    });
+
+    const after = JSON.parse(readFileSync(statePath, "utf8")) as {
+      incidents: Array<{ id: string; owner?: unknown }>;
+      remediation: {
+        sessions: Array<{ incidentId: string; lastErrorCode?: string; sessionId: string; state: string }>;
+      };
+    };
+    expect(after.incidents.find((candidate) => candidate.id === incident!.id)?.owner).toBeUndefined();
+    expect(after.remediation.sessions).toContainEqual(expect.objectContaining({
+      incidentId: incident!.id,
+      lastErrorCode: "shadow_mode",
+      sessionId: "session-shadow",
+      state: "blocked",
+    }));
   });
 
   it("rejects ambiguous database helper stdout instead of selecting one JSON-looking line", () => {
@@ -2154,6 +2325,7 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).toContain("$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
     expect(rendered).toContain("node_modules/tsx/dist/cli.mjs");
     expect(rendered).toContain("scripts/prod-watch.ts&quot; run --scheduled");
+    expect(rendered).toContain("--provider-child --dispatch-workers --remediation-shadow");
     expect(rendered).not.toContain("exec pnpm");
     expect(rendered).not.toContain(fakeHome);
     expect(() => renderLaunchdPlistTemplate(template, path.join(fakeHome, "..", "project"), fakeHome))
@@ -2221,6 +2393,7 @@ describe("production-watch static safety contracts", () => {
         "",
       ].join("\n"), { mode: 0o755 });
       chmodSync(helperPath, 0o755);
+      writeFakeCodexExecutable(path.join(helperRoot, "codex"));
       const template = readFileSync(
         path.join(repoRoot, "scripts", "prod-watch", "com.murph.prod-watch.plist.template"),
         "utf8",
@@ -2246,8 +2419,10 @@ describe("production-watch static safety contracts", () => {
           TMPDIR: realpathSync(os.tmpdir()),
           NODE_ENV: "test",
           MURPH_PROD_WATCH_TEST_RUNTIME_ROOT: runtimeRoot,
+          MURPH_PROD_WATCH_CODEX_PROFILE: "test-profile",
           TEST_DATABASE_FIXTURE: path.join(fixtureRoot, "healthy.database.json"),
           TEST_NODE_EXECUTABLE: process.execPath,
+          TEST_PROVIDER_FIXTURE: path.join(fixtureRoot, "healthy.providers.json"),
         },
         timeout: 30_000,
       });
@@ -2322,11 +2497,14 @@ describe("production-watch static safety contracts", () => {
         { mode: 0o755 },
       );
       chmodSync(launchctlPath, 0o755);
+      writeFakeSchedulerPreflightTools(binRoot);
       const sharedEnv = {
         HOME: fakeHome,
         LAUNCHCTL_LOG: launchctlLog,
         LAUNCHCTL_STATE: launchctlState,
+        MURPH_PROD_WATCH_CODEX_PROFILE: "test-profile",
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        TEST_PROVIDER_FIXTURE: path.join(fixtureRoot, "healthy.providers.json"),
       };
 
       writeFileSync(plistPath, "operator-owned\n", { mode: 0o600 });
@@ -2476,11 +2654,13 @@ describe("production-watch static safety contracts", () => {
     },
   );
 
-  it("keeps Phase 1 resolution authority complete-evidence-only and sensitive incidents escalation-only", () => {
+  it("keeps Phase 2 remediation guidance gated and sensitive incidents escalation-only", () => {
     const skill = readFileSync(
       path.join(repoRoot, ".agents", "skills", "production-watch", "SKILL.md"),
       "utf8",
     );
+    expect(skill).toContain("Phase 2 scheduler automation is shadow by default.");
+    expect(skill).toContain("do not run `pnpm --silent prod-watch` recursively");
     expect(skill).toContain(
       "A `resolved` transition is record-only and is allowed only after a fresh, complete aggregate evidence pass independently observes an externally applied fix.",
     );
@@ -2488,6 +2668,7 @@ describe("production-watch static safety contracts", () => {
       "Missing, partial, stale, or failed evidence must lead to `monitor_incomplete` or `escalated`, never `resolved`.",
     );
     expect(skill).toContain("Provider and other sensitive incidents permit only `escalated`");
+    expect(skill).toContain("Record the result with `pnpm --silent prod-watch remediate review");
   });
 
   it("keeps strict JSON schemas executable and fixtures conformant", () => {
@@ -2643,6 +2824,56 @@ function installDatabaseFixtureHelper(
     TEST_DATABASE_HELPER_SCRIPT: helperScriptPath,
     TEST_NODE_EXECUTABLE: process.execPath,
   };
+}
+
+function installFakeCodex(runtimeRoot: string): Record<string, string> {
+  const binRoot = path.join(runtimeRoot, "codex-bin");
+  mkdirSync(binRoot, { recursive: true });
+  writeFakeCodexExecutable(path.join(binRoot, "codex"));
+  const providerPath = path.join(runtimeRoot, "healthy.providers.current.json");
+  writeCurrentProviderFixture(providerPath);
+  return {
+    PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+    MURPH_PROD_WATCH_CODEX_PROFILE: "test-profile",
+    TEST_PROVIDER_FIXTURE: providerPath,
+  };
+}
+
+function writeFakeCodexExecutable(targetPath: string): void {
+  writeFileSync(targetPath, [
+    "#!/bin/sh",
+    "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"--help\" ]; then exit 0; fi",
+    "output=''",
+    "while [ \"$#\" -gt 0 ]; do",
+    "  if [ \"$1\" = \"--output-last-message\" ]; then output=\"$2\"; shift 2; else shift; fi",
+    "done",
+    "cat >/dev/null",
+    "if [ -n \"$output\" ]; then cp \"$TEST_PROVIDER_FIXTURE\" \"$output\"; fi",
+    "printf '%s\\n' '{\"type\":\"session\",\"session_id\":\"codex-test-session\"}'",
+    "printf '%s\\n' '{\"type\":\"turn.completed\",\"status\":\"completed\"}'",
+    "",
+  ].join("\n"), { mode: 0o755 });
+  chmodSync(targetPath, 0o755);
+}
+
+function writeFakeSchedulerPreflightTools(binRoot: string): void {
+  writeFakeCodexExecutable(path.join(binRoot, "codex"));
+  const ghPath = path.join(binRoot, "gh");
+  writeFileSync(ghPath, [
+    "#!/bin/sh",
+    "if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then exit 0; fi",
+    "exit 1",
+    "",
+  ].join("\n"), { mode: 0o755 });
+  chmodSync(ghPath, 0o755);
+  const pnpmPath = path.join(binRoot, "pnpm");
+  writeFileSync(pnpmPath, [
+    "#!/bin/sh",
+    "if [ \"$1\" = \"review:gpt\" ] && [ \"$2\" = \"--help\" ]; then exit 0; fi",
+    "exit 1",
+    "",
+  ].join("\n"), { mode: 0o755 });
+  chmodSync(pnpmPath, 0o755);
 }
 
 function writeCurrentProviderFixture(
