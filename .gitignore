@@ -26,6 +26,10 @@ apps/web/next-env.d.ts
 /.agents/skills/*
 !/.agents/skills/github-project-issues/
 !/.agents/skills/github-project-issues/SKILL.md
+!/.agents/skills/write-changelog/
+!/.agents/skills/write-changelog/SKILL.md
+!/.agents/skills/write-changelog/agents/
+!/.agents/skills/write-changelog/agents/openai.yaml
 !/.agents/skills/crabbox/
 !/.agents/skills/crabbox/SKILL.md
 !/.agents/skills/health-commons-research/
