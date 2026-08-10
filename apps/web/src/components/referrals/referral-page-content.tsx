@@ -24,7 +24,7 @@ const LINK_PRIVACY_TRUST_POINT = {
   title: "Your link shares nothing private.",
 } as const;
 
-const REWARD_PRIVACY_TRUST_POINT = {
+const DEFAULT_REWARD_PRIVACY_TRUST_POINT = {
   description:
     "Murph adds the usage and records it in Settings. When Murph can reach you in chat, you’ll also get a short confirmation with no private details.",
   title: "Rewards show up automatically.",
@@ -103,11 +103,13 @@ function buildFaqs(input: {
     ? "Not for your personal link. For a group reward, tell Murph which option you want and wait for the go-ahead before creating the group."
     : input.signupAvailable
     ? "No. Share your personal link whenever you like. The reward comes after someone new finishes setting up Murph and the referral qualifies."
-    : "Yes. Tell Murph which group option you want and wait for the go-ahead before creating the group.";
+    : "Not for your personal link. For a group reward, tell Murph which option you want and wait for the go-ahead before creating the group.";
+  const usageAnswer = input.groupAvailable && !input.signupAvailable
+    ? `Each rewarded group option shows an estimate of how many days it may add. The actual amount of Murph time varies with how you use Murph. Group rewards add usage; they do not extend your trial or plan dates. ${ownerDescription}`
+    : `Each option shows an estimate of how many days it may add. The actual amount of Murph time varies with how you use Murph. Rewards add usage; they do not extend your trial or plan dates. ${ownerDescription}`;
   const faqs = [
     {
-      answer:
-        `Each option shows an estimate of how many days it may add. The actual amount of Murph time varies with how you use Murph. Rewards add usage; they do not extend your trial or plan dates. ${ownerDescription}`,
+      answer: usageAnswer,
       question: "How much usage do I earn?",
     },
     {
@@ -121,8 +123,9 @@ function buildFaqs(input: {
     || input.rewards.some(({ id }) => id === "new-person-group")
   ) {
     faqs.push({
-      answer:
-        "Someone who has never had their own Murph account. They need to finish setup through your link or join the new group with their own Murph. Referring yourself or the same person twice does not count.",
+      answer: input.signupAvailable
+        ? "Someone who has never had their own Murph account. They need to finish setup through your link or join the new group with their own Murph. Referring yourself or the same person twice does not count."
+        : "Someone who has never had their own Murph account. For this group option, they need to join the new group with their own Murph. Referring yourself or the same person twice does not count.",
       question: "What counts as a new member?",
     });
   }
@@ -183,9 +186,16 @@ export function ReferralPageContent({
   ];
   const howItWorks = buildHowItWorks({ groupAvailable, signupAvailable });
   const faqs = buildFaqs({ groupAvailable, rewards, signupAvailable });
+  const rewardPrivacyTrustPoint = groupAvailable && !signupAvailable
+    ? {
+        description:
+          "When a group referral meets the rules, Murph adds the usage and records it in Settings. When Murph can reach you in chat, you’ll also get a short confirmation with no private details.",
+        title: "Group rewards show up automatically.",
+      }
+    : DEFAULT_REWARD_PRIVACY_TRUST_POINT;
   const trustPoints = [
     LINK_PRIVACY_TRUST_POINT,
-    REWARD_PRIVACY_TRUST_POINT,
+    rewardPrivacyTrustPoint,
     groupAvailable
       ? GROUP_PRIVACY_TRUST_POINT
       : SIGNUP_PRIVACY_TRUST_POINT,
@@ -205,6 +215,12 @@ export function ReferralPageContent({
     : signupAvailable
     ? "Link rewards go to your personal Murph."
     : "Group rewards go to the Murph where you started the referral. Your personal link is always ready to share.";
+  const privacyLead = groupAvailable && !signupAvailable
+    ? "Murph keeps only what it needs to recognize a group referral and add the reward. Sharing your personal link does not currently earn extra usage."
+    : "Murph keeps only what it needs to recognize the referral and add the reward.";
+  const closingDescription = groupAvailable && !signupAvailable
+    ? "Share your personal link anytime. Group rewards are tracked without sharing anyone’s private information."
+    : "Murph keeps track of the reward without sharing anyone’s private information.";
   const artifactReward = signupAvailable
     ? rewards.find(({ id }) => id === "signup-link")!
     : rewards[0]!;
@@ -384,8 +400,7 @@ export function ReferralPageContent({
               Your referral never exposes their health.
             </h2>
             <p className="mt-5 max-w-[48ch] text-[1rem] leading-[1.75] text-[#4a4036]">
-              Murph keeps only what it needs to recognize the referral and add
-              the reward.
+              {privacyLead}
             </p>
           </div>
 
@@ -455,8 +470,7 @@ export function ReferralPageContent({
               <span className="block">Bring someone with you.</span>
             </h2>
             <p className="mt-3 max-w-[46ch] text-[0.9375rem] leading-[1.7] text-[#f5f0e8]/70">
-              Murph keeps track of the reward without sharing anyone’s private
-              information.
+              {closingDescription}
             </p>
           </div>
           <div className="shrink-0">

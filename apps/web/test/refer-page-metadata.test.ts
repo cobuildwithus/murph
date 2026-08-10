@@ -59,7 +59,12 @@ test("ReferPage metadata does not promise disabled reward paths", () => {
     HOSTED_PUBLIC_REFERRAL_REWARDS.filter(({ id }) => id !== "signup-link"),
   );
   assert.match(String(groupMetadata.description), /Share your personal link/);
-  assert.match(String(groupMetadata.description), /start a new group/);
+  assert.match(String(groupMetadata.description), /To earn extra usage, choose a group referral option/);
+  assert.match(String(groupMetadata.description), /ask Murph before starting the group/);
+  assert.doesNotMatch(
+    String(groupMetadata.description),
+    /personal link.*Murph adds extra usage/i,
+  );
   assert.doesNotMatch(String(groupMetadata.description), /\bmissions?\b/i);
   assert.doesNotMatch(String(groupMetadata.description), /earn more AI usage when/);
 

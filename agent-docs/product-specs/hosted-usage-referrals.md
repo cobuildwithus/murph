@@ -127,8 +127,8 @@ same-origin claim form retains the canonical `Origin` required by its mutation
 guard.
 
 The available landing has one action: `Join Murph`, above a single closing line
-stating that Murph credits whoever shared the link and that the referrer cannot
-see the recipient's conversations or health information.
+stating that the link tells Murph who made the introduction and that the
+referrer cannot see the recipient's conversations or health information.
 
 Known unavailable links render a human-readable recovery state instead of a
 generic 404. A temporarily exhausted claim allowance or unexpected read/claim
