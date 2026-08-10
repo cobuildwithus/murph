@@ -39,6 +39,7 @@ import {
   getAssistantCronAutomationTimingProjection,
   getAssistantCronStatus,
   hasGroupNewsletterDeliveryTag,
+  isAssistantContextSnapshotCanonicalEventRefreshPending,
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
   isCanonicalGroupNewsletterAutomationInstructions,
   readAssistantOnboardingState,
@@ -2274,6 +2275,20 @@ export async function runHostedWorkspaceAssistantPhase(
         continuingSystemMailboxResult,
         memberPreferencesPrePlanning.result,
       );
+    }
+
+    if (
+      hasFreshConversationInput
+      && await isAssistantContextSnapshotCanonicalEventRefreshPending({
+        vaultRoot: input.restored.vaultRoot,
+      })
+    ) {
+      await refreshAssistantContextSnapshotBestEffort({
+        now: () => new Date(resolveHostedAssistantPhaseNowMs(input)).toISOString(),
+        shouldYield: null,
+        signal: channelAbortController.signal,
+        vaultRoot: input.restored.vaultRoot,
+      });
     }
 
     const freshAssistantInputIds = readHostedInitialAssistantInputIds(input);

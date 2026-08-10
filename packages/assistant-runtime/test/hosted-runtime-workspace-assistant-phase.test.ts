@@ -1,7 +1,7 @@
 import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -215,6 +215,7 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
 }));
 
 import {
+  addMeasurement,
   initializeVault,
   showAutomation,
   splitAutomationAvailabilityConflictBlock,
@@ -230,6 +231,7 @@ import {
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   readAssistantContextSnapshotState,
+  readAssistantContextSnapshotPrompt,
   saveAssistantAutomationState,
   saveAssistantSession,
   upsertAssistantInputEvent,
@@ -2369,6 +2371,82 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           promptBlock: expect.stringContaining("Hosted phase sleep consistency"),
         },
         pendingDirtyDomains: [],
+      });
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("refreshes dirty canonical history before the next foreground provider lane", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-context-snapshot-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const queryProjectionPath = path.join(
+      vaultRoot,
+      ".runtime/projections/query.sqlite",
+    );
+    let providerSnapshotPrompt: string | null = null;
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        timezone: "America/New_York",
+        vaultRoot,
+      });
+      await addMeasurement({
+        draft: {
+          measurements: [{ metric: "body-weight", unit: "kg", value: 82.5 }],
+          occurredAt: "2026-04-27T09:00:00.000Z",
+          source: "manual",
+          title: "Foreground snapshot body measurement",
+        },
+        vaultRoot,
+      });
+      await markAssistantContextSnapshotDirty({
+        domains: ["blood_tests"],
+        vaultRoot,
+      });
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+        providerSnapshotPrompt = await readAssistantContextSnapshotPrompt({ vaultRoot });
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: false,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 1,
+        linqDeliveryContext: {
+          directRecipientPhoneNumber: "+15555550100",
+          fromPhoneNumber: "+15555550101",
+          replyToMessageId: "linq_direct_snapshot_input",
+          routeAuthority: null,
+          service: "imessage",
+          target: "chat_direct_snapshot",
+          threadIsDirect: true,
+        },
+        now: () => "2026-04-27T10:00:00.000Z",
+        shouldYieldBackgroundMaintenance: () => true,
+        vaultRoot,
+      }));
+
+      expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+      expect(providerSnapshotPrompt).toContain(
+        "Body/scale measurement history is present (latest 2026-04-27)",
+      );
+      expect(providerSnapshotPrompt).toContain(
+        "measurement list --from 2026-04-27 --to 2026-04-27",
+      );
+      expect(providerSnapshotPrompt).not.toContain("82.5");
+      await expect(readAssistantContextSnapshotState(vaultRoot)).resolves.toMatchObject({
+        pendingDirtyDomains: [],
+      });
+      await expect(access(queryProjectionPath)).rejects.toMatchObject({
+        code: "ENOENT",
       });
     } finally {
       await rm(parentRoot, {

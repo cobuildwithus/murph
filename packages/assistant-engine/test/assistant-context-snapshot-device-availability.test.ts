@@ -160,6 +160,12 @@ describe('assistant context snapshot device availability', () => {
       value: 22.1,
     },
     {
+      metric: 'waistCircumferenceCentimeter',
+      storedMetric: 'waist-circumference',
+      unit: 'cm',
+      value: 83.2,
+    },
+    {
       metric: 'leanBodyMass',
       storedMetric: 'lean-body-mass',
       unit: 'kg',

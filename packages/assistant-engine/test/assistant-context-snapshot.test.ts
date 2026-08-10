@@ -661,6 +661,40 @@ describe('assistant context snapshot', () => {
     }
   })
 
+  it('does not expose stale canonical history availability while an event-ledger refresh is pending', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
+
+    try {
+      await initializeVault({
+        createdAt: '2026-06-26T00:00:00.000Z',
+        vaultRoot,
+      })
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-26T12:00:00.000Z',
+        vaultRoot,
+      })
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests'],
+        vaultRoot,
+      })
+
+      const prompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+      expect(prompt).toContain(
+        'Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable',
+      )
+      expect(prompt).toContain('Do not infer that history is absent')
+      expect(prompt).toContain('`vault-cli blood-test list`')
+      expect(prompt).toContain('`vault-cli measurement list`')
+      expect(prompt).toContain('`vault-cli measurement show <event-id>`')
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  })
+
   it('rebuilds a clean version-4 cache so newly rendered context lands on the next refresh', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
     const snapshotPath = resolveAssistantContextSnapshotPath(vaultRoot)

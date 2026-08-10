@@ -50,6 +50,12 @@ const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
   '- Before any safety-relevant guidance, enumerate the user\'s current active records with `vault-cli condition list --status active`, `vault-cli allergy list --status active`, `vault-cli regimen list --status active`, and `vault-cli goal list --status active`, then read individual records with the matching `vault-cli condition show <id>` / `vault-cli allergy show <id>` / `vault-cli regimen show <id>` / `vault-cli goal show <id>` as needed.',
 ].join('\n')
 
+const ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_STALE_PROMPT = [
+  'Assistant context snapshot for navigation only:',
+  '- Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).',
+  '- Do not infer that history is absent. If it matters for the current request, inspect canonical records with the existing `vault-cli blood-test list` or exact-day `vault-cli measurement list` then `vault-cli measurement show <event-id>` path.',
+].join('\n')
+
 export const ASSISTANT_CONTEXT_SNAPSHOT_DIRTY_DOMAINS = [
   'experiments',
   'blood_tests',
@@ -132,6 +138,9 @@ export async function readAssistantContextSnapshotPrompt(input: {
   if (state?.pendingDirtyDomains.includes('health_context')) {
     return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
   }
+  if (state?.pendingDirtyDomains.includes('blood_tests')) {
+    return ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_STALE_PROMPT
+  }
   if (state === null || state.lastCompleted === null) {
     return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
   }
@@ -146,6 +155,15 @@ export async function isAssistantContextSnapshotRefreshPending(input: {
       vaultRoot: input.vaultRoot,
     }),
   )
+}
+
+export async function isAssistantContextSnapshotCanonicalEventRefreshPending(input: {
+  vaultRoot: string
+}): Promise<boolean> {
+  const { state } = await readAssistantContextSnapshotStateStatus({
+    vaultRoot: input.vaultRoot,
+  })
+  return state?.pendingDirtyDomains.includes('blood_tests') === true
 }
 
 export async function markAssistantContextSnapshotDirty(input: {

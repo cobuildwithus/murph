@@ -28,6 +28,7 @@ import {
   selectMetricTrend,
   selectMetricValue,
   selectMetricWindowComparison,
+  wearableMetricCatalog,
   type GoalMetricTarget,
   type MetricPoint,
   type MetricSeriesPoint,
@@ -366,6 +367,29 @@ test("resolves every legacy collapsed body and blood-pressure identity from the 
       );
     }
   }
+
+  for (const wearableKey of [
+    "bmi",
+    "bodyFatPercentage",
+    "leanBodyMassKg",
+    "waistCircumference",
+    "weightKg",
+  ] as const) {
+    const entry = wearableMetricCatalog[wearableKey];
+    for (const identity of [entry.key, ...entry.aliases]) {
+      const definition = resolveMetricDefinition(identity);
+      assert.equal(
+        definition?.category,
+        "body",
+        `${identity} must resolve through the general body identity owner`,
+      );
+      assert.equal(
+        resolveMetricDefinition(normalizeMetricKey(identity).replace(/-/gu, ""))?.key,
+        definition?.key,
+        `${identity} must retain its general body identity after legacy writer collapse`,
+      );
+    }
+  }
 });
 
 test("requires exactly one session capture field for a subjective primary metric", () => {
@@ -471,6 +495,28 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     canonicalUnit: "kg",
     canonicalValue: 81.6466,
     unit: "lb",
+    warnings: [],
+  });
+
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "lean-body-mass",
+    unit: "lb",
+    value: 150,
+  }), {
+    canonicalUnit: "kg",
+    canonicalValue: 68.0389,
+    unit: "lb",
+    warnings: [],
+  });
+
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "lean-body-mass",
+    unit: "kg",
+    value: 68,
+  }), {
+    canonicalUnit: "kg",
+    canonicalValue: 68,
+    unit: "kg",
     warnings: [],
   });
 

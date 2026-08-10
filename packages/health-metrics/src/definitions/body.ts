@@ -13,7 +13,12 @@ export const BODY_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["waist", "waist_circumference", "waist-circumference-cm"],
+    aliases: [
+      "waist",
+      "waist_circumference",
+      "waist_circumference_centimeter",
+      "waist-circumference-cm",
+    ],
     biomarkerKey: null,
     canonicalUnit: "cm",
     category: "body",
