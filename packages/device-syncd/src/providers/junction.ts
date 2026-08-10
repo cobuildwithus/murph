@@ -37,11 +37,14 @@ import {
   resolveDeviceSyncJunctionInlineSourceProviderSlug,
 } from "../junction-inline-authority.ts";
 import {
+  addJunctionBloodPressureHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
+  canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   encodeJunctionHistoricalBackfillStatus,
+  hasJunctionBloodPressureHistoryBackfillCoverage,
   hasJunctionHistoricalBackfillEvidence,
-  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY,
+  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   readJunctionHistoricalBackfillEvidence,
@@ -296,7 +299,7 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES = Object.freeze([
 ] as const);
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   blood_pressure: {
-    metadataKey: JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY,
+    metadataKey: JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
     version: 1,
   },
 } as const satisfies Record<
@@ -629,30 +632,50 @@ export function createJunctionDeviceSyncProvider(
     account: StoredDeviceSyncAccount,
     now: string,
   ): DeviceSyncJobInput[] {
-    const window = buildExtendedTimeseriesBackfillWindow(account.connectedAt);
-
     return extendedBackfillTimeseriesResources.flatMap((resource) => {
       const policy = resolveJunctionExtendedTimeseriesBackfillPolicy(resource);
-      const storedVersion = policy ? account.metadata[policy.metadataKey] : null;
-      if (
-        !policy
-        || (
-          typeof storedVersion === "number"
-          && Number.isSafeInteger(storedVersion)
-          && storedVersion >= policy.version
-        )
-      ) {
+      if (!policy) {
+        return [];
+      }
+      const storedCoverage = account.metadata[policy.metadataKey];
+      if (!canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage(
+        storedCoverage,
+        policy.version,
+      )) {
         return [];
       }
 
-      return [buildExtendedTimeseriesBackfillJob({
-        availableAt: now,
-        historicalWindowStart: window.windowStart,
-        resource,
-        sourceProviderSlug: null,
-        windowEnd: window.windowEnd,
-        windowStart: window.windowStart,
-      })];
+      const scheduledSources = new Map<string, string>();
+      for (const source of account.sources ?? []) {
+        const sourceProviderSlug = normalizeProviderSlug(source.sourceProviderSlug);
+        if (
+          !sourceProviderSlug
+          || !isDeviceSyncSourceAdmitted(account.sources ?? [], sourceProviderSlug)
+          || hasJunctionBloodPressureHistoryBackfillCoverage(
+            storedCoverage,
+            sourceProviderSlug,
+            policy.version,
+          )
+        ) {
+          continue;
+        }
+        const existingFirstSeenAt = scheduledSources.get(sourceProviderSlug);
+        if (!existingFirstSeenAt || Date.parse(source.firstSeenAt) < Date.parse(existingFirstSeenAt)) {
+          scheduledSources.set(sourceProviderSlug, source.firstSeenAt);
+        }
+      }
+
+      return [...scheduledSources.entries()].map(([sourceProviderSlug, firstSeenAt]) => {
+        const window = buildExtendedTimeseriesBackfillWindow(firstSeenAt);
+        return buildExtendedTimeseriesBackfillJob({
+          availableAt: now,
+          historicalWindowStart: window.windowStart,
+          resource,
+          sourceProviderSlug,
+          windowEnd: window.windowEnd,
+          windowStart: window.windowStart,
+        });
+      });
     });
   }
 
@@ -2072,7 +2095,7 @@ export function createJunctionDeviceSyncProvider(
     resource: string,
     sourceProviderSlug: string | null,
   ): Record<string, unknown> {
-    if (sourceProviderSlug) {
+    if (!sourceProviderSlug) {
       return {};
     }
 
@@ -2081,18 +2104,12 @@ export function createJunctionDeviceSyncProvider(
       return {};
     }
 
-    const existingVersion = context.account.metadata[policy.metadataKey];
-    if (
-      typeof existingVersion === "number"
-      && Number.isSafeInteger(existingVersion)
-      && existingVersion >= policy.version
-    ) {
-      return {};
-    }
-
-    return {
-      [policy.metadataKey]: policy.version,
-    };
+    const coverage = addJunctionBloodPressureHistoryBackfillCoverage({
+      existingValue: context.account.metadata[policy.metadataKey],
+      providerSlug: sourceProviderSlug,
+      version: policy.version,
+    });
+    return coverage ? { [policy.metadataKey]: coverage } : {};
   }
 
   function isJunctionExtendedTimeseriesBackfillJob(

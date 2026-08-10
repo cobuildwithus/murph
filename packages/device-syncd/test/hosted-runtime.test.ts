@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import * as hostedRuntime from "../src/hosted-runtime.ts";
 import {
+  addJunctionBloodPressureHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
+  canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage,
+  hasJunctionBloodPressureHistoryBackfillCoverage,
   readJunctionHistoricalBackfillEvidence,
 } from "../src/junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
@@ -202,19 +205,38 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 });
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
-  it("preserves an unpublished local blood-pressure migration marker", () => {
+  it("keeps newer blood-pressure source-coverage semantics immutable to older runtimes", () => {
+    const coverage = addJunctionBloodPressureHistoryBackfillCoverage({
+      existingValue: "v2|withings",
+      providerSlug: "omron",
+      version: 1,
+    });
+
+    expect(coverage).toBe("v2|withings");
+    expect(hasJunctionBloodPressureHistoryBackfillCoverage(coverage, "omron", 1)).toBe(false);
+    expect(hasJunctionBloodPressureHistoryBackfillCoverage("v1|omron", "omron", 2)).toBe(false);
+    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage(coverage, 1)).toBe(false);
+    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage("v1|omron", 2)).toBe(true);
+    expect(addJunctionBloodPressureHistoryBackfillCoverage({
+      existingValue: coverage,
+      providerSlug: "__proto__",
+      version: 1,
+    })).toBeNull();
+  });
+
+  it("preserves unpublished local blood-pressure source coverage", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: { hostedOnly: true },
       localConnectionStateUnpublished: true,
       localMetadata: {
-        junctionBloodPressureHistoryBackfillVersion: 1,
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
       },
     });
 
     expect(result).toEqual({
       metadata: {
         hostedOnly: true,
-        junctionBloodPressureHistoryBackfillVersion: 1,
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
       },
       preservedLocalProgress: true,
     });
@@ -225,7 +247,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       hostedMetadata: { hostedOnly: true },
       localConnectionStateUnpublished: false,
       localMetadata: {
-        junctionBloodPressureHistoryBackfillVersion: 1,
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
       },
     });
 
@@ -235,19 +257,38 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     });
   });
 
-  it("keeps the highest valid unpublished migration version", () => {
+  it("unions hosted and unpublished local source coverage", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
-        junctionBloodPressureHistoryBackfillVersion: 1,
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
       },
       localConnectionStateUnpublished: true,
       localMetadata: {
-        junctionBloodPressureHistoryBackfillVersion: 2,
+        junctionBloodPressureHistoryBackfillCoverage: "v1|withings",
       },
     });
 
-    expect(result.metadata.junctionBloodPressureHistoryBackfillVersion).toBe(2);
+    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toBe("v1|omron,withings");
     expect(result.preservedLocalProgress).toBe(true);
+  });
+
+  it("keeps published source coverage when a bounded union cannot fit", () => {
+    const hostedCoverage = `v1|${Array.from(
+      { length: 12 },
+      (_, index) => `h${index.toString().padStart(9, "0")}`,
+    ).join(",")}`;
+    const localCoverage = `v1|${Array.from(
+      { length: 12 },
+      (_, index) => `l${index.toString().padStart(9, "0")}`,
+    ).join(",")}`;
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: { junctionBloodPressureHistoryBackfillCoverage: hostedCoverage },
+      localConnectionStateUnpublished: true,
+      localMetadata: { junctionBloodPressureHistoryBackfillCoverage: localCoverage },
+    });
+
+    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toBe(hostedCoverage);
+    expect(result.preservedLocalProgress).toBe(false);
   });
 
   it("preserves current local Junction retry progress over hosted legacy completion", () => {
@@ -686,10 +727,10 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 });
 
 describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
-  it("preserves the blood-pressure migration marker during guarded replacement", () => {
+  it("preserves blood-pressure source coverage during guarded replacement", () => {
     expect(mergeGuardedJunctionHistoricalBackfillMetadata({
       existingMetadata: {
-        junctionBloodPressureHistoryBackfillVersion: 1,
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
         seedOnlyState: "discard",
       },
       replacementMetadata: {
@@ -697,7 +738,7 @@ describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
       },
     })).toEqual({
       callbackOutcome: "complete",
-      junctionBloodPressureHistoryBackfillVersion: 1,
+      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
     });
   });
 
