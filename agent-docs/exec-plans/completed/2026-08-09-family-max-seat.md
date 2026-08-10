@@ -1,8 +1,8 @@
 # Family Max seat
 
-Status: active — specialist remediation locally proved; final exact-head gates pending
+Status: completed
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -208,13 +208,20 @@ Updated: 2026-08-09
   repair path, or new state owner was added.
 - GitHub's round-3 merge candidate exposed one Release app verification failure:
   current `main` had added the static Family setup route without registering it
-  in the telemetry inventory. All other required jobs were green. A normal
-  conflict-free merge of `main` supplied the route, and this candidate adds its
-  missing telemetry entry so exact-head CI can verify the combined tree.
-- The rollback-floor correction passes 15 focused Web capacity and telemetry
-  tests plus 4 focused hosted-runtime parser tests. Web and hosted-execution
+  in the telemetry inventory. The one-line inventory repair remains separately
+  owned rather than expanding Family Max; final ReviewGPT classified the issue
+  as pre-existing or adjacent, and the next exact pushed-head check set passed
+  Release app verification and the umbrella release check.
+- The rollback-floor correction passes 5 focused Web capacity tests plus 4
+  focused hosted-runtime parser tests. Web and hosted-execution
   typechecks pass; changed Web files pass ESLint with zero errors and one
   unrelated existing warning; `git diff --check` passes.
-- Pending: commit and push the rollback-floor and merged-base correction, update
-  the PR intent contract, run final ReviewGPT round 4 concurrently with exact-
-  head CI, then archive the plan, merge, and retire the worktree.
+- Final ReviewGPT round 4 audited the complete sensitive snapshot at the exact
+  rollback-floor head and returned `PASS` with no qualifying findings. It
+  verified every earlier finding and retrospective disposition. Its only notes
+  were a one-line PR-body count discrepancy, now corrected against the guarded
+  diff, and the already-disclosed lack of embedded renders in the final ZIP;
+  the hosted desktop/mobile proof remains linked from the PR.
+- Pending: archive this completed plan with the final scoped commit, push the
+  plan-only head, confirm exact-head CI, merge the PR, and retire the worktree.
+Completed: 2026-08-10
