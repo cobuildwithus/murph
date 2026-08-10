@@ -65,10 +65,22 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Generated group photos, patterns, and local-time reminders",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "Murph can now reuse an image it made as a group photo after an explicit request, while Patterns compares repeated actions and recurring reminders keep the local time you asked for.",
     items: [
+      {
+        id: "generated-image-group-photo",
+        kind: "feature",
+        priority: 5,
+        title: "Use a generated image as your group photo",
+        summary:
+          "After Murph creates and sends an image, ask it to use that same image as the current group photo.",
+        details:
+          "Murph changes the photo only after an explicit group request and after the exact generated image is visible in the conversation. Pending or mismatched media stays blocked.",
+        relevanceTags: ["groups", "images", "assistant", "privacy"],
+        sourcePullRequests: [1533],
+      },
       {
         id: "personal-patterns",
         kind: "feature",

@@ -467,3 +467,19 @@ Updated: 2026-08-10
   CLI total, 1,596,214-byte runner entry, 7,728,184-byte static boot closure,
   and 9,619,852-byte runner total with no forbidden boot input. Round 10 must
   review the pushed merged head; exact-head CI and final mergeability remain.
+- Exact-head CI exposed two completion-only gaps. The PR lacked its required
+  member-visible changelog disposition, and the new authority tests built raw
+  App Server tool-call envelopes without the request/call/thread/turn identity
+  required by the release-package lane. The correction publishes one bounded
+  August 10 changelog item for explicit, visible generated-image group-photo
+  reuse and routes those tests through the existing canonical test request
+  builder; production behavior is unchanged.
+- Changelog and product-feedback archive proof passes 44 tests, the corrected
+  Assistant Engine authority file passes three tests, and the full Web
+  typecheck passes after running its required Health Commons and Prisma
+  generators. The earlier prepared-only typecheck was invalid because its
+  generated Prisma prerequisite was absent.
+- The first round-10 invocation against the pre-correction head ended without
+  a response artifact and does not advance the substantive review counter.
+  Round 10 must be retried as a sensitive fresh full-snapshot audit on the next
+  exact pushed head while exact-head CI runs concurrently.

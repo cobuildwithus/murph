@@ -16,7 +16,6 @@ import type {
 
 import {
   executeMurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
   createAssistantHostedToolContext,
@@ -28,6 +27,9 @@ import { upsertAssistantInputEvent } from '../src/assistant/input-store.js'
 import type {
   AssistantMessageInput,
 } from '../src/assistant/service-contracts.js'
+import {
+  readTestMurphDynamicToolRequest,
+} from './support/codex-app-server.js'
 
 const COMPLETION_INPUT_ID = `ain_${'1'.repeat(32)}`
 const ORIGIN_INPUT_ID = `ain_${'2'.repeat(32)}`
@@ -80,7 +82,7 @@ describe('hosted image completion effect authority', () => {
     expect(hostedToolContext.currentProductFeedbackAcceptedInputIds?.())
       .toEqual([])
 
-    const styleRequest = readMurphDynamicToolRequest({
+    const styleRequest = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -92,7 +94,7 @@ describe('hosted image completion effect authority', () => {
         tool: 'assistant_style',
       },
     })
-    const personalizationRequest = readMurphDynamicToolRequest({
+    const personalizationRequest = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -103,7 +105,7 @@ describe('hosted image completion effect authority', () => {
         tool: 'personalization',
       },
     })
-    const avatarRequest = readMurphDynamicToolRequest({
+    const avatarRequest = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -202,7 +204,7 @@ describe('hosted image completion effect authority', () => {
       })
       expect(hostedToolContext.currentHostedImageCompletionEffectScope?.())
         .toMatchObject({ completionAssistantInputId: COMPLETION_INPUT_ID })
-      const exactRequest = readMurphDynamicToolRequest({
+      const exactRequest = readTestMurphDynamicToolRequest({
         method: 'item/tool/call',
         params: {
           arguments: { media: [EXACT_MEDIA] },
@@ -210,7 +212,7 @@ describe('hosted image completion effect authority', () => {
           tool: 'attach_response_media',
         },
       })
-      const mismatchedRequest = readMurphDynamicToolRequest({
+      const mismatchedRequest = readTestMurphDynamicToolRequest({
         method: 'item/tool/call',
         params: {
           arguments: {
