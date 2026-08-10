@@ -4,6 +4,7 @@ import { GrowthCharts } from "./growth-charts";
 import { GrowthScorecard } from "./growth-scorecard";
 import { GrowthSponsorships } from "./growth-sponsorships";
 import { GrowthWeeklyTable } from "./growth-weekly-table";
+import { ReferralLinkUsage } from "./referral-link-usage";
 import { TrialStartAttribution } from "./trial-start-attribution";
 import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
 import {
@@ -88,6 +89,8 @@ export default async function HostedOpsGrowthPage() {
         monthlyRevenueSeries={dashboard.monthlyRevenueSeries}
         snapshotSeries={dashboard.snapshotSeries}
       />
+
+      <ReferralLinkUsage usage={dashboard.referralLinkUsage} />
 
       <TrialStartAttribution attribution={dashboard.trialStartAttribution} />
 
