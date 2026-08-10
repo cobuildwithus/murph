@@ -315,7 +315,9 @@ export function SectionsContent() {
           <ReferralPageContent
             authenticated={false}
             identityKey={null}
-            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS}
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
           />
         </div>
       </StudySection>

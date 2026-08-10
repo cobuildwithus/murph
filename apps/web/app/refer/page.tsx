@@ -19,11 +19,11 @@ export function buildReferralPageMetadata(
   const signupAvailable = rewards.some(({ id }) => id === "signup-link");
   const groupAvailable = rewards.some(({ id }) => id !== "signup-link");
   const description = signupAvailable && groupAvailable
-    ? "Explore Murph referral options. Qualifying link and group rewards add usage after eligibility, rolling-limit, and completion checks pass."
+    ? "Share your referral link or start a new group with Murph. When a referral meets the rules, Murph adds extra usage automatically."
     : signupAvailable
-    ? "Share Murph with friends through your referral link. A genuinely new completed signup can earn usage after Murph’s eligibility and rolling-limit checks pass."
+    ? "Share your personal link with someone new to Murph. If they finish setup and the referral meets the rules, Murph adds extra usage."
     : groupAvailable
-    ? "Explore a fresh-group mission with Murph. Qualifying missions earn usage after acceptance and completion requirements are met."
+    ? "Share your personal link or start a new group with Murph. When people genuinely join in, Murph adds extra usage automatically."
     : "Murph referral rewards are temporarily unavailable. Check back for current referral options.";
 
   return createMurphPageMetadata({

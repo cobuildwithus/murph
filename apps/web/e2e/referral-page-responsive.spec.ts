@@ -14,9 +14,9 @@ const REFERRAL_STUDIES = [
     selector: '[data-design-section="homepage-referral-program"]',
     slug: "mixed",
     titles: [
-      "Invite someone to Murph",
+      "Share your referral link",
       "Bring someone new to Murph",
-      "Start an active group",
+      "Start a group conversation",
     ],
   },
   {
@@ -29,7 +29,7 @@ const REFERRAL_STUDIES = [
     selector:
       '[data-design-section="homepage-referral-program-group-only"]',
     slug: "group-only",
-    titles: ["Bring someone new to Murph", "Start an active group"],
+    titles: ["Bring someone new to Murph", "Start a group conversation"],
   },
   {
     dayLabels: [
@@ -40,7 +40,7 @@ const REFERRAL_STUDIES = [
     selector:
       '[data-design-section="homepage-referral-program-signup-only"]',
     slug: "signup-only",
-    titles: ["Invite someone to Murph"],
+    titles: ["Share your referral link"],
   },
 ] as const;
 
@@ -110,7 +110,7 @@ test("referral page stays contained and actionable at every marketing breakpoint
     ).toBeGreaterThanOrEqual(44);
     await expect(
       page.getByRole("heading", {
-        name: "Choose a referral path.",
+        name: "Choose how to share Murph.",
       }),
     ).toBeVisible();
     await expect(
@@ -147,12 +147,26 @@ test("referral design study hydrates without reading a member referral link", as
 
   const study = page.locator("#referral-rewards-page");
   await expect(study).toBeVisible();
+  await expect(study.locator("#ways-to-earn article")).toHaveCount(3);
+  await expect(
+    study.getByRole("heading", { name: "Bring someone new to Murph" }),
+  ).toBeVisible();
+  await expect(
+    study.getByRole("heading", { name: "Start a group conversation" }),
+  ).toBeVisible();
+  await expect(
+    study.getByRole("heading", { name: "Share your referral link" }),
+  ).toBeVisible();
+  await expect(
+    study.getByText("Available to Murph members", { exact: true }),
+  ).toBeVisible();
   await expect(
     study.getByText("About 10 more days of Murph usage", { exact: true }).first(),
   ).toBeVisible();
   await expect(
     study.getByRole("button", { name: /Join Murph to start referring/ }).first(),
   ).toBeVisible();
+  await expect(study).not.toContainText(/\bmissions?\b/i);
   await expect(study).not.toContainText(/\$|≈|cost-weighted|usage credit/i);
   expect(referralLinkRequests).toEqual([]);
 });

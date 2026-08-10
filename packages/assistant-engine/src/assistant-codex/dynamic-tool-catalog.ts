@@ -892,7 +892,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
         description:
-          'Required only for action="cancel_usage_referral". Cancel only one exact mission with state="armed" from activeMissions.',
+          'Required only for action="cancel_usage_referral". Cancel only one exact referral option with state="armed" from the legacy internal activeMissions field. Never call it a mission in member-facing copy.',
       },
       policyCodes: {
         type: 'array',

@@ -515,7 +515,7 @@ for (const width of [768, 1280] as const) {
     await expect(historyPreview).toHaveCount(1);
     await expect(
       historyPreview.getByText(
-        "Invite friends to Murph or ask about referral missions.",
+        "Share your link or ask Murph about group referral options.",
       ),
     ).toBeVisible();
     await expect(historyPreview.getByText("Copy link", { exact: true })).toBeVisible();
@@ -546,9 +546,9 @@ for (const width of [768, 1280] as const) {
     });
     await expect(currentReferrals).toBeVisible();
     const referralDetailNames = [
-      "Details for Start an active group: In progress, Ends Aug 3 at 12:00 PM UTC",
-      "Details for Start an active group: Checking final activity, Closed Jul 27 at 12:00 PM UTC",
-      "Details for Start an active group: Reward pending, Qualified Jul 25",
+      "Details for Start a group conversation: In progress, Ends Aug 3 at 12:00 PM UTC",
+      "Details for Start a group conversation: Checking final activity, Closed Jul 27 at 12:00 PM UTC",
+      "Details for Start a group conversation: Reward pending, Qualified Jul 25",
     ];
     for (const name of referralDetailNames) {
       await expect(currentReferrals.getByRole("button", { name })).toHaveCount(1);

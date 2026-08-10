@@ -20,14 +20,14 @@ import {
 
 const LINK_PRIVACY_TRUST_POINT = {
   description:
-    "Your stable link contains no phone number, email address, health data, or recipient identity. It attributes the introduction to you, nothing more.",
-  title: "The link is only a code.",
+    "Your referral link does not include your phone number, email, health data, or the person you send it to. It only connects the introduction to you.",
+  title: "Your link shares nothing private.",
 } as const;
 
 const REWARD_PRIVACY_TRUST_POINT = {
   description:
-    "Murph applies rewards automatically, and Settings history keeps the durable receipt. When an authorized Murph chat is available, Murph also sends a short confirmation without repeating anything shared privately.",
-  title: "The receipt stays with you.",
+    "Murph adds the usage and records it in Settings. When Murph can reach you in chat, you’ll also get a short confirmation with no private details.",
+  title: "Rewards show up automatically.",
 } as const;
 
 const SIGNUP_PRIVACY_TRUST_POINT = {
@@ -48,20 +48,29 @@ const REWARD_ICONS: Record<HostedPublicReferralRewardId, typeof Link2> = {
   "signup-link": Link2,
 };
 
+const SHARE_LINK_ONLY_CARD = {
+  availabilityLabel: "Personal referral link",
+  description:
+    "Copy your personal link and send it to someone you’d like to bring to Murph.",
+  id: "share-link-only",
+  rewardLabel: "Available to Murph members",
+  title: "Share your referral link",
+} as const;
+
 function buildHowItWorks(input: {
   groupAvailable: boolean;
   signupAvailable: boolean;
 }) {
   const invitationDescription = input.signupAvailable && input.groupAvailable
-    ? "Copy your personal link, or ask Murph to start one of the available group missions before you create the group."
+    ? "Share your personal link anytime. For a group reward, tell Murph which option you want and wait for the go-ahead before creating the group."
     : input.signupAvailable
-    ? "Copy your personal link from here or Settings, then share it with someone who is genuinely new to Murph."
-    : "Ask Murph to start one of the available group missions, then wait for the confirmation before you create the fresh group.";
+    ? "Copy your personal link and send it to someone who is new to Murph."
+    : "Share your personal link anytime. For a group reward, tell Murph which option you want and wait for the go-ahead before creating the group.";
   const qualificationDescription = input.signupAvailable && input.groupAvailable
-    ? "Your friend completes their own Murph setup, or the fresh group reaches the mission’s real-participation requirements."
+    ? "Someone new finishes setting up Murph, or several people take part in a real group conversation."
     : input.signupAvailable
-    ? "Your friend follows the attributed invite and completes their own ordinary Murph setup. Opening the link alone is never enough."
-    : "The fresh group reaches the selected mission’s real-participation requirements after Murph has confirmed the mission.";
+    ? "They follow your link and finish setting up their own Murph."
+    : "Someone new joins Murph in the group, or several people take part in a real group conversation.";
 
   return [
     {
@@ -74,7 +83,7 @@ function buildHowItWorks(input: {
     },
     {
       description:
-        "After qualification and rolling-limit checks pass, Murph applies the usage reward automatically. The durable receipt appears in Settings history. When an authorized Murph chat is available, Murph also sends a short confirmation.",
+        "Once the requirements are met, Murph adds the usage automatically and records the reward in Settings.",
       title: "Usage is added",
     },
   ];
@@ -86,19 +95,19 @@ function buildFaqs(input: {
   signupAvailable: boolean;
 }) {
   const ownerDescription = input.signupAvailable && input.groupAvailable
-    ? "Signup rewards go to your Murph. Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster."
+    ? "Link rewards go to your personal Murph. Group rewards go to the Murph where you started the referral."
     : input.signupAvailable
-    ? "Signup rewards go to your personal Murph."
-    : "Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster.";
+    ? "Link rewards go to your personal Murph."
+    : "Group rewards go to the Murph where you started the referral.";
   const tellMurphAnswer = input.signupAvailable && input.groupAvailable
-    ? "Your personal referral link works without asking Murph first. Group missions need one extra step: tell Murph which mission you want, and wait for the confirmation before creating the fresh group."
+    ? "Not for your personal link. For a group reward, tell Murph which option you want and wait for the go-ahead before creating the group."
     : input.signupAvailable
-    ? "No. Your personal referral link works without asking Murph first. A genuinely new member still needs to complete ordinary Murph setup through the invite attributed to you."
-    : "Yes. Tell Murph which group mission you want, and wait for the confirmation before creating the fresh group.";
+    ? "No. Share your personal link whenever you like. The reward comes after someone new finishes setting up Murph and the referral qualifies."
+    : "Yes. Tell Murph which group option you want and wait for the go-ahead before creating the group.";
   const faqs = [
     {
       answer:
-        `Each option above estimates days of Murph usage. Actual capacity varies with the model, tools, media, task complexity, and response length. The reward adds usage capacity; it does not extend a trial or subscription period. ${ownerDescription}`,
+        `Each option shows an estimate of how many days it may add. The actual amount of Murph time varies with how you use Murph. Rewards add usage; they do not extend your trial or plan dates. ${ownerDescription}`,
       question: "How much usage do I earn?",
     },
     {
@@ -113,27 +122,27 @@ function buildFaqs(input: {
   ) {
     faqs.push({
       answer:
-        "A genuinely new member must complete their own ordinary Murph setup through the attributed invite or fresh group. Self-referrals, duplicate identities, and ambiguous attribution do not qualify.",
+        "Someone who has never had their own Murph account. They need to finish setup through your link or join the new group with their own Murph. Referring yourself or the same person twice does not count.",
       question: "What counts as a new member?",
     });
   }
   if (input.rewards.some(({ id }) => id === "active-group")) {
     faqs.push({
       answer:
-        "The active-group mission requires a fresh group with 15 qualifying human messages, including at least 8 messages from at least two people other than the referrer, spread across at least 10 minutes.",
+        "The group needs 15 messages from people over at least 10 minutes. At least 8 must come from at least two people besides you.",
       question: "What makes a group active?",
     });
   }
   if (input.signupAvailable) {
     faqs.push({
       answer:
-        "No. Settings history records qualifying rewards without identifying who joined. When an authorized Murph chat is available, Murph also confirms an applied reward.",
+        "No. Settings shows the reward without naming who joined. If Murph can reach you in chat, you’ll also get a short confirmation.",
       question: "Can I see who used my link?",
     });
   }
   faqs.push({
     answer:
-      "Yes. Rolling limits and eligibility checks prevent abuse, and available rewards can change. Murph shows the options available right now. Rewards add usage capacity but do not extend a trial end date.",
+      "Yes. To keep referrals fair, there are limits on how often rewards can be earned. Murph shows the options available right now.",
     question: "Are there limits?",
   });
 
@@ -155,30 +164,47 @@ export function ReferralPageContent({
 
   const signupAvailable = rewards.some(({ id }) => id === "signup-link");
   const groupAvailable = rewards.some(({ id }) => id !== "signup-link");
+  const signupReward = rewards.find(({ id }) => id === "signup-link");
+  const referralCards = [
+    ...rewards
+      .filter(({ id }) => id !== "signup-link")
+      .map((reward) => ({
+        ...reward,
+        rewardLabel: formatHostedPublicReferralRewardValue(reward),
+      })),
+    ...(signupReward
+      ? [{
+          ...signupReward,
+          rewardLabel: formatHostedPublicReferralRewardValue(signupReward),
+        }]
+      : groupAvailable
+      ? [SHARE_LINK_ONLY_CARD]
+      : []),
+  ];
   const howItWorks = buildHowItWorks({ groupAvailable, signupAvailable });
   const faqs = buildFaqs({ groupAvailable, rewards, signupAvailable });
   const trustPoints = [
-    ...(signupAvailable ? [LINK_PRIVACY_TRUST_POINT] : []),
+    LINK_PRIVACY_TRUST_POINT,
     REWARD_PRIVACY_TRUST_POINT,
     groupAvailable
       ? GROUP_PRIVACY_TRUST_POINT
       : SIGNUP_PRIVACY_TRUST_POINT,
   ];
   const heroDescription = signupAvailable && groupAvailable
-    ? "Explore your personal link or a group mission. Murph applies a reward automatically only after that path’s eligibility, rolling-limit, and completion checks pass."
+    ? "Share your link or bring Murph into a new group. When someone genuinely joins in and the referral meets the rules, Murph adds extra usage automatically."
     : signupAvailable
-    ? "Share your personal link. A genuinely new completed signup can earn the usage reward after Murph’s eligibility and rolling-limit checks pass."
-    : "Explore a qualifying group mission. Murph adds the usage reward automatically after the mission is accepted and its participation requirements are met.";
+    ? "Share your personal link. When someone new finishes setting up Murph and the referral meets the rules, Murph adds extra usage automatically."
+    : "Bring Murph into a new group and get people talking. Once the group qualifies, Murph adds extra usage automatically. You can also share your personal link anytime.";
   const qualificationLead = signupAvailable && groupAvailable
-    ? "Opening a link or creating a group alone is never enough."
+    ? "A link or a brand-new group is only the start. Rewards come after someone genuinely joins in."
     : signupAvailable
-    ? "Opening a link alone is never enough."
-    : "Creating a group alone is never enough.";
+    ? "Opening the link is only the start. The reward comes after someone new finishes setting up Murph and the referral meets the rules."
+    : "A brand-new group is only the start. The reward comes after people genuinely join the conversation.";
   const ownerDescription = signupAvailable && groupAvailable
-    ? "Eligible link rewards go to your personal Murph. Mission rewards go to the personal or group Murph the mission was accepted for, once Murph confirms the mission."
+    ? "Link rewards go to your personal Murph. Group rewards go to the Murph where you started the referral."
     : signupAvailable
-    ? "Eligible link rewards go to your personal Murph after settlement checks pass."
-    : "Mission rewards go to the personal or group Murph the mission was accepted for, once Murph confirms the mission.";
+    ? "Link rewards go to your personal Murph."
+    : "Group rewards go to the Murph where you started the referral. Your personal link is always ready to share.";
   const artifactReward = signupAvailable
     ? rewards.find(({ id }) => id === "signup-link")!
     : rewards[0]!;
@@ -209,27 +235,22 @@ export function ReferralPageContent({
               {heroDescription}
             </p>
 
-            {signupAvailable
-              ? (
-                <div className="mt-8">
-                  <ReferralShareAction
-                    authenticated={authenticated}
-                    identityKey={identityKey}
-                  />
-                </div>
-              )
-              : null}
+            <div className="mt-8">
+              <ReferralShareAction
+                authenticated={authenticated}
+                identityKey={identityKey}
+              />
+            </div>
             <a
               className="mt-5 inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-[#f5f0e8]/76 underline decoration-[#d4b87a]/45 underline-offset-4 transition-colors hover:text-[#f5f0e8]"
               href="#how-it-works"
             >
-              See how rewards qualify
+              See how it works
               <ArrowDown aria-hidden="true" className="size-4" />
             </a>
             <p className="mt-6 max-w-[56ch] text-xs leading-[1.7] text-[#f5f0e8]/55">
-              Rewards add usage capacity, not cash or extra calendar time. Day
-              estimates reflect typical Murph use; actual capacity varies with
-              the model, tools, media, and task complexity.
+              Rewards add Murph usage, not cash or extra days on your plan. Day
+              estimates reflect typical use and may vary.
             </p>
           </div>
 
@@ -250,7 +271,6 @@ export function ReferralPageContent({
               Real introductions. Clear rules.
             </h2>
             <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.75] text-[#3a322a]">
-              Each path has its own eligibility and participation checks.{" "}
               {qualificationLead}
             </p>
           </div>
@@ -281,10 +301,10 @@ export function ReferralPageContent({
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-[720px]">
               <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
-                Ways to earn
+                Referral options
               </p>
               <h2 className="mt-4 text-balance font-serif text-[clamp(2rem,4.5vw,3.7rem)] font-semibold leading-[1] tracking-[-0.045em] text-[#2d3436]">
-                Choose a referral path.
+                Choose how to share Murph.
               </h2>
             </div>
             <p className="max-w-[40ch] text-sm leading-[1.7] text-[#5a5045] lg:text-right">
@@ -293,8 +313,10 @@ export function ReferralPageContent({
           </div>
 
           <div className="mt-12 grid gap-5 lg:grid-cols-3">
-            {rewards.map((reward, index) => {
-              const Icon = REWARD_ICONS[reward.id];
+            {referralCards.map((card, index) => {
+              const Icon = card.id === "share-link-only"
+                ? Link2
+                : REWARD_ICONS[card.id];
               return (
                 <article
                   className={`rounded-[1.75rem] border p-7 sm:p-8 ${
@@ -302,7 +324,7 @@ export function ReferralPageContent({
                       ? "border-[#5a6e32]/35 bg-[#253321] text-[#f5f0e8]"
                       : "border-[#c4a882]/35 bg-[#faf7f1] text-[#2d3436]"
                   }`}
-                  key={reward.id}
+                  key={card.id}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <span
@@ -321,7 +343,7 @@ export function ReferralPageContent({
                           : "border-[#c4a882]/35 bg-white/55 text-[#736a58]"
                       }`}
                     >
-                      {reward.availabilityLabel}
+                      {card.availabilityLabel}
                     </span>
                   </div>
 
@@ -330,19 +352,17 @@ export function ReferralPageContent({
                       index === 0 ? "text-[#d4b87a]" : "text-[#736a58]"
                     }`}
                   >
-                    {formatHostedPublicReferralRewardValue(
-                      reward,
-                    )}
+                    {card.rewardLabel}
                   </p>
                   <h3 className="mt-3 text-balance font-serif text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.04em]">
-                    {reward.title}
+                    {card.title}
                   </h3>
                   <p
                     className={`mt-5 text-[0.9375rem] leading-[1.72] ${
                       index === 0 ? "text-[#f5f0e8]/74" : "text-[#4a4036]"
                     }`}
                   >
-                    {reward.description}
+                    {card.description}
                   </p>
                 </article>
               );
@@ -364,8 +384,8 @@ export function ReferralPageContent({
               Your referral never exposes their health.
             </h2>
             <p className="mt-5 max-w-[48ch] text-[1rem] leading-[1.75] text-[#4a4036]">
-              Murph tracks only the minimum attribution needed to apply the
-              reward.
+              Murph keeps only what it needs to recognize the referral and add
+              the reward.
             </p>
           </div>
 
@@ -435,27 +455,16 @@ export function ReferralPageContent({
               <span className="block">Bring someone with you.</span>
             </h2>
             <p className="mt-3 max-w-[46ch] text-[0.9375rem] leading-[1.7] text-[#f5f0e8]/70">
-              Murph handles attribution and privacy. Qualifying rewards are
-              applied automatically.
+              Murph keeps track of the reward without sharing anyone’s private
+              information.
             </p>
           </div>
-          {signupAvailable
-            ? (
-              <div className="shrink-0">
-                <ReferralShareAction
-                  authenticated={authenticated}
-                  identityKey={identityKey}
-                />
-              </div>
-            )
-            : (
-              <a
-                className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-xl bg-[#f5f0e8] px-5 py-3.5 text-[0.9375rem] font-semibold text-[#2d3436] transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]"
-                href="#ways-to-earn"
-              >
-                See available missions
-              </a>
-            )}
+          <div className="shrink-0">
+            <ReferralShareAction
+              authenticated={authenticated}
+              identityKey={identityKey}
+            />
+          </div>
         </div>
       </section>
     </main>
@@ -520,12 +529,12 @@ function ReferralHeroArtifact({
     ? `Your referral came through. ${formatHostedPublicReferralRewardValue(
       reward,
     )} — already added to your Murph.`
-    : `Your group mission is complete. ${formatHostedPublicReferralRewardValue(
+    : `Your group referral came through. ${formatHostedPublicReferralRewardValue(
       reward,
-    )} — already added to the Murph it was accepted for.`;
+    )} — already added where you started it.`;
   const privacyMessage = reward.id === "signup-link"
-    ? "No claim needed. Who joined and what they share privately with Murph stays private."
-    : "No claim needed. Private chats and health data stay private. Shared-group messages remain visible to that group.";
+    ? "Nothing to claim. Who joined and what they share privately with Murph stays private."
+    : "Nothing to claim. Private chats and health data stay private. Messages shared in the group stay visible to that group.";
 
   return (
     <div aria-hidden="true" className="relative mx-auto w-full max-w-[470px]">

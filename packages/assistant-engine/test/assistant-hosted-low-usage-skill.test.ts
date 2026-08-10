@@ -41,7 +41,7 @@ describe('assistant hosted low-usage skill', () => {
       'adding usage, or ways to get or earn more usage',
     )
     expect(normalizedSkill).toContain(
-      'how to get more usage, what options exist, how to earn usage, or about a mission',
+      'how to get more usage, what options exist, how to earn usage, or about a group referral',
     )
     expect(normalizedSkill).toContain(
       'A direct funding intent explicitly asks to fund, sponsor, contribute, pay to add usage, receive the funding link, or otherwise selects the paid path over earned options',
@@ -53,7 +53,7 @@ describe('assistant hosted low-usage skill', () => {
       'Call `read_usage` only',
     )
     expect(normalizedSkill).toContain(
-      'Do not call `read_usage_referral` or add earned missions',
+      'Do not call `read_usage_referral` or add earned referral options',
     )
     expect(normalizedSkill).toContain(
       'Do this even when current usage is `healthy`',
@@ -316,10 +316,10 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain(
       'A recommendation or low-usage warning is not consent',
     )
-    expect(skill).toContain('Merely describing referral missions is not consent')
+    expect(skill).toContain('Merely describing referral options is not consent')
     expect(skill).toContain('an explicit "both" is consent')
     expect(skill).toContain('Different policies are independent')
-    expect(skill).toContain('one-mission limit')
+    expect(skill).toContain('one-option limit')
     expect(normalizedSkill).toContain('one compact message')
     expect(normalizedSkill).toContain(
       'Call `arm_usage_referral` once with the exact selected `policyCodes` set',
@@ -327,7 +327,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('Never split one selection across multiple calls')
     expect(skill).toContain('usage_referral_selection_requires_one')
     expect(normalizedSkill).toContain(
-      'no new mission from that request committed',
+      'no new referral option from that request committed',
     )
     expect(normalizedSkill).toContain('invent operational limitations')
     expect(normalizedSkill).toContain('still `armed` when the group is created')
@@ -351,7 +351,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).not.toContain('exact cost-weighted usage-credit labels')
     expect(normalizedSkill).toContain('Never reveal qualification counters')
     expect(normalizedSkill).toContain(
-      'state the returned `expiresAt` as the mission\'s public occurrence deadline',
+      'state the returned `expiresAt` as the referral option\'s public occurrence deadline',
     )
     expect(normalizedSkill).toContain(
       '`usage_referral_arm_applied_snapshot_unavailable`, the arm committed',
@@ -365,7 +365,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain(
       '`usage_referral_cancel_applied_snapshot_unavailable`, the cancellation committed',
     )
-    expect(normalizedSkill).toContain('including a mission armed after the cancellation')
+    expect(normalizedSkill).toContain(
+      'including a referral option started after the cancellation',
+    )
     expect(normalizedSkill).toContain(
       'private anti-gaming thresholds, or late-arrival grace rules',
     )
@@ -388,7 +390,7 @@ describe('assistant hosted low-usage skill', () => {
       'confirm the handoff in one short sentence',
     )
     expect(normalizedSkill).not.toContain(
-      'After arming that mission, explain the reciprocal setup path',
+      'After starting that referral option, explain the reciprocal setup path',
     )
     expect(normalizedSkill).toContain(
       'introduce me to your mom and I can secure this group some additional Murph time',
@@ -451,7 +453,7 @@ describe('assistant hosted low-usage skill', () => {
 
   it.each([
     {
-      label: 'an arm followed by no active mission',
+      label: 'an arm followed by no active referral',
       toolResults: [
         {
           action: 'arm_usage_referral',
@@ -477,7 +479,7 @@ describe('assistant hosted low-usage skill', () => {
       ],
     },
     {
-      label: 'an arm followed by multiple active missions',
+      label: 'an arm followed by multiple active referrals',
       toolResults: [
         {
           action: 'arm_usage_referral',
@@ -520,7 +522,7 @@ describe('assistant hosted low-usage skill', () => {
       ],
     },
     {
-      label: 'a cancel followed by a newly armed mission',
+      label: 'a cancel followed by a newly armed referral',
       toolResults: [
         {
           action: 'cancel_usage_referral',

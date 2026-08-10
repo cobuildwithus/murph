@@ -52,22 +52,22 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /data-authenticated="true"/);
   assert.match(markup, /data-identity-key="member_referrer"/);
   assert.match(markup, /Real introductions\. Clear rules\./);
-  assert.match(markup, /Opening a link or creating a group alone is never enough\./);
-  assert.match(markup, /Choose a referral path\./);
-  assert.match(markup, /eligibility, rolling-limit, and completion checks pass/);
+  assert.match(markup, /A link or a brand-new group is only the start\./);
+  assert.match(markup, /Choose how to share Murph\./);
+  assert.match(markup, /the referral meets the rules/);
   assert.match(markup, /About 10 more days of Murph usage/);
   assert.match(markup, /About 14 more days of Murph usage/);
-  assert.match(markup, /15 human messages/);
-  assert.match(markup, /8 from at least 2 other people/);
+  assert.match(markup, /15 messages/);
+  assert.match(markup, /8 from two or more people besides you/);
   assert.match(markup, /at least 10 minutes/);
   assert.match(markup, /Your referral never exposes their health\./);
-  assert.match(markup, /contains no phone number, email address, health data, or recipient identity/);
+  assert.match(markup, /does not include your phone number, email, health data/);
   assert.match(markup, /Private chats and health data stay private/);
   assert.match(markup, /Messages someone chooses to post in a shared group remain visible to that group/);
   assert.doesNotMatch(markup, /Their conversations are never visible to you/);
   assert.match(markup, /Can I see who used my link\?/);
-  assert.match(markup, /Settings history records qualifying rewards/);
-  assert.match(markup, /When an authorized Murph chat is available/);
+  assert.match(markup, /Settings shows the reward without naming who joined/);
+  assert.match(markup, /If Murph can reach you in chat/);
   assert.match(markup, /example · chat available/);
   assert.doesNotMatch(markup, /Settings history shows that someone completed setup/);
   assert.doesNotMatch(markup, /anything they share with Murph/);
@@ -76,8 +76,9 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.doesNotMatch(markup, /Murph tells you that/);
   assert.doesNotMatch(markup, /Ways to earn right now/);
   assert.doesNotMatch(markup, /the reward is added automatically/);
-  assert.match(markup, /Rewards add usage capacity, not cash or extra calendar time\./);
-  assert.match(markup, /does not extend a trial or subscription period/);
+  assert.match(markup, /Rewards add Murph usage, not cash or extra days on your plan\./);
+  assert.match(markup, /do not extend your trial or plan dates/);
+  assert.doesNotMatch(markup, /\bmissions?\b/i);
   assert.doesNotMatch(markup, /\$|cost-weighted|usage credit/i);
   assert.match(markup, /Health is hard\./);
   assert.match(markup, /Bring someone with you\./);
@@ -87,7 +88,7 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   );
 });
 
-test("ReferralPageContent advertises only signup rewards when group missions are disabled", () => {
+test("ReferralPageContent advertises only signup rewards when group rewards are disabled", () => {
   const markup = renderToStaticMarkup(
     createElement(ReferralPageContent, {
       authenticated: false,
@@ -97,12 +98,12 @@ test("ReferralPageContent advertises only signup rewards when group missions are
   );
 
   assert.match(markup, /Share your personal link\./);
-  assert.match(markup, /completed signup can earn the usage reward after Murph’s eligibility and rolling-limit checks pass/);
-  assert.match(markup, /Invite someone to Murph/);
+  assert.match(markup, /someone new finishes setting up Murph and the referral meets the rules/);
+  assert.match(markup, /Share your referral link/);
   assert.match(markup, /Their private conversations and health data are never visible to you/);
   assert.match(markup, /what they share privately with Murph stays private/);
-  assert.match(markup, /Settings history records qualifying rewards/);
-  assert.match(markup, /When an authorized Murph chat is available/);
+  assert.match(markup, /Settings shows the reward without naming who joined/);
+  assert.match(markup, /If Murph can reach you in chat/);
   assert.match(markup, /example · chat available/);
   assert.doesNotMatch(markup, /Settings history shows that someone completed setup/);
   assert.doesNotMatch(markup, /anything they share with Murph/);
@@ -112,12 +113,13 @@ test("ReferralPageContent advertises only signup rewards when group missions are
   assert.doesNotMatch(markup, /the reward is added automatically/);
   assert.doesNotMatch(markup, /when setup completes|checks at completion/);
   assert.doesNotMatch(markup, /Shared-group messages remain visible/);
-  assert.doesNotMatch(markup, /Start an active group/);
+  assert.doesNotMatch(markup, /Start a group conversation/);
   assert.doesNotMatch(markup, /Bring someone new to Murph/);
+  assert.doesNotMatch(markup, /\bmissions?\b/i);
   assert.equal((markup.match(/Referral action/g) ?? []).length, 2);
 });
 
-test("ReferralPageContent advertises only group missions when signup rewards are disabled", () => {
+test("ReferralPageContent keeps the personal link visible when signup rewards are disabled", () => {
   const markup = renderToStaticMarkup(
     createElement(ReferralPageContent, {
       authenticated: true,
@@ -126,22 +128,23 @@ test("ReferralPageContent advertises only group missions when signup rewards are
     }),
   );
 
-  assert.match(markup, /Explore a qualifying group mission\./);
+  assert.match(markup, /Bring Murph into a new group and get people talking\./);
   assert.match(markup, /Bring someone new to Murph/);
-  assert.match(markup, /Start an active group/);
-  assert.match(markup, /See available missions/);
-  assert.doesNotMatch(markup, /Referral action/);
-  assert.doesNotMatch(markup, /Invite someone to Murph/);
-  assert.doesNotMatch(markup, /The link is only a code\./);
+  assert.match(markup, /Start a group conversation/);
+  assert.match(markup, /Share your referral link/);
+  assert.match(markup, /Available to Murph members/);
+  assert.match(markup, /Your link shares nothing private\./);
   assert.match(markup, /Private chats and health data stay private/);
   assert.match(markup, /Messages someone chooses to post in a shared group remain visible to that group/);
-  assert.match(markup, /Shared-group messages remain visible to that group/);
-  assert.match(markup, /The durable receipt appears in Settings history/);
-  assert.match(markup, /When an authorized Murph chat is available/);
+  assert.match(markup, /Messages shared in the group stay visible to that group/);
+  assert.match(markup, /Murph adds the usage and records it in Settings/);
+  assert.match(markup, /When Murph can reach you in chat/);
   assert.match(markup, /example · chat available/);
   assert.doesNotMatch(markup, /Their conversations are never visible to you/);
   assert.doesNotMatch(markup, /sends you a short confirmation/);
   assert.doesNotMatch(markup, /Ways to earn right now/);
+  assert.doesNotMatch(markup, /\bmissions?\b/i);
+  assert.equal((markup.match(/Referral action/g) ?? []).length, 2);
 });
 
 test("ReferralPageContent shows one unavailability state when every reward path is disabled", () => {
@@ -157,6 +160,6 @@ test("ReferralPageContent shows one unavailability state when every reward path 
   assert.match(markup, /no usage reward is currently promised/);
   assert.doesNotMatch(markup, /does not earn usage/);
   assert.doesNotMatch(markup, /Referral action/);
-  assert.doesNotMatch(markup, /Choose a referral path\./);
+  assert.doesNotMatch(markup, /Choose how to share Murph\./);
   assert.doesNotMatch(markup, /cost-weighted usage credit/);
 });

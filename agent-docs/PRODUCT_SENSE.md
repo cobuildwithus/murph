@@ -201,6 +201,9 @@ Assistant runtime state is never the source of truth for these objects.
 - On secondary web control surfaces, show the actionable state first and keep
   explanatory history or requirements on demand. Do not repeat the same truth
   in a heading, introduction, and row labels.
+- Describe earned group referrals as referral options in member-facing copy.
+  Keep internal lifecycle names such as `mission` out of the website, Settings,
+  and assistant language.
 - When a member choice materially changes cost-weighted included-capacity
   drawdown, disclose that difference before save and keep it visible in the
   saved-state summary. Do not imply that equal model names have equal provider
