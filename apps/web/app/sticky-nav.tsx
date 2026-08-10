@@ -24,6 +24,7 @@ const NAV_LINKS: ReadonlyArray<{
   { href: "/clubs", label: "Clubs" },
   { href: "/#faq", label: "FAQ" },
   { href: "/knowledge", label: "Knowledge" },
+  { href: "/blog", label: "Blog" },
   { href: "/security", label: "Security" },
 ];
 

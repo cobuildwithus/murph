@@ -22,6 +22,7 @@
     "product-labels:env-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-product-label-runtime-env.ts",
     "hosted-crypto:env-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-hosted-crypto-standby-env.ts",
     "public-routes:waf-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-public-routes-waf.ts",
+    "seo:opportunities": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/search-console-opportunities.ts",
     "device:reconnect-link": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/create-device-reconnect-link.ts",
     "clinical-records:providers:import": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/import-epic-clinical-provider-directory.ts",
     "linq:sync-lines": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/sync-hosted-linq-lines.ts",

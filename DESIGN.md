@@ -557,6 +557,19 @@ For long pages with route-driven tabs (Overview / Research / etc.), use a sticky
 ### Changelog Archive Pagination
 The public changelog shows seven dated editions per server-rendered archive window. Page one keeps the clean `/changelog` URL and opens on the latest seven days; older windows use a stable `?edition=YYYY-MM-DD` cursor, and every item permalink includes the edition that owns its anchor. Navigation sits below the window on a plain warm hairline divider: Newer and Older text links at the edges, a compact current-page window with first and last page on larger screens, and `PAGE N OF N` in mono on phones. The current page uses the slate affirmative block; inactive pages stay flat and warm with no enclosing card. Major feature cards may include one compact explanatory mock from the changelog visual primitives when it makes the shipped behavior easier to understand.
 
+### Editorial Blog
+The public blog uses the same flat warm-paper system as the homepage and
+changelog. Its archive opens with a dark editorial masthead and the canonical
+wide-horizon photograph, followed by plain dividers rather than a grid of
+floating cards. Fraunces carries article titles; DM Mono carries content type,
+date, and reading-time labels; DM Sans carries summaries and body copy. Article
+pages keep a narrow reading column, a small educational-information note, and
+no sticky conversion chrome. The three editorial labels are Guide, Field note,
+and Case study. A Case study may render only after its result, verification
+date, and permission are recorded in the typed content registry. The real
+archive and article components render on `/design?tab=sections#blog-archive`
+and `/design?tab=sections#blog-article`.
+
 ### Icons
 Lucide React (`lucide-react`) is the default. Lucide Animated (`https://lucide-animated.com`) is reserved for icons that specifically need motion — loaders, hover affordances. Install animated icons via `pnpm dlx shadcn@latest add https://lucide-animated.com/r/{icon-name}.json`. Icons serve comprehension; they never decorate.
 
