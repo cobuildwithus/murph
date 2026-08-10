@@ -2989,7 +2989,7 @@ describe("Linq explicit external-thread routing", () => {
       accountLookupKey,
       channel: "linq",
       containerMemberId: "member_thread_container_winner",
-      prisma: prisma as unknown as Prisma.TransactionClient,
+      prisma: prisma as never,
       threadId: "chat_group_123",
     });
     prisma.seedThreadRoute({
@@ -3012,7 +3012,7 @@ describe("Linq explicit external-thread routing", () => {
       accountLookupKey,
       channel: "linq",
       containerMemberId: "member_thread_container_loser",
-      prisma: prisma as unknown as Prisma.TransactionClient,
+      prisma: prisma as never,
       threadId: "chat_group_123",
     });
 
@@ -3023,7 +3023,7 @@ describe("Linq explicit external-thread routing", () => {
         occurredAt: new Date("2026-06-24T00:00:00.000Z"),
         ownerMemberId: "member_owner_123",
         preparedCreation: stalePreparedCreation,
-        prisma: prisma as unknown as Prisma.TransactionClient,
+        prisma: prisma as never,
         threadId: "chat_group_123",
       }),
     ).resolves.toMatchObject({
