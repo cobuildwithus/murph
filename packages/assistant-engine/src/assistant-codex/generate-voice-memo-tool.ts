@@ -46,6 +46,30 @@ export interface VoiceMemoElevenLabsRuntimeConfig {
   voiceId: string | null
 }
 
+export type VoiceMemoToolRuntimeFailure =
+  | {
+      kind: 'generation_failed'
+      detail: string | null
+    }
+  | {
+      kind: 'invalid_audio'
+    }
+  | {
+      kind: 'missing_configuration'
+      variable: 'ELEVENLABS_API_KEY' | 'LINQ_API_TOKEN'
+    }
+
+export type VoiceMemoToolRuntimeResult =
+  | {
+      attachmentId: string
+      filename: string
+      ok: true
+    }
+  | {
+      failure: VoiceMemoToolRuntimeFailure
+      ok: false
+    }
+
 export type VoiceMemoToolRuntime =
   | {
       elevenLabs: VoiceMemoElevenLabsRuntimeConfig
@@ -57,10 +81,7 @@ export type VoiceMemoToolRuntime =
         filenameBase: string
         generation: AssistantVoiceMemoGeneration
         signal?: AbortSignal | null
-      }): Promise<{
-        attachmentId: string
-        filename: string
-      }>
+      }): Promise<VoiceMemoToolRuntimeResult>
       kind: 'linq'
     }
 
@@ -205,9 +226,9 @@ async function executeGeneratedVoiceMemo(input: {
     }
   }
 
-  let upload: Awaited<ReturnType<typeof input.runtime.generateAndUpload>>
+  let runtimeResult: VoiceMemoToolRuntimeResult
   try {
-    upload = await input.runtime.generateAndUpload({
+    runtimeResult = await input.runtime.generateAndUpload({
       filenameBase: input.filenameBase,
       generation: input.generation,
       signal: input.signal,
@@ -215,13 +236,6 @@ async function executeGeneratedVoiceMemo(input: {
   } catch (error) {
     if (isAbortError(error)) {
       throw error
-    }
-    const runtimeFailure = readVoiceMemoRuntimeFailure(error)
-    if (runtimeFailure) {
-      return {
-        rpcSuccess: false,
-        rpcText: runtimeFailure,
-      }
     }
     return {
       rpcSuccess: false,
@@ -232,14 +246,21 @@ async function executeGeneratedVoiceMemo(input: {
     }
   }
 
+  if (!runtimeResult.ok) {
+    return {
+      rpcSuccess: false,
+      rpcText: describeVoiceMemoRuntimeFailure(label, runtimeResult.failure),
+    }
+  }
+
   return {
     responseMedia: [
       {
         kind: 'voice_memo',
-        filename: upload.filename,
+        filename: runtimeResult.filename,
         transcript,
         transport: {
-          attachmentId: upload.attachmentId,
+          attachmentId: runtimeResult.attachmentId,
           kind: 'linq_attachment',
         },
       },
@@ -250,6 +271,22 @@ async function executeGeneratedVoiceMemo(input: {
 }
 
 type VoiceMemoGenerationLabel = 'song' | 'voice memo'
+
+function describeVoiceMemoRuntimeFailure(
+  label: VoiceMemoGenerationLabel,
+  failure: VoiceMemoToolRuntimeFailure,
+): string {
+  switch (failure.kind) {
+    case 'generation_failed':
+      return appendFailureDetail(`${label} generation failed`, failure.detail)
+    case 'invalid_audio':
+      return `${label} generation returned invalid audio data`
+    case 'missing_configuration':
+      return failure.variable === 'LINQ_API_TOKEN'
+        ? `${failure.variable} is required for ${label} attachment upload`
+        : `${failure.variable} is required for ${label} generation`
+  }
+}
 
 function rejectIfResponseMediaConflicts(
   currentResponseMedia: readonly AssistantResponseMedia[],
@@ -301,20 +338,6 @@ function warnVoiceMemoFailure(operation: string, error: unknown): string | null 
 
 function appendFailureDetail(rpcText: string, failure: string | null): string {
   return failure === null ? rpcText : `${rpcText}: ${failure}`
-}
-
-function readVoiceMemoRuntimeFailure(error: unknown): string | null {
-  if (!error || typeof error !== 'object') {
-    return null
-  }
-  try {
-    const rpcText = Reflect.get(error, 'rpcText')
-    return typeof rpcText === 'string' && rpcText.trim().length > 0
-      ? rpcText
-      : null
-  } catch {
-    return null
-  }
 }
 
 function isAbortError(error: unknown): boolean {

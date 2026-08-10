@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createVoiceMemoToolRuntimeFromEnv,
@@ -11,6 +11,10 @@ type LinqVoiceMemoRuntime = Extract<
   VoiceMemoToolRuntime,
   { kind: 'linq' }
 >
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 function createTelegramRuntime(input?: {
   apiKeyAvailable?: boolean
@@ -30,6 +34,31 @@ function createTelegramRuntime(input?: {
         : input.voiceId,
     },
     kind: 'telegram',
+  }
+}
+
+function createLinqRuntime(
+  generateAndUpload: LinqVoiceMemoRuntime['generateAndUpload'],
+  input?: {
+    apiKeyAvailable?: boolean
+    defaultVoiceId?: string | null
+    modelId?: string | null
+    voiceId?: string | null
+  },
+): LinqVoiceMemoRuntime {
+  return {
+    elevenLabs: {
+      apiKeyAvailable: input?.apiKeyAvailable ?? true,
+      defaultVoiceId: input?.defaultVoiceId ?? null,
+      modelId: input?.modelId === undefined
+        ? 'eleven_multilingual_v2'
+        : input.modelId,
+      voiceId: input?.voiceId === undefined
+        ? 'voice_default'
+        : input.voiceId,
+    },
+    generateAndUpload,
+    kind: 'linq',
   }
 }
 
@@ -111,6 +140,102 @@ describe('executeGenerateVoiceMemoTool', () => {
     })
   })
 
+  it('uses the preferred runtime voice unless the tool supplies an explicit voice', async () => {
+    const runtime = createTelegramRuntime({
+      defaultVoiceId: 'voice_env_default',
+      voiceId: 'voice_preferred',
+    })
+
+    const preferredResult = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: null,
+      },
+      runtime,
+    })
+    const explicitResult = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: 'voice_explicit',
+      },
+      runtime,
+    })
+
+    expect(preferredResult).toMatchObject({
+      responseMedia: [
+        {
+          transport: {
+            generation: {
+              voiceId: 'voice_preferred',
+            },
+          },
+        },
+      ],
+      rpcSuccess: true,
+    })
+    expect(explicitResult).toMatchObject({
+      responseMedia: [
+        {
+          transport: {
+            generation: {
+              voiceId: 'voice_explicit',
+            },
+          },
+        },
+      ],
+      rpcSuccess: true,
+    })
+  })
+
+  it('resolves catalog voice options and falls back to the configured default', async () => {
+    const runtime = createTelegramRuntime({
+      defaultVoiceId: 'voice_env_default',
+      voiceId: 'voice_preferred',
+    })
+
+    const catalogResult = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: null,
+        voiceOptionId: 'upbeat',
+      },
+      runtime,
+    })
+    const fallbackResult = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: null,
+        voiceOptionId: 'classic',
+      },
+      runtime,
+    })
+
+    expect(catalogResult).toMatchObject({
+      responseMedia: [
+        {
+          transport: {
+            generation: {
+              voiceId: 'tnSpp4vdxKPjI9w0GnoV',
+            },
+          },
+        },
+      ],
+      rpcSuccess: true,
+    })
+    expect(fallbackResult).toMatchObject({
+      responseMedia: [
+        {
+          transport: {
+            generation: {
+              voiceId: 'voice_env_default',
+            },
+          },
+        },
+      ],
+      rpcSuccess: true,
+    })
+  })
+
   it('builds the Telegram delivery descriptor without provider I/O', async () => {
     const result = await executeGenerateVoiceMemoTool({
       args: {
@@ -148,16 +273,9 @@ describe('executeGenerateVoiceMemoTool', () => {
     >(async () => ({
       attachmentId: 'attachment_voice_1',
       filename: 'voice-memo-1.mp3',
+      ok: true,
     }))
-    const runtime: LinqVoiceMemoRuntime = {
-      elevenLabs: {
-        apiKeyAvailable: true,
-        modelId: 'eleven_multilingual_v2',
-        voiceId: 'voice_default',
-      },
-      generateAndUpload,
-      kind: 'linq',
-    }
+    const runtime = createLinqRuntime(generateAndUpload)
 
     const result = await executeGenerateVoiceMemoTool({
       args: {
@@ -195,23 +313,107 @@ describe('executeGenerateVoiceMemoTool', () => {
     })
   })
 
-  it('accepts only the bounded runtime failure text from a managed adapter', async () => {
-    const generateAndUpload = vi.fn<
-      LinqVoiceMemoRuntime['generateAndUpload']
-    >(async () => {
-      throw Object.assign(new Error('provider internals'), {
-        rpcText: 'voice memo generation failed: safe provider summary',
-      })
+  it('maps typed adapter failures into public model-visible semantics', async () => {
+    const missingTokenRuntime = createLinqRuntime(
+      vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>(async () => ({
+        failure: {
+          kind: 'missing_configuration',
+          variable: 'LINQ_API_TOKEN',
+        },
+        ok: false,
+      })),
+    )
+    const generationFailureRuntime = createLinqRuntime(
+      vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>(async () => ({
+        failure: {
+          detail: 'ELEVENLABS_API_REQUEST_FAILED (http 503)',
+          kind: 'generation_failed',
+        },
+        ok: false,
+      })),
+    )
+    const invalidAudioRuntime = createLinqRuntime(
+      vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>(async () => ({
+        failure: {
+          kind: 'invalid_audio',
+        },
+        ok: false,
+      })),
+    )
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        runtime: missingTokenRuntime,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText:
+        'LINQ_API_TOKEN is required for voice memo attachment upload',
     })
-    const runtime: LinqVoiceMemoRuntime = {
-      elevenLabs: {
-        apiKeyAvailable: true,
-        modelId: 'eleven_multilingual_v2',
-        voiceId: 'voice_default',
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        runtime: generationFailureRuntime,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText:
+        'voice memo generation failed: ELEVENLABS_API_REQUEST_FAILED (http 503)',
+    })
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        runtime: invalidAudioRuntime,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText: 'voice memo generation returned invalid audio data',
+    })
+  })
+
+  it('does not trust rpcText properties on thrown adapter errors', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const runtime = createLinqRuntime(
+      vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>(async () => {
+        throw Object.assign(new Error('provider internals'), {
+          rpcText: 'secret provider response',
+        })
+      }),
+    )
+
+    const result = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: null,
       },
-      generateAndUpload,
-      kind: 'linq',
-    }
+      runtime,
+    })
+
+    expect(result.rpcSuccess).toBe(false)
+    expect(result.rpcText).toContain(
+      'voice memo generated but Linq attachment upload failed',
+    )
+    expect(result.rpcText).not.toContain('secret provider response')
+  })
+
+  it('rethrows aborts instead of converting them into delivery failures', async () => {
+    const abortError = new Error('aborted')
+    abortError.name = 'AbortError'
+    const runtime = createLinqRuntime(
+      vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>(async () => {
+        throw abortError
+      }),
+    )
 
     await expect(
       executeGenerateVoiceMemoTool({
@@ -221,25 +423,14 @@ describe('executeGenerateVoiceMemoTool', () => {
         },
         runtime,
       }),
-    ).resolves.toEqual({
-      rpcSuccess: false,
-      rpcText: 'voice memo generation failed: safe provider summary',
-    })
+    ).rejects.toBe(abortError)
   })
 
   it('keeps response-media conflicts in the public executor', async () => {
     const generateAndUpload = vi.fn<
       LinqVoiceMemoRuntime['generateAndUpload']
     >()
-    const runtime: LinqVoiceMemoRuntime = {
-      elevenLabs: {
-        apiKeyAvailable: true,
-        modelId: 'eleven_multilingual_v2',
-        voiceId: 'voice_default',
-      },
-      generateAndUpload,
-      kind: 'linq',
-    }
+    const runtime = createLinqRuntime(generateAndUpload)
 
     await expect(
       executeGenerateVoiceMemoTool({
@@ -273,16 +464,12 @@ describe('executeGenerateSongTool', () => {
     >(async () => ({
       attachmentId: 'attachment_song_1',
       filename: 'song-1.mp3',
+      ok: true,
     }))
-    const runtime: LinqVoiceMemoRuntime = {
-      elevenLabs: {
-        apiKeyAvailable: true,
-        modelId: null,
-        voiceId: null,
-      },
-      generateAndUpload,
-      kind: 'linq',
-    }
+    const runtime = createLinqRuntime(generateAndUpload, {
+      modelId: null,
+      voiceId: null,
+    })
 
     const result = await executeGenerateSongTool({
       args: {
