@@ -683,6 +683,7 @@ async function spawnCaptured(
       options.signal?.removeEventListener("abort", onAbort);
     };
     child.on("error", fail);
+    child.stdin?.on("error", fail);
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {

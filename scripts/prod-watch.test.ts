@@ -1146,7 +1146,7 @@ describe("production-watch locking and dry-run behavior", () => {
     const env = { PATH: `${binRoot}:${process.env.PATH ?? ""}` };
 
     const accepted = runProdWatch(["collect", "--provider-evidence", providerPath], runtimeRoot, env);
-    expect(accepted.status).toBe(0);
+    expect(accepted.status, "private_provider_collect_failed").toBe(0);
     const acceptedSnapshot = JSON.parse(accepted.stdout) as ProductionWatchSnapshot;
     expect(acceptedSnapshot.sourceHealth
       .filter((source) => source.source !== "database")
@@ -1156,15 +1156,17 @@ describe("production-watch locking and dry-run behavior", () => {
       .toEqual([]);
 
     chmodSync(providerPath, 0o644);
-    const rejected = runProdWatch(["collect", "--provider-evidence", providerPath], runtimeRoot, env);
-    expect(rejected.status).toBe(0);
-    const rejectedSnapshot = JSON.parse(rejected.stdout) as ProductionWatchSnapshot;
-    expect(rejectedSnapshot.collectorFailures.filter((failure) => failure.source !== "database"))
-      .toHaveLength(3);
-    expect(rejectedSnapshot.collectorFailures
-      .filter((failure) => failure.source !== "database")
-      .every((failure) => failure.code === "provider_evidence_invalid"))
-      .toBe(true);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const rejected = runProdWatch(["collect", "--provider-evidence", providerPath], runtimeRoot, env);
+      expect(rejected.status, "world_readable_provider_collect_failed").toBe(0);
+      const rejectedSnapshot = JSON.parse(rejected.stdout) as ProductionWatchSnapshot;
+      expect(rejectedSnapshot.collectorFailures.filter((failure) => failure.source !== "database"))
+        .toHaveLength(3);
+      expect(rejectedSnapshot.collectorFailures
+        .filter((failure) => failure.source !== "database")
+        .every((failure) => failure.code === "provider_evidence_invalid"))
+        .toBe(true);
+    }
   });
 
   it("keeps the production source universe fixed across environment changes", () => {
