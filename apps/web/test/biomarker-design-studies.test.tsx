@@ -123,7 +123,10 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Group sponsorship with optional creative response",
+    "Group sponsorship purchase, signed-out management, cancellation, and completion",
+  );
+  expect(sectionsMarkup).toContain(
+    "Subscription recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and exact usage status",
   );
   expect(sectionsMarkup).toContain(
     "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
@@ -159,7 +162,14 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-state="monthly-active"');
   expect(sectionsMarkup).toContain('data-design-state="monthly-paused"');
   expect(sectionsMarkup).toContain('data-design-state="monthly-recovery"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-management-sign-in"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-canceled"');
   expect(sectionsMarkup).toContain('data-design-state="sponsored-one-time-recovery"');
+  expect(sectionsMarkup).toContain('data-design-state="trial-family-confirmation"');
+  expect(sectionsMarkup).toContain('data-design-state="family-billing-recovery"');
+  expect(sectionsMarkup).toContain("Your Family plan needs billing attention");
+  expect(sectionsMarkup).toContain("Monthly sponsorship canceled");
+  expect(sectionsMarkup).toContain("Sign in to continue");
   expect(sectionsMarkup).toContain("Monthly sponsorship is the primary flow");
   expect(sectionsMarkup).toContain("One-time contribution");
   expect(sectionsMarkup).toContain("personal-usage-credit-owner");
