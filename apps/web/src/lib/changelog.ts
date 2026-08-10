@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Patterns, reliable reminders, and working web search",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "Patterns compares repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, and Murph can search the web for current information again.",
     items: [
       {
         id: "personal-patterns",
@@ -105,6 +105,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           label: "Schedule a local-time reminder",
           prompt: "Remind me every day at 9 PM Central to wind down.",
+        },
+      },
+      {
+        id: "web-search-restored",
+        kind: "improvement",
+        priority: 5,
+        title: "Web search works again",
+        summary:
+          "Murph can search the web for current information again instead of stopping with a forbidden-request error.",
+        details:
+          "Search still runs through Murph's existing protected provider connection and returns in the same conversation.",
+        relevanceTags: ["assistant", "search", "research", "reliability"],
+        sourcePullRequests: [1583],
+        tryIt: {
+          label: "Ask Murph to search",
+          prompt: "Search the web for the latest information on a topic I care about.",
         },
       },
     ],

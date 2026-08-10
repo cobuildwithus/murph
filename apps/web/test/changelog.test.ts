@@ -493,6 +493,7 @@ describe("changelog registry", () => {
         itemIds: [
           "personal-patterns",
           "reminders-keep-requested-timezone",
+          "web-search-restored",
         ],
       },
       {
