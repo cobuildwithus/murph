@@ -512,6 +512,7 @@ describe("changelog registry", () => {
           "reminders-keep-requested-timezone",
           "wearable-sync-recovers-model-free",
           "web-search-restored",
+          "appointment-reminders-by-default",
         ],
       },
       {
