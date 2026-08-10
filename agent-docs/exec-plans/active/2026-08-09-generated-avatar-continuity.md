@@ -539,3 +539,8 @@ Updated: 2026-08-10
   through the real archive component without live data or requests; no
   production UI component or behavior changed. Its two catalog/changelog files
   pass 18 tests.
+- Exact merged-head runner proof passes 67 bundle-policy tests. Fresh full
+  assembly passes every CLI parity probe at 8,690,580-byte Vault CLI total,
+  1,596,168-byte runner entry, 7,727,794-byte static boot closure, and
+  9,619,462-byte runner total without a ratchet change. The full Web typecheck,
+  docs drift, whitespace, and candidate privacy/static checks pass.
