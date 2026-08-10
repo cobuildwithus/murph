@@ -150,6 +150,7 @@ export async function runHostedAssistantAutomationLane(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   freshAssistantInputIds?: readonly string[] | null;
+  hostedImageCompletionInputIds?: readonly string[] | null;
   idleCheckpointDelayMs?: number | null;
   now?: Date | null;
   operatorHomeRoot?: string | null;
@@ -221,6 +222,8 @@ export async function runHostedAssistantAutomationLane(input: {
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           commitTimeoutMs: input.runtime.commitTimeoutMs,
           idleCheckpointDelayMs: input.idleCheckpointDelayMs ?? null,
+          hostedImageCompletionInputIds:
+            input.hostedImageCompletionInputIds ?? [],
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
@@ -296,6 +299,7 @@ export async function runHostedAssistantAutomation(
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     commitTimeoutMs?: number | null;
     idleCheckpointDelayMs?: number | null;
+    hostedImageCompletionInputIds?: readonly string[] | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
@@ -342,9 +346,11 @@ export async function runHostedAssistantAutomation(
   let providerStartCriticalPath = options?.providerStartCriticalPath ?? null;
   const selectedInputIds = await selectHostedAssistantInputIds(
     freshAssistantInputIdCount > 0
-      ? {
-          freshAssistantInputIds,
-          mode: "foreground",
+        ? {
+            freshAssistantInputIds,
+            hostedImageCompletionInputIds:
+              options?.hostedImageCompletionInputIds ?? [],
+            mode: "foreground",
           vaultRoot,
         }
       : {
@@ -361,6 +367,9 @@ export async function runHostedAssistantAutomation(
     initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:
       selectedInputIds.mode === "foreground" ? "none" : "compact",
+    preserveSelectedInputOrder:
+      selectedInputIds.mode === "foreground"
+      && selectedInputIds.preserveInputOrder,
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });

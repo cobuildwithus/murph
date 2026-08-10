@@ -38,6 +38,7 @@ import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
 } from '../src/assistant/response-media.ts'
 import type { AssistantAutomationOperationScope } from '../src/assistant/automation/operation-scope.ts'
+import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
 import type { AssistantAutoReplyPromptInput } from '../src/assistant/automation/prompt-builder.ts'
 import type { AssistantGroupParticipantDisplayName } from '../src/assistant/execution-context.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -1595,6 +1596,45 @@ describe('assistant automation scanner', () => {
         type: 'reply.scan.primed',
       }),
     )
+  })
+
+  it('preserves explicit input-source order at provider grouping', async () => {
+    const completion = createCaptureSummary({
+      captureId: 'capture-completion-order',
+      createdAt: '2026-04-08T00:05:00.000Z',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+    })
+    const fresh = createCaptureSummary({
+      captureId: 'capture-fresh-order',
+      createdAt: '2026-04-08T00:04:00.000Z',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+    })
+    const inputSource = {
+      ...createAssistantInputSourceForCaptures([completion, fresh]),
+      preserveInputCandidateOrder: true,
+    }
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    const firstGroupingInput = groupingMocks.collectAssistantAutoReplyGroup
+      .mock.calls[0]?.[0]
+    expect(firstGroupingInput?.inputSummaries.map(
+      (summary: AssistantAutomationInputSummary) => summary.inputId,
+    ))
+      .toEqual([
+        assistantInputCandidateFromInboxCapture(completion).event.inputId,
+        assistantInputCandidateFromInboxCapture(fresh).event.inputId,
+      ])
   })
 
   it('shares one history reader across every group in an automation pass', async () => {

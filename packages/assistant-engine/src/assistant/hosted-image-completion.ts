@@ -1,10 +1,22 @@
 import type {
   AssistantHostedImageGenerationResult,
 } from './execution-context.js'
-import { readAssistantInputEvent } from './input-store.js'
+import {
+  readAssistantInputEvent,
+  type AssistantInputSourceRef,
+} from './input-store.js'
 
 export const ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA =
   'murph.hosted-image-completion.v1'
+
+export function isAssistantHostedImageCompletionEvent(event: {
+  sourceRef: AssistantInputSourceRef
+}): boolean {
+  return event.sourceRef.kind === 'hosted-mailbox' &&
+    event.sourceRef.lane === 'system' &&
+    event.sourceRef.payloadSchema === ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA &&
+    event.sourceRef.wakeSchema === ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA
+}
 
 const HOSTED_IMAGE_RESULT_OPEN = '<hosted_image_result>'
 const HOSTED_IMAGE_RESULT_CLOSE = '</hosted_image_result>'
@@ -138,10 +150,7 @@ export async function readAssistantHostedImageCompletion(input: {
   })
   if (
     !event
-    || event.sourceRef.kind !== 'hosted-mailbox'
-    || event.sourceRef.lane !== 'system'
-    || event.sourceRef.payloadSchema !== ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA
-    || event.sourceRef.wakeSchema !== ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA
+    || !isAssistantHostedImageCompletionEvent(event)
   ) {
     return null
   }

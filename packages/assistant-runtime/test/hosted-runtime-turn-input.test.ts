@@ -873,6 +873,125 @@ describe("selectHostedAssistantInputIds", () => {
     ]);
   });
 
+  it("keeps an exact image completion before a newer authenticated group input", async () => {
+    const vaultRoot = await createTempVault();
+    const fresh = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent({
+        actorId: "actor_fresh",
+        causalSeq: "12",
+        dedupeKey: "dedupe_image_completion_fresh",
+        eventId: "event_image_completion_fresh",
+        itemId: "item_image_completion_fresh",
+        laneSeq: "12",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        routeAuthority: true,
+        sessionId: "asst_image_completion_group",
+        threadIsDirect: false,
+      }),
+      now: new Date("2026-04-23T00:00:04.000Z"),
+      vault: vaultRoot,
+    });
+    const completion = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent({
+        actorId: null,
+        dedupeKey: "dedupe_image_completion",
+        eventId: "event_image_completion",
+        itemId: "item_image_completion",
+        lane: "system",
+        laneSeq: "image-completion:operation",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        payloadSchema: "murph.hosted-image-completion.v1",
+        receivedAt: "2026-04-23T00:00:05.000Z",
+        routeAuthority: true,
+        sessionId: "asst_image_completion_group",
+        threadIsDirect: false,
+        wakeSchema: "murph.hosted-image-completion.v1",
+      }),
+      now: new Date("2026-04-23T00:00:05.000Z"),
+      vault: vaultRoot,
+    });
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [completion.inputId, fresh.inputId],
+      hostedImageCompletionInputIds: [completion.inputId],
+      mode: "foreground",
+      vaultRoot,
+    });
+    if (selection.mode !== "foreground") {
+      throw new TypeError("Expected a foreground image-completion selection.");
+    }
+    const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
+      preserveSelectedInputOrder: selection.preserveInputOrder,
+      selectedInputIds: selection.inputIds,
+      vaultRoot,
+    });
+    const batch = await source.listInputCandidates({
+      limit: 10,
+      sourceId: "linq",
+    });
+    const acceptedContext = await resolveHostedCurrentInputIdForAcceptedInputs({
+      assistantInputIds: selection.inputIds,
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([completion.inputId, fresh.inputId]);
+    expect(selection.preserveInputOrder).toBe(true);
+    expect(source.preserveInputCandidateOrder).toBe(true);
+    expect(batch.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      completion.inputId,
+      fresh.inputId,
+    ]);
+    expect(acceptedContext).toEqual({
+      conversationActivity: "observed",
+      currentInputId: fresh.inputId,
+    });
+  });
+
+  it("does not fold a different authenticated group route into an image completion", async () => {
+    const vaultRoot = await createTempVault();
+    const completion = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent({
+        actorId: null,
+        dedupeKey: "dedupe_image_completion_route",
+        eventId: "event_image_completion_route",
+        itemId: "item_image_completion_route",
+        lane: "system",
+        laneSeq: "image-completion:route-operation",
+        payloadSchema: "murph.hosted-image-completion.v1",
+        routeAuthority: true,
+        sessionId: "asst_image_completion_route",
+        threadIsDirect: false,
+        wakeSchema: "murph.hosted-image-completion.v1",
+      }),
+      vault: vaultRoot,
+    });
+    const differentRoute = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent({
+        causalSeq: "9",
+        dedupeKey: "dedupe_image_completion_other_route",
+        eventId: "event_image_completion_other_route",
+        itemId: "item_image_completion_other_route",
+        laneSeq: "9",
+        routeAuthority: true,
+        sessionId: "asst_image_completion_route",
+        threadId: "thread_other",
+        threadIsDirect: false,
+      }),
+      vault: vaultRoot,
+    });
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [completion.inputId, differentRoute.inputId],
+      hostedImageCompletionInputIds: [completion.inputId],
+      mode: "foreground",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([completion.inputId]);
+  });
+
   it("ends a same-conversation batch at a causal-sequence gap", async () => {
     const vaultRoot = await createTempVault();
     const first = await upsertAssistantInputEvent({
@@ -1659,7 +1778,7 @@ async function enableLinqAutoReply(vaultRoot: string): Promise<void> {
 }
 
 function createAssistantInputEvent(input: {
-  actorId?: string;
+  actorId?: string | null;
   causalSeq?: string | null;
   dedupeKey?: string;
   eventId?: string;
@@ -1669,16 +1788,19 @@ function createAssistantInputEvent(input: {
   deliveryTarget?: string;
   messageId?: string;
   occurredAt?: string;
+  payloadSchema?: string;
   receivedAt?: string;
   replyToMessageId?: string | null;
   replyTarget?: string | null;
   routeAuthority?: boolean;
   senderHandle?: string | null;
+  sessionId?: string;
   source?: string;
   sourceKind?: "hosted-mailbox" | "inbox-capture";
   text?: string;
   threadId?: string;
   threadIsDirect?: boolean;
+  wakeSchema?: string;
 } = {}) {
   const source = input.source ?? "linq";
   const threadId = input.threadId ?? "thread_1";
@@ -1698,6 +1820,7 @@ function createAssistantInputEvent(input: {
       accountId: "acct_1",
       actorId: input.actorId ?? "actor_1",
       actorIsSelf: false,
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       source,
       threadId,
       threadIsDirect: input.threadIsDirect ?? true,
@@ -1739,10 +1862,10 @@ function createAssistantInputEvent(input: {
           kind: "hosted-mailbox" as const,
           lane: input.lane ?? "conversation",
           laneSeq: input.laneSeq ?? "42",
-          payloadSchema: "murph.hosted-mailbox-payload.v1",
+          payloadSchema: input.payloadSchema ?? "murph.hosted-mailbox-payload.v1",
           payloadSource: "inline" as const,
           source: "hosted-mailbox" as const,
-          wakeSchema: "murph.hosted-execution-wake.v1",
+          wakeSchema: input.wakeSchema ?? "murph.hosted-execution-wake.v1",
         },
   };
 }

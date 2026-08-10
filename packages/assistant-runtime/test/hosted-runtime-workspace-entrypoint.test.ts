@@ -18830,18 +18830,147 @@ describe("hosted workspace runtime entrypoint", () => {
       sizeBytes: 18,
       source: "gpt-image-2",
     };
-    const freshInputImported = createDeferred<void>();
     const imageReady = createDeferred<void>();
     const combinedPhaseObserved = createDeferred<void>();
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const originalAutomationPass =
+      mocks.runAssistantAutomationPass.getMockImplementation();
     let assistantPhaseCalls = 0;
     let completionInputId: string | null = null;
     let freshInputId: string | null = null;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
+    assert.ok(originalAutomationPass);
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      mocks.runAssistantAutomationPass.mockImplementation(
+        async (input: RunAssistantAutomationPassInput) => {
+          const candidates = await input.inputSource?.listInputCandidates({
+            afterCursor: null,
+            limit: 10,
+            sourceId: "linq",
+          });
+          const assistantInputIds = candidates?.inputs.map((candidate) =>
+            candidate.event.inputId
+          ) ?? [];
+          if (assistantInputIds.length === 0) {
+            return {
+              currentTurnDeliveryIntentIds: [],
+              nextWakeAt: null,
+              progressed: false,
+            };
+          }
+
+          assistantPhaseCalls += 1;
+          const providerInputDetails = await Promise.all(
+            assistantInputIds.map(async (inputId) => {
+              const event = await readAssistantInputEvent({ inputId, vault: vaultRoot });
+              return {
+                inputId,
+                payloadSchema: event?.sourceRef.kind === "hosted-mailbox"
+                  ? event.sourceRef.payloadSchema
+                  : null,
+                sessionId: event?.conversation?.sessionId ?? null,
+                threadId: event?.conversation?.threadId ?? null,
+              };
+            }),
+          );
+          assert.equal(
+            assistantInputIds.length,
+            assistantPhaseCalls === 1 ? 1 : 2,
+            `provider turn ${assistantPhaseCalls}: ${JSON.stringify({ freshInputId, providerInputDetails })}`,
+          );
+          const releaseProviderInputs =
+            await input.beforeProviderAcceptedInputs?.({
+              acceptedInputs: assistantInputIds.map((id) => ({
+                id,
+                source: "assistant-input" as const,
+              })),
+            });
+
+          if (assistantPhaseCalls === 1) {
+            const assistantInputId = assistantInputIds[0]!;
+            const imageGenerationLauncher =
+              input.executionContext?.hosted?.imageGenerationLauncher;
+            assert.ok(imageGenerationLauncher);
+            assert.equal(
+              imageGenerationLauncher.launch({
+                continuationSessionId: "asst_image_completion_preemption",
+                operationId: "image_operation_completion_preemption",
+                originAssistantInputId: assistantInputId,
+                originAssistantInputIdExact: false,
+                scopeId: "session_image_completion_preemption",
+                async run() {
+                  await imageReady.promise;
+                  return {
+                    media: generatedMedia,
+                    runtimeIssue: null,
+                    savedImageRef: generatedMedia.ref,
+                  };
+                },
+              }),
+              "started",
+            );
+            imageReady.resolve();
+            await withRealTimeout(
+              (async () => {
+                while (
+                  imageGenerationLauncher.readStatus?.(
+                    "session_image_completion_preemption",
+                  ) !== "queued"
+                ) {
+                  await new Promise<void>((resolve) => setImmediate(resolve));
+                }
+              })(),
+              1_000,
+              () => events.join(","),
+            );
+            mailboxItems.push(createMailboxItem({
+              id: "mailbox_item_image_completion_preemption_fresh",
+              laneSeq: "2",
+              occurredAt: new Date(Date.now() + 1_000).toISOString(),
+            }));
+            runtimeWakeSignal.notify();
+          } else if (assistantPhaseCalls === 2) {
+            completionInputId = assistantInputIds[0]!;
+            const completion = await readAssistantInputEvent({
+              inputId: completionInputId,
+              vault: vaultRoot,
+            });
+            assert.equal(
+              completion?.sourceRef.kind === "hosted-mailbox"
+                ? completion.sourceRef.payloadSchema
+                : null,
+              "murph.hosted-image-completion.v1",
+            );
+            assert.ok(freshInputId);
+            assert.deepEqual(assistantInputIds, [completionInputId, freshInputId]);
+            combinedPhaseObserved.resolve();
+          } else {
+            throw new Error("Unexpected extra image completion preemption phase.");
+          }
+
+          for (const assistantInputId of assistantInputIds) {
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: assistantInputId,
+              vaultRoot,
+            });
+          }
+          await releaseProviderInputs?.();
+          return {
+            currentTurnDeliveryIntentIds: [],
+            nextWakeAt: null,
+            progressed: true,
+            replies: {
+              considered: assistantInputIds.length,
+              failed: 0,
+              replied: assistantInputIds.length,
+              skipped: 0,
+            },
+          };
+        },
+      );
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -18866,12 +18995,13 @@ describe("hosted workspace runtime entrypoint", () => {
           async importItem(item) {
             const inputId = await stagePendingLinqAssistantInputForMailboxItem({
               item: item.item,
+              sessionId: "asst_image_completion_preemption",
               threadId: "thread_image_completion_preemption",
+              threadIsDirect: false,
               vaultRoot,
             });
             if (item.item.laneSeq === "2") {
               freshInputId = inputId;
-              freshInputImported.resolve();
             }
             return {
               assistantInputId: inputId,
@@ -18890,102 +19020,6 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase(phaseInput) {
-            assistantPhaseCalls += 1;
-            const assistantInputIds =
-              phaseInput.initialAssistantInputBatch?.assistantInputIds
-              ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
-              ?? [];
-            assert.equal(assistantInputIds.length, assistantPhaseCalls === 1 ? 1 : 2);
-            const releaseProviderInputs =
-              await phaseInput.beforeProviderAcceptedInputs?.({
-                acceptedInputs: assistantInputIds.map((id) => ({
-                  id,
-                  source: "assistant-input" as const,
-                })),
-              });
-
-            if (assistantPhaseCalls === 1) {
-              const assistantInputId = assistantInputIds[0]!;
-              const imageGenerationLauncher = phaseInput.imageGenerationLauncher;
-              assert.ok(imageGenerationLauncher);
-              assert.equal(
-                imageGenerationLauncher.launch({
-                  continuationSessionId: "asst_image_completion_preemption",
-                  operationId: "image_operation_completion_preemption",
-                  originAssistantInputId: assistantInputId,
-                  originAssistantInputIdExact: false,
-                  scopeId: "session_image_completion_preemption",
-                  async run() {
-                    await imageReady.promise;
-                    return {
-                      media: generatedMedia,
-                      runtimeIssue: null,
-                      savedImageRef: generatedMedia.ref,
-                    };
-                  },
-                }),
-                "started",
-              );
-              imageReady.resolve();
-              await withRealTimeout(
-                (async () => {
-                  while (
-                    imageGenerationLauncher.readStatus?.(
-                      "session_image_completion_preemption",
-                    ) !== "queued"
-                  ) {
-                    await new Promise<void>((resolve) => setImmediate(resolve));
-                  }
-                })(),
-                1_000,
-                () => events.join(","),
-              );
-              mailboxItems.push(createMailboxItem({
-                id: "mailbox_item_image_completion_preemption_fresh",
-                laneSeq: "2",
-                occurredAt: new Date(Date.now() + 1_000).toISOString(),
-              }));
-              runtimeWakeSignal.notify();
-            } else if (assistantPhaseCalls === 2) {
-              completionInputId = assistantInputIds[0]!;
-              const completion = await readAssistantInputEvent({
-                inputId: completionInputId,
-                vault: vaultRoot,
-              });
-              assert.equal(
-                completion?.sourceRef.kind === "hosted-mailbox"
-                  ? completion.sourceRef.payloadSchema
-                  : null,
-                "murph.hosted-image-completion.v1",
-              );
-              assert.ok(freshInputId);
-              assert.deepEqual(assistantInputIds, [completionInputId, freshInputId]);
-              assert.deepEqual(
-                phaseInput.initialAssistantInputBatch?.assistantInputRecords?.map(
-                  (record) => record.assistantInputId,
-                ),
-                assistantInputIds,
-              );
-              combinedPhaseObserved.resolve();
-            } else {
-              throw new Error("Unexpected extra image completion preemption phase.");
-            }
-
-            for (const assistantInputId of assistantInputIds) {
-              await writeSyntheticAssistantAutoReplyTerminalEvidence({
-                inputId: assistantInputId,
-                vaultRoot,
-              });
-            }
-            await releaseProviderInputs?.();
-            return {
-              checkpointReason: "assistant_runtime_commit" as const,
-              foregroundReplyFailed: 0,
-              nextWakeAt: null,
-              progressed: true,
-            };
-          },
           shutdownSignal: runtimeAbortController.signal,
           vaultRoot,
         },
@@ -19002,6 +19036,7 @@ describe("hosted workspace runtime entrypoint", () => {
         new DOMException("Synthetic test cleanup.", "AbortError"),
       );
       await resultPromise?.catch(() => undefined);
+      mocks.runAssistantAutomationPass.mockImplementation(originalAutomationPass);
       await removeTempRoot(vaultRoot);
     }
   });
@@ -30359,6 +30394,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
   causalSeq?: string;
   item: HostedMailboxItem;
   lane?: "conversation" | "system";
+  sessionId?: string;
   threadId?: string;
   threadIsDirect?: boolean;
   vaultRoot: string;
@@ -30381,6 +30417,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
         accountId: "acct_1",
         actorId: "actor_1",
         actorIsSelf: false,
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         source: "linq",
         threadId,
         threadIsDirect: input.threadIsDirect ?? true,
@@ -30392,6 +30429,18 @@ async function stageAssistantInputEventForMailboxItem(input: {
         messageId: `msg_${input.item.id}`,
         threadId,
       },
+      ...(input.threadIsDirect === false
+        ? {
+            sourceMetadata: {
+              externalThreadRouteAuthorityPresent: true,
+              kind: "linq" as const,
+              partCount: 1,
+              reactionEligible: true,
+              replyToMessageId: null,
+              service: "imessage",
+            },
+          }
+        : {}),
       sourceRef: {
         ...(input.causalSeq ? { causalSeq: input.causalSeq } : {}),
         dedupeKey: input.item.dedupeKey,
@@ -30415,6 +30464,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
 async function stagePendingLinqAssistantInputForMailboxItem(input: {
   causalSeq?: string;
   item: HostedMailboxItem;
+  sessionId?: string;
   threadId?: string;
   threadIsDirect?: boolean;
   vaultRoot: string;

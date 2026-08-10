@@ -1967,7 +1967,10 @@ the runtime carries the exact ready completion input into the next Codex
 admission instead of rediscovering it through mailbox selection. When newer
 conversation input is already waiting, the same frozen batch places the trusted
 completion immediately before that input; later input still joins through the
-existing live foreground loop. The pending input index owns durable retry and
+existing live foreground loop. Invocation-local completion readiness is cleared
+only when the exact input reaches provider admission; shutdown, provider
+handoff, or an earlier failure leaves it visible to the existing immediate
+assistant checkpoint wake. The pending input index owns durable retry and
 terminal evidence. Provider completion starts the existing generic
 usage recorder without awaiting it, and image delivery never waits for
 accounting or diagnostic writes. A provider rejection keeps the exact legacy

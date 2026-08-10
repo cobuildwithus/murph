@@ -397,13 +397,14 @@ async function listAssistantReplyCandidates(input: {
     }),
   )
 
-  return candidates
-    .flat()
-    .sort((left, right) =>
-      compareAssistantInputCursors(
-        left.inputCandidate.event.cursor,
-        right.inputCandidate.event.cursor,
-      ))
+  const flattenedCandidates = candidates.flat()
+  return (input.inputSource.preserveInputCandidateOrder === true
+    ? flattenedCandidates
+    : flattenedCandidates.sort((left, right) =>
+        compareAssistantInputCursors(
+          left.inputCandidate.event.cursor,
+          right.inputCandidate.event.cursor,
+        )))
     .slice(0, input.limit)
 }
 

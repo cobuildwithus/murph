@@ -3,6 +3,7 @@ import {
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
+  isAssistantHostedImageCompletionEvent,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItemDetails,
   type AssistantInputCandidate,
@@ -18,6 +19,7 @@ import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
+  isSameAuthenticatedAssistantGroupRoute,
   shouldGroupAdjacentAssistantInputCandidates,
 } from "@murphai/assistant-engine/assistant-automation";
 import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
@@ -38,6 +40,7 @@ type HostedAssistantInputSelection =
       inputIds: string[];
       mode: "foreground";
       pendingInputIds: string[];
+      preserveInputOrder?: true;
     }
   | {
       inputIds: string[];
@@ -101,7 +104,13 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     : "not_observed";
   let batch: AssistantInputEventRecord[];
   try {
-    batch = selectHostedAssistantInputEventBatch({
+    batch = await selectHostedImageCompletionInputEventBatch({
+      events,
+      hostedImageCompletionInputIds: events
+        .filter(isAssistantHostedImageCompletionEvent)
+        .map((event) => event.inputId),
+      vaultRoot: input.vaultRoot,
+    }) ?? selectHostedAssistantInputEventBatch({
       events,
       limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
     });
@@ -132,6 +141,7 @@ function isHostedConversationActivityInputEvent(
 export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
   pendingInputRefreshMode: HostedPendingInputRefreshMode;
+  preserveSelectedInputOrder?: boolean;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): HostedAssistantInputSource {
@@ -146,12 +156,14 @@ export function createHostedAssistantInputSource(input: {
   const readSelectedCandidates = () => {
     selectedCandidatesPromise ??= readHostedAssistantInputCandidatesById({
       inputIds: selectedInputIds,
+      preserveInputOrder: input.preserveSelectedInputOrder === true,
       vaultRoot: input.vaultRoot,
     });
     return selectedCandidatesPromise;
   };
 
   return {
+    preserveInputCandidateOrder: input.preserveSelectedInputOrder === true,
     readObservedInputIds() {
       return [...observedInputIds];
     },
@@ -212,6 +224,7 @@ export function createHostedAssistantInputSource(input: {
       return filterHostedAssistantInputCandidates({
         candidates,
         emittedCursorKeys: emittedListInputCandidateCursorKeys,
+        preserveInputOrder: input.preserveSelectedInputOrder === true,
         query,
       });
     },
@@ -284,6 +297,7 @@ export async function selectHostedAssistantInputIds(
   input:
     | {
         freshAssistantInputIds?: readonly string[] | null;
+        hostedImageCompletionInputIds?: readonly string[] | null;
         mode: "foreground";
         vaultRoot: string;
       }
@@ -329,16 +343,73 @@ export async function selectHostedAssistantInputIds(
     inputIds: freshInputIds,
     vaultRoot: input.vaultRoot,
   });
+  const hostedImageCompletionEvents =
+    await selectHostedImageCompletionInputEventBatch({
+      events: freshEvents,
+      hostedImageCompletionInputIds:
+        input.hostedImageCompletionInputIds ?? [],
+      vaultRoot: input.vaultRoot,
+    });
 
   return {
     freshInputIds,
-    inputIds: selectHostedAssistantInputEventBatch({
-      events: freshEvents,
-      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-    }).map((event) => event.inputId),
+    inputIds: (hostedImageCompletionEvents
+      ?? selectHostedAssistantInputEventBatch({
+        events: freshEvents,
+        limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+      })).map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds: [],
+    ...(hostedImageCompletionEvents ? { preserveInputOrder: true as const } : {}),
   };
+}
+
+async function selectHostedImageCompletionInputEventBatch(input: {
+  events: readonly AssistantInputEventRecord[];
+  hostedImageCompletionInputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[] | null> {
+  const completionInputIds = new Set(
+    uniqueStrings(input.hostedImageCompletionInputIds),
+  );
+  if (completionInputIds.size === 0) {
+    return null;
+  }
+  const [anchorEvent] = input.events;
+  if (
+    !anchorEvent
+    || !completionInputIds.has(anchorEvent.inputId)
+    || [...completionInputIds].some((inputId) =>
+      !input.events.some((event) =>
+        event.inputId === inputId
+        && isAssistantHostedImageCompletionEvent(event)
+      )
+    )
+  ) {
+    return null;
+  }
+
+  const candidates = await createHostedAssistantInputCandidates({
+    events: input.events,
+    preserveInputOrder: true,
+    vaultRoot: input.vaultRoot,
+  });
+  const anchorCandidate = candidates[0];
+  if (!anchorCandidate) {
+    return null;
+  }
+  const candidatesByInputId = new Map(
+    candidates.map((candidate) => [candidate.event.inputId, candidate] as const),
+  );
+  return input.events.filter((event, index) => {
+    if (index === 0) {
+      return true;
+    }
+    const candidate = candidatesByInputId.get(event.inputId);
+    return candidate
+      ? isSameAuthenticatedAssistantGroupRoute(anchorCandidate, candidate)
+      : false;
+  }).slice(0, DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT);
 }
 
 function selectHostedAssistantInputEventBatch(input: {
@@ -448,27 +519,33 @@ function readPositiveHostedAssistantInputCausalSeq(
 
 async function readHostedAssistantInputCandidatesById(input: {
   inputIds: readonly string[];
+  preserveInputOrder?: boolean;
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const events = await readHostedAssistantInputEventsById(input);
   return createHostedAssistantInputCandidates({
     events,
+    preserveInputOrder: input.preserveInputOrder === true,
     vaultRoot: input.vaultRoot,
   });
 }
 
 async function createHostedAssistantInputCandidates(input: {
   events: readonly AssistantInputEventRecord[];
+  preserveInputOrder?: boolean;
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
     inputIds: input.events.map((event) => event.inputId),
     vault: input.vaultRoot,
   });
-  return [...input.events]
-    .sort((left, right) =>
+  const orderedEvents = [...input.events];
+  if (input.preserveInputOrder !== true) {
+    orderedEvents.sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
-    )
+    );
+  }
+  return orderedEvents
     .map((event) => {
       const hostedMailboxItem = hostedMailboxItems.get(event.inputId);
       return assistantInputCandidateFromStoredEvent(event, {
@@ -553,6 +630,7 @@ function filterHostedAssistantInputCandidates(input: {
   candidates: readonly AssistantInputCandidate[];
   emittedCursorKeys?: Set<string>;
   ignoreAfterCursor?: boolean;
+  preserveInputOrder?: boolean;
   query: AssistantInputCandidateQuery;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
@@ -577,6 +655,7 @@ function filterHostedAssistantInputCandidates(input: {
       return true;
     }),
     limit: input.query.limit,
+    preserveInputOrder: input.preserveInputOrder === true,
   });
   for (const candidate of batch.inputs) {
     input.emittedCursorKeys?.add(hostedAssistantInputCursorKey(candidate.event.cursor));
@@ -618,23 +697,25 @@ function buildHostedAssistantInputCandidateBatch(input: {
   afterCursor: AssistantInputCursor | null;
   candidates: readonly AssistantInputCandidate[];
   limit?: number;
+  preserveInputOrder?: boolean;
 }): AssistantInputCandidateBatch {
   const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
-  const selected = input.candidates
-    .filter((candidate) =>
+  const selected = input.candidates.filter((candidate) =>
       input.afterCursor
         ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
         : true
-    )
-    .sort((left, right) =>
+    );
+  if (input.preserveInputOrder !== true) {
+    selected.sort((left, right) =>
       compareAssistantInputCursors(left.event.cursor, right.event.cursor)
-    )
-    .slice(0, limit);
+    );
+  }
+  const limited = selected.slice(0, limit);
 
   return {
-    inputs: selected,
-    nextCursor: selected.length > 0
-      ? selected[selected.length - 1]!.event.cursor
+    inputs: limited,
+    nextCursor: limited.length > 0
+      ? limited[limited.length - 1]!.event.cursor
       : input.afterCursor,
   };
 }

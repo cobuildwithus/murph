@@ -108,6 +108,9 @@ export interface AssistantInputSource {
   listNewConversationInputs(
     input: AssistantTurnConversationInputQuery,
   ): Promise<AssistantInputCandidateBatch>
+  // Exact admission sources may intentionally put a trusted system completion
+  // before a newer conversation input. Generic sources remain cursor ordered.
+  preserveInputCandidateOrder?: boolean
   refresh(
     input?: AssistantTurnInputRefreshInput,
   ): Promise<AssistantTurnInputRefreshResult>

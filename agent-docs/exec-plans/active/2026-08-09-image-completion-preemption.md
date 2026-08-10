@@ -22,18 +22,23 @@ Done:
 - Read the hosted runtime, security, reliability, verification, and completion workflow guidance.
 - Added a regression that failed with fresh conversation selected first and now proves the completion and fresh input enter one ordered Codex batch.
 - Replaced the boolean wake hint with exact staged completion input ids and updated the architecture and invariant contracts.
+- Remediated both exact-head ReviewGPT findings: production selectors and the assistant scanner now preserve the trusted completion-first batch, and readiness remains visible until the provider-acceptance boundary so shutdown can checkpoint an immediate retry.
+- Added focused route-isolation, current-input-authority, provider-order, and shutdown-handoff proof; focused engine/runtime suites and package typechecks pass.
 
 Now:
-- Run focused runtime tests, typecheck, and diff review.
+- Commit and push the corrected candidate head, then update the PR evidence.
 
 Next:
-- Push an exact PR head and run the required specialist and final ReviewGPT gates concurrently with CI.
+- Run final ReviewGPT round 2 and required CI against the corrected exact head, resolve any findings, and complete the parent review.
 
 Open questions (UNCONFIRMED if needed):
 - None.
 
 Working set (files/ids/commands):
 - `packages/assistant-runtime/src/hosted-runtime.ts`
+- `packages/assistant-runtime/src/hosted-runtime/turn-input.ts`
+- `packages/assistant-engine/src/assistant/automation/grouping.ts`
+- `packages/assistant-engine/src/assistant/automation/scanner.ts`
 - `packages/assistant-runtime/src/hosted-runtime/image-generation.ts`
 - `packages/assistant-runtime/test/hosted-runtime-image-generation.test.ts`
 - `packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts`

@@ -2093,6 +2093,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       acceptedInputContext.conversationActivity,
                     );
                   }
+                  consumeReadyImageCompletionInputs(assistantInputIds);
                   return () => {
                     currentAssistantInputId = null;
                   };
@@ -2800,6 +2801,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               ...stagedInputIds,
             ],
             emailDeliveryContexts: [],
+            hostedImageCompletionInputIds: [
+              ...(readyImageCompletionInputBatch
+                ?.hostedImageCompletionInputIds ?? []),
+              ...stagedInputIds,
+            ],
             linqDeliveryContexts: [],
           };
         }
@@ -2811,7 +2817,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (!completionBatch || completionBatch.assistantInputIds.length === 0) {
           return batch;
         }
-        readyImageCompletionInputBatch = null;
         if (!batch || batch.assistantInputIds.length === 0) {
           return completionBatch;
         }
@@ -2834,24 +2839,56 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   }
                 : {}),
             }));
+        const completionInputIdSet = new Set(
+          completionBatch.assistantInputIds,
+        );
+        const combinedRecords = [
+          ...readBatchRecords(completionBatch),
+          ...readBatchRecords(batch).filter((record) =>
+            !completionInputIdSet.has(record.assistantInputId)
+          ),
+        ];
+        const combinedInputIdSet = new Set(
+          combinedRecords.map((record) => record.assistantInputId),
+        );
         return {
-          assistantInputIds: [
-            ...completionBatch.assistantInputIds,
-            ...batch.assistantInputIds,
-          ],
-          assistantInputRecords: [
-            ...readBatchRecords(completionBatch),
-            ...readBatchRecords(batch),
-          ],
-          emailDeliveryContexts: [
-            ...completionBatch.emailDeliveryContexts,
-            ...batch.emailDeliveryContexts,
-          ],
-          linqDeliveryContexts: [
-            ...completionBatch.linqDeliveryContexts,
-            ...batch.linqDeliveryContexts,
-          ],
+          assistantInputIds: combinedRecords.map((record) =>
+            record.assistantInputId
+          ),
+          assistantInputRecords: combinedRecords,
+          emailDeliveryContexts: combinedRecords.flatMap((record) =>
+            record.emailDeliveryContext ? [record.emailDeliveryContext] : []
+          ),
+          hostedImageCompletionInputIds: [...new Set([
+            ...(completionBatch.hostedImageCompletionInputIds ?? []),
+            ...(batch.hostedImageCompletionInputIds ?? []),
+          ])].filter((inputId) => combinedInputIdSet.has(inputId)),
+          linqDeliveryContexts: combinedRecords.flatMap((record) =>
+            record.linqDeliveryContext ? [record.linqDeliveryContext] : []
+          ),
         };
+      };
+      const consumeReadyImageCompletionInputs = (
+        acceptedInputIds: readonly string[],
+      ): void => {
+        const readyBatch = readyImageCompletionInputBatch;
+        if (!readyBatch) {
+          return;
+        }
+        const acceptedInputIdSet = new Set(acceptedInputIds);
+        const retainedInputIds = readyBatch.assistantInputIds.filter(
+          (inputId) => !acceptedInputIdSet.has(inputId),
+        );
+        if (retainedInputIds.length === readyBatch.assistantInputIds.length) {
+          return;
+        }
+        readyImageCompletionInputBatch = retainedInputIds.length === 0
+          ? null
+          : {
+              ...readyBatch,
+              assistantInputIds: retainedInputIds,
+              hostedImageCompletionInputIds: retainedInputIds,
+            };
       };
       const absorbForegroundPassResult = (
         passResult: HostedWorkspaceRunnerResult,
@@ -3104,6 +3141,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return passResult;
       };
       const runForegroundMailboxWakeIfWork = async (input: {
+        includeReadyImageCompletion?: boolean;
         latencySeed: HostedRuntimeWakeLatencySeed | null;
         rearmIdleCheckpointAfterEmptyProbe: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
@@ -3298,6 +3336,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
           importForegroundMailboxItem,
         );
+        if (input.includeReadyImageCompletion === true) {
+          invocationLocalAssistantInputBatch =
+            prependReadyImageCompletionInputs(
+              invocationLocalAssistantInputBatch,
+            );
+        }
         const shouldRunConversationAssistant = shouldContinue() && (
           input.runAssistantWithoutMailboxWork === true
           || hostedAssistantInputBatchHasWork(
@@ -3421,15 +3465,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           && (wakeOptions.shouldContinue?.() ?? true)
           && hostedAssistantInputBatchHasWork(readyImageCompletionInputBatch)
         ) {
-          const completionInputBatch = prependReadyImageCompletionInputs(null);
-          await runForegroundPass({
-            initialAssistantInputBatch: completionInputBatch,
-            initialMailboxImportLanes: [],
+          return await runForegroundMailboxWakeIfWork({
+            includeReadyImageCompletion: true,
             latencySeed,
+            rearmIdleCheckpointAfterEmptyProbe:
+              wakeOptions.rearmIdleCheckpointAfterEmptyProbe === true,
             requestIdKind: "checkpoint-interrupt",
+            runAssistantWithoutMailboxWork: true,
+            shouldContinue: wakeOptions.shouldContinue,
             signal: wakeOptions.signal,
+            systemMailboxAdmission: "pre_checkpoint_safe",
           });
-          return true;
         }
         const ran = await runForegroundMailboxWakeIfWork({
           latencySeed,
