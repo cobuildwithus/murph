@@ -2,6 +2,9 @@ import type { Prisma } from "@prisma/client";
 
 import { generateHostedRandomPrefixedId } from "../primitives";
 import {
+  readHostedUsageCreditGrantCapacityTx,
+} from "./usage-credit-grant-capacity";
+import {
   applyHostedUsageCreditProjectionDeltaTx,
   assertHostedUsageCreditDate,
   reconcileHostedUsageCreditCurrentPeriodBlockTx,
@@ -62,9 +65,14 @@ export async function appendHostedUsageCreditGrantTx(input: {
     select: {
       amountUsdMicros: true,
       beneficiaryMemberId: true,
+      beneficiarySequence: true,
       effectiveAt: true,
       grant: {
-        select: { remainingUsdMicros: true },
+        select: {
+          beneficiaryMemberId: true,
+          beneficiarySequence: true,
+          remainingUsdMicros: true,
+        },
       },
       id: true,
       kind: true,
@@ -84,6 +92,9 @@ export async function appendHostedUsageCreditGrantTx(input: {
       existing.amountUsdMicros !== input.grantUsdMicros
       || existing.beneficiaryMemberId
         !== input.lockedBeneficiary.beneficiaryMemberId
+      || !existing.grant
+      || existing.grant.beneficiaryMemberId !== existing.beneficiaryMemberId
+      || existing.grant.beneficiarySequence !== existing.beneficiarySequence
       || existing.effectiveAt.getTime() !== input.effectiveAt.getTime()
       || existing.kind !== expectedKind
       || existing.parentGrantEntryId !== null
@@ -95,7 +106,6 @@ export async function appendHostedUsageCreditGrantTx(input: {
         !== (input.source.kind === "starter"
           ? input.source.sourceReferenceLookupKey
           : null)
-      || !existing.grant
       || existing.grant.remainingUsdMicros < 0n
       || existing.grant.remainingUsdMicros > existing.amountUsdMicros
     ) {
@@ -107,6 +117,30 @@ export async function appendHostedUsageCreditGrantTx(input: {
       granted: false,
       ledgerVersion: input.lockedBeneficiary.ledgerVersion,
     };
+  }
+
+  const capacity = await readHostedUsageCreditGrantCapacityTx({
+    ...(input.source.kind === "purchase"
+      ? { expectedPurchaseId: input.source.purchaseId }
+      : {}),
+    lockedBeneficiary: input.lockedBeneficiary,
+    tx: input.tx,
+  });
+  if (capacity.state === "overflow") {
+    throw new TypeError(
+      "Hosted usage-credit active grant capacity exceeds its contract.",
+    );
+  }
+  if (input.source.kind === "purchase") {
+    if (!capacity.expectedPurchaseOwnsReservation) {
+      throw new TypeError(
+        "Hosted usage-credit purchase grant reservation is missing.",
+      );
+    }
+  } else if (capacity.state === "at_capacity") {
+    throw new TypeError(
+      "Hosted usage-credit active grant capacity is full.",
+    );
   }
 
   const projection = await applyHostedUsageCreditProjectionDeltaTx({
@@ -140,6 +174,8 @@ export async function appendHostedUsageCreditGrantTx(input: {
   });
   await input.tx.hostedUsageCreditGrant.create({
     data: {
+      beneficiaryMemberId: projection.beneficiaryMemberId,
+      beneficiarySequence: projection.ledgerVersion,
       entryId,
       remainingUsdMicros: input.grantUsdMicros,
     },

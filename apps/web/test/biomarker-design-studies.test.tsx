@@ -214,6 +214,10 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).toContain("Preview WHOOP completion");
   expect(componentsMarkup).toContain("Preview capacity fallback");
   expect(componentsMarkup).toContain("Preview capacity fallback without contact route");
+  expect(componentsMarkup).toContain("Preview capacity response");
+  expect(componentsMarkup).toContain(
+    'data-design-state="usage-top-up-capacity-conflict"',
+  );
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-preparing"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-index"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
