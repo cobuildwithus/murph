@@ -4,4 +4,4 @@ export const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica" as con
  * Increment when a projection-shape or projection-interpretation change makes
  * an otherwise source-current browser replica incomplete for current readers.
  */
-export const BROWSER_VAULT_REPLICA_CURRENT_GENERATION = 3 as const;
+export const BROWSER_VAULT_REPLICA_CURRENT_GENERATION = 4 as const;
