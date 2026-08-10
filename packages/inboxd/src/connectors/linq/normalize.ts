@@ -487,6 +487,7 @@ function buildLinqCaptureRawMetadata(input: {
   let linkPartCount = 0;
   let mediaPartCount = 0;
   let voiceMemoPartCount = 0;
+  let imessageAppPartCount = 0;
   const attachments: Array<Record<string, unknown>> = [];
 
   for (const part of input.parts) {
@@ -497,6 +498,11 @@ function buildLinqCaptureRawMetadata(input: {
 
     if (part.type === "link") {
       linkPartCount += 1;
+      continue;
+    }
+
+    if (part.type === "imessage_app") {
+      imessageAppPartCount += 1;
       continue;
     }
 
@@ -541,6 +547,9 @@ function buildLinqCaptureRawMetadata(input: {
 
   if (input.eventId) {
     raw.event_id = input.eventId;
+  }
+  if (imessageAppPartCount > 0) {
+    raw.imessage_app_part_count = imessageAppPartCount;
   }
   if (input.service) {
     raw.service = input.service;

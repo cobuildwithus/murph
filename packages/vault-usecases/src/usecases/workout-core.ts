@@ -5,6 +5,7 @@ import type {
   RawImportKind,
 } from '@murphai/contracts'
 import type {
+  CanonicalMutationResource,
   EventAttachmentSourceInput,
   EventDraftByKind,
 } from '@murphai/core'
@@ -24,6 +25,15 @@ export interface WorkoutRawImportOptions {
 }
 
 export interface WorkoutCoreRuntime {
+  canonicalLogicalResource(
+    key: string,
+    label?: string,
+  ): CanonicalMutationResource
+  withCanonicalResourceLocks<TResult>(input: {
+    vaultRoot: string
+    resources: readonly CanonicalMutationResource[]
+    run: () => Promise<TResult>
+  }): Promise<TResult>
   addActivitySession(input: {
     vaultRoot: string
     draft: ActivitySessionDraftInput
