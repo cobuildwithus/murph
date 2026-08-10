@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — ReviewGPT round 8 authorized; exact-head packaging retry
+Status: active — ReviewGPT round 8 finding and current-main conflicts under remediation
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -379,3 +379,37 @@ Updated: 2026-08-10
   packager was building the preceding behavior head, so the ZIP correctly
   rejected its old diff/new plan-file mismatch before substantive review. Retry
   round 8 only from one clean, stable, exact pushed head.
+- The valid round-8 full audit found one review-induced delivery bypass. A
+  trusted ready completion could finish without attaching its exact capture,
+  retain provider continuity, and leave no generated-image marker. The later
+  avatar verifier intentionally permits markerless ordinary captures, so the
+  retained generated ref could cross publication without outbox visibility.
+- The correction keeps the existing transcript and outbox owners. Every trusted
+  ready completion now persists the existing exact provenance marker; attached
+  media keeps its actual delivery ordinal, while an unattached completion uses
+  the completion turn's response ordinal. The marker still authorizes nothing,
+  and an empty or mismatched outbox therefore rejects the generated ref. Focused
+  proof covers no-reply continuity, exact marker persistence, empty-outbox
+  rejection, mismatched response media, and the existing group boundary before
+  publication or mutation.
+- Current `main` introduced four textual conflicts. The hosted-image test keeps
+  both the branch's bounded completion-copy assertions and main's origin-parser
+  assertions. Runner-bundle policy temporarily keeps the larger previously
+  measured branch ceilings until exact post-merge assembly remeasures the
+  combined graph. The generated CLI hash will be regenerated from the resolved
+  built tree rather than choosing either stale side.
+- The first exact post-merge assembly stopped at the Vault CLI size guard:
+  9,028,740 bytes exceeded the historical 9,000,000-byte ceiling. The measured
+  growth is the combination of this PR's reviewed generated-image continuity
+  and main's shipped Health Commons knowledge command; both remain lazy CLI
+  capabilities and no new package entered the graph. Recovering 28,740 bytes
+  would require deleting part of either current feature, so the deliberate
+  correction raises the ceiling to 9,100,000 bytes, which remains below the
+  guard's original 30-percent headroom policy. Exact assemble-only proof must
+  still pass the CLI and runner entrypoint graph guards before push.
+- Exact assemble-only proof then passed: Vault CLI 9,028,740 of 9,100,000
+  bytes; runner entry 1,670,920 bytes, static closure 8,041,446 bytes, and total
+  10,022,379 bytes. The combined total becomes the new measured runner baseline
+  with the existing 32 KiB reviewed-addition allowance; the entry and static
+  measurements remain inside their established tolerances and no forbidden
+  boot input entered the graph.

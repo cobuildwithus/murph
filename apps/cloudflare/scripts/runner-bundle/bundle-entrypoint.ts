@@ -176,12 +176,23 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // full hosted-local assembly measured a 8,016,324B static closure and
 // 9,994,142B total on 2026-08-09. Ratchet both measurements while retaining
 // the established cross-platform tolerances and reviewed-addition allowance.
+// Adding the single-message group offer, exact reply ownership, and weekly
+// contextualization instructions grows only that lazy assistant output. Exact
+// ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
+// baselines and established total tolerance.
+//
 // Subsequent reviewed biomarker ranges, hosted
 // runtime-control compaction, and named-diet guidance moved exact ubuntu total
 // output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
-// remain below the generated-image continuity ceilings and no forbidden
-// subsystem enters the boot graph, so keep the larger reviewed measurements.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_994_142 + 32_768;
+// remain within their existing ceilings and no forbidden subsystem enters the
+// boot graph, so ratchet only the total ceiling and keep both startup baselines
+// and all tolerances.
+//
+// Bounded group-tool failure diagnostics, the strict included-usage read,
+// mainline Health Commons knowledge, and generated-image continuity measured a
+// 10,022,379B total in exact post-merge assembly on 2026-08-10. Ratchet to the
+// combined measurement and retain the established reviewed-addition allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_022_379 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_016_324;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

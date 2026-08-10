@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  parseAssistantHostedImageCompletionOriginText,
   parseAssistantHostedImageCompletionText,
   renderAssistantHostedImageCompletionSystemText,
 } from '../src/assistant/hosted-image-completion.js'
@@ -43,6 +44,11 @@ describe('hosted image completion', () => {
     expect(text).not.toContain('provider conversation')
     expect(text).not.toContain('group-avatar')
     expect(text).not.toContain('mutation authority')
+    expect(parseAssistantHostedImageCompletionOriginText(text)).toEqual({
+      originAssistantInputId: `ain_${'a'.repeat(32)}`,
+      originAssistantInputIdExact: true,
+      status: 'ready',
+    })
   })
 
   it('rejects a mismatched saved ref', () => {
@@ -116,5 +122,10 @@ describe('hosted image completion', () => {
       'Continue the pending task with the exact saved image.',
     )
     expect(parseAssistantHostedImageCompletionText(text)).toBeNull()
+    expect(parseAssistantHostedImageCompletionOriginText(text)).toEqual({
+      originAssistantInputId: `ain_${'c'.repeat(32)}`,
+      originAssistantInputIdExact: false,
+      status: 'failed',
+    })
   })
 })

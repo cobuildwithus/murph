@@ -464,7 +464,12 @@ async function resolveAssistantGeneratedImageDeliveryTranscriptEntries(input: {
     )
   }
   if (deliveryContextOrdinals.size === 0) {
-    return []
+    // This marker records trusted generated provenance, not delivery. A ready
+    // completion may retain provider continuity while finishing without an
+    // attachment; the outbox join independently proves later visibility.
+    deliveryContextOrdinals.add(
+      input.providerResult.responseDeliveryContextOrdinal,
+    )
   }
   const markers = [...deliveryContextOrdinals].sort((left, right) =>
     left - right

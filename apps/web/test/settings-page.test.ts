@@ -53,10 +53,10 @@ const mocks = vi.hoisted(() => ({
     }
     if (
       input?.message?.body
-        === "Hey Murph, what usage missions can I choose from?"
+        === "Hey Murph, what referral options can I choose from?"
     ) {
       return [{
-        href: "sms:+15550100001?body=Hey%20Murph%2C%20what%20usage%20missions%20can%20I%20choose%20from%3F",
+        href: "sms:+15550100001?body=Hey%20Murph%2C%20what%20referral%20options%20can%20I%20choose%20from%3F",
         kind: "text",
         label: "Messages",
       }];
@@ -999,7 +999,7 @@ test("SettingsPage reads the app session and persisted account settings into the
         status: "in_progress",
         statusLabel: "In progress",
         timingLabel: "Ends Aug 3, 2026",
-        title: "Start an active group",
+        title: "Start a group conversation",
       },
     ],
     missionsEnabled: true,
@@ -1186,7 +1186,7 @@ test("SettingsPage reads the app session and persisted account settings into the
         text: true,
       },
       message: {
-        body: "Hey Murph, what usage missions can I choose from?",
+        body: "Hey Murph, what referral options can I choose from?",
       },
       murphEmailAddress: null,
       murphPhoneNumber: "+15550100001",
@@ -1196,7 +1196,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith({
       activity: usageActivity,
       missionContactOption: {
-        href: "sms:+15550100001?body=Hey%20Murph%2C%20what%20usage%20missions%20can%20I%20choose%20from%3F",
+        href: "sms:+15550100001?body=Hey%20Murph%2C%20what%20referral%20options%20can%20I%20choose%20from%3F",
         kind: "text",
         label: "Messages",
       },
@@ -2292,7 +2292,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
         text: false,
       },
       message: {
-        body: "Hey Murph, what usage missions can I choose from?",
+        body: "Hey Murph, what referral options can I choose from?",
       },
     }),
   );

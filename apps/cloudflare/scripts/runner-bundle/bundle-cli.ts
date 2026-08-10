@@ -71,7 +71,11 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // baseline + ~25-30% headroom. If a violation fires, investigate the listed
 // largest inputs first; only raise the budget deliberately for growth that
 // is understood and intended.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_000_000;
+// Merging the reviewed generated-image continuity surface with the mainline
+// Health Commons knowledge command measured 9,028,740B on 2026-08-10. Both are
+// intentional lazy CLI capabilities and no new package enters the graph, so
+// retain the original sub-30% headroom policy with a 9.1MB ceiling.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_100_000;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
 // Known divergence the parity battery cannot reach (it would need a live
