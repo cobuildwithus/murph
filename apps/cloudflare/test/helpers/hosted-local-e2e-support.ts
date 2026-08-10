@@ -393,16 +393,32 @@ function readMurphDynamicToolAdvertisement(body: string): {
     }
   }
 
-  const murphNamespace = candidateToolLists
-    .flat()
-    .find((tool): tool is { tools?: unknown } =>
+  const directToolCandidates = candidateToolLists.flat();
+  const functionsNamespace = directToolCandidates.find(
+    (tool): tool is { tools?: unknown } =>
+      Boolean(
+        tool
+        && typeof tool === "object"
+        && (tool as { type?: unknown }).type === "namespace"
+        && (tool as { name?: unknown }).name === "functions",
+      ),
+  );
+  const toolCandidates = [
+    ...directToolCandidates,
+    ...(functionsNamespace && Array.isArray(functionsNamespace.tools)
+      ? functionsNamespace.tools
+      : []),
+  ];
+
+  const murphNamespace = toolCandidates.find(
+    (tool): tool is { tools?: unknown } =>
       Boolean(
         tool
         && typeof tool === "object"
         && (tool as { type?: unknown }).type === "namespace"
         && (tool as { name?: unknown }).name === "murph",
-      )
-    );
+      ),
+  );
   const names = new Set<string>();
   if (murphNamespace && Array.isArray(murphNamespace.tools)) {
     for (const tool of murphNamespace.tools) {
@@ -416,8 +432,7 @@ function readMurphDynamicToolAdvertisement(body: string): {
     }
   }
 
-  const execDescriptions = candidateToolLists
-    .flat()
+  const execDescriptions = toolCandidates
     .filter((tool): tool is { description?: unknown } =>
       Boolean(
         tool
