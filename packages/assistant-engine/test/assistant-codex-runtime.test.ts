@@ -8159,6 +8159,154 @@ describe('assistant codex runtime', () => {
     expect(progressUpdates).toEqual(['Starting early work'])
   })
 
+  it('attributes only post-start unscoped reroutes on a reused warm process', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-warm-reroute-work-')
+    const codexHome = await createTempDir('assistant-codex-warm-reroute-home-')
+    const onTraceEvent = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-warm-reroute',
+            turnId: 'turn-warm-reroute-1',
+          })
+          writeCodexV2AssistantEventTurn({
+            child,
+            finalMessage: 'First warm turn complete',
+            threadId: 'thread-warm-reroute',
+            turnId: 'turn-warm-reroute-1',
+          })
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: { id: 'thread-warm-reroute' },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: { id: 'turn-warm-reroute-2' },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'model/rerouted',
+            params: { toModel: 'gpt-5.6-terra' },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              threadId: 'thread-warm-reroute',
+              turn: { id: 'turn-warm-reroute-2' },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'model/rerouted',
+            params: { toModel: 'gpt-5.6-sol' },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId: 'thread-warm-reroute',
+              tokenUsage: {
+                last: {
+                  cacheWriteInputTokens: 0,
+                  cachedInputTokens: 12,
+                  inputTokens: 120,
+                  outputTokens: 45,
+                  reasoningOutputTokens: 8,
+                  totalTokens: 165,
+                },
+                modelContextWindow: 258_400,
+                total: {
+                  cacheWriteInputTokens: 0,
+                  cachedInputTokens: 12,
+                  inputTokens: 120,
+                  outputTokens: 45,
+                  reasoningOutputTokens: 8,
+                  totalTokens: 165,
+                },
+              },
+              turnId: 'turn-warm-reroute-2',
+            },
+          }))
+          writeCodexV2AssistantEventTurn({
+            child,
+            finalMessage: 'Current turn used the rerouted model',
+            threadId: 'thread-warm-reroute',
+            turnId: 'turn-warm-reroute-2',
+          })
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: { PATH: '/custom/bin' },
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+    await expect(executeCodexAppServerTurn({
+      ...stableInput,
+      prompt: 'seed the warm process',
+    })).resolves.toMatchObject({
+      sessionId: 'thread-warm-reroute',
+      turnId: 'turn-warm-reroute-1',
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...stableInput,
+      onTraceEvent,
+      prompt: 'use the current rerouted model',
+    })
+
+    expect(result).toMatchObject({
+      finalMessage: 'Current turn used the rerouted model',
+      sessionId: 'thread-warm-reroute',
+      turnId: 'turn-warm-reroute-2',
+    })
+    expect(result.jsonEvents.filter(
+      (event) => isTestRecord(event) && asRecord(event).method === 'model/rerouted',
+    )).toEqual([
+      {
+        method: 'model/rerouted',
+        params: { toModel: 'gpt-5.6-sol' },
+      },
+    ])
+    expect(onTraceEvent).toHaveBeenCalledWith(expect.objectContaining({
+      rawEvent: {
+        method: 'model/rerouted',
+        params: { toModel: 'gpt-5.6-sol' },
+      },
+      updates: [{
+        kind: 'status',
+        mode: 'replace',
+        streamKey: 'status:model-reroute',
+        text: 'Switched to gpt-5.6-sol.',
+      }],
+    }))
+    expect(onTraceEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      rawEvent: {
+        method: 'model/rerouted',
+        params: { toModel: 'gpt-5.6-terra' },
+      },
+    }))
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+  })
+
   it('ignores stale same-thread messages tagged with an older turn id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-stale-turn-id-work-')
     const codexHome = await createTempDir('assistant-codex-local-stale-turn-id-home-')

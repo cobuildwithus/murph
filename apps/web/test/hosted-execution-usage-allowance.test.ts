@@ -465,6 +465,38 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("prices canonical model reroutes from the served model", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-5.6-luna",
+      servedModel: "gpt-5.6-sol",
+    })).toMatchObject({
+      costUsdMicros: 1_896n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-sol",
+        modelSource: "served",
+        requestedModel: "gpt-5.6-luna",
+        servedModel: "gpt-5.6-sol",
+      },
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-5.6-sol",
+      servedModel: "gpt-5.6-luna",
+    })).toMatchObject({
+      costUsdMicros: 77n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-luna",
+        modelSource: "served",
+        requestedModel: "gpt-5.6-sol",
+        servedModel: "gpt-5.6-luna",
+      },
+    });
+  });
+
   it("prices Venice GPT-5.6 usage at Venice's official provider rates", () => {
     const cases = [
       {

@@ -435,6 +435,175 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
+  it.each([
+    {
+      requestedModel: 'gpt-5.6-luna',
+      servedModel: 'gpt-5.6-sol',
+    },
+    {
+      requestedModel: 'gpt-5.6-sol',
+      servedModel: 'gpt-5.6-luna',
+    },
+  ])(
+    'attributes canonical $requestedModel reroutes to served $servedModel',
+    ({ requestedModel, servedModel }) => {
+      const usage = extractExactCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: requestedModel,
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          {
+            method: 'turn/started',
+            params: {
+              threadId: 'thread-rerouted-usage',
+              turn: { id: 'turn-rerouted-usage' },
+            },
+          },
+          {
+            method: 'model/rerouted',
+            params: { toModel: servedModel },
+          },
+          {
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId: 'thread-rerouted-usage',
+              tokenUsage: {
+                last: {
+                  cacheWriteInputTokens: 0,
+                  cachedInputTokens: 12,
+                  inputTokens: 120,
+                  outputTokens: 45,
+                  reasoningOutputTokens: 8,
+                  totalTokens: 165,
+                },
+                modelContextWindow: 258_400,
+                total: {
+                  cacheWriteInputTokens: 0,
+                  cachedInputTokens: 12,
+                  inputTokens: 120,
+                  outputTokens: 45,
+                  reasoningOutputTokens: 8,
+                  totalTokens: 165,
+                },
+              },
+              turnId: 'turn-rerouted-usage',
+            },
+          },
+          {
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-rerouted-usage',
+              turn: {
+                id: 'turn-rerouted-usage',
+                status: 'completed',
+              },
+            },
+          },
+        ],
+      })
+
+      expect(usage).toMatchObject({
+        inputTokens: 120,
+        outputTokens: 45,
+        requestedModel,
+        servedModel,
+      })
+    },
+  )
+
+  it('ignores a canonical reroute that precedes the current turn boundary', () => {
+    const usage = extractExactCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'gpt-5.6-luna',
+        modelProvider: 'openai',
+        oss: false,
+      }),
+      rawEvents: [
+        {
+          method: 'model/rerouted',
+          params: { toModel: 'gpt-5.6-sol' },
+        },
+        {
+          method: 'turn/started',
+          params: {
+            threadId: 'thread-current-usage',
+            turn: { id: 'turn-current-usage' },
+          },
+        },
+        {
+          method: 'turn/completed',
+          params: {
+            threadId: 'thread-current-usage',
+            turn: {
+              id: 'turn-current-usage',
+              status: 'completed',
+            },
+          },
+        },
+      ],
+    })
+
+    expect(usage).toMatchObject({
+      requestedModel: 'gpt-5.6-luna',
+      servedModel: 'gpt-5.6-luna',
+    })
+  })
+
+  it.each([
+    {
+      expectedPricingBasis: 'openai-flex' as const,
+      requestedModel: 'gpt-5.4-mini',
+      servedModel: 'gpt-5.6-sol',
+    },
+    {
+      expectedPricingBasis: 'standard' as const,
+      requestedModel: 'gpt-5.6-sol',
+      servedModel: 'gpt-5.4-mini',
+    },
+  ])(
+    'derives $expectedPricingBasis pricing from rerouted $servedModel',
+    ({ expectedPricingBasis, requestedModel, servedModel }) => {
+      const usage = extractExactCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: requestedModel,
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          {
+            method: 'turn/started',
+            params: { turn: { id: 'turn-rerouted-pricing' } },
+          },
+          {
+            method: 'model/rerouted',
+            params: { toModel: servedModel },
+          },
+          {
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-rerouted-pricing',
+                status: 'completed',
+              },
+            },
+          },
+        ],
+        serviceTier: 'flex',
+      })
+
+      expect(usage).toMatchObject({
+        requestedModel,
+        servedModel,
+        tokenPricingBasis: expectedPricingBasis,
+      })
+    },
+  )
+
   it('uses OpenAI flex token pricing only for requested flex on supported OpenAI models', () => {
     const codexSettingsFlexEvent = {
       method: 'thread/settings/updated',

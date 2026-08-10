@@ -339,6 +339,10 @@ export function extractCodexAssistantProviderUsage(input: {
     ? input.providerConfig.target.modelProvider
     : null
   const requestedModel = input.providerConfig.target.model
+  const servedModel = findAssistantCodexCurrentTurnReroutedModel({
+    rawEvents: input.rawEvents,
+    turnId,
+  }) ?? requestedModel
 
   return {
     apiKeyEnv: null,
@@ -356,9 +360,9 @@ export function extractCodexAssistantProviderUsage(input: {
       : null,
     reasoningTokens: usage?.reasoningOutputTokens ?? null,
     requestedModel,
-    servedModel: requestedModel,
+    servedModel,
     tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
-      model: requestedModel,
+      model: servedModel,
       modelProvider: providerName,
       serviceTier: input.serviceTier ?? null,
     }),
@@ -367,6 +371,54 @@ export function extractCodexAssistantProviderUsage(input: {
     usageExtractionSourcePath: usageSource?.sourcePath ?? null,
     usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
   }
+}
+
+function findAssistantCodexCurrentTurnReroutedModel(input: {
+  rawEvents: readonly unknown[]
+  turnId: string | null
+}): string | null {
+  let currentTurnId = input.turnId
+  let currentTurnStarted = false
+  let servedModel: string | null = null
+
+  for (const rawEvent of input.rawEvents) {
+    const notification = readCodexServerNotification(rawEvent)
+    if (!notification) {
+      continue
+    }
+
+    if (notification.method === 'turn/started') {
+      const startedTurnId = readCodexNonEmptyString(
+        readCodexRecord(notification.params.turn)?.id,
+      )
+      if (startedTurnId) {
+        currentTurnId ??= startedTurnId
+        currentTurnStarted = startedTurnId === currentTurnId
+      }
+      continue
+    }
+
+    if (!currentTurnStarted) {
+      continue
+    }
+
+    if (notification.method === 'model/rerouted') {
+      servedModel = readCodexNonEmptyString(notification.params.toModel)
+        ?? servedModel
+      continue
+    }
+
+    if (notification.method === 'turn/completed') {
+      const completedTurnId = readCodexNonEmptyString(
+        readCodexRecord(notification.params.turn)?.id,
+      )
+      if (completedTurnId === currentTurnId) {
+        break
+      }
+    }
+  }
+
+  return servedModel
 }
 
 interface AssistantCodexTokenUsageEvent {

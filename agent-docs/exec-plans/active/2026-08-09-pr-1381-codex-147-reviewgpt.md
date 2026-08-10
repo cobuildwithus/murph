@@ -86,6 +86,10 @@ Updated: 2026-08-09
 - Treat `147` as the public package release `0.147.0`, matching the existing
   `0.147.0` versioning convention.
 - Use the PR's mandatory ReviewGPT lane instead of local deep-review.
+- Accept final ReviewGPT round 2's model-reroute usage finding. Keep the fix at
+  the existing invocation event owner: only a canonical reroute after the
+  matching `turn/started` changes the served model and pricing basis. Do not
+  restore deleted completion aliases or custom-inference compatibility paths.
 
 ## Verification
 
@@ -144,3 +148,16 @@ Updated: 2026-08-09
 - The rejected recovery UI is deleted, restoring a frontend-neutral PR; design
   catalog and screenshot proof are therefore not applicable to the current
   candidate.
+- Final ReviewGPT round 2 on `f18e3904ebc7` found that canonical
+  `model/rerouted` notifications were visible in progress but discarded during
+  usage extraction, so durable allowance pricing used the requested model. A
+  focused failing test reproduced both Luna-to-Sol and Sol-to-Luna
+  misattribution. The correction derives served-model identity and token
+  pricing only from a post-`turn/started` canonical reroute and preserves the
+  reused-process stale-event fence; focused verification and a new exact-head
+  review remain pending.
+- Exact-head GitHub Actions also exposed an inherited `main` regression from
+  the newly added static Family setup route: the fail-closed Vercel telemetry
+  allowlist had not added that literal pathname. The route and failing contract
+  both predate this remediation; the smallest CI repair adds the missing
+  sanitized static pathname without changing the page or telemetry payload.

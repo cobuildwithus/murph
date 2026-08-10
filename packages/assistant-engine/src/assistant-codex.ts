@@ -3142,6 +3142,7 @@ async function runCodexAppServerTurnOnProcess(
   let codexTimingTurnStartAckElapsedMs: number | null = null
   let codexTimingTurnStartedNotificationElapsedMs: number | null = null
   let codexTimingTurnCompletedNotificationElapsedMs: number | null = null
+  let currentTurnStartedNotificationObserved = false
   let liveInterruptRequested = false
 
   let completeTurn: (() => void) | null = null
@@ -4541,6 +4542,10 @@ async function runCodexAppServerTurnOnProcess(
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
+    if (isTurnStartedNotification) {
+      currentTurnStartedNotificationObserved =
+        turnId !== null && extractCodexTurnIdFromMessage(message) === turnId
+    }
     const shouldCaptureTurnStartedNotification =
       providerRequestStartedAtMs !== null &&
       isTurnStartedNotification &&
@@ -4976,7 +4981,19 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    if (isReusedWarmProcess && messageTurnId === null) {
+    if (
+      messageTurnId === null &&
+      method === 'model/rerouted' &&
+      !currentTurnStartedNotificationObserved
+    ) {
+      return
+    }
+
+    if (
+      isReusedWarmProcess &&
+      messageTurnId === null &&
+      method !== 'model/rerouted'
+    ) {
       return
     }
 
