@@ -8,6 +8,7 @@ export {
   requireHostedLinqParticipantChangedEvent,
   requireHostedLinqTypingIndicatorStartedEvent,
   requireHostedLinqMessageReceivedEvent,
+  inspectHostedLinqMessageReceivedParts,
   summarizeHostedLinqMessage,
   shouldIgnoreHostedLinqForLocalInboundGuard,
   parseHostedLinqWebhookEvent,
@@ -16,6 +17,7 @@ export {
 export type {
   HostedLinqMessageEditedEvent,
   HostedLinqMessageReceivedEvent,
+  HostedLinqMessageReceivedPartsInspection,
   HostedLinqParticipantChangedEvent,
   HostedLinqTypingIndicatorStartedEvent,
   HostedLinqWebhookEvent,

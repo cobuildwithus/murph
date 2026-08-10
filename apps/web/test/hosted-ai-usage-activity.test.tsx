@@ -24,6 +24,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-growth/signup-referral-policy", () => ({
+  HOSTED_SIGNUP_REFERRAL_POLICY_VERSION: SIGNUP_POLICY_VERSION,
   HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY: {
     requirementsLabel:
       "A new member completed Murph setup through your referral link.",
@@ -39,6 +40,7 @@ vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-growth/usage-referral-policy", () => ({
+  HOSTED_USAGE_REFERRAL_POLICY_VERSION: ORDINARY_POLICY_VERSION,
   isHostedUsageReferralEnabled: mocks.isReferralEnabled,
 }));
 
@@ -245,7 +247,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_pending",
-        rewardLabel: "$3.50",
+        rewardLabel: "About 14 more days of Murph usage",
         selectedLabel: "Jul 28, 2026",
         status: "reward_pending",
         statusLabel: "Reward pending",
@@ -254,7 +256,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_checking_final",
-        rewardLabel: "$3.50",
+        rewardLabel: "About 14 more days of Murph usage",
         selectedLabel: "Jul 28, 2026",
         status: "checking_final_activity",
         statusLabel: "Checking final activity",
@@ -263,7 +265,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_in_progress",
-        rewardLabel: "$3.50",
+        rewardLabel: "About 14 more days of Murph usage",
         selectedLabel: "Jul 27, 2026",
         status: "in_progress",
         statusLabel: "In progress",
@@ -272,7 +274,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "your Murph",
         id: "hur_waiting",
-        rewardLabel: "$2.00",
+        rewardLabel: "About 10 more days of Murph usage",
         selectedLabel: "Jul 26, 2026",
         status: "waiting_for_group",
         statusLabel: "Waiting for a new group",
@@ -281,7 +283,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "your Murph",
         id: "hur_completed",
-        rewardLabel: "$2.00",
+        rewardLabel: "About 10 more days of Murph usage",
         selectedLabel: "Jul 10, 2026",
         status: "completed",
         statusLabel: "Completed",
@@ -322,7 +324,7 @@ describe("readHostedAiUsageActivity", () => {
         id: "hur_signup_link",
         requirementsLabel:
           "A new member completed Murph setup through your referral link.",
-        rewardLabel: "$2.75",
+        rewardLabel: "About 12 more days of Murph usage",
         title: "Invite someone to Murph",
       }),
     ]);
@@ -507,7 +509,7 @@ describe("HostedAiUsageActivity", () => {
             destinationLabel: "the group",
             id: "mission_1",
             requirementsLabel: "Start a fresh group and get people talking.",
-            rewardLabel: "$3.50",
+            rewardLabel: "About 14 more days of Murph usage",
             selectedLabel: "Jul 27, 2026",
             status: "in_progress",
             statusLabel: "In progress",
@@ -518,7 +520,7 @@ describe("HostedAiUsageActivity", () => {
             destinationLabel: "your Murph",
             id: "mission_completed",
             requirementsLabel: "Invite someone.",
-            rewardLabel: "$2.00",
+            rewardLabel: "About 10 more days of Murph usage",
             selectedLabel: "Jul 10, 2026",
             status: "completed",
             statusLabel: "Completed",
@@ -545,13 +547,13 @@ describe("HostedAiUsageActivity", () => {
     );
     assert.match(markup, /aria-label="Current usage referrals"/);
     assert.match(markup, /Start an active group/);
-    assert.match(markup, /\$3\.50/);
+    assert.match(markup, /About 14 more days of Murph usage/);
     assert.match(markup, />History</);
     assert.match(markup, /aria-label="Usage activity history"/);
     assert.match(markup, /Invite someone to Murph/);
     assert.match(markup, /Usage purchase/);
     assert.match(markup, /Purchased by you/);
-    assert.doesNotMatch(markup, /Remaining|\$6\.42|<table/);
+    assert.doesNotMatch(markup, /Remaining|\$3\.50|\$6\.42|<table/);
     const detailOpeningTags = markup.match(/<details\b[^>]*>/gu) ?? [];
     assert.equal(detailOpeningTags.length, 2);
     detailOpeningTags.forEach((openingTag) => {
@@ -576,7 +578,7 @@ describe("HostedAiUsageActivity", () => {
       destinationLabel: "the group",
       id,
       requirementsLabel: `Requirements for ${statusLabel}`,
-      rewardLabel: "$3.50",
+      rewardLabel: "About 14 more days of Murph usage",
       selectedLabel: "Jul 27, 2026",
       status,
       statusLabel,
@@ -622,7 +624,7 @@ describe("HostedAiUsageActivity", () => {
           destinationLabel: "your Murph",
           id: "mission_completed",
           requirementsLabel: "Complete the selected mission.",
-          rewardLabel: "$2.00",
+          rewardLabel: "About 10 more days of Murph usage",
           selectedLabel: "Jul 10, 2026",
           status: "completed",
           statusLabel: "Completed",

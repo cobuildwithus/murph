@@ -55,6 +55,21 @@ export function logHostedOnboardingDiagnostic(
   });
 }
 
+export function logHostedOnboardingWarning(
+  name: string,
+  details: HostedOnboardingStructuredLogDetails = {},
+): void {
+  const warning =
+    sanitizeHostedOnboardingTimingLabel(
+      name,
+      HOSTED_ONBOARDING_TIMING_LABEL_MAX_LENGTH,
+    ) ?? "unknown";
+  console.warn(`Hosted onboarding warning: ${warning}.`, {
+    warning,
+    ...sanitizeHostedOnboardingStructuredLogDetails(details),
+  });
+}
+
 export function deriveHostedOnboardingTimingErrorName(error: unknown): string {
   if (error instanceof Error && error.name) {
     return error.name;

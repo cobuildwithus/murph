@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Current Repo Checks
 
@@ -32,6 +32,7 @@ Last verified: 2026-08-07
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/initial-onboarding-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for initial-onboarding rollout compatibility and first-writer-wins serialization. The suite rejects non-loopback database URLs and runs after migrations. | The exact migration SQL backfills existing rows, its temporary default completes a legacy omitted-column insert, the current explicit-null insert stays pending, and independent Web-save/iOS-skip Prisma transactions serialize in both controlled winner orderings without loser preference overwrite |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for deterministic hosted usage replay. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | A first writer holds an uncommitted deterministic usage row while an exact concurrent replay waits; both transactions complete after release and the ledger retains one immutable row |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-accepted-attempt-recheck-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof that the accepted-attempt recheck cooldown elects one owner. The claim replaced a runtime-log-row election, so exactly-one-winner is now PostgreSQL conditional-update semantics rather than application logic. Runs in the hosted E2E PostgreSQL job after migrations. | Two concurrent claims at the same logical time yield exactly one winner; a claim at the cooldown boundary is denied; a claim past the boundary succeeds |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-workspace-checkpoint-postgres.test.ts` | Opt-in real-PostgreSQL proof for the Web-owned workspace checkpoint CAS and its atomic set-based mailbox acknowledgement. The suite rejects non-loopback database URLs and runs after migrations. | A successful versioned workspace update returns the successor and replaced snapshot; exact same-user conversation items stamp only within lane, kind, and imported bounds; live gaps stop the contiguous replay floor while expired or retention-old rows do not; system and conversation counters stay monotonic and within append high-water; CAS loss changes no dependent row; and a concurrent committed append is observed as `conversationInputAhead` without rejecting the checkpoint |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for hosted Linq proactive-capacity, edit-source, and member-route concurrency. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | One blind source-message key serializes concurrent edit lineage reads, while an edit racing an uncommitted ordinary source append sees the retryable missing-source state and resolves the source after commit; the final daily slot admits exactly one claim; concurrent direct-Telegram contact requests converge on one encrypted home-line assignment without a chat binding or proactive-capacity claim; activation, first-contact, reclassification, and participant routing serialize on the member owner; and real Telegram/Linq planners complete in both routing orders for already-active members and for an inbound reclassified after an uncommitted activation, while retaining both bindings and exactly one mailbox item per event |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-pending-group-setup-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the encrypted one-use next-Linq-group transfer envelope. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Two simultaneous group claims yield exactly one decrypted setup; exact restore preserves its payload, a stale restore cannot overwrite a replacement, corrupt ciphertext is consumed without blocking admission, a provider-correlated replacement-line intent retains the exact prepared owner when another roster member speaks first while rejecting a foreign roster and thread, the setup is consumed once, and deleting the owner cascades re-armed state |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-recent-message-load-postgres.test.ts` | Opt-in real-PostgreSQL proof for Hosted Linq recent line-load derivation and its bounded query plan. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Canonical accepted delivery and inbound-message ledgers count only effects in the inclusive trailing seven-day window, while the exact production query uses both partial `(line, time)` indexes under representative historical load |
@@ -529,12 +530,29 @@ supported provider credential.
   hours, while a fully stale trace is deleted.
 - `apps/cloudflare/test/database-health-{metrics,monitor,worker}.test.ts`
   covers the independent PlanetScale/Linq database-health plane. The tests
-  prove strict metric normalization and required-series failure, positive
-  direct-port counter deltas with reset/new-series suppression, SQLite sample
-  persistence and 30-day pruning, concrete connection thresholds, two-failure
-  collection hysteresis, failed-scrape incident preservation, recovery reset,
-  global 30-minute wall-time provider-attempt pacing across incident recovery,
-  current actual-check-time and rotated evidence-bearing recurrence copy,
+  prove strict per-family metric normalization, explicit unknowns for missing
+  required series, continued evaluation of available signals, positive
+  direct-port counter deltas with reset/new-series suppression across complete
+  and partial samples, SQLite sample persistence and 30-day pruning, concrete
+  connection thresholds, two-failure collection hysteresis, one acknowledged
+  page per unresolved telemetry-notification window, recovered threshold
+  coalescing before acknowledgment, truthful partial-then-unavailable,
+  unavailable-then-partial, and different-family partial-window summaries with
+  bounded observed evidence, failed-scrape incident preservation,
+  telemetry obligation retention behind older pending and direct-error-only
+  pages across restart and recovery, current-pressure priority at the first
+  eligible provider slot with historical observation time, exact combined
+  pressure, telemetry, and direct-error retention when concrete evidence appears
+  at or after the unadmitted threshold across recovery and restart,
+  rollback-compatible additive SQLite alert-state migration and legacy-ack
+  normalization, recovery reset and rearming, post-ack monitoring suppression
+  inside concrete-pressure
+  recurrence, stale pressure retry isolation from a later rearmed obligation,
+  global one-hour wall-time provider-attempt pacing across incident recovery,
+  current actual-check-time and full reachability of the one-hundred-opening
+  deterministic observation-scoped recurrence bank, neutral-opening coverage
+  across condition families, and delayed post-recovery delivery through the
+  scheduled Worker and real SQLite Durable Object boundary,
   no stale fenced gauge page after recovery, exact body/idempotency reuse after
   an ambiguous Linq send, transactional rollback before direct
   counter-baseline advancement, one-sample direct errors admitted inside the

@@ -256,6 +256,21 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - storing raw provider webhook bodies or provider tokens in hosted API responses
 - turning Cloudflare execution mirrors into a second durable source of product truth
 
+Signed Linq `message.received` payloads accept both supported webhook shapes.
+An absent or null `parts` field uses the existing empty-message disposition: Web
+records the provider event, acknowledges it without an assistant wake, and emits
+a redacted warning containing only bounded shape categories, part counts and
+kinds, webhook-version category, outcome, and an event-id suffix. Non-array
+`parts` values and unsupported part types still fail closed with the same
+redacted warning. Inbound `imessage_app` parts contribute only their documented
+fallback text (or a fixed placeholder); app identity, layout, and URL metadata
+do not enter the durable mailbox payload or logs. First-contact admission and
+blocked-content screening use one shared disposition for that same fallback
+text before any signup or group routing, independent of admission mode. An app
+card without fallback text remains contentless there rather than receiving the
+active-member placeholder. This rule is app-card-specific; legacy media-only
+first contacts retain their existing behavior.
+
 ## Legal and health-permission publication surfaces
 
 Hosted deployments should expose HTML legal pages in addition to downloadable
@@ -852,9 +867,10 @@ Hosted AI usage metering:
   referrer's next new group, and freeze pre-expiry qualification in the
   provider-ingress transaction. Bound commitments remain reserved for a
   25-hour late-evidence grace before referrer-serialized expiry becomes final.
-  The assistant-facing reward label is an exact server-owned cost-weighted
-  usage-credit label; it is never translated into an approximate number of
-  messages or days. Exact qualification counters remain server-only.
+  The assistant-facing reward label is a server-owned estimate of additional
+  Murph usage days derived from the persisted grant and policy basis. It is
+  never translated into a message count or calendar/trial duration. Exact
+  qualification counters remain server-only.
   Immediate post-commit reconciliation and the bounded minute recovery cron
   converge on one final referral grant and one atomic source-mailbox
   celebration fence. Recovery also re-signals bounded oldest unconsumed

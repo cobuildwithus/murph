@@ -831,7 +831,7 @@ export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
 
-export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 500;
+export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 2_000;
 
 const HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN = "[redacted]";
 
@@ -2123,6 +2123,19 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
+    shellPrewarmFirstHintAtEpochMs?: number;
+    shellPrewarmFinishedAtEpochMs?: number;
+    shellPrewarmOperationElapsedMs?: number;
+    shellPrewarmHintCount?: number;
+    shellPrewarmOutcome?:
+      | "cold_start_observed"
+      | "failed"
+      | "start_issued_warm"
+      | "superseded";
+    shellPrewarmSource?:
+      | "linq-instant-start"
+      | "linq-typing-started"
+      | "unknown";
     workspaceReadElapsedMs?: number;
     runtimeStoreEnsureElapsedMs?: number;
     runtimeInvocationPreparationElapsedMs?: number;
@@ -2189,6 +2202,18 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     mailboxImportDoneToAssistantPhaseMs?: number;
     workspaceAssistantPreAutomationMs?: number;
     automationLaneToAssistantServiceMs?: number;
+    // These adjacent nested leaves exactly partition
+    // automationLaneToAssistantServiceMs when all are present.
+    automationReadinessMs?: number;
+    automationInputSelectionMs?: number;
+    automationPassSetupMs?: number;
+    automationCandidateScanMs?: number;
+    automationGroupAndOperationScopeMs?: number;
+    automationTerminalEvidenceMs?: number;
+    automationSessionPreflightMs?: number;
+    automationCrossSessionContextMs?: number;
+    automationPromptPreparationMs?: number;
+    automationServiceHandoffMs?: number;
     executionTargetHydrateMs?: number;
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
@@ -2235,6 +2260,106 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     preProviderSetupMs?: number;
     providerPlanAndGateMs?: number;
     linqEgressGuardMs?: number;
+  };
+}
+
+export const HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS = [
+  "automationReadinessMs",
+  "automationInputSelectionMs",
+  "automationPassSetupMs",
+  "automationCandidateScanMs",
+  "automationGroupAndOperationScopeMs",
+  "automationTerminalEvidenceMs",
+  "automationSessionPreflightMs",
+  "automationCrossSessionContextMs",
+  "automationPromptPreparationMs",
+  "automationServiceHandoffMs",
+] as const;
+
+type HostedRuntimeAutomationLaneTimingSubdivision = Required<Pick<
+  NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+  (typeof HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS)[number]
+>>;
+
+export type HostedRuntimeAutomationLaneTimingSubdivisionInspection =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | {
+      kind: "complete";
+      subdivision: HostedRuntimeAutomationLaneTimingSubdivision;
+    };
+
+export function inspectHostedRuntimeAutomationLaneTimingSubdivision(
+  preProvider: NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+): HostedRuntimeAutomationLaneTimingSubdivisionInspection {
+  const {
+    automationCandidateScanMs,
+    automationCrossSessionContextMs,
+    automationGroupAndOperationScopeMs,
+    automationInputSelectionMs,
+    automationPassSetupMs,
+    automationPromptPreparationMs,
+    automationReadinessMs,
+    automationServiceHandoffMs,
+    automationSessionPreflightMs,
+    automationTerminalEvidenceMs,
+  } = preProvider;
+  if (
+    automationCandidateScanMs === undefined
+    && automationCrossSessionContextMs === undefined
+    && automationGroupAndOperationScopeMs === undefined
+    && automationInputSelectionMs === undefined
+    && automationPassSetupMs === undefined
+    && automationPromptPreparationMs === undefined
+    && automationReadinessMs === undefined
+    && automationServiceHandoffMs === undefined
+    && automationSessionPreflightMs === undefined
+    && automationTerminalEvidenceMs === undefined
+  ) {
+    return { kind: "absent" };
+  }
+  if (
+    automationCandidateScanMs === undefined
+    || automationCrossSessionContextMs === undefined
+    || automationGroupAndOperationScopeMs === undefined
+    || automationInputSelectionMs === undefined
+    || automationPassSetupMs === undefined
+    || automationPromptPreparationMs === undefined
+    || automationReadinessMs === undefined
+    || automationServiceHandoffMs === undefined
+    || automationSessionPreflightMs === undefined
+    || automationTerminalEvidenceMs === undefined
+  ) {
+    return { kind: "invalid" };
+  }
+
+  const subdivision = {
+    automationReadinessMs,
+    automationInputSelectionMs,
+    automationPassSetupMs,
+    automationCandidateScanMs,
+    automationGroupAndOperationScopeMs,
+    automationTerminalEvidenceMs,
+    automationSessionPreflightMs,
+    automationCrossSessionContextMs,
+    automationPromptPreparationMs,
+    automationServiceHandoffMs,
+  };
+  const values = Object.values(subdivision);
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    return { kind: "invalid" };
+  }
+  const sum = values.reduce<number>((total, value) => total + value, 0);
+  if (
+    !Number.isSafeInteger(sum)
+    || !Number.isSafeInteger(preProvider.automationLaneToAssistantServiceMs)
+    || preProvider.automationLaneToAssistantServiceMs !== sum
+  ) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "complete",
+    subdivision,
   };
 }
 
@@ -2300,6 +2425,12 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",
+    "shellPrewarmFirstHintAtEpochMs",
+    "shellPrewarmFinishedAtEpochMs",
+    "shellPrewarmOperationElapsedMs",
+    "shellPrewarmHintCount",
+    "shellPrewarmOutcome",
+    "shellPrewarmSource",
     "workspaceReadElapsedMs",
     "runtimeStoreEnsureElapsedMs",
     "runtimeInvocationPreparationElapsedMs",
@@ -2346,6 +2477,16 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "mailboxImportDoneToAssistantPhaseMs",
     "workspaceAssistantPreAutomationMs",
     "automationLaneToAssistantServiceMs",
+    "automationReadinessMs",
+    "automationInputSelectionMs",
+    "automationPassSetupMs",
+    "automationCandidateScanMs",
+    "automationGroupAndOperationScopeMs",
+    "automationTerminalEvidenceMs",
+    "automationSessionPreflightMs",
+    "automationCrossSessionContextMs",
+    "automationPromptPreparationMs",
+    "automationServiceHandoffMs",
     "executionTargetHydrateMs",
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
@@ -2652,6 +2793,17 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
     )
   ) {
     return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+  }
+  if (phase === "orchestration" && leafKey === "shellPrewarmOutcome") {
+    return value === "cold_start_observed"
+      || value === "failed"
+      || value === "start_issued_warm"
+      || value === "superseded";
+  }
+  if (phase === "orchestration" && leafKey === "shellPrewarmSource") {
+    return value === "linq-instant-start"
+      || value === "linq-typing-started"
+      || value === "unknown";
   }
   if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
     return typeof value === "string"

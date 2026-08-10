@@ -10,6 +10,7 @@ const codexMocks = vi.hoisted(() => ({
   dynamicToolCalls: [] as Array<{
     assistantStyleSettingsAvailable?: boolean
     deliveryContextOrdinal: number | null
+    generateSongTurnState?: unknown
     kind: string
     voiceMemoRuntime: unknown
   }>,
@@ -43,6 +44,12 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
               }
             : {}),
           deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+          ...(input.request.kind === 'generate-song'
+            ? {
+                generateSongTurnState:
+                  input.generateSongTurnState ?? null,
+              }
+            : {}),
           kind: input.request.kind,
           voiceMemoRuntime: input.voiceMemoRuntime ?? null,
         })
@@ -198,7 +205,7 @@ describe('Codex dynamic tool runtime routing', () => {
     ])
   })
 
-  it('passes voice memo and exact-turn style capabilities only to their tools', async () => {
+  it('passes voice memo, generated-song policy, and exact-turn style capabilities only to their tools', async () => {
     const workingDirectory = await createTempDir('assistant-codex-dynamic-runtime-work-')
     const codexHome = await createTempDir('assistant-codex-dynamic-runtime-home-')
     const voiceMemoRuntime: VoiceMemoToolRuntime = {
@@ -230,7 +237,11 @@ describe('Codex dynamic tool runtime routing', () => {
           CODEX_HOME: codexHome,
           PATH: '/usr/bin',
         },
-        prompt: 'Use three tools.',
+        generateSongPolicy: {
+          maxAttempts: 1,
+          requiredDurationSeconds: 15,
+        },
+        prompt: 'Use four tools.',
         sandbox: 'workspace-write',
         hostedToolContext: {
           beforeToolExecution,
@@ -268,21 +279,36 @@ describe('Codex dynamic tool runtime routing', () => {
         voiceMemoRuntime,
       },
       {
+        deliveryContextOrdinal: 0,
+        generateSongTurnState: {
+          attemptCount: 0,
+          policy: {
+            maxAttempts: 1,
+            requiredDurationSeconds: 15,
+          },
+        },
+        kind: 'generate-song',
+        voiceMemoRuntime,
+      },
+      {
         assistantStyleSettingsAvailable: true,
         deliveryContextOrdinal: 1,
         kind: 'assistant-style',
         voiceMemoRuntime: null,
       },
     ])
-    expect(beforeToolExecution).toHaveBeenCalledTimes(3)
+    expect(beforeToolExecution).toHaveBeenCalledTimes(4)
     expect(beforeToolExecution).toHaveBeenNthCalledWith(1, 0)
     expect(beforeToolExecution).toHaveBeenNthCalledWith(2, 0)
-    expect(beforeToolExecution).toHaveBeenNthCalledWith(3, 1)
+    expect(beforeToolExecution).toHaveBeenNthCalledWith(3, 0)
+    expect(beforeToolExecution).toHaveBeenNthCalledWith(4, 1)
     expect(codexMocks.executionOrder).toEqual([
       'checkpoint',
       'tool:send-progress-update',
       'checkpoint',
       'tool:generate-voice-memo',
+      'checkpoint',
+      'tool:generate-song',
       'checkpoint',
       'tool:assistant-style',
     ])
@@ -940,7 +966,7 @@ async function runScriptedDynamicToolTurn(
     params: {
       item: {
         id: 'user-dynamic-runtime-initial',
-        message: 'Use three tools.',
+        message: 'Use four tools.',
         type: 'user_message',
       },
     },
@@ -976,6 +1002,22 @@ async function runScriptedDynamicToolTurn(
   await child.waitForRpcId(2)
 
   child.stdout.write(jsonLine({
+    id: 3,
+    method: 'item/tool/call',
+    params: {
+      arguments: {
+        durationSeconds: 30,
+        instrumental: false,
+        prompt: 'An original group theme.',
+      },
+      namespace: 'murph',
+      tool: 'generate_song',
+      turnId: 'turn-dynamic-runtime',
+    },
+  }))
+  await child.waitForRpcId(3)
+
+  child.stdout.write(jsonLine({
     method: 'item/completed',
     params: {
       item: {
@@ -988,7 +1030,7 @@ async function runScriptedDynamicToolTurn(
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   child.stdout.write(jsonLine({
-    id: 3,
+    id: 4,
     method: 'item/tool/call',
     params: {
       arguments: {
@@ -999,7 +1041,7 @@ async function runScriptedDynamicToolTurn(
       turnId: 'turn-dynamic-runtime',
     },
   }))
-  await child.waitForRpcId(3)
+  await child.waitForRpcId(4)
 
   child.stdout.write(jsonLine({
     method: 'item/completed',

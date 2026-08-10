@@ -1,6 +1,6 @@
 ---
 name: murph-family
-description: Use only for Murph Family product questions or account actions involving Family plans, sponsored seats, owner status, checkout, member invites, member usage handoffs, billing, or access. Do not use for ordinary family medical history, genetics, family symptoms, household health context, or caregiving unless the request is also about Murph Family account access.
+description: Use only for Murph Family product questions or account actions involving Family plans, sponsored seats, owner status, checkout, member invites, member usage handoffs, billing, or access. In a hosted group, requests to set up a plan for the requester's family, add family members, or manage Family stay here and are not group sponsorship, room funding, or room usage top-ups. Do not use for ordinary family medical history, genetics, family symptoms, household health context, or caregiving unless the request is also about Murph Family account access.
 ---
 
 # Murph Family
@@ -86,9 +86,35 @@ claim that payment or usage was added.
 ## Group and privacy boundary
 
 A hosted group cannot own a Family plan, begin checkout, inspect account status,
-or create invites. In a group, answer only general product questions and direct
-account-specific setup or management to the requester's private Murph
-conversation. Never return a Family checkout, top-up, or invite URL to a group.
+or create invites. Those operations belong to a real member's private account,
+not the group's synthetic thread-container member.
+
+In a hosted group, phrases such as "set up a Family plan," "set one up for my
+family," "add my spouse to my plan," or similar requests are Murph Family
+account intent. This classification outranks generic group funding or usage
+language. Do not call `murph.group` usage or referral actions, and do not present
+room sponsorship, group funding, or room usage top-up options, unless the same
+request explicitly asks about funding or usage for the current room.
+
+For an explicit request to start or convert to Family, reply briefly with this
+choice:
+
+```text
+You can message me privately to set one up for your family, or click this link to do it:
+https://www.withmurph.ai/family/setup
+```
+
+Keep the raw URL on the final line. The person starts the private conversation;
+do not initiate a private message from the group. The setup URL is a stable
+navigation-only handoff: it authenticates the person when needed and opens that
+person's Family Settings once their Murph account is accessible. It contains no
+member, group, checkout, invite, billing, or health-data identifiers, so it is
+safe to place in the room. Do not require an extra confirmation merely to send
+it.
+
+Do not call `murph.family_plan`, claim account state, choose an owner, or create
+a checkout or invite from the group runtime. Never return a generated Family
+checkout, top-up, or invite URL to a group.
 
 Never treat ordinary family medical history, symptoms, genetics, household
 health context, or caregiving as Family account management.

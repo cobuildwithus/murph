@@ -108,6 +108,24 @@ describe("assertHostedOnboardingMutationOrigin", () => {
     }));
   });
 
+  it("rejects opaque browser origins", async () => {
+    const { assertHostedOnboardingMutationOrigin } = await import("@/src/lib/hosted-onboarding/csrf");
+
+    expect(() =>
+      assertHostedOnboardingMutationOrigin(
+        new Request("https://app.example.test/api/hosted-onboarding/invites", {
+          method: "POST",
+          headers: {
+            origin: "null",
+          },
+        }),
+      )
+    ).toThrowError(expect.objectContaining({
+      code: "HOSTED_ONBOARDING_ORIGIN_REQUIRED",
+      httpStatus: 403,
+    }));
+  });
+
   it("fails closed on non-loopback hosts when no canonical public origin is configured", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
       publicBaseUrl: null,

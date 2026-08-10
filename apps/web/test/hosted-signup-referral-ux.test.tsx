@@ -36,11 +36,11 @@ describe("hosted signup referral UX", () => {
     });
   });
 
-  it("keeps stable links out of indexes and referrer headers", async () => {
+  it("keeps stable links out of indexes while preserving same-origin claim proof", async () => {
     const page = await import("../app/r/[referralCode]/page");
 
     expect(page.metadata).toMatchObject({
-      referrer: "no-referrer",
+      referrer: "strict-origin",
       robots: {
         follow: false,
         index: false,
