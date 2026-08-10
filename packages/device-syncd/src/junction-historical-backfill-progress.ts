@@ -48,6 +48,14 @@ export const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
   evidence: "junctionHistoricalBackfillEvidence",
 } as const);
 
+export const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY =
+  "junctionBloodPressureHistoryBackfillVersion";
+
+const JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS = Object.freeze([
+  ...Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS),
+  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY,
+]);
+
 export function readJunctionHistoricalBackfillProgress(
   metadata: Record<string, unknown>,
 ): JunctionHistoricalBackfillProgress | null {
@@ -144,21 +152,50 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown>;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
-  if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.hostedMetadata)) {
+  const finalize = (result: {
+    metadata: Record<string, unknown>;
+    preservedLocalProgress: boolean;
+  }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } => {
+    const hostedVersion = readJunctionBloodPressureHistoryBackfillVersion(
+      input.hostedMetadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY],
+    );
+    const localVersion = input.localConnectionStateUnpublished
+      ? readJunctionBloodPressureHistoryBackfillVersion(
+        input.localMetadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY],
+      )
+      : null;
+    const preservedLocalVersion = localVersion !== null
+      && (hostedVersion === null || localVersion > hostedVersion);
+    const selectedVersion = preservedLocalVersion ? localVersion : hostedVersion;
+    const metadata = { ...result.metadata };
+
+    if (selectedVersion === null) {
+      delete metadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY];
+    } else {
+      metadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY] = selectedVersion;
+    }
+
     return {
+      metadata,
+      preservedLocalProgress: result.preservedLocalProgress || preservedLocalVersion,
+    };
+  };
+
+  if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.hostedMetadata)) {
+    return finalize({
       metadata: { ...input.hostedMetadata },
       preservedLocalProgress: false,
-    };
+    });
   }
 
   if (
     input.localConnectionStateUnpublished
     && !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.localMetadata)
   ) {
-    return {
+    return finalize({
       metadata: { ...input.hostedMetadata, ...input.localMetadata },
       preservedLocalProgress: true,
-    };
+    });
   }
 
   const preserveLocalProgressMetadata = shouldPreserveLocalJunctionHistoricalBackfillProgress(input);
@@ -202,7 +239,7 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
         metadata[key] = value;
       }
     }
-    return { metadata, preservedLocalProgress };
+    return finalize({ metadata, preservedLocalProgress });
   }
 
   const metadata: Record<string, unknown> = {};
@@ -226,7 +263,7 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
     }
   }
 
-  return { metadata, preservedLocalProgress };
+  return finalize({ metadata, preservedLocalProgress });
 }
 
 /** Preserve provider-owned progress during a guarded replacement inside the store transaction. */
@@ -235,7 +272,7 @@ export function mergeGuardedJunctionHistoricalBackfillMetadata(input: {
   replacementMetadata: Record<string, unknown>;
 }): Record<string, unknown> {
   const existingHistoricalMetadata: Record<string, unknown> = {};
-  for (const key of Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS)) {
+  for (const key of JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS) {
     if (Object.prototype.hasOwnProperty.call(input.existingMetadata, key)) {
       existingHistoricalMetadata[key] = input.existingMetadata[key];
     }
@@ -248,7 +285,7 @@ export function mergeGuardedJunctionHistoricalBackfillMetadata(input: {
   }).metadata;
   const metadata: Record<string, unknown> = {};
 
-  for (const key of Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS)) {
+  for (const key of JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS) {
     if (Object.prototype.hasOwnProperty.call(mergedMetadata, key)) {
       metadata[key] = mergedMetadata[key];
     }
@@ -260,6 +297,12 @@ export function mergeGuardedJunctionHistoricalBackfillMetadata(input: {
   }
 
   return metadata;
+}
+
+function readJunctionBloodPressureHistoryBackfillVersion(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1
+    ? value
+    : null;
 }
 
 export function encodeJunctionHistoricalBackfillStatus(

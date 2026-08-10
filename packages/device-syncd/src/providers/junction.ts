@@ -41,6 +41,7 @@ import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   encodeJunctionHistoricalBackfillStatus,
   hasJunctionHistoricalBackfillEvidence,
+  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   readJunctionHistoricalBackfillEvidence,
@@ -155,8 +156,8 @@ interface JunctionTimeseriesImportResult {
 }
 
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  canonicalEventCount: number;
   fetchComplete: boolean;
-  recordCount: number;
 }
 
 interface JunctionDirectSummaryImportResult {
@@ -295,7 +296,7 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES = Object.freeze([
 ] as const);
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   blood_pressure: {
-    metadataKey: "junctionBloodPressureHistoryBackfillVersion",
+    metadataKey: JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_VERSION_METADATA_KEY,
     version: 1,
   },
 } as const satisfies Record<
@@ -1854,7 +1855,7 @@ export function createJunctionDeviceSyncProvider(
           isJunctionExtendedTimeseriesBackfillJob(job, effectiveResource);
         const historicalRecordsSeen = extendedHistoricalBackfill
           ? job.payload.historicalRecordsSeen === true
-            || timeseriesImport.recordCount > 0
+            || timeseriesImport.canonicalEventCount > 0
           : undefined;
         if (timeseriesImport.yieldedAt) {
           return withJunctionSkippedResourceMetadata(
@@ -1887,7 +1888,6 @@ export function createJunctionDeviceSyncProvider(
             job,
             resource: effectiveResource,
             result,
-            skippedOptionalResources,
             window,
           }),
         );
@@ -2001,7 +2001,6 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord;
     resource: string;
     result: ProviderJobResult;
-    skippedOptionalResources: readonly JunctionSkippedOptionalResource[];
     window: { windowEnd: string; windowStart: string };
   }): ProviderJobResult {
     if (!isJunctionExtendedTimeseriesBackfillJob(input.job, input.resource)) {
@@ -2011,16 +2010,9 @@ export function createJunctionDeviceSyncProvider(
     const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
     const recordsSeen =
       input.job.payload.historicalRecordsSeen === true
-      || input.importResult.recordCount > 0;
-    const terminalOptionalFailure = input.skippedOptionalResources.some((entry) =>
-      entry.resource === input.resource
-      && (entry.reason === "not_found" || entry.reason === "unsupported")
-    );
+      || input.importResult.canonicalEventCount > 0;
 
-    if (
-      terminalOptionalFailure
-      || (input.importResult.fetchComplete && recordsSeen)
-    ) {
+    if (input.importResult.fetchComplete && recordsSeen) {
       return withJunctionMetadataPatch(
         input.result,
         buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
@@ -2453,6 +2445,7 @@ export function createJunctionDeviceSyncProvider(
     let executionWindowStart: string | null = null;
     let fetchComplete = true;
     let yieldedAt: string | null = null;
+    let canonicalEventCount = 0;
 
     for (const window of buildPreciseTimeseriesWindows(windowStart, windowEnd)) {
       if (context.shouldYield?.()) {
@@ -2495,7 +2488,7 @@ export function createJunctionDeviceSyncProvider(
         sourceProviders,
       );
       if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        await context.importSnapshot({
+        const receipt = await context.importSnapshot({
           provider: "junction",
           accountId: buildJunctionImportAccountId(context.account.externalAccountId),
           connectionId: context.account.id,
@@ -2506,15 +2499,13 @@ export function createJunctionDeviceSyncProvider(
           summaries: {},
           timeseries: preparedImport.snapshots,
         });
+        canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
       }
     }
 
-    const recordCount = Object.values(dedupedTimeseries)
-      .reduce((count, records) => count + records.length, 0);
-
     return {
+      canonicalEventCount,
       fetchComplete,
-      recordCount,
       yieldedAt,
     };
   }
@@ -7037,6 +7028,15 @@ function readPlainObject(value: unknown): Record<string, unknown> | null {
 
 function readProviderSnapshotDurableDeliveryAccepted(value: unknown): boolean {
   return readPlainObject(value)?.durableDeliveryAccepted === true;
+}
+
+function readProviderSnapshotCanonicalEventCount(value: unknown): number {
+  const canonicalEventCount = readPlainObject(value)?.canonicalEventCount;
+  return typeof canonicalEventCount === "number"
+      && Number.isSafeInteger(canonicalEventCount)
+      && canonicalEventCount >= 0
+    ? canonicalEventCount
+    : 0;
 }
 
 function base32UrlEncode(input: Buffer): string {

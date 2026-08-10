@@ -202,6 +202,54 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 });
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
+  it("preserves an unpublished local blood-pressure migration marker", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: { hostedOnly: true },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionBloodPressureHistoryBackfillVersion: 1,
+      },
+    });
+
+    expect(result).toEqual({
+      metadata: {
+        hostedOnly: true,
+        junctionBloodPressureHistoryBackfillVersion: 1,
+      },
+      preservedLocalProgress: true,
+    });
+  });
+
+  it("accepts hosted migration metadata after local state is published", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: { hostedOnly: true },
+      localConnectionStateUnpublished: false,
+      localMetadata: {
+        junctionBloodPressureHistoryBackfillVersion: 1,
+      },
+    });
+
+    expect(result).toEqual({
+      metadata: { hostedOnly: true },
+      preservedLocalProgress: false,
+    });
+  });
+
+  it("keeps the highest valid unpublished migration version", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        junctionBloodPressureHistoryBackfillVersion: 1,
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionBloodPressureHistoryBackfillVersion: 2,
+      },
+    });
+
+    expect(result.metadata.junctionBloodPressureHistoryBackfillVersion).toBe(2);
+    expect(result.preservedLocalProgress).toBe(true);
+  });
+
   it("preserves current local Junction retry progress over hosted legacy completion", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
@@ -638,6 +686,21 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 });
 
 describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
+  it("preserves the blood-pressure migration marker during guarded replacement", () => {
+    expect(mergeGuardedJunctionHistoricalBackfillMetadata({
+      existingMetadata: {
+        junctionBloodPressureHistoryBackfillVersion: 1,
+        seedOnlyState: "discard",
+      },
+      replacementMetadata: {
+        callbackOutcome: "complete",
+      },
+    })).toEqual({
+      callbackOutcome: "complete",
+      junctionBloodPressureHistoryBackfillVersion: 1,
+    });
+  });
+
   it("preserves opaque future historical state without retaining ordinary seed metadata", () => {
     expect(mergeGuardedJunctionHistoricalBackfillMetadata({
       existingMetadata: {

@@ -103,6 +103,7 @@ function toJobRecord(input: DeviceSyncJobInput, index: number): DeviceSyncJobRec
 
 function createJobContext(input: {
   account?: DeviceSyncAccount;
+  canonicalEventCount?: number;
   importedSnapshots?: unknown[];
   now?: string;
   shouldYield?: () => boolean;
@@ -113,7 +114,10 @@ function createJobContext(input: {
     now: input.now ?? NOW,
     importSnapshot: async (snapshot) => {
       input.importedSnapshots?.push(snapshot);
-      return { imported: true };
+      return {
+        canonicalEventCount: input.canonicalEventCount ?? 1,
+        durableDeliveryAccepted: true,
+      };
     },
     upsertConnectionSource: (sourceInput) => ({
       id: "src-1",
@@ -135,10 +139,12 @@ function createJobContext(input: {
 }
 
 function createProvider(input: {
+  bloodPressureFailureRequest?: number;
   bloodPressureRecords?: readonly Record<string, unknown>[];
   requests: TimeseriesRequest[];
   timeseriesBackfillDays?: number;
 }) {
+  let bloodPressureRequestCount = 0;
   return createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
@@ -187,6 +193,12 @@ function createProvider(input: {
           resource,
           start: url.searchParams.get("start_date"),
         });
+        if (resource === "blood_pressure") {
+          bloodPressureRequestCount += 1;
+          if (bloodPressureRequestCount === input.bloodPressureFailureRequest) {
+            return createJsonResponse({ error: "unsupported_resource" }, 422);
+          }
+        }
         const records = resource === "blood_pressure"
           ? [...(input.bloodPressureRecords ?? [])]
           : [];
@@ -407,6 +419,78 @@ test("a fetched blood-pressure record completes without an empty retry", async (
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   assert.equal(result.metadataPatch?.[BP_HISTORY_VERSION_KEY], 1);
+});
+
+test("partial optional failure retries from the anchored window after importing canonical events", async () => {
+  const importedSnapshots: unknown[] = [];
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    bloodPressureFailureRequest: 2,
+    bloodPressureRecords: [{
+      id: "bp-before-partial-failure",
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 119,
+      diastolic: 77,
+    }],
+    requests,
+  });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const admittedBloodPressure = toJobRecord(bloodPressure, 1);
+  admittedBloodPressure.dedupeKey = `hosted-device-sync:${"d".repeat(64)}`;
+
+  const partial = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ importedSnapshots }),
+    admittedBloodPressure,
+  );
+  const retry = findBloodPressureJob(partial.scheduledJobs ?? []);
+
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(JSON.stringify(importedSnapshots).includes("bp-before-partial-failure"), true);
+  assert.equal(partial.metadataPatch?.[BP_HISTORY_VERSION_KEY], undefined);
+  assert.equal(retry.dedupeKey, admittedBloodPressure.dedupeKey);
+  assert.equal(retry.payload?.historicalRecordsSeen, true);
+  assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+
+  const completed = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(retry, 2),
+  );
+  assert.equal(completed.scheduledJobs?.length ?? 0, 0);
+  assert.equal(completed.metadataPatch?.[BP_HISTORY_VERSION_KEY], 1);
+  assert.equal(
+    requests.filter((request) => request.resource === "blood_pressure").length,
+    32,
+  );
+});
+
+test("raw provider rows without canonical imported events remain on the retry ladder", async () => {
+  const provider = createProvider({
+    bloodPressureRecords: [{
+      id: "bp-not-canonicalized",
+      timestamp: "2026-05-20T08:30:00.000Z",
+      systolic: 120,
+    }],
+    requests: [],
+  });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ canonicalEventCount: 0 }),
+    toJobRecord(findBloodPressureJob(connection.initialJobs ?? []), 1),
+  );
+  const retry = findBloodPressureJob(result.scheduledJobs ?? []);
+
+  assert.equal(result.metadataPatch?.[BP_HISTORY_VERSION_KEY], undefined);
+  assert.equal(retry.payload?.emptyBackfillAttempts, 1);
+  assert.equal(retry.payload?.historicalRecordsSeen, undefined);
+  assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
 });
 
 test("ordinary empty webhook fetches do not enter the historical retry ladder", async () => {
