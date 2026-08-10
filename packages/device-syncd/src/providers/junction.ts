@@ -7125,6 +7125,7 @@ async function projectJunctionSources(
       sourceInstanceKey: existing?.sourceInstanceKey ?? source.sourceInstanceKey,
       sourceProviderSlug: source.sourceProviderSlug,
       displayName: existing?.displayName ?? null,
+      ...(existing?.firstSeenAt ? { firstSeenAt: existing.firstSeenAt } : {}),
       status: keepHistoricalReconnect
         ? "error"
         : source.status,

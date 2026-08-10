@@ -1202,6 +1202,7 @@ describe("hosted device-sync runtime", () => {
           resourceCount: 2,
           resourceAvailabilitySummary: {
             activity: true,
+            blood_pressure: true,
             blood_oxygen: true,
           },
           sourceInstanceKey,
@@ -1274,6 +1275,7 @@ describe("hosted device-sync runtime", () => {
                     name: "Garmin",
                     resource_availability: {
                       activity: true,
+                      blood_pressure: true,
                       blood_oxygen: true,
                     },
                     slug: "garmin",
@@ -1284,6 +1286,7 @@ describe("hosted device-sync runtime", () => {
                     name: "Oura",
                     resource_availability: {
                       activity: true,
+                      blood_pressure: true,
                       blood_oxygen: true,
                     },
                     slug: "oura",
@@ -1352,7 +1355,8 @@ describe("hosted device-sync runtime", () => {
           },
           region: "us",
           summaryResources: ["activity"],
-          timeseriesResources: ["blood_oxygen"],
+          timeseriesBackfillDays: 5,
+          timeseriesResources: ["blood_oxygen", "blood_pressure"],
         },
       });
       assert.ok(provider);
@@ -1420,6 +1424,10 @@ describe("hosted device-sync runtime", () => {
           deniedSources.find((source) => source.sourceProviderSlug === "garmin")?.status,
           "connected",
         );
+        assert.equal(
+          deniedSources.find((source) => source.sourceProviderSlug === "garmin")?.firstSeenAt,
+          "2026-07-27T00:00:00.000Z",
+        );
 
         hostedSnapshot = buildSnapshot("connected");
         await syncHostedDeviceSyncControlPlaneState({
@@ -1459,6 +1467,36 @@ describe("hosted device-sync runtime", () => {
             connectionId: hostedConnectionId,
             sourceProviderSlug: "garmin",
           }),
+        );
+        assert.equal(
+          finalSources.find((source) => source.sourceProviderSlug === "garmin")
+            ?.firstSeenAt,
+          "2026-07-27T00:00:00.000Z",
+        );
+        const recoveredAccount = getStore(service).getAccountById(localAccountId);
+        assert.ok(recoveredAccount);
+        const createScheduledJobs = provider.jobExecutor?.createScheduledJobs;
+        assert.ok(createScheduledJobs);
+        const scheduledPressureHistory = createScheduledJobs(
+          recoveredAccount,
+          "2026-07-30T00:10:00.000Z",
+        ).jobs.find((job) =>
+          job.kind === "resource"
+          && job.payload?.resource === "blood_pressure"
+          && job.payload?.sourceProviderSlug === "garmin"
+        );
+        assert.ok(scheduledPressureHistory);
+        assert.equal(
+          scheduledPressureHistory.payload?.historicalWindowStart,
+          "2026-07-22T00:00:00.000Z",
+        );
+        assert.equal(
+          scheduledPressureHistory.payload?.windowStart,
+          "2026-07-22T00:00:00.000Z",
+        );
+        assert.equal(
+          scheduledPressureHistory.payload?.windowEnd,
+          "2026-07-27T00:00:00.000Z",
         );
         assert.equal(
           liveSnapshotRequests.some((input) =>

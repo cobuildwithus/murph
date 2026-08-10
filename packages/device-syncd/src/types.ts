@@ -739,6 +739,7 @@ export interface ProviderSnapshotImportReceipt {
 
 export interface ProviderJobConnectionSource {
   displayName: string | null;
+  firstSeenAt?: string;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
