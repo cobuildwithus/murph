@@ -1,6 +1,6 @@
 # Bound usage-credit settlement database critical section
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -144,5 +144,23 @@ Current local proof:
   smallest complete experience for personal, Family, and group funding—an
   immediate truthful explanation, one dismiss action, no misleading amount
   choice, and no new screen or lifecycle owner. No findings remain.
-- Exact-head GitHub Actions and final ReviewGPT round 2 remain pending until the
-  remediation commits and updated PR contract are pushed.
+- The branch merged the latest `main` after ReviewGPT packaging. Its two
+  conflicts were limited to retaining both migration-list entries and combining
+  the current Stripe and usage-credit testing-map descriptions; the focused
+  migration test and docs drift check passed after resolution.
+- Against the merged candidate, 512 focused tests, web TypeScript, and scoped
+  ESLint passed. A fresh isolated database applied all 172 migrations in order.
+  The complete 33-case PostgreSQL suite passed 32 cases while the large-history
+  fixture reached its 60-second test timeout; an isolated rerun passed in 55.5
+  seconds and again proved the partial-index plans and bounded results. Exact-
+  head CI remains the clean-runner authority for that timing-sensitive lane.
+- Final ReviewGPT round 2 ran on Eragon against the immutable pre-merge
+  remediation snapshot and returned `PASS` with no findings. Its guarded ZIP
+  could not independently open the externally hosted design-proof images; the
+  parent had already reopened both hosted images at native resolution and
+  exercised the hydrated production catalog state locally.
+- Exact-head GitHub Actions remain pending until this plan is archived and the
+  final candidate is pushed once. Base-only merge history, the isolated
+  migration-list regression resolution, and this explanatory plan closure do
+  not require another ReviewGPT round under the repository final-gate policy.
+Completed: 2026-08-10
