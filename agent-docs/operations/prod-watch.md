@@ -82,7 +82,7 @@ pnpm --silent prod-watch scheduler uninstall
 
 ```sh
 pnpm --silent prod-watch incident list
-pnpm --silent prod-watch incident claim "$INCIDENT" --session-id "$CODEX_THREAD_ID" --kind triage
+pnpm --silent prod-watch incident claim "$INCIDENT" --session-id "$CODEX_THREAD_ID"
 pnpm --silent prod-watch incident heartbeat "$INCIDENT" --session-id "$CODEX_THREAD_ID"
 pnpm --silent prod-watch drill-down "$INCIDENT" --session-id "$CODEX_THREAD_ID" --lookback-minutes 60
 pnpm --silent prod-watch incident transition "$INCIDENT" \
@@ -158,7 +158,7 @@ The first database query deliberately omits full workspace/checkpoint scans: the
     state.lock/
 ```
 
-`state.v1.json` is durable machine-local coordination state. It stores monitor health, anomaly streaks, cumulative-counter baselines, incident lifecycle, lease metadata, handling session, and PR reference. It contains no raw snapshots or production bodies.
+`state.v1.json` is durable machine-local coordination state. It stores monitor health, anomaly streaks, cumulative-counter baselines, the Phase 1 incident lifecycle, triage lease metadata, and handling sessions. It contains no raw snapshots, production bodies, remediation lifecycle, or pull-request state.
 
 The Markdown files are rebuildable atomic projections. They are ignored by Git and must never be edited as inputs. `ACTIVE_INCIDENTS.md` shows nonterminal incidents and current lease ownership. `INCIDENT_HISTORY.md` shows terminal and active history without private production data. `MONITOR_STATUS.md` shows scheduler/coverage health.
 
@@ -171,8 +171,8 @@ JSON is sufficient for Phase 1 because state is small, single-host, and serializ
 - New candidates must satisfy their consecutive-run gate before promotion. Missing a candidate resets its short streak after a bounded retention window.
 - Repeated occurrences update `lastSeenAt`, count, evidence, and release context on the same incident.
 - Incidents retain at most 32 transitions. Terminal incidents retain 180 days, with a hard cap of 2,000 records.
-- Only one active remediation lease is permitted globally. Triage leases are per incident.
-- Leases have owner session, kind, acquired/heartbeat/expiry times. A different session cannot claim before expiry. Stale leases are recovered on state read.
+- Triage leases are per incident. Phase 1 has no remediation lease or remediation state owner.
+- Leases have owner session and acquired/heartbeat/expiry times. A different session cannot claim before expiry. Stale leases are recovered on state read.
 
 ## Incident state machine
 
@@ -186,13 +186,9 @@ claimed_triage/investigating ─> confirmed               (causal chain supporte
                               └─> false_positive        (terminal)
 monitor_incomplete ─> investigating | escalated | false_positive
 confirmed/escalated ─> resolved                         (external fix observed)
-
-Future low-risk path only:
-confirmed -> remediation_eligible -> worktree_ready -> patched -> verified
-          -> reviewgpt_pending -> pr_drafted -> resolved
 ```
 
-A lease claim records the handling session. State transitions require that same owner while the lease is live. `false_positive` and `resolved` are terminal. Phase 1 permits coordination and escalation but disables the future remediation command.
+A lease claim records the handling session. State transitions require that same owner while the lease is live. `false_positive` and `resolved` are terminal. Phase 1 permits coordination and escalation but disables the future remediation command. A later edit phase must introduce and prove its own remediation lifecycle and global lease rather than carrying unreachable future states in the Phase 1 record.
 
 ## First-release anomaly rules
 
@@ -248,7 +244,7 @@ All must hold:
 
 ### Future worktree/edit gate
 
-A later phase may create an isolated worktree only when the diagnosis gate passes, the incident remediation lease and single global remediation lease are held, the base branch/head is recorded, and the patch fits an explicit low-risk allowlist. Initial limits should be no dependency changes, migrations, data repair, auth/billing/privacy/health handling, deployment config, or application state-machine changes; at most five files and 300 changed lines; and a deterministic regression test must fail before and pass after the patch.
+A later phase may create an isolated worktree only after it adds and proves a single global remediation lease, the diagnosis gate passes, the base branch/head is recorded, and the patch fits an explicit low-risk allowlist. Initial limits should be no dependency changes, migrations, data repair, auth/billing/privacy/health handling, deployment config, or application state-machine changes; at most five files and 300 changed lines; and a deterministic regression test must fail before and pass after the patch.
 
 ### ReviewGPT and PR gate
 
@@ -259,7 +255,7 @@ Use existing `pnpm review:gpt` once per incident fingerprint **and exact patch h
 - the minimal diff;
 - directly relevant source and tests.
 
-Never send raw logs. Do not invoke ReviewGPT on each five-minute recurrence. Record the last reviewed fingerprint, patch head, outcome, and time in operational state. Retry at most twice for invalid/tool failures. An unchanged fingerprint and patch head have a six-hour cooldown. A substantive rejection requires a changed patch or new evidence, not a retry.
+Never send raw logs. Do not invoke ReviewGPT on each five-minute recurrence. A later remediation phase must add bounded operational fields for the last reviewed fingerprint, patch head, outcome, and time before enabling this gate. Retry at most twice for invalid/tool failures. An unchanged fingerprint-and-patch-head pair has a six-hour cooldown. A substantive rejection requires a changed patch or new evidence, not a retry.
 
 Only an approved, verified low-risk patch may become a **draft** PR. Production-watch never merges, enables auto-merge, deploys, mutates production state, or declares resolution merely because a PR exists.
 
@@ -295,7 +291,7 @@ Alert suppression rules:
 | Prompt injection in logs/provider output | Raw text is never ingested; tokens are allowlisted/normalized; evidence is data under a strict JSON schema; fresh read-only sessions; skill explicitly rejects embedded instructions. |
 | Compromised/malformed provider evidence | Strict schema, source uniqueness, bounded arrays, token/timestamp checks, local anomaly code; failure becomes monitor-degraded, not zero evidence. |
 | Runaway automation | 240-second run deadline, 30-second adapter deadline, output limits, no Phase 1 writes beyond local state, no PR/merge/deploy command. |
-| Overlapping agents/split ownership | Non-waiting run lock, serialized state lock, per-incident leases, heartbeat/expiry, one global remediation lease, handling-session checks. |
+| Overlapping agents/split ownership | Non-waiting run lock, serialized state lock, per-incident triage leases, heartbeat/expiry, and handling-session checks. Phase 1 has no remediation owner. |
 | Provider outage/rate limit | Isolated source failure, deduplicated alert, partial/degraded status, no incident closure or remediation based on missing evidence. |
 | State corruption or final-path symlink | Private directories, exact schema parsing, final-directory checks, atomic same-directory rename, fail-closed reads, ignored machine-local paths. |
 | Laptop sleep/offline | Scheduler lag and stale success metadata; no catch-up storm. External metadata-only dead-man is required for true 24/7 assurance. |
@@ -308,7 +304,7 @@ Alert suppression rules:
 | Schema bounds/redaction | Healthy fixture serializes without fixture raw fingerprint or forbidden identifier/text keys; strict provider evidence rejects extra prompt/log fields. |
 | Anomaly rules | Suspicious fixture proves sensitive escalation, deployment correlation, and two-window promotion for noisy rates. |
 | Deduplication | Same source/rule dimensions stay one incident across windows and release SHA changes. |
-| Lease safety | Second owner cannot claim; second remediation lease is rejected; stale dead-PID/PID-reuse claims are recoverable; live lock is not stolen; malformed incident state fails closed. |
+| Lease safety | A second triage owner cannot claim; stale dead-PID/PID-reuse claims are recoverable; live lock is not stolen; malformed incident state fails closed. |
 | Timeout/failure isolation | Fake database helper hangs and emits private stderr; collector terminates it and returns only `helper_timeout`. |
 | Dry run | Produces snapshot without state or Markdown projection files. |
 | Database boundary | Static proof requires a read-only transaction, bounded timeouts, and no private columns. The opt-in `scripts/prod-watch.database.integration.test.ts` lane runs the exact CLI query through `murph-prod-psql-ro`, retains the aggregate snapshot only in memory, and validates the strict snapshot contract without printing the payload. |
@@ -347,7 +343,7 @@ Alert suppression rules:
 
 ### Stage 3 — draft-PR automation for a tiny allowlist
 
-- One remediation globally.
+- Add and prove one global remediation lease before any edit path.
 - Isolated worktree, deterministic regression test, patch budget, repo gates, ReviewGPT approval.
 - Draft PR only. No merge or deployment.
 

@@ -71,7 +71,7 @@ const USAGE = `Usage:
   pnpm --silent prod-watch run [--scheduled] [--dry-run] [--fixture healthy|suspicious] [--provider-evidence <file>]
   pnpm --silent prod-watch drill-down <incident-id-or-fingerprint> --session-id <id> [--lookback-minutes 60] [--fixture healthy|suspicious]
   pnpm --silent prod-watch incident list
-  pnpm --silent prod-watch incident claim <incident-id-or-fingerprint> --session-id <id> [--kind triage|remediation]
+  pnpm --silent prod-watch incident claim <incident-id-or-fingerprint> --session-id <id>
   pnpm --silent prod-watch incident heartbeat <incident-id-or-fingerprint> --session-id <id>
   pnpm --silent prod-watch incident transition <incident-id-or-fingerprint> --session-id <id> --state <state>
   pnpm --silent prod-watch scheduler render [--output -|<file>]
@@ -264,15 +264,8 @@ async function runIncidentCommand(argv: string[]): Promise<void> {
     const incident = findIncident(state, target);
     let updated: ProductionWatchState;
     if (action === "claim") {
-      assertNoUnknownFlags(rest, new Set(["--kind", "--session-id"]));
-      const kind = readOptionalFlag(rest, "--kind") ?? "triage";
-      if (kind !== "triage" && kind !== "remediation") {
-        throw new Error("lease_kind_invalid");
-      }
-      if (kind === "remediation") {
-        throw new Error("automation_disabled_phase_1");
-      }
-      updated = claimIncident(state, incident.fingerprint, sessionId, kind, new Date(), 15);
+      assertNoUnknownFlags(rest, new Set(["--session-id"]));
+      updated = claimIncident(state, incident.fingerprint, sessionId, new Date(), 15);
     } else if (action === "heartbeat") {
       assertNoUnknownFlags(rest, new Set(["--session-id"]));
       updated = heartbeatIncident(state, incident.fingerprint, sessionId, new Date(), 15);

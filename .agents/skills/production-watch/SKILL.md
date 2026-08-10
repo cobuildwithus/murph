@@ -39,7 +39,7 @@ Use this skill only for Murph production-watch runs and incidents.
 - Claim before drill-down:
 
   ```sh
-  pnpm --silent prod-watch incident claim "$INCIDENT" --session-id "$CODEX_THREAD_ID" --kind triage
+  pnpm --silent prod-watch incident claim "$INCIDENT" --session-id "$CODEX_THREAD_ID"
   ```
 
 - The lease is exclusive. Do not continue if the command reports another owner. Heartbeat only while actively working:
@@ -67,7 +67,7 @@ A later remediation phase may proceed only after all of these are true:
 - relevant source coverage is complete, or a documented provider outage explains the missing source without weakening the diagnosis;
 - the incident is not in a sensitive alert-only domain;
 - a deployment-correlated causal chain is supported by at least two independent aggregate signals, or by one aggregate signal plus a deterministic regression test;
-- the incident lease and the single global remediation lease are owned by the same fresh session;
+- a later remediation phase has added and proved one global remediation lease; Phase 1 deliberately persists only triage ownership;
 - the change fits the low-risk remediation allowlist and bounded patch budget;
 - repo-required scoped tests and typecheck pass;
 - `pnpm review:gpt` receives only the minimum redacted incident snapshot plus relevant source/test files and approves the exact patch head.
