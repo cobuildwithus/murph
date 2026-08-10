@@ -27,6 +27,7 @@ function createAccount(input: {
   connectedAt?: string;
   metadata?: Record<string, unknown>;
   now?: string;
+  sources?: DeviceSyncAccount["sources"];
 } = {}): DeviceSyncAccount {
   const now = input.now ?? NOW;
   return {
@@ -52,6 +53,7 @@ function createAccount(input: {
     lastErrorCode: null,
     lastErrorMessage: null,
     nextReconcileAt: null,
+    ...(input.sources === undefined ? {} : { sources: input.sources }),
     createdAt: now,
     updatedAt: now,
   };
@@ -491,6 +493,88 @@ test("raw provider rows without canonical imported events remain on the retry la
   assert.equal(retry.payload?.emptyBackfillAttempts, 1);
   assert.equal(retry.payload?.historicalRecordsSeen, undefined);
   assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
+});
+
+test("source admission rejection cannot certify historical coverage", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createProvider({
+    bloodPressureRecords: [{
+      id: "bp-disconnected-source",
+      provider_connection_id: "provider-omron-1",
+      sourceProviderSlug: "omron",
+      timestamp: "2026-05-20T08:30:00.000Z",
+      systolic: 120,
+      diastolic: 78,
+    }],
+    requests: [],
+  });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({
+        sources: [{
+          displayName: "Omron",
+          firstSeenAt: NOW,
+          lastDataAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: NOW,
+          resourceCount: 1,
+          sourceProviderSlug: "omron",
+          status: "disconnected",
+        }],
+      }),
+      importedSnapshots,
+    }),
+    toJobRecord(findBloodPressureJob(connection.initialJobs ?? []), 1),
+  );
+  const retry = findBloodPressureJob(result.scheduledJobs ?? []);
+
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(result.metadataPatch?.[BP_HISTORY_VERSION_KEY], undefined);
+  assert.equal(retry.payload?.emptyBackfillAttempts, 1);
+  assert.equal(retry.payload?.historicalRecordsSeen, undefined);
+});
+
+test("source-scoped partial failure retries instead of abandoning remaining history", async () => {
+  const provider = createProvider({
+    bloodPressureFailureRequest: 2,
+    bloodPressureRecords: [{
+      id: "bp-source-before-partial-failure",
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 117,
+      diastolic: 75,
+    }],
+    requests: [],
+  });
+  const connection = await requireValue(provider.sdkConnectionHandler).ensureConnection({
+    ownerId: "member-1",
+    now: NOW,
+  });
+  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const sourceScoped = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      sourceProviderSlug: "omron",
+    },
+  }, 1);
+  sourceScoped.dedupeKey = `hosted-device-sync:${"e".repeat(64)}`;
+
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    sourceScoped,
+  );
+  const retry = findBloodPressureJob(result.scheduledJobs ?? []);
+
+  assert.equal(result.metadataPatch?.[BP_HISTORY_VERSION_KEY], undefined);
+  assert.equal(retry.dedupeKey, sourceScoped.dedupeKey);
+  assert.equal(retry.payload?.sourceProviderSlug, "omron");
+  assert.equal(retry.payload?.historicalRecordsSeen, true);
+  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
 });
 
 test("ordinary empty webhook fetches do not enter the historical retry ladder", async () => {
