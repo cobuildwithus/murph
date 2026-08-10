@@ -1249,6 +1249,49 @@ test("a unit-matched published comparator appears only when the latest lab range
   }
 });
 
+test("a censored result keeps its published-comparator status provenance without a chart point", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "eGFR",
+      biomarkerKey: "biomarker:egfr",
+      comparator: ">=",
+      id: "egfr-censored",
+      metricKey: "egfr",
+      normalizedUnit: "mL/min/1.73m^2",
+      normalizedValue: 60,
+      specimenKind: "serum",
+      unit: "mL/min/1.73m^2",
+      value: 60,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={[{
+        applicability: "For published adult kidney comparison.",
+        eligibleSpecimenKinds: ["serum"],
+        label: "Published adult kidney comparator",
+        lowerBound: { inclusive: true, value: 60 },
+        unit: "mL/min/1.73m^2",
+      }]}
+      metricKey="egfr"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("In range");
+    expect(text).toContain(">=60 mL/min/1.73m^2");
+    expect(text).toContain("Published comparator — not the reporting lab's range");
+    expect(text).not.toContain("No reference range");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test.each([
   { expected: true, specimenType: "serum" },
   { expected: false, specimenType: "urine" },

@@ -22,6 +22,7 @@ const temporaryDirectories: string[] = [];
 const finnishDrySaunaProtocolKey = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const healthCommonsRuntimeArtifactNames = [
   "biomarker-desired-directions.json",
+  "knowledge.sqlite",
   "protocol-index.json",
   "protocol-run-specs.json",
   "protocol-family-graph.json",
@@ -806,6 +807,10 @@ async function readOptionalText(filePath: string): Promise<string> {
 
 async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): Promise<void> {
   await mkdir(generatedDir, { recursive: true });
+  await writeFile(
+    path.join(generatedDir, "knowledge.sqlite"),
+    Buffer.from("SQLite format 3\0fixture"),
+  );
   await writeFile(
     path.join(generatedDir, "biomarker-desired-directions.json"),
     `${JSON.stringify({

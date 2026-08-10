@@ -58,6 +58,92 @@ export const HOSTED_MAILBOX_LANES = [
 
 export type HostedMailboxLane = (typeof HOSTED_MAILBOX_LANES)[number];
 
+export const HOSTED_RUNTIME_FAILURE_PHASE_NAMES = [
+  "browser_vault.refresh",
+  "codex.prepare",
+  "foreground.pass",
+  "mailbox.import.initial",
+  "runtime",
+  "runtime.return",
+  "workspace.checkpoint.durable_effect",
+  "workspace.checkpoint.idle_compact",
+  "workspace.checkpoint.idle_shutdown",
+  "workspace.read",
+  "workspace.restore",
+] as const;
+
+export type HostedRuntimeFailurePhaseName =
+  (typeof HOSTED_RUNTIME_FAILURE_PHASE_NAMES)[number];
+export type HostedRuntimeFailurePhaseCode =
+  `runtime_phase:${HostedRuntimeFailurePhaseName}`;
+
+const HOSTED_RUNTIME_FAILURE_PHASE_CODES = new Set<string>(
+  HOSTED_RUNTIME_FAILURE_PHASE_NAMES.map(
+    (phase): HostedRuntimeFailurePhaseCode => `runtime_phase:${phase}`,
+  ),
+);
+
+const HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY =
+  "hostedRuntimeFailurePhaseCode";
+
+export const HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY =
+  "runtimeFailurePhaseCode";
+
+export function buildHostedRuntimeFailurePhaseCode(
+  phase: HostedRuntimeFailurePhaseName,
+): HostedRuntimeFailurePhaseCode {
+  return `runtime_phase:${phase}`;
+}
+
+export function isHostedRuntimeFailurePhaseCode(
+  value: unknown,
+): value is HostedRuntimeFailurePhaseCode {
+  return typeof value === "string"
+    && HOSTED_RUNTIME_FAILURE_PHASE_CODES.has(value);
+}
+
+export function attachHostedRuntimeFailurePhaseCode(
+  error: unknown,
+  phase: HostedRuntimeFailurePhaseName,
+): unknown {
+  if (!(error instanceof Error) || readHostedRuntimeFailurePhaseCode(error)) {
+    return error;
+  }
+
+  try {
+    Object.defineProperty(error, HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY, {
+      configurable: false,
+      enumerable: false,
+      value: buildHostedRuntimeFailurePhaseCode(phase),
+      writable: false,
+    });
+  } catch {
+    // Diagnostics are fail-open: frozen or hostile errors retain their
+    // original behavior when the optional phase cannot be attached.
+  }
+  return error;
+}
+
+export function readHostedRuntimeFailurePhaseCode(
+  error: unknown,
+): HostedRuntimeFailurePhaseCode | null {
+  try {
+    if (!error || typeof error !== "object") {
+      return null;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      error,
+      HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY,
+    );
+    return descriptor && "value" in descriptor
+      && isHostedRuntimeFailurePhaseCode(descriptor.value)
+      ? descriptor.value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export const HOSTED_MAILBOX_KINDS = [
   "conversation.message",
   "member.activated",
@@ -985,7 +1071,7 @@ export interface HostedRuntimeGroupDisclosureGrantListEntry
   groupLabel: string | null;
 }
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE =
-  "Like or heart this message to share {{share_scope}} with this group. To choose different permissions, use {{join_url}}.";
+  "Sounds good. Like or heart this message to share {{share_scope}} with the group, or use {{join_url}} to customize what you share.";
 
 export interface HostedRuntimeGroupMemberSummary {
   disclosureGrants?: HostedRuntimeGroupDisclosureGrantSummary[];
@@ -1012,6 +1098,8 @@ export interface HostedRuntimeGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
+  /** Required on the current shape; absent only on legacy response branches. */
+  includedUsageUsedPercent?: number;
 }
 
 export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
@@ -1097,10 +1185,8 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
   displayName?: string | null;
-  // Legacy wire compatibility only. Current Web ignores this field and owns
-  // the canonical copy. The runtime supplies one fixed value so older Web can
-  // substitute already-known scopes; model input can never set it. Remove the
-  // field after the consumer-first Web rollout sets the Cloudflare rollback floor.
+  // Legacy wire compatibility only. Web owns the canonical consent sentence
+  // because an affirmative reaction grants the frozen server-side snapshot.
   messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.
@@ -1809,8 +1895,11 @@ export type HostedRuntimeFamilyPlanToolAction =
 export const HOSTED_PLAN_CODES = ["pulse", "edge"] as const;
 export type HostedPlanCode = (typeof HOSTED_PLAN_CODES)[number];
 
+export const HOSTED_FAMILY_PLAN_CODES = ["pulse", "edge", "max"] as const;
+export type HostedFamilyPlanCode = (typeof HOSTED_FAMILY_PLAN_CODES)[number];
+
 export interface HostedRuntimeFamilyPlanCreateInviteRequest {
-  planCode?: HostedPlanCode;
+  planCode?: HostedFamilyPlanCode;
   targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
@@ -1827,7 +1916,6 @@ export type HostedRuntimeFamilyPlanToolRequest =
     }
   | {
       action: "start_checkout";
-      invite?: HostedRuntimeFamilyPlanCreateInviteRequest | null;
     };
 
 export interface HostedRuntimeFamilyPlanToolSeatStatus {
@@ -1843,7 +1931,7 @@ export interface HostedRuntimeFamilyPlanToolSeatStatus {
 export interface HostedRuntimeFamilyPlanToolMember {
   isOwner: boolean;
   label: string | null;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   role: string;
   status: string;
 }
@@ -1851,7 +1939,7 @@ export interface HostedRuntimeFamilyPlanToolMember {
 export interface HostedRuntimeFamilyPlanToolInvite {
   acceptUrl: string | null;
   expiresAt: string;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -1867,7 +1955,7 @@ export interface HostedRuntimeFamilyPlanToolPlanStatus {
 }
 
 export type HostedRuntimeFamilyPlanToolPlans = Record<
-  HostedPlanCode,
+  HostedFamilyPlanCode,
   HostedRuntimeFamilyPlanToolPlanStatus
 >;
 
@@ -1894,8 +1982,6 @@ export interface HostedRuntimeFamilyPlanToolStartCheckoutResponse {
   billingStatus: string;
   checkoutUrl: string | null;
   owner: boolean;
-  preparedInvite: HostedRuntimeFamilyPlanToolInvite | null;
-  preparedInviteReplyText: string | null;
   plans: HostedRuntimeFamilyPlanToolPlans;
   seats: HostedRuntimeFamilyPlanToolSeatStatus;
   unavailableReason: "already_sponsored" | null;
@@ -2540,6 +2626,89 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "preProvider.receiptScanPerformed",
   ] as const;
 
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
+  Readonly<Record<string, readonly string[]>> = {
+    "orchestration.shellPrewarmOutcome": [
+      "cold_start_observed",
+      "failed",
+      "start_issued_warm",
+      "superseded",
+    ],
+    "orchestration.shellPrewarmSource": [
+      "linq-instant-start",
+      "linq-typing-started",
+      "unknown",
+    ],
+  };
+
+export type HostedRuntimeLatencyPhaseBreakdownLeafRule =
+  | { kind: "boolean" }
+  | { kind: "enum_string"; values: readonly string[] }
+  | { kind: "lease_generation" }
+  | { kind: "orchestration_attempt_id" }
+  | { kind: "safe_integer" };
+
+export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES: Readonly<
+  Record<
+    HostedRuntimeLatencyPhaseBreakdownPhase,
+    Readonly<Record<string, HostedRuntimeLatencyPhaseBreakdownLeafRule>>
+  >
+> = {
+  assistant: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("assistant"),
+  boot: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("boot"),
+  dispatch: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("dispatch"),
+  import: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("import"),
+  orchestration: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("orchestration"),
+  preProvider: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("preProvider"),
+  provider: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("provider"),
+  restore: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("restore"),
+  wake: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("wake"),
+};
+
+function buildHostedRuntimeLatencyPhaseBreakdownLeafRules(
+  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
+): Readonly<Record<string, HostedRuntimeLatencyPhaseBreakdownLeafRule>> {
+  return Object.fromEntries(
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS[phase].map(
+      (leafKey): [string, HostedRuntimeLatencyPhaseBreakdownLeafRule] => [
+        leafKey,
+        readHostedRuntimeLatencyPhaseBreakdownLeafRule(phase, leafKey),
+      ],
+    ),
+  );
+}
+
+function readHostedRuntimeLatencyPhaseBreakdownLeafRule(
+  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
+  leafKey: string,
+): HostedRuntimeLatencyPhaseBreakdownLeafRule {
+  if (
+    phase === "orchestration"
+    && (
+      leafKey === "directEnsureOrchestrationAttemptId"
+      || leafKey === "runtimeInvocationOrchestrationAttemptId"
+    )
+  ) {
+    return { kind: "orchestration_attempt_id" };
+  }
+  const allowedStringValues =
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES[`${phase}.${leafKey}`];
+  if (allowedStringValues) {
+    return { kind: "enum_string", values: allowedStringValues };
+  }
+  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
+    return { kind: "lease_generation" };
+  }
+  if (
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS.some(
+      (key) => key === `${phase}.${leafKey}`,
+    )
+  ) {
+    return { kind: "boolean" };
+  }
+  return { kind: "safe_integer" };
+}
+
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
@@ -2577,10 +2746,6 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   assistant: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.assistant),
   provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
 };
-
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET = new Set<string>(
-  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
-);
 
 export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
   value: unknown,
@@ -2782,36 +2947,23 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
-  if (
-    phase === "orchestration"
-    && (
-      leafKey === "directEnsureOrchestrationAttemptId"
-      || leafKey === "runtimeInvocationOrchestrationAttemptId"
-    )
-  ) {
-    return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+  const rule = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES[phase][leafKey];
+  switch (rule?.kind) {
+    case "boolean":
+      return typeof value === "boolean";
+    case "enum_string":
+      return typeof value === "string" && rule.values.includes(value);
+    case "lease_generation":
+      return typeof value === "string"
+        && value.length <= 20
+        && /^(?:0|[1-9]\d*)$/u.test(value);
+    case "orchestration_attempt_id":
+      return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+    case "safe_integer":
+      return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
+    default:
+      return false;
   }
-  if (phase === "orchestration" && leafKey === "shellPrewarmOutcome") {
-    return value === "cold_start_observed"
-      || value === "failed"
-      || value === "start_issued_warm"
-      || value === "superseded";
-  }
-  if (phase === "orchestration" && leafKey === "shellPrewarmSource") {
-    return value === "linq-instant-start"
-      || value === "linq-typing-started"
-      || value === "unknown";
-  }
-  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
-    return typeof value === "string"
-      && value.length <= 20
-      && /^(?:0|[1-9]\d*)$/u.test(value);
-  }
-  if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
-    return typeof value === "boolean";
-  }
-
-  return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
 }
 
 export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(

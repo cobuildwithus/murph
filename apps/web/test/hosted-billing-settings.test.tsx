@@ -521,7 +521,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Group · Resets/);
   });
 
-  test("shows trial usage, timing, and a conservative forecast before the plan cards", async () => {
+  test("shows trial usage and timing without exposing the internal forecast", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
@@ -552,7 +552,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /aria-label="35% used, 65% remaining"/);
     assert.match(markup, /<span[^>]*>65% remaining<\/span>/u);
     assert.match(markup, /Trial ends Jul 17, 2026/);
-    assert.match(markup, /may run out in about 3 days/);
+    assert.doesNotMatch(markup, /recent pace|run out in about|days? remaining/);
     assert.ok(markup.indexOf("AI usage") < markup.indexOf("Run experiments"));
   });
 
@@ -1419,7 +1419,7 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Choose Family/);
-    assert.match(markup, /Choose Pulse or Edge for each person/);
+    assert.match(markup, /Choose Pulse, Edge, or Max for each person/);
     assert.match(markup, /From \$7\/person/);
   });
 

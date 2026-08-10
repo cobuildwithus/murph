@@ -464,9 +464,9 @@ system prefix. Their server-generated event identities and idempotent delivery
 make that latency shortcut replay-safe; generic notifications still wait for
 the idle checkpoint. A referral celebration recomputes its current-model
 capacity label and receives only a server-resolved tone, Humor, and Unhinged
-band, never transcript history. The existing minute recovery pass re-signals
-the exact oldest unconsumed celebration mailbox items after a failed Temporal
-signal, so mailbox state remains the only durable wake owner.
+band, never transcript history. The existing minute recovery pass
+re-signals the exact oldest unconsumed celebration mailbox items after a failed
+Temporal signal, so mailbox state remains the only durable wake owner.
 
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
 
@@ -820,7 +820,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/query`: workspace-private read helpers, export-pack generation, query-local event display-identity derivation, the semantic wearable day-summary and provider-neutral sleep-pattern read models over imported device evidence, the rebuildable local query projection over canonical vault data under `.runtime/projections/query.sqlite` that now backs both `readVault()` and lexical search, the stable reference-graph readers for `bank/library/**`, the pure parser/search/index helpers for derived knowledge pages under `derived/knowledge/**`, and the read-side adapters that consume shared MetricPoint contracts from `@murphai/health-metrics` plus shared health registry projection metadata, event lifecycle/revision collapse helpers, and static lookup-ID family classification from `@murphai/contracts` instead of maintaining duplicate query-local copies. Experiment progress-card sentiment accepts an injected snapshot of canonical biomarker desired directions and keeps that health interpretation separate from experiment-hypothesis agreement.
 - `packages/health-metrics`: workspace-private neutral MetricPoint contract owner for health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports
 - `packages/vault-usecases`: workspace-private CLI/headless vault usecase orchestration owner over `packages/core`, `packages/importers`, and `packages/query`. It owns command-shaped service interfaces, shared CLI-style input normalization, lazy runtime loaders, assistant-safe vault path helpers, the narrow manifest-receipt/removal seam for derived export packs, and the neutral `@murphai/vault-usecases/vault-services` factory used by CLI, assistant, daemon, setup, hosted runtime, and inbox-service callers that need one composed vault service surface without importing owner internals. It composes the compact Health Commons desired-direction lookup into experiment progress-card snapshots without making query depend on the filesystem-backed Health Commons runtime. It must stay a thin composition layer: canonical record schemas and static lookup-ID family classification stay in `packages/contracts`, canonical writes stay in `packages/core`, imports stay in `packages/importers`, query projections and event display identity stay in `packages/query`, device runtime and control-plane composition stay in `packages/device-syncd`/`packages/cli`, inbox daemon behavior stays in `packages/inboxd` and `packages/inbox-services`, and assistant/session state stays in the assistant runtime packages.
-- `packages/health-commons`: workspace-private public Health Commons owner for protocol pages, biomarker pages, source pages, exact protocol revisions, generated catalogs, and future aggregate outcome summaries consumed across local and hosted surfaces
+- `packages/health-commons`: workspace-private public Health Commons owner for protocol pages, biomarker pages, source pages, source-backed health guidance and symptom-safety decisions, exact protocol revisions, generated catalogs, a read-only generated SQLite FTS claim projection that resolves a full health question to one authored topic before retrieving sourced claims, typed-target source findings, and matching safety within that owner, and future aggregate outcome summaries consumed across local and hosted surfaces. Assistant skills must not become a second owner for topic-specific public health knowledge; they remain for tool procedures and stateful product workflows.
 - `packages/assistant-engine`: workspace-private headless assistant execution runtime that owns provider-turn execution, tool/runtime assembly, assistant state/outbox/status/store surfaces, assistant automation, the single assistant input spine, assistant-specific vault/inbox/knowledge tool surfaces, hosted computer-use dynamic tools, Murph-managed package skill assets under `skills/**`, attachment prompt-bundle audit support, and active-outbox reconciliation for assistant-owned one-time delivery staging under the exact flat assistant-runtime generated-delivery directory. Broad low-frequency native tools keep their argument contracts and set Codex `deferLoading` at `thread/start`, leaving direct-model `tool_search` and code-mode `ALL_TOOLS` discovery to the pinned App Server rather than adding a Murph-owned discovery protocol. The stable assistant prompt may route to those package-owned skill files through `$MURPH_ASSISTANT_SKILLS_ROOT`; local and hosted runtime env setup stamps that var to the canonical package-owned skill root. Hosted native Codex skill rendering stays disabled because rendered runner-local paths can break hosted prompt-cache stability. It consumes neutral vault usecase services, runtime loaders, and assistant vault path helpers from `@murphai/vault-usecases`, and consumes provider-target normalization plus hosted provider-preset/config helpers from `@murphai/operator-config` instead of owning duplicate copies.
 - `packages/operator-config`: workspace-private operator and setup configuration surface that owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider-preset/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and CLI/shared command contracts
 - `packages/assistant-cli`: workspace-private CLI-only assistant surface that owns the daemon-aware assistant wrappers, assistant command registration, foreground terminal logging, and the Ink chat UI
@@ -923,9 +923,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   rollover is lazy and activation-anchored, including end-of-month behavior.
   Cap increases require explicit payer confirmation; a decrease below already
   committed charges is deferred to the next period. Only the activation
-  purchase may own a public sponsorship moment; refills are silent. Group
-  projections expose only sponsored versus unsponsored, never payer, cap,
-  charges, balance, percentages, message counts, or refill events. Only
+  purchase may own a public sponsorship moment; refills are silent. The
+  sponsorship projection exposes only sponsored versus unsponsored. A separate
+  room-public usage read may expose one bounded
+  `includedUsageUsedPercent`: Web derives it only from current-period included
+  spend and the room's included limit. It never reveals payer, cap, charges,
+  credit balance or source, remaining capacity, period dates, message counts,
+  or refill state or events. Only
   verified Stripe-event reconciliation can grant purchased credit; a browser
   return or synchronous PaymentIntent response
   cannot. Conversational referrals instead require explicit arming by
@@ -933,35 +937,64 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   serialization boundary, bind only to that referrer's next newly created
   thread container, normalize Linq and Telegram evidence into one
   provider-neutral qualifier, freeze pre-expiry qualification in the ingress
-  transaction, and converge immediate plus bounded minute recovery on one
-  fixed server-catalog grant and one source-mailbox celebration fence. A new
+  transaction, and converge immediate plus bounded minute recovery on
+  one fixed server-catalog grant and one source-mailbox celebration fence. A new
   grant clears the current block when capacity becomes positive and requests
   the normal runtime recheck through the durable event owner so pending
   accepted work can resume. Inactive, suspended, malformed or expired trial
   entitlement, and separate daily Linq anti-abuse gates, remain enforceable.
 
-  The group-tool privacy projection has one bounded rolling-deploy reader seam.
-  A compatible runtime accepts the current exact `{fundingNeeded,fundingUrl}`
-  response, strips the immediately preceding optional `sponsorshipStatus`
-  field, and also accepts the older exact
-  `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response. It derives
-  only the funding boolean from that oldest shape and discards period,
-  percentage, and funding-setup fields before they reach assistant policy. In
-  the current shape, `fundingNeeded` is false for healthy capacity and for low
-  capacity with an available or pending automatic refill; it is true for low
-  capacity without automatic recovery and for every exhausted room.
-  `fundingUrl` remains the capability for an explicit contribution at any valid
-  group-capacity state. Assistant policy has one contract regardless of payment
-  setup: it uses the boolean only for proactive depletion messaging and may
-  share the returned URL after an explicit funding request even when the
-  boolean is false. A Web-owned exhaustion projection always appends that
-  current URL to the ordinary group pause copy. Deploy that reader
-  throughout Cloudflare/runner before Web begins emitting the current shape.
-  Because the preceding producer cannot represent an active monthly
-  sponsorship, the Web switch becomes a forward-only tandem cutover once
-  authorization creation is enabled. Remove the preceding-shape reader only
-  after that producer is neither routable nor a rollback candidate and every
-  warm runner from before the reader deployment has been drained.
+  The current group-tool privacy projection is
+  `{fundingNeeded,fundingUrl,includedUsageUsedPercent}`. A successful current
+  Web projection already proves a positive included limit; an inactive or
+  malformed limit makes the whole read unavailable rather than creating a
+  second successful shape. Web computes the required integer from included
+  usage only: return `0` when counted current-period included spend is not
+  positive; return `100` when spend is at least the limit; otherwise return
+  `max(1, floor(spend * 100 / limit))`. Credit purchases, referrals, automatic
+  refills, carryover, and remaining effective capacity do not enter that math,
+  so adding or consuming credit cannot lower or reset the percentage. A new
+  included-usage period may reset it. `100` means at least all included usage
+  has been used; it does not mean that the room is exhausted because credit may
+  remain.
+
+  The runtime requires and preserves the aggregate on the current successful
+  shape. A funding-only current response is rejected instead of serving as a
+  rollout compatibility shape; the assistant reports quantitative status as
+  unavailable and must not reconstruct it from urgency, funding, sponsorship,
+  or conversation history. The immediately preceding optional
+  `sponsorshipStatus` and the older exact
+  `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response remain
+  legacy-facing reader branches only. The oldest shape derives only the funding
+  boolean; its period, remaining percentage, and funding-setup fields are
+  discarded. In the current shape, `fundingNeeded` is false for healthy
+  capacity and for low capacity with an available or pending automatic refill;
+  it is true for low capacity without automatic recovery and for every
+  exhausted room. `fundingUrl` remains the capability for an explicit
+  contribution at any valid capacity.
+
+  Assistant policy may disclose the included-used aggregate only after a
+  participant explicitly asks how much AI usage the room has consumed or asks
+  for the room's current usage status. The answer is approximate and scoped to
+  included usage in the current period. Proactive depletion messaging, general
+  funding options, and funding requests use `fundingNeeded` and `fundingUrl`
+  without mentioning the percentage. The transport returns facts and never
+  infers conversational intent. Filesystem-capable group-chat turns load the
+  detailed low-usage skill. Group-email turns cannot read that skill, so the
+  stable prompt carries only the compact explicit-question contract: one
+  `read_usage`, the bounded under-100/at-least-100 wording, authoritative
+  unavailability, and the prohibition on remaining-capacity inference. It does
+  not grant the spoofable email sender any mutation authority. A Web-owned
+  exhaustion projection always appends the current URL to the ordinary group
+  pause copy.
+
+  The Web producer, strict runtime reader, and assistant policy ship as one
+  product change. There is no strip-only reader phase or rollout-only feature
+  flag. A mixed-version Web/runner window may temporarily make this strict read
+  fail; that availability tradeoff is accepted. Once both components converge,
+  the direct group usage read must succeed. Existing legacy-shape branches may
+  be removed only after their producers are neither routable nor rollback
+  candidates and every older warm runner has drained.
 
   The app-local GCP KMS adapter owns web-side root wrapping plus authority
   signing. Hosted billing may store an encrypted unverified Stripe checkout
@@ -1605,15 +1638,45 @@ receipts retain retry authority, and alert configuration or delivery failure
 cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.
 
-Established Linq direct messages and established external-thread group messages
-resolve only a narrow blind-index/member-id preflight target and unwrap the
-mailbox-payload ingress root before the planner transaction opens. The direct
-preflight requires current active access and a complete active domain-root set;
-the group preflight uses the already established route. Neither result grants
-authority: the planner repeats route, identity, activation, access, and
-participant checks in its transaction. New thread containers and members whose
-roots or active access are not yet established remain on the transaction-owned
-provisioning path.
+Hosted thread routing prepares thread-container domain envelopes, delivery-route
+ciphertext, and mailbox ingress roots before the planner transaction.
+Telegram sender authority and Linq pending-contact authority resolve
+contact-privacy rotation candidates through blind routing indexes to core
+member state only; they do not select or decrypt private routing fields.
+The Linq AT_RISK home-line and recovered-setup paths genuinely inspect private
+home-line state before `BEGIN`; those speculative reads retain a failed root
+unwrap only in the existing request-scoped cache so their authoritative
+transaction rechecks fail locally instead of repeating KMS under a connection
+or authority lock.
+Established Linq direct messages resolve only a narrow blind-index/member-id
+target and unwrap the mailbox-payload ingress root; established Linq and
+Telegram group routes also retain the exact observed delivery-route ciphertext,
+prewarm both the active control root used for replacement sealing and any
+decrypt-only control root named by that ciphertext, and prewarm the mailbox
+root. For an eligible unbound group, Web generates the
+synthetic member id, prepares all four domain-root envelopes, pre-seals the
+delivery route, and prewarms the prepared control and mailbox roots before
+`BEGIN`. These reads and crypto results grant no authority: the planner repeats
+route, identity, activation, access, line, pending-setup, and participant checks
+inside the transaction. A new route then commits the synthetic member,
+prepared root envelopes, container, unique external-thread route, and activation
+mailbox wake atomically using the prewarmed ingress root. A version-independent
+raw-thread advisory token serializes creation and refresh across privacy-key
+write versions; the versioned unique external-thread identity remains the
+same-version conflict backstop.
+After taking that token, refresh compares the locked row with the exact
+pre-transaction ciphertext before demotion, mailbox work, or route decryption.
+If the route changes after preparation, Web rolls back and performs at most one
+fresh prepare-before-transaction attempt. Matching valid ciphertext opens from
+the request-scoped root cache with local AES work; absent or structurally corrupt
+ciphertext keeps the existing owning-ingress repair path without speculative
+KMS. Thread-container creation therefore does not use the legacy all-domain
+provisioning bridge or perform domain-root provisioning, delivery-route sealing,
+or activation-mailbox root unwraps while holding its route transaction.
+Transaction-owned authority reads remain inside that boundary and may reuse
+request-scoped root prewarms when available. In particular, opening a
+pending-group setup transfer payload remains a pre-existing transaction-owned
+authority read; it is not thread-container crypto preparation.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The
@@ -1962,9 +2025,20 @@ the canonical capture save waits for an invocation boundary and rebases its
 existing receipt checkpoint onto the latest workspace. The exact private
 `vault_image` result is upserted on the original accepted conversation route and registered with the
 ordinary pending assistant-input index before invocation-local completion state
-is released. The existing runtime wake interrupts the dirty idle window; normal
-foreground selection keeps fresh conversation ahead of the completion and owns
-retry and terminal evidence. Provider completion starts the existing generic
+is released. The existing runtime wake interrupts the dirty idle window, and
+the runtime carries the exact ready completion input into the next Codex
+admission. When newer conversation input is already waiting, the same frozen
+batch places the trusted completion immediately before that input; later input
+still joins through the existing live foreground loop. Invocation-local
+completion readiness is cleared only when the exact input reaches provider
+admission. After shutdown, provider handoff, or an earlier failure, background
+or fresh-foreground selection reconstructs the same completion-first batch
+from structurally trusted completion events in the ordinary pending input
+index. The trusted envelope's existing origin input id bounds the cohort to
+same-route conversation events strictly after that origin, so older backlog
+and other routes remain pending. The index owns durable retry and terminal
+evidence; the immediate assistant wake is only a scheduling hint. Provider
+completion starts the existing generic
 usage recorder without awaiting it, and image delivery never waits for
 accounting or diagnostic writes. A provider rejection keeps the exact legacy
 failed result envelope and places its bounded structured OpenAI diagnostic on a

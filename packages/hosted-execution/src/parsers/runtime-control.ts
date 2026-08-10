@@ -43,7 +43,7 @@ import {
 } from "../assistant-ask-payload.ts";
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
@@ -129,9 +129,9 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  type HostedFamilyPlanCode,
   type HostedRuntimeIMessageContactToolRequest,
   type HostedRuntimeIMessageContactToolResponse,
-  type HostedPlanCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeAssistantConfigurationControlRequest,
   type HostedRuntimeAssistantConfigurationToolRequest,
@@ -2956,6 +2956,7 @@ export function parseHostedRuntimeGroupToolResponse(
         new Set([
           "fundingNeeded",
           "fundingUrl",
+          "includedUsageUsedPercent",
           "sponsorshipStatus",
         ]),
         "Hosted runtime group tool read_usage usage",
@@ -2979,6 +2980,22 @@ export function parseHostedRuntimeGroupToolResponse(
           "Hosted runtime group tool read_usage fundingNeeded must be boolean.",
         );
       }
+      const includedUsageUsedPercent =
+        usage.includedUsageUsedPercent === undefined
+          && usage.sponsorshipStatus !== undefined
+          ? undefined
+          : requireNonNegativeInteger(
+              usage.includedUsageUsedPercent,
+              "Hosted runtime group tool read_usage includedUsageUsedPercent",
+            );
+      if (
+        includedUsageUsedPercent !== undefined
+        && includedUsageUsedPercent > 100
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage includedUsageUsedPercent must be at most 100.",
+        );
+      }
       return {
         action,
         result: {
@@ -2989,6 +3006,9 @@ export function parseHostedRuntimeGroupToolResponse(
               usage.fundingUrl,
               "Hosted runtime group tool read_usage fundingUrl",
             ),
+            ...(includedUsageUsedPercent === undefined
+              ? {}
+              : { includedUsageUsedPercent }),
           },
         },
       };
@@ -4501,23 +4521,12 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   if (action === "start_checkout") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "invite"]),
+      new Set(["action"]),
       "Hosted runtime family plan tool start_checkout request",
     );
-    const invite = record.invite === undefined || record.invite === null
-      ? null
-      : parseHostedRuntimeFamilyPlanInviteRequest(
-          record.invite,
-          "Hosted runtime family plan tool start_checkout request invite",
-        );
-    return invite
-      ? {
-          action,
-          invite,
-        }
-      : {
-          action,
-        };
+    return {
+      action,
+    };
   }
   if (action !== "create_invite") {
     throw new TypeError("Hosted runtime family plan tool action is not supported.");
@@ -5030,7 +5039,7 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
   return {
     ...(invite.planCode === undefined
       ? {}
-      : { planCode: parseHostedRuntimePlanCode(invite.planCode) }),
+      : { planCode: parseHostedRuntimeFamilyPlanCode(invite.planCode) }),
     ...(targetEmail === undefined ? {} : { targetEmail }),
     targetLabel,
     targetPhoneNumber,
@@ -5346,6 +5355,22 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
     ]),
     "Hosted runtime family plan tool start_checkout response result",
   );
+  // The Max-aware runner deploys before Web. The old Web build emits these
+  // inert null keys when checkout carries no invite; accept only that legacy
+  // shape until the old build has drained.
+  if (record.preparedInvite !== undefined && record.preparedInvite !== null) {
+    throw new TypeError(
+      "Hosted runtime family plan start_checkout preparedInvite must be null.",
+    );
+  }
+  if (
+    record.preparedInviteReplyText !== undefined
+    && record.preparedInviteReplyText !== null
+  ) {
+    throw new TypeError(
+      "Hosted runtime family plan start_checkout preparedInviteReplyText must be null.",
+    );
+  }
   const unavailableReason = readOptionalNullableString(
     record.unavailableReason,
     "Hosted runtime family plan start_checkout unavailableReason",
@@ -5377,13 +5402,6 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
     owner: requireBoolean(
       record.owner,
       "Hosted runtime family plan start_checkout owner",
-    ),
-    preparedInvite: record.preparedInvite === null || record.preparedInvite === undefined
-      ? null
-      : parseHostedRuntimeFamilyPlanInvite(record.preparedInvite),
-    preparedInviteReplyText: readNullableString(
-      record.preparedInviteReplyText,
-      "Hosted runtime family plan start_checkout preparedInviteReplyText",
     ),
     plans: parseHostedRuntimeFamilyPlanPlans(record.plans, seats),
     seats,
@@ -5420,6 +5438,7 @@ function parseHostedRuntimeFamilyPlanPlans(
   if (value === undefined) {
     return {
       edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
       pulse: {
         active: legacySeats.active,
         billed: legacySeats.billed,
@@ -5430,7 +5449,16 @@ function parseHostedRuntimeFamilyPlanPlans(
     };
   }
   const record = requireObject(value, "Hosted runtime family plan plans");
-  return Object.fromEntries(HOSTED_PLAN_CODES.map((planCode) => {
+  return Object.fromEntries(HOSTED_FAMILY_PLAN_CODES.map((planCode) => {
+    if (planCode === "max" && record[planCode] === undefined) {
+      return [planCode, {
+        active: 0,
+        billed: 0,
+        invited: 0,
+        remaining: 0,
+        used: 0,
+      }];
+    }
     const status = requireObject(
       record[planCode],
       `Hosted runtime family plan ${planCode} status`,
@@ -5450,7 +5478,7 @@ function parseHostedRuntimeFamilyPlanPlans(
       ),
       used: requireNumber(status.used, `Hosted runtime family plan ${planCode} used`),
     }];
-  })) as Record<HostedPlanCode, {
+  })) as Record<HostedFamilyPlanCode, {
     active: number;
     billed: number;
     invited: number;
@@ -5459,11 +5487,12 @@ function parseHostedRuntimeFamilyPlanPlans(
   }>;
 }
 
-function parseHostedRuntimePlanCode(value: unknown): HostedPlanCode {
+function parseHostedRuntimeFamilyPlanCode(value: unknown): HostedFamilyPlanCode {
   const planCode = requireString(value, "Hosted runtime Family plan code");
-  if (HOSTED_PLAN_CODES.includes(planCode as HostedPlanCode)) {
-    return planCode as HostedPlanCode;
+  if (HOSTED_FAMILY_PLAN_CODES.includes(planCode as HostedFamilyPlanCode)) {
+    return planCode as HostedFamilyPlanCode;
   }
+
   throw new TypeError("Hosted runtime Family plan code is not supported.");
 }
 
@@ -5486,7 +5515,7 @@ function parseHostedRuntimeFamilyPlanMember(value: unknown) {
     ),
     planCode: record.planCode === undefined
       ? "pulse" as const
-      : parseHostedRuntimePlanCode(record.planCode),
+      : parseHostedRuntimeFamilyPlanCode(record.planCode),
     role: requireString(record.role, "Hosted runtime family plan member role"),
     status: requireString(record.status, "Hosted runtime family plan member status"),
   };
@@ -5519,7 +5548,7 @@ function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
     ),
     planCode: record.planCode === undefined
       ? "pulse" as const
-      : parseHostedRuntimePlanCode(record.planCode),
+      : parseHostedRuntimeFamilyPlanCode(record.planCode),
     status: requireString(record.status, "Hosted runtime family plan invite status"),
     targetLabel: readNullableString(
       record.targetLabel,

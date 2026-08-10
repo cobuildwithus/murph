@@ -1692,7 +1692,7 @@ describe('assistant consumption lookup guidance', () => {
       'Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.',
     )
     expect(prompt).toContain(
-      'Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution; body-composition weight/waist/recomposition; gut-digestion digestive symptoms; micronutrients-supplements supplement evidence, labels, dose, and safety.',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation; body-composition owns weight/waist/recomposition; gut-digestion owns digestive symptoms and elimination/reintroduction; micronutrients-supplements owns supplement evidence, labels, dose, and safety.',
     )
     expect(prompt).toContain(
       'Preserve medication state correctly: completed historical courses use `vault-cli medication history add`; current medication regimens use `regimen save --kind medication` with correct status and dates; one dose taken at a specific time uses `event medication-intake add`.',
@@ -1707,7 +1707,7 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
+      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.',
     )
     expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
@@ -2340,7 +2340,22 @@ describe('assistant experiment onboarding guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).not.toContain('Supported experiment protocols:')
-    expect(prompt).toContain('Health Commons route surface:')
+    expect(prompt).toContain('Health Commons tools:')
+    expect(prompt).toContain(
+      'Before health Q&A or advice',
+    )
+    expect(prompt).toContain(
+      '`vault-cli commons knowledge search "<full health question in concise English>" --format json`',
+    )
+    expect(prompt).toContain('run one `vault-cli commons knowledge search')
+    expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
+    expect(prompt).toContain('If unavailable or empty, continue honestly.')
+    expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')
+    expect(prompt).toContain('only when asked to try, test, track, or set one up.')
+    expect(prompt).not.toContain('overall evidence')
+    expect(prompt).not.toContain('topicResolved')
+    expect(prompt).not.toContain('same catalogHash')
+    expect(prompt).not.toContain('use 2 only')
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
     )
@@ -2570,6 +2585,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
+    expect(prompt).toContain(
+      'nutrition-strategy owns forward meal execution and named-diet evaluation',
+    )
     expect(prompt).toContain('Care logistics: appointment-scheduling.')
     expect(prompt).toContain('Transports and services: connected-apps, computer-use, phone-calls.')
     expect(prompt).toContain('Account products: murph-family.')
@@ -3033,6 +3051,21 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       'In group email, where filesystem reads are forbidden, do not attempt the read; apply the resident group Understand before recommending rules instead.',
+    )
+    expect(prompt).toContain(
+      'Group email has no filesystem access. Do not try to read a usage skill.',
+    )
+    expect(prompt).toContain(
+      'call `murph.group action="read_usage"` exactly once',
+    )
+    expect(prompt).toContain(
+      'At least all of this room\'s included usage for the current period has been used.',
+    )
+    expect(prompt).toContain(
+      'authoritative included-usage progress figure for this room is unavailable right now',
+    )
+    expect(prompt).not.toContain(
+      'Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md`',
     )
     expect(prompt).not.toContain(
       'Use `murph.automation` with `action: save`',

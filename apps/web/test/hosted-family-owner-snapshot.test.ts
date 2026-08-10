@@ -108,6 +108,25 @@ function ownerSnapshotPrisma() {
   };
 }
 
+function projectPreMaxHostedFamilyMembership(input: {
+  pendingPlanCode: string | null;
+  planCode: string;
+}) {
+  const readPlanCode = (value: string): "edge" | "pulse" => {
+    if (value === "edge" || value === "pulse") {
+      return value;
+    }
+    throw new TypeError("Hosted Family plan code is not supported.");
+  };
+
+  return {
+    pendingPlanCode: input.pendingPlanCode
+      ? readPlanCode(input.pendingPlanCode)
+      : null,
+    planCode: readPlanCode(input.planCode),
+  };
+}
+
 test("owner snapshot maps seats, member labels, masked phone, and share links", async () => {
   const prisma = ownerSnapshotPrisma();
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({
@@ -141,6 +160,48 @@ test("owner snapshot maps seats, member labels, masked phone, and share links", 
   // Dad is a phone-bound invite: no Telegram link, even though a bot is configured.
   expect(invite?.telegramInviteUrl).toBeNull();
   expect(invite?.acceptUrl).toBe("https://app.murph.test/family/accept/CODEDAD");
+});
+
+test("pending Max transition advances the Web rollback floor before Stripe capacity changes", async () => {
+  const transitioningMember = {
+    joinedAt: FUTURE,
+    memberId: "m_mom",
+    pendingPlanCode: "max",
+    planCode: "pulse",
+    role: "member",
+    status: "active",
+  };
+
+  expect(() => projectPreMaxHostedFamilyMembership(transitioningMember)).toThrow(
+    /plan code is not supported/u,
+  );
+
+  const prisma = ownerSnapshotPrisma();
+  prisma.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([
+    {
+      joinedAt: NOW,
+      memberId: "m_owner",
+      pendingPlanCode: null,
+      planCode: "pulse",
+      role: "owner",
+      status: "active",
+    },
+    transitioningMember,
+  ]);
+
+  const snapshot = await readHostedFamilyOwnerSnapshotForMember({
+    // @ts-expect-error: focused prisma double exposes only the methods under test
+    prisma,
+    memberId: "m_owner",
+    now: NOW,
+  });
+
+  expect(snapshot?.members.find((member) => member.memberId === "m_mom")).toMatchObject({
+    pendingPlanCode: "max",
+    planCode: "pulse",
+  });
+  expect(snapshot?.plans.pulse.billed).toBe(4);
+  expect(snapshot?.plans.max.billed).toBe(0);
 });
 
 test("owner snapshot exposes a Telegram link only for a Telegram-bound invite", async () => {
