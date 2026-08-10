@@ -100,8 +100,15 @@ describe("hosted group tool route", () => {
     expect(mocks.handleTool).toHaveBeenCalledWith({
       memberId: "member_group_runtime",
       request: body,
+      // Anchored before the signed-callback read above, so the verification and
+      // nonce work it covers is charged to whatever budget the tool derives.
+      requestStartedAtMs: expect.any(Number),
       scheduleMailboxWake: expect.any(Function),
     });
+    const [handled] = mocks.handleTool.mock.calls.at(-1) as [
+      { requestStartedAtMs: number },
+    ];
+    expect(handled.requestStartedAtMs).toBeLessThanOrEqual(Date.now());
   });
 
   it.each([

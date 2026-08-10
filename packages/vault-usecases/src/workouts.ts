@@ -1,5 +1,6 @@
 export * from './usecases/workout.js'
 export * from './usecases/workout-format.js'
 export * from './usecases/workout-import.js'
+export * from './usecases/workout-live.js'
 export * from './usecases/workout-measurement.js'
 export * from './usecases/workout-read.js'

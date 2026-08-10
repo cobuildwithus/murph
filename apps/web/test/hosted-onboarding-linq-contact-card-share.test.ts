@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Mirrors linq-client's own attempt budget; the share module derives its
+// pre-send deadline from that owner rather than restating the number.
+const SEND_ATTEMPT_BUDGET_MS = 7_000;
+
 const shareSendMocks = vi.hoisted(() => ({
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
@@ -34,6 +38,7 @@ vi.mock("@/src/lib/hosted-onboarding/contact-privacy", async (importOriginal) =>
 });
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  HOSTED_LINQ_ATTACHMENT_SEND_ATTEMPT_TIMEOUT_MS: 7_000,
   getHostedLinqChatHandles: shareSendMocks.getHostedLinqChatHandles,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
     Boolean(
@@ -71,9 +76,11 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
 }));
 
 import {
+  HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_OPERATION_BUDGET_MS,
   isHostedLinqContactCardAutoShareEligible,
   releaseHostedLinqContactCardShareAttempt,
   reserveHostedLinqContactCardShareAttempt,
+  resolveHostedLinqPersonalizedContactCardDeadlines,
   shareMurphHostedLinqNativeContactCardToChat,
   shareMurphHostedLinqContactCardVcfToChat,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
@@ -665,6 +672,19 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
       reason: "send_failed",
       error: otherFailure,
     });
+  });
+
+  it("places the pre-send deadline so the send and its reconciliation still fit", () => {
+    // Not a claim about the caller's own window — the route boundary owns that
+    // and proves it. This pins the derivation: reaching the pre-send deadline
+    // is the admission check, so whatever is left must cover both attempts.
+    const { operationDeadlineAt, preSendDeadlineAt } =
+      resolveHostedLinqPersonalizedContactCardDeadlines(0);
+
+    expect(operationDeadlineAt).toBe(
+      HOSTED_LINQ_PERSONALIZED_CONTACT_CARD_OPERATION_BUDGET_MS,
+    );
+    expect(operationDeadlineAt - preSendDeadlineAt).toBe(2 * SEND_ATTEMPT_BUDGET_MS);
   });
 
   it("reports an unresolved acknowledgement as unconfirmed only per request", async () => {

@@ -53,10 +53,15 @@ import {
 } from "../hosted-routing/assistant-notification-destination";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
-import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
+import {
+  HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+  isHostedUsageReferralEnabled,
+} from "./usage-referral-policy";
+import {
+  formatHostedReferralRewardUsageDays,
+} from "./referral-reward-days";
 
-export const HOSTED_USAGE_REFERRAL_POLICY_VERSION =
-  "hosted-usage-referral-2026-07-v1";
+export { HOSTED_USAGE_REFERRAL_POLICY_VERSION } from "./usage-referral-policy";
 export const HOSTED_USAGE_REFERRAL_INTENT_TTL_MS =
   7 * 24 * 60 * 60 * 1_000;
 export const HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS =
@@ -82,13 +87,6 @@ const EXPECTED_REFERRAL_UNAVAILABLE_ERRORS = new Set([
   "too_many_referrals_in_progress",
   "usage_referral_not_available",
 ]);
-const HOSTED_USAGE_CREDIT_USD_FORMATTER = new Intl.NumberFormat("en-US", {
-  currency: "USD",
-  maximumFractionDigits: 2,
-  minimumFractionDigits: 2,
-  style: "currency",
-});
-
 type HostedUsageReferralPolicyDefinition = {
   code: HostedUsageReferralPolicyCode;
   requirementsLabel: string;
@@ -145,17 +143,14 @@ interface HostedUsageReferralCelebrationStyleBand {
 
 export function buildHostedUsageReferralRewardLabel(input: {
   destinationKind: "group" | "personal";
+  policyCode: HostedUsageReferralPolicyCode;
+  policyVersion: string;
   rewardUsdMicros: bigint;
 }): string {
   const subject = input.destinationKind === "group"
     ? "this room"
     : "your Murph";
-  return `${formatHostedUsageCreditUsd(input.rewardUsdMicros)} of cost-weighted usage credit for ${subject}`;
-}
-
-function formatHostedUsageCreditUsd(usdMicros: bigint): string {
-  const cents = (usdMicros + 5_000n) / 10_000n;
-  return HOSTED_USAGE_CREDIT_USD_FORMATTER.format(Number(cents) / 100);
+  return `${formatHostedReferralRewardUsageDays(input)} for ${subject}`;
 }
 
 function outstandingHostedUsageReferralCommitmentWhere(
@@ -1067,6 +1062,8 @@ async function appendHostedUsageReferralCelebration(input: {
     select: {
       beneficiaryMemberId: true,
       celebrationQueuedAt: true,
+      policyCode: true,
+      policyVersion: true,
       referrerMemberId: true,
       rewardUsdMicros: true,
       rewardedAt: true,
@@ -1158,6 +1155,8 @@ async function appendHostedUsageReferralCelebration(input: {
         notificationKey,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind,
+          policyCode: referral.policyCode,
+          policyVersion: referral.policyVersion,
           rewardUsdMicros: referral.rewardUsdMicros,
         }),
         rewardedAt,
@@ -1669,6 +1668,7 @@ async function readHostedUsageReferralSnapshot(input: {
     select: {
       expiresAt: true,
       policyCode: true,
+      policyVersion: true,
       rewardUsdMicros: true,
       status: true,
     },
@@ -1717,6 +1717,8 @@ async function readHostedUsageReferralSnapshot(input: {
             policyCode: mission.policyCode,
             rewardLabel: buildHostedUsageReferralRewardLabel({
               destinationKind,
+              policyCode: mission.policyCode,
+              policyVersion: mission.policyVersion,
               rewardUsdMicros: mission.rewardUsdMicros,
             }),
             state: mission.status === "armed" ? "armed" : "target_bound",
@@ -1736,6 +1738,8 @@ async function readHostedUsageReferralSnapshot(input: {
         requirementsLabel: POLICIES[code].requirementsLabel,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind,
+          policyCode: code,
+          policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
           rewardUsdMicros: POLICIES[code].rewardUsdMicros,
         }),
       })),

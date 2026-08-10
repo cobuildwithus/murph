@@ -18,6 +18,7 @@ vi.mock("@/src/lib/connected-apps/service", () => ({
   executeHostedConnectedAppsRequest: mocks.executeHostedConnectedAppsRequest,
 }));
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { hostedMemberAccessSelect } from "@/src/lib/hosted-onboarding/member-access";
 
 type RouteModule = typeof import("../app/api/internal/connected-apps/route");
@@ -347,6 +348,78 @@ describe("internal connected-apps route", () => {
         operation: "search",
       },
     });
+  });
+
+  it("logs structured provider diagnostics without returning them to the runner", async () => {
+    mocks.getPrisma.mockReturnValue(createPrisma({
+      accountGroupMemberships: [],
+      billingStatus: "active",
+      id: "member_family",
+      suspendedAt: null,
+    }));
+    mocks.executeHostedConnectedAppsRequest.mockRejectedValue(
+      hostedOnboardingError({
+        cause: new Error(
+          "Composio email sending returned an ambiguous result. Composio request failed with status 400. Provider error: code=1703, slug=PROVIDER_AUTH_FAILED.",
+        ),
+        code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+        details: {
+          operationName: "GMAIL_SEND_EMAIL",
+          statusCode: 400,
+          type: "composio_http_error",
+        },
+        httpStatus: 400,
+        message: "The connected-app request could not be completed.",
+        retryable: false,
+      }),
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/internal/connected-apps",
+      {
+        body: JSON.stringify({
+          input: {
+            account: "work",
+            agentApproved: true,
+            arguments: {
+              body: "Please help with my account.",
+              recipient_email: "support@example.com",
+              subject: "Account help",
+            },
+            toolSlug: "GMAIL_SEND_EMAIL",
+          },
+          operation: "execute",
+        }),
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload).toEqual({
+      error: {
+        code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+        details: {
+          operationName: "GMAIL_SEND_EMAIL",
+          statusCode: 400,
+          type: "composio_http_error",
+        },
+        message: "The connected-app request could not be completed.",
+        retryable: false,
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain("PROVIDER_AUTH_FAILED");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted onboarding route failed.",
+      expect.objectContaining({
+        errorCauseMessage:
+          "Composio email sending returned an ambiguous result. Composio request failed with status 400. Provider error: code=1703, slug=PROVIDER_AUTH_FAILED.",
+        errorResponseCode: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+        requestMethod: "POST",
+      }),
+    );
+    warnSpy.mockRestore();
   });
 });
 

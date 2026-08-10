@@ -2523,7 +2523,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                         requirementsLabel:
                           'Start a fresh group with one genuinely new person who activates their own Murph and says hi there.',
                         rewardLabel:
-                          '$2.00 of cost-weighted usage credit for your Murph',
+                          'about 10 more days of Murph usage for your Murph',
                       }],
                       trialCreditNotice: null,
                     },
@@ -2587,7 +2587,12 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(privatePlanUsageReads).toBe(1)
         expect(privateGroupActions).toEqual(['read_usage_referral'])
         expect(privateResult.finalMessage).toMatch(/add (?:one-time )?usage/iu)
-        expect(privateResult.finalMessage).toContain('$2.00 of cost-weighted usage credit')
+        expect(privateResult.finalMessage).toContain(
+          'about 10 more days of Murph usage for your Murph',
+        )
+        expect(privateResult.finalMessage).not.toMatch(
+          /\$|cost-weighted|exact credit|messages?\b|remaining balance|calendar|trial extension/iu,
+        )
 
         const groupResult = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
@@ -2635,7 +2640,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                           requirementsLabel:
                             'Start a fresh group and make it genuinely active, with multiple people actually talking.',
                           rewardLabel:
-                            '$3.50 of cost-weighted usage credit for your Murph',
+                            'about 14 more days of Murph usage for your Murph',
                         }],
                         trialCreditNotice: null,
                       },
@@ -2681,7 +2686,12 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           'read_usage_referral',
         ]))
         expect(groupResult.finalMessage).toContain(fundingUrl)
-        expect(groupResult.finalMessage).toContain('$3.50 of cost-weighted usage credit')
+        expect(groupResult.finalMessage).toContain(
+          'about 14 more days of Murph usage for your Murph',
+        )
+        expect(groupResult.finalMessage).not.toMatch(
+          /\$|cost-weighted|exact credit|messages?\b|remaining balance|calendar|trial extension/iu,
+        )
         expect(groupResult.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
 
         const fundingPrivacyResult = await executeRealCodexAppServerTurn({
@@ -2835,14 +2845,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                             requirementsLabel:
                               'Bring Murph and one genuinely new person together in a fresh group.',
                             rewardLabel:
-                              '$2.00 of cost-weighted usage credit for your Murph',
+                              'about 10 more days of Murph usage for your Murph',
                           },
                           {
                             code: 'active_group_v1',
                             requirementsLabel:
                               'Start a fresh group and make it genuinely active, with multiple people actually talking.',
                             rewardLabel:
-                              '$3.50 of cost-weighted usage credit for your Murph',
+                              'about 14 more days of Murph usage for your Murph',
                           },
                         ],
                         trialCreditNotice: null,
@@ -2905,11 +2915,17 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         ]))
         expect(newPersonPathIndex).toBeGreaterThanOrEqual(0)
         expect(activeGroupPathIndex).toBeGreaterThanOrEqual(0)
+        expect(second.finalMessage).toContain(
+          'about 10 more days of Murph usage for your Murph',
+        )
+        expect(second.finalMessage).toContain(
+          'about 14 more days of Murph usage for your Murph',
+        )
         expect(fundingUrlIndex).toBeGreaterThan(newPersonPathIndex)
         expect(fundingUrlIndex).toBeGreaterThan(activeGroupPathIndex)
         expect(second.finalMessage).toMatch(/sponsor|fund/iu)
         expect(second.finalMessage).not.toMatch(
-          /messages?\b|one-time|monthly sponsorship|second sponsor|new sponsor|payer|charged|maximum|monthly cap|balance|remaining|percent|refill/iu,
+          /\$|cost-weighted|exact credit|messages?\b|one-time|monthly sponsorship|second sponsor|new sponsor|payer|charged|maximum|monthly cap|balance|remaining|percent|refill|calendar|trial extension/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
