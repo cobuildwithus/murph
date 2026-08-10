@@ -12,8 +12,11 @@ import {
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
   queryHostedRuntimeWorkflowForTest,
+  seedHostedWorkspaceInboxMediaRetentionWakeForTest,
   signalHostedMailboxAppendRuntimeForTest,
   signalHostedManualRunRuntimeForTest,
+  signalHostedRetentionRuntimeRecheckForTest,
+  updateHostedMemberBillingStatusForTest,
 } from "#hosted-web-testing";
 
 vi.mock("server-only", () => ({}));
@@ -21,6 +24,8 @@ vi.mock("server-only", () => ({}));
 const runUserId = `member_local_temporal_orchestration_${Date.now()}`;
 const mailboxWorkspaceUserId =
   `member_local_temporal_mailbox_workspace_${Date.now()}`;
+const pausedRetentionUserId =
+  `member_local_temporal_paused_retention_${Date.now()}`;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -115,10 +120,59 @@ describe("hosted local Temporal orchestration e2e", () => {
     expect(finalStatus.workspace).not.toBeNull();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
   }, 300_000);
+
+  it("runs due retention for a paused member without assistant provider work", async () => {
+    const activeScenario = requireScenario();
+
+    await activeScenario.seedActiveHostedMember({
+      memberId: pausedRetentionUserId,
+    });
+    await activeScenario.runWake(
+      buildActivationWake(pausedRetentionUserId, "paused-retention"),
+      pausedRetentionUserId,
+    );
+    await activeScenario.waitForHostedCompletion(pausedRetentionUserId);
+    const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
+
+    await updateHostedMemberBillingStatusForTest({
+      billingStatus: "paused",
+      environment: activeScenario.runtimeEnv,
+      memberId: pausedRetentionUserId,
+    });
+    await seedHostedWorkspaceInboxMediaRetentionWakeForTest({
+      environment: activeScenario.runtimeEnv,
+      userId: pausedRetentionUserId,
+      wakeAt: new Date(Date.now() - 60_000),
+    });
+
+    const retentionSignalStartedAt = new Date();
+    const signal = await signalHostedRetentionRuntimeRecheckForTest({
+      environment: activeScenario.runtimeEnv,
+      userId: pausedRetentionUserId,
+    });
+    const workflowState = await waitForWorkflowExecutionState({
+      env: activeScenario.runtimeEnv,
+      executionNotBefore: retentionSignalStartedAt,
+      workflowId: signal.workflowId,
+    });
+    expect(workflowState.lastExecutionErrorCode).toBeNull();
+    expect(workflowState.lastExecutionKind).toMatch(/runtime_/u);
+    expect(workflowState.lastReconciliationBlockedReason).toBe("user_not_active");
+
+    const finalStatus = await activeScenario.waitForHostedCompletion(
+      pausedRetentionUserId,
+    );
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.workspace?.inboxMediaRetentionWakeAt ?? null).toBeNull();
+    expect(activeScenario.assistantProviderRequests).toHaveLength(
+      providerRequestBaseline,
+    );
+  }, 300_000);
 });
 
 async function waitForWorkflowExecutionState(input: {
   env: NodeJS.ProcessEnv;
+  executionNotBefore?: Date;
   workflowId: string;
 }): Promise<ObservedHostedRuntimeWorkflowState> {
   const deadline = Date.now() + 180_000;
@@ -134,7 +188,10 @@ async function waitForWorkflowExecutionState(input: {
           workflowId: input.workflowId,
         }),
       );
-      if (latestState.lastExecutionKind !== null) {
+      if (
+        latestState.lastExecutionKind !== null
+        && isExecutionAtOrAfter(latestState.lastExecutionAt, input.executionNotBefore)
+      ) {
         return latestState;
       }
     } catch (error) {
@@ -155,10 +212,27 @@ async function waitForWorkflowExecutionState(input: {
   );
 }
 
+function isExecutionAtOrAfter(
+  lastExecutionAt: string | null,
+  executionNotBefore: Date | undefined,
+): boolean {
+  if (!executionNotBefore) {
+    return true;
+  }
+  if (!lastExecutionAt) {
+    return false;
+  }
+
+  const executionAtMs = Date.parse(lastExecutionAt);
+  return Number.isFinite(executionAtMs)
+    && executionAtMs >= executionNotBefore.getTime();
+}
+
 interface ObservedHostedRuntimeWorkflowState {
   lastExecutionAt: string | null;
   lastExecutionErrorCode: string | null;
   lastExecutionKind: string | null;
+  lastReconciliationBlockedReason: string | null;
   userId: string;
 }
 
@@ -174,6 +248,9 @@ function readObservedHostedRuntimeWorkflowState(
     record.lastExecutionErrorCode,
   );
   const lastExecutionKind = readNullableString(record.lastExecutionKind);
+  const lastReconciliationBlockedReason = readNullableString(
+    record.lastReconciliationBlockedReason,
+  );
   if (typeof record.userId !== "string" || record.userId.length === 0) {
     throw new TypeError("Hosted runtime Workflow query returned an invalid userId.");
   }
@@ -182,6 +259,7 @@ function readObservedHostedRuntimeWorkflowState(
     lastExecutionAt,
     lastExecutionErrorCode,
     lastExecutionKind,
+    lastReconciliationBlockedReason,
     userId: record.userId,
   };
 }

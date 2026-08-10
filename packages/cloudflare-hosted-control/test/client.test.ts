@@ -359,7 +359,7 @@ describe("createCloudflareHostedControlClient", () => {
     ).rejects.toThrow("processingAllowed did not match consentState");
   });
 
-  it("posts an empty runtime shell-prewarm hint to the bound user route", async () => {
+  it("posts a source-bound runtime shell-prewarm hint to the bound user route", async () => {
     const fetchImpl = vi.fn(async () =>
       createJsonResponse({ accepted: true }, { status: 202 })
     ) as typeof fetch;
@@ -369,7 +369,10 @@ describe("createCloudflareHostedControlClient", () => {
       getBearerToken: async () => "token-123",
     });
 
-    await expect(client.prewarmRuntimeShell("user_123")).resolves.toEqual({
+    await expect(client.prewarmRuntimeShell({
+      source: "linq-typing-started",
+      userId: "user_123",
+    })).resolves.toEqual({
       accepted: true,
     });
 
@@ -379,7 +382,7 @@ describe("createCloudflareHostedControlClient", () => {
       "https://runner.example.test/internal/users/user_123/runtime/shell-prewarm",
     );
     expect(init).toMatchObject({
-      body: "{}",
+      body: '{"source":"linq-typing-started"}',
       method: "POST",
     });
     const headers = new Headers(init.headers);
@@ -396,7 +399,10 @@ describe("createCloudflareHostedControlClient", () => {
       getBearerToken: async () => "token-123",
     });
 
-    await expect(client.prewarmRuntimeShell("user_123")).rejects.toThrow(
+    await expect(client.prewarmRuntimeShell({
+      source: "linq-typing-started",
+      userId: "user_123",
+    })).rejects.toThrow(
       "Cloudflare runtime shell prewarm response accepted must be true.",
     );
   });
