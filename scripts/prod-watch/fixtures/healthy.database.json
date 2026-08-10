@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "prod-watch.adapter-evidence.v1",
+  "source": "database",
+  "collectedAt": "2026-01-01T00:00:00.000Z",
+  "status": "ok",
+  "auth": "not_required",
+  "freshnessSeconds": 0,
+  "releaseContext": [
+    {
+      "source": "database",
+      "runtime": "assistant_runtime",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observedAt": "2026-01-01T00:00:00.000Z",
+      "current": true
+    }
+  ],
+  "counters": [
+    {
+      "metric": "runtime_event_count",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 1000,
+      "previous": 950,
+      "sampleCount": 1000,
+      "previousSampleCount": 950
+    },
+    {
+      "metric": "runtime_error_count",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 2,
+      "previous": 2,
+      "sampleCount": 1000,
+      "previousSampleCount": 950
+    },
+    {
+      "metric": "runtime_timeout_count",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 1,
+      "previous": 1,
+      "sampleCount": 1000,
+      "previousSampleCount": 950
+    },
+    {
+      "metric": "assistant_issue_count",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 1,
+      "previous": 1
+    },
+    {
+      "metric": "ingress_accepted_count",
+      "dimensions": { "source": "database", "surface": "linq" },
+      "unit": "count",
+      "current": 120,
+      "previous": 118
+    },
+    {
+      "metric": "ingress_incomplete_count",
+      "dimensions": { "source": "database", "surface": "linq" },
+      "unit": "count",
+      "current": 0,
+      "previous": 0,
+      "sampleCount": 120,
+      "previousSampleCount": 118
+    },
+    {
+      "metric": "db_connections",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 24
+    },
+    {
+      "metric": "db_connection_ratio",
+      "dimensions": { "source": "database" },
+      "unit": "ratio",
+      "current": 0.24
+    },
+    {
+      "metric": "db_deadlocks_total",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 2
+    },
+    {
+      "metric": "db_temp_bytes_total",
+      "dimensions": { "source": "database" },
+      "unit": "bytes",
+      "current": 1024
+    },
+    {
+      "metric": "db_cache_hit_ratio",
+      "dimensions": { "source": "database" },
+      "unit": "ratio",
+      "current": 0.995
+    },
+    {
+      "metric": "db_active_sessions",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 3
+    },
+    {
+      "metric": "db_idle_in_transaction",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 0
+    },
+    {
+      "metric": "db_long_transaction_count",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 0
+    },
+    {
+      "metric": "db_max_active_transaction_age_ms",
+      "dimensions": { "source": "database" },
+      "unit": "milliseconds",
+      "current": 1200
+    },
+    {
+      "metric": "db_blocked_session_count",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 0
+    }
+  ],
+  "latency": [
+    {
+      "metric": "ingress_to_provider_ms",
+      "dimensions": { "source": "database", "surface": "linq" },
+      "count": 100,
+      "p50Ms": 850,
+      "p95Ms": 3200,
+      "p99Ms": 6500,
+      "maxMs": 8000,
+      "baselineCount": 98,
+      "baselineP95Ms": 3000,
+      "baselineP99Ms": 6200
+    }
+  ],
+  "fingerprints": [
+    {
+      "rawFingerprint": "fixture-healthy-runtime-error",
+      "source": "database",
+      "component": "hosted_runtime",
+      "phase": "reply",
+      "severity": "low",
+      "errorCode": "transient_provider_error",
+      "issueKind": "runtime_error",
+      "count": 1,
+      "previousCount": 1,
+      "firstSeenAt": "2026-01-01T00:00:00.000Z",
+      "lastSeenAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}

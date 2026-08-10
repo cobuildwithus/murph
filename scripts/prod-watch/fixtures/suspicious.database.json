@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "prod-watch.adapter-evidence.v1",
+  "source": "database",
+  "collectedAt": "2026-01-01T00:00:00.000Z",
+  "status": "ok",
+  "auth": "not_required",
+  "freshnessSeconds": 0,
+  "releaseContext": [
+    {
+      "source": "database",
+      "runtime": "assistant_runtime",
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "observedAt": "2026-01-01T00:00:00.000Z",
+      "deployedAt": "2026-01-01T00:00:00.000Z",
+      "current": true
+    }
+  ],
+  "counters": [
+    {
+      "metric": "runtime_event_count",
+      "dimensions": { "source": "database", "component": "hosted_runtime" },
+      "unit": "count",
+      "current": 500,
+      "previous": 500,
+      "sampleCount": 500,
+      "previousSampleCount": 500
+    },
+    {
+      "metric": "runtime_error_count",
+      "dimensions": { "source": "database", "component": "hosted_runtime" },
+      "unit": "count",
+      "current": 60,
+      "previous": 5,
+      "sampleCount": 500,
+      "previousSampleCount": 500
+    },
+    {
+      "metric": "runtime_timeout_count",
+      "dimensions": { "source": "database", "component": "hosted_runtime" },
+      "unit": "count",
+      "current": 12,
+      "previous": 1,
+      "sampleCount": 500,
+      "previousSampleCount": 500
+    },
+    {
+      "metric": "assistant_issue_count",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 25,
+      "previous": 3
+    },
+    {
+      "metric": "ingress_accepted_count",
+      "dimensions": { "source": "database", "surface": "linq" },
+      "unit": "count",
+      "current": 110,
+      "previous": 112
+    },
+    {
+      "metric": "ingress_incomplete_count",
+      "dimensions": { "source": "database", "surface": "linq" },
+      "unit": "count",
+      "current": 12,
+      "previous": 1,
+      "sampleCount": 110,
+      "previousSampleCount": 112
+    },
+    {
+      "metric": "db_connections",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 94
+    },
+    {
+      "metric": "db_connection_ratio",
+      "dimensions": { "source": "database" },
+      "unit": "ratio",
+      "current": 0.94
+    },
+    {
+      "metric": "db_deadlocks_total",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 5
+    },
+    {
+      "metric": "db_temp_bytes_total",
+      "dimensions": { "source": "database" },
+      "unit": "bytes",
+      "current": 734003200
+    },
+    {
+      "metric": "db_cache_hit_ratio",
+      "dimensions": { "source": "database" },
+      "unit": "ratio",
+      "current": 0.91
+    },
+    {
+      "metric": "db_active_sessions",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 42
+    },
+    {
+      "metric": "db_idle_in_transaction",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 8
+    },
+    {
+      "metric": "db_long_transaction_count",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 2
+    },
+    {
+      "metric": "db_max_active_transaction_age_ms",
+      "dimensions": { "source": "database" },
+      "unit": "milliseconds",
+      "current": 420000
+    },
+    {
+      "metric": "db_blocked_session_count",
+      "dimensions": { "source": "database" },
+      "unit": "count",
+      "current": 6
+    }
+  ],
+  "latency": [
+    {
+      "metric": "ingress_to_provider_ms",
+      "dimensions": { "source": "database", "surface": "linq", "component": "hosted_runtime" },
+      "count": 90,
+      "p50Ms": 6000,
+      "p95Ms": 22000,
+      "p99Ms": 72000,
+      "maxMs": 90000,
+      "baselineCount": 95,
+      "baselineP95Ms": 4000,
+      "baselineP99Ms": 10000
+    }
+  ],
+  "fingerprints": [
+    {
+      "rawFingerprint": "fixture-sensitive-billing-signal",
+      "source": "database",
+      "component": "stripe_webhook",
+      "phase": "receipt_apply",
+      "severity": "high",
+      "errorCode": "billing_receipt_failed",
+      "issueKind": "billing_integrity",
+      "releaseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "count": 3,
+      "previousCount": 0,
+      "firstSeenAt": "2026-01-01T00:00:00.000Z",
+      "lastSeenAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "rawFingerprint": "fixture-runtime-spike",
+      "source": "database",
+      "component": "hosted_runtime",
+      "phase": "provider_call",
+      "severity": "high",
+      "errorCode": "provider_timeout",
+      "issueKind": "runtime_error",
+      "releaseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "count": 20,
+      "previousCount": 2,
+      "firstSeenAt": "2026-01-01T00:00:00.000Z",
+      "lastSeenAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}

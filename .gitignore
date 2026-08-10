@@ -32,6 +32,10 @@ apps/web/next-env.d.ts
 !/.agents/skills/health-commons-research/SKILL.md
 !/.agents/skills/work-with-pro/
 !/.agents/skills/work-with-pro/SKILL.md
+!/.agents/skills/production-watch/
+!/.agents/skills/production-watch/SKILL.md
+!/.agents/skills/production-watch/agents/
+!/.agents/skills/production-watch/agents/openai.yaml
 !/.agents/skills/murph-exercise-images/
 !/.agents/skills/murph-exercise-images/SKILL.md
 !/.agents/skills/murph-exercise-images/agents/
