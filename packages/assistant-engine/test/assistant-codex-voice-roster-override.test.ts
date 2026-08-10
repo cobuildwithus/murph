@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -8,7 +9,6 @@ import {
   MURPH_GENERATE_VOICE_MEMO_TOOL,
 } from '../src/assistant-codex/dynamic-tools/generate-voice-memo.ts'
 import {
-  readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 const countryElevenLabsVoiceId = 'Bj9UqZbhQsanLzgalpEG'
@@ -42,7 +42,7 @@ describe('voice memo roster overrides', () => {
   })
 
   it('parses a named Murph voice and rejects the legacy raw voiceId field', () => {
-    const parsed = readMurphDynamicToolRequest({
+    const parsed = readTestMurphDynamicToolRequest({
       id: 1,
       method: 'item/tool/call',
       params: {
@@ -54,7 +54,7 @@ describe('voice memo roster overrides', () => {
         tool: 'generate_voice_memo',
       },
     })
-    const legacy = readMurphDynamicToolRequest({
+    const legacy = readTestMurphDynamicToolRequest({
       id: 2,
       method: 'item/tool/call',
       params: {
