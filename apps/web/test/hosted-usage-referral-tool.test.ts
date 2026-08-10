@@ -167,7 +167,7 @@ describe("hosted usage referral tool", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("offers both missions to a healthy personal member", async () => {
+  it("offers both group referral options to a healthy personal member", async () => {
     const { prisma } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
@@ -188,7 +188,7 @@ describe("hosted usage referral tool", () => {
             {
               code: "new_person_activation_v1",
               requirementsLabel:
-                "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+                "Bring one new person into a fresh Murph group. Murph handles setup, and the reward is earned once they join the conversation with their own Murph.",
               rewardLabel:
                 "about 10 more days of Murph usage for your Murph",
             },
@@ -224,7 +224,7 @@ describe("hosted usage referral tool", () => {
             {
               code: "new_person_activation_v1",
               requirementsLabel:
-                "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+                "Bring one new person into a fresh Murph group. Murph handles setup, and the reward is earned once they join the conversation with their own Murph.",
               rewardLabel:
                 "about 10 more days of Murph usage for your Murph",
             },

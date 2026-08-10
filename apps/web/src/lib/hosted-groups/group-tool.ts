@@ -434,6 +434,7 @@ export async function handleHostedRuntimeGroupTool(input: {
             usage: {
               fundingNeeded: usage.fundingNeeded,
               fundingUrl: usage.fundingUrl,
+              includedUsageUsedPercent: usage.includedUsageUsedPercent,
             },
           }
         : {

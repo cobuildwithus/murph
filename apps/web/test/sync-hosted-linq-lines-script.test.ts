@@ -32,19 +32,13 @@ const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const TEST_KEY = Buffer.alloc(32, 7).toString("base64url");
 
 function createPrismaOwner() {
-  const transactionClient = {};
   const disconnect = vi.fn().mockResolvedValue(undefined);
-  const transaction = vi.fn(async (callback: (tx: object) => Promise<void>) => {
-    await callback(transactionClient);
-  });
 
   return {
     disconnect,
     prisma: {
       $disconnect: disconnect,
-      $transaction: transaction,
     },
-    transaction,
   };
 }
 
@@ -87,8 +81,9 @@ describe("sync-hosted-linq-lines script", () => {
       expect(owner.disconnect).toHaveBeenCalledOnce();
     });
 
-    expect(owner.transaction).toHaveBeenCalledOnce();
-    expect(mocks.syncConfiguredLines).toHaveBeenCalledOnce();
+    expect(mocks.syncConfiguredLines).toHaveBeenCalledWith(expect.objectContaining({
+      prisma: owner.prisma,
+    }));
     expect(mocks.syncProviderInventory).toHaveBeenCalledOnce();
     expect(mocks.assertAssignablePoolReady).toHaveBeenCalledOnce();
     expect(settled).toBe(false);
@@ -99,7 +94,7 @@ describe("sync-hosted-linq-lines script", () => {
   });
 
   it.each([
-    ["transaction", mocks.syncConfiguredLines],
+    ["configured-line sync", mocks.syncConfiguredLines],
     ["provider inventory", mocks.syncProviderInventory],
     ["readiness", mocks.assertAssignablePoolReady],
   ])("disconnects once and preserves a %s failure", async (_stage, failingOperation) => {
