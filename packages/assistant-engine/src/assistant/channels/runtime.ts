@@ -587,7 +587,7 @@ export async function sendLinqMessage(
     idempotencyKey !== null
   const shouldAttemptGroupChallengeCard =
     card?.kind === 'challenge_standings' &&
-    input.targetKind === 'thread' &&
+    (input.targetKind === 'thread' || input.targetKind === 'explicit') &&
     input.threadIsDirect === false &&
     input.nativeReplyRequested !== true &&
     idempotencyKey !== null

@@ -1,25 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { Buffer } from "node:buffer";
 
-const lineStoreMocks = vi.hoisted(() => ({
-  upsertHostedLinqLineForPhoneTx: vi.fn(),
-}));
-
-const providerHealthStoreMocks = vi.hoisted(() => ({
-  projectHostedLinqLineProviderStateTx: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
-  acquireHostedLinqInventoryApplyLockTx: async (
-    input: { prisma: { $executeRaw: (...args: unknown[]) => Promise<unknown> } },
-  ) => {
-    await input.prisma.$executeRaw();
-  },
-  upsertHostedLinqLineForPhoneTx: lineStoreMocks.upsertHostedLinqLineForPhoneTx,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/linq-provider-health-store", () => ({
-  projectHostedLinqLineProviderStateTx: providerHealthStoreMocks.projectHostedLinqLineProviderStateTx,
-}));
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingLinqConfig: () => ({
@@ -28,16 +9,29 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
 }));
 
-import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy-core";
 import {
   parseHostedLinqPhoneNumberInventory,
   syncHostedLinqPhoneNumberInventory,
 } from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
 
+const TEST_KEYRING_ENTRIES = {
+  v1: Buffer.from("1".repeat(32), "utf8").toString("base64"),
+  v2: Buffer.from("2".repeat(32), "utf8").toString("base64"),
+};
+
+let restoreContactPrivacyKeyring: (() => void) | null = null;
+
+beforeEach(() => {
+  restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+    currentVersion: "v1",
+    entries: TEST_KEYRING_ENTRIES,
+  });
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
-  lineStoreMocks.upsertHostedLinqLineForPhoneTx.mockReset();
-  providerHealthStoreMocks.projectHostedLinqLineProviderStateTx.mockReset();
+  restoreContactPrivacyKeyring?.();
+  restoreContactPrivacyKeyring = null;
 });
 
 describe("syncHostedLinqPhoneNumberInventory", () => {
@@ -48,34 +42,38 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     )));
   };
 
-  it("revokes relinquished and moved provider-id pairings before upserting", async () => {
-    const keptLookupKey = createHostedPhoneLookupKey("+15550000001");
-    const callOrder: string[] = [];
-    const findMany = vi.fn(async () => [
-      { phoneNumberLookupKey: keptLookupKey, providerPhoneNumberId: "line_current" },
-      { phoneNumberLookupKey: "lookup:moved", providerPhoneNumberId: "line_moving" },
-      { phoneNumberLookupKey: "lookup:relinquished", providerPhoneNumberId: "line_gone" },
-    ]);
-    const updateMany = vi.fn(async () => {
-      callOrder.push("revoke");
-      return { count: 2 };
+  it("prepares the bounded snapshot before transaction entry and applies one bulk statement", async () => {
+    const events: string[] = [];
+    const queryRaw = vi.fn().mockImplementation(() => {
+      events.push("bulk-statement");
+      return Promise.resolve([{ syncedCount: 2n }]);
     });
-    lineStoreMocks.upsertHostedLinqLineForPhoneTx.mockImplementation(async () => {
-      callOrder.push("upsert");
-      return { phoneNumberLookupKey: "lookup:any" };
+    const tx = { $queryRaw: queryRaw };
+    const transaction = vi.fn(async (
+      callback: (client: typeof tx) => Promise<unknown>,
+      options: unknown,
+    ) => {
+      events.push("transaction:start");
+      expect(options).toEqual({ isolationLevel: "Serializable" });
+      // Prepared lookup candidates and ciphertext must already be detached
+      // from keyring state when transaction ownership begins.
+      restoreContactPrivacyKeyring?.();
+      restoreContactPrivacyKeyring = null;
+      const result = await callback(tx);
+      events.push("transaction:commit");
+      return result;
     });
-    providerHealthStoreMocks.projectHostedLinqLineProviderStateTx.mockResolvedValue(undefined);
     stubInventoryFetch({
       phone_numbers: [
         {
-          id: "line_current",
-          phone_number: "+15550000001",
-          reputation: { status: "HEALTHY" },
-          status: "ACTIVE",
+          id: "line_2",
+          phone_number: "+15550000002",
+          reputation: { status: "AT_RISK" },
+          status: "FLAGGED",
         },
         {
-          id: "line_moving",
-          phone_number: "+15550000002",
+          id: "line_1",
+          phone_number: "+1 (555) 000-0001",
           reputation: { status: "HEALTHY" },
           status: "ACTIVE",
         },
@@ -83,137 +81,127 @@ describe("syncHostedLinqPhoneNumberInventory", () => {
     });
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
+      observedAt: new Date("2026-07-01T12:00:00.000Z"),
+      prisma: { $transaction: transaction } as never,
     })).resolves.toEqual({ syncedCount: 2 });
 
-    // line_current keeps its pairing; line_moving is held at a lookup key
-    // that is not a candidate for its snapshot phone (a move) and line_gone
-    // is absent from the snapshot, so exactly those two rows are cleared.
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        providerInventoryConfirmedAt: null,
-        providerPhoneNumberId: null,
-      },
-      where: {
-        phoneNumberLookupKey: { in: ["lookup:moved", "lookup:relinquished"] },
-      },
-    });
-    expect(callOrder[0]).toBe("revoke");
-    expect(callOrder).toContain("upsert");
+    expect(events).toEqual([
+      "transaction:start",
+      "bulk-statement",
+      "transaction:commit",
+    ]);
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(query.sql).toContain("released_line AS");
+    expect(query.sql).toContain("upserted_line AS");
+    expect(query.sql).toContain("ON CONFLICT (phone_number_lookup_key)");
+    expect(query.sql).not.toContain("pg_advisory_xact_lock");
+    expect(query.sql).not.toContain("FOR UPDATE");
+    expect(query.values).toEqual(expect.arrayContaining([
+      "line_1",
+      "line_2",
+      "*** 0001",
+      "*** 0002",
+      "HEALTHY",
+      "ACTIVE",
+      "AT_RISK",
+      "FLAGGED",
+    ]));
+    expect(JSON.stringify(query.values)).not.toContain("+1555000000");
   });
 
-  it("clears every held provider id when the provider reports an explicitly empty inventory", async () => {
-    const findMany = vi.fn(async () => [
-      { phoneNumberLookupKey: "lookup:only", providerPhoneNumberId: "line_prior" },
-    ]);
-    const updateMany = vi.fn(async () => ({ count: 1 }));
+  it("uses one authoritative bulk statement for an explicitly empty inventory", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 0n }]);
     stubInventoryFetch({ phone_numbers: [] });
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
+      prisma: { $queryRaw: queryRaw } as never,
     })).resolves.toEqual({ syncedCount: 0 });
 
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        providerInventoryConfirmedAt: null,
-        providerPhoneNumberId: null,
-      },
-      where: {
-        phoneNumberLookupKey: { in: ["lookup:only"] },
-      },
-    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const query = queryRaw.mock.calls[0]?.[0] as { sql: string };
+    expect(query.sql).toContain("WHERE FALSE");
+    expect(query.sql).toContain("provider_phone_number_id = NULL");
   });
 
-  it("applies the snapshot inside one owning transaction that takes the inventory lock first", async () => {
-    const callOrder: string[] = [];
-    const tx = {
-      $executeRaw: vi.fn(async () => {
-        callOrder.push("lock");
-        return 0;
-      }),
-      hostedLinqLine: {
-        findMany: vi.fn(async () => {
-          callOrder.push("read-held");
-          return [];
-        }),
-        updateMany: vi.fn(),
-      },
-    };
-    const $transaction = vi.fn(async (callback: (client: unknown) => Promise<unknown>) => {
-      callOrder.push("transaction");
+  it("retries unique-key convergence without repeating preprocessing", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
+    const tx = { $queryRaw: queryRaw };
+    let attempts = 0;
+    const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => {
+      attempts += 1;
+      if (attempts === 1) {
+        restoreContactPrivacyKeyring?.();
+        restoreContactPrivacyKeyring = null;
+        throw {
+          code: "P2010",
+          meta: {
+            driverAdapterError: { cause: { originalCode: "23505" } },
+          },
+        };
+      }
       return callback(tx);
     });
-    stubInventoryFetch({ phone_numbers: [] });
+    stubInventoryFetch({
+      phone_numbers: [{ id: "line_1", phone_number: "+15550000001" }],
+    });
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { $transaction, hostedLinqLine: { findMany: vi.fn(), updateMany: vi.fn() } } as never,
-    })).resolves.toEqual({ syncedCount: 0 });
+      prisma: { $transaction: transaction } as never,
+    })).resolves.toEqual({ syncedCount: 1 });
 
-    expect($transaction).toHaveBeenCalledTimes(1);
-    expect(callOrder).toEqual(["transaction", "lock", "read-held"]);
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 
-  it("does not revoke inventory backing when the provider read fails", async () => {
-    const findMany = vi.fn();
-    const updateMany = vi.fn();
+  it("does not enter a transaction when the provider read fails", async () => {
+    const transaction = vi.fn();
     stubInventoryFetch("upstream error", 503);
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
+      prisma: { $transaction: transaction } as never,
     })).rejects.toMatchObject({
       code: "LINQ_PHONE_NUMBER_INVENTORY_FAILED",
     });
 
-    expect(findMany).not.toHaveBeenCalled();
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(lineStoreMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it.each([
     ["a missing collection field", {}],
-    ["an aliased collection field", { data: [{ id: "line_1", phone_number: "+15550000001" }] }],
-    ["a non-array collection field", { phone_numbers: "+15550000001" }],
-  ])("rejects %s without touching stored ownership", async (_label, payload) => {
-    const findMany = vi.fn();
-    const updateMany = vi.fn();
+    ["an invalid phone number", {
+      phone_numbers: [{ id: "line_1", phone_number: "not-a-phone" }],
+    }],
+    ["a duplicate phone number", {
+      phone_numbers: [
+        { id: "line_1", phone_number: "+15550000001" },
+        { id: "line_2", phone_number: "+1 (555) 000-0001" },
+      ],
+    }],
+    ["a missing provider id", {
+      phone_numbers: [{ phone_number: "+15550000001" }],
+    }],
+    ["a duplicate provider id", {
+      phone_numbers: [
+        { id: "line_1", phone_number: "+15550000001" },
+        { id: "line_1", phone_number: "+15550000002" },
+      ],
+    }],
+  ])("rejects %s before transaction entry", async (_label, payload) => {
+    const transaction = vi.fn();
     stubInventoryFetch(payload);
 
     await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
+      prisma: { $transaction: transaction } as never,
     })).rejects.toMatchObject({
       code: "LINQ_PHONE_NUMBER_INVENTORY_INVALID",
     });
 
-    expect(findMany).not.toHaveBeenCalled();
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(lineStoreMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["an invalid phone number", [{ id: "line_1", phone_number: "not-a-phone" }]],
-    ["a duplicate phone number", [
-      { id: "line_1", phone_number: "+15550000001" },
-      { id: "line_2", phone_number: "+1 (555) 000-0001" },
-    ]],
-    ["a missing provider id", [{ phone_number: "+15550000001" }]],
-    ["a duplicate provider id", [
-      { id: "line_1", phone_number: "+15550000001" },
-      { id: "line_1", phone_number: "+15550000002" },
-    ]],
-  ])("rejects a snapshot containing %s without touching stored ownership", async (_label, records) => {
-    const findMany = vi.fn();
-    const updateMany = vi.fn();
-    stubInventoryFetch({ phone_numbers: records });
-
-    await expect(syncHostedLinqPhoneNumberInventory({
-      prisma: { $executeRaw: vi.fn(), hostedLinqLine: { findMany, updateMany } } as never,
-    })).rejects.toMatchObject({
-      code: "LINQ_PHONE_NUMBER_INVENTORY_INVALID",
-    });
-
-    expect(findMany).not.toHaveBeenCalled();
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(lineStoreMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
   });
 });
 
@@ -307,3 +295,39 @@ describe("parseHostedLinqPhoneNumberInventory", () => {
     })).toThrow(/exceeds the configured 1 line limit/u);
   });
 });
+
+function configureHostedContactPrivacyKeyringForTest(input: {
+  currentVersion: string;
+  entries: Record<string, string>;
+}): () => void {
+  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
+    .map(([version, key]) => `${version}:${key}`)
+    .join(",");
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
+  clearHostedOnboardingEnvCache();
+
+  return () => {
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousCurrentVersion);
+    clearHostedOnboardingEnvCache();
+  };
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}

@@ -200,12 +200,12 @@ describe('challenge standings response cards', () => {
     )
   })
 
-  it('encodes the exact schema-v4 snapshot consumed by iOS', () => {
+  it('encodes the exact schema-v5 snapshot consumed by iOS', () => {
     const url = encodeChallengeStandingsAppCardUrl(INDIVIDUAL_CARD)
     expect(buildLinqIMessageAppCardUrl(INDIVIDUAL_CARD)).toBe(url)
     expect(url.length).toBeLessThan(2_048)
     expect(decodeAppCardUrl(url)).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       card: INDIVIDUAL_CARD,
     })
 

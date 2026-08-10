@@ -316,6 +316,7 @@ export async function setResolvedCanonicalAssistantCronSourceEnabled(input: {
     const updatedAutomation = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
         vault: input.resolved.vault,
+        now: input.now,
         automationId: input.resolved.source.automationId,
         automation: input.resolved.source,
         title: input.resolved.source.title,
@@ -392,6 +393,7 @@ export async function updateResolvedCanonicalAssistantCronAutomationTarget(input
   const updatedAutomation = await upsertAutomation(
     buildCanonicalAutomationUpsertInput({
       vault: input.resolved.vault,
+      now: new Date(input.now),
       automationId: input.resolved.source.automationId,
       automation: input.resolved.source,
       title: input.resolved.source.title,

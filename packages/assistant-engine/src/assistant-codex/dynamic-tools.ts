@@ -12,7 +12,7 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
@@ -156,6 +156,11 @@ import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'
 import {
+  readCodexNonEmptyString,
+  readCodexServerRequest,
+  readCodexString,
+} from './app-server-protocol.js'
+import {
   executeGenerateImageTool,
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
@@ -247,6 +252,7 @@ import {
   asRecord,
   ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION,
+  GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -682,18 +688,12 @@ const familyPlanArgumentsSchema = z
     }).strict(),
     z.object({
       action: z.literal('start_checkout'),
-      invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
-        targetEmail: z.string().trim().email().max(320).nullable().default(null),
-        targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
-        targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
-        targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
-      }).strict().nullable().default(null),
+      confirmedTrialConversion: z.literal(true).optional(),
     }).strict(),
     z.object({
       action: z.literal('create_invite'),
       invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
+        planCode: z.enum(HOSTED_FAMILY_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
@@ -702,11 +702,7 @@ const familyPlanArgumentsSchema = z
     }).strict(),
   ])
   .superRefine((value, context) => {
-    const invite = value.action === 'create_invite'
-      ? value.invite
-      : value.action === 'start_checkout'
-        ? value.invite
-        : null
+    const invite = value.action === 'create_invite' ? value.invite : null
     if (invite && !invite.targetPhoneNumber && !invite.targetTelegramUsername && !invite.targetEmail) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -2995,7 +2991,16 @@ async function executeFamilyPlanTool(input: {
     const result = await familyPlanTool.request(input.request)
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
-    return toolTextResult(false, 'family plan tool request failed')
+    if (input.request.action === 'read_status') {
+      return toolTextResult(
+        false,
+        'Family status could not be read; no change was attempted; retry the status read',
+      )
+    }
+    return toolTextResult(
+      false,
+      'family plan request was not confirmed; check Family Settings before retrying to avoid a duplicate request',
+    )
   }
 }
 
@@ -3843,6 +3848,7 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
         ? {
             offeredAt: response.result.offeredAt,
             recencyEvidence: 'eligible' as const,
+            responseHandling: GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
           }
         : { recencyEvidence: 'unavailable' as const }),
       presentation: 'native' as const,
@@ -4426,6 +4432,11 @@ async function executeGroupTool(input: {
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch (error) {
+    const runtimeIssueInput = buildGroupToolFailureRuntimeIssueInput({
+      action: input.request.action,
+      callerSignalAborted: input.abortSignal?.aborted === true,
+      error,
+    })
     return {
       ...toolTextResult(
         false,
@@ -4433,9 +4444,139 @@ async function executeGroupTool(input: {
           ? buildGroupAskRequestFailureText(error)
           : 'group tool request failed',
       ),
+      ...(runtimeIssueInput ? { runtimeIssueInputs: [runtimeIssueInput] } : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   }
+}
+
+type GroupToolFailureCategory =
+  | 'http_4xx'
+  | 'http_5xx'
+  | 'response_schema_invalid'
+  | 'timeout'
+  | 'transport'
+  | 'unknown'
+
+function buildGroupToolFailureRuntimeIssueInput(input: {
+  action: MurphGroupToolRequest['action']
+  callerSignalAborted: boolean
+  error: unknown
+}): AssistantRuntimeIssueInput | null {
+  if (input.callerSignalAborted) {
+    return null
+  }
+  const classification = classifyGroupToolFailure(input.error)
+  return {
+    component: 'assistant.group-tool',
+    operation: input.action,
+    phase: classification.category === 'response_schema_invalid'
+      ? 'tool_result_parse'
+      : 'tool_call',
+    issueKind: classification.category === 'response_schema_invalid'
+      ? 'schema_rejection'
+      : classification.category === 'timeout'
+        ? 'timeout'
+        : 'tool_error',
+    severity: 'warning',
+    errorCode: classification.errorCode,
+    summary: 'Hosted group tool request failed.',
+    details: {
+      action: input.action,
+      failureCategory: classification.category,
+      ...(classification.retryable === null
+        ? {}
+        : { retryable: classification.retryable }),
+      ...(classification.statusClass === null
+        ? {}
+        : { statusClass: classification.statusClass }),
+    },
+  }
+}
+
+function classifyGroupToolFailure(error: unknown): {
+  category: GroupToolFailureCategory
+  errorCode: string
+  retryable: boolean | null
+  statusClass: '4xx' | '5xx' | null
+} {
+  const record = error && typeof error === 'object' && !Array.isArray(error)
+    ? error as Record<string, unknown>
+    : null
+  const retryable = typeof record?.retryable === 'boolean'
+    ? record.retryable
+    : null
+  if (
+    record?.code === 'HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID'
+    && record.name === 'HostedGroupToolResponseSchemaError'
+  ) {
+    return {
+      category: 'response_schema_invalid',
+      errorCode: 'HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID',
+      retryable,
+      statusClass: null,
+    }
+  }
+
+  const statusCode = readGroupToolFailureStatusCode(record)
+  if (statusCode !== null && statusCode >= 400 && statusCode <= 499) {
+    return {
+      category: 'http_4xx',
+      errorCode: 'HOSTED_GROUP_TOOL_HTTP_4XX',
+      retryable,
+      statusClass: '4xx',
+    }
+  }
+  if (statusCode !== null && statusCode >= 500 && statusCode <= 599) {
+    return {
+      category: 'http_5xx',
+      errorCode: 'HOSTED_GROUP_TOOL_HTTP_5XX',
+      retryable,
+      statusClass: '5xx',
+    }
+  }
+
+  const fetchCauseKind = typeof record?.hostedRuntimeFetchCauseKind === 'string'
+    ? record.hostedRuntimeFetchCauseKind
+    : null
+  const errorName = error instanceof Error ? error.name : null
+  if (
+    fetchCauseKind === 'timeout'
+    || errorName === 'TimeoutError'
+  ) {
+    return {
+      category: 'timeout',
+      errorCode: 'HOSTED_GROUP_TOOL_TIMEOUT',
+      retryable,
+      statusClass: null,
+    }
+  }
+  if (fetchCauseKind !== null || errorName === 'AbortError') {
+    return {
+      category: 'transport',
+      errorCode: 'HOSTED_GROUP_TOOL_TRANSPORT_FAILED',
+      retryable,
+      statusClass: null,
+    }
+  }
+  return {
+    category: 'unknown',
+    errorCode: 'HOSTED_GROUP_TOOL_FAILED',
+    retryable,
+    statusClass: null,
+  }
+}
+
+function readGroupToolFailureStatusCode(
+  record: Record<string, unknown> | null,
+): number | null {
+  const candidate = record?.statusCode ?? record?.status
+  return typeof candidate === 'number'
+      && Number.isInteger(candidate)
+      && candidate >= 100
+      && candidate <= 599
+    ? candidate
+    : null
 }
 
 function buildGroupAskRequestFailureText(error: unknown): string {
@@ -5549,31 +5690,35 @@ function toolTextResult(
 function parseDynamicToolCallRequest(
   message: CodexRpcMessage,
 ): ParsedDynamicToolCallRequest | null {
-  if (message.method !== CODEX_DYNAMIC_TOOL_CALL_METHOD) {
+  const request = readCodexServerRequest(message)
+  if (request?.method !== CODEX_DYNAMIC_TOOL_CALL_METHOD) {
     return null
   }
 
-  const params = asRecord(message.params)
-  if (!params) {
-    return {
-      arguments: null,
-      namespace: null,
-      tool: null,
-      toolCallId: null,
-    }
+  const params = request.params
+  const threadId = readCodexNonEmptyString(params.threadId)
+  const turnId = readCodexNonEmptyString(params.turnId)
+  const toolCallId = readCodexNonEmptyString(params.callId)
+  const tool = readCodexNonEmptyString(params.tool)
+  const namespace = params.namespace === null
+    ? null
+    : readCodexString(params.namespace)
+  if (
+    !threadId ||
+    !turnId ||
+    !toolCallId ||
+    !tool ||
+    (params.namespace !== null && namespace === null) ||
+    !Object.hasOwn(params, 'arguments')
+  ) {
+    return null
   }
 
   return {
     arguments: params.arguments,
-    namespace: normalizeNullableStringValue(params.namespace),
-    tool: normalizeNullableStringValue(params.tool),
-    toolCallId:
-      normalizeNullableStringValue(params.callId) ??
-      normalizeNullableStringValue(params.call_id) ??
-      normalizeNullableStringValue(params.toolCallId) ??
-      normalizeNullableStringValue(params.tool_call_id) ??
-      normalizeNullableStringValue(params.itemId) ??
-      normalizeNullableStringValue(params.item_id),
+    namespace,
+    tool,
+    toolCallId,
   }
 }
 
@@ -5715,24 +5860,12 @@ function parseFamilyPlanArguments(
   if (parsed.data.action === 'start_checkout') {
     return {
       ok: true,
-      request: parsed.data.invite
-        ? {
-            action: 'start_checkout',
-            invite: {
-              ...(parsed.data.invite.planCode
-                ? { planCode: parsed.data.invite.planCode }
-                : {}),
-              ...(parsed.data.invite.targetEmail
-                ? { targetEmail: parsed.data.invite.targetEmail }
-                : {}),
-              targetLabel: parsed.data.invite.targetLabel,
-              targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
-              targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
-            },
-          }
-        : {
-            action: 'start_checkout',
-          },
+      request: {
+        action: 'start_checkout',
+        ...(parsed.data.confirmedTrialConversion
+          ? { confirmedTrialConversion: true as const }
+          : {}),
+      },
     }
   }
 

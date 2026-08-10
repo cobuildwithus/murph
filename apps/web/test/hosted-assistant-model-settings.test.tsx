@@ -223,7 +223,7 @@ test("the routing dialog offers the member's endpoint as a third option", () => 
         revision: 4,
         selected: true,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+        verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
         verifiedAt: "2026-07-30T12:00:00.000Z",
       },
       initialDormantSolPreference: false,
@@ -396,7 +396,7 @@ test("one save routes replies to the endpoint and keeps the managed default", as
         revision: 4,
         selected: false,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+        verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
         verifiedAt: "2026-07-30T12:00:00.000Z",
       },
       initialDormantSolPreference: false,
@@ -621,7 +621,7 @@ function endpointConnection(selected: boolean, revision = 4) {
     selected,
     supportsImages: false,
     verificationProfile:
-      "murph-codex-0.145.0-portable-responses-v1" as const,
+      "murph-codex-0.147.0-portable-responses-v1" as const,
     verifiedAt: "2026-07-30T12:00:00.000Z",
   };
 }

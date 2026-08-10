@@ -109,6 +109,12 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
   [
+    "20260810050000_relax_detached_automatic_refill_failure",
+    // This replacement only admits the terminal, reference-free automatic
+    // refill failure already accepted by the account-deletion owner.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
     "20260728030000_hosted_usage_referral_credit_entry_constraints",
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
@@ -126,6 +132,19 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // active-payer index is created before the old, stricter index is dropped;
     // removing it only permits independent automatic refill purchases.
     new Set(["ADD CONSTRAINT CHECK", "DROP INDEX"]),
+  ],
+  [
+    "20260809160000_add_hosted_family_max_plan_code",
+    // Membership and invite assignments are already required by the Prisma
+    // schema and every supported writer. Reasserting that contract here
+    // replaces the superseded postdeploy migration, while each check only
+    // widens the existing Pulse/Edge vocabulary with Max. Old writers remain
+    // valid before, during, and after the transaction.
+    new Set([
+      "ADD CONSTRAINT CHECK",
+      "ALTER COLUMN SET NOT NULL",
+      "DROP CONSTRAINT",
+    ]),
   ],
 ]);
 

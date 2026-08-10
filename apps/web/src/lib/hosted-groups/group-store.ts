@@ -50,12 +50,12 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import {
   generateHostedGroupId,
+  generateHostedGroupJoinOfferGeneration,
   generateHostedGroupJoinOfferId,
   generateHostedGroupMemberId,
   generateHostedGroupJoinCode,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
-import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
@@ -69,12 +69,10 @@ import {
 } from "../hosted-vault-share/projection-snapshot";
 import { parseHostedVaultShareRowProjectionScope } from "../hosted-vault-share/row-projection-scope";
 import {
-  emptyHostedGroupJoinPolicy,
   includeLegacyHostedGroupSleepProjectionScopes,
   includeSourceAwareHostedGroupSleepProjectionScopes,
   legacyHostedGroupSleepProjectionScope,
   mergeHostedGroupJoinPolicy,
-  normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionKinds,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
@@ -167,6 +165,7 @@ export interface HostedGroupJoinOfferBindingTxResult {
 export type HostedGroupJoinOfferPostPreparation =
   | { kind: "active_offer" }
   | {
+      offerGeneration: string;
       joinCode: string;
       kind: "post";
     }
@@ -212,13 +211,6 @@ export type HostedGroupMemberLeaveSelector =
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 export const HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX = 64;
-const DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS = [
-  "group-email.v0",
-] as const satisfies readonly HostedVaultShareProjectionKind[];
-const DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_SCOPES =
-  DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS.map((projectionKind) =>
-    hostedVaultShareProjectionKindToScope(projectionKind)
-  );
 
 export async function ensureHostedGroupForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
@@ -249,14 +241,10 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     });
   }
 
-  const requested = normalizeHostedGroupAccessOfferProjectionScopes(
+  const requested = normalizeHostedVaultShareProjectionScopes(
     input.requestedVaultShareProjectionScopes
       ?? fixedProjectionKindsToScopes(input.requestedVaultShareProjectionKinds ?? []),
   );
-  const createdRequested = normalizeHostedGroupAccessOfferProjectionScopes([
-    ...DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_SCOPES,
-    ...requested,
-  ]);
   const existing = await input.tx.hostedGroup.findUnique({
     where: { runtimeMemberId: container.memberId },
     select: { displayName: true, id: true },
@@ -281,12 +269,11 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
       memberId: container.ownerMemberId,
       now: input.now,
     });
-    if (createdRequested.length > 0) {
-      await mergeHostedGroupRequestedProjectionsTx(input.tx, {
-        groupId: existing.id,
-        requestedVaultShareProjectionScopes: createdRequested,
-      });
-    }
+    await replaceHostedGroupRequestedProjectionsTx(input.tx, {
+      groupId: existing.id,
+      now: input.now,
+      requestedVaultShareProjectionScopes: requested,
+    });
     const summary = await readHostedGroupSummaryById(input.tx, existing.id);
     if (!summary) {
       throw hostedOnboardingError({
@@ -298,17 +285,16 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     return summary;
   }
 
+  const requestedPolicy = mergeHostedGroupJoinPolicy({
+    existing: null,
+    offerGeneration: generateHostedGroupJoinOfferGeneration(),
+    requestedVaultShareProjectionScopes: requested,
+  });
   const created = await input.tx.hostedGroup.create({
     data: {
       id: generateHostedGroupId(),
       displayName: normalizeHostedGroupDisplayName(input.displayName ?? null),
-      joinPolicyJson: createdRequested.length > 0
-        ? toHostedGroupJoinPolicyJson({
-            ...emptyHostedGroupJoinPolicy(),
-            requestedVaultShareProjectionKinds: createdRequested.map((scope) => scope.projectionKind),
-            requestedVaultShareProjectionScopes: createdRequested,
-          })
-        : undefined,
+      joinPolicyJson: toHostedGroupJoinPolicyJson(requestedPolicy),
       kind: normalizeHostedGroupKind(input.kind),
       ownerMemberId: container.ownerMemberId,
       runtimeMemberId: container.memberId,
@@ -325,12 +311,6 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     memberId: container.ownerMemberId,
     now: input.now,
   });
-  await grantHostedGroupMembershipEmailTx(input.tx, {
-    groupRuntimeMemberId: container.memberId,
-    memberId: container.ownerMemberId,
-    now: input.now,
-  });
-
   const summary = await readHostedGroupSummaryById(input.tx, created.id);
   if (!summary) {
     throw hostedOnboardingError({
@@ -1557,19 +1537,31 @@ export async function readHostedGroupJoinView(input: {
   }
 
   const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
-  const offeredProjectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
+  const offeredProjectionScopes = normalizeHostedVaultShareProjectionScopes(
     policy.requestedVaultShareProjectionScopes,
   );
-  const activeVaultShareProjectionScopes = input.memberId && group.runtimeMemberId
-    ? await readActiveHostedVaultShareProjectionScopes({
-        destinationMemberId: group.runtimeMemberId,
-        grantorMemberId: input.memberId,
-        prisma,
-        projectionScopes: includeLegacyHostedGroupSleepProjectionScopes(
-          offeredProjectionScopes,
-        ),
-      })
-    : [];
+  const activeVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
+    input.memberId && group.runtimeMemberId
+      ? await readActiveHostedVaultShareProjectionScopes({
+          destinationMemberId: group.runtimeMemberId,
+          grantorMemberId: input.memberId,
+          prisma,
+          ...(group.members.length > 0
+            ? {}
+            : {
+                projectionScopes: includeLegacyHostedGroupSleepProjectionScopes(
+                  offeredProjectionScopes,
+                ),
+              }),
+        })
+      : [],
+  );
+  const visibleProjectionScopes = group.members.length > 0
+    ? normalizeHostedVaultShareProjectionScopes([
+        ...offeredProjectionScopes,
+        ...activeVaultShareProjectionScopes,
+      ])
+    : offeredProjectionScopes;
 
   return {
     activeVaultShareProjectionKinds: activeVaultShareProjectionScopes.map((scope) =>
@@ -1581,7 +1573,7 @@ export async function readHostedGroupJoinView(input: {
     kind: group.kind,
     memberCount: group._count.members,
     requestedVaultShareProjections: projectHostedVaultShareProjectionDisplays(
-      offeredProjectionScopes,
+      visibleProjectionScopes,
     ),
     status: "active",
     viewerCanLeave: group.members.length > 0 && group.ownerMemberId !== input.memberId,
@@ -1628,6 +1620,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
 }
 
 export async function recordHostedGroupJoinOfferTx(input: {
+  expectedOfferGeneration: string;
   groupId: string;
   message: HostedGroupOfferMessageBinding;
   postedAt: Date;
@@ -1653,13 +1646,28 @@ export async function recordHostedGroupJoinOfferTx(input: {
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
-    select: { joinCode: true },
+    select: { joinCode: true, joinPolicyJson: true },
   });
   if (!group?.joinCode) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
       httpStatus: 404,
       message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+  const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
+  if (
+    policy.offerGeneration !== input.expectedOfferGeneration
+    || !hostedGroupProjectionScopeSetsEqual(
+      policy.requestedVaultShareProjectionScopes,
+      projectionScopes,
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_STALE",
+      httpStatus: 409,
+      message: "This group offer was replaced before it could be activated.",
       retryable: false,
     });
   }
@@ -1703,12 +1711,13 @@ export async function recordHostedGroupJoinOfferTx(input: {
 
 /**
  * Resolves the durable no-repost state for one canonical permission snapshot.
- * The group row lock keeps join-code generation and active-offer reads in one
- * transaction. Provider idempotency covers the intentional gap between this
- * transaction and the later provider-message binding transaction.
+ * The group row lock keeps policy generation and active-offer reads in one
+ * transaction. The generation participates in provider idempotency and must
+ * still match when the provider message is bound after the intentional gap.
  */
 export async function prepareHostedGroupJoinOfferPostTx(input: {
   groupId: string;
+  now: Date;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferPostPreparation> {
@@ -1725,9 +1734,19 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
-    select: { joinCode: true },
+    select: { joinCode: true, joinPolicyJson: true },
   });
   if (!group?.joinCode) {
+    return { kind: "unavailable" };
+  }
+  const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
+  if (
+    !policy.offerGeneration
+    || !hostedGroupProjectionScopeSetsEqual(
+      policy.requestedVaultShareProjectionScopes,
+      projectionScopes,
+    )
+  ) {
     return { kind: "unavailable" };
   }
 
@@ -1742,10 +1761,7 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
   if (offers.length > HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX) {
     return { kind: "unavailable" };
   }
-  const requestedScopeKeys = new Set(
-    projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
-  );
-
+  let allActiveOffersMatch = offers.length > 0;
   for (const offer of offers) {
     const storedScopes = parseHostedGroupJoinOfferProjectionScopes(
       offer.projectionKindsJson,
@@ -1753,18 +1769,25 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
     if (!storedScopes) {
       return { kind: "unavailable" };
     }
-    const storedScopeKeys = new Set(
-      storedScopes.map(buildHostedVaultShareProjectionScopeKey),
-    );
-    if (![...requestedScopeKeys].every((scopeKey) => storedScopeKeys.has(scopeKey))) {
-      continue;
+    if (!hostedGroupProjectionScopeSetsEqual(storedScopes, projectionScopes)) {
+      allActiveOffersMatch = false;
     }
+  }
+  if (allActiveOffersMatch) {
     return { kind: "active_offer" };
+  }
+
+  if (offers.length > 0) {
+    await revokeHostedGroupJoinOffersTx(input.tx, {
+      groupId: input.groupId,
+      now: input.now,
+    });
   }
 
   return {
     joinCode: group.joinCode,
     kind: "post",
+    offerGeneration: policy.offerGeneration,
   };
 }
 
@@ -2015,11 +2038,26 @@ async function acceptHostedGroupJoinTx(input: {
     input.selectedVaultShareProjectionScopes,
   );
   const storedPolicy = readHostedGroupJoinPolicy(group.joinPolicyJson);
-  const requestedProjectionScopes = input.policyProjectionScopes
+  const policyRequestedProjectionScopes = input.policyProjectionScopes
     ? normalizeHostedVaultShareProjectionScopes(input.policyProjectionScopes)
-    : normalizeHostedGroupAccessOfferProjectionScopes(
+    : normalizeHostedVaultShareProjectionScopes(
         storedPolicy.requestedVaultShareProjectionScopes,
       );
+  const activeManageableProjectionScopes = existingMembership
+    && input.joinOrigin === "web"
+    && !input.additiveOnly
+    && input.policyProjectionScopes === null
+    && group.runtimeMemberId
+    ? await readActiveHostedVaultShareProjectionScopes({
+        destinationMemberId: group.runtimeMemberId,
+        grantorMemberId: input.memberId,
+        prisma: input.tx,
+      })
+    : [];
+  const requestedProjectionScopes = normalizeHostedVaultShareProjectionScopes([
+    ...policyRequestedProjectionScopes,
+    ...activeManageableProjectionScopes,
+  ]);
   const allowedSelectedSet = new Set(
     includeLegacyHostedGroupSleepProjectionScopes(requestedProjectionScopes)
       .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
@@ -2370,10 +2408,11 @@ async function ensureHostedGroupOwnerMembershipTx(
   });
 }
 
-async function mergeHostedGroupRequestedProjectionsTx(
+async function replaceHostedGroupRequestedProjectionsTx(
   tx: Prisma.TransactionClient,
   input: {
     groupId: string;
+    now: Date;
     requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   },
 ): Promise<void> {
@@ -2382,7 +2421,17 @@ async function mergeHostedGroupRequestedProjectionsTx(
     select: { joinPolicyJson: true, runtimeMemberId: true },
   });
   if (!group) throw hostedOnboardingError({ code: "HOSTED_GROUP_NOT_FOUND", httpStatus: 404, message: "Hosted group not found." });
-  if (input.requestedVaultShareProjectionScopes.length > 0) {
+  const requested = normalizeHostedVaultShareProjectionScopes(
+    input.requestedVaultShareProjectionScopes,
+  );
+  const existing = readHostedGroupJoinPolicy(group.joinPolicyJson);
+  if (hostedGroupProjectionScopeSetsEqual(
+    existing.requestedVaultShareProjectionScopes,
+    requested,
+  ) && existing.offerGeneration !== null) {
+    return;
+  }
+  if (requested.length > 0) {
     if (!group.runtimeMemberId) {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_RUNTIME_REQUIRED",
@@ -2392,17 +2441,20 @@ async function mergeHostedGroupRequestedProjectionsTx(
     }
     await assertHostedGroupRuntimeDestinationTx(tx, group.runtimeMemberId);
   }
-  const merged = mergeHostedGroupJoinPolicy({
-    existing: group.joinPolicyJson,
-    requestedVaultShareProjectionScopes: input.requestedVaultShareProjectionScopes,
+  const replacement = mergeHostedGroupJoinPolicy({
+    existing: null,
+    offerGeneration: generateHostedGroupJoinOfferGeneration(),
+    requestedVaultShareProjectionScopes: requested,
   });
   await tx.hostedGroup.update({
     where: { id: input.groupId },
     data: {
-      joinPolicyJson: merged.requestedVaultShareProjectionScopes.length > 0
-        ? toHostedGroupJoinPolicyJson(merged)
-        : undefined,
+      joinPolicyJson: toHostedGroupJoinPolicyJson(replacement),
     },
+  });
+  await revokeHostedGroupJoinOffersTx(tx, {
+    groupId: input.groupId,
+    now: input.now,
   });
 }
 
@@ -2509,16 +2561,6 @@ async function grantHostedGroupMembershipProfileNameTx(
   await grantHostedGroupMembershipProjectionTx(tx, {
     ...input,
     projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
-  });
-}
-
-async function grantHostedGroupMembershipEmailTx(
-  tx: Prisma.TransactionClient,
-  input: { groupRuntimeMemberId: string; memberId: string; now: Date },
-): Promise<void> {
-  await grantHostedGroupMembershipProjectionTx(tx, {
-    ...input,
-    projectionScope: hostedVaultShareProjectionKindToScope("group-email.v0"),
   });
 }
 

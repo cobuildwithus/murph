@@ -245,6 +245,12 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
       exerciseId: exerciseIdOption,
       exerciseOrder: exerciseOrderOption,
       setOrder: requiredSetOrderOption,
+      requireExistingSet: z
+        .boolean()
+        .optional()
+        .describe(
+          'Fail instead of appending when the selected set no longer exists.',
+        ),
       type: z.enum(['normal', 'warmup', 'dropset', 'failure']).optional(),
       note: z.string().min(1).max(400).optional(),
       reps: z.number().int().nonnegative().optional(),
@@ -266,6 +272,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         exerciseName: args.exercise,
         exerciseOrder: options.exerciseOrder,
         setOrder: options.setOrder,
+        requireExistingSet: options.requireExistingSet,
         type: options.type,
         note: options.note,
         reps: options.reps,

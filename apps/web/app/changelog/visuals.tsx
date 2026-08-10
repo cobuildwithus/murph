@@ -1373,12 +1373,14 @@ export type ContactField = {
 
 export function ContactCardMock({
   action,
+  avatarSrc,
   fields,
   label = "Contact card",
   name = "Murph",
   subtitle,
 }: {
   action?: string;
+  avatarSrc?: string;
   fields: readonly ContactField[];
   label?: string;
   name?: string;
@@ -1392,12 +1394,22 @@ export function ContactCardMock({
       </div>
       <div className="flex flex-col gap-3 p-4">
         <div className="flex items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-[#3a4a1e] font-serif text-[17px] font-semibold text-[#f5f0e8]"
-          >
-            {name.slice(0, 1)}
-          </span>
+          {avatarSrc ? (
+            // The changelog study uses a public synthetic brand portrait only.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              alt=""
+              className="size-11 shrink-0 rounded-full border border-[#2d3436]/10 object-cover"
+              src={avatarSrc}
+            />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-[#3a4a1e] font-serif text-[17px] font-semibold text-[#f5f0e8]"
+            >
+              {name.slice(0, 1)}
+            </span>
+          )}
           <div className="min-w-0">
             <p className="font-serif text-[15px] font-semibold leading-tight text-[#2d3436]">
               {name}
@@ -1479,6 +1491,117 @@ export function PanelGrid({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+export type CompactTableColumn = {
+  key: string;
+  label: string;
+};
+
+export type CompactTableRow = Readonly<Record<string, string>>;
+
+export function CompactTableMock({
+  columns,
+  label = "Murph table",
+  rows,
+}: {
+  columns: readonly CompactTableColumn[];
+  label?: string;
+  rows: readonly CompactTableRow[];
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+        <span className={HEADER_META}>{rows.length} rows</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[280px] border-collapse text-left">
+          <thead>
+            <tr className="border-b border-[#2d3436]/8 bg-[#fafaf6]">
+              {columns.map((column) => (
+                <th
+                  className="px-3 py-2 font-mono text-[9.5px] font-medium tracking-[0.08em] text-[#736a58] uppercase"
+                  key={column.key}
+                  scope="col"
+                >
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#2d3436]/8">
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {columns.map((column, columnIndex) => (
+                  <td
+                    className={`px-3 py-2.5 text-[12px] text-[#4d453b] ${
+                      columnIndex === 0 ? "font-medium text-[#2d3436]" : ""
+                    }`}
+                    key={column.key}
+                  >
+                    {row[column.key] ?? ""}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function ReferenceBandMock({
+  highLabel,
+  label = "Reference context",
+  lowLabel,
+  markerLabel,
+  markerPosition,
+}: {
+  highLabel: string;
+  label?: string;
+  lowLabel: string;
+  markerLabel: string;
+  markerPosition: number;
+}) {
+  const boundedPosition = Math.min(100, Math.max(0, markerPosition));
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+      </div>
+      <div
+        aria-label={`${markerLabel}, reference range ${lowLabel} to ${highLabel}`}
+        className="p-4"
+        role="img"
+      >
+        <div className="relative pt-8">
+          <div
+            className="absolute top-0 -translate-x-1/2 text-center"
+            style={{ left: `${boundedPosition}%` }}
+          >
+            <p className="font-serif text-[15px] font-semibold leading-none text-[#2d3436]">
+              {markerLabel}
+            </p>
+            <span
+              aria-hidden="true"
+              className="mx-auto mt-1 block h-3 w-px bg-[#2d3436]"
+            />
+          </div>
+          <div className="grid h-3 grid-cols-[1fr_2fr_1fr] overflow-hidden rounded-full border border-[#2d3436]/10">
+            <span aria-hidden="true" className="bg-[#a36b3f]/18" />
+            <span aria-hidden="true" className="bg-[#5a6e32]/25" />
+            <span aria-hidden="true" className="bg-[#a36b3f]/18" />
+          </div>
+          <div className="mt-2 flex justify-between font-mono text-[10px] tracking-[0.04em] text-[#736a58]">
+            <span>{lowLabel}</span>
+            <span>{highLabel}</span>
+          </div>
+        </div>
       </div>
     </div>
   );

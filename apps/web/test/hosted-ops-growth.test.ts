@@ -218,7 +218,7 @@ describe("hosted ops growth metrics", () => {
       payingFamilyGroups: [
         {
           billingRef: {
-            billedSeatCount: 3,
+            billedSeatCount: 4,
             currentBillingPhase: "paid",
           },
           id: "group_family",
@@ -229,6 +229,7 @@ describe("hosted ops growth metrics", () => {
           planCapacities: [
             { billedQuantity: 2, planCode: "pulse" },
             { billedQuantity: 1, planCode: "edge" },
+            { billedQuantity: 1, planCode: "max" },
           ],
         },
       ],
@@ -274,10 +275,11 @@ describe("hosted ops growth metrics", () => {
     expect(metrics.maxMrrUsdCents).toBe(5_000);
     expect(metrics.payingIndividuals).toBe(4);
     expect(metrics.payingFamilyGroups).toBe(1);
-    expect(metrics.payingFamilySeats).toBe(3);
+    expect(metrics.payingFamilySeats).toBe(4);
     expect(metrics.coveredMembers).toBe(5);
-    expect(metrics.familyMrrUsdCents).toBe(2 * 700 + 1_900);
-    expect(metrics.mrrUsdCents).toBe(800 + 2_000 + 5_000 + 2 * 700 + 1_900);
+    expect(metrics.familyMrrUsdCents).toBe(2 * 700 + 1_900 + 4_900);
+    expect(metrics.mrrUsdCents)
+      .toBe(800 + 2_000 + 5_000 + 2 * 700 + 1_900 + 4_900);
     expect(metrics.unpricedPaidMembers).toBe(1);
   });
 

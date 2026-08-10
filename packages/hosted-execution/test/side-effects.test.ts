@@ -131,6 +131,38 @@ const COMPACT_TABLE_CARD: HostedAssistantResponseCard = {
   version: 1,
 };
 
+const WORKOUT_CARD: HostedAssistantResponseCard = {
+  kind: "compact_table",
+  version: 1,
+  title: "Push day",
+  subtitle: "1 of 2 sets complete",
+  footer: null,
+  tracking: {
+    kind: "workout",
+    entityId: "evt_01K1ABCDEFGHJKMNPQRSTVWXYZ",
+    snapshotAt: "2026-08-09T19:45:00.000Z",
+  },
+  workout: {
+    version: 1,
+    state: "active",
+    exercises: [{
+      name: "Bench press",
+      sets: [
+        {
+          status: "completed",
+          target: "185 lb × 8",
+          actual: "185 lb × 8",
+        },
+        {
+          status: "pending",
+          target: "185 lb × 6–8",
+          actual: null,
+        },
+      ],
+    }],
+  },
+};
+
 describe("hosted assistant delivery contracts", () => {
   it("reuses gateway-owned delivery target kinds", () => {
     expect(hostedAssistantDeliveryTargetKindValues).toEqual(gatewayDeliveryTargetKindValues);
@@ -242,6 +274,21 @@ describe("hosted assistant delivery contracts", () => {
         }),
       })).toThrow(/requires a private direct conversation/);
     }
+  });
+
+  it("round-trips workout cards through hosted side-effect serialization", () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-workout-card",
+      effectId: "intent-workout-card",
+      payload: createHostedAssistantDeliveryPayload({
+        card: WORKOUT_CARD,
+        channel: "linq",
+        message: "Active workout · 1/2 sets complete",
+      }),
+    });
+    const persisted = JSON.parse(JSON.stringify(effect)) as unknown;
+
+    expect(parseHostedAssistantDeliverySideEffect(persisted)).toEqual(effect);
   });
 
   it("rejects malformed hosted response cards and card-media coexistence", () => {

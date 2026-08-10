@@ -90,7 +90,7 @@ describe("hosted group sponsorship contracts", () => {
       },
     })).toThrow(/canonical/u);
   });
-  it("documents the bounded parser-first rollout and old-Web rollback floor", () => {
+  it("documents the strict usage contract and old-Web sponsorship rollback floor", () => {
     const deployGuide = readFileSync(
       new URL("../../../apps/cloudflare/DEPLOY.md", import.meta.url),
       "utf8",
@@ -101,7 +101,12 @@ describe("hosted group sponsorship contracts", () => {
     const normalizedSection = section?.replace(/\s+/gu, " ");
 
     expect(section).toBeDefined();
-    expect(normalizedSection).toContain("read-side tolerance is only the first deployment step");
+    expect(normalizedSection).toContain(
+      "There is no strip-only reader phase or rollout-only feature flag",
+    );
+    expect(normalizedSection).toContain(
+      "A mixed-version Web/runner window may temporarily make the strict read fail",
+    );
     expect(normalizedSection).toContain(
       "Confirm both the migration and new Web have converged before enabling monthly authorization creation or automatic refill admission",
     );

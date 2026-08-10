@@ -172,18 +172,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Scorer-owned group challenge cards add the existing normalized score input,
 // deterministic scorer, bounded card mapper, and complete static presentation
-// to the runner graph. Exact macOS assembly measured an 8,002,296B static
-// closure and 9,984,952B total on 2026-08-09. No forbidden subsystem entered
-// the boot graph. The subsequent reviewed biomarker ranges, hosted
-// runtime-control compaction, and named-diet guidance moved exact ubuntu total
-// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
-// remain within their existing ceilings. Exact merged macOS assembly measured
-// 10,057,443B total on 2026-08-10 while the entry and static closure stayed
-// within their existing ceilings and no forbidden subsystem entered the boot
-// graph. Ratchet that measured total and retain the established tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_057_443 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_002_296;
+// to the runner graph. Combined with mainline Health Commons, workout-card,
+// recurring-timezone, usage, and group-newsletter additions, exact local
+// production assembly measured a 1,674,361B entry, 8,099,290B static closure,
+// and 10,107,083B total on 2026-08-10. No forbidden subsystem entered the boot
+// graph, so ratchet all three measurements and retain the established narrow
+// cross-platform tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_107_083 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_674_361;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_099_290;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

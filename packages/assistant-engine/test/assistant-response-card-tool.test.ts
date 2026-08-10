@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { Buffer } from 'node:buffer'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -138,6 +139,46 @@ afterEach(async () => {
   ))
 })
 
+const REALISTIC_LATE_WORKOUT_CARD: AssistantResponseCard = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Lower body strength',
+  subtitle: '18 of 24 sets complete',
+  footer: 'Tap an exercise to log or correct a set.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: [
+      'Dumbbell Single-Leg Romanian Deadlift',
+      'Dumbbell Bulgarian Split Squat',
+      'Dumbbell Walking Lunge in Place',
+      'Split Squat with Front Heel Lift',
+      'Dumbbell Reverse Lunge',
+      'Dumbbell Step-Up',
+    ].map((name, exerciseIndex) => ({
+      name,
+      sets: [
+        ['55 lb × 8–10', '55 lb × 9'],
+        ['55 lb × 10', '55 lb × 10'],
+        ['65 lb × 10–12', '65 lb × 11'],
+        ['65 lb × 12', '65 lb × 12'],
+      ].map(([target, actual], setIndex) => {
+        const isCompleted = exerciseIndex * 4 + setIndex < 18
+        return {
+          status: isCompleted ? 'completed' : 'pending',
+          target: target ?? null,
+          actual: isCompleted ? actual ?? null : null,
+        }
+      }),
+    })),
+  },
+}
+
 const IMAGE: AssistantResponseMedia = {
   alt: null,
   kind: 'image',
@@ -207,7 +248,7 @@ async function createChallengeVault(input: {
 }
 
 function readCardToolRequest(argumentsValue: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     id: 1,
     method: 'item/tool/call',
     params: {
@@ -390,6 +431,7 @@ describe('murph.attach_response_card', () => {
     const groupSchema = JSON.stringify(groupTool!.inputSchema)
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
+    expect(privateSchema).toContain('fiberGrams')
     expect(privateSchema).not.toContain('challenge_standings')
     expect(groupSchema).toContain('participantObservations')
     expect(groupSchema).toContain('challengeSlug')
@@ -445,10 +487,10 @@ describe('murph.attach_response_card', () => {
       'Occurrence authority alone is not card intent',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'single active tracked workout whose table was explicitly established earlier',
+      'verified initial card after starting or resuming one canonical live workout',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'with no active table or multiple plausible workouts, do not infer authority',
+      'with multiple plausible workouts, do not infer authority',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'card replaces the entire final response',
@@ -496,6 +538,10 @@ describe('murph.attach_response_card', () => {
       entries: CHALLENGE_CARD.entries,
     })).toMatchObject({
       kind: 'invalid-response-card-arguments',
+    })
+    expect(readCardToolRequest({ card: REALISTIC_LATE_WORKOUT_CARD })).toEqual({
+      card: REALISTIC_LATE_WORKOUT_CARD,
+      kind: 'attach-response-card',
     })
     expect(readCardToolRequest({ card: CARD, extra: true })).toMatchObject({
       kind: 'invalid-response-card-arguments',

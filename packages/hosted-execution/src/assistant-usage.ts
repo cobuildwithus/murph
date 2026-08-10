@@ -9,6 +9,7 @@ const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set<string>(["OPENAI_API_KEY"])
 const ASSISTANT_USAGE_REPORTING_USER_ID_HMAC_CONTEXT =
   "murph.assistant-usage.reporting-user.v1";
 const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
+  "cacheWriteInputTokens",
   "cacheWriteTokens",
   "cache_write_tokens",
   "cachedInputTokens",

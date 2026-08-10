@@ -1829,6 +1829,89 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('falls back once after a definitive scheduled group-card rejection', async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq rejected the iMessage app card.',
+      {
+        failureStage: 'http',
+        method: 'POST',
+        operation: 'send_imessage_app_card',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 400,
+      },
+    ))
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'scheduled-group-card-fallback-1' },
+    })
+
+    await expect(sendLinqMessage({
+      card: CHALLENGE_CARD,
+      idempotencyKey: 'scheduled-group-card',
+      message: CHALLENGE_CARD_TEXT,
+      target: 'scheduled-group-thread',
+      targetKind: 'explicit',
+      threadIsDirect: false,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      idempotencyKey: 'scheduled-group-card:fallback',
+      providerMessageId: 'scheduled-group-card-fallback-1',
+    })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledWith({
+      card: CHALLENGE_CARD,
+      chatId: 'scheduled-group-thread',
+      idempotencyKey: 'scheduled-group-card',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: undefined,
+    })
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: 'scheduled-group-card:fallback',
+    })
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledOnce()
+  })
+
+  it('preserves a scheduled group card after an ambiguous native result', async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    const error = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq app-card delivery was not confirmed.',
+      {
+        failureStage: 'transport',
+        method: 'POST',
+        operation: 'send_imessage_app_card',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: true,
+      },
+    )
+    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(error)
+
+    await expect(sendLinqMessage({
+      card: CHALLENGE_CARD,
+      idempotencyKey: 'scheduled-group-card-ambiguous',
+      message: CHALLENGE_CARD_TEXT,
+      target: 'scheduled-group-thread',
+      targetKind: 'explicit',
+      threadIsDirect: false,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).rejects.toBe(error)
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledOnce()
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['rate limit', { failureStage: 'http', retryable: true, status: 429 }],
     ['server failure', { failureStage: 'http', retryable: true, status: 500 }],
