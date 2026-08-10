@@ -58,6 +58,44 @@ export const HOSTED_MAILBOX_LANES = [
 
 export type HostedMailboxLane = (typeof HOSTED_MAILBOX_LANES)[number];
 
+export const HOSTED_RUNTIME_FAILURE_PHASE_NAMES = [
+  "browser_vault.refresh",
+  "codex.prepare",
+  "foreground.pass",
+  "mailbox.import.initial",
+  "runtime",
+  "runtime.return",
+  "workspace.checkpoint.durable_effect",
+  "workspace.checkpoint.idle_compact",
+  "workspace.checkpoint.idle_shutdown",
+  "workspace.read",
+  "workspace.restore",
+] as const;
+
+export type HostedRuntimeFailurePhaseName =
+  (typeof HOSTED_RUNTIME_FAILURE_PHASE_NAMES)[number];
+export type HostedRuntimeFailurePhaseCode =
+  `runtime_phase:${HostedRuntimeFailurePhaseName}`;
+
+const HOSTED_RUNTIME_FAILURE_PHASE_CODES = new Set<string>(
+  HOSTED_RUNTIME_FAILURE_PHASE_NAMES.map(
+    (phase): HostedRuntimeFailurePhaseCode => `runtime_phase:${phase}`,
+  ),
+);
+
+export function buildHostedRuntimeFailurePhaseCode(
+  phase: HostedRuntimeFailurePhaseName,
+): HostedRuntimeFailurePhaseCode {
+  return `runtime_phase:${phase}`;
+}
+
+export function isHostedRuntimeFailurePhaseCode(
+  value: unknown,
+): value is HostedRuntimeFailurePhaseCode {
+  return typeof value === "string"
+    && HOSTED_RUNTIME_FAILURE_PHASE_CODES.has(value);
+}
+
 export const HOSTED_MAILBOX_KINDS = [
   "conversation.message",
   "member.activated",

@@ -43,6 +43,9 @@ import {
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
+import {
+  buildHostedRunnerRedactedErrorJson,
+} from "../src/user-runner/diagnostics.ts";
 
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
 const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
@@ -6868,7 +6871,7 @@ describe("RunnerContainer", () => {
     expect(JSON.stringify(failureLogInput)).not.toContain("placeholder");
   });
 
-  it("summarizes runtime shell detail in the thrown container error", async () => {
+  it("preserves runtime phase detail through the thrown and persisted error shapes", async () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
@@ -6883,7 +6886,7 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
-            errorCodeDetail: "VAULT_FILE_MISSING",
+            errorCodeDetail: "runtime_phase:foreground.pass",
             errorDetail: "Missing required file \"vault.json\".",
           },
           error: "Hosted execution runtime failed.",
@@ -6909,14 +6912,19 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
-        errorCodeDetail: "VAULT_FILE_MISSING",
+        errorCodeDetail: "runtime_phase:foreground.pass",
         errorDetailPresent: true,
         payloadDetailsPresent: true,
       },
-      message: "Hosted execution runtime failed. Code: VAULT_FILE_MISSING. Status: 500.",
+      message:
+        "Hosted execution runtime failed. Code: runtime_phase:foreground.pass. Status: 500.",
       name: "Error",
       status: 500,
       statusCode: 500,
+    });
+    expect(buildHostedRunnerRedactedErrorJson(thrown)).toMatchObject({
+      errorCode: "runtime_error",
+      errorCodeDetail: "runtime_phase:foreground.pass",
     });
     expect(JSON.stringify(thrown)).not.toContain("vault.json");
   });

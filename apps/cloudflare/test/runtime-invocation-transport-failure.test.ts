@@ -707,6 +707,22 @@ describe("buildHostedRunnerRedactedErrorJson", () => {
       errorCodeDetail: "ECONNRESET",
     });
   });
+
+  it("does not promote identifier-shaped nested detail over the outer error code", () => {
+    const nestedIdentifier = Object.assign(new Error("boom"), {
+      code: "runtime_error",
+      details: {
+        errorCodeDetail: "member_123456789",
+      },
+    });
+
+    const redacted = buildHostedRunnerRedactedErrorJson(nestedIdentifier);
+
+    expect(redacted).toMatchObject({
+      errorCodeDetail: "runtime_error",
+    });
+    expect(JSON.stringify(redacted)).not.toContain("member_123456789");
+  });
 });
 
 async function createTransportFailureHarness(input: {

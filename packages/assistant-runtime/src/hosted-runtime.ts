@@ -4,7 +4,9 @@ import path from "node:path";
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+  buildHostedRuntimeFailurePhaseCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
+  type HostedRuntimeFailurePhaseName,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceStagedMilestones,
@@ -2160,7 +2162,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           stage: "foreground.pass",
           status: "fail",
         });
-        throw error;
+        throw attachHostedRuntimeFailurePhase(error, "foreground.pass");
       }
     };
     const runBrowserVaultRefreshMaintenance = async (maintenanceInput: {
@@ -2178,24 +2180,39 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         stage: "browser_vault.refresh",
         status: "start",
       });
-      const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
-        force: browserVaultReplicaRefreshRequested,
-        generatedAt: new Date().toISOString(),
-        platform: guardedRuntime.platform,
-        runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-        signal: maintenanceSignal,
-        timeoutMs: null,
-        vaultRoot: restored.vaultRoot,
-        workspace: maintenanceInput.workspace,
-      });
-      emitPhaseLog({
-        details: buildHostedBrowserVaultRefreshLogDetails(refresh),
-        input,
-        requestId,
-        stage: "browser_vault.refresh",
-        status: "done",
-      });
-      return refresh;
+      try {
+        const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+          force: browserVaultReplicaRefreshRequested,
+          generatedAt: new Date().toISOString(),
+          platform: guardedRuntime.platform,
+          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          signal: maintenanceSignal,
+          timeoutMs: null,
+          vaultRoot: restored.vaultRoot,
+          workspace: maintenanceInput.workspace,
+        });
+        emitPhaseLog({
+          details: buildHostedBrowserVaultRefreshLogDetails(refresh),
+          input,
+          requestId,
+          stage: "browser_vault.refresh",
+          status: "done",
+        });
+        return refresh;
+      } catch (error) {
+        if (maintenanceSignal.aborted) {
+          phaseLogger.close("browser_vault.refresh");
+        } else {
+          emitPhaseLog({
+            error,
+            input,
+            requestId,
+            stage: "browser_vault.refresh",
+            status: "fail",
+          });
+        }
+        throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
+      }
     };
     const idleCheckpointDelayMs = resolveHostedRuntimeIdleCheckpointDelayMs(
       input.request.idleCheckpointDelayMs,
@@ -3608,9 +3625,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           readConfirmedAssistantTarget()?.model
           ?? runtimeEnv.HOSTED_ASSISTANT_MODEL
           ?? null;
-        const idleMaintenance = dirtyWindowCheckpointTrigger === "shutdown_signal"
-          ? buildHostedShutdownIdleMaintenanceOutcome()
-          : await runHostedPendingInputProtectedIdleMaintenance({
+        let idleMaintenance: HostedIdleMaintenanceOutcome;
+        try {
+          idleMaintenance = dirtyWindowCheckpointTrigger === "shutdown_signal"
+            ? buildHostedShutdownIdleMaintenanceOutcome()
+            : await runHostedPendingInputProtectedIdleMaintenance({
               // The compact call rides the same warm-process credential as turns,
               // so attribute it the same way: members using their own provider key
               // must not have platform allowance debited for it.
@@ -3665,6 +3684,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 return persisted.result;
               },
             });
+        } catch (error) {
+          throw attachHostedRuntimeFailurePhase(
+            error,
+            "workspace.checkpoint.idle_compact",
+          );
+        }
         emitPhaseLog({
           details: {
             idleCompactKind: idleMaintenance.kind,
@@ -3780,6 +3805,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         } catch (error) {
           resumeDetachedAssistantAskAfterWorkspaceBoundary();
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
+            phaseLogger.close("workspace.checkpoint.idle_shutdown");
             const shutdownWasSignaled = () => options.shutdownSignal?.aborted === true;
             if (
               shutdownWasSignaled()
@@ -3824,6 +3850,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             continue;
           }
           if (isHostedRuntimeCheckpointSupersededByWorkspaceProgress(error)) {
+            phaseLogger.close("workspace.checkpoint.idle_shutdown");
             await runForegroundPass({
               latencySeed: null,
               requestIdKind: "checkpoint-interrupt",
@@ -4160,7 +4187,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     return invocationResult;
   } catch (error) {
-    phaseLogger.failOpenPhases({
+    const failedRuntimePhases = phaseLogger.failOpenPhases({
       error,
       input,
       requestId,
@@ -4174,10 +4201,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     if (hostAbortObserved) {
       await drainLocalWorkspaceMutationsBestEffort();
-      throw hostAbortReason;
+      throw attachHostedRuntimeFailurePhase(
+        hostAbortReason,
+        failedRuntimePhases[0] ?? "runtime",
+      );
     }
     await drainDeferredUsageBestEffort();
-    throw error;
+    throw attachHostedRuntimeFailurePhase(
+      error,
+      failedRuntimePhases[0] ?? "runtime",
+    );
   } finally {
     try {
       await settleCodexProcessPreparation();
@@ -4194,21 +4227,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
 type HostedRuntimePhaseLogStatus = "done" | "fail" | "start";
 
-const HOSTED_RUNTIME_PHASE_NAMES = [
-  "browser_vault.refresh",
-  "codex.prepare",
-  "foreground.pass",
-  "mailbox.import.initial",
-  "runtime",
-  "runtime.return",
-  "workspace.checkpoint.durable_effect",
-  "workspace.checkpoint.idle_compact",
-  "workspace.checkpoint.idle_shutdown",
-  "workspace.read",
-  "workspace.restore",
-] as const;
-
-type HostedRuntimePhaseName = typeof HOSTED_RUNTIME_PHASE_NAMES[number];
+type HostedRuntimePhaseName = HostedRuntimeFailurePhaseName;
 
 interface HostedRuntimePhaseLogState {
   ordinal: number;
@@ -4217,8 +4236,11 @@ interface HostedRuntimePhaseLogState {
 }
 
 interface HostedRuntimePhaseLogger {
+  close(stage: HostedRuntimePhaseName): void;
   emit(input: HostedRuntimePhaseLogInput): void;
-  failOpenPhases(input: Omit<HostedRuntimePhaseLogInput, "stage" | "status">): void;
+  failOpenPhases(
+    input: Omit<HostedRuntimePhaseLogInput, "stage" | "status">,
+  ): HostedRuntimePhaseName[];
 }
 
 interface HostedRuntimePhaseLogInput {
@@ -4239,6 +4261,9 @@ function createHostedRuntimePhaseLogger(): HostedRuntimePhaseLogger {
   };
 
   return {
+    close(stage) {
+      state.startedAtMsByStage.delete(stage);
+    },
     emit(input) {
       emitHostedRuntimePhaseLog(input, state);
     },
@@ -4251,8 +4276,42 @@ function createHostedRuntimePhaseLogger(): HostedRuntimePhaseLogger {
           status: "fail",
         }, state);
       }
+      return openStages;
     },
   };
+}
+
+function attachHostedRuntimeFailurePhase(
+  error: unknown,
+  phase: HostedRuntimePhaseName,
+): unknown {
+  if (!(error instanceof Error) || hasHostedRuntimeDiagnosticErrorCode(error)) {
+    return error;
+  }
+
+  // The container-to-Worker boundary already carries short `.errorCode`
+  // values into the metadata-only accepted-attempt log. Add the phase only to
+  // otherwise-generic extensible errors, preserving every existing typed code
+  // and all retry/error-class behavior.
+  try {
+    Reflect.set(error, "errorCode", buildHostedRuntimeFailurePhaseCode(phase));
+  } catch {
+    // Diagnostics are fail-open: a frozen third-party error must keep its
+    // original behavior even when it cannot accept the optional phase tag.
+  }
+  return error;
+}
+
+function hasHostedRuntimeDiagnosticErrorCode(error: Error): boolean {
+  try {
+    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+    return typeof diagnostics?.errorCodeDetail === "string"
+      && diagnostics.errorCodeDetail.trim().length > 0;
+  } catch {
+    // A hostile getter or proxy must not let optional diagnostics replace the
+    // original runtime failure.
+    return true;
+  }
 }
 
 function emitHostedRuntimePhaseLog(
