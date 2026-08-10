@@ -227,41 +227,41 @@ export function writeHealthCommonsKnowledgeIndex(
         continue;
       }
       for (const relation of entity.relations ?? []) {
-        if (relation.type === "parent_family") {
-          const parent = entitiesByKey.get(relation.target);
-          if (!parent) {
-            continue;
-          }
-          insertTopicOwner.run(
-            normalizeTopicPhrase(parent.title),
-            parent.key,
-            entity.key,
-            0,
-          );
+        if (relation.type !== "parent_family") {
           continue;
         }
-        if (
-          relation.type !== "child_family"
-          || entity.entityType !== "experiment_family"
-        ) {
-          continue;
-        }
-        const child = entitiesByKey.get(relation.target);
-        if (child?.entityType !== "experiment_family") {
+        const parent = entitiesByKey.get(relation.target);
+        if (!parent) {
           continue;
         }
         insertTopicOwner.run(
-          normalizeTopicPhrase(entity.title),
+          normalizeTopicPhrase(parent.title),
+          parent.key,
           entity.key,
-          child.key,
           0,
         );
-        for (const alias of entity.aliases ?? []) {
+      }
+    }
+    for (const entity of catalog.entities) {
+      if (entity.entityType !== "experiment_family") {
+        continue;
+      }
+      const descendantKeys = collectBroadFamilyDescendantKeys(
+        entity.key,
+        entitiesByKey,
+      );
+      if (descendantKeys.length === 0) {
+        continue;
+      }
+      for (
+        const [index, phrase] of [entity.title, ...(entity.aliases ?? [])].entries()
+      ) {
+        for (const descendantKey of descendantKeys) {
           insertTopicOwner.run(
-            normalizeTopicPhrase(alias),
+            normalizeTopicPhrase(phrase),
             entity.key,
-            child.key,
-            1,
+            descendantKey,
+            index === 0 ? 0 : 1,
           );
         }
       }
@@ -653,6 +653,58 @@ function hasSameTitleParent(
     relation.type === "parent_family"
     && normalizeTopicPhrase(entitiesByKey.get(relation.target)?.title ?? "") === title
   );
+}
+
+function collectBroadFamilyDescendantKeys(
+  rootKey: string,
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+): string[] {
+  const root = entitiesByKey.get(rootKey);
+  if (
+    root?.entityType !== "experiment_family"
+    || !(root.relations ?? []).some((relation) => relation.type === "child_family")
+  ) {
+    return [];
+  }
+  const descendants = new Set<string>();
+  const visitedFamilies = new Set<string>();
+  const pendingFamilies = [rootKey];
+
+  while (pendingFamilies.length > 0) {
+    const familyKey = pendingFamilies.shift();
+    if (!familyKey || visitedFamilies.has(familyKey)) {
+      continue;
+    }
+    visitedFamilies.add(familyKey);
+    const family = entitiesByKey.get(familyKey);
+    if (family?.entityType !== "experiment_family") {
+      continue;
+    }
+    for (const relation of family.relations ?? []) {
+      if (relation.type !== "child_family") {
+        continue;
+      }
+      const child = entitiesByKey.get(relation.target);
+      if (child?.entityType !== "experiment_family") {
+        continue;
+      }
+      descendants.add(child.key);
+      pendingFamilies.push(child.key);
+    }
+    for (const candidate of entitiesByKey.values()) {
+      if (
+        candidate.entityType === "protocol_variant"
+        && (candidate.relations ?? []).some((relation) =>
+          relation.type === "parent_family"
+          && relation.target === familyKey
+        )
+      ) {
+        descendants.add(candidate.key);
+      }
+    }
+  }
+
+  return [...descendants].sort((left, right) => left.localeCompare(right));
 }
 
 function sourceFindingTargets(

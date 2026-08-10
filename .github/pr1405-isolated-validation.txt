@@ -1,4 +1,4 @@
-Reused the existing child_family graph for broad Health Commons topic expansion
+Expanded only authored broad child-family closures into their protocol descendants
 
 apply outcome: success
 install outcome: success
@@ -8,7 +8,7 @@ install outcome: success
 > @murphai/health-commons@1.0.0 generate /home/runner/work/murph/murph/packages/health-commons
 > pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts
 
-(node:2235) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:2410) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 exit: 0
@@ -22,7 +22,7 @@ exit: 0
 > @murphai/health-commons@1.0.0 generate /home/runner/work/murph/murph/packages/health-commons
 > pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts
 
-(node:2324) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:2503) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 
@@ -37,127 +37,113 @@ exit: 0
 > @murphai/health-commons@1.0.0 generate /home/runner/work/murph/murph/packages/health-commons
 > pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts
 
-(node:2430) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:2610) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/murph/murph/packages/health-commons[39m
 
- [32m✓[39m [30m[42m health-commons [49m[39m test/runtime.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 3649[2mms[22m[39m
-     [33m[2m✓[22m[39m does not publish any explicit draft, deprecated, or hidden protocol route or bundle [33m 3416[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/catalog-coverage.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 29[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/requested-biomarker-content.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 2151[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/build-determinism.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 36[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.experiment-onboarding.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 3373[2mms[22m[39m
-     [33m[2m✓[22m[39m keeps psyllium lab defaults out of daily LDL-C run-in windows [33m 3364[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3429[2mms[22m[39m
-     [33m[2m✓[22m[39m builds a deterministic catalog with protocol revisions and artifact manifests [33m 3428[2mms[22m[39m
- [31m❯[39m [30m[42m health-commons [49m[39m test/knowledge-index-full-catalog.test.ts [2m([22m[2m39 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 296[2mms[22m[39m
-[31m     [31m×[31m answers a normal sauna question without requiring an exact catalog title[39m[32m 11[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/runtime.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 4409[2mms[22m[39m
+     [33m[2m✓[22m[39m does not publish any explicit draft, deprecated, or hidden protocol route or bundle [33m 4125[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog-coverage.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/requested-biomarker-content.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 2512[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/build-determinism.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 47[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.experiment-onboarding.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 4103[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps psyllium lab defaults out of daily LDL-C run-in windows [33m 4092[2mms[22m[39m
+ [31m❯[39m [30m[42m health-commons [49m[39m test/knowledge-index-full-catalog.test.ts [2m([22m[2m39 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 372[2mms[22m[39m
+     [32m✓[39m answers a normal sauna question without requiring an exact catalog title[32m 10[2mms[22m[39m
      [32m✓[39m answers red-light questions through Health Commons without a topic-specific skill[32m 6[2mms[22m[39m
      [32m✓[39m returns a safety-only hard stop for sauna and fentanyl patches[32m 3[2mms[22m[39m
      [32m✓[39m keeps caffeine pregnancy safety separate from unrelated safety[32m 3[2mms[22m[39m
-     [32m✓[39m returns the core dry-sauna systematic review[32m 7[2mms[22m[39m
-     [32m✓[39m does not substitute nearby topics for unsupported queries[32m 9[2mms[22m[39m
-     [32m✓[39m preserves the qualifier for Daily Vitamin D3 Supplementation[32m 4[2mms[22m[39m
-     [32m✓[39m preserves the qualifier for Walking After Every Meal[32m 6[2mms[22m[39m
-     [32m✓[39m preserves the qualifier for Omega-3 Supplementation[32m 8[2mms[22m[39m
-     [32m✓[39m does not route vitamin C through a compound collagen alias[32m 2[2mms[22m[39m
+     [32m✓[39m returns the core dry-sauna systematic review[32m 8[2mms[22m[39m
+     [32m✓[39m does not substitute nearby topics for unsupported queries[32m 11[2mms[22m[39m
+     [32m✓[39m preserves the qualifier for Daily Vitamin D3 Supplementation[32m 5[2mms[22m[39m
+     [32m✓[39m preserves the qualifier for Walking After Every Meal[32m 7[2mms[22m[39m
+     [32m✓[39m preserves the qualifier for Omega-3 Supplementation[32m 9[2mms[22m[39m
+     [32m✓[39m does not route vitamin C through a compound collagen alias[32m 3[2mms[22m[39m
      [32m✓[39m does not substitute a child protocol for the family alias UC-II[32m 2[2mms[22m[39m
-     [32m✓[39m does not substitute a child protocol for the family alias native type-II collagen[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias native type-II collagen[32m 3[2mms[22m[39m
      [32m✓[39m does not substitute a child protocol for the family alias gelatin plus vitamin C[32m 2[2mms[22m[39m
      [32m✓[39m does not substitute a child protocol for the family alias bone broth[32m 2[2mms[22m[39m
      [32m✓[39m does not substitute a child protocol for the family alias cold shower[32m 2[2mms[22m[39m
-     [32m✓[39m does not substitute a child protocol for the family alias winter swimming[32m 2[2mms[22m[39m
-     [32m✓[39m keeps broad canonical family retrieval and direct child retrieval[32m 24[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias winter swimming[32m 3[2mms[22m[39m
+     [32m✓[39m keeps broad canonical family retrieval and direct child retrieval[32m 31[2mms[22m[39m
      [32m✓[39m normalizes combining-mark aliases without changing their topic[32m 3[2mms[22m[39m
      [32m✓[39m does not compose a topic from unrelated sauna citations[32m 4[2mms[22m[39m
-     [32m✓[39m keeps water-fasting evidence and safety on the fasting topic[32m 12[2mms[22m[39m
-     [32m✓[39m returns the focused dry-sauna safety boundary for recent fainting[32m 2[2mms[22m[39m
-     [32m✓[39m returns the focused dry-sauna safety boundary for unstable cardiovascular disease[32m 4[2mms[22m[39m
+     [32m✓[39m keeps water-fasting evidence and safety on the fasting topic[32m 16[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for recent fainting[32m 3[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for unstable cardiovascular disease[32m 5[2mms[22m[39m
      [32m✓[39m returns the focused dry-sauna safety boundary for fever[32m 2[2mms[22m[39m
      [32m✓[39m returns the focused dry-sauna safety boundary for trying to conceive[32m 2[2mms[22m[39m
      [32m✓[39m returns dry-sauna immunity evidence from the resolved owner[32m 2[2mms[22m[39m
-     [32m✓[39m returns member-readable broad evidence for Finnish Dry Sauna[32m 7[2mms[22m[39m
-     [32m✓[39m returns member-readable broad evidence for Caffeine Curfew[32m 7[2mms[22m[39m
-     [32m✓[39m returns member-readable broad evidence for Creatine Monohydrate[32m 7[2mms[22m[39m
-     [32m✓[39m returns member-readable broad evidence for Omega-3 Supplementation[32m 6[2mms[22m[39m
-     [32m✓[39m returns member-readable broad evidence for Collagen Supplementation[32m 6[2mms[22m[39m
-     [32m✓[39m routes typed source findings to their related protocol[32m 4[2mms[22m[39m
-     [32m✓[39m omits ambiguous multi-target source findings instead of broadcasting them[32m 7[2mms[22m[39m
-     [32m✓[39m routes measurement findings to REM Sleep[32m 3[2mms[22m[39m
-     [32m✓[39m routes measurement findings to HRV / RMSSD[32m 3[2mms[22m[39m
-     [32m✓[39m routes directly sourced SpO2 safety to its measurement owner[32m 7[2mms[22m[39m
-     [32m✓[39m resolves canonical family and protocol title collisions to the family owner[32m 22[2mms[22m[39m
-     [32m✓[39m does not attach page-wide efficacy citations to aggregate safety text[32m 4[2mms[22m[39m
-[31m     [31m×[31m never returns an unsourced ordinary item or an overview row[39m[32m 82[2mms[22m[39m
-     [32m✓[39m does not return reducer bookkeeping as IT band guidance[32m 6[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/cli-coverage.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 54[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/sleep-workflow-content.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 3398[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/biomarker-fallback-ranges.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 2100[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/knowledge-index.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 116[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/protocol-artifacts.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 12[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/sleep-complaint-publishing-journeys.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 6072[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.measurement-plan.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 12[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/biomarker-web-artifacts.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/pre-sleep-silent-meditation-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3455[2mms[22m[39m
-     [33m[2m✓[22m[39m keeps the expected signal metadata aligned with the protocol page [33m 3454[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/catalog-baseline-policy.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 6435[2mms[22m[39m
-     [33m[2m✓[22m[39m uses two-week baselines by default and composes total durations from each plan [33m 3370[2mms[22m[39m
-     [33m[2m✓[22m[39m keeps Daily Step Floor timing exclusively on its fixed two-week test plan [33m 3064[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/load.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 27[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/tabata-20-10-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3365[2mms[22m[39m
-     [33m[2m✓[22m[39m keeps the expected signal metadata aligned with the protocol page [33m 3364[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/itbs-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3374[2mms[22m[39m
-     [33m[2m✓[22m[39m keeps the catalog focused on lateral-knee pain and running tolerance [33m 3373[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/bryan-johnson-onboarding.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3367[2mms[22m[39m
-     [33m[2m✓[22m[39m materializes the structured onboarding contract in the catalog [33m 3366[2mms[22m[39m
- [32m✓[39m [30m[42m health-commons [49m[39m test/hash-artifact.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 6[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Finnish Dry Sauna[32m 9[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Caffeine Curfew[32m 8[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Creatine Monohydrate[32m 8[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Omega-3 Supplementation[32m 8[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Collagen Supplementation[32m 8[2mms[22m[39m
+     [32m✓[39m routes typed source findings to their related protocol[32m 6[2mms[22m[39m
+     [32m✓[39m omits ambiguous multi-target source findings instead of broadcasting them[32m 8[2mms[22m[39m
+     [32m✓[39m routes measurement findings to REM Sleep[32m 5[2mms[22m[39m
+     [32m✓[39m routes measurement findings to HRV / RMSSD[32m 4[2mms[22m[39m
+     [32m✓[39m routes directly sourced SpO2 safety to its measurement owner[32m 9[2mms[22m[39m
+     [32m✓[39m resolves canonical family and protocol title collisions to the family owner[32m 28[2mms[22m[39m
+     [32m✓[39m does not attach page-wide efficacy citations to aggregate safety text[32m 5[2mms[22m[39m
+[31m     [31m×[31m never returns an unsourced ordinary item or an overview row[39m[32m 105[2mms[22m[39m
+     [32m✓[39m does not return reducer bookkeeping as IT band guidance[32m 8[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4102[2mms[22m[39m
+     [33m[2m✓[22m[39m builds a deterministic catalog with protocol revisions and artifact manifests [33m 4100[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/cli-coverage.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 67[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/sleep-workflow-content.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 4071[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/biomarker-fallback-ranges.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 2472[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/knowledge-index.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 145[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/protocol-artifacts.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/sleep-complaint-publishing-journeys.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 5977[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.measurement-plan.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/biomarker-web-artifacts.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/pre-sleep-silent-meditation-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4058[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the expected signal metadata aligned with the protocol page [33m 4057[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog-baseline-policy.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 7743[2mms[22m[39m
+     [33m[2m✓[22m[39m uses two-week baselines by default and composes total durations from each plan [33m 4048[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Daily Step Floor timing exclusively on its fixed two-week test plan [33m 3693[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/load.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/tabata-20-10-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4047[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the expected signal metadata aligned with the protocol page [33m 4045[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/itbs-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4033[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the catalog focused on lateral-knee pain and running tolerance [33m 4032[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/bryan-johnson-onboarding.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4034[2mms[22m[39m
+     [33m[2m✓[22m[39m materializes the structured onboarding contract in the catalog [33m 4032[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/hash-artifact.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 7[2mms[22m[39m
 
-[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
-
-[41m[1m FAIL [22m[49m [30m[42m health-commons [49m[39m test/knowledge-index-full-catalog.test.ts[2m > [22mHealth Commons full-catalog knowledge retrieval[2m > [22manswers a normal sauna question without requiring an exact catalog title
-[31m[1mAssertionError[22m: expected 0 to be greater than 0[39m
-[36m [2m❯[22m test/knowledge-index-full-catalog.test.ts:[2m44:33[22m[39m
-    [90m 42|[39m
-    [90m 43|[39m     [34mexpect[39m(result[33m.[39mtopicResolved)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
-    [90m 44|[39m     [34mexpect[39m(result[33m.[39mitems[33m.[39mlength)[33m.[39m[34mtoBeGreaterThan[39m([34m0[39m)[33m;[39m
-    [90m   |[39m                                 [31m^[39m
-    [90m 45|[39m     [34mexpect[39m([34mpacketText[39m(result))[33m.[39m[34mtoMatch[39m([36m/immun/iu[39m)[33m;[39m
-    [90m 46|[39m   })[33m;[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
 
 [41m[1m FAIL [22m[49m [30m[42m health-commons [49m[39m test/knowledge-index-full-catalog.test.ts[2m > [22mHealth Commons full-catalog knowledge retrieval[2m > [22mnever returns an unsourced ordinary item or an overview row
-[31m[1mAssertionError[22m: expected { count: 6 } to match object { count: +0 }[39m
+[31m[1mAssertionError[22m: expected { count: 217 } to match object { count: +0 }[39m
 
 [32m- Expected[39m
 [31m+ Received[39m
 
 [2m  {[22m
 [32m-   "count": 0,[39m
-[31m+   "count": 6,[39m
+[31m+   "count": 217,[39m
 [2m  }[22m
 
-[36m [2m❯[22m test/knowledge-index-full-catalog.test.ts:[2m339:17[22m[39m
-    [90m337|[39m         WHERE child_owner.entity_key <> child_owner.owner_key
-    [90m338|[39m           AND child_owner.match_priority > 0
-    [90m339|[39m       `[39m)[33m.[39m[35mget[39m())[33m.[39m[34mtoMatchObject[39m({ count[33m:[39m [34m0[39m })[33m;[39m
+[36m [2m❯[22m test/knowledge-index-full-catalog.test.ts:[2m347:17[22m[39m
+    [90m345|[39m               AND family_child.entity_key <> family_child.owner_key
+    [90m346|[39m           )
+    [90m347|[39m       `[39m)[33m.[39m[35mget[39m())[33m.[39m[34mtoMatchObject[39m({ count[33m:[39m [34m0[39m })[33m;[39m
     [90m   |[39m                 [31m^[39m
-    [90m340|[39m     } [35mfinally[39m {
-    [90m341|[39m       database[33m.[39m[34mclose[39m()[33m;[39m
+    [90m348|[39m       [34mexpect[39m(database[33m.[39m[34mprepare[39m([32m`
+    [90m349|[39m         SELECT COUNT(DISTINCT entity_key) AS count
 
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
 
 
 [2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m21 passed[39m[22m[90m (22)[39m
-[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m139 passed[39m[22m[90m (141)[39m
-[2m   Start at [22m 12:01:04
-[2m   Duration [22m 53.04s[2m (transform 679ms, setup 99ms, import 5.84s, tests 44.76s, environment 2ms)[22m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m140 passed[39m[22m[90m (141)[39m
+[2m   Start at [22m 12:10:29
+[2m   Duration [22m 62.30s[2m (transform 819ms, setup 115ms, import 7.03s, tests 52.30s, environment 2ms)[22m
 
 
-::error file=/home/runner/work/murph/murph/packages/health-commons/test/knowledge-index-full-catalog.test.ts,title=[health-commons] test/knowledge-index-full-catalog.test.ts > Health Commons full-catalog knowledge retrieval > answers a normal sauna question without requiring an exact catalog title,line=44,column=33::AssertionError: expected 0 to be greater than 0%0A ❯ test/knowledge-index-full-catalog.test.ts:44:33%0A%0A
-
-::error file=/home/runner/work/murph/murph/packages/health-commons/test/knowledge-index-full-catalog.test.ts,title=[health-commons] test/knowledge-index-full-catalog.test.ts > Health Commons full-catalog knowledge retrieval > never returns an unsourced ordinary item or an overview row,line=339,column=17::AssertionError: expected { count: 6 } to match object { count: +0 }%0A%0A- Expected%0A+ Received%0A%0A  {%0A-   "count": 0,%0A+   "count": 6,%0A  }%0A%0A ❯ test/knowledge-index-full-catalog.test.ts:339:17%0A%0A
+::error file=/home/runner/work/murph/murph/packages/health-commons/test/knowledge-index-full-catalog.test.ts,title=[health-commons] test/knowledge-index-full-catalog.test.ts > Health Commons full-catalog knowledge retrieval > never returns an unsourced ordinary item or an overview row,line=347,column=17::AssertionError: expected { count: 217 } to match object { count: +0 }%0A%0A- Expected%0A+ Received%0A%0A  {%0A-   "count": 0,%0A+   "count": 217,%0A  }%0A%0A ❯ test/knowledge-index-full-catalog.test.ts:347:17%0A%0A
  ELIFECYCLE  Command failed with exit code 1.
 
 exit: 1
@@ -172,36 +158,36 @@ packages/contracts build$ node ../../scripts/rm-paths.mjs dist tsconfig.build.ts
 packages/exercise-library build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false && node dist/build.js
 packages/gateway-core build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/health-metrics build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false
-packages/contracts build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/exercise-library build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
-packages/gateway-core build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/contracts build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/health-metrics build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/gateway-core build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/gateway-core build: Done
 packages/messaging-ingress build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/messaging-ingress build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/health-metrics build: Done
 packages/openclaw-plugin build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/openclaw-plugin build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
-packages/messaging-ingress build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
-packages/openclaw-plugin build: Done
-packages/runtime-state build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/messaging-ingress build: Done
+packages/runtime-state build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/openclaw-plugin build: Done
 packages/runtime-state build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
-packages/exercise-library build: Done
 packages/runtime-state build: Done
+packages/exercise-library build: Done
 packages/contracts build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/contracts build: Done
 packages/clinical-records build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false
 packages/core build$ node ../../scripts/rm-paths.mjs dist tsconfig.build.tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json
 packages/health-commons build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false && node dist/build.js
 packages/query build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
-packages/clinical-records build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/query build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/core build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/clinical-records build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/health-commons build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/clinical-records build: Done
 packages/query build: Done
 packages/core build: Done
-packages/health-commons build: (node:3174) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+packages/health-commons build: (node:3380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 packages/health-commons build: (Use `node --trace-warnings ...` to show where the warning was created)
 packages/health-commons build: Done
 packages/importers build$ pnpm --dir ../.. exec tsx --tsconfig tsconfig.base.json packages/importers/scripts/safe-build.ts
@@ -212,12 +198,12 @@ packages/importers build: [typescript] lane=package profile=default mode=checker
 packages/importers build: Done
 packages/device-syncd build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/inboxd build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
-packages/device-syncd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/inboxd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/device-syncd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/inboxd build: Done
 packages/device-syncd build: Done
-packages/operator-config build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/hosted-execution build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/operator-config build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/hosted-execution build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/operator-config build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/hosted-execution build: Done
@@ -240,9 +226,9 @@ packages/assistant-engine build: Done
 packages/assistant-runtime build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/assistantd build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
 packages/setup-cli build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
-packages/assistantd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/assistant-runtime build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/setup-cli build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistantd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
 packages/assistantd build: Done
 packages/setup-cli build: Done
 packages/assistant-runtime build: Done
@@ -279,12 +265,12 @@ exit: 0
 
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/murph/murph/packages/cli[39m
 
- [32m✓[39m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 63[2mms[22m[39m
+ [32m✓[39m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 80[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
 [2m      Tests [22m [1m[32m13 passed[39m[22m[90m (13)[39m
-[2m   Start at [22m 12:02:47
-[2m   Duration [22m 981ms[2m (transform 467ms, setup 11ms, import 763ms, tests 63ms, environment 0ms)[22m
+[2m   Start at [22m 12:12:35
+[2m   Duration [22m 1.24s[2m (transform 589ms, setup 13ms, import 956ms, tests 80ms, environment 0ms)[22m
 
 
 exit: 0
@@ -304,13 +290,13 @@ exit: 1
 
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/murph/murph/packages/assistant-engine[39m
 
- [32m✓[39m [30m[46m assistant-engine [49m[39m test/model-behavior.test.ts [2m([22m[2m73 tests[22m[2m)[22m[32m 121[2mms[22m[39m
- [32m✓[39m [30m[46m assistant-engine [49m[39m test/assistant-skill-assets.test.ts [2m([22m[2m31 tests[22m[2m | [22m[33m6 skipped[39m[2m)[22m[32m 82[2mms[22m[39m
+ [32m✓[39m [30m[46m assistant-engine [49m[39m test/model-behavior.test.ts [2m([22m[2m73 tests[22m[2m)[22m[32m 152[2mms[22m[39m
+ [32m✓[39m [30m[46m assistant-engine [49m[39m test/assistant-skill-assets.test.ts [2m([22m[2m31 tests[22m[2m | [22m[33m6 skipped[39m[2m)[22m[32m 102[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
 [2m      Tests [22m [1m[32m98 passed[39m[22m[2m | [22m[33m6 skipped[39m[90m (104)[39m
-[2m   Start at [22m 12:02:52
-[2m   Duration [22m 2.03s[2m (transform 831ms, setup 14ms, import 1.57s, tests 204ms, environment 0ms)[22m
+[2m   Start at [22m 12:12:41
+[2m   Duration [22m 2.55s[2m (transform 1.04s, setup 18ms, import 1.97s, tests 253ms, environment 0ms)[22m
 
 
 exit: 0
@@ -321,6 +307,5 @@ exit: 0
 
 ===== changed files =====
  M .github/pr1405-isolated-validation.txt
- M packages/health-commons/content/families/dry-sauna.md
- M packages/health-commons/content/families/infrared-sauna.md
  M packages/health-commons/src/knowledge-index.ts
+ M packages/health-commons/test/knowledge-index-full-catalog.test.ts

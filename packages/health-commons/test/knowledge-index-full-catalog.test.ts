@@ -334,9 +334,30 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
           ON parent_owner.phrase = child_owner.phrase
          AND parent_owner.owner_key = child_owner.owner_key
          AND parent_owner.entity_key = parent_owner.owner_key
-        WHERE child_owner.entity_key <> child_owner.owner_key
+        WHERE child_owner.entity_key LIKE 'protocol_variant:%'
           AND child_owner.match_priority > 0
+          AND NOT EXISTS (
+            SELECT 1
+            FROM topic_owners family_child
+            WHERE family_child.phrase = child_owner.phrase
+              AND family_child.owner_key = child_owner.owner_key
+              AND family_child.entity_key LIKE 'experiment_family:%'
+              AND family_child.entity_key <> family_child.owner_key
+          )
       `).get()).toMatchObject({ count: 0 });
+      expect(database.prepare(`
+        SELECT COUNT(DISTINCT entity_key) AS count
+        FROM topic_owners
+        WHERE phrase = 'sauna'
+          AND owner_key = 'experiment_family:sauna'
+      `).get()).toMatchObject({ count: expect.any(Number) });
+      const saunaOwnerCount = database.prepare(`
+        SELECT COUNT(DISTINCT entity_key) AS count
+        FROM topic_owners
+        WHERE phrase = 'sauna'
+          AND owner_key = 'experiment_family:sauna'
+      `).get();
+      expect(Number(saunaOwnerCount?.count ?? 0)).toBeGreaterThan(3);
     } finally {
       database.close();
     }
