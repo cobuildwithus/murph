@@ -156,7 +156,14 @@ Use the existing canonical Goal owner; add no new state surface.
    write or attach a card.
 2. Reuse at most one Goal with slug `murph-daily-nutrition-starting-targets`.
    Create it only when absent, with title `Daily nutrition targets`, domain
-   `nutrition`, horizon `ongoing`, and status `paused`. A paused record is the
+   `nutrition`, horizon `ongoing`, and status `paused`. Before that first write,
+   establish one proposal-effective local date. Use the member's explicitly
+   requested effective date when present; otherwise use the selected card
+   `localDate` for a dated card request, including a historical date; otherwise
+   use the engine-supplied current vault-local date for an undated target or
+   card request. Include `window: { startAt: <proposal-effective-localDate> }`
+   in the initial `goal import-json` payload. Do not rely on the Goal owner's
+   write-day default or substitute a wall-clock date. A paused record is the
    proposal awaiting the member's review; an abandoned or completed record is
    an opt-out and must not be recreated automatically.
 3. Save only metrics without an explicit owner through
@@ -176,18 +183,25 @@ Use the existing canonical Goal owner; add no new state surface.
    managed Goal. Preserve every unchanged target and stable target id, and omit
    only a metric deliberately removed because an explicit owner now exists.
    Never send only the changed or removed target. Read the Goal back and verify
-   the complete retained set; never create a duplicate or rewrite an unchanged
-   proposal. Any write that adds or changes a derived managed value must include
-   `status: "paused"` atomically, even when the same Goal was active; this keeps
-   the revised bundle a proposal until the member accepts it. Removing an
-   overlapping metric without adding or changing a derived value may leave the
-   managed Goal active because the explicit owner supplies that metric. A
-   status-only update may omit `metricTargets`.
+   the complete retained set and window; never create a duplicate or rewrite an
+   unchanged proposal. Preserve the existing Goal window on every later value,
+   overlap-removal, status, or card-request turn; omit `window` from those
+   patches and never silently rebase it to another requested card date. Change
+   the window only when the member explicitly changes the proposal's effective
+   date, then explain that revision and verify the complete record. Any write
+   that adds or changes a derived managed value must include `status: "paused"`
+   atomically, even when the same Goal was active; this keeps the revised bundle
+   a proposal until the member accepts it. Removing an overlapping metric
+   without adding or changing a derived value may leave the managed Goal active
+   because the explicit owner supplies that metric. A status-only update may
+   omit `metricTargets`.
 4. A turn that creates or changes the paused proposal must be ordinary text,
    never a card. Briefly name all five effective values, which facts and labeled
    assumptions materially drove them, and why calories, protein, carbohydrate,
-   fat, and fiber landed there. Call them provisional and invite correction or
-   acceptance. This explanation must happen before the first goal-aware card.
+   fat, and fiber landed there. State the proposal-effective date, especially
+   when it is historical or future. Call the values provisional and invite
+   correction or acceptance. This explanation must happen before the first
+   goal-aware card.
 5. When the member accepts the proposal, first re-read target authority. If a
    metric has gained an explicit owner, remove it from the managed proposal by
    sending the complete intended post-update array and read the Goal back. Then

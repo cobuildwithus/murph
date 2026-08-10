@@ -276,6 +276,18 @@ describe('assistant nutrition strategy skill', () => {
       'A scheduled closeout may use an already accepted active bundle, but it must not use this workflow to ask for inputs, derive or save targets, or surface a proposal.',
     )
     expect(compactGoals).toContain('status `paused`')
+    expect(compactGoals).toContain(
+      'Before that first write, establish one proposal-effective local date.',
+    )
+    expect(compactGoals).toContain(
+      "Use the member's explicitly requested effective date when present; otherwise use the selected card `localDate` for a dated card request, including a historical date; otherwise use the engine-supplied current vault-local date for an undated target or card request.",
+    )
+    expect(compactGoals).toContain(
+      'Include `window: { startAt: <proposal-effective-localDate> }` in the initial `goal import-json` payload.',
+    )
+    expect(compactGoals).toContain(
+      "Do not rely on the Goal owner's write-day default or substitute a wall-clock date.",
+    )
     expect(compactGoals).toContain('vault-cli goal import-json --input -')
     expect(compactGoals).toContain('kind: "metric"')
     expect(compactGoals).toContain(
@@ -288,7 +300,13 @@ describe('assistant nutrition strategy skill', () => {
       'Preserve every unchanged target and stable target id, and omit only a metric deliberately removed because an explicit owner now exists.',
     )
     expect(compactGoals).toContain(
-      'Read the Goal back and verify the complete retained set',
+      'Read the Goal back and verify the complete retained set and window',
+    )
+    expect(compactGoals).toContain(
+      'Preserve the existing Goal window on every later value, overlap-removal, status, or card-request turn; omit `window` from those patches and never silently rebase it to another requested card date.',
+    )
+    expect(compactGoals).toContain(
+      "Change the window only when the member explicitly changes the proposal's effective date, then explain that revision and verify the complete record.",
     )
     expect(compactGoals).toContain(
       'Any write that adds or changes a derived managed value must include `status: "paused"` atomically, even when the same Goal was active',
@@ -303,7 +321,10 @@ describe('assistant nutrition strategy skill', () => {
       'Briefly name all five effective values, which facts and labeled assumptions materially drove them, and why calories, protein, carbohydrate, fat, and fiber landed there.',
     )
     expect(compactGoals).toContain(
-      'Call them provisional and invite correction or acceptance.',
+      'State the proposal-effective date, especially when it is historical or future.',
+    )
+    expect(compactGoals).toContain(
+      'Call the values provisional and invite correction or acceptance.',
     )
     expect(compactGoals).toContain(
       'vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active',

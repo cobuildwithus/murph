@@ -221,6 +221,15 @@ describe('murph.attach_response_card', () => {
       'Save one paused canonical proposal',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'explain its values, reasoning, and effective date in ordinary text with no card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'explicit numeric-card request authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(

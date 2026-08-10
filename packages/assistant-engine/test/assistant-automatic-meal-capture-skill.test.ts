@@ -506,6 +506,44 @@ describe('assistant automatic meal capture skill', () => {
     expect(applicableGoals('2026-08-10').map(({ name }) => name)).toEqual([
       'occurrence-date goal',
     ])
+
+    const proposalEffectiveDate = (input: {
+      currentVaultDate: string
+      explicitEffectiveDate?: string
+      selectedCardDate?: string
+    }): string =>
+      input.explicitEffectiveDate ??
+      input.selectedCardDate ??
+      input.currentVaultDate
+
+    const historicalProposalStart = proposalEffectiveDate({
+      currentVaultDate: '2026-08-10',
+      selectedCardDate: '2026-08-09',
+    })
+    expect(historicalProposalStart).toBe('2026-08-09')
+    expect(appliesToCardDate({
+      cardDate: '2026-08-09',
+      goalStartAt: historicalProposalStart,
+    })).toBe(true)
+
+    const currentProposalStart = proposalEffectiveDate({
+      currentVaultDate: '2026-08-10',
+    })
+    expect(currentProposalStart).toBe('2026-08-10')
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: currentProposalStart,
+    })).toBe(true)
+
+    const futureProposalStart = proposalEffectiveDate({
+      currentVaultDate: '2026-08-10',
+      explicitEffectiveDate: '2026-08-11',
+    })
+    expect(futureProposalStart).toBe('2026-08-11')
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: futureProposalStart,
+    })).toBe(false)
   })
 
   it('keeps a post-midnight retry anchored to its scheduled occurrence date', () => {

@@ -573,13 +573,14 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
   }
 });
 
-test("goal import-json preserves sibling nutrition targets and pauses an active derived replacement", async () => {
+test("goal import-json preserves the nutrition proposal window, sibling targets, and paused replacement", async () => {
   const cli = createVaultCli();
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const createPayloadPath = path.join(vaultRoot, "nutrition-goal-create.json");
   const editPayloadPath = path.join(vaultRoot, "nutrition-goal-edit.json");
   const removePayloadPath = path.join(vaultRoot, "nutrition-goal-remove.json");
   const restorePayloadPath = path.join(vaultRoot, "nutrition-goal-restore.json");
+  const proposalStartAt = "2026-08-09";
   const target = (
     targetId: string,
     metricKey: string,
@@ -613,6 +614,7 @@ test("goal import-json preserves sibling nutrition targets and pauses an active 
         status: "paused",
         horizon: "ongoing",
         domains: ["nutrition"],
+        window: { startAt: proposalStartAt },
         metricTargets: originalTargets,
       }),
       "utf8",
@@ -648,11 +650,21 @@ test("goal import-json preserves sibling nutrition targets and pauses an active 
       vaultRoot,
     ]);
     const { envelope: shownAfterEdit } = await runInProcessJsonCli<{
-      entity: { data: { status: string; metricTargets: typeof editedTargets } };
+      entity: {
+        data: {
+          status: string;
+          windowStartAt: string | null;
+          metricTargets: typeof editedTargets;
+        };
+      };
     }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
 
     assert.equal(edited.ok, true);
     assert.equal(requireData(shownAfterEdit).entity.data.status, "paused");
+    assert.equal(
+      requireData(shownAfterEdit).entity.data.windowStartAt,
+      proposalStartAt,
+    );
     assert.deepEqual(
       requireData(shownAfterEdit).entity.data.metricTargets,
       editedTargets,
@@ -670,6 +682,20 @@ test("goal import-json preserves sibling nutrition targets and pauses an active 
       vaultRoot,
     ]);
     assert.equal(activated.ok, true);
+    const { envelope: shownAfterActivation } = await runInProcessJsonCli<{
+      entity: {
+        data: {
+          status: string;
+          windowStartAt: string | null;
+          metricTargets: typeof editedTargets;
+        };
+      };
+    }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
+    assert.equal(requireData(shownAfterActivation).entity.data.status, "active");
+    assert.equal(
+      requireData(shownAfterActivation).entity.data.windowStartAt,
+      proposalStartAt,
+    );
 
     const retainedTargets = editedTargets.filter(
       (entry) => entry.metricKey !== "protein-grams",
@@ -721,11 +747,21 @@ test("goal import-json preserves sibling nutrition targets and pauses an active 
       vaultRoot,
     ]);
     const { envelope: shownAfterRestore } = await runInProcessJsonCli<{
-      entity: { data: { status: string; metricTargets: typeof restoredTargets } };
+      entity: {
+        data: {
+          status: string;
+          windowStartAt: string | null;
+          metricTargets: typeof restoredTargets;
+        };
+      };
     }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
 
     assert.equal(restored.ok, true);
     assert.equal(requireData(shownAfterRestore).entity.data.status, "paused");
+    assert.equal(
+      requireData(shownAfterRestore).entity.data.windowStartAt,
+      proposalStartAt,
+    );
     assert.deepEqual(
       requireData(shownAfterRestore).entity.data.metricTargets,
       restoredTargets,
