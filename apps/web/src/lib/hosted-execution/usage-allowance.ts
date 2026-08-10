@@ -33,13 +33,13 @@ import {
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
-  getHostedBillingPlanCodeForPlan,
   getHostedDefaultBillingPlanCode,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
+  getHostedFamilyBillingPlanCode,
   isHostedBillingPlanImmediateUpgrade,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
-  parseHostedPlanCode,
+  parseHostedFamilyPlanCode,
   parseHostedBillingCheckoutOffer,
   requireHostedPulseTrialPolicy,
   type HostedBillingPlanCode,
@@ -370,7 +370,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   if (!familyAccess) {
     return null;
   }
-  const planCode = parseHostedPlanCode(familyAccess.planCode);
+  const planCode = parseHostedFamilyPlanCode(familyAccess.planCode);
   if (!planCode) {
     return null;
   }
@@ -400,7 +400,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   return {
     allowanceSource: "family_sponsored_plan",
     currentBillingPhase: "paid",
-    currentBillingPlanCode: getHostedBillingPlanCodeForPlan(planCode),
+    currentBillingPlanCode: getHostedFamilyBillingPlanCode(planCode),
     currentCheckoutOffer: null,
     currentPeriodEnd,
     currentPeriodStart,

@@ -48,7 +48,7 @@ describe("hosted member assistant model preference", () => {
     })).toBe("openai");
   });
 
-  it("limits Sol eligibility to direct paid Edge or active Family Edge personal members", () => {
+  it("limits Sol eligibility to direct premium or active Family premium members", () => {
     const eligible = {
       accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.active,
@@ -96,6 +96,13 @@ describe("hosted member assistant model preference", () => {
       currentBillingPlanCode: null,
     };
     expect(isHostedMemberSolModelEligible(familyEdge)).toBe(true);
+    expect(isHostedMemberSolModelEligible({
+      ...familyEdge,
+      accountGroupMemberships: [{
+        ...familyEdgeMembership,
+        planCode: "max",
+      }],
+    })).toBe(true);
     expect(isHostedMemberSolModelEligible({
       ...familyEdge,
       accountGroupMemberships: [{
