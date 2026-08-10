@@ -1,0 +1,81 @@
+back(tx),
++        deviceConnection: {
++          findUnique: async () => ({
++            connectedAt: stored.connectedAt,
++            id: stored.id,
++            userId: stored.userId,
++          }),
++        },
++        $transaction: transaction,
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+     });
+ 
++    prepareDirtyClassificationsMock
++      .mockRejectedValueOnce({
++        code: "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING",
++        retryable: true,
++      })
++      .mockResolvedValueOnce(undefined);
++
+     await expect(store.upsertConnection({
+       ownerId: "user-123",
+       existingAccountPolicy: "replace",
+@@ -980,6 +1006,16 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+         tokenVersion: 1,
+       }),
+     }));
++    expect(prepareDirtyClassificationsMock).toHaveBeenCalledTimes(2);
++    expect(transaction).toHaveBeenCalledTimes(1);
++    expect(prepareDirtyClassificationsMock).toHaveBeenCalledWith({
++      connectionId: "dsc_123",
++      prisma: expect.any(Object),
++      userId: "user-123",
++    });
++    expect(prepareDirtyClassificationsMock.mock.invocationCallOrder[0]).toBeLessThan(
++      transaction.mock.invocationCallOrder[0] ?? 0,
++    );
+     expect(supersedeDirtyStateMock).toHaveBeenCalledWith({
+       connectionId: "dsc_123",
+       tx,
+@@ -1017,6 +1053,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+@@ -1076,6 +1113,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+@@ -1129,6 +1167,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+@@ -1187,6 +1226,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+diff --git a/docs/device-sync-hosted-control-plane.md b/docs/device-sync-hosted-control-plane.md
+index d9eb67fe..f3d45a1e 100644
+--- a/docs/device-sync-hosted-control-plane.md
++++ b/docs/device-sync-hosted-control-plane.md
+@@ -131,7 +131,7 @@ Postgres should keep only opaque ids, blind indexes, typed summaries, sparse sig
+ 
+ `device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The hosted browser start also requires its configured provider callback base to use that request's hostname; a mismatch fails before OAuth state creation or provider authorization. Start sets a short-lived provider-, state-, member-, and session-bound host-only proof. The provider callback GET validates that proof, passes `expectedOwnerId` into shared ingress, and redirects back into the app without an interstitial. A missing proof burns the OAuth state and returns to Connect so the callback URL cannot be relayed. Intent rows must not store raw provider or Junction authorization URLs.
+ 
+-`device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_pa

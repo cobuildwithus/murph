@@ -1,0 +1,128 @@
+dOnce();
+-      const lockQuery = tx.$queryRaw.mock.calls[0]?.[0] as {
+-        sql?: string;
+-      };
+-      expect(lockQuery.sql).toContain("device_sync_dirty_connection");
+-      expect(lockQuery.sql).toContain("FOR UPDATE");
+-      expect(updateMany).toHaveBeenCalledWith({
+-        data: {
+-          dirtyResourcesJson: {},
+-          firstDirtyAt: new Date("2026-07-27T04:00:00.000Z"),
+-          processedRevision: dirtyRevision,
+-          resourceCategoryCountsJson: {},
+-          sourceProviderCountsJson: {},
++          resourceCategory: "summary",
++          sourceProviderSlug: "garmin",
+           windowEnd: null,
+           windowStart: null,
+-        },
+-        where: {
+-          connectionId,
+-          dirtyRevision,
+-          processedRevision: 1n,
+-          userId,
+-        },
++        }],
++        userId: "member_classify",
+       });
+-      expect(deleteMany).toHaveBeenCalledWith({
+-        where: {
+-          connectionId,
+-          id: {
+-            in: ["dsp_credential"],
++      const junctionCredentialScoped = await store.prepareDirtyPayloads({
++        connectionId: "dsc_classify_credential",
++        dirtyAt: "2026-07-27T04:00:00.000Z",
++        provider: "junction",
++        resources: [{
++          count: 1,
++          jobKind: "resource",
++          payload: {
++            resource: "steps",
++            resourceCategory: "timeseries",
++            sourceProviderSlug: "garmin",
+           },
+-          userId,
+-        },
++          resource: "steps",
++          resourceCategory: "timeseries",
++          sourceProviderSlug: "garmin",
++          windowEnd: null,
++          windowStart: null,
++        }],
++        userId: "member_classify",
+       });
++
++      expect(ouraDelete?.rows[0]?.credentialIndependent).toBe(true);
++      expect(junctionCompanion?.rows[0]?.credentialIndependent).toBe(true);
++      expect(junctionInline?.rows[0]?.credentialIndependent).toBe(true);
++      expect(junctionCredentialScoped?.rows[0]?.credentialIndependent).toBe(false);
+     } finally {
+-      installHostedSecureBoxStringTestCodec();
++      setHostedSecureBoxStringTestCodecForTests(null);
+     }
+   });
+ 
+@@ -281,6 +439,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+       expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
+       const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
+       expect(payloadRow.resourceEncrypted).toMatch(/^hsb-test:/u);
++      expect(payloadRow.credentialIndependent).toBe(false);
+       expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
+         .toBe(payloadRow.id);
+     } finally {
+@@ -298,6 +457,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+       let dirtyRecord: Record<string, unknown> | null = null;
+       const payloadRows = new Map<string, {
+         connectionId: string;
++        credentialIndependent: boolean | null;
+         dirtyRevision: bigint;
+         id: string;
+         provider: string;
+@@ -385,6 +545,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+         deviceSyncDirtyPayload: {
+           createMany: vi.fn(async (input: { data: Array<{
+             connectionId: string;
++            credentialIndependent: boolean;
+             dirtyRevision: bigint;
+             id: string;
+             provider: string;
+@@ -401,6 +562,20 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+             }
+             return { count };
+           }),
++          updateMany: vi.fn(async (input: {
++            data: { credentialIndependent: boolean };
++            where: { credentialIndependent: null; id: { in: string[] } };
++          }) => {
++            let count = 0;
++            for (const id of input.where.id.in) {
++              const row = payloadRows.get(id);
++              if (row?.credentialIndependent === null) {
++                row.credentialIndependent = input.data.credentialIndependent;
++                count += 1;
++              }
++            }
++            return { count };
++          }),
+           deleteMany: vi.fn(async (input: { where: { id: { in: string[] } } }) => {
+             let count = 0;
+             for (const id of input.where.id.in) {
+@@ -517,8 +692,11 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+       expect(payloadRows.size).toBe(0);
+ 
+       operationOrder.length = 0;
++      const nextNightInput = buildInput(observation.rmssdMs, "2026-07-11");
++      const preparedPayloads = await store.prepareDirtyPayloads(nextNightInput);
+       await store.upsertDirtyConnection({
+-        ...buildInput(observation.rmssdMs, "2026-07-11"),
++        ...nextNightInput,
++        preparedPayloads,
+         tx: prisma as never,
+       });
+       expect(operationOrder).toEqual([
+@@ -622,7 +800,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+     expect(receiptRows).toEqual([]);
+   });
+ 
+-  it("prepares caller-owned p

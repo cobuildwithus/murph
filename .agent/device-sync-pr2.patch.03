@@ -1,0 +1,155 @@
+lledWith({
++      where: {
++        connectionId,
++        credentialIndependent: null,
++        userId,
++      },
++    });
++    expect(tx.deviceSyncDirtyPayload.findMany).not.toHaveBeenCalled();
++  });
++
++  it("keeps a replacement route-free when an old writer leaves an unclassified payload after the marker lock", async () => {
++    const connectionId = "dsc_epoch_skew";
++    const updateMany = vi.fn();
++    const deleteMany = vi.fn();
++    const tx = {
++      $queryRaw: vi.fn(async () => [{ connectionId }]),
++      deviceSyncDirtyConnection: {
++        findFirst: vi.fn(async () => ({
++          connectionId,
++          dirtyRevision: 3n,
++          latestDirtyAt: new Date("2026-07-27T04:00:00.000Z"),
++          processedRevision: 2n,
++          userId: "member_epoch_skew",
++        })),
++        updateMany,
++      },
++      deviceSyncDirtyPayload: {
++        count: vi.fn(async () => 1),
++        deleteMany,
++      },
++    };
++
++    await expect(supersedeHostedCredentialScopedDirtyStateForConnectionTx({
++      connectionId,
++      tx: tx as never,
++      userId: "member_epoch_skew",
++    })).rejects.toMatchObject({
++      code: "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING",
++      retryable: true,
++    });
++    expect(updateMany).not.toHaveBeenCalled();
++    expect(deleteMany).not.toHaveBeenCalled();
++  });
++
++  it("classifies legacy payloads before replacement and preserves decrypt failures", async () => {
++    installHostedSecureBoxStringTestCodec();
++    const connectionId = "dsc_legacy_classification";
++    const userId = "member_legacy_classification";
++    const dirtyRevision = 4n;
++
++    try {
++      const makePayload = (payloadId: string, value: unknown) =>
++        sealHostedDeviceSyncDirtyPayloadJson({
++          connectionId,
++          dirtyRevision,
++          payloadId,
++          provider: "junction",
++          userId,
++          value,
++        });
++      const rows = [
++        {
++          connectionId,
++          dirtyRevision,
++          id: "dsp_credential",
++          provider: "junction",
++          resourceEncrypted: await makePayload("dsp_credential", {
++            count: 1,
++            jobKind: "deauthorization",
++            payload: { webhookDataJson: JSON.stringify({ event: "deauthorize" }) },
++            resource: "deauthorization",
++          }),
++        },
++        {
++          connectionId,
++          dirtyRevision,
++          id: "dsp_companion",
++          provider: "junction",
++          resourceEncrypted: await makePayload("dsp_companion", {
++            count: 1,
++            jobKind: "resource",
++            payload: { resource: COMPANION_HRV_RMSSD_RESOURCE },
+             resource: COMPANION_HRV_RMSSD_RESOURCE,
+-          },
+-          resource: COMPANION_HRV_RMSSD_RESOURCE,
++          }),
++        },
++        {
++          connectionId,
++          dirtyRevision,
++          id: "dsp_companion_metadata",
++          provider: "junction",
++          resourceEncrypted: await makePayload("dsp_companion_metadata", {
++            count: 1,
++            jobKind: "resource",
++            payload: { resource: "companion_health_metadata" },
++            resource: "companion_health_metadata",
++          }),
++        },
++        {
++          connectionId,
++          dirtyRevision,
++          id: "dsp_inline",
++          provider: "junction",
++          resourceEncrypted: await makePayload("dsp_inline", {
++            count: 1,
++            jobKind: "resource",
++            payload: {
++              resource: "sleep",
++              resourceCategory: "summary",
++              sourceProviderSlug: "garmin",
++              webhookDataJson: JSON.stringify({ sourceProviderSlug: "garmin" }),
++            },
++            resource: "sleep",
++          }),
++        },
++      ];
++      const updateMany = vi.fn(async (input: { where: { id: { in: string[] } } }) => ({
++        count: input.where.id.in.length,
++      }));
++      const prisma = {
++        deviceSyncDirtyPayload: {
++          findMany: vi.fn(async () => rows),
++          updateMany,
++        },
++      };
++
++      await expect(prepareHostedCredentialScopedDirtyPayloadClassifications({
++        connectionId,
++        prisma: prisma as never,
++        userId,
++      })).resolves.toBeUndefined();
++      expect(updateMany).toHaveBeenCalledTimes(2);
++      expect(updateMany).toHaveBeenCalledWith({
++        data: { credentialIndependent: true },
++        where: {
++          connectionId,
++          credentialIndependent: null,
++          id: { in: ["dsp_companion", "dsp_companion_metadata", "dsp_inline"] },
++          userId,
++        },
++      });
++      expect(updateMany).toHaveBeenCalledWith({
++        data: { credentialIndependent: false },
++        where: {
++          connectionId,
++          credentialIndependent: null,
++          id: { in: ["dsp_credential"] },
++          userId,
++        },
++      });
++
++      setHostedSecureBoxStringTestCodecForTests({
++        decrypt() {
++          throw new Error("kms unavai

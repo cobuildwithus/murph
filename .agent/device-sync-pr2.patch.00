@@ -1,0 +1,131 @@
+diff --git a/agent-docs/RELIABILITY.md b/agent-docs/RELIABILITY.md
+index 5a0d1727..9f5ae61a 100644
+--- a/agent-docs/RELIABILITY.md
++++ b/agent-docs/RELIABILITY.md
+@@ -574,6 +574,17 @@ Last verified: 2026-08-09
+   idempotent target-only revoke. The initiating operation follows the newest
+   same-purpose claim before returning, while separate start-cleanup and user-
+   disconnect phase codes preserve the intended terminal state.
++- Device-sync dirty payloads complete provider-aware credential-independence
++  classification, compression, and secure-box sealing before any admission
++  transaction opens. The encrypted row persists only the server-derived
++  boolean authority needed by reconnect cleanup. Ordinary dirty writes keep
++  their existing revision compare-and-swap; companion replay receipts retain
++  the existing marker-first lock order only after preparation is complete. A
++  replacement connection epoch first classifies any nullable old-writer rows
++  outside the transaction, then rejects the commit if another legacy row
++  appeared before the marker lock. Under that lock, supersession clears the
++  compact marker projection and deletes credential-scoped payloads set-wise; it
++  must not decrypt payloads, load provider modules, or loop over payload rows.
+ - Companion Apple Health metadata and WHOOP overnight summaries recheck their
+   exact source inside the health-data admission lock and again before runtime
+   import by rereading the durable source row rather than trusting the queued
+diff --git a/agent-docs/exec-plans/active/2026-08-09-device-sync-dirty-payload-classification.md b/agent-docs/exec-plans/active/2026-08-09-device-sync-dirty-payload-classification.md
+new file mode 100644
+index 00000000..61c41efa
+--- /dev/null
++++ b/agent-docs/exec-plans/active/2026-08-09-device-sync-dirty-payload-classification.md
+@@ -0,0 +1,68 @@
++# Device-sync dirty-payload credential classification
++
++Status: in_progress
++Created: 2026-08-09
++Updated: 2026-08-09
++
++## Goal
++
++- Remove encrypted payload hydration and provider-aware classification from the
++  connection-epoch supersession transaction by persisting the server-owned
++  credential-independence decision when each dirty payload is accepted.
++
++## Success criteria
++
++- Every new `device_sync_dirty_payload` row carries the classification derived
++  by the existing generic and Junction-specific import-authority predicates.
++- Classification, compression, KMS-backed key preparation, and encryption
++  finish before the health-data admission transaction begins.
++- Ordinary dirty writes retain the existing revision compare-and-swap, while
++  companion receipt claims, acknowledgement, reconnect supersession, and
++  account deletion retain their reviewed marker-first ordering. No network,
++  KMS, dynamic import, or payload-dependent loop runs under that lock.
++- Connection replacement classifies nullable rows written by an older deployed
++  Web build before the short supersession commit and fails retryably if deploy
++  skew creates another nullable row before the marker is locked.
++- Reconnect retains credential-independent payloads and deletes
++  credential-scoped payloads with set-based database mutations.
++- Focused unit, real PostgreSQL concurrency, schema/migration, typecheck, lint,
++  exact-head CI, and required review gates pass before handoff.
++
++## Constraints
++
++- Reuse the existing credential-independence predicates; do not create a second
++  provider policy or infer authority from ciphertext.
++- Keep the migration additive and compatible with old writers by leaving the
++  new column nullable during the expand window.
++- Do not add a queue, scheduler, repair table, background classifier, or second
++  dirty-state owner.
++- Preserve encrypted payload contents, deterministic payload ids, replay
++  behavior, mailbox handoff, and runtime acknowledgement semantics.
++
++## Tasks
++
++1. Add the nullable persisted classification and migration contract.
++2. Move payload classification and sealing into an explicit pre-transaction
++   preparation phase used by every hosted admission caller.
++3. Replace reconnect hydration with bounded legacy preparation plus set-based
++   supersession under the dirty-marker lock.
++4. Prove replay, contention, account-deletion ordering, migration compatibility,
++   and absence of crypto/provider work inside the supersession transaction.
++5. Reconcile current `main`, run focused verification and exact-head CI, resolve
++   all review findings, and leave the PR unmerged.
++
++## Outcome
++
++- New payloads persist the existing server-derived credential-independence
++  decision beside their ciphertext; no health value or provider secret is
++  exposed.
++- Payload classification, compression, and secure-box sealing now happen before
++  admission opens a transaction. Ordinary writes retain their revision CAS;
++  companion receipt claims retain marker-first ordering only where required.
++- Reconnect classifies old nullable rows outside the transaction and performs
++  marker reset plus credential-scoped deletion without decrypting payloads or
++  loading Junction code under the lock.
++- The additive schema remains compatible with old deployed writers. A future
++  contract migration may make the column non-null only after the writer floor
++  and production null census prove it safe.
++- Verification and review results are recorded in the pull-request description.
+diff --git a/agent-docs/operations/device-sync-ingestion-invariants.md b/agent-docs/operations/device-sync-ingestion-invariants.md
+index a79c366a..ac381576 100644
+--- a/agent-docs/operations/device-sync-ingestion-invariants.md
++++ b/agent-docs/operations/device-sync-ingestion-invariants.md
+@@ -1,6 +1,6 @@
+ # Device Sync Ingestion Invariants
+ 
+-Last verified: 2026-07-14
++Last verified: 2026-08-09
+ 
+ ## Purpose
+ 
+@@ -226,12 +226,17 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
+    summary payloads whose inline source provenance is sufficient for direct
+    import. Inline-looking Junction jobs that must fall back to a provider fetch
+    remain connection-epoch scoped. Junction owns that exact inline predicate
+-   beside its importer-backed executor. Web dynamically invokes the same public
+-   predicate during reconnect cleanup; hosted runtime hydration loads it per
+-   turn and passes it into the existing SQLite credential-replacement
+-   transaction. Both paths keep provider/importer modules out of their static
+-   boot closures. Recovery does not use an automatic export endpoint, operator
+-   action, or vendor support.
++   beside its importer-backed executor. Web invokes the same public predicate
++   before sealing each new payload and persists only its boolean authority on
++   the encrypted row. Reconnect cleanup therefore uses set-based database
++   mutation under the dirty-marker lock and performs no payload decryption,
++   dynamic module load, or data-dependent loop. During mixed-version rollout,
++   bounded nullable legacy rows are classified outside the transaction before
++   replacement can commit. Hosted runtime hydration still loads the Junction
++   predicate per turn and passes it into the existing SQLite
++   credential-replacement transaction. Both paths keep provider/importer modules
++   out of their static boot closures. Recovery does not use an automatic export
++   endpoint, operator action, or vendor support.
+    Hosted runtime account hydration keys by the control plane's opaque hosted
+    connection id b¶»§q«^u¼¬ÊË^™Ûž¶‹"Í

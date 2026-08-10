@@ -1,0 +1,226 @@
+s.length === 0) {
++        continue;
++      }
++      await input.prisma.deviceSyncDirtyPayload.updateMany({
++        data: { credentialIndependent },
++        where: {
++          connectionId: input.connectionId,
++          credentialIndependent: null,
++          id: { in: ids },
++          userId: input.userId,
++        },
++      });
++    }
++
++    if (rows.length <= DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT) {
++      return;
++    }
++  }
++
++  throw createDirtyPayloadClassificationPendingError();
++}
++
++export function isHostedDirtyPayloadClassificationPendingError(error: unknown): boolean {
++  return Boolean(
++    typeof error === "object"
++      && error !== null
++      && "code" in error
++      && (error as { code?: unknown }).code
++        === HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE,
++  );
++}
++
+ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(input: {
+   connectionId: string;
+   tx: HostedPrismaTransactionClient;
+   userId: string;
+-}): Promise<{
+-  retainedCredentialIndependentPayloadCount: number;
+-  supersededPayloadCount: number;
+-}> {
+-  await input.tx.$queryRaw<Array<{ connectionId: string }>>(Prisma.sql`
++}): Promise<void> {
++  const locked = await input.tx.$queryRaw<Array<{ connectionId: string }>>(Prisma.sql`
+     SELECT connection_id AS "connectionId"
+     FROM device_sync_dirty_connection
+     WHERE connection_id = ${input.connectionId}
++      AND user_id = ${input.userId}
+     FOR UPDATE
+   `);
++  if (locked.length === 0) {
++    return;
++  }
++
+   const existing = await input.tx.deviceSyncDirtyConnection.findFirst({
+     where: {
+       connectionId: input.connectionId,
+@@ -107,50 +201,18 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
+     },
+   });
+   if (!existing) {
+-    return {
+-      retainedCredentialIndependentPayloadCount: 0,
+-      supersededPayloadCount: 0,
+-    };
++    throw createDirtyStateContentionError("ack");
+   }
+ 
+-  const payloadRows = await input.tx.deviceSyncDirtyPayload.findMany({
+-    select: {
+-      connectionId: true,
+-      dirtyRevision: true,
+-      id: true,
+-      provider: true,
+-      resourceEncrypted: true,
+-    },
++  const unclassifiedPayloadCount = await input.tx.deviceSyncDirtyPayload.count({
+     where: {
+       connectionId: input.connectionId,
++      credentialIndependent: null,
+       userId: input.userId,
+     },
+   });
+-  const supersededPayloadIds: string[] = [];
+-  let retainedCredentialIndependentPayloadCount = 0;
+-  let classifyJunctionProviderJob: DeviceSyncCredentialIndependentImportJobClassifier | undefined;
+-  for (const row of payloadRows) {
+-    const resource = await readDirtyPayloadResourceJson({
+-      row,
+-      tx: input.tx,
+-      userId: input.userId,
+-    });
+-    if (resource && row.provider === "junction" && !classifyJunctionProviderJob) {
+-      ({
+-        isJunctionCredentialIndependentInlineImportJob: classifyJunctionProviderJob,
+-      } = await import("@murphai/device-syncd/junction-inline-authority"));
+-    }
+-    if (resource && isDeviceSyncCredentialIndependentImportJob({
+-      kind: resource.jobKind,
+-      payload: resource.payload,
+-      provider: row.provider,
+-    }, row.provider === "junction"
+-      ? classifyJunctionProviderJob
+-      : undefined)) {
+-      retainedCredentialIndependentPayloadCount += 1;
+-    } else {
+-      supersededPayloadIds.push(row.id);
+-    }
++  if (unclassifiedPayloadCount > 0) {
++    throw createDirtyPayloadClassificationPendingError();
+   }
+ 
+   const updated = await input.tx.deviceSyncDirtyConnection.updateMany({
+@@ -174,22 +236,13 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
+     throw createDirtyStateContentionError("ack");
+   }
+ 
+-  if (supersededPayloadIds.length > 0) {
+-    await input.tx.deviceSyncDirtyPayload.deleteMany({
+-      where: {
+-        connectionId: input.connectionId,
+-        id: {
+-          in: supersededPayloadIds,
+-        },
+-        userId: input.userId,
+-      },
+-    });
+-  }
+-
+-  return {
+-    retainedCredentialIndependentPayloadCount,
+-    supersededPayloadCount: supersededPayloadIds.length,
+-  };
++  await input.tx.deviceSyncDirtyPayload.deleteMany({
++    where: {
++      connectionId: input.connectionId,
++      credentialIndependent: false,
++      userId: input.userId,
++    },
++  });
+ }
+ 
+ interface DirtyPayloadHydrationBudget {
+@@ -275,13 +328,49 @@ export class PrismaHostedDirtyConnectionStore {
+       : "conflict";
+   }
+ 
++  async prepareDirtyPayloads(
++    input: Omit<
++      UpsertHostedDeviceSyncDirtyConnectionInput,
++      "preparedPayloads" | "tx"
++    >,
++  ): Promise<HostedPreparedDeviceSyncDirtyPayloads | undefined> {
++    const resourceBatch = buildDirtyResourceBatch(input.resources ?? []);
++    if (resourceBatch.payloadResources.length === 0) {
++      return undefined;
++    }
++
++    const existing = await this.prisma.deviceSyncDirtyConnection.findUnique({
++      where: {
++        connectionId: input.connectionId,
++      },
++    });
++    return prepareDirtyPayloadRows({
++      connectionId: input.connectionId,
++      dirtyRevision: resolveDirtyPayloadRevision({
++        existing,
++        resourceBatch,
++      }),
++      prisma: this.prisma,
++      provider: input.provider,
++      resources: resourceBatch.payloadResources,
++      traceId: input.traceId,
++      userId: input.userId,
++    });
++  }
++
+   async upsertDirtyConnection(
+     input: UpsertHostedDeviceSyncDirtyConnectionInput,
+   ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
+     const resourceBatch = buildDirtyResourceBatch(input.resources ?? []);
+     if (input.tx) {
++      if (resourceBatch.payloadResources.length > 0 && !input.preparedPayloads) {
++        throw new TypeError(
++          "Hosted device-sync dirty payloads must be classified and sealed before opening the transaction.",
++        );
++      }
+       return this.upsertDirtyConnectionOnce({
+         ...input,
++        precomputedDirtyPayloadRows: input.preparedPayloads,
+         resourceBatch,
+         tx: input.tx,
+       });
+@@ -289,14 +378,7 @@ export class PrismaHostedDirtyConnectionStore {
+ 
+     for (let attempt = 0; attempt < DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS; attempt += 1) {
+       try {
+-        const precomputedDirtyPayloadRows =
+-          await this.prepareDirtyPayloadRowsForStoreOwnedUpsert({
+-            connectionId: input.connectionId,
+-            provider: input.provider,
+-            resourceBatch,
+-            traceId: input.traceId,
+-            userId: input.userId,
+-          });
++        const precomputedDirtyPayloadRows = await this.prepareDirtyPayloads(input);
+ 
+         return await this.prisma.$transaction((tx) =>
+           this.upsertDirtyConnectionOnce({
+@@ -339,29 +421,16 @@ export class PrismaHostedDirtyConnectionStore {
+     const hasCompanionNightResource = input.resourceBatch.payloadResources.some(
+       (resource) => readCompanionHrvDirtyResourceNightDate(resource) !== null,
+     );
+-    let preparedDirtyPayloadRows = input.precomputedDirtyPayloadRows;
+-    if (
+-      hasCompanionNightResource
+-      && input.resourceBatch.payloadResources.length > 0
+-      && !preparedDirtyPayloadRows
+-    ) {
+-      preparedDirtyPayloadRows = await prepareDirtyPayloadRows({
+-        connectionId: input.connectionId,
+-        dirtyRevision: resolveDirtyPayloadRevision({
+-          existing,
+-          resourceBatch: input.resourceBatch,
+-        }),
+-        provider: input.provider,
+-        resources: i²È="24¬€½¹ÍÐÁÉ•Á…É•€ô¥¹ÁÕÐ¹ÁÉ•½µÁÕÑ•ì(¬€¥˜€ …ÁÉ•Á…É•¤ì(¬€€€Ñ¡É½Ü¹•ÜQåÁ•ÉÉ½È (¬€€€€€€‰!½ÍÑ•‘•Ù¥”µÍå¹Œ‘¥ÉÑäÁ…å±½…‘ÌµÕÍÐ‰”±…ÍÍ¥™¥•…¹Í•…±•‰•™½É”Ñ¡”ÑÉ…¹Í…Ñ¥½¸¸ˆ°(¬€€€€¤ì(¬€ô(¬€¥˜€¡ÁÉ•Á…É•¹‘¥ÉÑåI•Ù¥Í¥½¸€„ôô¥¹ÁÕÐ¹‘¥ÉÑåI•Ù¥Í¥½¸¤ì(¬€€€Ñ¡É½ÜÉ•…Ñ•¥ÉÑåMÑ…Ñ•½¹Ñ•¹Ñ¥½¹ÉÉ½È ‰ÕÁ‘…Ñ”ˆ¤ì(¬€ô(¬€…ÍÍ•ÉÑAÉ•Á…É•‘¥ÉÑåA…å±½…‘I½ÝÍ5…Ñ¡%¹ÁÕÐ¡ì(€€€€½¹¹•Ñ¥½¹%è¥¹ÁÕÐ¹½¹¹•Ñ¥½¹%°(€€€€‘¥ÉÑåI•Ù¥Í¥½¸è¥¹ÁÕÐ¹‘¥ÉÑåI•Ù¥Í¥½¸°(€€€€ÁÉ½Ù¥‘•Èè¥¹ÁÕÐ¹ÁÉ½Ù¥‘•È°(€€€€É•Í½ÕÉ•Ìè¥¹ÁÕÐ¹É•Í½ÕÉ•Ì°(´€€€ÑÉ…•%è¥¹ÁÕÐ¹ÑÉ…•%°(¬€€€É½ÝÌèÁÉ•Á…É•¹É½ÝÌ°(€€€€ÕÍ•É%è¥¹ÁÕÐ¹ÕÍ•É%°(´€€€ÁÉ¥Íµ„è¥¹ÁÕÐ¹Ñà°(´€ô¤¤ì(´€¥˜€¡ÁÉ•Á…É•¹‘¥ÉÑåI•Ù¥Í¥½¸€„ôô¥¹ÁÕÐ¹‘¥ÉÑåI•Ù¥Í¥½¸¤ì(´€€€Ñ¡É½ÜÉ•…Ñ•¥ÉÑåMÑ…Ñ•½¹Ñ•¹Ñ¥½¹ÉÉ½È ‰ÕÁ‘…Ñ”ˆ¤ì(´€ô(¬€ô¤ì(€(´€…Ý…¥Ð¥¹ÁÕÐ¹Ñà¹‘•Ù¥•Må¹¥ÉÑåA…å±½…¹É•…Ñ•5…¹ä¡ì(¬€½¹ÍÐÉ•…Ñ•€ô…Ý…¥Ð¥¹ÁÕÐ¹Ñà¹‘•Ù¥•Må¹¥ÉÑåA…å±½…¹É•…Ñ•5…¹ä¡ì(€€€€‘…Ñ„èÁÉ•Á…É•¹É½ÝÌ°(€€€€Í­¥ÁÕÁ±¥…Ñ•ÌèÑÉÕ”°(€€ô¤ì(¬€¥˜€¡É•…Ñ•¹½Õ¹Ð€„ôôÁÉ•Á…É•¹É½ÝÌ¹±•¹Ñ ¤ì(¬€€€…Ý…¥Ð…‘½ÁÑU¹±…ÍÍ¥™¥•‘I•Á±…åI½ÝÌ¡ì(¬€€€€€É½ÝÌèÁÉ•Á…É•¹É½ÝÌ°(¬€€€€€Ñàè¥¹ÁÕÐ¹Ñà°(¬€€€ô¤ì(¬€ô(€(€€É•ÑÕÉ¸ì(€€€€É•Í½ÕÉ•ÌèÁÉ•Á…É•¹É•Í½ÕÉ•Ì°) €´äàÄ°Ìä€¬ÄÀÌÄ°ÔÐ …Íå¹Œ™Õ¹Ñ¥½¸ÁÉ•Á…É•¥ÉÑåA…å±½…‘I½ÝÌ¡¥¹ÁÕÐèì(€€ÑÉ…•%üèÍÑÉ¥¹œð¹Õ±°ì(€€ÕÍ•É%èÍÑÉ¥¹œì(ô¤èAÉ½µ¥Í”ñAÉ•Á…É•‘¥ÉÑåA…å±½…‘I½ÝÌøì(´€½¹ÍÐÁÉ•Á…É•€ô…Ý…¥Ðµ…Á1¥µ¥Ð¡¥¹ÁÕÐ¹É•Í½ÕÉ•Ì°%IQe}Ae1=}AIM1}=9UII9d°…Íå¹Œ€¡É•Í½ÕÉ”°¥¹‘•à¤€ôøì(´€€€½¹ÍÐÁ…å±½…‘%€ôÉ•…Ñ•¥ÉÑåA…å±½…‘%¡ì(´€€€€€½¹¹•Ñ¥½¹%è¥¹ÁÕÐ¹½¹¹•Ñ¥½¹%°(´€€€€€‘¥ÉÑåI•Ù¥Í¥½¸è¥¹ÁÕÐ¹‘¥ÉÑåI•Ù¥Í¥½¸°(´€€€€€¥¹‘•à°(´€€€€€É•Í½ÕÉ”°(´€€€€€ÑÉ…•%è¥¹ÁÕÐ¹ÑÉ…•%°(´€€€ô¤ì(´€€€½¹ÍÐÉ•Í½ÕÉ•]¥Ñ¡A…å±½…‘%€ôì(´€€€€€€¸¸¹É•Í½ÕÉ”°(´€€€€€‘¥ÉÑåA…å±½…‘%èÁ…å±½…‘%°(´€€€ôì(´(´€€€É•ÑÕÉ¸ì(´€€€€€É•Í½ÕÉ”èÉ•Í½ÕÉ•]¥Ñ¡A…å±½…‘%°(´€€€€€É½Üèì(¬€½¹ÍÐ©Õ¹Ñ¥½¹±…ÍÍ¥™¥•È€ô¥¹ÁÕÐ¹É•Í½ÕÉ•Ì¹Í½µ” ¡É•Í½ÕÉ”¤€ôø(¬€€€É•ÅÕ¥É•Í)Õ¹Ñ¥½¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ñ±…ÍÍ¥™¥•È¡¥¹ÁÕÐ¹ÁÉ½Ù¥‘•È°É•Í½ÕÉ”¤(¬€€¤(¬€€€€ü…Ý…¥Ð±½…‘)Õ¹Ñ¥½¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ñ±…ÍÍ¥™¥•È ¤(¬€€€€èÕ¹‘•™¥¹•ì(¬€½¹ÍÐÁÉ•Á…É•€ô…Ý…¥Ðµ…Á1¥µ¥Ð (¬€€€¥¹ÁÕÐ¹É•Í½ÕÉ•Ì°(¬€€€%IQe}Ae1=}AIM1}=9UII9d°(¬€€€…Íå¹Œ€¡É•Í½ÕÉ”°¥¹‘•à¤€ôøì(¬€€€€€½¹ÍÐÁ…å±½…‘%€ôÉ•…Ñ•¥ÉÑåA…å±½…‘%¡ì(€€€€€€€€½¹¹•Ñ¥½¹%è¥¹ÁÕÐ¹½¹¹•Ñ¥½¹%°(€€€€€€€€‘¥ÉÑåI•Ù¥Í¥½¸è¥¹ÁÕÐ¹‘¥ÉÑåI•Ù¥Í¥½¸°(´€€€€€€€¥èÁ…å±½…‘%°(¬€€€€€€€¥¹‘•à°(¬€€€€€€€É•Í½ÕÉ”°(¬€€€€€€€ÑÉ…•%è¥¹ÁÕÐ¹ÑÉ…•%°(¬€€€€€ô¤ì(¬€€€€€½¹ÍÐÉ•Í½ÕÉ•]¥Ñ¡A…å±½…‘%€ôì(¬€€€€€€€€¸¸¹É•Í½ÕÉ”°(¬€€€€€€€‘¥ÉÑåA…å±½…‘%èÁ…å±½…‘%°(¬€€€€€ôì(¬€€€€€½¹ÍÐÉ•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ð€ô±…ÍÍ¥™å¥ÉÑåA…å±½…‘É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹”¡ì(¬€€€€€€€©Õ¹Ñ¥½¹±…ÍÍ¥™¥•È°(€€€€€€€€ÁÉ½Ù¥‘•Èè¥¹ÁÕÐ¹ÁÉ½Ù¥‘•È°(´€€€€€€€É•Í½ÕÉ•¹ÉåÁÑ•è…Ý…¥ÐÍ•…±!½ÍÑ•‘•Ù¥•Må¹¥ÉÑåA…å±½…‘)Í½¸¡ì(¬€€€€€€€É•Í½ÕÉ”èÉ•Í½ÕÉ•]¥Ñ¡A…å±½…‘%°(¬€€€€€ô¤ì(¬(¬€€€€€É•ÑÕÉ¸ì(¬€€€€€€€É•Í½ÕÉ”èÉ•Í½ÕÉ•]¥Ñ¡A…å±½…‘%°(¬€€€€€€€É½Üèì(€€€€€€€€€€½¹¹•Ñ¥½¹%è¥¹ÁÕÐ¹½¹¹•Ñ¥½¹%°(¬€€€€€€€€€É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ð°(€€€€€€€€€€‘¥ÉÑåI•Ù¥Í¥½¸è¥¹ÁÕÐ¹‘¥ÉÑåI•Ù¥Í¥½¸°(´€€€€€€€€€Á…å±½…‘%°(´€€€€€€€€€ÁÉ¥Íµ„è¥¹ÁÕÐ¹ÁÉ¥Íµ„°(¬€€€€€€€€€¥èÁ…å±½…‘%°(€€€€€€€€€€ÁÉ½Ù¥‘•Èè¥¹ÁÕÐ¹ÁÉ½Ù¥‘•È°(¬€€€€€€€€€É•Í½ÕÉ•¹ÉåÁÑ•è…Ý…¥ÐÍ•…±!½ÍÑ•‘•Ù¥•Må¹¥ÉÑåA…å±½…‘)Í½¸¡ì(¬€€€€€€€€€€€½¹¹•Ñ¥½¹%è¥¹ÁÕÐ¹½¹¹•Ñ¥½¹%°(¬€€€€€€€€€€€‘¥ÉÑåI•Ù¥Í¥½¸è¥¹ÁÕÐ¹‘¥ÉÑåI•Ù¥Í¥½¸°(¬€€€€€€€€€€€Á…å±½…‘%°(¬€€€€€€€€€€€ÁÉ¥Íµ„è¥¹ÁÕÐ¹ÁÉ¥Íµ„°(¬€€€€€€€€€€€ÁÉ½Ù¥‘•Èè¥¹ÁÕÐ¹ÁÉ½Ù¥‘•È°(¬€€€€€€€€€€€ÕÍ•É%è¥¹ÁÕÐ¹ÕÍ•É%°(¬€€€€€€€€€€€Ù…±Õ”èÉ•Í½ÕÉ•]¥Ñ¡A…å±½…‘%°(¬€€€€€€€€€ô¤°(€€€€€€€€€€ÕÍ•É%è¥¹ÁÕÐ¹ÕÍ•É%°(´€€€€€€€€€Ù…±Õ”èÉ•Í½ÕÉ•]¥Ñ¡A…å±½…‘%°(´€€€€€€€ô¤°(´€€€€€€€ÕÍ•É%è¥¹ÁÕÐ¹ÕÍ•É%°(´€€€€€ô°(´€€€ôì(´€ô¤ì(¬€€€€€€€ô°(¬€€€€€ôì(¬€€€ô°(¬€€¤ì(€(€€É•ÑÕÉ¸ì(€€€€‘¥ÉÑåI•Ù¥Í¥½¸è¥¹ÁÕÐ¹‘¥ÉÑåI•Ù¥Í¥½¸°) €´ÄÀÈÈ°Ø€¬ÄÀàÜ°äÌ …Íå¹Œ™Õ¹Ñ¥½¸ÁÉ•Á…É•¥ÉÑåA…å±½…‘I½ÝÌ¡¥¹ÁÕÐèì(€€ôì(ô(€(­™Õ¹Ñ¥½¸…ÍÍ•ÉÑAÉ•Á…É•‘¥ÉÑåA…å±½…‘I½ÝÍ5…Ñ¡%¹ÁÕÐ¡¥¹ÁÕÐèì(¬€½¹¹•Ñ¥½¹%èÍÑÉ¥¹œì(¬€‘¥ÉÑåI•Ù¥Í¥½¸è‰¥¥¹Ðì(¬€ÁÉ½Ù¥‘•ÈèÍÑÉ¥¹œì(¬€É•Í½ÕÉ•ÌèÉ•…‘½¹±ä!½ÍÑ•‘•Ù¥•Må¹¥ÉÑåI•Í½ÕÉ•mtì(¬€É½ÝÌèÉ•…‘½¹±ä!½ÍÑ•‘AÉ•Á…É•‘•Ù¥•Må¹¥ÉÑåA…å±½…‘I½Ýmtì(¬€ÕÍ•É%èÍÑÉ¥¹œì(­ô¤èÙ½¥ì(¬€¥˜€¡¥¹ÁÕÐ¹É½ÝÌ¹±•¹Ñ €„ôô¥¹ÁÕÐ¹É•Í½ÕÉ•Ì¹±•¹Ñ ¤ì(¬€€€Ñ¡É½Ü¹•ÜQåÁ•ÉÉ½È (¬€€€€€€‰!½ÍÑ•‘•Ù¥”µÍå¹ŒÁÉ•Á…É•Á…å±½…É½ÝÌµÕÍÐµ…Ñ Ñ¡”Á…å±½…É•Í½ÕÉ”½Õ¹Ð¸ˆ°(¬€€€€¤ì(¬€ô(¬€¥˜€¡¥¹ÁÕÐ¹É½ÝÌ¹Í½µ” ¡É½Ü¤€ôø(¬€€€É½Ü¹½¹¹•Ñ¥½¹%€„ôô¥¹ÁÕÐ¹½¹¹•Ñ¥½¹%(¬€€€ñðÉ½Ü¹‘¥ÉÑåI•Ù¥Í¥½¸€„ôô¥¹ÁÕÐ¹‘¥ÉÑåI•Ù¥Í¥½¸(¬€€€ñðÉ½Ü¹ÁÉ½Ù¥‘•È€„ôô¥¹ÁÕÐ¹ÁÉ½Ù¥‘•È(¬€€€ñðÉ½Ü¹ÕÍ•É%€„ôô¥¹ÁÕÐ¹ÕÍ•É%(¬€€¤¤ì(¬€€€Ñ¡É½Ü¹•ÜQåÁ•ÉÉ½È (¬€€€€€€‰!½ÍÑ•‘•Ù¥”µÍå¹ŒÁÉ•Á…É•Á…å±½…É½ÝÌµÕÍÐµ…Ñ Ñ¡”É•ÅÕ•ÍÑ•½¹¹•Ñ¥½¸•Á½ ¸ˆ°(¬€€€€¤ì(¬€ô(­ô(¬(­…Íå¹Œ™Õ¹Ñ¥½¸…‘½ÁÑU¹±…ÍÍ¥™¥•‘I•Á±…åI½ÝÌ¡¥¹ÁÕÐèì(¬€É½ÝÌèÉ•…‘½¹±ä!½ÍÑ•‘AÉ•Á…É•‘•Ù¥•Må¹¥ÉÑåA…å±½…‘I½Ýmtì(¬€Ñàè!½ÍÑ•‘AÉ¥Íµ…QÉ…¹Í…Ñ¥½¹±¥•¹Ðì(­ô¤èAÉ½µ¥Í”ñÙ½¥øì(¬€½¹ÍÐ™¥ÉÍÐ€ô¥¹ÁÕÐ¹É½ÝÍlÁtì(¬€¥˜€ …™¥ÉÍÐ¤ì(¬€€€É•ÑÕÉ¸ì(¬€ô(¬€™½È€¡½¹ÍÐÉ•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ð½˜m™…±Í”°ÑÉÕ•t…Ì½¹ÍÐ¤ì(¬€€€½¹ÍÐ¥‘Ì€ô¥¹ÁÕÐ¹É½ÝÌ(¬€€€€€€¹™¥±Ñ•È ¡É½Ü¤€ôøÉ½Ü¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ð€ôôôÉ•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ð¤(¬€€€€€€¹µ…À ¡É½Ü¤€ôøÉ½Ü¹¥¤ì(¬€€€¥˜€¡¥‘Ì¹±•¹Ñ €ôôô€À¤ì(¬€€€€€½¹Ñ¥¹Õ”ì(¬€€€ô(¬€€€…Ý…¥Ð¥¹ÁÕÐ¹Ñà¹‘•Ù¥•Må¹¥ÉÑåA…å±½…¹ÕÁ‘…Ñ•5…¹ä¡ì(¬€€€€€‘…Ñ„èìÉ•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ðô°(¬€€€€€Ý¡•É”èì(¬€€€€€€€½¹¹•Ñ¥½¹%è™¥ÉÍÐ¹½¹¹•Ñ¥½¹%°(¬€€€€€€€É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ðè¹Õ±°°(¬€€€€€€€‘¥ÉÑåI•Ù¥Í¥½¸è™¥ÉÍÐ¹‘¥ÉÑåI•Ù¥Í¥½¸°(¬€€€€€€€¥èì¥¸è¥‘Ìô°(¬€€€€€€€ÁÉ½Ù¥‘•Èè™¥ÉÍÐ¹ÁÉ½Ù¥‘•È°(¬€€€€€€€ÕÍ•É%è™¥ÉÍÐ¹ÕÍ•É%°(¬€€€€€ô°(¬€€€ô¤ì(¬€ô(­ô(¬(­™Õ¹Ñ¥½¸±…ÍÍ¥™å¥ÉÑåA…å±½…‘É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹”¡¥¹ÁÕÐèì(¬€©Õ¹Ñ¥½¹±…ÍÍ¥™¥•Èüè•Ù¥•Må¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ñ%µÁ½ÉÑ)½‰±…ÍÍ¥™¥•Èì(¬€ÁÉ½Ù¥‘•ÈèÍÑÉ¥¹œì(¬€É•Í½ÕÉ”è!½ÍÑ•‘•Ù¥•Må¹¥ÉÑåI•Í½ÕÉ”ì(­ô¤è‰½½±•…¸ì(¬€É•ÑÕÉ¸¥Í•Ù¥•Må¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ñ%µÁ½ÉÑ)½ˆ¡ì(¬€€€­¥¹è¥¹ÁÕÐ¹É•Í½ÕÉ”¹©½‰-¥¹°(¬€€€Á…å±½…è¥¹ÁÕÐ¹É•Í½ÕÉ”¹Á…å±½…°(¬€€€ÁÉ½Ù¥‘•Èè¥¹ÁÕÐ¹ÁÉ½Ù¥‘•È°(¬€ô°¥¹ÁÕÐ¹ÁÉ½Ù¥‘•È€ôôô€‰©Õ¹Ñ¥½¸ˆ€ü¥¹ÁÕÐ¹©Õ¹Ñ¥½¹±…ÍÍ¥™¥•È€èÕ¹‘•™¥¹•¤ì(­ô(¬(­™Õ¹Ñ¥½¸É•ÅÕ¥É•Í)Õ¹Ñ¥½¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ñ±…ÍÍ¥™¥•È (¬€ÁÉ½Ù¥‘•ÈèÍÑÉ¥¹œ°(¬€É•Í½ÕÉ”è!½ÍÑ•‘•Ù¥•Må¹¥ÉÑåI•Í½ÕÉ”°(¬¤è‰½½±•…¸ì(¬€É•ÑÕÉ¸ÁÉ½Ù¥‘•È€ôôô€‰©Õ¹Ñ¥½¸ˆ(¬€€€€˜˜É•Í½ÕÉ”¹©½‰-¥¹€ôôô€‰É•Í½ÕÉ”ˆ(¬€€€€˜˜€…±…ÍÍ¥™å¥ÉÑåA…å±½…‘É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹”¡ì(¬€€€€€ÁÉ½Ù¥‘•È°(¬€€€€€É•Í½ÕÉ”°(¬€€€ô¤ì(­ô(¬(­…Íå¹Œ™Õ¹Ñ¥½¸±½…‘)Õ¹Ñ¥½¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ñ±…ÍÍ¥™¥•È ¤èAÉ½µ¥Í”ð(¬€•Ù¥•Må¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ñ%µÁ½ÉÑ)½‰±…ÍÍ¥™¥•È(¬øì(¬€½¹ÍÐì(¬€€€¥Í)Õ¹Ñ¥½¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ñ%¹±¥¹•%µÁ½ÉÑ)½ˆ°(¬€ô€ô…Ý…¥Ð¥µÁ½ÉÐ ‰µÕÉÁ¡…¤½‘•Ù¥”µÍå¹½©Õ¹Ñ¥½¸µ¥¹±¥¹”µ…ÕÑ¡½É¥Ñäˆ¤ì(¬€É•ÑÕÉ¸¥Í)Õ¹Ñ¥½¹É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ñ%¹±¥¹•%µÁ½ÉÑ)½ˆì(­ô(¬(…Íå¹Œ™Õ¹Ñ¥½¸µ…Á1¥µ¥ÐñQ%¹ÁÕÐ°Q=ÕÑÁÕÐø (€€Ù…±Õ•ÌèÉ•…‘½¹±äQ%¹ÁÕÑmt°(€€±¥µ¥Ðè¹Õµ‰•È°)‘¥™˜€´µ¥Ð„½…ÁÁÌ½Ý•ˆ½ÍÉŒ½±¥ˆ½‘•Ù¥”µÍå¹Œ½ÁÉ¥Íµ„µÍÑ½É”½ÑåÁ•Ì¹ÑÌˆ½…ÁÁÌ½Ý•ˆ½ÍÉŒ½±¥ˆ½‘•Ù¥”µÍå¹Œ½ÁÉ¥Íµ„µÍÑ½É”½ÑåÁ•Ì¹ÑÌ)¥¹‘•àŒÉŒÀÐÅÈ¸¸ÀØÐÙ•…‘Œ€ÄÀÀØÐÐ(´´´„½…ÁÁÌ½Ý•ˆ½ÍÉŒ½±¥ˆ½‘•Ù¥”µÍå¹Œ½ÁÉ¥Íµ„µÍÑ½É”½ÑåÁ•Ì¹ÑÌ(¬¬¬ˆ½…ÁÁÌ½Ý•ˆ½ÍÉŒ½±¥ˆ½‘•Ù¥”µÍå¹Œ½ÁÉ¥Íµ„µÍÑ½É”½ÑåÁ•Ì¹ÑÌ) €´äà°Ø€¬äà°ÈÈ •áÁ½ÉÐÑåÁ”!½ÍÑ•‘½¹¹•Ñ¥½¹I•™É•Í¡1•…Í•±…¥µI•ÍÕ±Ð€ô(€€ðìÍÑ…ÑÕÌè€‰ÍÑ…±”ˆô(€€ðìÍÑ…ÑÕÌè€‰Ù•ÉÍ¥½¹}¡…¹•ˆôì(€(­•áÁ½ÉÐ¥¹Ñ•É™…”!½ÍÑ•‘AÉ•Á…É•‘•Ù¥•Må¹¥ÉÑåA…å±½…‘I½Üì(¬€½¹¹•Ñ¥½¹%èÍÑÉ¥¹œì(¬€É•‘•¹Ñ¥…±%¹‘•Á•¹‘•¹Ðè‰½½±•…¸ì(¬€‘¥ÉÑåI•Ù¥Í¥½¸è‰¥¥¹Ðì(¬€¥èÍÑÉ¥¹œì(¬€ÁÉ½Ù¥‘•ÈèÍÑÉ¥¹œì(¬€É•Í½ÕÉ•¹ÉåÁÑ•èÍÑÉ¥¹œì(¬€ÕÍ•É%èÍÑÉ¥¹œì(­ô(¬(­•áÁ½ÉÐ¥¹Ñ•É™…”!½ÍÑ•‘AÉ•Á…É•‘•Ù¥•Må¹¥ÉÑåA…å±½…‘Ìì(¬€‘¥ÉÑåI•Ù¥Í¥½¸è‰¥¥¹Ðì(¬€É•Í½ÕÉ•Ìè!½ÍÑ•‘•Ù¥•Må¹¥ÉÑåI•Í½ÕÉ•mtì(¬€É½ÝÌè!½ÍÑ•‘AÉ•Á…É•‘•Ù¥•Må¹¥ÉÑåA…å±½…‘I½Ýmtì(­ô(¬(•áÁ½ÉÐ¥¹Ñ•É™…”UÁÍ•ÉÑ!½ÍÑ•‘•Ù¥•Må¹¥ÉÑå½¹¹•Ñ¥½¹%¹ÁÕÐì(€€½¹¹”

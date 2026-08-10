@@ -1,0 +1,56 @@
+name: Apply device-sync dirty payload classification
+
+on:
+  push:
+    branches:
+      - agent/device-sync-dirty-classification
+    paths:
+      - .github/workflows/agent-apply-device-sync-pr2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply reviewed implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            .agent/device-sync-pr2.patch.00 \
+            .agent/device-sync-pr2.patch.01 \
+            .agent/device-sync-pr2.patch.02 \
+            .agent/device-sync-pr2.patch.03 \
+            .agent/device-sync-pr2.patch.04 \
+            .agent/device-sync-pr2.patch.05 \
+            .agent/device-sync-pr2.patch.06 \
+            .agent/device-sync-pr2.patch.07 \
+            .agent/device-sync-pr2.patch.08 \
+            .agent/device-sync-pr2.patch.09 \
+            > /tmp/device-sync-pr2.patch
+          echo "c84f1da4c758ba86d7a7de7d8a1abcff8b73127d747b7b676072320384bfbfb3  /tmp/device-sync-pr2.patch" | sha256sum -c -
+          git apply --check /tmp/device-sync-pr2.patch
+          git apply --index /tmp/device-sync-pr2.patch
+          git rm -f \
+            .agent/device-sync-pr2.patch.00 \
+            .agent/device-sync-pr2.patch.01 \
+            .agent/device-sync-pr2.patch.02 \
+            .agent/device-sync-pr2.patch.03 \
+            .agent/device-sync-pr2.patch.04 \
+            .agent/device-sync-pr2.patch.05 \
+            .agent/device-sync-pr2.patch.06 \
+            .agent/device-sync-pr2.patch.07 \
+            .agent/device-sync-pr2.patch.08 \
+            .agent/device-sync-pr2.patch.09 \
+            .github/workflows/agent-apply-device-sync-pr2.yml
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "refactor(device-sync): persist dirty payload credential authority"
+          git push origin HEAD:agent/device-sync-dirty-classification

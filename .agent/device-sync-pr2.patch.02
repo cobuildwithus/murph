@@ -1,0 +1,120 @@
+ctionId: string;
+   userId: string;
+@@ -107,6 +123,7 @@ export interface UpsertHostedDeviceSyncDirtyConnectionInput {
+   eventType?: string | null;
+   resourceCategory?: string | null;
+   resources?: readonly HostedDeviceSyncDirtyResource[];
++  preparedPayloads?: HostedPreparedDeviceSyncDirtyPayloads;
+   tx?: HostedPrismaTransactionClient;
+ }
+ 
+diff --git a/apps/web/src/lib/device-sync/public-ingress-service.ts b/apps/web/src/lib/device-sync/public-ingress-service.ts
+index 9d9e5177..5cdd980e 100644
+--- a/apps/web/src/lib/device-sync/public-ingress-service.ts
++++ b/apps/web/src/lib/device-sync/public-ingress-service.ts
+@@ -494,10 +494,10 @@ export class HostedDeviceSyncPublicIngressService {
+     // One webhook request opens and seals several secure-box fields under the
+     // member's device domain roots. Scope the unwrap memo to the request so
+     // each distinct root key costs at most one KMS round trip per request
+-    // instead of one per field: the concrete root is unwrapped by the account
+-    // lookup before the admission transaction, while the @active root used for
+-    // sealing payloads is a separate cache key whose first unwrap still runs
+-    // inside the transaction. Hosted-onboarding webhooks use the same seam.
++    // instead of one per field. Account lookup and dirty-payload preparation
++    // both complete before the admission transaction; the concrete and
++    // @active root aliases remain distinct cache keys. Hosted-onboarding
++    // webhooks use the same seam.
+     return runWithHostedDomainRootUnwrapCache(() =>
+       this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody),
+     );
+diff --git a/apps/web/src/lib/device-sync/wake-service.ts b/apps/web/src/lib/device-sync/wake-service.ts
+index acdee9ba..3c2dc140 100644
+--- a/apps/web/src/lib/device-sync/wake-service.ts
++++ b/apps/web/src/lib/device-sync/wake-service.ts
+@@ -1782,8 +1782,17 @@ async function persistHostedDeviceSyncCompanionResource(input: {
+   userId: string;
+   wakeReason: string;
+ }): Promise<void> {
+-  const result = await retryHostedDirtyStateContention(async () =>
+-    input.store.withHealthDataAdmissionLock(
++  const result = await retryHostedDirtyStateContention(async () => {
++    const preparedPayloads = await input.store.prepareDirtyPayloads({
++      connectionId: input.connectionId,
++      dirtyAt: input.occurredAt,
++      eventType: input.eventType,
++      provider: "junction",
++      resourceCategory: input.resourceCategory,
++      resources: [input.resource],
++      userId: input.userId,
++    });
++    return input.store.withHealthDataAdmissionLock(
+       input.userId,
+       input.connectionId,
+       async (tx) => {
+@@ -1834,6 +1843,7 @@ async function persistHostedDeviceSyncCompanionResource(input: {
+           provider: connection.provider,
+           resourceCategory: input.resourceCategory,
+           resources: [input.resource],
++          preparedPayloads,
+           tx,
+           userId: input.userId,
+         });
+@@ -1893,7 +1903,8 @@ async function persistHostedDeviceSyncCompanionResource(input: {
+ 
+         return { wakeMailboxItemId: mailboxAppend.item.id };
+       },
+-    ));
++    );
++  });
+ 
+   if (result.wakeMailboxItemId) {
+     await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
+@@ -2195,8 +2206,18 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
+   traceId: string | null;
+   userId: string;
+ }): Promise<void> {
+-  const result = await retryHostedDirtyStateContention(async () =>
+-    input.store.withHealthDataAdmissionLock(
++  const result = await retryHostedDirtyStateContention(async () => {
++    const preparedPayloads = await input.store.prepareDirtyPayloads({
++      connectionId: input.connectionId,
++      dirtyAt: input.occurredAt,
++      eventType: input.eventType,
++      provider: input.provider,
++      resourceCategory: input.resourceCategory ?? null,
++      resources: input.dirtyResources,
++      traceId: input.traceId,
++      userId: input.userId,
++    });
++    return input.store.withHealthDataAdmissionLock(
+       input.userId,
+       input.oonnectionId,
+       async (tx) => {
+       const current = await input.store.getConnectionForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      if (
+        !current
+        || current.provider !== input.provider
+        || current.status !== "active"
+        || current.connectedAt !== input.expectedConnectedAt
+      ) {
+        await completeHostedWebhookTraceTx(input, tx);
+        return {
+          wakeMailboxItemId: null,
+        };
+      }
+      if (isDeviceSyncConnectionSetupPending(current)) {
+        throw deviceSyncError({
+          code: "WEBHOOK_ACCOUNT_NOT_READY",
+          message: "Device sync setup changed before webhook work could be committed.",
+          retryable: true,
+          httpStatus: 503,
+        });
+      }
+      const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+      if (sourceProviderSlug) {
+        const matchingSources = await input.store.listConnectionSources({\n          connectionId: input.connectionId,\n          sourceProviderSlug,\n        }, tx);\n        if (!isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)) {\n          throw deviceSyncError({\n            code: "WEBHOOK_SOURCE_NOT_READY",\n            message: "Device source setup changed before webhook work could be committed.",\n            retryable: true,\n            httpStatus: 503,\n          });\n        }\n      }\n\n      // Level webhooks may be coalesced only after committed dirty state exists.\n      // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.\n      // Dirty state dedupes work; only the clean-to-dirty transition appends a durable runtime handoff.\n      if (\n        input.acceptanceMode === "level_dirty_hint"\n        && await input.store.hasPendingDirtyConnection(input.connectionId, tx)\n      ) {\n        await completeHostedWebhookTraceTx(input, tx);\n        return {\n          wakeMailboxItemId: null,\n        };\n      }\n\n      const dirtyUpdate = await input.store.upsertDirtyConnection({\n        connectionId: input.connectionId,\n        dirtyAt: input.occurredAt,\n        eventType: input.eventType,\n        provider: input.provider,\n        resourceCategory: input.resourceCategory ?? null,\n        resources: input.dirtyResources,\n        preparedPayloads,\n        traceId: input.traceId,\n        tx,\n        userId: input.userId,\n      });\n      await completeHostedWebhookTraceTx(input, tx);\n\n      let wakeMailboxItemId: string | null = null;\n      if (dirtyUpdate.shouldRequestWake) {\n        const wake = buildHostedDeviceSyncWake({\n          connectionId: input.connectionId,\n          eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({\n            connectionId: input.connectionId,\n            dirtyRevision: dirtyUpdate.dirty.dirtyRevision,\n            expectedConnectedAt: input.expectedConnectedAt,\n            provider: input.provider,\n            userId: input.userId,\n          }),\n          expectedConnectedAt: input.expectedConnectedAt,\n          hint: buildHostedDeviceSyncSignalPayload({\n            hint: {\n              eventType: input.eventType,\n              occurredAt: input.occurredAt,\n              reason: "webhook_dirty_transition",\n              resourceCategory: input.resourceCategory ?? null,\n            },\n            occurredAt: input.occurredAt,\n            traceId: input.traceId,\n          }),\n          occurredAt: input.occurredAt,\n          provider: input.provider,\n          source: "webhook-hint",\n          traceId: null,\n          userId: input.userId,\n        });\n        const mailboxAppend = await appendHostedMailboxEnvelopeTx({\n          envelope: wake,\n          tx,\n        });\n        if (mailboxAppend.dedupeConflict) {\n          throw deviceSyncError({\n            code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",\n            httpStatus: 503,\n            message: "Hosted device-sync dirty wake conflicted with an existing wake identity.",\n            retryable: true,\n          });\n        }\n        wakeMailboxItemId = mailboxAppend.item.id;\n      }\n      await input.store.createSignal({\n        userId: input.userId,\n        connectionId: input.connectionId,\n        provider: input.provider,\n        kind: "webhook_hint",\n        occurredAt: input.occurredAt,\n        traceId: input.traceId,\n        eventType: input.eventType,\n        resourceCategory: input.resourceCategory ?? null,\n        sourceProviderSlug: input.dataSourceProviderSlug,\n        createdAt: input.acceptedAt,\n        tx,\n      });\n\n      return {\n        wakeMailboxItemId,\n      };\n      },\n      {\n        memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,\n      },\n    );\n  });\n
+  if (result.wakeMailboxItemId) {\n    await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {\n      failureMode: "best_effort",\n    });\n  }\n}\n\nfunction buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {\n  connectionId: string;\n  dirtyRevision: bigint;\n  expectedConnectedAt: string;\n  provider: string;\n  userId: string;\n}): string {\n  return [\n    "device-sync",\n    "dirty",\n    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,\n    input.userId,\n    input.provider,\n    input.connectionId,\n    input.expectedConnectedAt,\n    input.dirtyRevision.toString(),\n  ].join(":");\n}\n\nconst HOSTED_DIRTY_STATE_RETRY_ATTEMPTS = 12;\nconst HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";\n\nasync function retryHostedDirtyStateContention<T>(\n  operation: () => Promise<T>,\n): Promise<T> {\n  for (let attempt = 0; attempt < HOSTED_DIRTY_STATE_RETRY_ATTEMPTS; attempt += 1) {\n    try {\n      return await operation();\n    } catch (error) {\n      if (\n        !isHostedDirtyStateContentionError(error)\n        || attempt === HOSTED_DIRTY_STATE_RETRY_ATTEMPTS - 1\n      ) {\n        throw error;\n      }\n      await waitForHostedDirtyStateRetry(attempt);\n    }\n  }\n\n  throw new Error("Hosted device-sync dirty-state retry loop exhausted unexpectedly.");\n}\n\nfunction isHostedDirtyStateContentionError(error: unknown): boolean {\n  return Boolean(\n    typeof error === "object"\n      && error !== null\n      && "code" in error\n      && (error as { code?: unknown }).code === HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE\n  );\n}\n\nasync function waitForHostedDirtyStateRetry(attempt: number): Promise<void> {\n  const delayMs = Math.min(25, 2 + attempt * 2 + Math.floor(Math.random() * 3));\n  await new Promise<void>((resolve) => {\n    setTimeout(resolve, delayMs);\n  });\n}\n\nasync function completeHostedWebhookTraceTx(\n  input: {\n    claimToken: string;\n    provider: string;\n    store: PrismaDeviceSyncControlPlaneStore;\n    traceId: string | null;\n  },\n  tx: HostedPrismaTransactionClient,\n): Promise<void> {\n  if (!input.traceId) {\n    return;\n  }\n\n  const completed = await input.store.completeWebhookTrace(input.provider, input.traceId, input.claimToken, tx);\n  if (!completed) {\n    throw deviceSyncError({\n      code: "WEBHOOK_TRACE_CLAIM_LOST",\n      message: "Webhook trace claim was lost before durable acceptance completed.",\n      retryable: true,\n      httpStatus: 503,\n    });\n  }\n}\n\nfunction buildHostedDeviceSyncSignalPayload(input: {\n  hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;\n  occurredAt: string;\n  traceId?: string | null;\n}): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]> {\n  return {\n    ...(input.hint ?? {}),\n    ...(input.hint?.occurredAt === undefined ? { occurredAt: input.occurredAt } : {}),\n    ...(input.traceId && input.hint?.traceId === undefined ? { traceId: input.traceId } : {}),\n  };\n}\n\nfunction normalizeHostedDeviceSyncJobHints(input: {\n  connectionId: string;\n  expectedConnectedAt: string;\n  jobs: readonly DeviceSyncJobInput[];\n  occurredAt?: string | null;\n  provider: string;\n  reason: HostedExecutionDeviceSyncWakeEvent["reason"];\n  traceId?: string | null;\n}): HostedExecutionDeviceSyncJobHint[] {\n  return input.jobs.map((job, index) => {\n    const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);\n    const stableSeed = JSON.stringify({\n      connectionId: input.connectionId,\n      expectedConnectedAt: input.expectedConnectedAt,\n      ...(typeof job.dedupeKey === "string"\n        ? { providerDedupeKey: job.dedupeKey }\n        : {\n          index,\n          kind: job.kind,\n          payload,\n        }),\n      reason: input.reason,\n      traceId: input.traceId ?? null,\n    });\n\n    return {\n      kind: job.kind,\n      ...(job.availableAt ? { availableAt: job.availableAt } : {}),\n      dedupeKey: `hosted-device-sync:${sha256Hex(stableSeed)}`,\n      ...(typeof job.maxAttempts === "number" ? { maxAttempts: job.maxAttempts } : {}),\n      payload,\n      ...(typeof job.priority === "number" ? { priority: job.priority } : {}),\n    } satisfies HostedExecutionDeviceSyncJobHint;\n  });\n}\n\nfunction buildHostedWebhookDirtyResources(input: {\n  jobs: readonly DeviceSyncJobInput[];\n  provider: string;\n}): HostedDeviceSyncDirtyResource[] {\n  const resources: HostedDeviceSyncDirtyResource[] = [];\n\n  for (const job of input.jobs) {\n    const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);\n    resources.push({\n      count: 1,\n      jobKind: job.kind,\n      payload: readHostedDirtyResourcePayload(payload),\n      resource: readHostedDirtyResourceString(payload.resource),\n      resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),\n      sourceProviderSlug: readHostedDirtyResourceString(payload.sourceProviderSlug),\n      windowEnd: readHostedDirtyResourceString(payload.windowEnd),\n      windowStart: readHostedDirtyResourceString(payload.windowStart),\n    });\n  }\n\n  if (resources.length === 0) {\n    resources.push({\n      count: 1,\n      jobKind: "reconcile",\n      resource: null,\n      resourceCategory: null,\n      sourceProviderSlug: null,\n      windowEnd: null,\n      windowStart: null,\n    });\n  }\n\n  return resources;\n}\n\nfunction readHostedDirtyResourceString(value: unknown): string | null {\n  return typeof value === "string" && value.trim().length > 0 ? value : null;\n}\n\nfunction readHostedDirtyResourcePayload(\n  value: Record<string, unknown>,\n): HostedDeviceSyncDirtyResource["payload"] {\n  const payload: Record<string, boolean | number | string> = {};\n  for (const [key, entry] of Object.entries(value)) {\n    if (typeof entry === "string" || typeof entry === "boolean") {\n      payload[key] = entry;\n    } else if (typeof entry === "number" && Number.isFinite(entry)) {\n      payload[key] = entry;\n    }\n  }\n  return Object.keys(payload).length > 0 ? payload : undefined;\n}\n"]}

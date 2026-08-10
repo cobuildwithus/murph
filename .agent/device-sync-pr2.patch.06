@@ -1,0 +1,116 @@
+ayload encryption before the dirty update and inserts after it", async () => {
++  it("requires caller-owned transactions to receive payloads prepared before the dirty-state CAS", async () => {
+     let insideCallerOwnedTransaction = false;
+     const encryptInsideCallerOwnedTransaction: boolean[] = [];
+     const operationOrder: string[] = [];
+@@ -632,14 +810,6 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+     });
+ 
+     try {
+-      const rootPrisma = {
+-        $transaction: vi.fn(),
+-        deviceSyncDirtyConnection: {
+-          findUnique: vi.fn(async () => {
+-            throw new Error("Root Prisma client should not precompute caller-owned dirty payload rows.");
+-          }),
+-        },
+-      };
+       const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+       const existing = {
+         connectionId: "dsc_caller_owned_1",
+@@ -661,6 +831,12 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+         windowEnd: null,
+         windowStart: null,
+       };
++      const rootPrisma = {
++        $transaction: vi.fn(),
++        deviceSyncDirtyConnection: {
++          findUnique: vi.fn(async () => existing),
++        },
++      };
+       let payloadCreateData: Array<Record<string, unknown>> | null = null;
+       const tx = {
+         deviceSyncDirtyConnection: {
+@@ -687,9 +863,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+         },
+       };
+       const store = new PrismaHostedDirtyConnectionStore(rootPrisma as never);
+-
+-      insideCallerOwnedTransaction = true;
+-      const result = await store.upsertDirtyConnection({
++      const input = {
+         connectionId: existing.connectionId,
+         dirtyAt: "2026-05-26T12:01:00.000Z",
+         eventType: "daily.data.steps.created",
+@@ -710,26 +884,34 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+           },
+         ],
+         traceId: "trace_caller_owned_1",
+-        tx: tx as never,
+         userId: existing.userId,
++      } as const;
++      const preparedPayloads = await store.prepareDirtyPayloads(input);
++
++      insideCallerOwnedTransaction = true;
++      const result = await store.upsertDirtyConnection({
++        ...input,
++        preparedPayloads,
++        tx: tx as never,
+       });
+       insideCallerOwnedTransaction = false;
+ 
+-      expect(encryptInsideCallerOwnedTransaction).toEqual([true]);
++      expect(encryptInsideCallerOwnedTransaction).toEqual([false]);
+       expect(operationOrder).toEqual([
+         "encrypt-payload",
+         "update-dirty-marker",
+         "insert-durable-payload",
+       ]);
+       expect(rootPrisma.$transaction).not.toHaveBeenCalled();
+-      expect(rootPrisma.deviceSyncDirtyConnection.findUnique).not.toHaveBeenCalled();
++      expect(rootPrisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledOnce();
+       expect(tx.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
+       const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
++      expect(payloadRow.credentialIndependent).toBe(false);
+       expect(Object.values(result.dirty.dirtyResources)[0]?.dirtyPayloadId)
+         .toBe(payloadRow.id);
+     } finally {
+       insideCallerOwnedTransaction = false;
+-      installHostedSecureBoxStringTestCodec();
++      setHostedSecureBoxStringTestCodecForTests(null);
+     }
+   });
+ 
+@@ -1760,6 +1942,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+     try {
+       const dirtyAt = new Date("2026-07-09T12:00:00.000Z");
+       const payloadCreates: Array<Array<Record<string, unknown>>> = [];
++      let payloadCreateAttempt = 0;
+       const dirtyRecord = {
+         connectionId: "dsc_companion_123",
+         createdAt: dirtyAt,
+@@ -1781,6 +1964,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+         windowStart: null,
+       };
+       const prisma = {
++        $queryRaw: vi.fn(async () => [{ connectionId: "dsc_companion_123" }]),
+         $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+         deviceSyncDirtyConnection: {
+           findUnique: vi.fn(async () => dirtyRecord),
+@@ -1792,8 +1976,10 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+             skipDuplicates: boolean;
+           }) => {
+             payloadCreates.push(input.data);
+-            return { count: input.data.length };
++            payloadCreateAttempt += 1;
++            return { count: payloadCreateAttempt === 1 ? input.data.length : 0 };
+           }),
++          updateMany: vi.fn(async () => ({ count: 0 })),
+         },
+       };
+       const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+diff --git a/apps/web/test/prisma-store-oauth-connection.test.ts b/apps/web/test/prisma-store-oauth-connection.test.ts
+index 6e6c3dee..6d838cfd 100644
+--- a/apps/web/test/prisma-store-oauth-connection.test.ts
++++ b/apps/web/test/prisma-store-oauth-connection.test.ts
+@

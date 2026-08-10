@@ -1,0 +1,103 @@
+@ -4,6 +4,7 @@ import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-s
+ const {
+   lockHostedMemberRowMock,
+   openHostedUserSecureBoxStringMock,
++  prepareDirtyClassificationsMock,
+   randomBytesMock,
+   readHostedHealthDataConsentStateMock,
+   supersedeDirtyStateMock,
+@@ -12,14 +13,12 @@ const {
+   openHostedUserSecureBoxStringMock: vi.fn(
+     async (_input: { prisma?: unknown; value?: unknown }) => "acct_456",
+   ),
++  prepareDirtyClassificationsMock: vi.fn(async () => undefined),
+   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
+   readHostedHealthDataConsentStateMock: vi.fn(
+     async (): Promise<"granted" | "missing" | "revoked"> => "missing",
+   ),
+-  supersedeDirtyStateMock: vi.fn(async () => ({
+-    retainedCredentialIndependentPayloadCount: 0,
+-    supersededPayloadCount: 0,
+-  })),
++  supersedeDirtyStateMock: vi.fn(async () => undefined),
+ }));
+ 
+ vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => ({
+@@ -54,6 +53,8 @@ vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", async () => {
+   >("@/src/lib/device-sync/prisma-store/dirty-connections");
+   return {
+     ...actual,
++    prepareHostedCredentialScopedDirtyPayloadClassifications:
++      prepareDirtyClassificationsMock,
+     supersedeHostedCredentialScopedDirtyStateForConnectionTx:
+       supersedeDirtyStateMock,
+   };
+@@ -181,7 +182,9 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
+ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+   beforeEach(() => {
+     vi.clearAllMocks();
++    prepareDirtyClassificationsMock.mockResolvedValue(undefined);
+     readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
++    supersedeDirtyStateMock.mockResolvedValue(undefined);
+   });
+ 
+   it("denies health-data admission after locking and re-reading consent", async () => {
+@@ -312,6 +315,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+@@ -399,6 +403,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+@@ -456,6 +461,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+@@ -699,6 +705,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+@@ -775,6 +782,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+@@ -862,6 +870,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
++        deviceConnection: tx.deviceConnection,
+         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+       } as never,
+       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+@@ -936,14 +945,31 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+       },
+     };
+ 
++    const transaction = vi.fn(async <TResult>(
++      callback: (transaction: typeof tx) => Promise<TResult>,
++    ) => callback(tx));
+     const store = new PrismaDeviceSyncControlPlaneStore({
+       codec: TEST_CODEC,
+       prisma: {
+-        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => call
