@@ -1,4 +1,4 @@
-name: PR 1484 audit export
+name: PR 1484 audited fix apply
 
 on:
   push:
@@ -6,34 +6,49 @@ on:
       - agent/pr1484-audit-export
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  apply:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Check out exact audit head
+      - name: Check out target PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/member-owned-provider-applications
+          fetch-depth: 0
+          path: target
+
+      - name: Check out isolated audit payload
         uses: actions/checkout@v4
         with:
           ref: agent/pr1484-audit-export
-          fetch-depth: 0
+          fetch-depth: 1
+          path: helper
 
-      - name: Package source
+      - name: Apply exact audited patch
         shell: bash
         run: |
           set -euo pipefail
-          tar \
-            --exclude=.git \
-            --exclude=node_modules \
-            --exclude=.next \
-            --exclude=.github/workflows/pr1484-audit-export.yml \
-            -czf /tmp/pr1484-head.tar.gz .
+          cd target
+          expected_head=e5fe6d0f70a1c46a2e098ae117bdcd971aa126f8
+          actual_head=$(git rev-parse HEAD)
+          test "$actual_head" = "$expected_head" || {
+            echo "PR head changed: expected $expected_head, found $actual_head" >&2
+            exit 1
+          }
+          base64 --decode ../helper/.github/pr1484/fixes-1.patch.gz.b64 \
+            | gzip --decompress > /tmp/pr1484-fixes.patch
+          git apply --index --whitespace=nowarn /tmp/pr1484-fixes.patch
+          git diff --cached --check
 
-      - name: Upload source
-        uses: actions/upload-artifact@v4
-        with:
-          name: pr1484-head
-          path: /tmp/pr1484-head.tar.gz
-          retention-days: 1
-          if-no-files-found: error
+      - name: Commit and push fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd target
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "fix: harden member-owned provider applications"
+          git push origin HEAD:agent/member-owned-provider-applications
