@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 
 ## Current Guardrails
 
@@ -35,6 +35,13 @@ Last verified: 2026-08-09
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
+- Codex App Server owns managed OpenAI standalone web search. Its exact
+  `POST /v1/alpha/search` request uses the existing signed provider credential
+  and Worker egress owner; a provider rejection remains the current tool
+  failure and must not create a Murph-side retry, fallback search provider,
+  queue, or durable search state. Unsupported methods, paths, providers, and
+  invalid runtime identity fail closed before Worker-owned credential
+  injection.
 - Health-data withdrawal commits its revocation boundary, then waits for the
   existing per-user Cloudflare execution owner to serialize with earlier
   ensures, re-read the Web-owned grant, clear the write fence, and stop the
@@ -669,11 +676,47 @@ Last verified: 2026-08-09
   cannot admit a reviewed completion.
 - A usage-credit purchase persists one reconstructible `created` purchase before
   Stripe I/O; that row and the single purchase-status lifecycle are the durable
-  ambiguity fence. Every create retry during the first 30 minutes uses the
-  same purchase-derived Stripe idempotency key, leaving at least 60 minutes on
-  the frozen Session expiry. An ambiguous response must
-  not mint a replacement purchase or create a second payable Session. The
-  member may begin another purchase only after the existing one is terminal.
+  ambiguity fence. While the purchase is unfulfilled and its provider-final
+  `grantSlotReleasedAt` marker is null, it also reserves one future grant slot.
+  Local expiry or ambiguous failure does not release that reservation. Exact
+  expired-and-unpaid Checkout evidence may release from webhook, explicit
+  retrieve/expire, binding, or account-deletion finalization; an exact canceled
+  saved-card PaymentIntent may release from its explicit terminal owner. A
+  saved-card release fallback, recoverable provider state, and ordinary local
+  expiry remain reserved. The migration backfill marks only rows whose durable
+  references plus terminal reconciliation prove those same provider-final
+  cases, excludes automatic-refill ordinals from reference-free proof, and
+  leaves every other historical null-marker row conservatively reserved. Every
+  create retry during the first 30 minutes uses the same purchase-derived
+  Stripe idempotency key, leaving at least 60 minutes on the frozen Session
+  expiry. An ambiguous response must not mint a replacement purchase or create
+  a second payable Session. The member may begin another purchase only after
+  the existing one is terminal.
+- The beneficiary row lock is the sole serialization point for usage-credit
+  grants, purchase reservations, debits, projection adjustments, and relevant
+  checkout/refill admission. A beneficiary may have at most 32 occupied grant
+  slots: positive active grant projections plus unfulfilled purchases whose
+  release marker is null. Every capacity inspection reads at most 33 combined
+  rows through the partial active-grant and unfulfilled-reservation indexes,
+  and the 33rd is a fail-closed invariant violation. Personal, Family,
+  and group Checkout purchases, automatic sponsorship refills, explicit
+  recovery reacquisition, and unreserved referral grants share this contract
+  under beneficiary-before-distinct-payer lock order. Exact replay does not
+  reserve twice. Ordinary automatic refill admission returns no refill at
+  capacity; overflow fails as an invariant. Recovery reacquires capacity before
+  clearing a prior release, and fulfillment at 32 may only replace the exact
+  purchase reservation with its active grant.
+- Refund and dispute adjustment convergence performs one final shared capacity
+  read after its negative and positive passes. If restoration would leave more
+  than 32 active grant projections, the whole transition rolls back before the
+  Stripe receipt binds and remains retryable; no transient intermediate pass is
+  accepted as the final contract.
+- A genuinely new personal, Family, or group checkout at capacity returns the
+  structured `HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT` 409. Exact request-key and
+  matching active-purchase replay resolve first, while true eligibility failures
+  remain 403. Group checkout performs its first serialized capacity admission
+  before Customer preparation and revalidates afterward so an already-full
+  beneficiary does not create provider state.
 - Current-policy personal, Family, and group funding may create one unconfirmed
   saved-card PaymentIntent with a purchase-derived idempotency key. Frozen v2
   purchases retain the legacy selection behavior for groups only, frozen v3
@@ -812,9 +855,14 @@ Last verified: 2026-08-09
   receipt lease, and receipt completion must win its exact attempt fence; a
   timed-out or reclaimed worker remains retryable and cannot report completion.
 - Purchase and referral credit share one immutable credit-entry ledger. Each
-  positive entry owns one entry-keyed remaining-capacity projection; settlement
-  consumes those grants FIFO under the beneficiary member lock. The purchase
-  remaining field is only a synchronized expand-phase projection. Refund and
+  positive entry owns one entry-keyed remaining-capacity projection. Settlement
+  holds the beneficiary lock, inspects at most 33 positive grants, and rejects
+  more than the reviewed maximum of 32 before mutation. One data-modifying SQL
+  statement computes FIFO allocations with window sums, updates affected grant
+  and purchase projections set-wise, updates the beneficiary projection once,
+  and inserts every debit entry. Replay reads at most 33 debit rows and rejects
+  more than 32 before its bounded validation loop. The purchase remaining field
+  is only a synchronized expand-phase projection. Refund and
   dispute reconciliation requires a purchase-backed entry and cannot touch a
   referral-backed entry. Referral observation stays inside the canonical
   provider-ingress transaction without acquiring the beneficiary lock.
