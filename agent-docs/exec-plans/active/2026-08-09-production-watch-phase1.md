@@ -59,14 +59,16 @@ Updated: 2026-08-09
 - Interpret Prisma `timestamp without time zone` columns explicitly as UTC-naive instants in SQL, and emit timezone-qualified evidence timestamps.
 - Render launchd configuration with a literal `$HOME`-relative repository path so generated files do not persist the local account name or concrete home path.
 - Do not install or start the scheduler as part of code validation.
+- Only one signed-in Brave profile is available for ReviewGPT. Use that profile sequentially through a local-only configuration, and never restart or terminate the shared browser process.
+- The preliminary specialist pass returned six actionable prompt/coverage findings. All were accepted: complete-evidence-only resolution wording, exact live database-boundary proof, incident-scoped drill-down and lease proof, scheduled-overlap recovery proof, private-mode persistence proof, and managed scheduler lifecycle proof. The returned tests-only patch was inspected in full and recreated deliberately rather than applied as trusted code.
 
 ## Verification
 
 - Commands to run: skill validation, focused Vitest coverage, CLI fixture/dry-run scenarios, `pnpm logs:guard`, `pnpm test:diff <changed paths...>`, `git diff --check`, and privacy/secret scans.
 - Expected outcomes: all required commands pass; no raw/private evidence or machine-specific path is tracked; monitor behavior is bounded, deterministic, fail-closed, and read-only.
-- Passed: skill quick validation; tools TypeScript check; strict Ajv compilation and fixture validation; 374 repo-tool tests; synthetic launchd plist validation; incident/projection direct scenario; live aggregate-only production database collection and snapshot-schema validation.
+- Passed: skill quick validation; tools TypeScript check; strict Ajv compilation and fixture validation; 551 current repo-tool tests; synthetic launchd plist validation; incident/projection direct scenario; live aggregate-only production database collection and snapshot-schema validation.
+- Passed the opt-in live database integration lane against the exact CLI/helper boundary without emitting the aggregate payload.
+- Preliminary ReviewGPT completed with a substantive findings result; all six accepted findings are implemented locally and await corrected-head CI plus the final ReviewGPT gate.
 - Confirmed the installed Codex CLI supports the documented future triage invocation: stdin prompts, ephemeral sessions, read-only sandboxing, JSONL events, output schemas, and writing only the final structured response to a bounded evidence file.
 - Routed `pnpm test:diff` passed guards, tools and package typechecks, CLI tests, repo-tool tests, and completed package tests before stopping on the pre-existing `packages/core/test/memory.test.ts` missing dated audit-file failure. The exact focused test fails unchanged in the primary checkout.
-- Coverage-write audit completed with no unresolved findings after adding private provider-file permission proof and exposing two fail-closed parser gaps. The parent hardened present-but-malformed optional state fields and strict RFC3339 timestamps; the auditor added regressions and finished with focused V8 coverage, 374 repo-tool tests, tools typecheck, and diff checks passing.
-Completed: 2026-08-09
-Completed: 2026-08-09
+- Coverage-write audit completed with no unresolved findings after adding private provider-file permission proof and exposing two fail-closed parser gaps. The parent hardened present-but-malformed optional state fields and strict RFC3339 timestamps; the auditor added regressions and finished with focused V8 coverage, repo-tool tests, tools typecheck, and diff checks passing.

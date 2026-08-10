@@ -311,8 +311,8 @@ Alert suppression rules:
 | Lease safety | Second owner cannot claim; second remediation lease is rejected; stale dead-PID/PID-reuse claims are recoverable; live lock is not stolen; malformed incident state fails closed. |
 | Timeout/failure isolation | Fake database helper hangs and emits private stderr; collector terminates it and returns only `helper_timeout`. |
 | Dry run | Produces snapshot without state or Markdown projection files. |
-| Database boundary | Static test requires read-only transaction/timeouts and forbids private columns. PostgreSQL integration must run against a disposable schema before enabling production. |
-| Scheduler | Template is 300 seconds, `KeepAlive=false`, has placeholders, and contains no machine path. Rendered output retains a literal `$HOME` path and rejects unsafe repository paths. On macOS, install/status/uninstall smoke is required before activation. |
+| Database boundary | Static proof requires a read-only transaction, bounded timeouts, and no private columns. The opt-in `scripts/prod-watch.database.integration.test.ts` lane runs the exact CLI query through `murph-prod-psql-ro`, retains the aggregate snapshot only in memory, and validates the strict snapshot contract without printing the payload. |
+| Scheduler | Template proof requires a 300-second interval, `KeepAlive=false`, placeholders, and no machine path. Rendered output retains a literal `$HOME` path and rejects unsafe repository paths. A macOS-only CLI lifecycle test uses a disposable home and fake `launchctl` to prove unmanaged-file refusal, managed replacement, failed-enable cleanup, and uninstall behavior; an operator smoke remains required before activation. |
 | JSON contracts | All checked-in schemas parse; fixture evidence passes the runtime's strict parsers and produces the documented `snapshot.v1` shape. |
 | Repo gates | `pnpm test:repo-tools -- scripts/prod-watch.test.ts`, tools typecheck, `git diff --check`, and relevant docs checks. |
 
@@ -369,6 +369,7 @@ scripts/prod-watch/fixtures/*.json            # Synthetic healthy/suspicious evi
 scripts/prod-watch/schemas/*.schema.json      # Snapshot/provider/Codex contracts
 scripts/prod-watch/com.murph.prod-watch.plist.template
 scripts/prod-watch.test.ts
+scripts/prod-watch.database.integration.test.ts       # Explicit opt-in live read-only boundary proof
 .agents/skills/production-watch/SKILL.md
 agent-docs/operations/prod-watch.md
 ```
