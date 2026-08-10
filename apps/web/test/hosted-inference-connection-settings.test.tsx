@@ -247,7 +247,7 @@ function savedConnection(selected: boolean) {
     selected,
     supportsImages: false,
     verificationProfile:
-      "murph-codex-0.145.0-portable-responses-v1" as const,
+      "murph-codex-0.147.0-portable-responses-v1" as const,
     verifiedAt: "2026-07-30T12:00:00.000Z",
   };
 }

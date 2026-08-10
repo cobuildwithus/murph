@@ -36,6 +36,7 @@ import {
   AssessmentCard,
   CalendarMock,
   ChecklistMock,
+  CompactTableMock,
   ContactCardMock,
   DeviceList,
   DialogMock,
@@ -49,6 +50,7 @@ import {
   PdfPreview,
   PreferenceCard,
   PrivacyTimeline,
+  ReferenceBandMock,
   ReasoningSteps,
   SongBubble,
   StatBlock,
@@ -56,6 +58,464 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "murph-max-plan": (
+    <PreferenceCard
+      label="Murph Max"
+      meta="$50 monthly"
+      entries={[
+        { label: "Included AI usage", value: "Highest" },
+        { label: "Deep research", value: "More room" },
+        { label: "Ongoing analysis", value: "Built for it" },
+      ]}
+    />
+  ),
+  "generated-contact-card-avatar": (
+    <ContactCardMock
+      action="Add to Contacts"
+      avatarSrc="/murph-headshots/murph-headshot-08-sm.png"
+      fields={[{ label: "Mobile", value: "Current Murph line" }]}
+      name="Murph"
+      subtitle="Your requested contact photo"
+    />
+  ),
+  "family-setup-from-group": (
+    <DialogMock
+      label="Murph Family"
+      title="Set this up privately"
+      body="Continue in your private Murph conversation or sign in to open your Family settings."
+      primary="Open Family settings"
+      secondary="Message Murph privately"
+    />
+  ),
+  "live-workout-logging": (
+    <CompactTableMock
+      label="Live workout"
+      columns={[
+        { key: "set", label: "Set" },
+        { key: "reps", label: "Reps" },
+        { key: "load", label: "Load" },
+      ]}
+      rows={[
+        { set: "Bench · 1", reps: "8", load: "135 lb" },
+        { set: "Bench · 2", reps: "8", load: "135 lb" },
+        { set: "Bench · 3", reps: "Pending", load: "Pending" },
+      ]}
+    />
+  ),
+  "body-composition-guidance": (
+    <GoalsRegimenCard
+      label="One goal, clear ownership"
+      meta="evidence-backed"
+      entries={[
+        { kind: "goal", text: "Choose the body-composition lane" },
+        { kind: "habit", text: "Use the minimum useful tracking" },
+        { kind: "ramp", text: "Adjust only after a real trend" },
+      ]}
+    />
+  ),
+  "group-replies-respect-the-room": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "Replying here: Tuesday works better." },
+        { from: "user", body: "Same here." },
+        { from: "murph", body: "Tuesday has the room. Want me to help with a time?" },
+      ]}
+    />
+  ),
+  "sponsorship-creative-opt-in": (
+    <PreferenceCard
+      label="Personalize (optional)"
+      meta="Quiet by default"
+      entries={[
+        { label: "No room message", value: "Selected" },
+        { label: "Message, poem, or song", value: "Opt in" },
+      ]}
+    />
+  ),
+  "response-cards-survive-long-turns": (
+    <CompactTableMock
+      label="Private response card"
+      columns={[
+        { key: "metric", label: "Metric" },
+        { key: "today", label: "Today" },
+        { key: "goal", label: "Goal" },
+      ]}
+      rows={[
+        { metric: "Protein", today: "92 g", goal: "120 g" },
+        { metric: "Fiber", today: "24 g", goal: "30 g" },
+      ]}
+    />
+  ),
+  "typing-prewarms-private-chat": (
+    <ReasoningSteps
+      label="Private-chat start"
+      meta="best effort"
+      steps={[
+        { label: "Authenticated typing hint", state: "done" },
+        { label: "Warm the existing shell", state: "active" },
+        { label: "Accepted message owns the reply", state: "pending" },
+      ]}
+    />
+  ),
+  "ios-app-footer-link": (
+    <AppIconCard
+      label="Available on iOS"
+      name="Murph"
+      status="Open the App Store listing"
+    />
+  ),
+  "runtime-replacement-continuity": (
+    <ReasoningSteps
+      label="Conversation handoff"
+      meta="automatic"
+      steps={[
+        { label: "Recognize the active save", state: "done" },
+        { label: "Preserve the latest handoff", state: "done" },
+        { label: "Resume fresh conversation work", state: "active" },
+      ]}
+    />
+  ),
+  "paused-member-retention-cleanup": (
+    <ChecklistMock
+      label="Paused-member privacy cleanup"
+      items={[
+        { label: "Ordinary assistant work stays paused", done: true },
+        { label: "Expired private media is removed", done: true },
+        { label: "A new member action is required", done: false },
+      ]}
+    />
+  ),
+  "background-results-use-less-shared-capacity": (
+    <ReasoningSteps
+      label="Background results"
+      meta="less shared work"
+      steps={[
+        { label: "Read prior reply context in bounded batches", state: "done" },
+        { label: "Prepare completed call results", state: "done" },
+        { label: "Leave current replies room to run", state: "active" },
+      ]}
+    />
+  ),
+  "custom-experiment-deep-links": (
+    <DialogMock
+      label="Private experiment"
+      title="Morning light experiment"
+      body="Open the exact run you asked for. Normal sign-in and account access still apply."
+      primary="Open experiment"
+      secondary="Stay in chat"
+    />
+  ),
+  "group-funding-one-recovery-owner": (
+    <ChecklistMock
+      label="Group funding recovery"
+      items={[
+        { label: "Verified payment owns the credit", done: true },
+        { label: "Uncertain checkout stays recoverable", done: true },
+        { label: "Create a second charge", done: false },
+      ]}
+    />
+  ),
+  "room-memory-status-recovers": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "House rule: weekend workouts stay social." },
+        { from: "user", body: "What should we do Saturday?" },
+        { from: "murph", body: "Keep it social: easy circuit, no leaderboard." },
+      ]}
+    />
+  ),
+  "due-automations-drain-cleanly": (
+    <ChecklistMock
+      label="Due automations"
+      items={[
+        { label: "Admit the bounded due set", done: true },
+        { label: "Preserve each occurrence", done: true },
+        { label: "Duplicate the backlog", done: false },
+      ]}
+    />
+  ),
+  "device-sync-webhook-recovery": (
+    <DeviceList
+      label="Sync recovery"
+      devices={[
+        { color: "#5a6e32", initial: "W", name: "Wearable source", status: "syncing" },
+        { color: "#3a4a1e", initial: "M", name: "Murph health record", status: "connected" },
+      ]}
+    />
+  ),
+  "first-personal-health-read": (
+    <PhoneMock
+      channel="Private conversation"
+      messages={[
+        { from: "murph", body: "Your sleep timing has been steadier this week. The useful next step may be keeping the same wake time tomorrow." },
+        { from: "user", body: "That feels manageable." },
+      ]}
+    />
+  ),
+  "reusable-referral-links": (
+    <PreferenceCard
+      label="Your referral link"
+      meta="Reusable"
+      entries={[
+        { label: "One stable link", value: "Ready" },
+        { label: "Reward after activation", value: "Eligibility checked" },
+      ]}
+    />
+  ),
+  "focused-current-research": (
+    <ReasoningSteps
+      label="Focused current research"
+      meta="public scope only"
+      steps={[
+        { label: "Represent the question safely", state: "done" },
+        { label: "Map a usable source", state: "done" },
+        { label: "State limits with the answer", state: "active" },
+      ]}
+    />
+  ),
+  "repeated-experiment-cadence": (
+    <CalendarMock
+      label="Experiment cadence"
+      entries={[
+        { day: "Mon", time: "7:00 AM", what: "Occurrence 1 · complete" },
+        { day: "Wed", time: "7:00 AM", what: "Occurrence 2 · today" },
+        { day: "Fri", time: "7:00 AM", what: "Occurrence 3 · upcoming" },
+      ]}
+    />
+  ),
+  "biomarker-reference-bands": (
+    <ReferenceBandMock
+      highLabel="100 mg/dL"
+      label="Fasting glucose"
+      lowLabel="70 mg/dL"
+      markerLabel="92"
+      markerPosition={62}
+    />
+  ),
+  "interactive-imessage-cards-restored": (
+    <CompactTableMock
+      label="Interactive iMessage card"
+      columns={[
+        { key: "day", label: "Day" },
+        { key: "sleep", label: "Sleep" },
+        { key: "steps", label: "Steps" },
+      ]}
+      rows={[
+        { day: "Mon", sleep: "7h 42m", steps: "9,120" },
+        { day: "Tue", sleep: "7h 18m", steps: "10,404" },
+      ]}
+    />
+  ),
+  "group-room-context-grounding": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "Remember, no one wants a sunrise start." },
+        { from: "user", body: "Plan Saturday?" },
+        { from: "murph", body: "Late-morning walk, then coffee. No sunrise involved." },
+      ]}
+    />
+  ),
+  "billing-access-recovery": (
+    <DialogMock
+      label="Subscription recovery"
+      title="Your plan change is still settling"
+      body="There is no need to start another checkout. Murph will use the confirmed billing result."
+      primary="Check status"
+      secondary="Return to Murph"
+    />
+  ),
+  "cancel-pending-file-delivery": (
+    <ChecklistMock
+      label="Pending file"
+      items={[
+        { label: "Cancel before delivery starts", done: true },
+        { label: "Keep the private source file", done: true },
+        { label: "Recall an entered provider send", done: false },
+      ]}
+    />
+  ),
+  "meal-capture-toggle-ordering": (
+    <PreferenceCard
+      label="Meal capture"
+      meta="Latest choice wins"
+      entries={[
+        { label: "Photo capture", value: "Off" },
+        { label: "Daily closeout", value: "Stopped" },
+      ]}
+    />
+  ),
+  "companion-admission-before-device": (
+    <AppIconCard
+      label="Murph companion"
+      name="Murph"
+      status="Ready before device setup"
+    />
+  ),
+  "turn-local-browser-progress": (
+    <ReasoningSteps
+      label="Current browser task"
+      meta="this turn"
+      steps={[
+        { label: "Open the requested page", state: "done" },
+        { label: "Check the visible details", state: "active" },
+        { label: "Return the result here", state: "pending" },
+      ]}
+    />
+  ),
+  "recovery-readiness-insight": (
+    <MetricCardMock
+      label="Weekly recovery read"
+      title="Fresh source + corroborating signal"
+      value="One adjustment"
+      caption="Reassess before changing more"
+      sparkline={[82, 79, 76, 72, 70, 68, 69]}
+    />
+  ),
+  "health-consent-actions-clarified": (
+    <ChecklistMock
+      label="Health data use"
+      items={[
+        { label: "Review what changes", done: true },
+        { label: "Pause processing", done: false },
+        { label: "Export or delete account", done: false },
+      ]}
+    />
+  ),
+  "first-contact-starts-faster": (
+    <ReasoningSteps
+      label="First contact"
+      meta="faster path"
+      steps={[
+        { label: "Finish activation and consent", state: "done" },
+        { label: "Warm Murph's shell", state: "active" },
+        { label: "Answer the accepted message", state: "pending" },
+      ]}
+    />
+  ),
+  "late-media-origin-continuity": (
+    <div className="mt-5 w-full max-w-[320px]">
+      <ImagePreview
+        alt="A generated image returning to its originating private conversation"
+        caption="Returns to the conversation that requested it"
+      />
+    </div>
+  ),
+  "prepare-next-group": (
+    <CalendarMock
+      label="Next group preparation"
+      entries={[
+        { day: "Now", time: "30 min", what: "Prepared room style and guidance" },
+        { day: "Next", time: "New room", what: "Applies once" },
+      ]}
+    />
+  ),
+  "tracked-compact-table-cards": (
+    <CompactTableMock
+      label="Tracked compact table"
+      columns={[
+        { key: "habit", label: "Habit" },
+        { key: "week", label: "This week" },
+        { key: "status", label: "Status" },
+      ]}
+      rows={[
+        { habit: "Morning walk", week: "4 / 5", status: "On track" },
+        { habit: "Lights out", week: "3 / 5", status: "Building" },
+      ]}
+    />
+  ),
+  "connected-app-authorization-preview": (
+    <DialogMock
+      label="Connected app"
+      title="Continue to authorize"
+      body="You are leaving Murph to approve this connection with the external service."
+      primary="Continue"
+      secondary="Not now"
+    />
+  ),
+  "daily-nutrition-card-delivery": (
+    <CompactTableMock
+      label="Daily nutrition card"
+      columns={[
+        { key: "metric", label: "Metric" },
+        { key: "total", label: "Total" },
+        { key: "goal", label: "Goal" },
+      ]}
+      rows={[
+        { metric: "Protein", total: "92 g", goal: "120 g" },
+        { metric: "Fiber", total: "24 g", goal: "30 g" },
+      ]}
+    />
+  ),
+  "mobile-one-time-contribution": (
+    <PreferenceCard
+      label="One-time contribution"
+      meta="Separate from monthly"
+      entries={[
+        { label: "Add group usage", value: "$10" },
+        { label: "Checkout starts", value: "After continue" },
+      ]}
+    />
+  ),
+  "official-local-alert-health-context": (
+    <MetricCardMock
+      label="Official local alert"
+      title="Outdoor activity context"
+      value="Heat advisory"
+      caption="Location-specific, not a universal threshold"
+      sparkline={[72, 76, 81, 87, 92, 94, 89]}
+    />
+  ),
+  "scheduled-reminder-authority": (
+    <CalendarMock
+      label="Independently approved reminders"
+      entries={[
+        { day: "Tue", time: "8:00 AM", what: "Medication · approved" },
+        { day: "Thu", time: "6:00 PM", what: "Call Dad · review pending" },
+      ]}
+    />
+  ),
+  "onboarding-and-group-activation-recovery": (
+    <ChecklistMock
+      label="Setup recovery"
+      items={[
+        { label: "Recognize completed activation", done: true },
+        { label: "Resume the existing group join", done: true },
+        { label: "Repeat finished setup", done: false },
+      ]}
+    />
+  ),
+  "venice-usage-before-save": (
+    <PreferenceCard
+      label="Model provider"
+      meta="Before save"
+      entries={[
+        { label: "Venice", note: "Can use capacity faster", value: "Selected" },
+        { label: "Managed models", note: "Murph's standard route", value: "Available" },
+      ]}
+    />
+  ),
+  "feedback-starts-with-the-problem": (
+    <PhoneMock
+      channel="Private conversation"
+      messages={[
+        { from: "user", body: "The meal flow is frustrating." },
+        { from: "murph", body: "What happened, and where did it stop you?" },
+      ]}
+    />
+  ),
+  "maintenance-without-global-pause": (
+    <ChecklistMock
+      label="Live storage maintenance"
+      items={[
+        { label: "Ordinary replies stay available", done: true },
+        { label: "Attachments and checkpoints continue", done: true },
+        { label: "Pause everyone by default", done: false },
+      ]}
+    />
+  ),
   "post-onboarding-choice-point": (
     <CalendarMock
       label="One-time follow-up"

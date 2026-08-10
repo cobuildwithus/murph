@@ -378,6 +378,41 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the detached automatic-refill failure exception to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260810050000_relax_detached_automatic_refill_failure";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_purchase"',
+          '  DROP CONSTRAINT "hosted_usage_credit_purchase_active_payer_required",',
+          '  ADD CONSTRAINT "hosted_usage_credit_purchase_active_payer_required"',
+          '    CHECK ("payer_member_id" IS NOT NULL);',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{ migrationId, reason: "DROP TABLE" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits the referral ledger constraint predeploy exception to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
@@ -1605,7 +1640,26 @@ describe("hosted web production migration guard", () => {
       ),
       {
         path: "/api/internal/hosted-execution/product-feedback/digest/cron",
-        schedule: "*/10 * * * *",
+        schedule: "*/10 22,23 * * *",
+      },
+    );
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) =>
+          cron.path === "/api/internal/hosted-growth/usage-referral/cron",
+      ),
+      {
+        path: "/api/internal/hosted-growth/usage-referral/cron",
+        schedule: "* * * * *",
+      },
+    );
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) => cron.path === "/api/internal/hosted-onboarding/stripe/cron",
+      ),
+      {
+        path: "/api/internal/hosted-onboarding/stripe/cron",
+        schedule: "* * * * *",
       },
     );
     assert.deepEqual(

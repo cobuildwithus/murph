@@ -20,14 +20,12 @@ export async function syncHostedLinqLines(
   const syncProviderInventory = !argv.includes("--skip-provider-inventory");
 
   try {
-    await prisma.$transaction(async (tx) => {
-      await syncHostedLinqConfiguredLinesTx({
-        // Rollback compatibility only; weighted assignment does not read this.
-        activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
-        observedAt,
-        phoneNumbers: environment.linqConversationPhoneNumbers,
-        prisma: tx,
-      });
+    await syncHostedLinqConfiguredLinesTx({
+      // Rollback compatibility only; weighted assignment does not read this.
+      activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
+      observedAt,
+      phoneNumbers: environment.linqConversationPhoneNumbers,
+      prisma,
     });
 
     const configuredHints = environment.linqConversationPhoneNumbers

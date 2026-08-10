@@ -305,7 +305,7 @@ describe("automation helpers", () => {
         "schedule:",
         "  kind: cron",
         "  expression: 0 8 * * 1",
-        "  timeZone: UTC",
+        "  timeZone: Invalid/Timezone",
         "route:",
         "  channel: email",
         "  deliverResponse: true",
@@ -324,7 +324,7 @@ describe("automation helpers", () => {
     );
 
     await expect(listAutomations(timeZoneVault)).rejects.toThrow(
-      /schedule\.timeZone is not supported for canonical automation schedules\./u,
+      /schedule\.timeZone must be a valid IANA timezone\./u,
     );
 
     const invalidDeviceSourceVault = await createVaultRoot();

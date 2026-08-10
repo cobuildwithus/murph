@@ -3099,10 +3099,22 @@ describe("parseHostedRuntimeGroupTool", () => {
         usage: {
           fundingNeeded: true,
           fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          includedUsageUsedPercent: 64,
         },
       },
     };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          fundingNeeded: true,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+        },
+      },
+    })).toThrow(/includedUsageUsedPercent/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_usage",
       result: {
@@ -3194,6 +3206,26 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       },
     })).toThrow(/remainingPercent must be at most 100/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          includedUsageUsedPercent: 101,
+        },
+      },
+    })).toThrow(/includedUsageUsedPercent must be at most 100/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          includedUsageUsedPercent: 20.5,
+        },
+      },
+    })).toThrow(/includedUsageUsedPercent/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       ...response,
       result: {
@@ -3755,6 +3787,17 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     })).toEqual({
       action: "start_checkout",
     });
+    expect(parseHostedRuntimeFamilyPlanToolRequest({
+      action: "start_checkout",
+      confirmedTrialConversion: true,
+    })).toEqual({
+      action: "start_checkout",
+      confirmedTrialConversion: true,
+    });
+    expect(() => parseHostedRuntimeFamilyPlanToolRequest({
+      action: "start_checkout",
+      confirmedTrialConversion: false,
+    })).toThrow(/confirmedTrialConversion must be true/u);
 
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "create_invite",
@@ -3846,9 +3889,21 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
           pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
         },
         seats: { active: 3, billed: 4, invited: 1, max: 6, min: 2, remaining: 0, used: 4 },
+        activeTrialConversion: {
+          includedPulseSeats: 2,
+          monthlyAmountUsdCents: 1_400,
+          perSeatMonthlyAmountUsdCents: 700,
+          trialEndsImmediately: true,
+        },
       },
     })).toMatchObject({
       result: {
+        activeTrialConversion: {
+          includedPulseSeats: 2,
+          monthlyAmountUsdCents: 1_400,
+          perSeatMonthlyAmountUsdCents: 700,
+          trialEndsImmediately: true,
+        },
         members: [{ planCode: "pulse" }, { planCode: "edge" }, { planCode: "max" }],
         pendingInvites: [{ planCode: "edge" }],
         plans: {

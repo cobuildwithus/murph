@@ -659,7 +659,7 @@ function resolveActionKind(
 ): CodexActionKind | null {
   const itemType =
     normalized.kind === 'status_item'
-      ? normalized.itemType
+      ? normalizeIdentifier(normalized.itemType)
       : readItemType(rawEvent)
 
   if (itemType === 'command.execution') {
@@ -671,7 +671,7 @@ function resolveActionKind(
   if (itemType === 'file.change') {
     return 'file.change'
   }
-  if (itemType === 'mcp.tool.call' || itemType === 'tool.call') {
+  if (itemType === 'mcp.tool.call') {
     return 'mcp.tool.call'
   }
   if (itemType === 'web.search' || normalized.kind === 'web_search') {

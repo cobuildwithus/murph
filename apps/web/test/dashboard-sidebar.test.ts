@@ -188,14 +188,27 @@ beforeEach(() => {
   mocks.setOpenMobile.mockClear();
 });
 
-test("Sidebar does not render the Overview page as a navigation item", () => {
+test("Sidebar renders Patterns instead of the internal Overview route", () => {
   mocks.usePathname.mockReturnValue("/experiments");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
+  assert.match(markup, /href="\/patterns"/);
+  assert.match(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
+});
+
+test("Sidebar marks Patterns as active on its page", () => {
+  mocks.usePathname.mockReturnValue("/patterns");
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.match(
+    markup,
+    /data-active="true">\s*<a[^>]*href="\/patterns"[^>]*>[\s\S]*Patterns<\/a>/,
+  );
 });
 
 test("Sidebar renders Environment as an active primary destination", () => {

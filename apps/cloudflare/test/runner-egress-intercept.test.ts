@@ -365,7 +365,7 @@ describe("hostedRunnerIntercept", () => {
         revision: 7,
         schema: HOSTED_INFERENCE_RUNTIME_TARGET_SCHEMA,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+        verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
       },
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {

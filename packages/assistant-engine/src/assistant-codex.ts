@@ -101,6 +101,12 @@ import {
   type PendingCodexRpcRequest,
 } from './assistant-codex/app-server-rpc.js'
 import {
+  readCodexNonEmptyString,
+  readCodexRecord,
+  readCodexThreadTokenUsage,
+  type CodexTokenUsageBreakdown,
+} from './assistant-codex/app-server-protocol.js'
+import {
   resolveCodexChildEnv,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
@@ -317,21 +323,20 @@ function prepareCodexRpcParams(
   return stripped
 }
 
-// Modern app-server clients receive compaction lifecycle as contextCompaction
-// items; `thread/compacted` is the legacy fan-out kept for protocol drift
-// tolerance.
+// Codex emits contextCompaction item lifecycle notifications and also retains
+// the canonical deprecated thread/compacted notification. Both exact pinned
+// protocol shapes are accepted; no dotted or alternate envelope aliases are.
 function isCodexContextCompactionStarted(message: CodexRpcMessage): boolean {
-  const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/started' && method !== 'item.started') {
+  if (message.method !== 'item/started') {
     return false
   }
-
-  return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+  return readCodexRecord(readCodexRecord(message.params)?.item)?.type
+    === 'contextCompaction'
 }
 
 function readCodexContextCompactionItemId(message: CodexRpcMessage): string | null {
-  return normalizeNullableString(
-    asCodexString(asCodexRecord(asCodexRecord(message.params)?.item)?.id),
+  return readCodexNonEmptyString(
+    readCodexRecord(readCodexRecord(message.params)?.item)?.id,
   )
 }
 
@@ -339,67 +344,54 @@ function isCodexContextCompactionStartedForThread(
   message: CodexRpcMessage,
   threadId: string,
 ): boolean {
-  if (!isCodexContextCompactionStarted(message)) {
-    return false
-  }
-
-  const messageThreadId = extractCodexThreadIdFromMessage(message)
-  return messageThreadId === null || messageThreadId === threadId
+  return isCodexContextCompactionStarted(message)
+    && extractCodexThreadIdFromMessage(message) === threadId
 }
 
 function isCodexLegacyContextCompactionCompletion(message: CodexRpcMessage): boolean {
-  const method = typeof message.method === 'string' ? message.method : null
-  return method === 'thread/compacted' || method === 'thread.compacted'
+  return message.method === 'thread/compacted'
 }
 
 function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   if (isCodexLegacyContextCompactionCompletion(message)) {
     return true
   }
-  const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/completed' && method !== 'item.completed') {
+  if (message.method !== 'item/completed') {
     return false
   }
-
-  return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+  return readCodexRecord(readCodexRecord(message.params)?.item)?.type
+    === 'contextCompaction'
 }
 
 function isCodexContextCompactionCompletionForThread(
   message: CodexRpcMessage,
   threadId: string,
 ): boolean {
-  if (!isCodexContextCompactionCompletion(message)) {
-    return false
-  }
-
-  const messageThreadId = extractCodexThreadIdFromMessage(message)
-  return messageThreadId === null || messageThreadId === threadId
+  return isCodexContextCompactionCompletion(message)
+    && extractCodexThreadIdFromMessage(message) === threadId
 }
 
 function isCodexThreadTokenUsageUpdatedMethod(method: string | null): boolean {
-  return (
-    method === 'thread/tokenUsage/updated' ||
-    method === 'thread/token_usage/updated' ||
-    method === 'thread.tokenUsage.updated' ||
-    method === 'thread.token.usage.updated' ||
-    method === 'thread.token_usage.updated'
-  )
+  return method === 'thread/tokenUsage/updated'
 }
 
 function readCodexThreadTokenUsageUpdate(message: CodexRpcMessage): {
-  last: Record<string, unknown> | null
-  threadId: string | null
+  last: CodexTokenUsageBreakdown
+  threadId: string
 } | null {
-  const method = typeof message.method === 'string' ? message.method : null
-  if (!isCodexThreadTokenUsageUpdatedMethod(method)) {
+  if (!isCodexThreadTokenUsageUpdatedMethod(readCodexEventMethod(message))) {
     return null
   }
 
-  const params = asCodexRecord(message.params)
-  return {
-    last: asCodexRecord(asCodexRecord(params?.tokenUsage)?.last),
-    threadId: typeof params?.threadId === 'string' ? params.threadId : null,
-  }
+  const params = readCodexRecord(message.params)
+  const threadId = readCodexNonEmptyString(params?.threadId)
+  const tokenUsage = readCodexThreadTokenUsage(params?.tokenUsage)
+  return threadId && tokenUsage
+    ? {
+        last: tokenUsage.last,
+        threadId,
+      }
+    : null
 }
 
 function buildCodexAppServerNotFoundError(codexCommand: string): VaultCliError {
@@ -1847,7 +1839,7 @@ function readCodexSubagentActivity(message: CodexRpcMessage): {
   kind: 'interacted' | 'interrupted' | 'malformed' | 'started'
 } | null {
   const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/completed' && method !== 'item.completed') {
+  if (method !== 'item/completed') {
     return null
   }
   const item = asCodexRecord(asCodexRecord(message.params)?.item)
@@ -2550,7 +2542,7 @@ export interface CodexWarmThreadCompactionUsage {
   cachedInputTokens: number | null
   inputTokens: number
   outputTokens: number | null
-  source: 'estimated' | 'provider'
+  source: 'estimated'
   totalTokens: number
 }
 
@@ -2570,87 +2562,6 @@ function estimateCodexWarmThreadCompactionUsage(
     source: 'estimated',
     totalTokens: threadContextTokensBefore,
   }
-}
-
-function readCodexCompactionCompletionProviderUsage(
-  message: CodexRpcMessage,
-  threadId: string,
-): CodexWarmThreadCompactionUsage | null {
-  if (!isCodexContextCompactionCompletionForThread(message, threadId)) {
-    return null
-  }
-
-  const params = asCodexRecord(message.params)
-  const item = asCodexRecord(params?.item)
-  const candidates = [
-    ...readCodexProviderUsageCandidates(params),
-    ...readCodexProviderUsageCandidates(item),
-  ]
-
-  for (const candidate of candidates) {
-    const usage = readCodexCompactionProviderUsage(candidate)
-    if (usage) {
-      return usage
-    }
-  }
-
-  return null
-}
-
-function readCodexProviderUsageCandidates(
-  value: Record<string, unknown> | null,
-): readonly (Record<string, unknown> | null)[] {
-  if (!value) {
-    return []
-  }
-  const providerUsage = asCodexRecord(value.providerUsage)
-    ?? asCodexRecord(value.provider_usage)
-  return [providerUsage, asCodexRecord(providerUsage?.last)]
-}
-
-function readCodexCompactionProviderUsage(
-  value: Record<string, unknown> | null,
-): CodexWarmThreadCompactionUsage | null {
-  if (!value) {
-    return null
-  }
-
-  const inputTokens = readCodexUsageNumber(value, 'inputTokens', 'input_tokens')
-  const outputTokens = readCodexUsageNumber(value, 'outputTokens', 'output_tokens')
-  const totalTokens = readCodexUsageNumber(value, 'totalTokens', 'total_tokens')
-  if (inputTokens === null || outputTokens === null || totalTokens === null) {
-    return null
-  }
-  if (inputTokens <= 0 || outputTokens < 0 || totalTokens < inputTokens + outputTokens) {
-    return null
-  }
-  const cachedInputTokens = readCodexUsageNumber(
-    value,
-    'cachedInputTokens',
-    'cached_input_tokens',
-  )
-  if (cachedInputTokens !== null && cachedInputTokens > inputTokens) {
-    return null
-  }
-
-  return {
-    cachedInputTokens,
-    inputTokens,
-    outputTokens,
-    source: 'provider',
-    totalTokens,
-  }
-}
-
-function readCodexUsageNumber(
-  value: Record<string, unknown>,
-  camelKey: string,
-  snakeKey: string,
-): number | null {
-  const raw = value[camelKey] ?? value[snakeKey]
-  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
-    ? raw
-    : null
 }
 
 export type CodexWarmThreadCompactionOutcome =
@@ -2753,7 +2664,6 @@ export async function compactWarmCodexThread(input: {
   let compactRequestAccepted = false
   let compactStartedItemId: string | null = null
   let compactCompletionBuffered = false
-  let providerUsage: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let compactionSettleReason: CompactionSettleReason | null = null
   let resolveCompaction!: (reason: CompactionSettleReason) => void
@@ -2835,8 +2745,6 @@ export async function compactWarmCodexThread(input: {
         if (!compactRequestAccepted) {
           return
         }
-        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
-          ?? providerUsage
         settleCompaction('compacted')
         return
       }
@@ -2849,8 +2757,6 @@ export async function compactWarmCodexThread(input: {
         if (compactStartedItemId === null || itemId !== compactStartedItemId) {
           return
         }
-        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
-          ?? providerUsage
         if (compactRequestAccepted) {
           settleCompaction('compacted')
         } else {
@@ -2903,8 +2809,7 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
-        usage: providerUsage
-          ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
+        usage: estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
     }
 
@@ -2940,17 +2845,11 @@ function hashCodexRawString(value: string): string {
 }
 
 function readCodexEventMethod(message: CodexRpcMessage): string | null {
-  return typeof message.method === 'string'
-    ? message.method
-    : typeof message.type === 'string'
-      ? message.type
-      : typeof message.event === 'string'
-        ? message.event
-        : null
+  return typeof message.method === 'string' ? message.method : null
 }
 
 function isCodexTurnStartedMethod(method: string | null): boolean {
-  return method === 'turn/started' || method === 'turn.started'
+  return method === 'turn/started'
 }
 
 function createCodexSubagentTurnUsageKey(input: {
@@ -2961,7 +2860,7 @@ function createCodexSubagentTurnUsageKey(input: {
 }
 
 function isCodexTurnCompletedMethod(method: string | null): boolean {
-  return method === 'turn/completed' || method === 'turn.completed'
+  return method === 'turn/completed'
 }
 
 type CodexTransportDiagnosticSource = {
@@ -3243,6 +3142,7 @@ async function runCodexAppServerTurnOnProcess(
   let codexTimingTurnStartAckElapsedMs: number | null = null
   let codexTimingTurnStartedNotificationElapsedMs: number | null = null
   let codexTimingTurnCompletedNotificationElapsedMs: number | null = null
+  let currentTurnStartedNotificationObserved = false
   let liveInterruptRequested = false
 
   let completeTurn: (() => void) | null = null
@@ -4642,6 +4542,10 @@ async function runCodexAppServerTurnOnProcess(
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
+    if (isTurnStartedNotification) {
+      currentTurnStartedNotificationObserved =
+        turnId !== null && extractCodexTurnIdFromMessage(message) === turnId
+    }
     const shouldCaptureTurnStartedNotification =
       providerRequestStartedAtMs !== null &&
       isTurnStartedNotification &&
@@ -4745,7 +4649,7 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       normalizedEvent.kind !== 'status_item' ||
-      normalizedEvent.itemType !== 'context.compaction'
+      normalizedEvent.itemType !== 'contextCompaction'
     ) {
       input.onTraceEvent?.({
         codexThreadId,
@@ -5077,7 +4981,19 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    if (isReusedWarmProcess && messageTurnId === null) {
+    if (
+      messageTurnId === null &&
+      method === 'model/rerouted' &&
+      !currentTurnStartedNotificationObserved
+    ) {
+      return
+    }
+
+    if (
+      isReusedWarmProcess &&
+      messageTurnId === null &&
+      method !== 'model/rerouted'
+    ) {
       return
     }
 
@@ -5335,7 +5251,6 @@ async function runCodexAppServerTurnOnProcess(
     acceptTurnStartResultTurnId(extractCodexTurnIdFromResult(turnResult))
     lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
-    registerLiveTurn()
 
     lifecycleStage = 'turn_running'
     await turnCompleted
@@ -5982,21 +5897,17 @@ function extractCodexProviderActionKey(
   normalizedEvent: CodexNormalizedEvent,
   rawEvent: CodexRpcMessage,
 ): string | null {
+  if (isCodexProductFeedbackDynamicToolEvent(rawEvent)) {
+    return null
+  }
   if (normalizedEvent.kind === 'status_item') {
     if (
-      normalizedEvent.itemType !== 'command.execution' &&
-      normalizedEvent.itemType !== 'dynamic.tool.call' &&
-      normalizedEvent.itemType !== 'file.change'
+      normalizedEvent.itemType !== 'commandExecution' &&
+      normalizedEvent.itemType !== 'dynamicToolCall' &&
+      normalizedEvent.itemType !== 'fileChange'
     ) {
       return null
     }
-    if (
-      normalizedEvent.itemType === 'dynamic.tool.call' &&
-      isCodexProductFeedbackDynamicToolEvent(rawEvent)
-    ) {
-      return null
-    }
-
     return (
       normalizedEvent.itemId ??
       providerActionFallbackKeyFromNormalized(normalizedEvent)
@@ -6019,19 +5930,11 @@ function extractCodexProviderActionKey(
 function isCodexProductFeedbackDynamicToolEvent(
   event: CodexRpcMessage,
 ): boolean {
-  const params = readCodexRecordField(event, 'params')
-  const data = readCodexRecordField(event, 'data')
-  const item =
-    readCodexRecordField(event, 'item') ??
-    readCodexRecordField(params, 'item') ??
-    readCodexRecordField(data, 'item')
-  const itemType = readCodexStringField(item, 'type')
-    ?.replaceAll(/[._-]/gu, '')
-    .toLowerCase()
+  const item = readCodexRecord(readCodexRecord(event.params)?.item)
   return (
-    itemType === 'dynamictoolcall' &&
-    readCodexStringField(item, 'namespace') === 'murph' &&
-    readCodexStringField(item, 'tool') === 'submit_product_feedback'
+    item?.type === 'dynamicToolCall' &&
+    item.namespace === 'murph' &&
+    item.tool === 'submit_product_feedback'
   )
 }
 

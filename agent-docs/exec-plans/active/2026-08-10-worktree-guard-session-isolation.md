@@ -56,7 +56,11 @@ Updated: 2026-08-10
   repo-tools typechecking, dependency policy, and 519 of 520 repo-tools tests.
   Its unrelated signal-forwarding timing test then passed directly in
   isolation. The complete serialized rerun passed all 520 tests and every
-  preceding check.
+  preceding check. After merging current `origin/main`, the focused 27-test
+  suite and the complete serialized 520-test diff suite passed again.
+- The current-main merge had one documentation conflict. Its resolution keeps
+  the upstream changelog and shared-guard requirements together with this
+  change's scoped rollout and downgrade guarantees; no code conflict occurred.
 - With the live unrelated raw review checkout still registered, the repaired
   guard passed for this authorized checkout while its no-argument global audit
   and a raw-checkout-scoped audit both failed as designed. The obsolete marker

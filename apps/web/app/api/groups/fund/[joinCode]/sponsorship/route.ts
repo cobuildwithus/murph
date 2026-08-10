@@ -13,6 +13,7 @@ import {
 } from "@/src/lib/hosted-groups/group-sponsorship-authorization";
 import {
   normalizeHostedGroupUsageFundingLocator,
+  readHostedGroupUsageFundingManagementTargetByLocator,
   readHostedGroupUsageFundingTargetByLocator,
 } from "@/src/lib/hosted-groups/group-usage-funding";
 import {
@@ -29,7 +30,6 @@ export const POST = withJsonError(async (
 ) => {
   assertHostedOnboardingMutationOrigin(request);
   const auth = await requireHostedAppSessionFromRequest(request);
-  assertHostedMemberNotSuspended(auth.member);
   const [body, rawJoinCode] = await Promise.all([
     readHostedOnboardingJsonObject(request, {
       limitBytes: BODY_LIMIT_BYTES,
@@ -38,15 +38,24 @@ export const POST = withJsonError(async (
     }),
     resolveDecodedRouteParam(context.params, "joinCode"),
   ]);
+  const action = parseHostedGroupSponsorshipManagementAction(body);
   const locator = normalizeHostedGroupUsageFundingLocator(rawJoinCode);
   const prisma = getPrisma();
+  const cancellationOnly = action.action === "cancel";
+  if (!cancellationOnly) {
+    assertHostedMemberNotSuspended(auth.member);
+  }
   const target = locator
-    ? await readHostedGroupUsageFundingTargetByLocator({ locator, prisma })
+    ? cancellationOnly
+      ? await readHostedGroupUsageFundingManagementTargetByLocator({
+          locator,
+          prisma,
+        })
+      : await readHostedGroupUsageFundingTargetByLocator({ locator, prisma })
     : null;
   if (!target) {
     return jsonOk({ management: null });
   }
-  const action = parseHostedGroupSponsorshipManagementAction(body);
   if (action.action === "recover") {
     const checkout =
       await recoverHostedGroupSponsorshipUsageCreditCheckout({

@@ -7,6 +7,7 @@ import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
+  calculateHostedGroupIncludedUsageUsedPercent,
   classifyHostedGroupUsageCapacity,
 } from "./group-usage-capacity";
 import {
@@ -57,6 +58,8 @@ export interface HostedGroupFundingRecoveryStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
+  /** Whole-number share of the room's included usage consumed this period. */
+  includedUsageUsedPercent: number;
 }
 
 // Accepts the full funding-locator namespace: an owner-created join code or
@@ -151,6 +154,12 @@ export async function readHostedGroupFundingRecoveryStatus(input: {
     return null;
   }
 
+  const includedUsageUsedPercent =
+    calculateHostedGroupIncludedUsageUsedPercent({
+      limitUsdMicros: decision.limitUsdMicros,
+      spentUsdMicros: decision.spentUsdMicros,
+    });
+
   const capacityState = classifyHostedGroupUsageCapacity({
     limitUsdMicros: decision.limitUsdMicros,
     remainingUsdMicros: decision.remainingUsdMicros,
@@ -177,6 +186,7 @@ export async function readHostedGroupFundingRecoveryStatus(input: {
     fundingUrl: locator
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
       : null,
+    includedUsageUsedPercent,
   };
 }
 
@@ -213,6 +223,58 @@ export async function readHostedGroupUsageFundingTargetByLocator(input: {
     return null;
   }
 
+  return {
+    displayName: normalizeNullableString(group?.displayName ?? null),
+    fundingPath: buildHostedGroupUsageFundingPath(input.locator),
+    joinCode: input.locator,
+    kind: group?.kind ?? "custom",
+    runtimeMemberId,
+  };
+}
+
+// Resolves only the identifier needed to manage an existing sponsorship. It
+// deliberately does not grant funding authority: callers must bind the target
+// to the authenticated payer's exact sponsorship authorization before showing
+// data or accepting a mutation. Keeping this resolver independent of runtime
+// access lets a payer cancel after the beneficiary becomes inactive.
+export async function readHostedGroupUsageFundingManagementTargetByLocator(input: {
+  locator: string;
+  prisma?: PrismaClient;
+}): Promise<HostedGroupUsageFundingTarget | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const joinCode = normalizeHostedGroupUsageJoinCode(input.locator);
+  if (joinCode) {
+    const group = await prisma.hostedGroup.findUnique({
+      select: {
+        displayName: true,
+        joinCode: true,
+        kind: true,
+        runtimeMemberId: true,
+      },
+      where: { joinCode },
+    });
+    if (!group?.joinCode || !group.runtimeMemberId) {
+      return null;
+    }
+    return {
+      displayName: normalizeNullableString(group.displayName),
+      fundingPath: buildHostedGroupUsageFundingPath(group.joinCode),
+      joinCode: group.joinCode,
+      kind: group.kind,
+      runtimeMemberId: group.runtimeMemberId,
+    };
+  }
+
+  const runtimeMemberId = readHostedGroupUsageFundingLocatorRuntimeMemberId(
+    input.locator,
+  );
+  if (!runtimeMemberId) {
+    return null;
+  }
+  const group = await prisma.hostedGroup.findUnique({
+    select: { displayName: true, kind: true },
+    where: { runtimeMemberId },
+  });
   return {
     displayName: normalizeNullableString(group?.displayName ?? null),
     fundingPath: buildHostedGroupUsageFundingPath(input.locator),
