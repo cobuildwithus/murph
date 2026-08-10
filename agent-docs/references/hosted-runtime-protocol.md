@@ -505,9 +505,10 @@ reply after its deadline.
 If a `system_mailbox` invocation owns the active fence when foreground/default
 work arrives, the runner uses the same exact-child abort and identity-cleared
 replacement path. It must start a default-mode child rather than coalescing the
-wake because system-mailbox mode imports only system work and returns before
-assistant admission. A system-mailbox request behind an active default runtime
-remains deferred and cannot broaden that child's admission authority.
+wake because system-mailbox mode imports system work, may run one bounded
+model-free deterministic item, and returns before assistant admission. A
+system-mailbox request behind an active default runtime remains deferred and
+cannot broaden that child's admission authority.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -1776,9 +1777,10 @@ caller sends its existing ensure-processing HTTP timeout as an internal header.
 An expected managed AI usage denial observed by the workspace read is not a
 transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
-`system_mailbox` path, which imports eligible model-free system work and exits
-before foreground assistant admission. It binds that effective processing mode
-into the same fence so controller priority, preemption, and the container job
+`system_mailbox` path, which imports system work, may run one bounded
+model-free deterministic item, and exits before foreground assistant admission.
+It binds that effective processing mode into the same fence so controller
+priority, preemption, and the container job
 cannot diverge; the fence also rejects all metered provider egress if the runtime
 reaches one unexpectedly. Explicit media
 retention remains model-free, and custom inference keeps its selected route.

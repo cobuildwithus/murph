@@ -71,6 +71,7 @@ export type HostedSystemMailboxCheckpointPreparation =
       errorMessage: string | null;
       itemId: string;
       nextWakeAt: string;
+      nextWakeReason: string | null;
       status: "retryable_failed";
     }
   | {
@@ -334,6 +335,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   }
 
   try {
+    if (shouldPreemptHostedDeviceSyncSystemMailboxItem(input, prepared)) {
+      return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        prepared,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     const metrics = await executePendingHostedSystemMailboxItem({
       executionContext: input.executionContext ?? null,
       operatorHomeRoot: input.operatorHomeRoot ?? undefined,
@@ -344,6 +351,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
+    if (shouldPreemptHostedDeviceSyncSystemMailboxItem(input, prepared)) {
+      return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        prepared,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
     if (postCheckpointRecord) {
       const processedItem: HostedSystemMailboxPendingItem = {
@@ -378,22 +391,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       isHostedAssistantAskCompletionPreemptedError(error)
       && input.shouldYieldBackgroundMaintenance?.() === true
     ) {
-      const retainedItem: HostedSystemMailboxPendingItem = {
-        ...prepared,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        nextAttemptAt: null,
-        status: "pending",
-      };
-      await retainHostedSystemMailboxItemAfterForegroundPreemption({
-        item: retainedItem,
+      return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        prepared,
         vaultRoot: input.vaultRoot,
       });
-      return {
-        item: retainedItem,
-        itemId: prepared.itemId,
-        status: "preempted",
-      };
     }
     const normalized = normalizeHostedSystemMailboxError(error);
     const nextWakeAt = new Date(Date.parse(startedAt) + 60_000).toISOString();
@@ -412,9 +413,48 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       errorMessage: normalized.message,
       itemId: prepared.itemId,
       nextWakeAt,
+      nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(prepared),
       status: "retryable_failed",
     };
   }
+}
+
+function resolveHostedSystemMailboxPreparedItemRetryWakeReason(
+  item: HostedSystemMailboxPendingItem,
+): string | null {
+  return item.routeAction === "run-device-sync-wake"
+    ? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+    : null;
+}
+
+function shouldPreemptHostedDeviceSyncSystemMailboxItem(
+  input: { shouldYieldBackgroundMaintenance?: (() => boolean) | null },
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.routeAction === "run-device-sync-wake"
+    && input.shouldYieldBackgroundMaintenance?.() === true;
+}
+
+async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(input: {
+  prepared: HostedSystemMailboxPendingItem;
+  vaultRoot: string;
+}): Promise<Extract<HostedSystemMailboxCheckpointPreparation, { status: "preempted" }>> {
+  const retainedItem: HostedSystemMailboxPendingItem = {
+    ...input.prepared,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    nextAttemptAt: null,
+    status: "pending",
+  };
+  await retainHostedSystemMailboxItemAfterForegroundPreemption({
+    item: retainedItem,
+    vaultRoot: input.vaultRoot,
+  });
+  return {
+    item: retainedItem,
+    itemId: input.prepared.itemId,
+    status: "preempted",
+  };
 }
 
 function hostedSystemMailboxTimestampPrecedes(
@@ -481,9 +521,13 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   recorded: number;
 }> {
   if (!input.item.postCheckpointRecord) {
+    const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({
+      vaultRoot: input.vaultRoot,
+    });
     return {
       failed: 0,
-      nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
+      nextWakeAt: nextWake.at,
+      ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       recorded: 0,
     };
   }
@@ -509,9 +553,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     return {
       failed: 0,
       nextWakeAt: nextWake.at,
-      ...(nextWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
-        ? { nextWakeReason: nextWake.reason }
-        : {}),
+      ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       recorded: recordResult.recorded,
     };
   } catch (error) {
@@ -530,6 +572,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     return {
       failed: 1,
       nextWakeAt,
+      nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
       recorded: 0,
     };
   }
