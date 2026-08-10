@@ -138,6 +138,11 @@ function-state matrix and verification ledger. The accepted defects are:
   returns the original error for rethrow after commit; the regression records
   both the marker-creation and cleanup transactions as committed. The complete
   Family suite passes 190/190 after this hardening.
+- The same parent lock audit found that start-paid revalidated suspension and
+  Stripe references but omitted the member billing status. The mutation
+  authority now includes the exact pre-lock status, so cancellation or another
+  inactive transition that wins the lock prevents a stale Stripe trial update.
+  Combined Family and start-paid proof passes 256/256.
 - Design catalog evidence (desktop and mobile) was captured and inspected for
   Family management, enabled sponsorship cancellation, cancellation failure,
   Portal failure inside its confirmation dialog, and the signed-out

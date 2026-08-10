@@ -370,6 +370,7 @@ async function transitionHostedPulseTrialPaidPlan<
     });
   }
   const mutationAuthority: HostedPulseTrialStartPaidMutationAuthority = {
+    billingStatus: member.billingStatus,
     currentBillingPhase: billingRef?.currentBillingPhase ?? null,
     currentBillingPlanCode: billingRef?.currentBillingPlanCode ?? null,
     currentCheckoutOffer: billingRef?.currentCheckoutOffer ?? null,
@@ -1006,6 +1007,7 @@ async function maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult<
 }
 
 interface HostedPulseTrialStartPaidMutationAuthority {
+  billingStatus: HostedBillingStatus;
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
   currentCheckoutOffer: string | null;
@@ -1027,6 +1029,7 @@ async function assertHostedPulseTrialStartPaidMutationAuthorityTx(input: {
   if (
     !member
     || member.suspendedAt
+    || member.billingStatus !== input.authority.billingStatus
     || (billingRef?.currentBillingPhase ?? null)
       !== input.authority.currentBillingPhase
     || (billingRef?.currentBillingPlanCode ?? null)
