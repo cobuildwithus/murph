@@ -22,6 +22,11 @@
       "import": "./dist/biomarker-entity-mappings.js",
       "default": "./dist/biomarker-entity-mappings.js"
     },
+    "./biomarker-fallback-ranges": {
+      "types": "./dist/biomarker-fallback-ranges.d.ts",
+      "import": "./dist/biomarker-fallback-ranges.js",
+      "default": "./dist/biomarker-fallback-ranges.js"
+    },
     "./generated/*": "./generated/*"
   },
   "files": [
