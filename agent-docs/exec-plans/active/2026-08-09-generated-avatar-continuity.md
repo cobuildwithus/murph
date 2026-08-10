@@ -103,15 +103,16 @@ Updated: 2026-08-09
 - Focused Assistant Engine verification passed: seven affected Vitest files,
   286 tests total; the affected-package typecheck passed; the package and its
   dependency build graph passed.
-- Exact local App Server capture used the branch base `7816f428d42`, pinned
-  `gpt-5.6-terra`, low reasoning, production code mode, identical synthetic
-  direct/group Linq inputs, and `gpt-tokenizer` 3.4.0 `o200k_harmony`. It counted
-  `include`, `input`, `parallel_tool_calls`, `text`, and `tool_choice` after
-  normalizing paths and unstable ids. Direct moved from 29,487 tokens / 134,867
-  bytes to 29,519 / 135,038 (+32 tokens, +0.1085%; +171 bytes, +0.1268%). Group
-  moved from 26,378 / 121,458 to 26,410 / 121,629 (+32 tokens, +0.1213%; +171
-  bytes, +0.1408%). Assembled authored instructions were byte- and token-identical;
-  the complete delta is deferred/eager tool description and generated guidance.
+- Exact local App Server capture used base `dbfa6ae12921` and head
+  `5623879ce655`, pinned `gpt-5.6-terra`, low reasoning, production code mode,
+  identical synthetic direct/group Linq inputs, and `gpt-tokenizer` 3.4.0
+  `o200k_harmony`. It counted `include`, `input`, `instructions`,
+  `parallel_tool_calls`, `text`, `tool_choice`, and `tools` after normalizing
+  paths and unstable ids. Direct moved from 38,177 tokens / 173,190 bytes to
+  38,209 / 173,361 (+32 tokens, +0.0838%; +171 bytes, +0.0987%). Group moved
+  from 30,067 / 139,329 to 30,099 / 139,500 (+32 tokens, +0.1064%; +171 bytes,
+  +0.1227%). Assembled authored instructions were byte- and token-identical; the
+  complete delta is deferred/eager tool description and generated guidance.
 - Durable-doc drift and whitespace checks passed. Exact-head privacy/static
   scans, CI, preliminary specialist ReviewGPT, and final ReviewGPT remain in the
   PR gate.
