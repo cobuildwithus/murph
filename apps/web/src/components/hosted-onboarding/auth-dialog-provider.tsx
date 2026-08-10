@@ -44,6 +44,7 @@ const INTEGRATIONS_CONNECT_PATH_PATTERN =
 const SETTINGS_DATA_PRIVACY_PATH = "/settings/data-privacy";
 const SETTINGS_PATH = "/settings";
 const ENVIRONMENT_PATH = "/environment";
+const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 
 interface AuthContextValue {
   authenticated: boolean;
@@ -140,6 +141,29 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPlanChangeUrl(payload)
     || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
+    || shouldResumeCurrentSettingsUsageCreditReturnUrl(payload)
+  );
+}
+
+function shouldResumeCurrentSettingsUsageCreditReturnUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const checkoutValues = params.getAll("usageCheckout");
+  const purchaseValues = params.getAll("usagePurchase");
+  return (
+    checkoutValues.length === 1
+    && (checkoutValues[0] === "success" || checkoutValues[0] === "cancel")
+    && purchaseValues.length === 1
+    && HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN.test(purchaseValues[0] ?? "")
   );
 }
 

@@ -644,7 +644,12 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
   test.each([
     ["customer mismatch", makeSubscription({ customer: "cus_other" }), "HOSTED_BILLING_STRIPE_CUSTOMER_MISMATCH"],
     ["past due", makeSubscription({ status: "past_due" }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
+    ["scheduled cancellation", makeSubscription({ cancelAt: 1_778_025_600 }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["cancel at period end", makeSubscription({ cancelAtPeriodEnd: true }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
+    ["manual invoice collection", makeSubscription({ collectionMethod: "send_invoice" }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
+    ["paused collection", makeSubscription({
+      pauseCollection: { behavior: "void", resumes_at: null },
+    }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["pending update", makeSubscription({ pendingUpdate: true }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["unknown item", makeSubscription({ items: ["price_edge_recurring", "price_unknown"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
     ["metered item", makeSubscription({ items: ["price_edge_recurring", "price_unknown_usage"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
@@ -975,12 +980,15 @@ describe("hosted Pulse switch schedule pending-field helpers", () => {
 });
 
 function makeSubscription(input?: {
+  cancelAt?: number | null;
   cancelAtPeriodEnd?: boolean;
+  collectionMethod?: Stripe.Subscription["collection_method"];
   currentPeriodEnd?: number;
   customer?: string;
   defaultPaymentMethod?: string | null;
   items?: string[];
   pendingUpdate?: boolean;
+  pauseCollection?: Stripe.Subscription["pause_collection"];
   schedule?: string | null;
   status?: Stripe.Subscription.Status;
 }): Stripe.Subscription {
@@ -988,7 +996,9 @@ function makeSubscription(input?: {
 
   // @ts-expect-error - the synthetic fixture only includes the Stripe fields exercised here.
   return {
+    cancel_at: input?.cancelAt ?? null,
     cancel_at_period_end: input?.cancelAtPeriodEnd === true,
+    collection_method: input?.collectionMethod ?? "charge_automatically",
     current_period_end: input?.currentPeriodEnd ?? 1_778_068_800,
     customer: input?.customer ?? "cus_123",
     default_payment_method:
@@ -1009,6 +1019,7 @@ function makeSubscription(input?: {
     },
     object: "subscription",
     pending_update: input?.pendingUpdate ? {} : null,
+    pause_collection: input?.pauseCollection ?? null,
     schedule: input?.schedule ?? null,
     status: input?.status ?? "active",
   } as Stripe.Subscription;
