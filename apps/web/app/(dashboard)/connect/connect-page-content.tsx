@@ -29,6 +29,7 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI } from "./apple-health-relay-connect-sources";
 import { ConnectSourcesGrid } from "./connect-page-client";
+import { MOBVOI_HEALTH_CONNECT_SOURCE } from "./health-connect-relay-connect-sources";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 import type {
   ConnectCallbackInput,
@@ -78,13 +79,10 @@ type ConnectSourceDisconnectScope = NonNullable<
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
-const MURPH_ANDROID_PLAY_STORE_URL =
-  "https://play.google.com/store/apps/details?id=ai.withmurph.app";
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>([
   "apple-health",
   "coros",
   "huawei-health",
-  "mobvoi-health",
   "ringconn",
   "suunto",
   "xiaomi-mi-fitness",
@@ -101,16 +99,6 @@ const CONNECT_SOURCE_UI = {
     unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
   },
   ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
-  "mobvoi-health": {
-    description: "TicWatch activity and health data.",
-    logo: logoAsset("mobvoi-health.png", "size-11 rounded-full object-contain"),
-    name: "Mobvoi / TicWatch",
-    unavailableActionAriaLabel: "Download the Murph Android app",
-    unavailableActionLabel: "Get Murph for Android",
-    unavailableActionUrl: MURPH_ANDROID_PLAY_STORE_URL,
-    unavailableMessage:
-      "Share from Mobvoi Health to Health Connect, or use Google Fit as a bridge. Finish in Murph on Android.",
-  },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
     logo: logoAsset(
@@ -328,7 +316,11 @@ const CONNECT_SOURCE_UI = {
   },
 } satisfies Record<string, ConnectSourceUi>;
 
-const CONNECT_SOURCES: readonly ConnectSource[] = listVisibleConnectSources();
+const CONNECTION_SOURCES: readonly ConnectSource[] = listVisibleDeviceConnectSources();
+const CONNECT_SOURCES: readonly ConnectSource[] = [
+  ...CONNECTION_SOURCES,
+  MOBVOI_HEALTH_CONNECT_SOURCE,
+];
 
 export default async function ConnectPage({
   searchParams,
@@ -374,7 +366,7 @@ export default async function ConnectPage({
         member: auth.authenticatedMember,
       });
       for (const connection of resolveConnectSourceConnectionStates(
-        CONNECT_SOURCES,
+        CONNECTION_SOURCES,
         response.sources,
       )) {
         const sourceId = connection.sourceId;
@@ -468,6 +460,13 @@ export default async function ConnectPage({
 }
 
 export function listVisibleConnectSources(): ConnectSource[] {
+  return [
+    ...listVisibleDeviceConnectSources(),
+    MOBVOI_HEALTH_CONNECT_SOURCE,
+  ];
+}
+
+function listVisibleDeviceConnectSources(): ConnectSource[] {
   return DEVICE_CONNECT_SOURCES.flatMap((source) => {
     if (!isVisibleConnectSource(source)) {
       return [];
@@ -490,9 +489,6 @@ export function listVisibleConnectSources(): ConnectSource[] {
             ...(ui.setupGuideId ? { setupGuideId: ui.setupGuideId } : {}),
             ...(ui.unavailableActionLabel
               ? { unavailableActionLabel: ui.unavailableActionLabel }
-              : {}),
-            ...(ui.unavailableActionAriaLabel
-              ? { unavailableActionAriaLabel: ui.unavailableActionAriaLabel }
               : {}),
             ...(ui.unavailableActionUrl
               ? { unavailableActionUrl: ui.unavailableActionUrl }

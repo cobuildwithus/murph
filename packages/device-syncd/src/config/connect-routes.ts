@@ -266,15 +266,6 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
     ],
   },
   {
-    connectSourceId: "mobvoi-health",
-    label: "Mobvoi / TicWatch",
-    routes: [
-      unavailableRoute(
-        "Supported Mobvoi and TicWatch data can share directly with Health Connect when the installed Mobvoi Health version offers it, with Google Fit as a fallback before connecting the Murph Android app.",
-      ),
-    ],
-  },
-  {
     connectSourceId: "health-connect",
     label: "Health Connect",
     routes: [unavailableRoute("Health Connect is a mobile/local device flow, not hosted Junction Link.")],

@@ -10,6 +10,7 @@ import {
   APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
   listAppleHealthRelayConnectSources,
 } from "@/app/(dashboard)/connect/apple-health-relay-connect-sources";
+import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
@@ -25,25 +26,6 @@ const ZEPP_CONNECT_SOURCE: ConnectSource = {
   ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI.zepp,
 };
 
-const MOBVOI_CONNECT_SOURCE: ConnectSource = {
-  connectionStatusMeaningful: false,
-  description: "TicWatch activity and health data.",
-  id: "mobvoi-health",
-  logo: {
-    className: "size-11 rounded-full object-contain",
-    height: 44,
-    src: "/brand-logos/connect/mobvoi-health.png",
-    width: 44,
-  },
-  name: "Mobvoi / TicWatch",
-  unavailableActionAriaLabel: "Download the Murph Android app",
-  unavailableActionLabel: "Get Murph for Android",
-  unavailableActionUrl:
-    "https://play.google.com/store/apps/details?id=ai.withmurph.app",
-  unavailableMessage:
-    "Share from Mobvoi Health to Health Connect, or use Google Fit as a bridge. Finish in Murph on Android.",
-};
-
 const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
     authenticated: true,
@@ -53,7 +35,7 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
     authenticated: true,
     errorMessage: null,
-    source: MOBVOI_CONNECT_SOURCE,
+    source: MOBVOI_HEALTH_CONNECT_SOURCE,
   },
   {
     authenticated: true,

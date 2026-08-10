@@ -30,7 +30,6 @@ export type ConnectSource = {
   requiresVitalDisclosure?: boolean;
   setupGuideActionLabel?: string;
   setupGuideId?: ConnectSourceSetupGuideId;
-  unavailableActionAriaLabel?: string;
   unavailableActionLabel?: string;
   unavailableActionUrl?: string;
   unavailableMessage?: string;

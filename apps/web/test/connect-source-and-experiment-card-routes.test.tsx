@@ -78,24 +78,30 @@ test("listVisibleConnectSources covers every hosted-visible device source with U
     "apple-health",
     "coros",
     "huawei-health",
-    "mobvoi-health",
     "ringconn",
     "suunto",
     "xiaomi-mi-fitness",
     "zepp",
   ]);
-  const expectedVisibleSourceIds = DEVICE_CONNECT_SOURCES
+  const expectedVisibleSourceIds = [
+    ...DEVICE_CONNECT_SOURCES
     .filter((source) =>
       displayOnlySourceIds.has(source.connectSourceId)
       || source.routes.some((route) => route.kind === "direct" || route.kind === "junction_link"),
     )
-    .map((source) => source.connectSourceId)
+    .map((source) => source.connectSourceId),
+    "mobvoi-health",
+  ]
     .sort();
 
   const actualVisibleSources = listVisibleConnectSources();
   const actualVisibleSourceIds = actualVisibleSources.map((source) => source.id).sort();
 
   assert.deepEqual(actualVisibleSourceIds, expectedVisibleSourceIds);
+  const connectionSourceIds = new Set<string>(
+    DEVICE_CONNECT_SOURCES.map((source) => source.connectSourceId),
+  );
+  assert.equal(connectionSourceIds.has("mobvoi-health"), false);
 
   const sourceIdsWithMissingUi = actualVisibleSources
     .filter((source) => !source.name || !source.description || !source.logo.src)
