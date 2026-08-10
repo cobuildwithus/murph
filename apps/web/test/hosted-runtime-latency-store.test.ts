@@ -1713,7 +1713,7 @@ describe("hosted runtime latency dashboard store", () => {
       mutationRoundTrips: 1,
     });
     expect(prisma.readSetBasedMutationValues()[0]?.slice(-assistantInputIds.length))
-      .toEqual(assistantInputIds);
+      .toEqual([...assistantInputIds].sort());
     expect(prisma.readSetBasedMutationSql()[0]).toContain("TIMESTAMP 'epoch'");
     expect(prisma.readSetBasedMutationSql()[0]).not.toContain("::timestamptz");
     expect(prisma.readSetBasedMutationValues()[0]?.[3]).toBe(
@@ -1744,9 +1744,11 @@ describe("hosted runtime latency dashboard store", () => {
       mutationRoundTrips: 1,
     });
     expect(prisma.readSetBasedMutationValues()[1]?.slice(-assistantInputIds.length))
-      .toEqual(assistantInputIds);
+      .toEqual([...assistantInputIds].sort());
     for (const sql of mutationSql) {
       expect(sql.match(/UPDATE hosted_ingress_latency_trace AS trace/gu)).toHaveLength(1);
+      expect(sql).toContain("statement_timestamp() AT TIME ZONE 'UTC'");
+      expect(sql).not.toContain("CURRENT_TIMESTAMP");
       expect(sql).not.toContain("FOR UPDATE");
     }
     expect(prisma.readTransactionCallCount()).toBe(0);
@@ -2756,7 +2758,7 @@ function applyHostedIngressProviderStartedSetBasedMutation(
   const schemaVersion = readNullableSqlNumber(values[5], "provider phase schema version");
   const preProvider = readNullableSqlJsonRecord(values[6], "provider preProvider phase");
   const provider = readNullableSqlJsonRecord(values[7], "provider phase");
-  const assistantInputIds = values.slice(8).map((value) =>
+  const assistantInputIds = values.slice(9).map((value) =>
     readSqlString(value, "provider assistant input id")
   );
 
@@ -2832,7 +2834,7 @@ function applyHostedIngressAssistantMilestoneSetBasedMutation(
     values[8],
     "assistant milestone terminal projection",
   );
-  const assistantInputIds = values.slice(9).map((value) =>
+  const assistantInputIds = values.slice(10).map((value) =>
     readSqlString(value, "assistant milestone assistant input id")
   );
 

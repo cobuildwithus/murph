@@ -3,6 +3,9 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import {
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
@@ -87,6 +90,19 @@ const HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT = 100_000;
 const HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS = 5 * 60_000;
 const HOSTED_ASSISTANT_TURN_TIMING_SCHEMA = "murph.assistant-turn-timing.v1";
 const HOSTED_ASSISTANT_TURN_TIMING_TYPE = "assistant.turn.timing";
+const HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON = JSON.stringify(
+  Object.fromEntries(
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS.map((phase) => [
+      phase,
+      Object.fromEntries(
+        HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS[phase].map((leafKey) => [
+          leafKey,
+          readHostedIngressLatencyPhaseLeafRule(phase, leafKey),
+        ]),
+      ),
+    ]),
+  ),
+);
 
 export interface HostedIngressLatencyWriteResult {
   matchedCount: number;
@@ -371,7 +387,7 @@ export async function recordHostedIngressProviderStarted(input: {
     ...new Set(input.assistantInputIds.map((id) =>
       requireSafeLatencyIdentifier(id, "Hosted ingress latency assistantInputId")
     )),
-  ];
+  ].sort();
   const providerRequestOrdinal = normalizeProviderRequestOrdinal(input.providerRequestOrdinal);
   const runtimeAttemptId = normalizeNullableLatencyIdentifier(input.runtimeAttemptId);
 
@@ -384,10 +400,28 @@ export async function recordHostedIngressProviderStarted(input: {
 
   const phasePatch = readHostedIngressLatencyProviderPhasePatch(input.phaseBreakdown);
   const requestedIds = buildHostedIngressLatencyRequestedIdsSql(assistantInputIds);
-  const nextPhaseBreakdown = buildHostedIngressProviderPhaseBreakdownSql({
-    hasPreProvider: phasePatch?.preProviderJson !== null && phasePatch?.preProviderJson !== undefined,
-    hasProvider: phasePatch?.providerJson !== null && phasePatch?.providerJson !== undefined,
-  });
+  const nextProviderStartAt = Prisma.sql`CASE
+    WHEN trace.provider_start_at IS NULL
+      OR trace.provider_start_at > input.provider_start_at
+    THEN input.provider_start_at
+    ELSE trace.provider_start_at
+  END`;
+  const nextProviderRequestOrdinal = Prisma.sql`CASE
+    WHEN trace.provider_start_at IS NULL
+      OR trace.provider_start_at > input.provider_start_at
+    THEN input.provider_request_ordinal
+    ELSE trace.provider_request_ordinal
+  END`;
+  const nextRuntimeAttemptId = Prisma.sql`COALESCE(
+    trace.runtime_attempt_id,
+    input.runtime_attempt_id
+  )`;
+  const nextPhaseBreakdown = phasePatch
+    ? buildHostedIngressProviderPhaseBreakdownSql({
+        hasPreProvider: phasePatch.preProviderJson !== null,
+        hasProvider: phasePatch.providerJson !== null,
+      })
+    : Prisma.sql`trace.phase_breakdown_json`;
   const rows = await prisma.$queryRaw<HostedIngressLatencySetWriteProjectionRow[]>(Prisma.sql`
     /* hosted_ingress_provider_started_set_based */
     WITH input AS (
@@ -402,7 +436,8 @@ export async function recordHostedIngressProviderStarted(input: {
         ${providerRequestOrdinal}::integer AS provider_request_ordinal,
         ${phasePatch?.schemaVersion ?? null}::integer AS phase_schema_version,
         ${phasePatch?.preProviderJson ?? null}::jsonb AS pre_provider_json,
-        ${phasePatch?.providerJson ?? null}::jsonb AS provider_json
+        ${phasePatch?.providerJson ?? null}::jsonb AS provider_json,
+        ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
     ),
     requested(assistant_input_id) AS (
       VALUES ${requestedIds}
@@ -416,31 +451,43 @@ export async function recordHostedIngressProviderStarted(input: {
        AND trace.user_id = input.user_id
        AND trace.source = input.source
     ),
+    eligible AS (
+      SELECT DISTINCT requested.assistant_input_id
+      FROM requested
+      CROSS JOIN input
+      JOIN hosted_ingress_latency_trace AS trace
+        ON trace.assistant_input_id = requested.assistant_input_id
+       AND trace.user_id = input.user_id
+       AND trace.source = input.source
+       AND (
+         trace.runtime_attempt_id IS NULL
+         OR input.runtime_attempt_id IS NULL
+         OR trace.runtime_attempt_id = input.runtime_attempt_id
+       )
+    ),
     updated AS (
       UPDATE hosted_ingress_latency_trace AS trace
-      SET
-        provider_start_at = CASE
-          WHEN trace.provider_start_at IS NULL
-            OR trace.provider_start_at > input.provider_start_at
-          THEN input.provider_start_at
-          ELSE trace.provider_start_at
-        END,
-        provider_request_ordinal = CASE
-          WHEN trace.provider_start_at IS NULL
-            OR trace.provider_start_at > input.provider_start_at
-          THEN input.provider_request_ordinal
-          ELSE trace.provider_request_ordinal
-        END,
-        runtime_attempt_id = COALESCE(trace.runtime_attempt_id, input.runtime_attempt_id),
-        phase_breakdown_json = ${nextPhaseBreakdown},
-        updated_at = CASE
-          WHEN trace.provider_start_at IS NULL
-            OR trace.provider_start_at > input.provider_start_at
-            OR (trace.runtime_attempt_id IS NULL AND input.runtime_attempt_id IS NOT NULL)
-            OR trace.phase_breakdown_json IS DISTINCT FROM ${nextPhaseBreakdown}
-          THEN CURRENT_TIMESTAMP
-          ELSE trace.updated_at
-        END
+      SET (
+        provider_start_at,
+        provider_request_ordinal,
+        runtime_attempt_id,
+        phase_breakdown_json,
+        updated_at
+      ) = (
+        SELECT
+          next.provider_start_at,
+          next.provider_request_ordinal,
+          next.runtime_attempt_id,
+          next.phase_breakdown_json,
+          statement_timestamp() AT TIME ZONE 'UTC'
+        FROM (
+          SELECT
+            ${nextProviderStartAt} AS provider_start_at,
+            ${nextProviderRequestOrdinal} AS provider_request_ordinal,
+            ${nextRuntimeAttemptId} AS runtime_attempt_id,
+            ${nextPhaseBreakdown} AS phase_breakdown_json
+        ) AS next
+      )
       FROM requested, input
       WHERE trace.assistant_input_id = requested.assistant_input_id
         AND trace.user_id = input.user_id
@@ -449,6 +496,13 @@ export async function recordHostedIngressProviderStarted(input: {
           trace.runtime_attempt_id IS NULL
           OR input.runtime_attempt_id IS NULL
           OR trace.runtime_attempt_id = input.runtime_attempt_id
+        )
+        AND (
+          trace.provider_start_at IS DISTINCT FROM ${nextProviderStartAt}
+          OR trace.provider_request_ordinal
+            IS DISTINCT FROM ${nextProviderRequestOrdinal}
+          OR trace.runtime_attempt_id IS DISTINCT FROM ${nextRuntimeAttemptId}
+          OR trace.phase_breakdown_json IS DISTINCT FROM ${nextPhaseBreakdown}
         )
       RETURNING trace.assistant_input_id AS "assistantInputId"
     )
@@ -461,8 +515,8 @@ export async function recordHostedIngressProviderStarted(input: {
       ) AS traced,
       EXISTS (
         SELECT 1
-        FROM updated
-        WHERE updated."assistantInputId" = requested.assistant_input_id
+        FROM eligible
+        WHERE eligible.assistant_input_id = requested.assistant_input_id
       ) AS matched
     FROM requested
   `);
@@ -491,7 +545,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
     ...new Set(input.assistantInputIds.map((id) =>
       requireSafeLatencyIdentifier(id, "Hosted ingress latency assistantInputId")
     )),
-  ];
+  ].sort();
   const runtimeAttemptId = normalizeNullableLatencyIdentifier(input.runtimeAttemptId);
   const runtimeLeaseGeneration = normalizeHostedRuntimeLeaseGeneration(
     input.runtimeLeaseGeneration,
@@ -540,7 +594,8 @@ export async function recordHostedIngressAssistantMilestone(input: {
         ${ordinaryMilestoneLeaf?.leafKey ?? null}::text AS milestone_leaf,
         ${ordinaryMilestoneLeaf?.keepEarliest ?? false}::boolean AS keep_earliest,
         ${terminalNonReplyProjection}::boolean AS terminal_non_reply_projection,
-        1::integer AS phase_schema_version
+        1::integer AS phase_schema_version,
+        ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
     ),
     requested(assistant_input_id) AS (
       VALUES ${requestedIds}
@@ -554,17 +609,36 @@ export async function recordHostedIngressAssistantMilestone(input: {
        AND trace.user_id = input.user_id
        AND trace.source = input.source
     ),
+    eligible AS (
+      SELECT DISTINCT requested.assistant_input_id
+      FROM requested
+      CROSS JOIN input
+      JOIN hosted_ingress_latency_trace AS trace
+        ON trace.assistant_input_id = requested.assistant_input_id
+       AND trace.user_id = input.user_id
+       AND trace.source = input.source
+       AND (
+         input.terminal_non_reply_projection
+         OR trace.runtime_attempt_id = input.runtime_attempt_id
+       )
+    ),
     updated AS (
       UPDATE hosted_ingress_latency_trace AS trace
-      SET
-        runtime_attempt_id = ${nextRuntimeAttemptId},
-        phase_breakdown_json = ${nextPhaseBreakdown},
-        updated_at = CASE
-          WHEN trace.runtime_attempt_id IS DISTINCT FROM ${nextRuntimeAttemptId}
-            OR trace.phase_breakdown_json IS DISTINCT FROM ${nextPhaseBreakdown}
-          THEN CURRENT_TIMESTAMP
-          ELSE trace.updated_at
-        END
+      SET (
+        runtime_attempt_id,
+        phase_breakdown_json,
+        updated_at
+      ) = (
+        SELECT
+          next.runtime_attempt_id,
+          next.phase_breakdown_json,
+          statement_timestamp() AT TIME ZONE 'UTC'
+        FROM (
+          SELECT
+            ${nextRuntimeAttemptId} AS runtime_attempt_id,
+            ${nextPhaseBreakdown} AS phase_breakdown_json
+        ) AS next
+      )
       FROM requested, input
       WHERE trace.assistant_input_id = requested.assistant_input_id
         AND trace.user_id = input.user_id
@@ -572,6 +646,10 @@ export async function recordHostedIngressAssistantMilestone(input: {
         AND (
           input.terminal_non_reply_projection
           OR trace.runtime_attempt_id = input.runtime_attempt_id
+        )
+        AND (
+          trace.runtime_attempt_id IS DISTINCT FROM ${nextRuntimeAttemptId}
+          OR trace.phase_breakdown_json IS DISTINCT FROM ${nextPhaseBreakdown}
         )
       RETURNING trace.assistant_input_id AS "assistantInputId"
     )
@@ -584,8 +662,8 @@ export async function recordHostedIngressAssistantMilestone(input: {
       ) AS traced,
       EXISTS (
         SELECT 1
-        FROM updated
-        WHERE updated."assistantInputId" = requested.assistant_input_id
+        FROM eligible
+        WHERE eligible.assistant_input_id = requested.assistant_input_id
       ) AS matched
     FROM requested
   `);
@@ -670,7 +748,8 @@ function buildHostedIngressProviderPhaseBreakdownSql(input: {
   hasProvider: boolean;
 }): Prisma.Sql {
   const stored = Prisma.sql`trace.phase_breakdown_json`;
-  const object = buildHostedIngressLatencyJsonObjectSql(stored);
+  const sanitizedObject = buildHostedIngressLatencySanitizedJsonObjectSql(stored);
+  const object = Prisma.sql`sanitized.object`;
   let patch = buildHostedIngressLatencySchemaPatchSql(object);
   if (input.hasPreProvider) {
     const existing = buildHostedIngressLatencyJsonObjectSql(
@@ -690,15 +769,16 @@ function buildHostedIngressProviderPhaseBreakdownSql(input: {
       input.provider_json || ${existing}
     )`;
   }
-  return Prisma.sql`CASE
-    WHEN input.phase_schema_version IS NULL THEN ${stored}
-    ELSE ${object} || ${patch}
-  END`;
+  return Prisma.sql`(
+    SELECT ${object} || ${patch}
+    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+  )`;
 }
 
 function buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql(): Prisma.Sql {
   const stored = Prisma.sql`trace.phase_breakdown_json`;
-  const object = buildHostedIngressLatencyJsonObjectSql(stored);
+  const sanitizedObject = buildHostedIngressLatencySanitizedJsonObjectSql(stored);
+  const object = Prisma.sql`sanitized.object`;
   const assistant = buildHostedIngressLatencyJsonObjectSql(
     Prisma.sql`${object} -> 'assistant'`,
   );
@@ -716,16 +796,20 @@ function buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql(): Prisma
       END
     )
   END`;
-  return Prisma.sql`${object}
-    || ${buildHostedIngressLatencySchemaPatchSql(object)}
-    || jsonb_build_object('assistant', ${assistant} || ${leafPatch})`;
+  return Prisma.sql`(
+    SELECT ${object}
+      || ${buildHostedIngressLatencySchemaPatchSql(object)}
+      || jsonb_build_object('assistant', ${assistant} || ${leafPatch})
+    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+  )`;
 }
 
 function buildHostedIngressTerminalNonReplyPhaseBreakdownSql(input: {
   hasCheckpointPublicationExpectedBy: boolean;
 }): Prisma.Sql {
   const stored = Prisma.sql`trace.phase_breakdown_json`;
-  const object = buildHostedIngressLatencyJsonObjectSql(stored);
+  const sanitizedObject = buildHostedIngressLatencySanitizedJsonObjectSql(stored);
+  const object = Prisma.sql`sanitized.object`;
   const assistant = buildHostedIngressLatencyJsonObjectSql(
     Prisma.sql`${object} -> 'assistant'`,
   );
@@ -765,10 +849,13 @@ function buildHostedIngressTerminalNonReplyPhaseBreakdownSql(input: {
   const merged = Prisma.sql`${object}
     || ${buildHostedIngressLatencySchemaPatchSql(object)}
     || jsonb_build_object('assistant', ${assistant} || ${assistantPatch})`;
-  return Prisma.sql`CASE
-    WHEN ${mayWrite} THEN ${merged}
-    ELSE ${stored}
-  END`;
+  return Prisma.sql`(
+    SELECT CASE
+      WHEN ${mayWrite} THEN ${merged}
+      ELSE ${stored}
+    END
+    FROM (SELECT ${sanitizedObject} AS object) AS sanitized
+  )`;
 }
 
 function buildHostedIngressTerminalNonReplyRuntimeAttemptSql(): Prisma.Sql {
@@ -810,6 +897,88 @@ function buildHostedIngressLatencyJsonObjectSql(value: Prisma.Sql): Prisma.Sql {
     WHEN jsonb_typeof(${value}) = 'object' THEN ${value}
     ELSE '{}'::jsonb
   END`;
+}
+
+function buildHostedIngressLatencySanitizedJsonObjectSql(
+  value: Prisma.Sql,
+): Prisma.Sql {
+  const normalizedObject = buildHostedIngressLatencyJsonObjectSql(value);
+  const object = Prisma.sql`stored.object`;
+  const schemaVersion = Prisma.sql`${object} -> 'schemaVersion'`;
+  const safeSchemaVersion = buildHostedIngressLatencySafeJsonIntegerPredicateSql(
+    schemaVersion,
+  );
+  return Prisma.sql`(
+    SELECT COALESCE(
+      (
+        SELECT jsonb_object_agg(
+          sanitized_phase.phase_key,
+          sanitized_phase.phase_value
+        )
+        FROM (
+          SELECT
+            phase.key AS phase_key,
+            jsonb_object_agg(leaf.key, leaf.value) AS phase_value
+          FROM jsonb_each(${object}) AS phase(key, value)
+          CROSS JOIN LATERAL jsonb_each(
+            CASE
+              WHEN jsonb_typeof(phase.value) = 'object' THEN phase.value
+              ELSE '{}'::jsonb
+            END
+          ) AS leaf(key, value)
+          WHERE CASE input.phase_leaf_rules -> phase.key ->> leaf.key
+            WHEN 'safe_integer'
+            THEN ${buildHostedIngressLatencySafeJsonIntegerPredicateSql(
+              Prisma.sql`leaf.value`,
+            )}
+            WHEN 'boolean'
+            THEN jsonb_typeof(leaf.value) = 'boolean'
+            WHEN 'lease_generation'
+            THEN jsonb_typeof(leaf.value) = 'string'
+              AND (leaf.value #>> '{}') ~ '^(0|[1-9][0-9]{0,19})$'
+            WHEN 'orchestration_attempt_id'
+            THEN jsonb_typeof(leaf.value) = 'string'
+              AND (leaf.value #>> '{}')
+                ~ '^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+            ELSE FALSE
+          END
+          GROUP BY phase.key
+        ) AS sanitized_phase
+      ),
+      '{}'::jsonb
+    ) || CASE
+      WHEN ${safeSchemaVersion}
+      THEN jsonb_build_object('schemaVersion', ${schemaVersion})
+      ELSE '{}'::jsonb
+    END
+    FROM (SELECT ${normalizedObject} AS object) AS stored
+  )`;
+}
+
+function readHostedIngressLatencyPhaseLeafRule(
+  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
+  leafKey: string,
+): "boolean" | "lease_generation" | "orchestration_attempt_id" | "safe_integer" {
+  if (
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS.some(
+      (key) => key === `${phase}.${leafKey}`,
+    )
+  ) {
+    return "boolean";
+  }
+  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
+    return "lease_generation";
+  }
+  if (
+    phase === "orchestration"
+    && (
+      leafKey === "directEnsureOrchestrationAttemptId"
+      || leafKey === "runtimeInvocationOrchestrationAttemptId"
+    )
+  ) {
+    return "orchestration_attempt_id";
+  }
+  return "safe_integer";
 }
 
 function buildHostedIngressLatencySchemaPatchSql(object: Prisma.Sql): Prisma.Sql {
