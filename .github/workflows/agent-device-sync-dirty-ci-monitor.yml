@@ -1,0 +1,98 @@
+name: Monitor device-sync dirty payload PR
+
+on:
+  push:
+    branches:
+      - agent/device-sync-dirty-ci-monitor
+    paths:
+      - .github/workflows/agent-device-sync-dirty-ci-monitor.yml
+
+permissions:
+  actions: write
+  checks: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Resolve pull request
+        id: pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          pr=""
+          for _ in $(seq 1 40); do
+            pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$TARGET_BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+            [[ -n "$pr" ]] && break
+            sleep 30
+          done
+          test -n "$pr"
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for exact-head checks
+        id: first
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --interval 20 --fail-fast=false
+
+      - name: Rerun failed workflow jobs once
+        if: steps.first.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          mapfile -t runs < <(gh run list --repo "$GITHUB_REPOSITORY" --branch "$TARGET_BRANCH" --event pull_request --limit 30 --json databaseId,conclusion --jq '.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out") | .databaseId')
+          for run in "${runs[@]}"; do
+            gh run rerun "$run" --repo "$GITHUB_REPOSITORY" --failed || true
+          done
+
+      - name: Wait after rerun
+        id: second
+        if: steps.first.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          sleep 30
+          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --interval 20 --fail-fast=false
+
+      - name: Record final check state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          FIRST_OUTCOME: ${{ steps.first.outcome }}
+          SECOND_OUTCOME: ${{ steps.second.outcome }}
+        run: |
+          set -euo pipefail
+          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" > /tmp/checks.txt || true
+          if [[ "$FIRST_OUTCOME" == "success" || "$SECOND_OUTCOME" == "success" ]]; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Exact-head GitHub checks completed successfully after the final device-sync review. The PR remains unmerged."
+            gh pr ready "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" || true
+          else
+            {
+              echo 'Exact-head CI still has failures after one failed-job rerun. No merge was performed.'
+              echo
+              echo '```text'
+              cat /tmp/checks.txt
+              echo '```'
+            } > /tmp/comment.md
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
+            exit 1
+          fi
