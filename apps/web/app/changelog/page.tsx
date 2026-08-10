@@ -197,15 +197,6 @@ const VISUALS: Record<string, ReactNode> = {
       ]}
     />
   ),
-  "feedback-reproduction-guidance": (
-    <PhoneMock
-      channel="Private conversation"
-      messages={[
-        { from: "user", body: "The connection stopped after I approved it." },
-        { from: "murph", body: "I’ll include the safe steps and where it stopped, without your private details." },
-      ]}
-    />
-  ),
   "custom-experiment-deep-links": (
     <DialogMock
       label="Private experiment"
@@ -411,13 +402,6 @@ const VISUALS: Record<string, ReactNode> = {
         caption="Returns to the conversation that requested it"
       />
     </div>
-  ),
-  "support-escalation-issue-summary": (
-    <EmailMock
-      from="Murph product support escalation"
-      subject="Sanitized issue summary"
-      body="A short problem summary, with no raw conversation, credentials, or health details."
-    />
   ),
   "prepare-next-group": (
     <CalendarMock

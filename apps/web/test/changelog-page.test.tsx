@@ -198,6 +198,12 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain(
       "The exact email you approved was sent from the connected account.",
     );
+    expect(markup).not.toContain("I’ll include");
+    expect(markup).not.toContain("without your private details");
+    expect(markup).not.toContain("Sanitized issue summary");
+    expect(markup).not.toContain(
+      "no raw conversation, credentials, or health details",
+    );
     expect(markup).toContain("Conversation handoff");
     expect(markup).toContain("Paused-member privacy cleanup");
     expect(markup).toContain("Daily nutrition card");

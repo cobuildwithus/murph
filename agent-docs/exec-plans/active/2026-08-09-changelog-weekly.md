@@ -152,6 +152,13 @@ Updated: 2026-08-10
   independently selectable. Reworded the item to name both permissions and
   clarify that source details were folded into each stage's own choice. Added
   focused registry coverage against the collapsed-consent claim.
+- Final ReviewGPT round 6 verified every prior correction, then found two
+  feedback trust-surface overclaims: an ordinary-feedback mock visibly promised
+  a handoff that production intentionally keeps silent and best-effort, while
+  both feedback entries promised semantic removal of private or health meaning
+  beyond the bounded pattern scrub production enforces. Deleted both misleading
+  mocks, rewrote the entries around bounded model-written summaries and their
+  residual free-text boundary, and added registry and render regressions.
 
 ## Decisions
 
@@ -174,16 +181,18 @@ Updated: 2026-08-10
   mirror and a new parser dependency; unsupported future registry structure
   fails the PR check instead of silently accepting an unverified reference.
 - Retrospective decision: existing product owners remain authoritative for
-  route capability, authentication, health-data ownership, reward ownership,
-  and connection status. Source PRs prove release provenance but do not make a
-  changelog fixture a live-state owner. Default to shrinking: delete a factual
-  visual unless it reuses canonical data/components or has a focused contract
+  route capability, authentication, health-data ownership, consent scope,
+  reward ownership, connection status, feedback completion, and redaction
+  limits. Source PRs prove release provenance but do not make a changelog
+  fixture a live-state owner. Default to shrinking: delete a factual visual
+  unless it reuses canonical data/components or has a focused contract
   assertion against the owner. Do not add synchronization machinery.
 - Re-audited all 60 catch-up items and the 51 original associated visuals under
-  that rule. Six original items were intentionally text-only. Deleted two contradictory
-  health-route/status visuals and the unconditional referral-beneficiary
-  visual, then deleted the scheduled connected-email completion visual. The
-  retained 47 are bounded as 20 synthetic output examples
+  that rule. Six original items were intentionally text-only. Deleted two
+  contradictory health-route/status visuals, the unconditional
+  referral-beneficiary visual, the scheduled connected-email completion visual,
+  and two misleading feedback acknowledgement/redaction visuals. The retained
+  45 are bounded as 18 synthetic output examples
   (message, table, card, chart, or artifact shape), 15 sequence/recovery
   diagrams (ordering and negative branches), and 12
   choice/handoff/consent illustrations tied to the existing referral, billing,
@@ -202,6 +211,10 @@ Updated: 2026-08-10
   scope cannot be described as merging independently selectable permissions.
   Changelog claims must name those member-facing scopes explicitly when the
   product still lets a member approve them separately.
+- Extended the owner gate after round 6 so feedback claims must preserve silent
+  versus visible completion semantics and distinguish raw-field exclusion or
+  deterministic pattern scrubbing from semantic removal of all private or
+  health meaning.
 
 ## Verification
 
@@ -229,6 +242,6 @@ Updated: 2026-08-10
   referral-beneficiary phrases were absent. The refreshed scheduled-call card
   captures were inspected and uploaded through the lossless design-proof
   variant.
-- Pending: commit and push the round-5 consent correction, complete final
-  ReviewGPT round 6, confirm exact-head CI and merge readiness, and close this
+- Pending: commit and push the round-6 feedback correction, complete final
+  ReviewGPT round 7, confirm exact-head CI and merge readiness, and close this
   plan.

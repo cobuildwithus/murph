@@ -170,7 +170,10 @@ product-decision owners.
    production authorization and delivery owners prove that exact path. A
    simpler choice inside one consent scope must not be described as merging
    independently selectable permissions; name those scopes explicitly when
-   production still lets a member approve them separately.
+   production still lets a member approve them separately. For feedback and
+   support summaries, distinguish silent best-effort capture from visible
+   acknowledgement, and distinguish raw-field exclusion or deterministic
+   pattern scrubbing from semantic removal of all private or health meaning.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips completion audits unless the user explicitly asks for them

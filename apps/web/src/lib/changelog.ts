@@ -293,11 +293,11 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "feedback-reproduction-guidance",
         kind: "improvement",
         priority: 4,
-        title: "Feedback can carry safe reproduction steps",
+        title: "Feedback can carry bounded reproduction context",
         summary:
-          "When a product problem has useful reproduction evidence, Murph can include concise steps and safe environment context in the existing feedback summary.",
+          "When a product problem has useful reproduction evidence, the internal feedback path can store a bounded model-written summary with concise steps and environment context instead of attaching the raw conversation or service response.",
         details:
-          "The summary excludes raw conversation wording, health or personal details, identifiers, contact information, secrets, and raw service data. Feature interest stays concise.",
+          "Ordinary feedback remains silent and best-effort. Recognizable shaped identifiers and secrets receive deterministic scrubbing, but the path does not claim that every private meaning can be detected or removed.",
         relevanceTags: ["feedback", "privacy", "support", "reliability"],
         sourcePullRequests: [1465],
       },
@@ -672,9 +672,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Support escalations carry the issue, not the conversation",
         summary:
-          "After an explicit private support request, the escalation email can now include a short sanitized problem summary so the support team understands what needs attention.",
+          "After an explicit request in a verified private conversation, the support email can include a short model-written problem summary instead of attaching the raw conversation or service response.",
         details:
-          "The route still requires a verified private conversation and explicit consent. It excludes raw transcripts, health details, credentials, and promises about response time or ticket status.",
+          "The email stays linked to the member for follow-up and can contain free-form issue context. Recognizable shaped identifiers and secrets receive deterministic scrubbing, but the route does not guarantee that every private meaning is removed or promise a response time or ticket status.",
         relevanceTags: ["support", "privacy", "assistant", "recovery"],
         sourcePullRequests: [1284, 1305],
       },

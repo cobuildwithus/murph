@@ -351,10 +351,19 @@ describe("changelog registry", () => {
       sourcePullRequests: [1475, 1510],
       details: expect.stringContaining("duplicate protection"),
     });
-    expect(items.get("feedback-reproduction-guidance")).toMatchObject({
+    const feedbackSummary = items.get("feedback-reproduction-guidance");
+    expect(feedbackSummary).toMatchObject({
       sourcePullRequests: [1465],
-      details: expect.stringContaining("excludes raw conversation wording"),
+      summary: expect.stringContaining(
+        "instead of attaching the raw conversation or service response",
+      ),
+      details: expect.stringContaining(
+        "Ordinary feedback remains silent and best-effort",
+      ),
     });
+    expect(`${feedbackSummary?.summary} ${feedbackSummary?.details}`).not.toMatch(
+      /excludes raw conversation wording|without your private details/iu,
+    );
 
     const experimentLinks = items.get("custom-experiment-deep-links");
     expect(experimentLinks).toMatchObject({
@@ -424,10 +433,19 @@ describe("changelog registry", () => {
       sourcePullRequests: [1334, 1346, 1374, 1389],
       details: expect.stringContaining("will not make a blind second attempt"),
     });
-    expect(items.get("support-escalation-issue-summary")).toMatchObject({
+    const supportSummary = items.get("support-escalation-issue-summary");
+    expect(supportSummary).toMatchObject({
       sourcePullRequests: [1284, 1305],
-      details: expect.stringContaining("excludes raw transcripts"),
+      summary: expect.stringContaining(
+        "instead of attaching the raw conversation or service response",
+      ),
+      details: expect.stringContaining(
+        "does not guarantee that every private meaning is removed",
+      ),
     });
+    expect(`${supportSummary?.summary} ${supportSummary?.details}`).not.toMatch(
+      /excludes (?:raw transcripts|health details)|no .*health details/iu,
+    );
     expect(items.get("daily-nutrition-card-delivery")).toMatchObject({
       sourcePullRequests: [1312],
       details: expect.stringContaining("partial-totals marker"),

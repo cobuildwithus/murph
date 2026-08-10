@@ -113,6 +113,13 @@ outcome and the meaningful boundary without publishing an exploit recipe or
 sensitive architecture. If no useful safe outcome exists, mark the changelog
 not applicable and explain that the change is internal hardening.
 
+For feedback or support summaries, distinguish silent best-effort capture from
+a member-visible acknowledgement. Do not say feedback was recorded, sent, or
+will be included unless the production owner guarantees that visible outcome.
+Describe raw-field exclusion and deterministic pattern scrubbing precisely;
+never turn a bounded free-text scrub into a guarantee that all private or
+health meaning is removed.
+
 ## 5. Add a visual when it teaches
 
 Give priority-5 features and interaction-heavy changes a compact explanatory
@@ -210,6 +217,8 @@ reason such as "not needed."
 - Scheduled and asynchronous claims match the exact invocation scope, route,
   audience, current-input requirement, destination, and recovery contract.
 - Consent claims preserve every independently selectable production scope.
+- Feedback claims preserve silent versus visible completion semantics and do
+  not overstate bounded redaction as semantic privacy.
 - Every source PR is present, with no unmerged or unrelated PRs.
 - Copy describes outcomes, limits, and recovery without internal leakage.
 - Visual facts are derived from or mechanically checked against their existing
