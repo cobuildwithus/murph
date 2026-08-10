@@ -376,7 +376,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
     && mailboxAppend.duplicate
     && !mailboxAppend.dedupeConflict
   ) {
-    // The durable request already exists. Canonical runtime reconciliation
+    // The durable request already exists. The scheduled mailbox handoff sweep
     // recovers a missed first signal; repeated browser polls must not wake and
     // preempt the same low-priority refresh forever.
     return {

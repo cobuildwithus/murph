@@ -1,8 +1,8 @@
 # Prevent browser-vault refresh starvation
 
-Status: active
+Status: completed
 Created: 2026-08-10
-Updated: 2026-08-10
+Updated: 2026-08-11
 
 ## Goal
 
@@ -19,10 +19,11 @@ Updated: 2026-08-10
 
 ## Scope
 
-- In scope: web-authored browser-vault refresh identity and signaling behavior,
-  focused regression tests, and matching durable runtime guidance.
+- In scope: browser-vault refresh identity and signaling, the existing scheduled
+  mailbox handoff sweep, runtime wake ordering, focused regression tests, and
+  matching durable runtime guidance.
 - Out of scope: the separate unverified-audience mailbox loop, browser UI,
-  replica schema, mailbox ordering, and the Temporal workflow definition.
+  replica schema, general mailbox ordering, and the Temporal workflow definition.
 
 ## Constraints
 
@@ -42,7 +43,13 @@ Updated: 2026-08-10
 - Keep one browser-vault refresh request per workspace version. The next
   checkpoint creates the next retry identity without a new timer or state.
 - Do not signal Temporal again when the same durable request already exists.
-  The canonical reconciliation loop still recovers a failed first signal.
+  The existing scheduled mailbox handoff sweep recovers a failed first signal.
+- Defer only a browser-only post-checkpoint wake until the active browser
+  refresh finishes or reaches a terminal result. Foreground work still
+  preempts the refresh.
+- Final ReviewGPT found two gaps in the first candidate: first-signal recovery
+  was not owned, and a new workspace version could create another browser wake
+  before publication. The current candidate closes both gaps without new state.
 
 ## Verification
 
@@ -51,3 +58,14 @@ Updated: 2026-08-10
 - `pnpm --dir apps/web exec eslint src/lib/hosted-orchestration/browser-vault-refresh-control.ts src/lib/hosted-orchestration/signal-runtime.ts test/hosted-orchestration-signal-runtime.test.ts test/hosted-onboarding-privy-phone-transfer-retirement.test.ts`
   passed.
 - `pnpm --dir apps/web typecheck:prepared` passed.
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-workspace-entrypoint.test.ts`
+  passed with 270 tests.
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --isolate=true --no-coverage apps/web/test/hosted-preference-handoff-sweeper.test.ts apps/web/test/hosted-orchestration-signal-runtime.test.ts apps/web/test/hosted-device-sync-recovery-sweeper.test.ts`
+  passed with 44 tests.
+- Scoped web ESLint passed with one pre-existing `_args` warning and no errors.
+- `pnpm --dir apps/web typecheck:prepared` and the assistant-runtime package
+  typecheck passed.
+- The user explicitly declined another full ReviewGPT ZIP after the first
+  final review found the two corrected issues. The parent inspected the full
+  corrected diff and ran focused proof instead of resending the package.
+Completed: 2026-08-11
