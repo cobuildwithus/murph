@@ -5343,7 +5343,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         timingVerified: true,
       }));
 
+      await expect(requestAutomation({
+        action: "save",
+        instructions: "Send the one-time evening reminder.",
+        schedule: {
+          at: "2026-08-01T13:00:00.000Z",
+          kind: "at",
+        },
+        slug: "one-time-evening-reminder",
+        status: "paused",
+        title: "One-time evening reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "paused",
+        timingVerified: true,
+      }));
+
       vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "one-time-evening-reminder",
+        status: "active",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        schedule: {
+          at: "2026-08-01T13:00:00.000Z",
+          kind: "at",
+        },
+        status: "active",
+        timingVerified: true,
+      }));
       await expect(requestAutomation({
         action: "patch",
         lookup: "daily-evening-reminder",

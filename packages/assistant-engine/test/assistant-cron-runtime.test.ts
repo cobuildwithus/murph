@@ -1083,6 +1083,104 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('projects one-shot occurrences with the same freshness boundaries as execution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-10T06:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-one-shot-projection-freshness-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: { timezone: 'America/New_York' },
+    })
+    const route = {
+      channel: 'linq' as const,
+      deliverySource: null,
+      deliveryTarget: 'projection-room',
+      identityId: null,
+      participantId: null,
+      threadId: 'projection-room',
+      threadIsDirect: false,
+    }
+    const saveOneShot = async (input: {
+      activeUntil?: string
+      at: string
+      slug: string
+    }) => {
+      const job = await upsertAssistantCronAutomation({
+        ...(input.activeUntil === undefined
+          ? {}
+          : { activeUntil: input.activeUntil }),
+        instructions: 'Send the one-time check-in.',
+        now: new Date('2026-08-10T06:00:00.000Z'),
+        route,
+        schedule: { at: input.at, kind: 'at' },
+        slug: input.slug,
+        title: 'One-time check-in',
+        vault: vaultRoot,
+      })
+      if (!job) {
+        throw new Error('Expected one-shot automation to be saved.')
+      }
+      const source = findCanonicalAutomation(vaultRoot, job.jobId)
+      if (!source?.relativePath) {
+        throw new Error('Expected one-shot automation source.')
+      }
+      return { job, relativePath: source.relativePath }
+    }
+
+    const future = await saveOneShot({
+      at: '2026-08-10T09:30:00.000Z',
+      slug: 'future-one-shot-projection',
+    })
+    const boundary = await saveOneShot({
+      at: '2026-08-10T08:00:00.000Z',
+      slug: 'boundary-one-shot-projection',
+    })
+    const stale = await saveOneShot({
+      at: '2026-08-10T07:59:59.999Z',
+      slug: 'stale-one-shot-projection',
+    })
+    const finite = await saveOneShot({
+      activeUntil: '2026-08-10T11:00:00.000Z',
+      at: '2026-08-10T07:00:00.000Z',
+      slug: 'finite-one-shot-projection',
+    })
+    vi.setSystemTime(new Date('2026-08-10T09:00:00.000Z'))
+
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      future.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: '2026-08-10T09:30:00.000Z',
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      boundary.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: '2026-08-10T08:00:00.000Z',
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      stale.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      finite.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: '2026-08-10T07:00:00.000Z',
+      occurrenceVerified: true,
+    })
+  })
+
   it('materializes a finite latest-slot occurrence with execution budget and preserves it on reseed', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-upsert-one-shot-automation-',

@@ -4071,6 +4071,94 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
+    'offers to reschedule a reactivated one-shot whose requested time is stale',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-stale-one-shot-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'patch') {
+                  throw new Error('Expected an automation patch request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'patch',
+                  automationId: 'automation-one-time-evening',
+                  created: false,
+                  effectiveTimeZone: null,
+                  lookupId: 'one-time-evening-reminder',
+                  nextOccurrenceAt: null,
+                  routeBinding: 'preserved',
+                  schedule: {
+                    at: '2026-08-01T13:00:00.000Z',
+                    kind: 'at',
+                  },
+                  status: 'active',
+                  timingVerified: true,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Reactivate my paused one-time evening reminder called',
+            'one-time-evening-reminder. Save the change now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'patch',
+          lookup: 'one-time-evening-reminder',
+          status: 'active',
+        })
+        expect(result.finalMessage).toMatch(
+          /already passed|no longer deliverable|cannot be delivered|can't be delivered/iu,
+        )
+        expect(result.finalMessage).toMatch(/new time|reschedul/iu)
+        expect(result.finalMessage).not.toMatch(
+          /scheduled for|will (?:send|remind)|set for/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'confirms an active device trigger without claiming future delivery is exhausted',
     async () => {
       const config = await resolveRealCodexE2eConfig()

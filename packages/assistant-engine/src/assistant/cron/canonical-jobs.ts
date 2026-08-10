@@ -41,6 +41,7 @@ import {
 } from './store.js'
 
 export const ASSISTANT_CRON_JOB_SCHEMA = 'murph.assistant-cron-job.v1'
+export const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 
 export interface CanonicalAutomationAssistantCronJobRecord {
   kind: 'automation'
@@ -300,6 +301,7 @@ export function resolveCanonicalAssistantCronOccurrenceAt(
 export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection(
   source: CanonicalAssistantCronJobRecord,
   runtimeState: AssistantCronCanonicalRuntimeRecord,
+  now: Date,
 ): {
   nextOccurrenceAt: string | null
   verified: boolean
@@ -322,22 +324,70 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
   )
   if (
     occurrenceAt === null ||
-    source.kind !== 'automation' ||
-    source.activeUntil === null
+    (source.kind === 'automation' &&
+      source.activeUntil !== null &&
+      Date.parse(occurrenceAt) >= Date.parse(source.activeUntil))
   ) {
     return {
-      nextOccurrenceAt: occurrenceAt,
+      nextOccurrenceAt: null,
+      verified: true,
+    }
+  }
+
+  if (
+    source.kind === 'automation' &&
+    source.schedule.kind === 'at' &&
+    !isCanonicalAssistantCronNotificationOccurrenceDeliverable({
+      now,
+      occurrenceAt,
+      source,
+    })
+  ) {
+    return {
+      nextOccurrenceAt: null,
       verified: true,
     }
   }
 
   return {
-    nextOccurrenceAt:
-      Date.parse(occurrenceAt) < Date.parse(source.activeUntil)
-        ? occurrenceAt
-        : null,
+    nextOccurrenceAt: occurrenceAt,
     verified: true,
   }
+}
+
+export function isAssistantCronNotificationOccurrenceFresh(input: {
+  now: Date
+  occurrenceAt: string
+}): boolean {
+  const nowMs = input.now.getTime()
+  const occurrenceMs = Date.parse(input.occurrenceAt)
+  if (!Number.isFinite(nowMs) || !Number.isFinite(occurrenceMs)) {
+    return true
+  }
+
+  return nowMs - occurrenceMs <= ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS
+}
+
+export function isCanonicalAssistantCronNotificationOccurrenceDeliverable(
+  input: {
+    now: Date
+    occurrenceAt: string
+    source: CanonicalAssistantCronJobRecord
+  },
+): boolean {
+  if (input.source.kind === 'scheduledLog') {
+    return true
+  }
+
+  if (
+    input.source.schedule.kind === 'at' &&
+    input.source.activeUntil !== null &&
+    input.now.getTime() < Date.parse(input.source.activeUntil)
+  ) {
+    return true
+  }
+
+  return isAssistantCronNotificationOccurrenceFresh(input)
 }
 
 function resolveCanonicalAssistantCronUnboundedOccurrenceAt(

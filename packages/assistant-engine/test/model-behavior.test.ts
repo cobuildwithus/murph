@@ -3077,6 +3077,9 @@ describe('assistant conversation scope', () => {
       'a verified null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
     )
     expect(prompt).toContain(
+      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+    )
+    expect(prompt).toContain(
       'When a time-based result has `timingVerified: false`, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write.',
     )
     expect(prompt).toContain(

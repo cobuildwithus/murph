@@ -15,10 +15,11 @@ Key decisions:
 - Persist the explicit timezone with the canonical automation schedule so DST and later vault-timezone changes cannot alter an explicitly named timezone.
 - Persist one `scheduleAnchorAt` timing-transition marker with the canonical automation. Core advances it only for schedule changes and reactivation; general edits must not reset cadence.
 - Extend the hosted automation result with the stored schedule, effective timezone, and projected next occurrence instead of relying on model-authored confirmation text.
+- Own notification freshness at the canonical scheduling boundary so hosted timing projection and execution use the same inclusive 60-minute rule and finite one-shot active-window exception.
 - Update the existing schedule-owner documentation and focused contract/core/assistant/runtime tests rather than adding a new service or state owner.
 
 State:
-- ReviewGPT round five verified every prior correction, then found that a partial recurring schedule patch could silently remove the stored explicit timezone. The failure is reproduced through core, typed CLI, and hosted-runtime paths; the core-owned preservation fix and separate-turn assistant proof are implemented.
+- ReviewGPT round six verified every prior correction, then found that reactivating a stale one-shot could return its expired timestamp as a verified next deliverable occurrence even though execution would archive it without sending. The contradiction was reproduced through the hosted patch response and canonical projection; both now share the existing execution freshness policy.
 
 Done:
 - Proved the production failure mechanism: a UTC-converted cron hour was persisted and then evaluated in the vault timezone.
@@ -59,12 +60,19 @@ Done:
 - Passed the complete core markdown suite (23), typed automation CLI suite (21), hosted assistant phase (280), and prompt/tool/scripted/opt-in model set (120 with 37 provider-gated skips), plus all four affected package typechecks and the complete 30-project workspace typecheck.
 - The patch-preservation guidance adds 41 `o200k_harmony` tokens and 214 UTF-8 bytes to both initial runtimes relative to round five: direct is now 23,988 tokens / 110,899 bytes versus base 23,701 / 109,497 (+287, +1.2109%, +1,402 bytes); group is 20,460 / 95,348 versus base 20,173 / 93,946 (+287, +1.4227%, +1,402 bytes). Prompt content is now 14,849 tokens / 72,811 bytes direct and 11,421 / 57,391 group. The deferred automation tool serialization is 4,570 tokens / 15,643 bytes when loaded.
 - Rebuilt the complete hosted runner closure after patch preservation. The runner entrypoint remains 1,661,608 bytes, its static boot closure is 8,019,500 bytes, and total output is 9,994,631 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed.
+- ReviewGPT round six proved that the projection branch for active `at` schedules returned the stored timestamp without applying execution's one-hour notification freshness rule. A paused one-shot reactivated days late therefore produced `timingVerified: true` with an occurrence that the scheduler would immediately expire.
+- Moved the existing inclusive freshness threshold and finite `activeUntil` exception into canonical scheduling code and reused that single predicate from execution. Projection now returns a verified null for an ordinary stale one-shot, while future occurrences, the exact 60-minute boundary, and an open finite active window remain deliverable; pending, retry, delivery, and running states remain unverified.
+- Added fake-clock canonical and hosted production-path regressions, retained scheduler boundary/retry proof, and added prompt, deferred-tool, scripted App Server, and opt-in actual-model coverage for explaining the expired time and offering to reschedule.
+- The round-seven retrospective continues the current PR without a new owner or state machine: this is an original projection/execution policy split, and the correction deletes the execution-local duplicate by relocating its existing rule to the canonical owner. The reviewed source delta remains below the remediation-growth threshold; round seven is the final automatic ReviewGPT round.
+- Passed the complete assistant cron suite (211), hosted assistant-phase suite (280), and prompt/tool/scripted/opt-in model set (121 with 38 provider-gated skips), plus all four affected package typechecks and the complete 30-project workspace typecheck.
+- The stale-one-shot explanation adds 27 `o200k_harmony` tokens and 131 UTF-8 bytes to both initial runtimes relative to round six: direct is now 24,015 tokens / 111,030 bytes versus base 23,701 / 109,497 (+314, +1.3248%, +1,533 bytes); group is 20,487 / 95,479 versus base 20,173 / 93,946 (+314, +1.5565%, +1,533 bytes). Prompt content is now 14,876 tokens / 72,942 bytes direct and 11,448 / 57,522 group. The deferred automation tool serialization is 4,597 tokens / 15,774 bytes when loaded.
+- Rebuilt the complete hosted runner closure after the shared freshness correction. The runner entrypoint remains 1,661,608 bytes, its static boot closure is 8,020,719 bytes, and total output is 9,995,850 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed.
 
 Now:
-- Complete candidate diff/privacy review, then commit and push the timezone-preserving patch.
+- Complete candidate diff/privacy review, then commit and push the shared freshness correction.
 
 Next:
-- Commit and push the exact remediation head, update PR #1546's evidence, and run sensitive full-snapshot ReviewGPT round six concurrently with CI until the latest substantive round passes.
+- Commit and push the exact remediation head, update PR #1546's evidence, and run sensitive full-snapshot ReviewGPT round seven concurrently with exact-head CI.
 
 Open questions (UNCONFIRMED if needed):
 - None. The timing result now reuses the canonical scheduler owners through an exact-file projection instead of the broad public job lookup.

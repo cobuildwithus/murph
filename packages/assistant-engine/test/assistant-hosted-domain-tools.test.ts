@@ -41,6 +41,9 @@ describe('hosted domain dynamic tools', () => {
       'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'On patch, a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
     )
   })

@@ -1592,6 +1592,85 @@ text(JSON.stringify(result));
     )
   })
 
+  it('reports a reactivated stale one-shot as needing a new time', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  lookup: "one-time-evening-reminder",
+  status: "active",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'That reminder is active, but its requested time has already passed and is no longer deliverable. Tell me a new time and I can reschedule it.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'patch',
+              automationId: 'automation-one-time-evening',
+              created: false,
+              effectiveTimeZone: null,
+              lookupId: 'one-time-evening-reminder',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved',
+              schedule: {
+                at: '2026-08-01T13:00:00.000Z',
+                kind: 'at',
+              },
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Reactivate my one-time evening reminder. Save the change now.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'patch',
+      lookup: 'one-time-evening-reminder',
+      status: 'active',
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"at"')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(result.finalMessage).toMatch(/already passed|no longer deliverable/iu)
+    expect(result.finalMessage).toMatch(/new time|reschedule/iu)
+  })
+
   it('keeps active device-triggered saves distinct from exhausted clock schedules', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

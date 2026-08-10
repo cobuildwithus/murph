@@ -276,6 +276,7 @@ export async function getAssistantCronAutomationTimingProjection(
     resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection(
       source,
       runtimeState,
+      new Date(),
     )
   return {
     job: projectCanonicalAssistantCronJob({ source, runtimeState }),
