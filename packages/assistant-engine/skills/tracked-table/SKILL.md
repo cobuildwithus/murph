@@ -103,7 +103,7 @@ Build it from two canonical sources:
 - `target`: the matching planned set from the verified workout format;
 - `actual`: the matching completed set from the verified canonical workout event.
 
-Set the compact summary to `rowHeader="Exercise"`, `columns=["Progress"]`, and one row per exercise whose value is `<completed>/<total>`. Then map each planned set in `workout.exercises` to:
+Do not add `rowHeader`, `columns`, or `rows` to a structured workout card. Text, provider-layout, and native-envelope consumers derive progress directly from `workout.exercises`. Map each planned set in `workout.exercises` to:
 
 - `pending`: no corresponding actual result and the workout is still live;
 - `completed`: a corresponding actual result exists;

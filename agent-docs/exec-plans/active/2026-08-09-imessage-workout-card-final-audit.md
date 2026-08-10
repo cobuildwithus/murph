@@ -47,6 +47,8 @@ Success criteria:
 - Accepted from exact-head CI: the pinned App Server removes `propertyNames`, so nutrition V2 macro names disappeared from its supported schema projection even though the raw schema remained valid. Every macro is now an explicit property, while one inline `patternProperties` rule keeps the repeated macro constraints strict and the complete schema below both 5,000-byte ceilings.
 - Accepted from exact-head CI: generated Incur configuration and type artifacts did not include `requireExistingSet`. They are regenerated from the prepared built CLI entrypoint and covered by package-shape verification.
 - Accepted from exact-head CI and local assembly: the intentional workout contract and command growth exceeded the runner's measured output ratchets. The total and static-closure baselines use the larger exact Ubuntu/macOS measurements; the entry baseline and all tolerances remain unchanged.
+- Accepted from final ReviewGPT round 2: persisted V4 cards establish a Worker-and-runner rollback floor after either the local outbox or hosted side-effect owner accepts them. The product spec now requires coordinated reader-first deployment, forward recovery or explicit quarantine restoration, and exact persisted-owner round-trip tests for both paths.
+- Accepted from final ReviewGPT round 2: workout cards duplicated progress in generic table rows and the structured workout payload. The runtime contract now has two closed variants; workout cards author only `workout.exercises`, and renderers derive all workout progress from that single presentation source.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
 - Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. Neither coordinated PR is ready or merged.
 
@@ -69,6 +71,9 @@ Success criteria:
 - The pinned real App Server boundary preserved both response-card shapes after schema projection (1 focused test passed).
 - Response-card authoring and workout contract suites passed 21 focused tests after the projection fix; the runner bundle budget policy suite passed 42 tests.
 - Full Cloudflare runner assembly passed at 9,969,877 total bytes, 7,994,746 static-closure bytes, and 1,659,589 entry bytes under the reviewed baselines and unchanged tolerances.
+- The two closed compact-table runtime variants passed 17 contract tests and 16 operator response-card tests; both the raw and App Server-projected authoring schemas remained below 5,000 bytes.
+- Local outbox save/list/read and hosted side-effect JSON round trips preserved the V4 workout payload; their focused suites passed 1 selected outbox test and 24 hosted side-effect tests.
+- The final four affected packages typechecked, and the workout skill suites passed 10 tests after removing duplicate model-authored table progress.
 
 ## Parent product-experience revalidation
 

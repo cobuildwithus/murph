@@ -15,9 +15,6 @@ const ACTIVE_WORKOUT_CARD = {
   version: 1,
   title: 'Push day',
   subtitle: '1 of 3 sets complete',
-  rowHeader: 'Exercise',
-  columns: ['Progress'],
-  rows: [{ label: 'Bench press', values: ['1/3'] }],
   footer: null,
   tracking: {
     kind: 'workout',

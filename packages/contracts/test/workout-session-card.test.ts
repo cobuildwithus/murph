@@ -13,12 +13,6 @@ const TRACKED_WORKOUT_CARD: CompactTableResponseCardV1 = {
   version: 1,
   title: "Push day",
   subtitle: "3 of 6 sets complete",
-  rowHeader: "Exercise",
-  columns: ["Progress"],
-  rows: [
-    { label: "Bench press", values: ["2/3"] },
-    { label: "Incline dumbbell press", values: ["1/3"] },
-  ],
   footer: "Tap an exercise to log or correct a set.",
   tracking: {
     kind: "workout",
@@ -73,19 +67,6 @@ const TRACKED_WORKOUT_CARD: CompactTableResponseCardV1 = {
   },
 };
 
-function summaryRows(
-  workout: NonNullable<CompactTableResponseCardV1["workout"]>,
-) {
-  return workout.exercises.map((exercise) => ({
-    label: exercise.name,
-    values: [
-      `${
-        exercise.sets.filter((set) => set.status === "completed").length
-      }/${exercise.sets.length}`,
-    ],
-  }));
-}
-
 describe("workout session compact-table contract", () => {
   it("accepts one bounded active workout backed by canonical state", () => {
     expect(
@@ -111,7 +92,6 @@ describe("workout session compact-table contract", () => {
     });
     const completedCard: CompactTableResponseCardV1 = {
       ...TRACKED_WORKOUT_CARD,
-      rows: summaryRows(workout),
       workout,
     };
 
@@ -139,7 +119,6 @@ describe("workout session compact-table contract", () => {
             },
           ],
         },
-        rows: [{ label: "Bench press", values: ["1/1"] }],
       }).success,
     ).toBe(false);
 
@@ -171,7 +150,6 @@ describe("workout session compact-table contract", () => {
             },
           ],
         },
-        rows: [{ label: "Bench press", values: ["0/1"] }],
       }).success,
     ).toBe(false);
   });
@@ -193,27 +171,24 @@ describe("workout session compact-table contract", () => {
     const card: CompactTableResponseCardV1 = {
       ...TRACKED_WORKOUT_CARD,
       subtitle: "6 of 6 sets complete",
-      rows: summaryRows(workout),
       workout,
     };
 
     expect(compactTableResponseCardV1Schema.parse(card)).toEqual(card);
   });
 
-  it("requires the compact summary to mirror workout progress", () => {
+  it("keeps generic table fields out of the workout branch", () => {
     expect(
       compactTableResponseCardV1Schema.safeParse({
         ...TRACKED_WORKOUT_CARD,
-        rows: [
-          { label: "Bench press", values: ["3/3"] },
-          { label: "Incline dumbbell press", values: ["1/3"] },
-        ],
+        rows: [{ label: "Bench press", values: ["3/3"] }],
       }).success,
     ).toBe(false);
 
     expect(
       compactTableResponseCardV1Schema.safeParse({
         ...TRACKED_WORKOUT_CARD,
+        rowHeader: "Exercise",
         columns: ["Sets"],
       }).success,
     ).toBe(false);
@@ -249,7 +224,6 @@ describe("workout session compact-table contract", () => {
             },
           ],
         },
-        rows: [{ label: "Bench press", values: ["2/3"] }],
       }).success,
     ).toBe(false);
 
@@ -307,7 +281,6 @@ describe("workout session compact-table contract", () => {
       ...TRACKED_WORKOUT_CARD,
       title: "T".repeat(workoutSessionCardV1Bounds.title),
       subtitle: null,
-      rows: summaryRows(workout),
       footer: null,
       workout,
     };
@@ -344,7 +317,6 @@ describe("workout session compact-table contract", () => {
     };
     const oversized = {
       ...TRACKED_WORKOUT_CARD,
-      rows: summaryRows(oversizedWorkout),
       workout: oversizedWorkout,
       footer: "F".repeat(workoutSessionCardV1Bounds.footer),
     };

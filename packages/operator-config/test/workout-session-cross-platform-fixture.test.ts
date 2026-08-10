@@ -10,12 +10,6 @@ const CARD: CompactTableResponseCardV1 = {
   version: 1,
   title: 'Push day',
   subtitle: '3 of 6 sets complete',
-  rowHeader: 'Exercise',
-  columns: ['Progress'],
-  rows: [
-    { label: 'Bench press', values: ['2/3'] },
-    { label: 'Incline dumbbell press', values: ['1/3'] },
-  ],
   footer: 'Tap an exercise to log or correct a set.',
   tracking: {
     kind: 'workout',

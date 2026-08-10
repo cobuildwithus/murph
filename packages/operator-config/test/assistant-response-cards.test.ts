@@ -179,52 +179,54 @@ describe('assistant response cards', () => {
           ],
         },
         {
-          additionalProperties: false,
-          properties: {
-            columns: {
-              maxItems: 4,
-              minItems: 1,
-              type: 'array',
-            },
-            kind: { const: 'compact_table' },
-            title: {
-              minLength: 1,
-              pattern: '^\\S(?:.*\\S)?$',
-              type: 'string',
-            },
-            rows: {
-              maxItems: 8,
-              minItems: 1,
-              type: 'array',
-            },
-            tracking: {
+          allOf: [
+            {
               additionalProperties: false,
               properties: {
-                entityId: {
-                  maxLength: 30,
-                  pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
+                columns: {
+                  maxItems: 4,
+                  minItems: 1,
+                  type: 'array',
                 },
-                kind: { const: 'workout' },
-                snapshotAt: {
-                  maxLength: 24,
-                  minLength: 24,
-                  pattern: expect.stringContaining('\\.\\d{3}Z'),
+                kind: { const: 'compact_table' },
+                title: {
+                  minLength: 1,
+                  pattern: '^\\S(?:.*\\S)?$',
+                  type: 'string',
                 },
+                rows: {
+                  maxItems: 8,
+                  minItems: 1,
+                  type: 'array',
+                },
+                tracking: {
+                  additionalProperties: false,
+                  properties: {
+                    entityId: {
+                      maxLength: 30,
+                      pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
+                    },
+                    kind: { const: 'workout' },
+                    snapshotAt: {
+                      maxLength: 24,
+                      minLength: 24,
+                      pattern: expect.stringContaining('\\.\\d{3}Z'),
+                    },
+                  },
+                  type: ['object', 'null'],
+                },
+                version: { const: 1 },
               },
-              type: ['object', 'null'],
+              required: [
+                'kind',
+                'version',
+                'title',
+                'subtitle',
+                'footer',
+                'tracking',
+              ],
             },
-            version: { const: 1 },
-          },
-          required: [
-            'kind',
-            'version',
-            'title',
-            'subtitle',
-            'rowHeader',
-            'columns',
-            'rows',
-            'footer',
-            'tracking',
+            {},
           ],
         },
       ],

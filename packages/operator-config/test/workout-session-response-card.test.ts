@@ -18,12 +18,6 @@ const ACTIVE_WORKOUT_CARD = {
   version: 1,
   title: 'Push day',
   subtitle: '3 of 6 sets complete',
-  rowHeader: 'Exercise',
-  columns: ['Progress'],
-  rows: [
-    { label: 'Bench press', values: ['2/3'] },
-    { label: 'Incline dumbbell press', values: ['1/3'] },
-  ],
   footer: 'Tap an exercise to log or correct a set.',
   tracking: {
     kind: 'workout',
@@ -76,6 +70,18 @@ const ACTIVE_WORKOUT_CARD = {
       },
     ],
   },
+} satisfies AssistantResponseCard
+
+const ORDINARY_TABLE = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Push day',
+  subtitle: null,
+  rowHeader: 'Exercise',
+  columns: ['Progress'],
+  rows: [{ label: 'Bench press', values: ['2/3'] }],
+  footer: null,
+  tracking: null,
 } satisfies AssistantResponseCard
 
 const APP_CARD_URL_PREFIX = `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`
@@ -131,8 +137,7 @@ describe('workout session response cards', () => {
       encodeWorkoutSessionAppCardUrl(ACTIVE_WORKOUT_CARD),
     )
 
-    const { workout: _workout, ...ordinaryTable } = ACTIVE_WORKOUT_CARD
-    expect(decodeAppCardUrl(encodeCompactTableAppCardUrl(ordinaryTable))).toMatchObject({
+    expect(decodeAppCardUrl(encodeCompactTableAppCardUrl(ORDINARY_TABLE))).toMatchObject({
       schemaVersion: 3,
       card: {
         kind: 'compact_table',
@@ -192,11 +197,9 @@ describe('workout session response cards', () => {
           },
         ],
       },
-      rows: [{ label: 'Bench press', values: ['0/1'] }],
     }).success).toBe(false)
 
-    const { workout: _workout, ...ordinaryTable } = ACTIVE_WORKOUT_CARD
-    expect(() => encodeWorkoutSessionAppCardUrl(ordinaryTable)).toThrow(
+    expect(() => encodeWorkoutSessionAppCardUrl(ORDINARY_TABLE)).toThrow(
       /workout session detail/u,
     )
   })
@@ -208,18 +211,22 @@ describe('workout session response cards', () => {
       anyOf: [
         {},
         {
-          properties: {
-            workout: {
+          allOf: [
+            {
               properties: {
-                state: { enum: ['active', 'completed'] },
-                exercises: {
-                  items: {
-                    properties: {
-                      sets: {
-                        items: {
-                          properties: {
-                            status: {
-                              enum: ['pending', 'completed', 'skipped'],
+                workout: {
+                  properties: {
+                    state: { enum: ['active', 'completed'] },
+                    exercises: {
+                      items: {
+                        properties: {
+                          sets: {
+                            items: {
+                              properties: {
+                                status: {
+                                  enum: ['pending', 'completed', 'skipped'],
+                                },
+                              },
                             },
                           },
                         },
@@ -229,7 +236,16 @@ describe('workout session response cards', () => {
                 },
               },
             },
-          },
+            {
+              oneOf: [
+                { required: ['rowHeader', 'columns', 'rows'] },
+                {
+                  properties: { tracking: { type: 'object' } },
+                  required: ['workout'],
+                },
+              ],
+            },
+          ],
         },
       ],
     })
@@ -240,10 +256,6 @@ describe('workout session response cards', () => {
       ...ACTIVE_WORKOUT_CARD,
       subtitle: null,
       footer: null,
-      rows: [
-        { label: 'Bench press', values: ['2/3'] },
-        { label: 'Incline dumbbell press', values: ['1/3'] },
-      ],
       workout: {
         version: 1,
         state: 'completed',

@@ -14,6 +14,7 @@ import {
   workoutSessionCardV1Bounds,
   workoutSessionSetStatusValues,
   type AssistantResponseCard,
+  type CompactTableGenericResponseCardV1,
   type CompactTableResponseCardV1,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
@@ -67,7 +68,7 @@ export type AppCardEnvelopeV2 = {
 
 export type AppCardEnvelopeV3 = {
   schemaVersion: 3
-  card: Omit<CompactTableResponseCardV1, 'tracking' | 'workout'>
+  card: Omit<CompactTableGenericResponseCardV1, 'tracking'>
 }
 
 export type LinqIMessageAppLayout = {
@@ -96,7 +97,9 @@ export {
   workoutSessionSetStatusValues,
   workoutSessionSetV1Schema,
   type AssistantResponseCard,
+  type CompactTableGenericResponseCardV1,
   type CompactTableResponseCardV1,
+  type CompactTableWorkoutResponseCardV1,
   type CompactTableRowV1,
   type CompactTableTrackingSourceV1,
   type DailyNutritionResponseCard,
@@ -154,7 +157,7 @@ export function buildLinqIMessageAppLayout(
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind === 'compact_table') {
-    if (parsed.workout !== undefined) {
+    if ('workout' in parsed) {
       const progress = countWorkoutSessionSets(parsed.workout)
       return {
         caption: parsed.title,
@@ -242,15 +245,11 @@ export function encodeCompactTableAppCardUrl(
   if (parsed.kind !== 'compact_table') {
     throw new TypeError('Expected a compact table response card.')
   }
-  if (parsed.workout !== undefined) {
+  if ('workout' in parsed) {
     return encodeWorkoutSessionAppCardUrl(parsed)
   }
 
-  const {
-    tracking: _tracking,
-    workout: _workout,
-    ...presentationCard
-  } = parsed
+  const { tracking: _tracking, ...presentationCard } = parsed
   const envelope: AppCardEnvelopeV3 = {
     schemaVersion: 3,
     card: presentationCard,
@@ -262,7 +261,7 @@ export function encodeWorkoutSessionAppCardUrl(
   card: CompactTableResponseCardV1,
 ): string {
   const parsed = compactTableResponseCardV1Schema.parse(card)
-  if (parsed.workout === undefined) {
+  if (!('workout' in parsed)) {
     throw new TypeError(
       'Expected a compact table with workout session detail.',
     )
@@ -297,7 +296,7 @@ function renderCompactTableResponseCardText(
   card: CompactTableResponseCardV1,
   includeTracking: boolean,
 ): string {
-  if (card.workout !== undefined) {
+  if ('workout' in card) {
     return renderWorkoutSessionResponseCardText(
       card,
       card.workout,
@@ -731,7 +730,7 @@ function createAssistantResponseCardJsonSchema() {
       'goals',
     ],
   } as const
-  const compactTable = {
+  const compactTableFields = {
     type: 'object',
     additionalProperties: false,
     properties: {
@@ -771,17 +770,32 @@ function createAssistantResponseCardJsonSchema() {
       'version',
       'title',
       'subtitle',
-      'rowHeader',
-      'columns',
-      'rows',
       'footer',
       'tracking',
+    ],
+  } as const
+  const compactTable = {
+    allOf: [
+      compactTableFields,
+      {
+        oneOf: [
+          {
+            required: ['rowHeader', 'columns', 'rows'],
+          },
+          {
+            properties: {
+              tracking: { type: 'object' },
+            },
+            required: ['workout'],
+          },
+        ],
+      },
     ],
   } as const
 
   return {
     description:
-      'Author daily_nutrition V2 or compact_table V1; workout detail is optional.',
+      'Author daily_nutrition V2, generic compact_table V1, or compact_table workout V1.',
     anyOf: [nutrition, compactTable],
   } as const
 }

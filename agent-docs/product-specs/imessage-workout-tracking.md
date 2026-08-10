@@ -21,19 +21,14 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 
 ## Response-card contract
 
-The assistant continues authoring `compact_table` V1. A tracked live workout may add structured `workout` detail:
+The assistant continues authoring `compact_table` V1 through two closed shapes. A generic table keeps `rowHeader`, `columns`, and `rows`. A tracked live workout instead carries the shared title/subtitle/footer fields, a required canonical `tracking` marker, and structured `workout` detail:
 
 - `state`: `active` or `completed`;
 - ordered exercises;
 - ordered sets with `pending`, `completed`, or `skipped` status;
 - a compact target string and actual-result string.
 
-The outer table remains a deterministic summary:
-
-- `rowHeader="Exercise"`;
-- `columns=["Progress"]`;
-- one row per exercise;
-- each value is `<completed>/<total>`.
+Workout progress summaries are derived from the structured exercise/set detail by text, provider-layout, and native-envelope consumers. The model does not author a second generic row projection of the same state.
 
 Tracked workout detail requires a canonical tracking marker in durable transcript context. The native URL strips the event id and snapshot time.
 
@@ -68,3 +63,5 @@ Finish branches before the active-only set preflight. The assistant invokes the 
 ## Rollout
 
 Deploy the native schema-version-4 reader before enabling broad schema-version-4 emission. Older app versions retain truthful text and Linq fallback layouts, but do not provide the drill-down workout interface.
+
+The backend also has a persisted-state compatibility floor. Deploy V4-capable Worker and runner bundles before any V4 card can be emitted. The accepted outbox intent and hosted delivery side effect both persist the full response card; after the first V4-bearing record exists, those bundle versions are the rollback floor. A warm older bundle must not process that state because its strict parser rejects the workout branch, and the local runner can quarantine the pending intent out of the retry inventory. Recovery is a coordinated forward fix or explicit restoration of the quarantined intent after the compatible bundle is live, not rollback below the floor. Focused local-outbox and hosted-side-effect round-trip tests pin both persisted owners.
