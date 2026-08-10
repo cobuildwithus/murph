@@ -301,6 +301,12 @@ describe("changelog registry", () => {
         "The group never reads Family status or creates billing and invite links",
       ),
     });
+    expect(items.get("private-group-follow-up")).toMatchObject({
+      sourcePullRequests: [1481],
+      summary: expect.stringContaining("only to your verified direct chat"),
+      details: expect.stringContaining("before personal work begins"),
+    });
+    expect(items.get("private-group-follow-up")?.tryIt).toBeUndefined();
     expect(items.get("clearer-health-source-handoffs")).toMatchObject({
       sourcePullRequests: [1432, 1447, 1506],
       details: expect.stringContaining("snapshots rather than live sync"),
@@ -487,6 +493,7 @@ describe("changelog registry", () => {
           "generated-contact-card-avatar",
           "family-setup-from-group",
           "live-workout-logging",
+          "private-group-follow-up",
           "clearer-health-source-handoffs",
           "body-composition-guidance",
           "group-replies-respect-the-room",

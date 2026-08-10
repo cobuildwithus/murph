@@ -60,6 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
+    expect(markup).toContain("Continue a group question privately");
     expect(markup).toContain(
       "Exact experiment links and steadier background work",
     );
@@ -103,6 +104,9 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('href="/changelog?edition=2026-08-02"');
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',
+    );
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-09#private-group-follow-up"',
     );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-06#x-post-media-understanding"',
