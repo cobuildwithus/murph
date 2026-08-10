@@ -241,3 +241,10 @@ Updated: 2026-08-10
 - The two focused Cloudflare files pass 98 tests, the Cloudflare package
   typecheck passes, docs drift passes, and the workspace diff has no whitespace
   errors.
+- The latest `main` merged without conflicts. Post-merge verification passes
+  the seven-file Assistant Engine suite (318 passed, 35 credential-gated
+  skipped), Assistant Engine and Cloudflare typechecks, and the two-file
+  98-test Cloudflare floor/preflight suite. Exact hosted-local assembly passes
+  at 8,999,437-byte vault CLI total and a 1,659,616-byte runner entry,
+  8,019,870-byte static closure, and 9,996,978-byte runner total without a
+  budget change.
