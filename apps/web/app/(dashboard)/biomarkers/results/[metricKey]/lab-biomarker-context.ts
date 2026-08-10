@@ -31,9 +31,14 @@ export function resolveLabBiomarkerContext(metricKey: string): {
     entityKeys.add(entry.key);
   }
 
+  // Health Commons' generated page artifact still models the original
+  // serum/plasma subset. The shared runtime owner additionally admits
+  // generation-4 whole-blood CBC comparators, which have the same display
+  // fields and are consumed by the existing detail component without a new UI
+  // contract or duplicated Web-owned range table.
   const reviewedFallbackRanges = [...entityKeys].flatMap((entityKey) =>
     resolveReviewedBiomarkerFallbackRanges(entityKey)
-  );
+  ) as unknown as HealthCommonsWebBiomarkerFallbackRange[];
 
   return {
     displayName: definition?.displayName
