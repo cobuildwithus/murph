@@ -203,9 +203,10 @@ Updated: 2026-08-10
   media/no-text context without transcript, filename, or provider-id leakage.
   The split voice-fallback and both generated-image primary/link journeys remain
   green.
-- Focused verification passes 251 Assistant Engine outbox/channel/reply tests,
-  the 64-test Operator Config Linq runtime file, and both affected package
-  typechecks. After removing redundant projection code instead of raising a
-  ratchet, exact hosted-local assembly passes at 8,999,571-byte vault CLI total
-  and a 1,659,616-byte runner entry, 8,018,897-byte static closure, and
-  9,996,715-byte runner total.
+- Focused verification passes 318 Assistant Engine tests with 35 explicit
+  live-provider cases skipped behind their credential gate, the 64-test
+  Operator Config Linq runtime file, and both affected package typechecks.
+  After removing redundant projection code instead of raising a ratchet, exact
+  hosted-local assembly passes at 8,999,571-byte vault CLI total and a
+  1,659,616-byte runner entry, 8,018,897-byte static closure, and 9,996,715-byte
+  runner total.
