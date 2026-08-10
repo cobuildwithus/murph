@@ -73,6 +73,9 @@ import {
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
+  startHostedPulseTrialPaidPlan,
+} from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
+import {
   readHostedPersonalAiUsageStatus,
 } from "@/src/lib/hosted-execution/usage-status";
 import {
@@ -378,6 +381,209 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     });
+
+    it("keeps Family blocked when a paused-plan resume succeeds after its fence transaction", async () => {
+      const blockerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const resumeClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const familyClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const ownerMemberId = `hbm_family_resume_owner_${fixtureId}`;
+      const memberId = `hbm_family_resume_member_${fixtureId}`;
+      const groupId = `hbag_family_resume_${fixtureId}`;
+      const inviteId = `hbagi_family_resume_${fixtureId}`;
+      const inviteCode = `family-resume-${fixtureId}`;
+      const stripeCustomerId = `cus_family_resume_${fixtureId}`;
+      const stripeSubscriptionId = `sub_family_resume_${fixtureId}`;
+      const pulsePriceId = `price_family_resume_pulse_${fixtureId}`;
+      const edgePriceId = `price_family_resume_edge_${fixtureId}`;
+      const webhookSecret = "whsec_hosted_family_resume_fixture";
+      const paymentMethodId = `pm_family_resume_${fixtureId}`;
+      const now = new Date("2026-07-01T13:45:00.000Z");
+      const blockerLocked = createDeferred();
+      const releaseBlocker = createDeferred();
+      const resumeRequested = createDeferred();
+      const allowResumeResponse = createDeferred();
+      const pausedSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        paymentMethodId,
+        priceId: pulsePriceId,
+        status: "paused",
+        subscriptionId: stripeSubscriptionId,
+      });
+      const resumedSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        latestInvoice: buildDraftPulseResumeInvoice({
+          customerId: stripeCustomerId,
+          invoiceId: `in_family_resume_${fixtureId}`,
+          subscriptionId: stripeSubscriptionId,
+        }),
+        paymentMethodId,
+        priceId: pulsePriceId,
+        status: "active",
+        subscriptionId: stripeSubscriptionId,
+      });
+      const stripeFixture = await startHostedStripeHttpFixture({
+        beforeResumeSubscription: async () => {
+          resumeRequested.resolve();
+          await allowResumeResponse.promise;
+        },
+        prices: {
+          [pulsePriceId]: buildHostedMonthlyPrice({
+            priceId: pulsePriceId,
+            unitAmount: 800,
+          }),
+        },
+        resumedSubscriptions: {
+          [stripeSubscriptionId]: resumedSubscription,
+        },
+        subscriptions: {
+          [stripeSubscriptionId]: pausedSubscription,
+        },
+        updatedSubscriptions: {
+          [stripeSubscriptionId]: pausedSubscription,
+        },
+      });
+      const runtimeGlobals = readHostedStripeRuntimeGlobals();
+      let blockerPromise: Promise<unknown> | null = null;
+      let startPromise: ReturnType<typeof startHostedPulseTrialPaidPlan> | null = null;
+      let familyPromise: Promise<unknown> | null = null;
+
+      configureHostedStripeFixtureEnvironment({
+        edgePriceId,
+        pulsePriceId,
+        stripe: stripeFixture.stripe,
+        webhookSecret,
+      });
+
+      try {
+        await resumeClient.hostedMember.createMany({
+          data: [
+            { id: ownerMemberId },
+            {
+              billingStatus: HostedBillingStatus.paused,
+              id: memberId,
+            },
+          ],
+        });
+        await resumeClient.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            currentBillingPhase: null,
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+            currentTrialEndsAt: now,
+            memberId,
+            stripeCustomerId,
+            stripeSubscriptionId,
+            tx,
+          })
+        );
+        await resumeClient.hostedAccountGroup.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: groupId,
+            ownerMemberId,
+          },
+        });
+        await resumeClient.hostedAccountGroupInvite.create({
+          data: {
+            expiresAt: new Date(now.getTime() + 60_000),
+            groupId,
+            id: inviteId,
+            inviteCode,
+            invitedByMemberId: ownerMemberId,
+          },
+        });
+
+        const resumePid = await readBackendPid(resumeClient);
+        const familyPid = await readBackendPid(familyClient);
+        blockerPromise = blockerClient.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, memberId);
+          blockerLocked.resolve();
+          await releaseBlocker.promise;
+        }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+        await blockerLocked.promise;
+
+        startPromise = startHostedPulseTrialPaidPlan({
+          memberId,
+          now,
+          prisma: resumeClient,
+        });
+        await waitForBlockedBackend({ observer, pid: resumePid });
+
+        familyPromise = familyClient.$transaction((tx) =>
+          acceptHostedFamilyInviteTx({
+            acceptedMemberId: memberId,
+            inviteCode,
+            now,
+            tx,
+          }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+        await waitForBlockedBackend({ observer, pid: familyPid });
+
+        releaseBlocker.resolve();
+        await resumeRequested.promise;
+        await expect(readHostedMemberBillingSnapshot({
+          memberId,
+          prisma: resumeClient,
+        })).resolves.toMatchObject({
+          core: { billingStatus: HostedBillingStatus.incomplete },
+        });
+        await expect(familyPromise).rejects.toMatchObject({
+          code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+        });
+        allowResumeResponse.resolve();
+        await expect(startPromise).resolves.toEqual({
+          billingPlanCode: "launch_monthly",
+          status: "billing_pending",
+        });
+
+        await expect(readHostedMemberBillingSnapshot({
+          memberId,
+          prisma: resumeClient,
+        })).resolves.toMatchObject({
+          core: { billingStatus: HostedBillingStatus.incomplete },
+        });
+        await expect(resumeClient.hostedAccountGroupInvite.findUnique({
+          select: { status: true },
+          where: { id: inviteId },
+        })).resolves.toEqual({ status: "pending" });
+        await expect(resumeClient.hostedAccountGroupMembership.count({
+          where: { groupId, memberId },
+        })).resolves.toBe(0);
+        expect(stripeFixture.observedRequests).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            method: "POST",
+            pathname: `/v1/subscriptions/${stripeSubscriptionId}`,
+          }),
+          expect.objectContaining({
+            method: "POST",
+            pathname: `/v1/subscriptions/${stripeSubscriptionId}/resume`,
+          }),
+        ]));
+      } finally {
+        releaseBlocker.resolve();
+        allowResumeResponse.resolve();
+        await Promise.allSettled([
+          ...(blockerPromise ? [blockerPromise] : []),
+          ...(startPromise ? [startPromise] : []),
+          ...(familyPromise ? [familyPromise] : []),
+        ]);
+        clearHostedStripeFixtureEnvironment(runtimeGlobals);
+        await stripeFixture.stop();
+        await resumeClient.hostedAccountGroup.deleteMany({
+          where: { id: groupId },
+        });
+        await resumeClient.hostedMember.deleteMany({
+          where: { id: { in: [ownerMemberId, memberId] } },
+        });
+        await Promise.all([
+          blockerClient.$disconnect(),
+          familyClient.$disconnect(),
+          observer.$disconnect(),
+          resumeClient.$disconnect(),
+        ]);
+      }
+    }, 60_000);
 
     it("lets Family removal win before Checkout loser cleanup without touching Stripe", async () => {
       const ownerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -2378,6 +2584,97 @@ async function makeStripeReceiptImmediatelyRetryable(input: {
     data: { nextAttemptAt: new Date(0) },
     where: { eventId: input.eventId },
   });
+}
+
+function buildHostedMonthlyPrice(input: {
+  priceId: string;
+  unitAmount: number;
+}): Stripe.Price {
+  return {
+    active: true,
+    billing_scheme: "per_unit",
+    currency: "usd",
+    currency_options: null,
+    custom_unit_amount: null,
+    id: input.priceId,
+    livemode: false,
+    object: "price",
+    recurring: {
+      interval: "month",
+      interval_count: 1,
+      meter: null,
+      trial_period_days: null,
+      usage_type: "licensed",
+    },
+    tiers_mode: null,
+    transform_quantity: null,
+    type: "recurring",
+    unit_amount: input.unitAmount,
+  } as never;
+}
+
+function buildDraftPulseResumeInvoice(input: {
+  customerId: string;
+  invoiceId: string;
+  subscriptionId: string;
+}): Stripe.Invoice {
+  return {
+    amount_remaining: 800,
+    customer: input.customerId,
+    hosted_invoice_url: null,
+    id: input.invoiceId,
+    object: "invoice",
+    status: "draft",
+    subscription: input.subscriptionId,
+  } as never;
+}
+
+function buildPulseResumeSubscription(input: {
+  customerId: string;
+  latestInvoice?: Stripe.Invoice;
+  paymentMethodId: string;
+  priceId: string;
+  status: "active" | "paused";
+  subscriptionId: string;
+}): Stripe.Subscription {
+  return {
+    cancel_at_period_end: false,
+    collection_method: "charge_automatically",
+    customer: input.customerId,
+    default_payment_method: input.paymentMethodId,
+    default_source: null,
+    id: input.subscriptionId,
+    items: {
+      data: [{
+        id: `si_${input.subscriptionId}`,
+        object: "subscription_item",
+        price: {
+          id: input.priceId,
+          object: "price",
+          recurring: {
+            interval: "month",
+            interval_count: 1,
+            meter: null,
+            trial_period_days: null,
+            usage_type: "licensed",
+          },
+          type: "recurring",
+        },
+        quantity: 1,
+      }],
+      has_more: false,
+      object: "list",
+      url: `/v1/subscription_items?subscription=${input.subscriptionId}`,
+    },
+    latest_invoice: input.latestInvoice ?? null,
+    metadata: {},
+    object: "subscription",
+    pause_collection: null,
+    pending_update: null,
+    schedule: null,
+    status: input.status,
+    trial_end: null,
+  } as never;
 }
 
 interface FamilyCleanupFixture {

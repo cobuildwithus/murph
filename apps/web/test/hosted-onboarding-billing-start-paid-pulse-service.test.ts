@@ -1292,7 +1292,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(2);
   });
 
-  test("holds paused cleanup and resume mutations behind one shared member lock", async () => {
+  test("commits the paused-resume fence before Stripe and leaves active to invoice reconciliation", async () => {
     let releaseFirstLock: (() => void) | undefined;
     let signalFirstLock: (() => void) | undefined;
     const firstLockEntered = new Promise<void>((resolve) => {
@@ -1350,13 +1350,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
-    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(1, {
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledOnce();
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
       billingStatus: HostedBillingStatus.incomplete,
-      memberId: "member_123",
-      prisma: mocks.prismaClient,
-    });
-    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(2, {
-      billingStatus: HostedBillingStatus.active,
       memberId: "member_123",
       prisma: mocks.prismaClient,
     });
@@ -1382,11 +1378,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
       mocks.updateHostedMemberCoreState.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.stripe.subscriptions.update.mock.invocationCallOrder[0] ?? 0,
-    );
-    expect(
-      mocks.stripe.subscriptions.resume.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.updateHostedMemberCoreState.mock.invocationCallOrder[1] ?? 0,
     );
   });
 
@@ -1500,14 +1491,22 @@ describe("startHostedPulseTrialPaidPlan", () => {
     );
   });
 
-  test("uses a fresh cleanup key when paused paid conversion is retried", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValue({
-      billingStatus: HostedBillingStatus.paused,
-      createdAt: new Date("2026-05-01T00:00:00.000Z"),
-      id: "member_123",
-      suspendedAt: null,
-      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
-    });
+  test("retries a committed resume fence with a fresh paused-cleanup key", async () => {
+    mocks.readHostedMemberCoreState
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.paused,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.incomplete,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:01.000Z"),
+      });
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
     }));

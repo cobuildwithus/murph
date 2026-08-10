@@ -22,8 +22,12 @@ export interface HostedStripeHttpFixture {
 }
 
 export async function startHostedStripeHttpFixture(input: {
+  beforeResumeSubscription?: (subscriptionId: string) => Promise<void>;
   events?: Readonly<Record<string, Stripe.Event>>;
+  prices?: Readonly<Record<string, Stripe.Price>>;
+  resumedSubscriptions?: Readonly<Record<string, Stripe.Subscription>>;
   subscriptions?: Readonly<Record<string, Stripe.Subscription>>;
+  updatedSubscriptions?: Readonly<Record<string, Stripe.Subscription>>;
 }): Promise<HostedStripeHttpFixture> {
   const observedRequests: ObservedHostedStripeHttpRequest[] = [];
   const server = createServer(async (request, response) => {
@@ -48,12 +52,48 @@ export async function startHostedStripeHttpFixture(input: {
       return;
     }
 
+    const priceId = readResourceId(url.pathname, "/v1/prices/");
+    if (observed.method === "GET" && priceId) {
+      const price = input.prices?.[priceId];
+      if (price) {
+        writeJsonResponse(response, 200, price);
+        return;
+      }
+      writeStripeNotFound(response, "price", priceId);
+      return;
+    }
+
+    const resumedSubscriptionId = readNestedResourceId(
+      url.pathname,
+      "/v1/subscriptions/",
+      "/resume",
+    );
+    if (observed.method === "POST" && resumedSubscriptionId) {
+      await input.beforeResumeSubscription?.(resumedSubscriptionId);
+      const subscription = input.resumedSubscriptions?.[resumedSubscriptionId];
+      if (subscription) {
+        writeJsonResponse(response, 200, subscription);
+        return;
+      }
+      writeStripeNotFound(response, "subscription", resumedSubscriptionId);
+      return;
+    }
+
     const subscriptionId = readResourceId(
       url.pathname,
       "/v1/subscriptions/",
     );
     if (observed.method === "GET" && subscriptionId) {
       const subscription = input.subscriptions?.[subscriptionId];
+      if (subscription) {
+        writeJsonResponse(response, 200, subscription);
+        return;
+      }
+      writeStripeNotFound(response, "subscription", subscriptionId);
+      return;
+    }
+    if (observed.method === "POST" && subscriptionId) {
+      const subscription = input.updatedSubscriptions?.[subscriptionId];
       if (subscription) {
         writeJsonResponse(response, 200, subscription);
         return;
@@ -91,12 +131,28 @@ export async function startHostedStripeHttpFixture(input: {
   };
 }
 
+function readNestedResourceId(
+  pathname: string,
+  prefix: string,
+  suffix: string,
+): string | null {
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) {
+    return null;
+  }
+  const encoded = pathname.slice(prefix.length, -suffix.length);
+  return encoded && !encoded.includes("/")
+    ? decodeURIComponent(encoded)
+    : null;
+}
+
 function readResourceId(pathname: string, prefix: string): string | null {
   if (!pathname.startsWith(prefix)) {
     return null;
   }
   const encoded = pathname.slice(prefix.length);
-  return encoded ? decodeURIComponent(encoded) : null;
+  return encoded && !encoded.includes("/")
+    ? decodeURIComponent(encoded)
+    : null;
 }
 
 function readHeader(

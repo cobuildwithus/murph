@@ -13,7 +13,6 @@ import { getPrisma } from "../prisma";
 import {
   coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
-  mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
   HOSTED_PULSE_TRIAL_OFFER,
@@ -1181,134 +1180,103 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
     ? paymentMethodUpdate.default_payment_method
     : paymentMethodUpdate.default_source;
 
+  // Family acceptance uses the same member row lock. Commit the non-lapsed
+  // fence before any provider mutation so an irreversible Stripe resume can
+  // never outlive a rolled-back local projection. A later retry can safely
+  // continue from canonical Stripe `paused`; invoice reconciliation alone may
+  // promote this projection to `active`.
+  await withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    run: async (tx) => {
+      await assertHostedBillingPlanSelectable({
+        memberId: input.memberId,
+        prisma: tx,
+        targetPlanCode: input.targetPlanCode,
+      });
+      const familyClaim = await readHostedMemberFamilyBillingClaim({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      if (familyClaim) {
+        throw buildHostedFamilyBillingClaimError(familyClaim);
+      }
+      await updateHostedMemberCoreState({
+        billingStatus: HostedBillingStatus.incomplete,
+        memberId: input.memberId,
+        prisma: tx,
+      });
+    },
+  });
+
   let stripeMutationCompleted = false;
 
   try {
-    const mutationResult = await withHostedMemberStripeMutationLock({
-      memberId: input.memberId,
-      prisma: input.prisma,
-      run: async (tx) => {
-        await assertHostedBillingPlanSelectable({
-          memberId: input.memberId,
-          prisma: tx,
-          targetPlanCode: input.targetPlanCode,
-        });
-        const familyClaim = await readHostedMemberFamilyBillingClaim({
-          memberId: input.memberId,
-          prisma: tx,
-        });
-        if (familyClaim) {
-          throw buildHostedFamilyBillingClaimError(familyClaim);
-        }
-
-        // The member row is the shared ordering lock with Family acceptance.
-        // Keep a non-lapsed projection committed when Stripe reports an
-        // ambiguous result. Replace it with the provider status after a
-        // successful resume unless Stripe still reports a lapsed status.
-        await updateHostedMemberCoreState({
-          billingStatus: HostedBillingStatus.incomplete,
-          memberId: input.memberId,
-          prisma: tx,
-        });
-
-        try {
-          const cleanupParams: Stripe.SubscriptionUpdateParams = {
-            expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
-            metadata: {
-              [PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY]: "",
-            },
-          };
-          if (input.transitionItems.length > 0) {
-            cleanupParams.items = input.transitionItems;
-            cleanupParams.proration_behavior = "none";
-          }
-          // Customer-level payment inheritance is made explicit here because
-          // Resume does not accept either payment instrument field.
-          if ("default_payment_method" in paymentMethodUpdate) {
-            cleanupParams.default_payment_method =
-              paymentMethodUpdate.default_payment_method;
-          } else {
-            cleanupParams.default_source = paymentMethodUpdate.default_source;
-          }
-          const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
-            "subscription.update.paused-pre-resume-cleanup",
-            // Stripe rejects `proration_behavior` on a paused subscription unless
-            // this request also changes the plan item. A same-plan resume keeps the
-            // existing metadata-only cleanup shape.
-            () => input.stripe.subscriptions.update(input.stripeSubscriptionId, cleanupParams, {
-              idempotencyKey:
-                buildHostedPulseTrialStartPaidCleanupIdempotencyKey(),
-            }),
-          );
-          assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
-            priceId: input.priceId,
-            subscription: cleanedSubscription,
-          });
-          if (
-            readHostedStripeSubscriptionPaymentMethodId(cleanedSubscription) !==
-              paymentMethodId
-          ) {
-            throw hostedOnboardingError({
-              code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_STATE_UNSUPPORTED",
-              httpStatus: 409,
-              message: "Your subscription payment method could not be confirmed.",
-            });
-          }
-          let subscription = cleanedSubscription;
-          if (cleanedSubscription.status === "paused") {
-            subscription = await callHostedStripeStartPaidPulseOperation(
-              "subscription.resume.paused-trial",
-              () => input.stripe.subscriptions.resume(
-                input.stripeSubscriptionId,
-                {
-                  billing_cycle_anchor: "now",
-                  expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
-                },
-                {
-                  idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
-                    memberId: input.memberId,
-                    operation: "paused-resume-v2",
-                    priceId: input.priceId,
-                    stripeSubscriptionId: input.stripeSubscriptionId,
-                    trialEnd: input.trialEnd,
-                  }),
-                },
-              ),
-            );
-            stripeMutationCompleted = true;
-          }
-          const mappedBillingStatus =
-            mapStripeSubscriptionStatusToHostedBillingStatus(
-              subscription.status,
-            );
-          const projectedBillingStatus = stripeMutationCompleted
-            && (
-              mappedBillingStatus === HostedBillingStatus.canceled
-              || mappedBillingStatus === HostedBillingStatus.paused
-            )
-            ? HostedBillingStatus.incomplete
-            : mappedBillingStatus;
-          await updateHostedMemberCoreState({
-            billingStatus: projectedBillingStatus,
-            memberId: input.memberId,
-            prisma: tx,
-          });
-          return {
-            kind: "subscription" as const,
-            subscription,
-          };
-        } catch (error) {
-          if (isHostedPulseTrialStartPaidAmbiguousStripeMutationError(error)) {
-            return { kind: "reconcile" as const };
-          }
-          throw error;
-        }
+    const cleanupParams: Stripe.SubscriptionUpdateParams = {
+      expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
+      metadata: {
+        [PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY]: "",
       },
-    });
-    if (mutationResult.kind === "reconcile") {
-      return null;
+    };
+    if (input.transitionItems.length > 0) {
+      cleanupParams.items = input.transitionItems;
+      cleanupParams.proration_behavior = "none";
     }
-    const resumedSubscription = mutationResult.subscription;
+    // Customer-level payment inheritance is made explicit here because
+    // Resume does not accept either payment instrument field.
+    if ("default_payment_method" in paymentMethodUpdate) {
+      cleanupParams.default_payment_method =
+        paymentMethodUpdate.default_payment_method;
+    } else {
+      cleanupParams.default_source = paymentMethodUpdate.default_source;
+    }
+    const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
+      "subscription.update.paused-pre-resume-cleanup",
+      // Stripe rejects `proration_behavior` on a paused subscription unless
+      // this request also changes the plan item. A same-plan resume keeps the
+      // existing metadata-only cleanup shape.
+      () => input.stripe.subscriptions.update(input.stripeSubscriptionId, cleanupParams, {
+        idempotencyKey:
+          buildHostedPulseTrialStartPaidCleanupIdempotencyKey(),
+      }),
+    );
+    assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
+      priceId: input.priceId,
+      subscription: cleanedSubscription,
+    });
+    if (
+      readHostedStripeSubscriptionPaymentMethodId(cleanedSubscription) !==
+        paymentMethodId
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_STATE_UNSUPPORTED",
+        httpStatus: 409,
+        message: "Your subscription payment method could not be confirmed.",
+      });
+    }
+    let resumedSubscription = cleanedSubscription;
+    if (cleanedSubscription.status === "paused") {
+      resumedSubscription = await callHostedStripeStartPaidPulseOperation(
+        "subscription.resume.paused-trial",
+        () => input.stripe.subscriptions.resume(
+          input.stripeSubscriptionId,
+          {
+            billing_cycle_anchor: "now",
+            expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
+          },
+          {
+            idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
+              memberId: input.memberId,
+              operation: "paused-resume-v2",
+              priceId: input.priceId,
+              stripeSubscriptionId: input.stripeSubscriptionId,
+              trialEnd: input.trialEnd,
+            }),
+          },
+        ),
+      );
+      stripeMutationCompleted = true;
+    }
     assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
       priceId: input.priceId,
       subscription: resumedSubscription,
