@@ -1,9 +1,9 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from "vitest";
 
 import {
   executeMurphDynamicToolRequest,
   MURPH_FAMILY_PLAN_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
 import {
@@ -21,7 +21,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("parses and executes structured family invite requests", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -139,7 +139,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("parses email-only family invite requests", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -169,7 +169,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("parses and executes Family checkout without invitation context", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -265,7 +265,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("preserves explicit active-trial conversion consent for Family checkout", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -283,7 +283,7 @@ describe("assistant family plan tool", () => {
       },
     });
 
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -297,7 +297,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("rejects invitation context on Family checkout", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -314,7 +314,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("rejects invite requests without a phone number, Telegram username, or email", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -330,7 +330,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("reports ambiguous Family mutations as unconfirmed without encouraging a duplicate", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -387,7 +387,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("reports a failed Family status read as retry-safe with no possible change", async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {

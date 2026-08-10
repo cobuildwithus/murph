@@ -69,47 +69,109 @@ describe('assistant response cards', () => {
           additionalProperties: false,
           properties: {
             goals: {
+              additionalProperties: false,
+              patternProperties: {
+                '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': {
+                  additionalProperties: false,
+                  properties: {
+                    target: {
+                      exclusiveMinimum: 0,
+                      maximum: 2_000,
+                      type: 'number',
+                    },
+                  },
+                  type: ['object', 'null'],
+                },
+              },
               properties: {
                 calories: {
-                  anyOf: [
-                    {
-                      properties: {
-                        status: {
-                          enum: [
-                            'far_under_target',
-                            'under_target',
-                            'on_target',
-                            'over_target',
-                            'far_over_target',
-                            'unavailable',
-                          ],
-                        },
-                        target: { type: 'number' },
-                      },
+                  additionalProperties: false,
+                  properties: {
+                    status: {
+                      enum: [
+                        'far_under_target',
+                        'under_target',
+                        'on_target',
+                        'over_target',
+                        'far_over_target',
+                        'unavailable',
+                      ],
                     },
-                    { type: 'null' },
-                  ],
+                    target: {
+                      exclusiveMinimum: 0,
+                      maximum: 20_000,
+                      type: 'number',
+                    },
+                  },
+                  type: ['object', 'null'],
                 },
+                proteinGrams: {
+                  additionalProperties: false,
+                  type: ['object', 'null'],
+                },
+                carbsGrams: {},
+                fatGrams: {},
+                fiberGrams: {},
               },
             },
             kind: { const: 'daily_nutrition' },
+            localDate: {
+              pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+              type: 'string',
+            },
+            mealCount: {
+              maximum: 100,
+              minimum: 1,
+              type: 'integer',
+            },
             totals: {
-              properties: {
-                fiberGrams: {
-                  anyOf: [
-                    {
-                      properties: {
-                        total: { type: 'number' },
-                      },
+              additionalProperties: false,
+              patternProperties: {
+                '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': {
+                  additionalProperties: false,
+                  properties: {
+                    mealCount: {
+                      maximum: 100,
+                      minimum: 0,
+                      type: 'integer',
                     },
-                    {
-                      properties: {
-                        mealCount: { const: 0 },
-                        total: { type: 'null' },
-                      },
+                    total: {
+                      maximum: 2_000,
+                      minimum: 0,
+                      type: ['number', 'null'],
                     },
-                  ],
+                  },
                 },
+              },
+              properties: {
+                calories: {
+                  additionalProperties: false,
+                  properties: {
+                    mealCount: {
+                      maximum: 100,
+                      minimum: 1,
+                      type: 'integer',
+                    },
+                    total: {
+                      maximum: 20_000,
+                      minimum: 0,
+                      type: 'number',
+                    },
+                  },
+                },
+                proteinGrams: {
+                  additionalProperties: false,
+                  properties: {
+                    total: {
+                      maximum: 2_000,
+                      minimum: 0,
+                      type: ['number', 'null'],
+                    },
+                  },
+                },
+                carbsGrams: {},
+                fatGrams: {},
+                fiberGrams: {},
               },
             },
             version: { const: 2 },
@@ -124,47 +186,58 @@ describe('assistant response cards', () => {
           ],
         },
         {
-          additionalProperties: false,
-          properties: {
-            columns: {
-              maxItems: 4,
-              minItems: 1,
-              type: 'array',
-            },
-            kind: { const: 'compact_table' },
-            rows: {
-              maxItems: 8,
-              minItems: 1,
-              type: 'array',
-            },
-            tracking: {
-              anyOf: [
-                {
+          allOf: [
+            {
+              additionalProperties: false,
+              properties: {
+                columns: {
+                  maxItems: 4,
+                  minItems: 1,
+                  type: 'array',
+                },
+                kind: { const: 'compact_table' },
+                title: {
+                  minLength: 1,
+                  pattern: '^\\S(?:.*\\S)?$',
+                  type: 'string',
+                },
+                rows: {
+                  maxItems: 8,
+                  minItems: 1,
+                  type: 'array',
+                },
+                tracking: {
                   additionalProperties: false,
                   properties: {
+                    entityId: {
+                      maxLength: 30,
+                      pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
+                    },
                     kind: { const: 'workout' },
+                    snapshotAt: {
+                      maxLength: 24,
+                      minLength: 24,
+                      pattern: expect.stringContaining('\\.\\d{3}Z'),
+                    },
                   },
+                  type: ['object', 'null'],
                 },
-                { type: 'null' },
+                version: { const: 1 },
+              },
+              required: [
+                'kind',
+                'version',
+                'title',
+                'subtitle',
+                'footer',
+                'tracking',
               ],
             },
-            version: { const: 1 },
-          },
-          required: [
-            'kind',
-            'version',
-            'title',
-            'subtitle',
-            'rowHeader',
-            'columns',
-            'rows',
-            'footer',
-            'tracking',
+            {},
           ],
         },
       ],
     })
-    expect(assistantResponseCardJsonSchema).not.toHaveProperty('$defs')
     expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
   })
 

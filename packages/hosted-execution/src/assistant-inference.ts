@@ -19,7 +19,7 @@ export const HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION = 1 as const;
 export const HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY =
   "customInferenceVersion" as const;
 export const HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE =
-  "murph-codex-0.145.0-portable-responses-v1" as const;
+  "murph-codex-0.147.0-portable-responses-v1" as const;
 export const HOSTED_INFERENCE_CONTEXT_WINDOW_MIN_TOKENS = 8_192;
 export const HOSTED_INFERENCE_CONTEXT_WINDOW_MAX_TOKENS = 2_000_000;
 export const HOSTED_INFERENCE_MODEL_MAX_CODE_POINTS = 200;
