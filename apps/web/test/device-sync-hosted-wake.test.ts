@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     markConnectionSourcesDisconnected: vi.fn(),
     markDirtyConnectionProcessed: vi.fn(),
     persistStoredConnectionTokenBundle: vi.fn(),
+    prepareDirtyPayloads: vi.fn(),
     readHostedDeviceSyncEnvironment: vi.fn(),
     registryGet: vi.fn(),
     registryList: vi.fn(),
@@ -368,6 +369,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     markConnectionSourcesDisconnected = mocks.markConnectionSourcesDisconnected;
     markDirtyConnectionProcessed = mocks.markDirtyConnectionProcessed;
     persistStoredConnectionTokenBundle = mocks.persistStoredConnectionTokenBundle;
+    prepareDirtyPayloads = mocks.prepareDirtyPayloads;
     syncDurableConnectionState = mocks.syncDurableConnectionState;
     upsertDirtyConnection = mocks.upsertDirtyConnection;
     upsertConnectionSource = mocks.upsertConnectionSource;
@@ -585,6 +587,7 @@ describe("hosted device-sync wakes", () => {
     mocks.markConnectionSourcesDisconnected.mockResolvedValue(0);
     mocks.clearStoredProviderConfigCredential.mockResolvedValue(true);
     mocks.persistStoredConnectionTokenBundle.mockResolvedValue(undefined);
+    mocks.prepareDirtyPayloads.mockResolvedValue(undefined);
     mocks.registryGet.mockReturnValue(undefined);
     mocks.registryList.mockReturnValue([]);
     mocks.withConnectionMutationLock.mockImplementation(async (
@@ -4013,6 +4016,12 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("resolves the companion lane, stages a compact RMSSD job, and wakes the runtime", async () => {
+    const preparedPayloads = {
+      dirtyRevision: 1n,
+      resources: [],
+      rows: [],
+    };
+    mocks.prepareDirtyPayloads.mockResolvedValueOnce(preparedPayloads);
     const connection = buildHostedConnection({
       id: "dsc_junction_123",
       provider: "junction",
@@ -4040,6 +4049,7 @@ describe("hosted device-sync wakes", () => {
       dirtyAt: "2026-07-10T13:46:00.000Z",
       eventType: "companion.hrv-rmssd.created",
       provider: "junction",
+      preparedPayloads,
       resourceCategory: "derived",
       userId: "user-123",
       resources: [{
@@ -4059,6 +4069,9 @@ describe("hosted device-sync wakes", () => {
         windowStart: null,
       }],
     }));
+    expect(mocks.prepareDirtyPayloads.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0] ?? 0,
+    );
     const stagedPayload = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources?.[0]?.payload;
     const staged = stagedPayload?.companionObservationJson;
     expect(staged).toEqual(expect.any(String));

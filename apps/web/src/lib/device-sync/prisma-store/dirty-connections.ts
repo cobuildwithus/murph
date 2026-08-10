@@ -29,6 +29,7 @@ import type {
   HostedDeviceSyncDirtyConnectionAckRecord,
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDirtyResource,
+  HostedPreparedDeviceSyncDirtyPayloads,
   HostedPrismaTransactionClient,
   UpsertHostedDeviceSyncDirtyConnectionInput,
   UpsertHostedDeviceSyncDirtyConnectionResult,
@@ -55,20 +56,6 @@ interface DirtyPayloadCreateResult {
   resources: HostedDeviceSyncDirtyResource[];
 }
 
-type DirtyPayloadCreateRow = {
-  connectionId: string;
-  dirtyRevision: bigint;
-  id: string;
-  provider: string;
-  resourceEncrypted: string;
-  userId: string;
-};
-
-interface PreparedDirtyPayloadRows extends DirtyPayloadCreateResult {
-  dirtyRevision: bigint;
-  rows: DirtyPayloadCreateRow[];
-}
-
 const DIRTY_COUNTER_KEY_MAX_LENGTH = 96;
 const DIRTY_RESOURCE_KEY_MAX_LENGTH = 256;
 const DIRTY_RESOURCE_PAYLOAD_STRING_MAX_LENGTH = 512;
@@ -80,77 +67,142 @@ const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION = 500;
 const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_RESPONSE = 1_000;
 const DIRTY_PAYLOAD_HYDRATE_RESPONSE_MAX_ESTIMATED_BYTES = 8 * 1024 * 1024;
 const DIRTY_PAYLOAD_PRESEAL_CONCURRENCY = 16;
+const DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT = 100;
+const DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_MAX_BATCHES = 8;
+const HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE =
+  "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING";
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
 const COMPANION_HRV_NIGHT_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const COMPANION_HRV_NIGHT_RECEIPT_MAX_PER_CONNECTION = 64;
 
 export type CompanionHrvNightReceiptInspection = "conflict" | "exact" | "missing";
 
+export async function classifyHostedUnclassifiedDirtyPayloadsForConnection(input: {
+  connectionId: string;
+  prisma: PrismaClient;
+  userId: string;
+}): Promise<void> {
+  const classifyResource = createDirtyPayloadCredentialClassifier();
+
+  for (
+    let batch = 0;
+    batch < DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_MAX_BATCHES;
+    batch += 1
+  ) {
+    const rows = await input.prisma.deviceSyncDirtyPayload.findMany({
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
+      select: {
+        connectionId: true,
+        dirtyRevision: true,
+        id: true,
+        provider: true,
+        resourceEncrypted: true,
+      },
+      take: DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT + 1,
+      where: {
+        connectionId: input.connectionId,
+        credentialIndependent: null,
+        userId: input.userId,
+      },
+    });
+    if (rows.length === 0) {
+      return;
+    }
+
+    const classified = await mapLimit(
+      rows.slice(0, DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT),
+      DIRTY_PAYLOAD_PRESEAL_CONCURRENCY,
+      async (row) => {
+        const resource = await readDirtyPayloadResourceJson({
+          row,
+          tx: input.prisma,
+          userId: input.userId,
+        });
+        return {
+          credentialIndependent: resource
+            ? await classifyResource({
+                provider: row.provider,
+                resource,
+              })
+            : false,
+          id: row.id,
+        };
+      },
+    );
+
+    for (const credentialIndependent of [false, true] as const) {
+      const ids = classified
+        .filter((entry) => entry.credentialIndependent === credentialIndependent)
+        .map((entry) => entry.id);
+      if (ids.length === 0) {
+        continue;
+      }
+      await input.prisma.deviceSyncDirtyPayload.updateMany({
+        data: { credentialIndependent },
+        where: {
+          connectionId: input.connectionId,
+          credentialIndependent: null,
+          id: { in: ids },
+          userId: input.userId,
+        },
+      });
+    }
+
+    if (rows.length <= DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT) {
+      return;
+    }
+  }
+
+  throw createDirtyPayloadClassificationPendingError();
+}
+
+export function isHostedDirtyPayloadClassificationPendingError(
+  error: unknown,
+): boolean {
+  return Boolean(
+    typeof error === "object"
+      && error !== null
+      && "code" in error
+      && (error as { code?: unknown }).code
+        === HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE,
+  );
+}
+
 export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(input: {
   connectionId: string;
   tx: HostedPrismaTransactionClient;
   userId: string;
-}): Promise<{
-  retainedCredentialIndependentPayloadCount: number;
-  supersededPayloadCount: number;
-}> {
-  await input.tx.$queryRaw<Array<{ connectionId: string }>>(Prisma.sql`
-    SELECT connection_id AS "connectionId"
+}): Promise<void> {
+  const [existing] = await input.tx.$queryRaw<Array<{
+    dirtyRevision: bigint;
+    latestDirtyAt: Date;
+    processedRevision: bigint;
+  }>>(Prisma.sql`
+    SELECT
+      dirty_revision AS "dirtyRevision",
+      latest_dirty_at AS "latestDirtyAt",
+      processed_revision AS "processedRevision"
     FROM device_sync_dirty_connection
     WHERE connection_id = ${input.connectionId}
+      AND user_id = ${input.userId}
     FOR UPDATE
   `);
-  const existing = await input.tx.deviceSyncDirtyConnection.findFirst({
-    where: {
-      connectionId: input.connectionId,
-      userId: input.userId,
-    },
-  });
   if (!existing) {
-    return {
-      retainedCredentialIndependentPayloadCount: 0,
-      supersededPayloadCount: 0,
-    };
+    return;
   }
 
-  const payloadRows = await input.tx.deviceSyncDirtyPayload.findMany({
-    select: {
-      connectionId: true,
-      dirtyRevision: true,
-      id: true,
-      provider: true,
-      resourceEncrypted: true,
-    },
+  const unclassifiedPayloadCount = await input.tx.deviceSyncDirtyPayload.count({
     where: {
       connectionId: input.connectionId,
+      credentialIndependent: null,
       userId: input.userId,
     },
   });
-  const supersededPayloadIds: string[] = [];
-  let retainedCredentialIndependentPayloadCount = 0;
-  let classifyJunctionProviderJob: DeviceSyncCredentialIndependentImportJobClassifier | undefined;
-  for (const row of payloadRows) {
-    const resource = await readDirtyPayloadResourceJson({
-      row,
-      tx: input.tx,
-      userId: input.userId,
-    });
-    if (resource && row.provider === "junction" && !classifyJunctionProviderJob) {
-      ({
-        isJunctionCredentialIndependentInlineImportJob: classifyJunctionProviderJob,
-      } = await import("@murphai/device-syncd/junction-inline-authority"));
-    }
-    if (resource && isDeviceSyncCredentialIndependentImportJob({
-      kind: resource.jobKind,
-      payload: resource.payload,
-      provider: row.provider,
-    }, row.provider === "junction"
-      ? classifyJunctionProviderJob
-      : undefined)) {
-      retainedCredentialIndependentPayloadCount += 1;
-    } else {
-      supersededPayloadIds.push(row.id);
-    }
+  if (unclassifiedPayloadCount > 0) {
+    throw createDirtyPayloadClassificationPendingError();
   }
 
   const updated = await input.tx.deviceSyncDirtyConnection.updateMany({
@@ -174,22 +226,13 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
     throw createDirtyStateContentionError("ack");
   }
 
-  if (supersededPayloadIds.length > 0) {
-    await input.tx.deviceSyncDirtyPayload.deleteMany({
-      where: {
-        connectionId: input.connectionId,
-        id: {
-          in: supersededPayloadIds,
-        },
-        userId: input.userId,
-      },
-    });
-  }
-
-  return {
-    retainedCredentialIndependentPayloadCount,
-    supersededPayloadCount: supersededPayloadIds.length,
-  };
+  await input.tx.deviceSyncDirtyPayload.deleteMany({
+    where: {
+      connectionId: input.connectionId,
+      credentialIndependent: false,
+      userId: input.userId,
+    },
+  });
 }
 
 interface DirtyPayloadHydrationBudget {
@@ -275,11 +318,54 @@ export class PrismaHostedDirtyConnectionStore {
       : "conflict";
   }
 
+  async prepareDirtyPayloads(input: {
+    connectionId: string;
+    provider: string;
+    resources?: readonly HostedDeviceSyncDirtyResource[];
+    traceId?: string | null;
+    userId: string;
+  }): Promise<HostedPreparedDeviceSyncDirtyPayloads | undefined> {
+    const resourceBatch = buildDirtyResourceBatch(input.resources ?? []);
+    if (resourceBatch.payloadResources.length === 0) {
+      return undefined;
+    }
+
+    const existing = await this.prisma.deviceSyncDirtyConnection.findUnique({
+      where: {
+        connectionId: input.connectionId,
+      },
+    });
+    if (existing && existing.userId !== input.userId) {
+      throw new TypeError("Dirty payload preparation owner did not match the dirty connection.");
+    }
+
+    return prepareDirtyPayloadRows({
+      connectionId: input.connectionId,
+      dirtyRevision: resolveDirtyPayloadRevision({
+        existing,
+        resourceBatch,
+      }),
+      provider: input.provider,
+      resources: resourceBatch.payloadResources,
+      traceId: input.traceId,
+      userId: input.userId,
+      prisma: this.prisma,
+    });
+  }
+
   async upsertDirtyConnection(
     input: UpsertHostedDeviceSyncDirtyConnectionInput,
   ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
     const resourceBatch = buildDirtyResourceBatch(input.resources ?? []);
     if (input.tx) {
+      assertPreparedDirtyPayloads({
+        connectionId: input.connectionId,
+        preparedPayloads: input.preparedPayloads,
+        provider: input.provider,
+        resources: resourceBatch.payloadResources,
+        traceId: input.traceId,
+        userId: input.userId,
+      });
       return this.upsertDirtyConnectionOnce({
         ...input,
         resourceBatch,
@@ -289,19 +375,12 @@ export class PrismaHostedDirtyConnectionStore {
 
     for (let attempt = 0; attempt < DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS; attempt += 1) {
       try {
-        const precomputedDirtyPayloadRows =
-          await this.prepareDirtyPayloadRowsForStoreOwnedUpsert({
-            connectionId: input.connectionId,
-            provider: input.provider,
-            resourceBatch,
-            traceId: input.traceId,
-            userId: input.userId,
-          });
+        const preparedPayloads = await this.prepareDirtyPayloads(input);
 
         return await this.prisma.$transaction((tx) =>
           this.upsertDirtyConnectionOnce({
             ...input,
-            precomputedDirtyPayloadRows,
+            preparedPayloads,
             resourceBatch,
             tx,
           }),
@@ -323,7 +402,7 @@ export class PrismaHostedDirtyConnectionStore {
 
   private async upsertDirtyConnectionOnce(
     input: UpsertHostedDeviceSyncDirtyConnectionInput & {
-      precomputedDirtyPayloadRows?: PreparedDirtyPayloadRows;
+      preparedPayloads?: HostedPreparedDeviceSyncDirtyPayloads;
       resourceBatch: DirtyResourceBatch;
       tx: HostedPrismaTransactionClient;
     },
@@ -339,25 +418,7 @@ export class PrismaHostedDirtyConnectionStore {
     const hasCompanionNightResource = input.resourceBatch.payloadResources.some(
       (resource) => readCompanionHrvDirtyResourceNightDate(resource) !== null,
     );
-    let preparedDirtyPayloadRows = input.precomputedDirtyPayloadRows;
-    if (
-      hasCompanionNightResource
-      && input.resourceBatch.payloadResources.length > 0
-      && !preparedDirtyPayloadRows
-    ) {
-      preparedDirtyPayloadRows = await prepareDirtyPayloadRows({
-        connectionId: input.connectionId,
-        dirtyRevision: resolveDirtyPayloadRevision({
-          existing,
-          resourceBatch: input.resourceBatch,
-        }),
-        provider: input.provider,
-        resources: input.resourceBatch.payloadResources,
-        traceId: input.traceId,
-        userId: input.userId,
-        prisma,
-      });
-    }
+    const preparedDirtyPayloadRows = input.preparedPayloads;
     if (hasCompanionNightResource && existing) {
       // Companion replay receipts reference the parent connection. Lock the
       // dirty marker first so account deletion and ingress retain one lock
@@ -395,7 +456,7 @@ export class PrismaHostedDirtyConnectionStore {
       input.resourceBatch,
       companionNightClaims,
     );
-    const precomputedDirtyPayloadRows = filterPreparedDirtyPayloadRows(
+    const preparedPayloads = filterHostedPreparedDeviceSyncDirtyPayloads(
       preparedDirtyPayloadRows,
       companionNightClaims,
     );
@@ -445,7 +506,7 @@ export class PrismaHostedDirtyConnectionStore {
         connectionId: input.connectionId,
         dirtyRevision: 1n,
         provider: input.provider,
-        precomputed: precomputedDirtyPayloadRows,
+        precomputed: preparedPayloads,
         resources: resourceBatch.payloadResources,
         traceId: input.traceId,
         tx: prisma,
@@ -479,7 +540,7 @@ export class PrismaHostedDirtyConnectionStore {
         connectionId: input.connectionId,
         dirtyRevision: existing.dirtyRevision,
         provider: input.provider,
-        precomputed: precomputedDirtyPayloadRows,
+        precomputed: preparedPayloads,
         resources: resourceBatch.payloadResources,
         traceId: input.traceId,
         tx: prisma,
@@ -519,15 +580,7 @@ export class PrismaHostedDirtyConnectionStore {
     // lock order.
     const payloadRowsForCreate = resourceBatch.payloadResources.length === 0
       ? undefined
-      : precomputedDirtyPayloadRows ?? (await prepareDirtyPayloadRows({
-          connectionId: input.connectionId,
-          dirtyRevision: nextDirtyRevision,
-          provider: input.provider,
-          resources: resourceBatch.payloadResources,
-          traceId: input.traceId,
-          userId: input.userId,
-          prisma,
-        }));
+      : preparedPayloads;
     if (
       payloadRowsForCreate
       && payloadRowsForCreate.dirtyRevision !== nextDirtyRevision
@@ -589,36 +642,6 @@ export class PrismaHostedDirtyConnectionStore {
       ),
       shouldRequestWake: becameDirty,
     };
-  }
-
-  private async prepareDirtyPayloadRowsForStoreOwnedUpsert(input: {
-    connectionId: string;
-    provider: string;
-    resourceBatch: DirtyResourceBatch;
-    traceId?: string | null;
-    userId: string;
-  }): Promise<PreparedDirtyPayloadRows | undefined> {
-    if (input.resourceBatch.payloadResources.length === 0) {
-      return undefined;
-    }
-
-    const existing = await this.prisma.deviceSyncDirtyConnection.findUnique({
-      where: {
-        connectionId: input.connectionId,
-      },
-    });
-    return prepareDirtyPayloadRows({
-      connectionId: input.connectionId,
-      dirtyRevision: resolveDirtyPayloadRevision({
-        existing,
-        resourceBatch: input.resourceBatch,
-      }),
-      provider: input.provider,
-      resources: input.resourceBatch.payloadResources,
-      traceId: input.traceId,
-      userId: input.userId,
-      prisma: this.prisma,
-    });
   }
 
   async getDirtyConnection(input: {
@@ -900,6 +923,16 @@ function createDirtyStateContentionError(operation: "ack" | "update"): Error {
   });
 }
 
+function createDirtyPayloadClassificationPendingError(): Error {
+  return deviceSyncError({
+    code: HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE,
+    httpStatus: 503,
+    message:
+      "Hosted device-sync payload classification did not converge before reconnect. Retry the request.",
+    retryable: true,
+  });
+}
+
 function isDirtyStateContentionError(error: unknown): boolean {
   return Boolean(
     typeof error === "object"
@@ -936,7 +969,7 @@ async function hasPendingDirtyPayloadForConnection(input: {
 async function createDirtyPayloadRows(input: {
   connectionId: string;
   dirtyRevision: bigint;
-  precomputed?: PreparedDirtyPayloadRows;
+  precomputed?: HostedPreparedDeviceSyncDirtyPayloads;
   provider: string;
   resources: readonly HostedDeviceSyncDirtyResource[];
   traceId?: string | null;
@@ -949,15 +982,12 @@ async function createDirtyPayloadRows(input: {
     };
   }
 
-  const prepared = input.precomputed ?? (await prepareDirtyPayloadRows({
-    connectionId: input.connectionId,
-    dirtyRevision: input.dirtyRevision,
-    provider: input.provider,
-    resources: input.resources,
-    traceId: input.traceId,
-    userId: input.userId,
-    prisma: input.tx,
-  }));
+  const prepared = input.precomputed;
+  if (!prepared) {
+    throw new TypeError(
+      "Dirty payloads must be prepared before the database transaction begins.",
+    );
+  }
   if (prepared.dirtyRevision !== input.dirtyRevision) {
     throw createDirtyStateContentionError("update");
   }
@@ -980,7 +1010,8 @@ async function prepareDirtyPayloadRows(input: {
   resources: readonly HostedDeviceSyncDirtyResource[];
   traceId?: string | null;
   userId: string;
-}): Promise<PreparedDirtyPayloadRows> {
+}): Promise<HostedPreparedDeviceSyncDirtyPayloads> {
+  const classifyResource = createDirtyPayloadCredentialClassifier();
   const prepared = await mapLimit(input.resources, DIRTY_PAYLOAD_PRESEAL_CONCURRENCY, async (resource, index) => {
     const payloadId = createDirtyPayloadId({
       connectionId: input.connectionId,
@@ -998,6 +1029,10 @@ async function prepareDirtyPayloadRows(input: {
       resource: resourceWithPayloadId,
       row: {
         connectionId: input.connectionId,
+        credentialIndependent: await classifyResource({
+          provider: input.provider,
+          resource: resourceWithPayloadId,
+        }),
         dirtyRevision: input.dirtyRevision,
         id: payloadId,
         provider: input.provider,
@@ -1019,6 +1054,98 @@ async function prepareDirtyPayloadRows(input: {
     dirtyRevision: input.dirtyRevision,
     resources: prepared.map((entry) => entry.resource),
     rows: prepared.map((entry) => entry.row),
+  };
+}
+
+function assertPreparedDirtyPayloads(input: {
+  connectionId: string;
+  preparedPayloads: HostedPreparedDeviceSyncDirtyPayloads | undefined;
+  provider: string;
+  resources: readonly HostedDeviceSyncDirtyResource[];
+  traceId?: string | null;
+  userId: string;
+}): void {
+  if (input.resources.length === 0) {
+    if (
+      input.preparedPayloads
+      && (
+        input.preparedPayloads.rows.length > 0
+        || input.preparedPayloads.resources.length > 0
+      )
+    ) {
+      throw new TypeError("Prepared dirty payloads did not match the admitted resources.");
+    }
+    return;
+  }
+
+  const prepared = input.preparedPayloads;
+  if (
+    !prepared
+    || prepared.rows.length !== input.resources.length
+    || prepared.resources.length !== input.resources.length
+  ) {
+    throw new TypeError(
+      "Dirty payloads must be prepared before the database transaction begins.",
+    );
+  }
+
+  for (const [index, resource] of input.resources.entries()) {
+    const preparedResource = prepared.resources[index];
+    const row = prepared.rows[index];
+    if (
+      !preparedResource
+      || !row
+      || row.connectionId !== input.connectionId
+      || row.userId !== input.userId
+      || row.provider !== input.provider
+      || row.dirtyRevision !== prepared.dirtyRevision
+      || typeof row.credentialIndependent !== "boolean"
+      || typeof row.resourceEncrypted !== "string"
+      || row.resourceEncrypted.length === 0
+      || row.id !== preparedResource.dirtyPayloadId
+      || row.id !== createDirtyPayloadId({
+        connectionId: input.connectionId,
+        dirtyRevision: prepared.dirtyRevision,
+        index,
+        resource,
+        traceId: input.traceId,
+      })
+      || buildStrictDirtyResourceIdentity(resource)
+        !== buildStrictDirtyResourceIdentity(preparedResource)
+    ) {
+      throw new TypeError("Prepared dirty payloads did not match the admitted resources.");
+    }
+  }
+}
+
+function createDirtyPayloadCredentialClassifier(): (input: {
+  provider: string;
+  resource: HostedDeviceSyncDirtyResource;
+}) => Promise<boolean> {
+  let junctionClassifierPromise:
+    | Promise<DeviceSyncCredentialIndependentImportJobClassifier>
+    | null = null;
+
+  return async (input) => {
+    const classifierInput = {
+      kind: input.resource.jobKind,
+      payload: input.resource.payload,
+      provider: input.provider,
+    };
+    if (isDeviceSyncCredentialIndependentImportJob(classifierInput)) {
+      return true;
+    }
+    if (input.provider !== "junction" || input.resource.jobKind !== "resource") {
+      return false;
+    }
+
+    junctionClassifierPromise ??= import(
+      "@murphai/device-syncd/junction-inline-authority"
+    ).then((module) => module.isJunctionCredentialIndependentInlineImportJob);
+    return isDeviceSyncCredentialIndependentImportJob(
+      classifierInput,
+      await junctionClassifierPromise,
+    );
   };
 }
 
@@ -1228,10 +1355,10 @@ async function claimCompanionHrvNightReceipts(input: {
   return claims;
 }
 
-function filterPreparedDirtyPayloadRows(
-  prepared: PreparedDirtyPayloadRows | undefined,
+function filterHostedPreparedDeviceSyncDirtyPayloads(
+  prepared: HostedPreparedDeviceSyncDirtyPayloads | undefined,
   claims: readonly boolean[],
-): PreparedDirtyPayloadRows | undefined {
+): HostedPreparedDeviceSyncDirtyPayloads | undefined {
   if (!prepared) {
     return undefined;
   }

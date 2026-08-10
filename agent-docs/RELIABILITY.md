@@ -531,6 +531,18 @@ Last verified: 2026-08-09
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
+- Hosted device-sync dirty payloads use an explicit prepare-then-commit
+  boundary. Web derives the credential-independence authority bit, compresses,
+  and secure-box seals each payload before opening a caller-owned admission
+  transaction. After entry, the dirty-payload store validates the prepared
+  revision and performs only its database mutations; other owners in the same
+  admission commit retain their existing bounded work. Connection replacement
+  classifies bounded nullable rows from mixed-version writers before its
+  serialized commit; after the boundary is held, it rejects any remaining null
+  row, compare-and-sets the marker, and deletes credential-scoped payloads with
+  set-based writes. Reconnect must never decrypt payloads, dynamically load
+  provider code, or run a data-dependent payload loop while a pooled transaction
+  is open.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account
   release their trace claim and return a retryable not-ready response; they do

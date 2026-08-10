@@ -55,6 +55,22 @@ export interface HostedDeviceSyncDirtyResource {
   windowStart: string | null;
 }
 
+export interface HostedPreparedDeviceSyncDirtyPayloadRow {
+  connectionId: string;
+  credentialIndependent: boolean;
+  dirtyRevision: bigint;
+  id: string;
+  provider: string;
+  resourceEncrypted: string;
+  userId: string;
+}
+
+export interface HostedPreparedDeviceSyncDirtyPayloads {
+  dirtyRevision: bigint;
+  resources: HostedDeviceSyncDirtyResource[];
+  rows: HostedPreparedDeviceSyncDirtyPayloadRow[];
+}
+
 export interface HostedDeviceSyncDirtyConnectionRecord {
   connectionId: string;
   userId: string;
@@ -107,6 +123,7 @@ export interface UpsertHostedDeviceSyncDirtyConnectionInput {
   eventType?: string | null;
   resourceCategory?: string | null;
   resources?: readonly HostedDeviceSyncDirtyResource[];
+  preparedPayloads?: HostedPreparedDeviceSyncDirtyPayloads;
   tx?: HostedPrismaTransactionClient;
 }
 

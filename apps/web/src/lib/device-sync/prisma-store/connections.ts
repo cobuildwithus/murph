@@ -68,6 +68,8 @@ import {
   type HostedDeviceSyncSecretTestCodec,
 } from "./connection-secrets";
 import {
+  isHostedDirtyPayloadClassificationPendingError,
+  classifyHostedUnclassifiedDirtyPayloadsForConnection,
   supersedeHostedCredentialScopedDirtyStateForConnectionTx,
 } from "./dirty-connections";
 import { toPrismaJsonObject } from "./prisma-json";
@@ -107,6 +109,7 @@ type HostedConnectionSetupWrite = {
 };
 
 const DEFAULT_HOSTED_DEVICE_SYNC_SETUP_TTL_MS = 30 * 60_000;
+const HOSTED_CONNECTION_DIRTY_CLASSIFICATION_MAX_ATTEMPTS = 2;
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
@@ -133,15 +136,76 @@ export class PrismaHostedConnectionStore {
   async upsertConnectionWithPrevious(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
-    try {
-      return await this.upsertConnectionWithPreviousOnce(input);
-    } catch (error) {
-      if (!isUniqueViolation(error)) {
-        throw error;
-      }
+    for (
+      let attempt = 0;
+      attempt < HOSTED_CONNECTION_DIRTY_CLASSIFICATION_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        await this.preparePotentialReplacementDirtyPayloadClassifications(input);
+        return await this.upsertConnectionWithPreviousOnce(input);
+      } catch (error) {
+        if (
+          isHostedDirtyPayloadClassificationPendingError(error)
+          && attempt < HOSTED_CONNECTION_DIRTY_CLASSIFICATION_MAX_ATTEMPTS - 1
+        ) {
+          continue;
+        }
+        if (!isUniqueViolation(error)) {
+          throw error;
+        }
 
-      return this.resolveUpsertConnectionUniqueRace(input, error);
+        return this.resolveUpsertConnectionUniqueRace(input, error);
+      }
     }
+
+    throw new Error("Hosted device-sync connection replacement retry loop exhausted.");
+  }
+
+  private async preparePotentialReplacementDirtyPayloadClassifications(
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): Promise<void> {
+    const ownerId = normalizeNullableString(input.ownerId);
+    const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(
+      input.provider,
+      input.externalAccountId,
+    );
+    const existing = await this.prisma.deviceConnection.findUnique({
+      select: {
+        connectedAt: true,
+        id: true,
+        setupPhase: true,
+        status: true,
+        userId: true,
+      },
+      where: {
+        provider_providerAccountBlindIndex: {
+          provider: input.provider,
+          providerAccountBlindIndex,
+        },
+      },
+    });
+    if (
+      !existing
+      || (ownerId && existing.userId !== ownerId)
+      || (
+        ownerId
+        && existing.userId === ownerId
+        && shouldPreserveEstablishedDeviceSyncConnection(
+          existing,
+          input.existingAccountPolicy,
+        )
+      )
+      || existing.connectedAt.getTime() === new Date(input.connectedAt).getTime()
+    ) {
+      return;
+    }
+
+    await classifyHostedUnclassifiedDirtyPayloadsForConnection({
+      connectionId: existing.id,
+      prisma: this.prisma,
+      userId: existing.userId,
+    });
   }
 
   private async upsertConnectionWithPreviousOnce(
@@ -400,7 +464,7 @@ export class PrismaHostedConnectionStore {
       };
     }
 
-    return this.upsertConnectionWithPreviousOnce(input);
+    return this.upsertConnectionWithPrevious(input);
   }
 
   async getConnectionByExternalAccount(

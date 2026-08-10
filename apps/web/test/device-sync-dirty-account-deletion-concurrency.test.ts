@@ -234,36 +234,41 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }, { timeout: 15_000 });
 
         await payloadSweepFinished.promise;
+        const store = new PrismaHostedDirtyConnectionStore(fixture.webhookClient);
+        const dirtyInput = {
+          connectionId: fixture.connectionId,
+          dirtyAt: "2026-07-16T12:01:00.000Z",
+          eventType: "daily.data.steps.created",
+          provider: "junction",
+          resourceCategory: "timeseries",
+          resources: [
+            {
+              count: 1,
+              jobKind: "resource" as const,
+              payload: {
+                webhookDataJson: JSON.stringify({ source: "garmin", value: 789 }),
+              },
+              resource: "steps",
+              resourceCategory: "timeseries",
+              sourceProviderSlug: "garmin",
+              windowEnd: "2026-07-17T00:00:00.000Z",
+              windowStart: "2026-07-16T00:00:00.000Z",
+            },
+          ],
+          traceId: "trace_delete_lock_proof",
+          userId: fixture.userId,
+        };
+        const preparedPayloads = await store.prepareDirtyPayloads(dirtyInput);
         webhookTransaction = fixture.webhookClient.$transaction(async (tx) => {
           webhookPid.resolve(await readBackendPid(tx));
-          const store = new PrismaHostedDirtyConnectionStore(fixture.webhookClient);
           return store.upsertDirtyConnection({
-            connectionId: fixture.connectionId,
-            dirtyAt: "2026-07-16T12:01:00.000Z",
-            eventType: "daily.data.steps.created",
-            provider: "junction",
-            resourceCategory: "timeseries",
-            resources: [
-              {
-                count: 1,
-                jobKind: "resource",
-                payload: {
-                  webhookDataJson: JSON.stringify({ source: "garmin", value: 789 }),
-                },
-                resource: "steps",
-                resourceCategory: "timeseries",
-                sourceProviderSlug: "garmin",
-                windowEnd: "2026-07-17T00:00:00.000Z",
-                windowStart: "2026-07-16T00:00:00.000Z",
-              },
-            ],
-            traceId: "trace_delete_lock_proof",
+            ...dirtyInput,
+            preparedPayloads,
             tx: pauseBeforeDirtyMarkerUpdate({
               allowUpdate: allowWebhookUpdate,
               beforeUpdate: beforeWebhookUpdate,
               tx,
             }),
-            userId: fixture.userId,
           });
         }, { timeout: 15_000 });
 
@@ -329,24 +334,30 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }, { timeout: 15_000 });
 
         await payloadSweepFinished.promise;
-        webhookTransaction = fixture.webhookClient.$transaction(async (tx) => {
-          const store = new PrismaHostedDirtyConnectionStore(fixture.webhookClient);
-          return store.upsertDirtyConnection({
-            connectionId: fixture.connectionId,
-            dirtyAt: "2026-07-16T12:01:00.000Z",
-            eventType: "companion.hrv-rmssd.created",
-            provider: "junction",
-            resourceCategory: "derived",
-            resources: [buildCompanionHrvResource()],
-            traceId: "trace_companion_delete_lock_proof",
+        const store = new PrismaHostedDirtyConnectionStore(fixture.webhookClient);
+        const dirtyInput = {
+          connectionId: fixture.connectionId,
+          dirtyAt: "2026-07-16T12:01:00.000Z",
+          eventType: "companion.hrv-rmssd.created",
+          provider: "junction",
+          resourceCategory: "derived",
+          resources: [buildCompanionHrvResource()],
+          traceId: "trace_companion_delete_lock_proof",
+          userId: fixture.userId,
+        };
+        const preparedPayloads = await store.prepareDirtyPayloads(dirtyInput);
+        webhookTransaction = fixture.webhookClient.$transaction(
+          async (tx) => store.upsertDirtyConnection({
+            ...dirtyInput,
+            preparedPayloads,
             tx: pauseBeforeDirtyMarkerUpdate({
               allowUpdate: allowWebhookUpdate,
               beforeUpdate: beforeWebhookUpdate,
               tx,
             }),
-            userId: fixture.userId,
-          });
-        }, { timeout: 15_000 });
+          }),
+          { timeout: 15_000 },
+        );
 
         await beforeWebhookUpdate.promise;
         await waitForBlockedBackend({

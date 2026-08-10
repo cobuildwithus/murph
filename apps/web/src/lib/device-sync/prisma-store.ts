@@ -42,6 +42,7 @@ import type {
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDirtyResource,
   HostedDeviceSyncDueReconcileConnectionRecord,
+  HostedPreparedDeviceSyncDirtyPayloads,
   HostedConnectionRefreshLeaseClaimResult,
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
@@ -83,6 +84,7 @@ export type {
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDueReconcileConnectionRecord,
   HostedDeviceSyncDirtyResource,
+  HostedPreparedDeviceSyncDirtyPayloads,
   HostedConnectionRefreshLeaseClaimResult,
   HostedAgentSessionAuthResult,
   HostedAgentSessionAuthStatus,
@@ -295,6 +297,16 @@ export class PrismaDeviceSyncControlPlaneStore
     limit?: number;
   }): Promise<HostedSignalRecord[]> {
     return this.signals.listRecentConnectionWebhookSignals(input);
+  }
+
+  async prepareDirtyPayloads(input: {
+    connectionId: string;
+    provider: string;
+    resources?: readonly HostedDeviceSyncDirtyResource[];
+    traceId?: string | null;
+    userId: string;
+  }): Promise<HostedPreparedDeviceSyncDirtyPayloads | undefined> {
+    return this.dirtyConnections.prepareDirtyPayloads(input);
   }
 
   async upsertDirtyConnection(
