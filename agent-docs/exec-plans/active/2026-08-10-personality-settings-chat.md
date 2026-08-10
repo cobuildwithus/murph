@@ -77,10 +77,27 @@ Updated: 2026-08-10
 
 ## Verification
 
-- Commands to run: focused Vitest files for contracts, hosted execution,
-  assistant engine, Web Settings/picker/snapshot/routes, changelog, and prompt;
-  touched package typechecks plus Web typecheck; frontend design proof; exact
-  PR-head GitHub Actions and ReviewGPT gates.
-- Expected outcomes: all focused checks pass, screenshots show usable desktop
-  and mobile flows with no overflow, review findings are resolved, CI is green,
-  and GitHub reports the PR mergeable.
+- Focused package proof: 92 tests passed across Hosted Execution and Assistant
+  Engine personalization, authority, and model-behavior coverage.
+- Focused Web proof: 127 tests passed across the picker, Settings row and route,
+  settings snapshot, hosted personalization handler, and changelog surfaces.
+- Type proof: Hosted Execution, Assistant Engine, and Web typechecks passed. The
+  Web Prisma client was regenerated locally after merging current `main`; that
+  produced no repository diff.
+- Static proof: focused ESLint and `git diff --check` passed.
+- Responsive proof: the real design-catalog component was exercised at 1440
+  CSS pixels / 2x and 390 CSS pixels / 3x. The resulting desktop main step and
+  mobile supporting step were inspected locally and after hosted upload.
+- Initial provider-input proof: a pinned real Codex App Server request capture
+  against the candidate and its `main` base was repeated twice with identical
+  normalized results. The direct-chat request grew from 29,984 to 30,037 tokens
+  (+53, +0.1768%); the group-chat request grew from 23,038 to 23,073 tokens
+  (+35, +0.1519%). No database, network, provider-call, or awaited-latency step
+  was added or moved.
+- Claude UI review: attempted with the required Fable model and review-only
+  packet, but the account returned an explicit out-of-usage-credits response.
+  Per repository policy, this is recorded as a non-blocking unavailable review,
+  not as a pass; no further Claude request was made.
+- Remaining gates: preliminary specialist ReviewGPT, final ReviewGPT, exact-head
+  GitHub Actions, parent final diff review, merge-tree proof, plan archival, and
+  marking the draft PR ready.
