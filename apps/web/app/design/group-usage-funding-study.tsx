@@ -223,15 +223,31 @@ const DESIGN_PERSONAL_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   usedPercent: 35,
 };
 
-const DESIGN_TRIAL_CONVERSION_USAGE_STATUS: HostedPlanUsageStatus = {
+const DESIGN_UNAVAILABLE_USAGE_STATUS: HostedPlanUsageStatus = {
   generatedAt: "2026-07-22T12:00:00.000Z",
-  reason: "trial_conversion_pending",
+  reason: "group_not_supported",
+  recommendedAction: null,
+  status: "unavailable",
+};
+
+const DESIGN_STARTER_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  accessKind: "starter",
+  forecast: null,
+  generatedAt: "2026-08-07T20:00:00.000Z",
+  periodEnd: "2099-12-31T23:59:59.999Z",
+  periodKind: "lifetime",
+  periodStart: "2026-08-07T20:00:00.000Z",
+  planCode: "launch_monthly",
+  planName: "Starter",
   recommendedAction: {
-    kind: "start_pulse",
-    label: "Start Pulse",
+    kind: "change_plan",
+    label: "Choose Pulse",
+    targetPlanCode: "launch_monthly",
     url: "/settings#subscription",
   },
-  status: "unavailable",
+  remainingPercent: 0,
+  status: "exhausted",
+  usedPercent: 100,
 };
 
 const DESIGN_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
@@ -643,11 +659,11 @@ function PersonalUsageCreditOwnerStudy() {
         </div>
       </div>
       <PersonalUsageCreditState
-        billingState="pulse-trial"
-        canStartPaidPulse
-        label="Pulse trial ended"
-        state="trial-conversion"
-        usageStatus={DESIGN_TRIAL_CONVERSION_USAGE_STATUS}
+        billingState="starter"
+        canStartDirectPlan
+        label="Starter usage exhausted"
+        state="starter-exhausted"
+        usageStatus={DESIGN_STARTER_USAGE_STATUS}
       />
       <div
         className="flex flex-col gap-3"
@@ -664,24 +680,25 @@ function PersonalUsageCreditOwnerStudy() {
           Preview fulfilled top-up
         </Button>
         {fulfilledPreviewKey > 0 ? (
-          <HostedBillingSettings
-            key={fulfilledPreviewKey}
-            authenticated
-            billingStatus="active"
-            currentBillingPhase="paid"
-            currentBillingPlanCode="launch_monthly"
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
-            usageStatus={DESIGN_FULFILLED_USAGE_STATUS}
-            usageTopUpActivePurchase={{
-              offerCode: "usage_5_usd",
-              purchaseId: "hucp_design_overall_usage_added",
-              retryAllowed: false,
-              status: "fulfilled",
-            }}
-            usageTopUpContactOptions={DESIGN_TOP_UP_CONTACT_OPTIONS}
-            usageTopUpInitialOpen
-            usageTopUpOffers={[]}
-          />
+          <div key={fulfilledPreviewKey}>
+            <HostedBillingSettings
+              authenticated
+              billingStatus="active"
+              currentBillingPhase="paid"
+              currentBillingPlanCode="launch_monthly"
+              payerMemberId={DESIGN_PAYER_MEMBER_ID}
+              usageStatus={DESIGN_FULFILLED_USAGE_STATUS}
+              usageTopUpActivePurchase={{
+                offerCode: "usage_5_usd",
+                purchaseId: "hucp_design_overall_usage_added",
+                retryAllowed: false,
+                status: "fulfilled",
+              }}
+              usageTopUpContactOptions={DESIGN_TOP_UP_CONTACT_OPTIONS}
+              usageTopUpInitialOpen
+              usageTopUpOffers={[]}
+            />
+          </div>
         ) : null}
       </div>
     </div>
@@ -689,8 +706,8 @@ function PersonalUsageCreditOwnerStudy() {
 }
 
 function PersonalUsageCreditState(props: {
-  billingState?: "paid" | "pulse-trial";
-  canStartPaidPulse?: boolean;
+  billingState?: "paid" | "starter";
+  canStartDirectPlan?: boolean;
   label: string;
   state: string;
   usageActivityDetail?: ReactNode;
@@ -710,15 +727,12 @@ function PersonalUsageCreditState(props: {
         <HostedBillingSettings
           authenticated
           billingStatus="active"
-          canStartPaidPulse={props.canStartPaidPulse}
+          canStartDirectPlan={props.canStartDirectPlan}
           currentBillingPhase={
-            props.billingState === "pulse-trial" ? "trial" : "paid"
+            props.billingState === "starter" ? null : "paid"
           }
-          currentBillingPlanCode="launch_monthly"
-          currentCheckoutOffer={
-            props.billingState === "pulse-trial"
-              ? "pulse_trial_7d"
-              : "standard"
+          currentBillingPlanCode={
+            props.billingState === "starter" ? null : "launch_monthly"
           }
           payerMemberId={DESIGN_PAYER_MEMBER_ID}
           usageActivityDetail={props.usageActivityDetail}

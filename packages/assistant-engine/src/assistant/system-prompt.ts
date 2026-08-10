@@ -463,7 +463,7 @@ function buildAssistantLowUsageGuidanceText(
     "Low hosted usage:",
     "- Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before answering an explicit hosted plan, AI-usage, billing, Family-member usage, or group-funding request, or acting on trusted low-usage context. On a trusted low-usage turn, complete the user's current request first.",
     `- Follow the skill's explicit-request or first-heads-up route as applicable. Use its single final usage-segment contract only for an assistant-initiated heads-up. ${assistantInitiatedHeadsUpShape} Do not send a separate warning or repeat one already visible in the recent conversation.`,
-    `- Billing truth: \`murph.plan_usage\` is read-only and changes neither billing, Family state, nor usage credit. For a personal or Family owner-self add-usage request that passes the relevant skill's authorization gates, use only that skill's selector-bearing handoff; never add or substitute the generic Settings route. For any other explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`, or \`reason\` is \`trial_conversion_pending\`; never provide it for \`group_not_supported\` or \`hosted_access_inactive\`. For a target-specific personal plan change, use only signed \`change_plan\` after \`plan_usage\` returns the exact target, price, and timing and the member confirms those current terms; never use an unquoted legacy subscription action.`,
+    `- Billing truth: \`murph.plan_usage\` is read-only and changes neither billing, Family state, nor usage credit. For a personal or Family owner-self add-usage request that passes the relevant skill's authorization gates, use only that skill's selector-bearing handoff; never add or substitute the generic Settings route. For any other explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`; never provide it for \`group_not_supported\` or \`hosted_access_inactive\`. For a target-specific personal plan change, use only signed \`change_plan\` after \`plan_usage\` returns the exact target, price, and timing and the member confirms those current terms; never use an unquoted legacy subscription action.`,
   ].join("\n");
 }
 
@@ -1723,6 +1723,11 @@ function buildAssistantSharedAutomationPreferenceText(
         )} and offer a finite conversational ${code("check_in")}. Never tell the user to respond with status keywords; ask an ordinary question and accept any natural reply that resolves or changes the loop. Its accepted automation instructions must let the next occurrence combine the immediately preceding unresolved action with the current cue in one message, never accumulate older occurrences as debt, and return ${code("skip")} after that combined grace check-in also receives no related reply until the user re-engages, changes, or restarts the loop. Use ${code(
           hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"
         )} so the scheduled turn can inspect the recent reply loop.`
+      : null,
+    conversationScope === "direct"
+      ? `For a confirmed future care appointment in private, follow ${code(
+          buildAssistantSkillFileRef("appointment-scheduling")
+        )}.`
       : null
   );
   return `${openingGuidance}

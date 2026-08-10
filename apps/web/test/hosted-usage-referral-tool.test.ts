@@ -117,7 +117,7 @@ describe("hosted usage referral tool", () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedAiUsageGate.mockResolvedValue({
       allowed: true,
-      allowanceSource: "direct_trial",
+      allowanceSource: "direct_starter",
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 10_000_000n,
       memberId: "member_personal",

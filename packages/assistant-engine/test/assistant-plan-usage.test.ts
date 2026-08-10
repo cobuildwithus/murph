@@ -117,7 +117,7 @@ describe("assistant plan usage tool", () => {
     );
   });
 
-  it("projects the legacy Group wire name as Core for the assistant", async () => {
+  it("projects the eligible Starter Core recommendation for the assistant", async () => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -137,12 +137,18 @@ describe("assistant plan usage tool", () => {
       fetchImpl: fetch,
       hostedToolContext: buildHostedToolContext({
         read: vi.fn(async () => ({
-          accessKind: "paid" as const,
+          accessKind: "starter" as const,
           availablePlans: [
             {
               code: "launch_group_monthly" as const,
               displayName: "Group" as const,
               monthlyPriceUsdCents: 350,
+              selectable: true as const,
+            },
+            {
+              code: "launch_monthly" as const,
+              displayName: "Pulse" as const,
+              monthlyPriceUsdCents: 800,
               selectable: true as const,
             },
           ],
@@ -151,14 +157,15 @@ describe("assistant plan usage tool", () => {
           periodEnd: "2026-08-30T12:00:00.000Z",
           periodKind: "monthly" as const,
           periodStart: "2026-07-30T12:00:00.000Z",
-          planCode: "launch_group_monthly" as const,
-          planName: "Group" as const,
+          planCode: "launch_monthly" as const,
+          planName: "Starter" as const,
           recommendedAction: {
             kind: "change_plan" as const,
-            label: "Choose Group next month",
+            label: "Start Group now ($3.50/month)",
             targetPlanCode: "launch_group_monthly" as const,
             url: "https://example.test/settings#subscription",
           },
+          recommendedPlanCode: "launch_group_monthly" as const,
           remainingPercent: 50,
           scheduledPlan: {
             code: "launch_group_monthly" as const,
@@ -169,11 +176,11 @@ describe("assistant plan usage tool", () => {
           subscriptionActionQuote: {
             action: "change_plan" as const,
             expiresAt: "2026-07-30T12:10:00.000Z",
-            label: "Choose Group after your trial ($3.50/month)",
+            label: "Start Group now ($3.50/month)",
             monthlyPriceUsdCents: 350,
             quoteId: "quote_test_group",
             targetPlanCode: "launch_group_monthly" as const,
-            timing: "period_end" as const,
+            timing: "now" as const,
           },
           usedPercent: 50,
         })),
@@ -185,11 +192,11 @@ describe("assistant plan usage tool", () => {
 
     const resultText = result.rpcResult.contentItems[0]?.text ?? "";
     expect(result.rpcResult.success).toBe(true);
-    expect(resultText).toContain('"planName":"Core"');
+    expect(resultText).toContain('"planName":"Starter"');
     expect(resultText).toContain('"displayName":"Core"');
-    expect(resultText).toContain('"label":"Choose Core next month"');
+    expect(resultText).toContain('"recommendedPlanCode":"launch_group_monthly"');
     expect(resultText).toContain(
-      '"label":"Choose Core after your trial ($3.50/month)"',
+      '"label":"Start Core now ($3.50/month)"',
     );
     expect(resultText).not.toMatch(/\bGroup\b/u);
   });

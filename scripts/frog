@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+case "${1:-}" in
+  list|log) ;;
+  *)
+    echo "Usage: scripts/frog {list|log} [options]" >&2
+    exit 2
+    ;;
+esac
+
+for argument in "$@"; do
+  case "$argument" in
+    --cwd|--cwd=*|--mcp|--mcp=*)
+      echo "scripts/frog owns the repository root; --cwd and --mcp are not allowed." >&2
+      exit 2
+      ;;
+    --publish|--publish=*)
+      echo "Publishing is owned by .github/workflows/friction-log.yml." >&2
+      exit 2
+      ;;
+  esac
+done
+
+unset FROG_DATABASE_URL FROG_NAMESPACE FROG_SCHEMA
+cd "$repo_root"
+frog_bin="$repo_root/node_modules/.bin/frog"
+if [[ ! -x "$frog_bin" ]]; then
+  echo "Frog is not installed; run pnpm install --frozen-lockfile." >&2
+  exit 2
+fi
+exec "$frog_bin" "$@"
