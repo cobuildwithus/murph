@@ -183,7 +183,8 @@ default destination for every goal or the definition of activation.
   used
 - private-direct nutrition and compact-table cards whose installed-iPhone
   presentation is native and whose macOS or app-absent presentation remains a
-  complete, legible static image with full semantic context beneath it
+  legible static image with explicit partial-state and goal-direction context
+  plus a safe text recovery path
 - explicitly shared group contexts with scope and consent
 - public Health Commons protocols and sources, with aggregate outcomes as a
   future contribution-backed layer
