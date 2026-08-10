@@ -18,6 +18,7 @@ import {
 import type { BrowserVaultQueryClient } from "./shared.ts";
 
 type RangePosition = "above" | "below" | "within";
+type ResultComparator = NonNullable<BrowserVaultPresentedLabResultRow["comparator"]>;
 
 /**
  * Adds display-only status to presented rows without mutating the persisted
@@ -36,7 +37,11 @@ export function deriveBrowserVaultLabResultStatus(
     return row;
   }
 
-  const sourcePosition = classifySourceRange(value, row.normalizedReferenceRange);
+  const sourcePosition = classifySourceRange(
+    value,
+    row.comparator,
+    row.normalizedReferenceRange,
+  );
   if (sourcePosition !== null) {
     return {
       ...row,
@@ -55,7 +60,7 @@ export function deriveBrowserVaultLabResultStatus(
     return row;
   }
 
-  const position = classifyFallbackRange(value, fallback);
+  const position = classifyFallbackRange(value, row.comparator, fallback);
   if (position === null) {
     return row;
   }
@@ -102,8 +107,7 @@ const STANDARD_SOURCE_STATUS_MAPPING: Readonly<Record<
 
 function comparableResultValue(row: BrowserVaultPresentedLabResultRow): number | null {
   if (
-    row.comparator !== null
-    || row.normalizedValue === null
+    row.normalizedValue === null
     || !Number.isFinite(row.normalizedValue)
     || row.normalizedUnit === null
   ) {
@@ -114,24 +118,30 @@ function comparableResultValue(row: BrowserVaultPresentedLabResultRow): number |
 
 function classifySourceRange(
   value: number,
+  comparator: BrowserVaultPresentedLabResultRow["comparator"],
   range: BrowserVaultNormalizedLabReferenceRange | null,
 ): RangePosition | null {
   if (!range || (range.low === undefined && range.high === undefined)) {
     return null;
   }
-  if (
-    range.low !== undefined
-    && isBelowBound(value, { inclusive: range.lowComparator !== ">", value: range.low })
-  ) {
-    return "below";
-  }
-  if (
-    range.high !== undefined
-    && isAboveBound(value, { inclusive: range.highComparator !== "<", value: range.high })
-  ) {
-    return "above";
-  }
-  return "within";
+  return classifyRangePosition(value, comparator, {
+    ...(range.low === undefined
+      ? {}
+      : {
+          lowerBound: {
+            inclusive: range.lowComparator !== ">",
+            value: range.low,
+          },
+        }),
+    ...(range.high === undefined
+      ? {}
+      : {
+          upperBound: {
+            inclusive: range.highComparator !== "<",
+            value: range.high,
+          },
+        }),
+  });
 }
 
 function resolveApplicableFallbackRange(
@@ -166,18 +176,117 @@ function resolveApplicableFallbackRange(
 
 function classifyFallbackRange(
   value: number,
+  comparator: BrowserVaultPresentedLabResultRow["comparator"],
   range: BiomarkerFallbackStatusRange,
+): RangePosition | null {
+  return classifyRangePosition(value, comparator, range);
+}
+
+function classifyRangePosition(
+  value: number,
+  comparator: BrowserVaultPresentedLabResultRow["comparator"],
+  range: {
+    lowerBound?: BiomarkerFallbackRangeBound;
+    upperBound?: BiomarkerFallbackRangeBound;
+  },
 ): RangePosition | null {
   if (!range.lowerBound && !range.upperBound) {
     return null;
   }
-  if (range.lowerBound && isBelowBound(value, range.lowerBound)) {
-    return "below";
+  if (comparator === null) {
+    if (range.lowerBound && isBelowBound(value, range.lowerBound)) {
+      return "below";
+    }
+    if (range.upperBound && isAboveBound(value, range.upperBound)) {
+      return "above";
+    }
+    return "within";
   }
-  if (range.upperBound && isAboveBound(value, range.upperBound)) {
+
+  return classifyCensoredRangePosition(value, comparator, range);
+}
+
+function classifyCensoredRangePosition(
+  value: number,
+  comparator: ResultComparator,
+  range: {
+    lowerBound?: BiomarkerFallbackRangeBound;
+    upperBound?: BiomarkerFallbackRangeBound;
+  },
+): RangePosition | null {
+  if (comparator === "<" || comparator === "<=") {
+    const includesValue = comparator === "<=";
+    if (canOnlyRemainBelow(value, includesValue, range.lowerBound)) {
+      return "below";
+    }
+    if (canOnlyRemainWithinBelow(value, includesValue, range)) {
+      return "within";
+    }
+    return null;
+  }
+
+  const includesValue = comparator === ">=";
+  if (canOnlyRemainAbove(value, includesValue, range.upperBound)) {
     return "above";
   }
-  return "within";
+  if (canOnlyRemainWithinAbove(value, includesValue, range)) {
+    return "within";
+  }
+  return null;
+}
+
+function canOnlyRemainBelow(
+  value: number,
+  includesValue: boolean,
+  lowerBound?: BiomarkerFallbackRangeBound,
+): boolean {
+  if (!lowerBound) return false;
+  if (value < lowerBound.value) return true;
+  if (value > lowerBound.value) return false;
+  return lowerBound.inclusive || !includesValue;
+}
+
+function canOnlyRemainAbove(
+  value: number,
+  includesValue: boolean,
+  upperBound?: BiomarkerFallbackRangeBound,
+): boolean {
+  if (!upperBound) return false;
+  if (value > upperBound.value) return true;
+  if (value < upperBound.value) return false;
+  return upperBound.inclusive || !includesValue;
+}
+
+function canOnlyRemainWithinBelow(
+  value: number,
+  includesValue: boolean,
+  range: {
+    lowerBound?: BiomarkerFallbackRangeBound;
+    upperBound?: BiomarkerFallbackRangeBound;
+  },
+): boolean {
+  if (range.lowerBound !== undefined) return false;
+  const upperBound = range.upperBound;
+  if (!upperBound) return true;
+  if (value < upperBound.value) return true;
+  if (value > upperBound.value) return false;
+  return upperBound.inclusive || !includesValue;
+}
+
+function canOnlyRemainWithinAbove(
+  value: number,
+  includesValue: boolean,
+  range: {
+    lowerBound?: BiomarkerFallbackRangeBound;
+    upperBound?: BiomarkerFallbackRangeBound;
+  },
+): boolean {
+  if (range.upperBound !== undefined) return false;
+  const lowerBound = range.lowerBound;
+  if (!lowerBound) return true;
+  if (value > lowerBound.value) return true;
+  if (value < lowerBound.value) return false;
+  return lowerBound.inclusive || !includesValue;
 }
 
 function isBelowBound(value: number, bound: BiomarkerFallbackRangeBound): boolean {
