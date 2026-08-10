@@ -1,6 +1,6 @@
 # Family Max chat invitation remediation
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -122,5 +122,12 @@ Updated: 2026-08-10
   GitHub Action before the round-7 rollback-disclosure correction.
 - Round 7 inspected that exact head and returned only the pending-Max rollback
   floor finding recorded above.
-- Pending: push the correction, run the round-7 disclosure-only verification
-  retry, and pass final-head GitHub Actions.
+- The round-7 disclosure-only verification retry returned `PASS` with no
+  qualifying findings after 7 minutes 25 seconds. The exact full snapshot,
+  completion marker, requested model slug, and focused resolution were all
+  verified, so the near-threshold result counts under the final-gate policy.
+- The exact docs/test head passed all 16 required GitHub checks; the live
+  hosted-local Stripe browser matrix was intentionally skipped by policy.
+- Pending: plan archival, final plan-only CI, authorized merge, and worktree
+  retirement.
+Completed: 2026-08-10
