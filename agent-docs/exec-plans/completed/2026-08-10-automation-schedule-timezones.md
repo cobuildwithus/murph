@@ -19,7 +19,7 @@ Key decisions:
 - Update the existing schedule-owner documentation and focused contract/core/assistant/runtime tests rather than adding a new service or state owner.
 
 State:
-- ReviewGPT round seven verified every prior correction, then found two sibling original-PR gaps: stale recurring occurrences bypass the shared freshness predicate in projection, and an occurrence before `activeUntil` can still be certified after that finite window has closed. Both are reachable through ordinary non-timing patches/reactivation and would be discarded by execution.
+- The explicitly approved final ReviewGPT round eight returned `ROUND_OUTCOME: PASS` with no qualifying findings on exact pushed head `de534260ffba16527b32727ae2f99e966ec25362`. Required GitHub Actions are green on that head: 16 passed, 1 intentional skip, 0 failures, and 0 pending.
 
 Done:
 - Proved the production failure mechanism: a UTC-converted cron hour was persisted and then evaluated in the vault timezone.
@@ -74,12 +74,16 @@ Done:
 - Rebuilt the complete hosted runner closure after the final eligibility correction. The runner entrypoint is 1,661,357 bytes, its static boot closure is 8,020,513 bytes, and total output is 9,995,644 bytes against the unchanged 10,023,133-byte budget; all bundle parity probes passed. Provider-visible input is unchanged from round seven because the final correction changes projection, hosted response assembly, and tests only.
 - Corrected the PR shape from the exact merge-base diff rather than carrying forward additive round estimates: current authored source is 541/100, tests are 2,274/87, docs are 102/3, config/tooling is 9/2, generated is 22/3, and total is 2,948/195. Relative to the immutable first-reviewed source shape, remediation adds 403 and deletes 67 source lines.
 - The ReviewGPT hard cap is now reached. After correcting and verifying accepted round-seven findings, do not start round eight without an explicit continuation decision; the exact round-seven head passed all required GitHub checks.
+- The user explicitly approved final ReviewGPT round eight. Advancing `main` required a normal merge with conflicts limited to generated CLI hash parity and measured Cloudflare runner/vault-CLI bundle budgets. The merged graph was assembled before ratcheting the budgets; focused runner/hash proof and the complete workspace typecheck passed, and the repaired head was pushed.
+- Refreshed the provider-visible measurement against merged base `28b4f25782d32e0b42660e67a5817b37ddf5ec9b` and current head `de534260ffba16527b32727ae2f99e966ec25362` with the pinned real App Server and hermetic provider stub. Direct and group first requests each add 317 tokens and 1,533 bytes; the temporary probe and proof worktree were removed.
+- Final ReviewGPT round eight reviewed the full sensitive snapshot for the current head, verified every prior correction and the conflict-resolution delta, and returned `ROUND_OUTCOME: PASS` with no qualifying findings. Its requested-model sidecar verifies the `gpt-5.6-sol` lane with response model slug `gpt-5-6-pro`.
+- Exact-head GitHub Actions completed with 16 passing checks, 1 intentional skip, no failures, and no pending checks.
 
 Now:
-- Complete candidate diff/privacy and parent correctness review, then commit and push the round-seven remediation.
+- Archive this execution plan, run the final parent correctness and mergeability checks, and merge PR #1546.
 
 Next:
-- Run focused and workspace verification, push the round-seven remediation, complete parent review and exact-head CI, then pause before any round-eight ReviewGPT run.
+- Confirm the merge landed on `origin/main`, then retire the clean task worktree.
 
 Open questions (UNCONFIRMED if needed):
 - None. The timing result now reuses the canonical scheduler owners through an exact-file projection instead of the broad public job lookup.
@@ -96,3 +100,6 @@ Working set (files/ids/commands):
 - agent-docs/references/data-model-seams.md
 - pnpm exec vitest run <focused files>
 - pnpm typecheck
+Status: completed
+Updated: 2026-08-10
+Completed: 2026-08-10
