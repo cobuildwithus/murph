@@ -10064,6 +10064,135 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("fresh foreground input during system mailbox checkpoint defers post-checkpoint recording", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:preempt-recording",
+      id: "mailbox_item_system_mailbox_device_preempt_recording",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const baseDeviceSyncPort = createEmptyDeviceSyncPort();
+    let dirtyAckCalls = 0;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...baseDeviceSyncPort,
+      async ackDirtyStateProcessed() {
+        dirtyAckCalls += 1;
+        return {
+          acknowledgedAt: TEST_NOW,
+          userId: TEST_USER_ID,
+        };
+      },
+    };
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === deviceItem.id
+            ? {
+                ...item,
+                postCheckpointRecord: {
+                  connectionId: "device_sync_connection_preempt_recording",
+                  kind: "device-sync.dirty-processed" as const,
+                  processedDirtyPayloadIds: ["dirty_payload_preempt_recording"],
+                  processedRevision: "8",
+                },
+                status: "recording" as const,
+              }
+            : item
+        ),
+      }));
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-device-preempt-recording-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_device_preempt_recording",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-device-preempt-recording.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointResponse(request) {
+                runtimeWakeSignal.notify();
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  }),
+                };
+              },
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            throw new Error("System mailbox mode must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(dirtyAckCalls, 0);
+      assert.equal(checkpointRequests.length, 1);
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      assert.ok(state.pending.some((item) =>
+        item.itemId === deviceItem.id && item.status === "recording"
+      ));
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not import initial conversation messages while cold bootstrap is deferred", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

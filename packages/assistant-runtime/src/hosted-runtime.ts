@@ -2178,6 +2178,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             preparationWake ? [preparationWake] : [],
           );
         }
+        if (consumeForegroundWake()) {
+          return { preempted: true, prepared: preparation !== null };
+        }
         const recordItem = readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
         if (!recordItem?.postCheckpointRecord) {
           return { preempted: false, prepared: preparation !== null };
@@ -2197,7 +2200,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           `${inputItem.stagePrefix}.checkpoint.record`,
           recordWake.at ? [recordWake] : [],
         );
-        return { preempted: false, prepared: true };
+        return { preempted: consumeForegroundWake(), prepared: true };
       };
 
       if (consumeForegroundWake()) {
@@ -2238,6 +2241,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         );
       }
 
+      consumeForegroundWake();
       return await returnSystemMailboxModeResult();
     };
     if (initialMailboxImportResult.bootstrapPending) {
