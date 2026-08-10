@@ -1909,9 +1909,28 @@ export function createJunctionDeviceSyncProvider(
             sourceProviderSlug,
           })
         ) {
-          return {
+          const result = {
             nextReconcileAt: clampWebhookJobNextReconcileAt(context),
           };
+          if (
+            job.payload.historicalProviderRecordsSeen !== true
+            && job.payload.historicalRecordsSeen !== true
+          ) {
+            return result;
+          }
+          return withJunctionExtendedTimeseriesBackfillFollowUp({
+            context,
+            importResult: {
+              canonicalEventCount: 0,
+              fetchComplete: false,
+              providerRecordsSeen: false,
+              yieldedAt: null,
+            },
+            job,
+            resource: effectiveResource,
+            result,
+            window,
+          });
         }
         const timeseriesImport = await importTimeseriesPreciseSnapshots(
           context,
@@ -2583,24 +2602,43 @@ export function createJunctionDeviceSyncProvider(
     const dedupedTimeseries = dedupeJunctionTimeseriesSnapshotRecords(accumulatedTimeseries);
     const providerRecordsSeen = hasJunctionSnapshotRecords(dedupedTimeseries);
     if (executionWindowStart && executionWindowEnd && hasJunctionSnapshotRecords(dedupedTimeseries)) {
-      const preparedImport = await prepareJunctionImportSnapshot(
-        context,
-        dedupedTimeseries,
-        sourceProviders,
-      );
-      if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        const receipt = await context.importSnapshot({
-          provider: "junction",
-          accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-          connectionId: context.account.id,
-          importedAt: executionWindowEnd,
-          windowStart: executionWindowStart,
-          windowEnd: executionWindowEnd,
-          connections: preparedImport.connections,
-          summaries: {},
-          timeseries: preparedImport.snapshots,
-        });
-        canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
+      try {
+        const preparedImport = await prepareJunctionImportSnapshot(
+          context,
+          dedupedTimeseries,
+          sourceProviders,
+        );
+        if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+          const receipt = await context.importSnapshot({
+            provider: "junction",
+            accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+            connectionId: context.account.id,
+            importedAt: executionWindowEnd,
+            windowStart: executionWindowStart,
+            windowEnd: executionWindowEnd,
+            connections: preparedImport.connections,
+            summaries: {},
+            timeseries: preparedImport.snapshots,
+          });
+          canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
+        }
+      } catch (error) {
+        if (
+          options.preservePartialRetryableFailure === true
+          && (
+            options.historicalProviderRecordsSeen === true
+            || providerRecordsSeen
+          )
+          && isRetryableDeviceSyncFailure(error)
+        ) {
+          return {
+            canonicalEventCount: 0,
+            fetchComplete: false,
+            providerRecordsSeen,
+            yieldedAt: null,
+          };
+        }
+        throw error;
       }
     }
 

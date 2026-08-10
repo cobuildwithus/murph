@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { isDeviceSyncError } from "../src/errors.ts";
+import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
@@ -25,6 +25,7 @@ interface TimeseriesRequest {
 }
 
 interface MutableProviderState {
+  present?: boolean;
   resourceAvailability: Record<string, unknown>;
   status: string;
 }
@@ -176,7 +177,9 @@ function toJobRecord(input: DeviceSyncJobInput, index: number): DeviceSyncJobRec
 function createJobContext(input: {
   account?: DeviceSyncAccount;
   canonicalEventCount?: number;
+  importSnapshot?: ProviderJobContext["importSnapshot"];
   importedSnapshots?: unknown[];
+  listConnectionSources?: NonNullable<ProviderJobContext["listConnectionSources"]>;
   now?: string;
   projectedSources?: Array<{
     resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
@@ -188,13 +191,13 @@ function createJobContext(input: {
   return {
     account,
     now: input.now ?? NOW,
-    importSnapshot: async (snapshot) => {
+    importSnapshot: input.importSnapshot ?? (async (snapshot) => {
       input.importedSnapshots?.push(snapshot);
       return {
         canonicalEventCount: input.canonicalEventCount ?? 1,
         durableDeliveryAccepted: true,
       };
-    },
+    }),
     upsertConnectionSource: (sourceInput) => {
       input.projectedSources?.push({
         resourceAvailabilitySummary:
@@ -216,6 +219,9 @@ function createJobContext(input: {
       };
     },
     refreshAccountTokens: async () => account,
+    ...(input.listConnectionSources
+      ? { listConnectionSources: input.listConnectionSources }
+      : {}),
     ...(input.shouldYield ? { shouldYield: input.shouldYield } : {}),
     logger: {},
   };
@@ -275,13 +281,15 @@ function createProvider(input: {
           );
         }
         return createJsonResponse({
-          providers: [{
-            id: "provider-omron-1",
-            slug: "omron",
-            name: "Omron",
-            status: providerState.status,
-            resource_availability: providerState.resourceAvailability,
-          }],
+          providers: providerState.present === false
+            ? []
+            : [{
+                id: "provider-omron-1",
+                slug: "omron",
+                name: "Omron",
+                status: providerState.status,
+                resource_availability: providerState.resourceAvailability,
+              }],
         });
       }
       if (url.pathname === "/v2/summary/activity/junction-user-1") {
@@ -791,6 +799,11 @@ test("live blood-pressure capability gates provider egress and terminal coverage
       resourceAvailability: { activity: true, blood_pressure: true },
       status: "disconnected",
     },
+    {
+      present: false,
+      resourceAvailability: {},
+      status: "connected",
+    },
   ];
 
   for (const providerState of unavailableStates) {
@@ -809,10 +822,15 @@ test("live blood-pressure capability gates provider egress and terminal coverage
       toJobRecord(admitted, 1),
     );
 
-    assert.deepEqual(projectedSources, [{
-      resourceAvailabilitySummary: providerState.resourceAvailability,
-      status: providerState.status,
-    }]);
+    assert.deepEqual(
+      projectedSources,
+      providerState.present === false
+        ? []
+        : [{
+            resourceAvailabilitySummary: providerState.resourceAvailability,
+            status: providerState.status,
+          }],
+    );
     assert.equal(
       requests.some((request) => request.resource === "blood_pressure"),
       false,
@@ -866,6 +884,144 @@ test("live blood-pressure capability gates provider egress and terminal coverage
   assert.equal(
     recoveredRequests.some((request) => request.resource === "blood_pressure"),
     true,
+  );
+});
+
+test("live capability loss preserves carried history evidence until authority recovers", async () => {
+  const unavailableStates: MutableProviderState[] = [
+    {
+      resourceAvailability: { activity: true, blood_pressure: false },
+      status: "connected",
+    },
+    {
+      resourceAvailability: { activity: true },
+      status: "connected",
+    },
+    {
+      resourceAvailability: { activity: true, blood_pressure: true },
+      status: "disconnected",
+    },
+    {
+      present: false,
+      resourceAvailability: {},
+      status: "connected",
+    },
+  ];
+
+  for (const [index, providerState] of unavailableStates.entries()) {
+    const records: Record<string, unknown>[] = [];
+    const requests: TimeseriesRequest[] = [];
+    const projectedSources: Array<{
+      resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
+      status: string;
+    }> = [];
+    const provider = createProvider({
+      bloodPressureRecords: records,
+      providerState,
+      requests,
+    });
+    const original = createScheduledBloodPressureJob(provider, {
+      firstSeenAt: "2026-03-20T23:55:00.000Z",
+    });
+    const evidenceBearing = toJobRecord({
+      ...original,
+      payload: {
+        ...original.payload,
+        emptyBackfillAttempts: 4,
+        historicalProviderRecordsSeen: true,
+      },
+    }, index + 1);
+    evidenceBearing.dedupeKey = `hosted-device-sync:${String(index + 1).repeat(64)}`;
+
+    const unavailable = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ projectedSources }),
+      evidenceBearing,
+    );
+    const continuation = findBloodPressureJob(unavailable.scheduledJobs ?? []);
+
+    assert.deepEqual(
+      projectedSources,
+      providerState.present === false
+        ? []
+        : [{
+            resourceAvailabilitySummary: providerState.resourceAvailability,
+            status: providerState.status,
+          }],
+    );
+    assert.equal(requests.length, 0);
+    assert.equal(unavailable.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(continuation.availableAt, "2026-06-12T12:00:00.000Z");
+    assert.equal(continuation.dedupeKey, evidenceBearing.dedupeKey);
+    assert.equal(continuation.payload?.emptyBackfillAttempts, 4);
+    assert.equal(continuation.payload?.historicalProviderRecordsSeen, true);
+    assert.equal(
+      continuation.payload?.historicalWindowStart,
+      original.payload?.historicalWindowStart,
+    );
+    assert.equal(continuation.payload?.windowStart, original.payload?.windowStart);
+    assert.equal(continuation.payload?.windowEnd, original.payload?.windowEnd);
+
+    providerState.present = true;
+    providerState.status = "connected";
+    providerState.resourceAvailability = {
+      activity: true,
+      blood_pressure: true,
+    };
+    const empty = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+      toJobRecord(continuation, index + 10),
+    );
+    const stillRecoverable = findBloodPressureJob(empty.scheduledJobs ?? []);
+
+    assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(stillRecoverable.dedupeKey, evidenceBearing.dedupeKey);
+    assert.equal(stillRecoverable.payload?.historicalProviderRecordsSeen, true);
+    assert.equal(stillRecoverable.payload?.windowStart, original.payload?.windowStart);
+
+    records.push({
+      id: `bp-after-live-authority-recovery-${index}`,
+      timestamp: "2026-03-15T08:30:00.000Z",
+      systolic: 121,
+      diastolic: 79,
+    });
+    const completed = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
+      toJobRecord(stillRecoverable, index + 20),
+    );
+    assert.equal(completed.scheduledJobs?.length ?? 0, 0);
+    assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  }
+
+  const canonicalState: MutableProviderState = {
+    resourceAvailability: { activity: true, blood_pressure: false },
+    status: "connected",
+  };
+  const canonicalProvider = createProvider({
+    providerState: canonicalState,
+    requests: [],
+  });
+  const canonicalOriginal = createScheduledBloodPressureJob(canonicalProvider);
+  const canonicalEvidence = toJobRecord({
+    ...canonicalOriginal,
+    payload: {
+      ...canonicalOriginal.payload,
+      emptyBackfillAttempts: 4,
+      historicalRecordsSeen: true,
+    },
+  }, 30);
+  const canonicalUnavailable = await requireValue(canonicalProvider.jobExecutor).executeJob(
+    createJobContext(),
+    canonicalEvidence,
+  );
+  const canonicalContinuation = findBloodPressureJob(
+    canonicalUnavailable.scheduledJobs ?? [],
+  );
+
+  assert.equal(canonicalUnavailable.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(canonicalContinuation.payload?.historicalRecordsSeen, true);
+  assert.equal(
+    canonicalContinuation.payload?.historicalWindowStart,
+    canonicalOriginal.payload?.historicalWindowStart,
   );
 });
 
@@ -1087,6 +1243,154 @@ test("retryable provider failure after raw rows preserves evidence through later
 
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
   assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("retryable post-fetch failures preserve raw evidence and replay the anchored window", async () => {
+  for (const boundary of ["source-state", "canonical-import"] as const) {
+    const records: Record<string, unknown>[] = [{
+      id: `bp-before-${boundary}-failure`,
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 119,
+    }];
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({
+      bloodPressureRecords: records,
+      requests,
+    });
+    const original = createScheduledBloodPressureJob(provider);
+    const exhausted = toJobRecord({
+      ...original,
+      payload: {
+        ...original.payload,
+        emptyBackfillAttempts: 4,
+      },
+    }, boundary === "source-state" ? 40 : 41);
+    exhausted.dedupeKey = `hosted-device-sync:${boundary === "source-state" ? "4".repeat(64) : "5".repeat(64)}`;
+    const failure = deviceSyncError({
+      code: boundary === "source-state"
+        ? "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE"
+        : "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
+      httpStatus: 503,
+      message: `Temporary hosted device-sync ${boundary} failure.`,
+      retryable: true,
+    });
+    let sourceStateReads = 0;
+    let yieldChecks = 0;
+    const failed = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({
+        ...(boundary === "source-state"
+          ? {
+              listConnectionSources: async () => {
+                sourceStateReads += 1;
+                if (sourceStateReads === 1) {
+                  return [];
+                }
+                throw failure;
+              },
+            }
+          : {
+              importSnapshot: async () => {
+                throw failure;
+              },
+            }),
+        shouldYield: () => {
+          yieldChecks += 1;
+          return yieldChecks > 1;
+        },
+      }),
+      exhausted,
+    );
+    const retry = findBloodPressureJob(failed.scheduledJobs ?? []);
+
+    assert.equal(
+      requests.filter((request) => request.resource === "blood_pressure").length,
+      1,
+    );
+    assert.equal(failed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
+    assert.equal(retry.dedupeKey, exhausted.dedupeKey);
+    assert.equal(retry.payload?.emptyBackfillAttempts, 4);
+    assert.equal(retry.payload?.historicalProviderRecordsSeen, true);
+    assert.equal(retry.payload?.historicalWindowStart, original.payload?.historicalWindowStart);
+    assert.equal(retry.payload?.windowStart, original.payload?.windowStart);
+    assert.equal(retry.payload?.windowEnd, original.payload?.windowEnd);
+
+    records.length = 0;
+    const empty = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+      toJobRecord(retry, 42),
+    );
+    const stillRecoverable = findBloodPressureJob(empty.scheduledJobs ?? []);
+
+    assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(stillRecoverable.dedupeKey, exhausted.dedupeKey);
+    assert.equal(stillRecoverable.payload?.historicalProviderRecordsSeen, true);
+    assert.equal(stillRecoverable.payload?.windowStart, original.payload?.windowStart);
+
+    records.push({
+      id: `bp-after-${boundary}-recovery`,
+      timestamp: "2026-05-20T08:30:00.000Z",
+      systolic: 121,
+      diastolic: 79,
+    });
+    const recovered = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
+      toJobRecord(stillRecoverable, 43),
+    );
+
+    assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
+    assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  }
+});
+
+test("nonretryable post-fetch failures keep ordinary failure semantics", async () => {
+  for (const boundary of ["source-state", "canonical-import"] as const) {
+    const provider = createProvider({
+      bloodPressureRecords: [{
+        id: `bp-before-nonretryable-${boundary}-failure`,
+        timestamp: "2026-05-20T08:30:00.000Z",
+        systolic: 121,
+        diastolic: 79,
+      }],
+      requests: [],
+    });
+    const original = createScheduledBloodPressureJob(provider);
+    const failure = deviceSyncError({
+      code: boundary === "source-state"
+        ? "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE"
+        : "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
+      message: `Permanent hosted device-sync ${boundary} failure.`,
+      retryable: false,
+    });
+    let sourceStateReads = 0;
+
+    await assert.rejects(
+      () => requireValue(provider.jobExecutor).executeJob(
+        createJobContext(
+          boundary === "source-state"
+            ? {
+                listConnectionSources: async () => {
+                  sourceStateReads += 1;
+                  if (sourceStateReads === 1) {
+                    return [];
+                  }
+                  throw failure;
+                },
+              }
+            : {
+                importSnapshot: async () => {
+                  throw failure;
+                },
+              },
+        ),
+        toJobRecord(original, boundary === "source-state" ? 44 : 45),
+      ),
+      (error: unknown) =>
+        isDeviceSyncError(error)
+        && error.code === failure.code
+        && error.retryable === false,
+    );
+  }
 });
 
 test("provider failures without prior rows retain their ordinary failure semantics", async () => {
