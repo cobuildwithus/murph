@@ -63,6 +63,37 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-10",
+    publishedOn: "2026-08-10",
+    title: "Patterns connect actions with next-day recovery",
+    summary:
+      "Murph can now compare repeated activities and logged experiment actions with next-day sleep and recovery in one private view.",
+    items: [
+      {
+        id: "personal-patterns",
+        kind: "feature",
+        priority: 5,
+        title: "See what tends to change after repeated actions",
+        summary:
+          "Patterns compares days with and without a repeated activity or logged experiment action, then shows how next-day sleep and recovery differed.",
+        details:
+          "It uses your existing history when enough comparable days are available, requires the direction to repeat across the observation window, and shows association rather than cause. Murph's weekly health insight checks the same evidence and stays quiet when nothing clears the bar.",
+        relevanceTags: [
+          "patterns",
+          "wearables",
+          "sleep",
+          "recovery",
+          "experiments",
+        ],
+        sourcePullRequests: [1563],
+        tryIt: {
+          href: "/patterns",
+          label: "View your patterns",
+        },
+      },
+    ],
+  },
+  {
     id: "2026-08-06",
     publishedOn: "2026-08-06",
     title: "Murph can understand media in X posts",
