@@ -264,6 +264,13 @@ other OpenAI search method or path, validates the signed OpenAI provider
 credential against the active user and runner, strips caller and runtime
 authority headers, and injects the Worker-owned OpenAI credential only after
 authorization succeeds.
+The pinned Codex native binary has a test-only, version-bound route-disposition
+inventory. Offline CI scans the installed artifact for conservative `/v1/**`
+and known base-relative provider candidates, requires every discovered
+candidate to be explicitly classified, and runs a real App Server web-search
+turn through the production Worker interceptor. The inventory never generates
+or widens the Worker policy: a new candidate fails closed until its origin,
+method, transport, hosted reachability, and production policy are reviewed.
 Runtime-controlled delivery/control provider integrations such as Linq and
 Telegram still use provider-egress token proof when exact runtime
 authority headers are absent. There is no tokenless active-user-fence provider
