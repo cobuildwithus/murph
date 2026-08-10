@@ -52,12 +52,14 @@ describe("hosted ops growth sponsorship metrics", () => {
       'purchase."paid_at" < bounds.captured_at',
     );
     expect(queryText).toContain('"hosted_thread_container"');
-    expect(queryText).toContain('authorization."monthly_cap_minor"');
     expect(queryText).toContain(
-      'authorization."period_ends_at" <= bounds.captured_at',
+      'sponsorship_authorization."monthly_cap_minor"',
     );
     expect(queryText).toContain(
-      'authorization."pending_monthly_cap_minor" IS NOT NULL',
+      'sponsorship_authorization."period_ends_at" <= bounds.captured_at',
+    );
+    expect(queryText).toContain(
+      'sponsorship_authorization."pending_monthly_cap_minor" IS NOT NULL',
     );
     expect(queryText).toContain(
       'activation_purchase."group_sponsorship_charge_ordinal" = 0',
