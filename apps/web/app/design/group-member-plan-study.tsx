@@ -177,6 +177,21 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Inactive Family billing owner can repair or cancel from Settings"
+        state="family-billing-recovery"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="not_started"
+            canStartFamily
+            familyBillingOwner
+            familyState="none"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
         label="Family-sponsored member with billing owned by the sponsor"
         state="family-sponsored"
       >

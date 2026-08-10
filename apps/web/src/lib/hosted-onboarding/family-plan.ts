@@ -422,6 +422,18 @@ export type HostedFamilyBillingRecoveryState =
   | "manage"
   | "syncing";
 
+export function isHostedFamilyBillingPortalManageable(
+  billingStatus: HostedBillingStatus,
+): boolean {
+  return (
+    billingStatus === HostedBillingStatus.active
+    || billingStatus === HostedBillingStatus.incomplete
+    || billingStatus === HostedBillingStatus.past_due
+    || billingStatus === HostedBillingStatus.paused
+    || billingStatus === HostedBillingStatus.unpaid
+  );
+}
+
 export interface HostedFamilyUsageCreditCheckoutTarget {
   beneficiaryMemberId: string;
   groupId: string;
@@ -919,12 +931,8 @@ export async function readHostedFamilyBillingRecoveryForOwner(input: {
 
   if (
     group.billingRef?.stripeSubscriptionIdEncrypted
-    && (
-      group.billingStatus === HostedBillingStatus.incomplete
-      || group.billingStatus === HostedBillingStatus.past_due
-      || group.billingStatus === HostedBillingStatus.paused
-      || group.billingStatus === HostedBillingStatus.unpaid
-    )
+    && group.billingStatus !== HostedBillingStatus.active
+    && isHostedFamilyBillingPortalManageable(group.billingStatus)
   ) {
     return "manage";
   }

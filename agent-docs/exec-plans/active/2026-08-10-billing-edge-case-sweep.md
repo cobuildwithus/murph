@@ -76,7 +76,7 @@ Success means:
 
 - [x] Inventory billing actions, state owners, inverse operations, provider
   effects, browser recovery, and webhook reconciliation.
-- [x] Verify and correct nineteen independent traps across Family, direct-plan,
+- [x] Verify and correct twenty independent traps across Family, direct-plan,
   usage-credit, Portal, refund, and sponsorship paths.
 - [x] Add focused regressions plus an installed real-PostgreSQL migration and
   account-deletion proof.
@@ -124,6 +124,8 @@ function-state matrix and verification ledger. The accepted defects are:
     generic Family action without explicit terms or confirmation.
 19. Successful sponsorship cancellation could reload into an unrelated
     unavailable state instead of preserving a terminal receipt.
+20. A Telegram-only invite could authorize an automatically invoiced Family
+    seat even though a username cannot prove the target is not already active.
 
 ## Current evidence
 
@@ -168,3 +170,13 @@ function-state matrix and verification ledger. The accepted defects are:
   $14/month Family billing; and successful sponsorship cancellation now ends in
   a stable receipt without reloading. The seven focused suites pass 293/293,
   and the new desktop/mobile catalog states were inspected for all three paths.
+- Final ReviewGPT round 1 reviewed the immutable first candidate and returned
+  three findings. Its pending-marker transaction finding was already corrected
+  by the later commit-before-rethrow hardening. The Telegram paid-seat path and
+  canonical inactive-Family Settings recovery gap were both reproduced against
+  the current head before correction. Automatic seat purchase now requires
+  phone/email identity, while Telegram remains available with open capacity;
+  Settings routes all four nonterminal inactive Family statuses to the Family
+  portal without claiming current access or offering a fresh start. Ten focused
+  suites pass 398/398, typecheck/lint and both billing guards pass, and the new
+  desktop/mobile Settings recovery state was inspected at native resolution.

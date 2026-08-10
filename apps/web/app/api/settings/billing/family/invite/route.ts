@@ -51,12 +51,14 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  // Auto-adding a seat only happens for invites the issuer can dedup on retry
-  // (a normalized phone/email/Telegram). Label-only or invalid-contact invites
-  // have no reuse key, so a lost-response retry could otherwise buy a second seat.
+  // Auto-adding a seat requires a contact channel that can be compared with an
+  // already-active member's verified identity before purchase. Telegram
+  // usernames dedup invites, but members are bound by Telegram user id, so a
+  // username cannot prove the target is not already in this Family.
   const canAutoAddSeat =
     body.addSeatIfNeeded === true &&
-    hostedFamilyInviteHasReusableTarget({ targetEmail, targetPhoneNumber, targetTelegramUsername });
+    Boolean(targetPhoneNumber || targetEmail) &&
+    hostedFamilyInviteHasReusableTarget({ targetEmail, targetPhoneNumber });
 
   const issueInvite = () =>
     prisma.$transaction(async (tx) => {

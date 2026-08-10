@@ -225,22 +225,23 @@ export function HostedFamilyManager(props: {
     return trimmedTelegram;
   })();
   const planCanGrow = props.billingActive && seatsFull && props.seats.billed < props.seats.max;
-  // A seat is only auto-added for invites the server can dedup on retry, so the
-  // paid CTA and addSeatIfNeeded flag require a contact on the active channel.
-  const hasStableTarget =
+  // A paid seat can be added only when the server can reject an existing member
+  // by verified phone/email before charging. Telegram usernames dedup invites,
+  // but do not identify the member's provider user id.
+  const hasAutoSeatIdentity =
     inviteChannel === "imessage"
       ? Boolean(normalizedPhone)
       : inviteChannel === "email"
         ? Boolean(normalizedEmail)
-        : Boolean(normalizedTelegram);
+        : false;
   const activeContactInputNoun =
     inviteChannel === "imessage"
       ? "phone number"
       : inviteChannel === "email"
         ? "email"
         : "Telegram username";
-  const inviteWillAddSeat = planCanGrow && hasStableTarget;
-  const inviteNeedsStableTargetForSeat = planCanGrow && !hasStableTarget;
+  const inviteWillAddSeat = planCanGrow && hasAutoSeatIdentity;
+  const inviteNeedsStableTargetForSeat = planCanGrow && !hasAutoSeatIdentity;
   const selectedTierUnavailable = seatsFull && !planCanGrow;
   const inviteSubmitDisabled =
     isInviting || inviteNeedsStableTargetForSeat || selectedTierUnavailable;
@@ -805,7 +806,9 @@ export function HostedFamilyManager(props: {
                   </p>
                 ) : inviteNeedsStableTargetForSeat ? (
                   <p role="status" className="text-xs leading-5 text-[#736a58]">
-                    {activeContactInput
+                    {inviteChannel === "telegram"
+                      ? `Use iMessage or Email to add a paid ${invitePlan.name} seat, or change Family capacity first.`
+                      : activeContactInput
                       ? `Enter a valid ${activeContactInputNoun} to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`
                       : `Add a contact to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`}
                   </p>

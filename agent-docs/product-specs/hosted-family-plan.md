@@ -370,6 +370,15 @@ bound Session status is authoritative for resume/reconcile/restart,
 and invite-status polling rereads the server projection while Checkout or
 reconciliation remains pending.
 
+Canonical Settings remains the owner's recovery surface for a bound Family
+subscription in `incomplete`, `past_due`, `paused`, or `unpaid` state. It must
+not label Family as current access, offer a fresh Family start, or route the
+owner to a cleared personal Stripe customer. It shows one `Manage Family
+billing` action against the Family customer so repair or cancellation never
+depends on retaining an old invite URL. A `not_started` or fully canceled group
+without a manageable subscription remains eligible for the ordinary fresh-start
+journey.
+
 ## Invite Issuance
 
 The owner can issue family invites from the web settings surface and through the
@@ -383,6 +392,16 @@ The assistant should resolve the request into a bounded invite command owned by
 hosted web. The command should create or reuse a scoped family invite while
 respecting the paid-seat invariant. If no paid seats are open, the owner must
 add a Family seat before issuing another invite.
+
+The web invite flow may compose a one-seat increase with issuance only for a
+normalized phone number or email target, because those channels let the server
+reject a match to an already-active member's verified phone or email before
+Stripe mutation.
+Telegram usernames remain valid invite-reuse keys but are not durable member
+identity: a Telegram-only invite can use an already-open seat, but cannot
+authorize an automatic paid-seat increase. When that tier is full, Settings
+directs the owner to iMessage/email or a separate capacity change instead of
+showing a paid Telegram invite action.
 
 Accepted invite targets:
 

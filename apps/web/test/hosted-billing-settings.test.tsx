@@ -1355,6 +1355,51 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Current plan|Free trial/);
   });
 
+  test("routes an inactive Family billing owner to the Family portal", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        billingStatus: "active",
+        canStartFamily: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        familyBillingOwner: true,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Your Family plan needs billing attention/u,
+      );
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Current plan/u);
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Choose Family/u);
+
+      const manageButton = findButtonByText(
+        rendered.window.document,
+        "Manage Family billing",
+        rendered.window,
+      );
+      await act(async () => {
+        manageButton.click();
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "POST",
+        payload: { billingScope: "family" },
+        url: "/api/settings/billing/portal",
+      });
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
   test("shows the Family card as current for the family owner", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 

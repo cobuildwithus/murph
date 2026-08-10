@@ -67,6 +67,7 @@ import {
 } from "@/src/lib/hosted-onboarding/billing-plan-change-contract";
 import { hasHostedMemberOwnActiveBilling } from "@/src/lib/hosted-onboarding/entitlement";
 import {
+  isHostedFamilyBillingPortalManageable,
   readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember,
   type HostedFamilyOwnerMemberRow,
@@ -218,6 +219,8 @@ export default async function SettingsPage({
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
+  const familyBillingOwner = familyOwner !== null
+    && isHostedFamilyBillingPortalManageable(familyOwner.billingStatus);
   const familyOwnerUsageTopUpMember =
     resolveActiveFamilyOwnerUsageTopUpMember(familyOwner);
   const sponsoredMember = familyAccess !== null && familyOwner === null;
@@ -309,7 +312,7 @@ export default async function SettingsPage({
     : usageTopUpOffers;
   const canStartFamily =
     authenticatedMember != null &&
-    !activeFamilyOwner &&
+    !familyBillingOwner &&
     !sponsoredMember &&
     !authenticatedMember.suspendedAt;
   const currentPlanCode = parseHostedBillingPlanCode(
@@ -521,6 +524,7 @@ export default async function SettingsPage({
           canStartFamily={canStartFamily}
           canSwitchToEdge={canSwitchToEdge}
           canSwitchToGroup={canSwitchToGroup}
+          familyBillingOwner={familyBillingOwner}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           groupPaymentMethodSaved={groupPaymentMethodSaved}
           planChangePending={planChangePending}

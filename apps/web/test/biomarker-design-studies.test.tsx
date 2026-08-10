@@ -166,6 +166,8 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-state="monthly-canceled"');
   expect(sectionsMarkup).toContain('data-design-state="sponsored-one-time-recovery"');
   expect(sectionsMarkup).toContain('data-design-state="trial-family-confirmation"');
+  expect(sectionsMarkup).toContain('data-design-state="family-billing-recovery"');
+  expect(sectionsMarkup).toContain("Your Family plan needs billing attention");
   expect(sectionsMarkup).toContain("Monthly sponsorship canceled");
   expect(sectionsMarkup).toContain("Sign in to continue");
   expect(sectionsMarkup).toContain("Monthly sponsorship is the primary flow");
