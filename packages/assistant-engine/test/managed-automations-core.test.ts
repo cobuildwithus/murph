@@ -378,6 +378,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
+    expect(insightRecord?.instructions).toContain('vault-cli wearables patterns --date YYYY-MM-DD --format json')
+    expect(insightRecord?.instructions).toContain('stages of repeated association, not proof')
+    expect(insightRecord?.instructions).toContain('pattern report narrows the search')
     expect(insightRecord?.instructions).toContain('find zero or one useful')
     expect(insightRecord?.instructions).toContain('better to send nothing')
     expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
@@ -1380,7 +1383,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     ])
   })
 
-  it('preserves the signup schedule minute and pending first occurrence during same-pass reconciliation', async () => {
+  it('preserves the signup schedule minute and pending first occurrence without a redundant reconciliation write', async () => {
     const vaultRoot = await createVaultRoot()
     const vault = await loadVault({ vaultRoot })
     const vaultStableKey = vault.metadata.vaultId ?? 'vault-fallback'
@@ -1425,7 +1428,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toEqual({
       created: 5,
       skipped: 0,
-      updated: 1,
+      updated: 0,
     })
 
     await expect(showAutomation({

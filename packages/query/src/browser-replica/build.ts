@@ -50,6 +50,7 @@ import {
   type BrowserVaultRequestedMetric,
 } from "./metric-points.ts";
 import { toBrowserVaultLabResultRows } from "./lab-results.ts";
+import { buildPersonalPatternReport } from "../personal-patterns.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -107,6 +108,7 @@ export async function createBrowserVaultReplica(
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
+    personalPatterns: buildPersonalPatternReport(input.vault, { asOf: generatedAt }),
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: entities.map(projectSearchRow),
@@ -133,6 +135,14 @@ export async function hashBrowserVaultReplicaData(replica: BrowserVaultReplica):
   const stableReplica = {
     ...replica,
     generatedAt: "",
+    ...(replica.personalPatterns
+      ? {
+          personalPatterns: {
+            ...replica.personalPatterns,
+            asOfDate: "",
+          },
+        }
+      : {}),
     source: {
       ...replica.source,
       dataVersion: "pending",
