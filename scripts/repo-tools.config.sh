@@ -104,6 +104,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "AGENTS.md" \
   "ARCHITECTURE.md" \
   "Dockerfile.cloudflare-hosted-runner" \
+  "Dockerfile.cloudflare-hosted-runner-base" \
   "README.md" \
   "PRODUCT.md" \
   "DESIGN.md" \

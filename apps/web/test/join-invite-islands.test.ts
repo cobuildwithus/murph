@@ -11,10 +11,10 @@ import {
   JoinInviteSignOutButtonIsland,
   JoinInviteStatusRefreshIsland,
 } from "@/src/components/hosted-onboarding/join-invite-islands";
-import { JoinInviteAutoTrialIsland } from "@/src/components/hosted-onboarding/join-invite-auto-trial-island";
+import { JoinInviteStarterUsageIsland } from "@/src/components/hosted-onboarding/join-invite-starter-usage-island";
 import {
   HostedOnboardingApiError,
-  type HostedAutoPulseTrialEnrollmentResponse,
+  type HostedStarterUsageEnrollmentResponse,
 } from "@/src/components/hosted-onboarding/client-api";
 import {
   getHostedDefaultBillingPlanCode,
@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => ({
   privyLogout: vi.fn(),
   refresh: vi.fn(),
   replace: vi.fn(),
-  requestHostedAutoPulseTrialEnrollment: vi.fn(),
+  requestHostedStarterUsageEnrollment: vi.fn(),
   requestHostedBillingCheckout: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   hostedEmailAuthProps: null as Record<string, unknown> | null,
@@ -147,7 +147,7 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) 
 
   return {
     ...actual,
-    requestHostedAutoPulseTrialEnrollment: mocks.requestHostedAutoPulseTrialEnrollment,
+    requestHostedStarterUsageEnrollment: mocks.requestHostedStarterUsageEnrollment,
     requestHostedBillingCheckout: mocks.requestHostedBillingCheckout,
     requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
   };
@@ -231,7 +231,7 @@ test("JoinInviteCheckoutPlanButtonIsland sends the clicked plan code to checkout
   await cleanup();
 });
 
-test("JoinInviteCheckoutPlanButtonIsland sends Pulse Trial checkout offer to checkout", async () => {
+test("JoinInviteCheckoutPlanButtonIsland sends the Pulse plan to checkout", async () => {
   mocks.requestHostedBillingCheckout.mockResolvedValue({
     alreadyActive: false,
     url: "https://stripe.example.test/trial",
@@ -240,8 +240,7 @@ test("JoinInviteCheckoutPlanButtonIsland sends Pulse Trial checkout offer to che
   const { assign, button, cleanup } = await renderClientComponent(
     createElement(JoinInviteCheckoutPlanButtonIsland, {
       billingReady: true,
-      checkoutOffer: "pulse_trial_7d",
-      idleLabel: "Start 14-day trial",
+      idleLabel: "Get Pulse",
       inviteCode: "invite-code",
       planCode: "launch_monthly",
     }),
@@ -253,27 +252,25 @@ test("JoinInviteCheckoutPlanButtonIsland sends Pulse Trial checkout offer to che
 
   expect(mocks.requestHostedBillingCheckout).toHaveBeenCalledWith({
     billingPlanCode: "launch_monthly",
-    checkoutOffer: "pulse_trial_7d",
     inviteCode: "invite-code",
   });
   expect(assign).toHaveBeenCalledWith("https://stripe.example.test/trial");
   await cleanup();
 });
 
-test("JoinInviteCheckoutPlanButtonIsland uses the disabled label when trial checkout is not ready", async () => {
+test("JoinInviteCheckoutPlanButtonIsland uses the disabled label when checkout is not ready", async () => {
   const { button, cleanup } = await renderClientComponent(
     createElement(JoinInviteCheckoutPlanButtonIsland, {
       billingReady: false,
-      checkoutOffer: "pulse_trial_7d",
-      disabledLabel: "Trial unavailable",
-      idleLabel: "Start 14-day trial",
+      disabledLabel: "Checkout unavailable",
+      idleLabel: "Get Pulse",
       inviteCode: "invite-code",
       planCode: "launch_monthly",
     }),
   );
 
   expect((button as HTMLButtonElement).disabled).toBe(true);
-  expect(button.textContent).toBe("Trial unavailable");
+  expect(button.textContent).toBe("Checkout unavailable");
   await cleanup();
 });
 
@@ -301,14 +298,14 @@ test("JoinInviteCheckoutPlanButtonIsland refreshes instead of redirecting when c
   await cleanup();
 });
 
-test("JoinInviteAutoTrialIsland redirects after successful enrollment", async () => {
-  mocks.requestHostedAutoPulseTrialEnrollment.mockResolvedValue({
+test("JoinInviteStarterUsageIsland redirects after successful enrollment", async () => {
+  mocks.requestHostedStarterUsageEnrollment.mockResolvedValue({
     redirectPath: "/home",
     status: "enrolled",
   });
 
   const { cleanup } = await renderClientComponent(
-    createElement(JoinInviteAutoTrialIsland, {
+    createElement(JoinInviteStarterUsageIsland, {
       inviteCode: "invite-code",
     }),
     { requireButton: false },
@@ -318,23 +315,23 @@ test("JoinInviteAutoTrialIsland redirects after successful enrollment", async ()
     await Promise.resolve();
   });
 
-  expect(mocks.requestHostedAutoPulseTrialEnrollment).toHaveBeenCalledWith({
+  expect(mocks.requestHostedStarterUsageEnrollment).toHaveBeenCalledWith({
     inviteCode: "invite-code",
   });
   expect(mocks.replace).toHaveBeenCalledWith("/home");
   await cleanup();
 });
 
-test("JoinInviteAutoTrialIsland preserves the enrollment redirect after unmount", async () => {
-  let resolveEnrollment!: (value: HostedAutoPulseTrialEnrollmentResponse) => void;
-  mocks.requestHostedAutoPulseTrialEnrollment.mockReturnValue(
-    new Promise<HostedAutoPulseTrialEnrollmentResponse>((resolve) => {
+test("JoinInviteStarterUsageIsland preserves the enrollment redirect after unmount", async () => {
+  let resolveEnrollment!: (value: HostedStarterUsageEnrollmentResponse) => void;
+  mocks.requestHostedStarterUsageEnrollment.mockReturnValue(
+    new Promise<HostedStarterUsageEnrollmentResponse>((resolve) => {
       resolveEnrollment = resolve;
     }),
   );
 
   const { cleanup } = await renderClientComponent(
-    createElement(JoinInviteAutoTrialIsland, {
+    createElement(JoinInviteStarterUsageIsland, {
       inviteCode: "invite-code",
     }),
     { requireButton: false },
@@ -353,17 +350,17 @@ test("JoinInviteAutoTrialIsland preserves the enrollment redirect after unmount"
   expect(mocks.replace).toHaveBeenCalledWith("/home");
 });
 
-test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment fails", async () => {
-  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(
+test("JoinInviteStarterUsageIsland renders a distinct retry state after enrollment fails", async () => {
+  mocks.requestHostedStarterUsageEnrollment.mockRejectedValue(
     new HostedOnboardingApiError({
-      code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
-      message: "Murph is still finishing this trial setup. Try again.",
+      code: "HOSTED_STARTER_USAGE_FINALIZATION_BUSY",
+      message: "Murph is still finishing starter setup. Try again.",
       retryable: true,
     }),
   );
 
   const { container, cleanup } = await renderClientComponent(
-    createElement(JoinInviteAutoTrialIsland, {
+    createElement(JoinInviteStarterUsageIsland, {
       inviteCode: "invite-code",
     }),
     { requireButton: false },
@@ -373,10 +370,10 @@ test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment 
     await Promise.resolve();
   });
 
-  expect(container.textContent).toContain("Trial setup paused");
-  expect(container.textContent).toContain("Unable to start your trial");
+  expect(container.textContent).toContain("Setup paused");
+  expect(container.textContent).toContain("Unable to finish setup");
   expect(container.textContent).toContain(
-    "Murph is still finishing this trial setup. Try again.",
+    "Murph is still finishing starter setup. Try again.",
   );
   expect(container.textContent).toContain("Try again");
   expect(container.textContent).not.toContain("Setting up your Murph");
@@ -385,11 +382,11 @@ test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment 
   await cleanup();
 });
 
-test("JoinInviteAutoTrialIsland offers paid checkout when the trial was already used", async () => {
-  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(
+test("JoinInviteStarterUsageIsland offers paid checkout when starter usage is already owned", async () => {
+  mocks.requestHostedStarterUsageEnrollment.mockRejectedValue(
     new HostedOnboardingApiError({
-      code: "HOSTED_PULSE_TRIAL_ALREADY_REDEEMED",
-      message: "This hosted account has already used its Pulse Trial. Continue with Pulse instead.",
+      code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
+      message: "This hosted account already has billing history.",
     }),
   );
   mocks.requestHostedBillingCheckout.mockResolvedValue({
@@ -398,7 +395,7 @@ test("JoinInviteAutoTrialIsland offers paid checkout when the trial was already 
   });
 
   const { assign, cleanup, container, window } = await renderClientComponent(
-    createElement(JoinInviteAutoTrialIsland, {
+    createElement(JoinInviteStarterUsageIsland, {
       inviteCode: "invite-code",
     }),
     { requireButton: false },
@@ -408,16 +405,16 @@ test("JoinInviteAutoTrialIsland offers paid checkout when the trial was already 
     await Promise.resolve();
   });
 
-  expect(container.textContent).toContain("Trial unavailable");
+  expect(container.textContent).toContain("Choose your access");
   expect(container.textContent).toContain(
-    "This account cannot use the trial, but you can continue with paid Pulse.",
+    "This account has prior billing history, so it cannot receive starter usage again.",
   );
-  expect(container.textContent).toContain("Continue with paid Pulse");
+  expect(container.textContent).toContain("Continue with Pulse");
   expect(container.textContent).not.toContain("Contact support to restore access");
   expect(container.textContent).not.toContain("Try again");
 
   await act(async () => {
-    findButtonByText(container, /Continue with paid Pulse/).dispatchEvent(
+    findButtonByText(container, /Continue with Pulse/).dispatchEvent(
       new window.Event("click", { bubbles: true }),
     );
   });
@@ -430,8 +427,8 @@ test("JoinInviteAutoTrialIsland offers paid checkout when the trial was already 
   await cleanup();
 });
 
-test("JoinInviteAutoTrialIsland refreshes stale messaging-required state into setup", async () => {
-  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(
+test("JoinInviteStarterUsageIsland refreshes stale messaging-required state into setup", async () => {
+  mocks.requestHostedStarterUsageEnrollment.mockRejectedValue(
     new HostedOnboardingApiError({
       code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
       message: "Verify your phone number or connect Telegram before checkout so Murph can message you.",
@@ -439,7 +436,7 @@ test("JoinInviteAutoTrialIsland refreshes stale messaging-required state into se
   );
 
   const { cleanup, container, window } = await renderClientComponent(
-    createElement(JoinInviteAutoTrialIsland, {
+    createElement(JoinInviteStarterUsageIsland, {
       inviteCode: "invite-code",
     }),
     { requireButton: false },
@@ -452,7 +449,7 @@ test("JoinInviteAutoTrialIsland refreshes stale messaging-required state into se
   expect(container.textContent).toContain("Continue setup");
   expect(container.textContent).toContain("Finish setup so Murph can message you.");
   expect(container.textContent).not.toContain("Email support");
-  expect(container.textContent).not.toContain("Continue with paid Pulse");
+  expect(container.textContent).not.toContain("Continue with Pulse");
 
   await act(async () => {
     findButtonByText(container, /Continue setup/).dispatchEvent(
@@ -464,8 +461,8 @@ test("JoinInviteAutoTrialIsland refreshes stale messaging-required state into se
   await cleanup();
 });
 
-test("JoinInviteAutoTrialIsland shows support for non-checkout account errors", async () => {
-  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(
+test("JoinInviteStarterUsageIsland shows support for non-checkout account errors", async () => {
+  mocks.requestHostedStarterUsageEnrollment.mockRejectedValue(
     new HostedOnboardingApiError({
       code: "HOSTED_MEMBER_SUSPENDED",
       message: "This hosted account is suspended. Contact support to restore access.",
@@ -473,7 +470,7 @@ test("JoinInviteAutoTrialIsland shows support for non-checkout account errors", 
   );
 
   const { cleanup, container } = await renderClientComponent(
-    createElement(JoinInviteAutoTrialIsland, {
+    createElement(JoinInviteStarterUsageIsland, {
       inviteCode: "invite-code",
     }),
     { requireButton: false },
@@ -483,10 +480,10 @@ test("JoinInviteAutoTrialIsland shows support for non-checkout account errors", 
     await Promise.resolve();
   });
 
-  expect(container.textContent).toContain("Pulse setup needs support");
+  expect(container.textContent).toContain("Murph setup needs support");
   expect(container.textContent).toContain("Email support");
   expect(container.textContent).not.toContain("Try again");
-  expect(container.textContent).not.toContain("Continue with paid Pulse");
+  expect(container.textContent).not.toContain("Continue with Pulse");
   expect(container.querySelector("a[href^='mailto:']")).toBeTruthy();
   await cleanup();
 });
