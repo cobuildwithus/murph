@@ -105,7 +105,9 @@ function createAuthenticatedGroupCandidate(input: {
         accountId: 'acct_1',
         actorId: input.completion ? null : 'actor_1',
         actorIsSelf: false,
-        sessionId: 'asst_image_completion_group',
+        ...(input.completion
+          ? { sessionId: 'asst_image_completion_group' }
+          : {}),
         source: 'linq',
         threadId,
         threadIsDirect: false,

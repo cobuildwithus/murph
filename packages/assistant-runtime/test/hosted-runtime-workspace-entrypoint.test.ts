@@ -31,6 +31,7 @@ import {
 } from "@murphai/inboxd";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
@@ -328,6 +329,9 @@ import {
 import {
   prepareHostedWakeContext,
 } from "../src/hosted-runtime/context.ts";
+import {
+  importHostedConversationMailboxItem,
+} from "../src/hosted-runtime/mailbox-conversation-import.ts";
 import {
   createHostedWorkspaceRuntimeBridgeJobOptions,
   type HostedWorkspaceSnapshotArchiveBuilder,
@@ -19019,7 +19023,6 @@ describe("hosted workspace runtime entrypoint", () => {
           async importItem(item) {
             const inputId = await stagePendingLinqAssistantInputForMailboxItem({
               item: item.item,
-              sessionId: "asst_image_completion_preemption",
               threadId: "thread_image_completion_preemption",
               threadIsDirect: false,
               vaultRoot,
@@ -19478,13 +19481,15 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("delivers a failed image edit explanation through the production assistant and Linq owners", async () => {
+  test("folds a production-imported group follow-up into image completion delivery", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "murph-image-edit-failure-route-"),
     );
     const vaultRoot = path.join(root, "vault");
     const referenceImageRef = "raw/inbox/2026/04/image-edit-source.png";
+    const freshInputText = "Did the group image edit finish?";
     const codexCommand = await createImageFailureCodexAppServerCommand({
+      freshInputText,
       referenceImageRef,
       root,
     });
@@ -19496,6 +19501,11 @@ describe("hosted workspace runtime entrypoint", () => {
     })];
     const linqRequests: Array<Record<string, unknown>> = [];
     const linqRequestPaths: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let combinedPhaseInputIds: readonly string[] = [];
+    let combinedPhaseSessionIds: readonly (string | null)[] = [];
+    let currentInputAtProviderAcceptance: string | null = null;
+    let freshInputId: string | null = null;
     let imageProviderInvocationCount = 0;
 
     const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
@@ -19505,6 +19515,12 @@ describe("hosted workspace runtime entrypoint", () => {
       events.push(`provider.fetch:${method}:${new URL(url).pathname}`);
       if (method === "POST" && url.includes("/v1/images/edits")) {
         imageProviderInvocationCount += 1;
+        mailboxItems.push(createMailboxItem({
+          id: "mailbox_item_image_edit_failure_followup",
+          laneSeq: "2",
+          occurredAt: "2026-04-27T00:00:01.000Z",
+        }));
+        runtimeWakeSignal.notify();
         return new Response(JSON.stringify({
           error: {
             code: "invalid_image",
@@ -19539,7 +19555,6 @@ describe("hosted workspace runtime entrypoint", () => {
       }
       return new Response(null, { status: 204 });
     });
-
     try {
       const snapshotRef = createWorkspaceSnapshotV2Ref(
         "snapshot_image_edit_failure_route",
@@ -19598,35 +19613,65 @@ describe("hosted workspace runtime entrypoint", () => {
           },
         },
       });
+      const platform: HostedRuntimePlatform = {
+        ...basePlatform,
+        effectsPort: {
+          async assertLinqRecentInboundEngagement(request) {
+            assert.equal(
+              request.target,
+              "thread_image_edit_failure_route",
+            );
+            return {
+              providerDispatchClaimed: true,
+              threadIsDirect: false,
+            };
+          },
+          async readRawEmailMessage() {
+            return null;
+          },
+          async recordLinqDeliveryOutcome(request) {
+            events.push(
+              `provider.record:${request.providerMessageId ?? "missing"}`,
+            );
+          },
+          async sendEmail() {},
+        },
+        providerFetch,
+      };
+      const runtimeJobInput = createWorkspaceRuntimeJobInput({
+        forwardedEnv: {
+          [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: codexCommand,
+          LINQ_API_TOKEN: "synthetic-linq-token",
+          NODE_ENV: "test",
+        },
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: false,
+            telegramBotConfigured: false,
+          },
+          deviceSync: null,
+          managedAutoReplyChannels: [{
+            capabilityReady: true,
+            channel: "linq",
+            memberChannel: "linq",
+          }],
+        },
+        request: {
+          attemptId: "attempt_image_edit_failure_route",
+          budget: { maxMailboxItems: 10 },
+          idleCheckpointDelayMs: 50,
+          leaseGeneration: "8",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      });
+      const importRuntime = normalizeHostedAssistantRuntimeConfig(
+        runtimeJobInput.runtime,
+        platform,
+      );
       await withRealTimeout(
         runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
-            forwardedEnv: {
-              [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: codexCommand,
-              LINQ_API_TOKEN: "synthetic-linq-token",
-              NODE_ENV: "test",
-            },
-            resolvedConfig: {
-              channelCapabilities: {
-                emailSendReady: false,
-                telegramBotConfigured: false,
-              },
-              deviceSync: null,
-              managedAutoReplyChannels: [{
-                capabilityReady: true,
-                channel: "linq",
-                memberChannel: "linq",
-              }],
-            },
-            request: {
-              attemptId: "attempt_image_edit_failure_route",
-              budget: { maxMailboxItems: 10 },
-              idleCheckpointDelayMs: 50,
-              leaseGeneration: "8",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
-            },
-          }),
+          runtimeJobInput,
           {
             async createCheckpointSnapshot() {
               return {
@@ -19638,50 +19683,131 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             },
             async importItem(item, context) {
-              const assistantInputId =
-                await stagePendingLinqAssistantInputForMailboxItem({
-                  item: item.item,
+              const inputText = item.item.laneSeq === "2"
+                ? freshInputText
+                : "Edit the shared image so the subject faces left.";
+              const wake = buildHostedExecutionLinqConversationMessageWake({
+                accountLookupKey: "hbidx:group-account",
+                eventId: item.item.dedupeKey,
+                linqMessage: {
+                  chatId: "thread_image_edit_failure_route",
+                  from: "+15550000002",
+                  isFromMe: false,
+                  messageId: `msg_${item.item.id}`,
+                  parts: [{ type: "text", value: inputText }],
+                  reactionEligible: true,
+                  service: "iMessage",
+                  threadIsDirect: false,
+                },
+                occurredAt: item.item.occurredAt,
+                phoneLookupKey: "+15550000002",
+                routeAuthority: {
+                  accountLookupKey: "hbidx:group-account",
+                  channel: "linq",
+                  containerMemberId: TEST_USER_ID,
                   threadId: "thread_image_edit_failure_route",
-                  vaultRoot,
-                });
-              context?.onConversationInputStaged?.("linq");
-              return { assistantInputId, status: "imported" };
-            },
-            platform: {
-              ...basePlatform,
-              effectsPort: {
-                async assertLinqRecentInboundEngagement(request) {
-                  assert.equal(
-                    request.target,
-                    "thread_image_edit_failure_route",
-                  );
+                },
+                userId: TEST_USER_ID,
+              });
+              const outcome = await importHostedConversationMailboxItem({
+                decodePayload: {
+                  async decode() {
+                    return { status: "decoded", wake };
+                  },
+                },
+                async importConversationWake() {
                   return {
-                    providerDispatchClaimed: true,
-                    threadIsDirect: true,
+                    captureId: null,
+                    metrics: { nextWakeAt: null, parserProcessed: 0 },
                   };
                 },
-                async readRawEmailMessage() {
-                  return null;
-                },
-                async recordLinqDeliveryOutcome(request) {
-                  events.push(
-                    `provider.record:${request.providerMessageId ?? "missing"}`,
-                  );
-                },
-                async sendEmail() {},
-              },
-              providerFetch,
+                item,
+                onConversationInputStaged:
+                  context?.onConversationInputStaged ?? null,
+                runtime: importRuntime,
+                signal: context?.signal ?? null,
+                vaultRoot,
+              });
+              events.push(
+                `production.import:${item.item.laneSeq}:${outcome.status}`,
+              );
+              if (item.item.laneSeq === "2") {
+                freshInputId = outcome.status === "imported"
+                  ? outcome.assistantInputId ?? null
+                  : null;
+                assert.ok(freshInputId);
+                const freshInput = await readAssistantInputEvent({
+                  inputId: freshInputId,
+                  vault: vaultRoot,
+                });
+                assert.equal(freshInput?.conversation?.sessionId, null);
+              }
+              return outcome;
             },
-            runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),
+            platform,
+            runtimeWakeSignal,
+            async runAssistantPhase(phaseInput) {
+              const phaseInputIds =
+                phaseInput.initialAssistantInputBatch?.assistantInputIds
+                ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+                ?? [];
+              events.push(`assistant.phase:${phaseInputIds.length}`);
+              if (phaseInputIds.length === 2) {
+                combinedPhaseInputIds = phaseInputIds;
+                combinedPhaseSessionIds = await Promise.all(
+                  phaseInputIds.map(async (inputId) =>
+                    (await readAssistantInputEvent({ inputId, vault: vaultRoot }))
+                      ?.conversation?.sessionId ?? null
+                  ),
+                );
+              }
+              const beforeProviderAcceptedInputs =
+                phaseInput.beforeProviderAcceptedInputs;
+              return await runHostedWorkspaceAssistantPhase({
+                ...phaseInput,
+                ...(beforeProviderAcceptedInputs
+                  ? {
+                      beforeProviderAcceptedInputs: async (acceptedInput) => {
+                        const release =
+                          await beforeProviderAcceptedInputs(acceptedInput);
+                        if (phaseInputIds.length === 2) {
+                          currentInputAtProviderAcceptance =
+                            phaseInput.currentAssistantInputId?.() ?? null;
+                        }
+                        return release;
+                      },
+                    }
+                  : {}),
+              });
+            },
             vaultRoot,
           },
         ),
-        15_000,
+        30_000,
         () => events.join(","),
       );
 
       assert.equal(imageProviderInvocationCount, 1);
-      assert.equal(mailboxItems.length, 1);
+      assert.equal(mailboxItems.length, 2);
+      assert.ok(freshInputId);
+      assert.equal(combinedPhaseInputIds.length, 2);
+      assert.equal(combinedPhaseInputIds[1], freshInputId);
+      const completionInput = await readAssistantInputEvent({
+        inputId: combinedPhaseInputIds[0]!,
+        vault: vaultRoot,
+      });
+      assert.equal(
+        completionInput?.sourceRef.kind === "hosted-mailbox"
+          ? completionInput.sourceRef.payloadSchema
+          : null,
+        "murph.hosted-image-completion.v1",
+      );
+      assert.deepEqual(combinedPhaseSessionIds, [
+        completionInput?.conversation?.sessionId ?? null,
+        null,
+      ]);
+      assert.ok(combinedPhaseSessionIds[0]);
+      assert.equal(currentInputAtProviderAcceptance, freshInputId);
       assert.equal(linqRequests.length, 2, events.join(","));
       assert.equal(linqRequestPaths.length, 2);
       for (const requestPath of linqRequestPaths) {
@@ -19697,7 +19823,6 @@ describe("hosted workspace runtime entrypoint", () => {
           media: intent.media,
           message: intent.message,
           status: intent.status,
-          threadId: intent.threadId,
         })),
         [
           {
@@ -19706,7 +19831,6 @@ describe("hosted workspace runtime entrypoint", () => {
             message:
               "I'm editing that image now. I'll send the result back here when it's ready.",
             status: "sent",
-            threadId: "thread_image_edit_failure_route",
           },
           {
             channel: "linq",
@@ -19714,15 +19838,30 @@ describe("hosted workspace runtime entrypoint", () => {
             message:
               "OpenAI couldn't read the reference image, so the edit didn't complete. I can retry after you confirm, or you can send a different reference.",
             status: "sent",
-            threadId: "thread_image_edit_failure_route",
           },
         ],
       );
+      assert.ok(completionInput?.conversation?.threadId);
+      assert.notEqual(
+        completionInput.conversation.threadId,
+        "thread_image_edit_failure_route",
+      );
+      assert.deepEqual(
+        intents.map((intent) => intent.threadId),
+        [
+          completionInput.conversation.threadId,
+          completionInput.conversation.threadId,
+        ],
+      );
       assert.doesNotMatch(intents[1]?.message ?? "", /invalid_image|req_/u);
+      assert.deepEqual(
+        await compactHostedPendingAssistantInputIds({ vaultRoot }),
+        [],
+      );
     } finally {
       await removeTempRoot(root);
     }
-  });
+  }, 120_000);
 
   test("foreground rerun batch keeps fresh context after consumed replay", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-context-replay-"));
@@ -31026,6 +31165,7 @@ function createWorkspaceSnapshotV2Ref(snapshotId: string): HostedWorkspaceSnapsh
 }
 
 async function createImageFailureCodexAppServerCommand(input: {
+  freshInputText: string;
   referenceImageRef: string;
   root: string;
 }): Promise<string> {
@@ -31106,6 +31246,8 @@ for line in sys.stdin:
         continue
     if method == "turn/start":
         turn_ordinal += 1
+        if turn_ordinal > 2:
+            sys.exit(3)
         turn_id = "turn-image-failure-" + str(turn_ordinal)
         send({"id": request.get("id"), "result": {"turn": {"id": turn_id}}})
         send({
@@ -31114,11 +31256,11 @@ for line in sys.stdin:
         })
         params = request.get("params") or {}
         serialized_input = json.dumps(params.get("input", params))
-        is_failure_completion = (
-            "The reference image could not be decoded." in serialized_input
-            and "untrusted provider text" in serialized_input
-        )
-        if is_failure_completion:
+        if turn_ordinal == 2:
+            completion_index = serialized_input.find("The reference image could not be decoded.")
+            fresh_index = serialized_input.find(${JSON.stringify(input.freshInputText)})
+            if completion_index < 0 or fresh_index <= completion_index:
+                sys.exit(4)
             finish_turn(turn_id, ${JSON.stringify(failureExplanation)})
             continue
         pending_tool_call = {"id": 1001, "turnId": turn_id}

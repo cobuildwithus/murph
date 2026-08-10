@@ -168,6 +168,8 @@ function isSameAuthenticatedGroupRoomBatch(
   candidate: AssistantAutomationInputSummary,
 ): boolean {
   return isSameAuthenticatedGroupRoomRoute(first, candidate) &&
+    (first.conversation.sessionId ?? null) ===
+      (candidate.conversation.sessionId ?? null) &&
     first.projectionReady === candidate.projectionReady
 }
 
@@ -179,8 +181,6 @@ function isSameAuthenticatedGroupRoomRoute(
     first.source === candidate.source &&
     first.conversation.source === candidate.conversation.source &&
     first.conversation.accountId === candidate.conversation.accountId &&
-    (first.conversation.sessionId ?? null) ===
-      (candidate.conversation.sessionId ?? null) &&
     first.conversation.threadId === candidate.conversation.threadId &&
     first.conversation.threadIsDirect === false &&
     candidate.conversation.threadIsDirect === false &&

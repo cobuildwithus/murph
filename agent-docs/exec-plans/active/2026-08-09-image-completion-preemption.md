@@ -12,6 +12,7 @@ Key decisions:
 - Replace the invocation-local boolean image wake hint with the exact staged completion input batch returned by the image controller.
 - Admit that exact batch before another initial mailbox import. When the existing live foreground watcher already captured newer conversation input, prepend the completion to that same frozen batch instead of starting an extra turn.
 - Keep the pending-input index so runner loss or a failed completion turn retries through the existing durable path.
+- Treat the provider continuation session as ordinary batching context, not authenticated group-route identity, for the exact trusted-completion match. The production importer does not attach that session to a newer inbound group message.
 
 State:
 - In progress.
@@ -22,14 +23,16 @@ Done:
 - Read the hosted runtime, security, reliability, verification, and completion workflow guidance.
 - Added a regression that failed with fresh conversation selected first and now proves the completion and fresh input enter one ordered Codex batch.
 - Replaced the boolean wake hint with exact staged completion input ids and updated the architecture and invariant contracts.
-- Remediated both exact-head ReviewGPT findings: production selectors and the assistant scanner now preserve the trusted completion-first batch, and readiness remains visible until the provider-acceptance boundary so shutdown can checkpoint an immediate retry.
+- Remediated the first exact-head ReviewGPT round: production selectors and the assistant scanner now preserve the trusted completion-first batch, and readiness remains visible until the provider-acceptance boundary so shutdown can checkpoint an immediate retry.
 - Added focused route-isolation, current-input-authority, provider-order, and shutdown-handoff proof; focused engine/runtime suites and package typechecks pass.
+- Completed the required round-2 retrospective after production importer evidence showed that provider session equality split the trusted completion from a real newer group message. Chose shrink-and-continue: generic batching keeps session equality, while the exact trusted-completion route match reuses authenticated channel/account/thread authority without adding state or another owner.
+- Added a production-importer end-to-end regression that proves a null-session group follow-up joins the ready completion in one completion-first Codex turn, becomes current at provider acceptance, and delivers through the same authenticated group route.
 
 Now:
-- Commit and push the corrected candidate head, then update the PR evidence.
+- Run focused verification and package typechecks for the retrospective correction.
 
 Next:
-- Run final ReviewGPT round 2 and required CI against the corrected exact head, resolve any findings, and complete the parent review.
+- Commit and push the corrected candidate, update the PR evidence, then run final ReviewGPT round 3 and required CI against that exact head.
 
 Open questions (UNCONFIRMED if needed):
 - None.

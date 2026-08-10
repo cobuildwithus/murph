@@ -886,7 +886,6 @@ describe("selectHostedAssistantInputIds", () => {
         occurredAt: "2026-04-23T00:00:03.000Z",
         receivedAt: "2026-04-23T00:00:04.000Z",
         routeAuthority: true,
-        sessionId: "asst_image_completion_group",
         threadIsDirect: false,
       }),
       now: new Date("2026-04-23T00:00:04.000Z"),
@@ -943,6 +942,9 @@ describe("selectHostedAssistantInputIds", () => {
       completion.inputId,
       fresh.inputId,
     ]);
+    expect(batch.inputs.map((candidate) =>
+      candidate.event.conversation?.sessionId ?? null
+    )).toEqual(["asst_image_completion_group", null]);
     expect(acceptedContext).toEqual({
       conversationActivity: "observed",
       currentInputId: fresh.inputId,
