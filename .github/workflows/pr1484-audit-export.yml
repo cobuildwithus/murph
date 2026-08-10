@@ -1,4 +1,4 @@
-name: PR 1484 audited fix apply
+name: PR 1484 final audited rebuild
 
 on:
   push:
@@ -9,11 +9,11 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  rebuild:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     steps:
-      - name: Check out target PR branch
+      - name: Check out target history
         uses: actions/checkout@v4
         with:
           ref: agent/member-owned-provider-applications
@@ -27,28 +27,90 @@ jobs:
           fetch-depth: 1
           path: helper
 
-      - name: Apply exact audited patch
+      - name: Rebuild exact feature tree on current main
         shell: bash
         run: |
           set -euo pipefail
           cd target
-          expected_head=e5fe6d0f70a1c46a2e098ae117bdcd971aa126f8
-          actual_head=$(git rev-parse HEAD)
-          test "$actual_head" = "$expected_head" || {
-            echo "PR head changed: expected $expected_head, found $actual_head" >&2
-            exit 1
-          }
-          base64 --decode ../helper/.github/pr1484/fixes-1.patch.gz.b64 \
-            | gzip --decompress > /tmp/pr1484-fixes.patch
-          git apply --index --whitespace=nowarn /tmp/pr1484-fixes.patch
-          git diff --cached --check
-
-      - name: Commit and push fixes
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd target
+          expected_target=ee78d0004d070d0e9aa422f20b603a826f085545
+          expected_main=a22fba70b680c748367dcdc6ef2e09a24215ea85
+          feature_commit=e5fe6d0f70a1c46a2e098ae117bdcd971aa126f8
+          test "$(git rev-parse HEAD)" = "$expected_target"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$expected_main"
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m "fix: harden member-owned provider applications"
-          git push origin HEAD:agent/member-owned-provider-applications
+          git checkout -B rebuilt "$expected_main"
+          git cherry-pick "$feature_commit"
+          base64 --decode ../helper/.github/pr1484/fixes-final.patch.gz.b64 \
+            | gzip --decompress > /tmp/pr1484-fixes-final.patch
+          git apply --index --whitespace=nowarn /tmp/pr1484-fixes-final.patch
+          git diff --cached --check
+          git commit -m "fix: complete member-owned provider application audit"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: target/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: target
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        working-directory: target
+        run: pnpm --dir apps/web prisma generate
+
+      - name: Typecheck affected packages
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir packages/device-syncd typecheck
+          pnpm --dir packages/assistant-runtime typecheck
+          pnpm --dir apps/web typecheck
+
+      - name: Run focused tests
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir apps/web exec vitest run --config vitest.config.ts --no-coverage \
+            test/device-provider-application-crypto.test.ts \
+            test/device-provider-application-ingress-store.test.ts \
+            test/device-provider-application-store.test.ts \
+            test/device-provider-application-types.test.ts \
+            test/device-sync-hosted-runtime-authority.test.ts \
+            test/device-sync-internal-runtime.test.ts \
+            test/device-sync-providers.test.ts \
+            test/hosted-account-data-service.test.ts \
+            test/prisma-store-oauth-connection.test.ts \
+            test/prisma-store-oauth-sessions.test.ts
+          pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts --no-coverage \
+            test/config.test.ts test/hosted-runtime.test.ts
+          pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage \
+            test/hosted-runtime-device-sync-provider-configs.test.ts
+
+      - name: Run repository smoke checks
+        working-directory: target
+        run: pnpm test:smoke
+
+      - name: Verify final tree and push
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/main...HEAD
+          test -z "$(git status --short --untracked-files=no)" || {
+            git status --short
+            echo "Validation changed tracked files." >&2
+            exit 1
+          }
+          git push \
+            --force-with-lease=refs/heads/agent/member-owned-provider-applications:ee78d0004d070d0e9aa422f20b603a826f085545 \
+            origin HEAD:agent/member-owned-provider-applications
