@@ -63,6 +63,32 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-06",
+    publishedOn: "2026-08-06",
+    title: "Murph can understand media in X posts",
+    summary:
+      "Share an X post and Murph can now use its images or video when answering your question.",
+    items: [
+      {
+        id: "x-post-media-understanding",
+        kind: "feature",
+        priority: 4,
+        title: "Ask about images and video on X",
+        summary:
+          "Murph can inspect the images and video in a relevant X post, instead of relying only on its text.",
+        details:
+          "The existing live X search now asks Grok to inspect relevant media. Murph keeps the source link, separates the post text from what the media shows or says, and treats the result as unverified third-party content.",
+        relevanceTags: ["assistant", "x-search", "images", "video"],
+        sourcePullRequests: [1399],
+        tryIt: {
+          label: "Ask about an X post",
+          prompt:
+            "Look at the images or video in this X post and tell me what they show: [paste X post URL]",
+        },
+      },
+    ],
+  },
+  {
     id: "2026-08-05",
     publishedOn: "2026-08-05",
     title: "Local alerts can shape health advice",
