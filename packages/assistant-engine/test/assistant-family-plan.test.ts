@@ -265,7 +265,7 @@ describe("assistant family plan tool", () => {
   });
 
   it("preserves explicit active-trial conversion consent for Family checkout", () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
@@ -283,7 +283,7 @@ describe("assistant family plan tool", () => {
       },
     });
 
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
