@@ -120,12 +120,10 @@ describe("Health Commons knowledge SQLite projection", () => {
       await expect(readFile(firstPath)).resolves.toEqual(await readFile(secondPath));
       const result = searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
-        focus: "cardiovascular",
         limit: 2,
-        query: "dry sauna",
+        query: "Does dry sauna affect cardiovascular health?",
       });
 
-      expect(result.focus).toBe("cardiovascular");
       expect(result.topicResolved).toBe(true);
       expect(result.items).toHaveLength(1);
       expect(result.items).toContainEqual(expect.objectContaining({
@@ -142,13 +140,11 @@ describe("Health Commons knowledge SQLite projection", () => {
       });
       expect(searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
-        focus: "immunity",
-        query: "dry sauna",
+        query: "Does dry sauna improve immunity?",
       }).items).toEqual([]);
       expect(searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
-        focus: "spermatogenesis",
-        query: "dry sauna",
+        query: "Can dry sauna affect spermatogenesis?",
       }).safety).toMatchObject({
         caveat: "Evidence use: safety.",
         kind: "safety",
@@ -156,8 +152,7 @@ describe("Health Commons knowledge SQLite projection", () => {
       });
       const broad = searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
-        focus: "overall evidence",
-        query: "dry sauna",
+        query: "What does the evidence say about dry sauna?",
       });
       expect(broad.topicResolved).toBe(true);
       expect(broad.items).toEqual([
@@ -171,30 +166,10 @@ describe("Health Commons knowledge SQLite projection", () => {
   it("rejects empty search terms before opening broad content", () => {
     expect(() => searchHealthCommonsKnowledgeIndex({
       databasePath: "unused.sqlite",
-      focus: "health evidence",
       query: " - ",
     })).toThrow("at least one searchable term");
-    expect(() => searchHealthCommonsKnowledgeIndex({
-      databasePath: "unused.sqlite",
-      focus: " ",
-      query: "dry sauna",
-    })).toThrow("focus must not be blank");
   });
 
-  it("requires every focus term instead of silently dropping terms after eight", async () => {
-    const temporaryRoot = await mkdtemp(path.join(tmpdir(), "health-commons-focus-"));
-    const databasePath = path.join(temporaryRoot, "knowledge.sqlite");
-    try {
-      writeHealthCommonsKnowledgeIndex(databasePath, testCatalog());
-      expect(searchHealthCommonsKnowledgeIndex({
-        databasePath,
-        focus: "dry sauna heat cardiovascular recovery fertility regular frequent mortality absent",
-        query: "dry sauna",
-      })).toMatchObject({ items: [], safety: null });
-    } finally {
-      await rm(temporaryRoot, { force: true, recursive: true });
-    }
-  });
 
   it("returns nothing when one exact alias has two direct owners", async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), "health-commons-ambiguous-"));
@@ -218,8 +193,7 @@ describe("Health Commons knowledge SQLite projection", () => {
       writeHealthCommonsKnowledgeIndex(databasePath, catalog);
       expect(searchHealthCommonsKnowledgeIndex({
         databasePath,
-        focus: "heat",
-        query: "shared heat",
+        query: "What does shared heat do for recovery?",
       }))
         .toMatchObject({ items: [], safety: null, topicResolved: false });
     } finally {

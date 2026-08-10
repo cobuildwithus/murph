@@ -6,13 +6,70 @@ import type {
 } from "@murphai/contracts";
 
 export const HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE = "knowledge.sqlite";
-export const HEALTH_COMMONS_KNOWLEDGE_INDEX_SCHEMA_VERSION = 3;
+export const HEALTH_COMMONS_KNOWLEDGE_INDEX_SCHEMA_VERSION = 4;
 export const HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT = 3;
 export const HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT = 3;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_SOURCES_PER_ITEM = 4;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES = 48;
 const HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS = 32;
-export const HEALTH_COMMONS_KNOWLEDGE_OVERALL_FOCUS = "overall evidence";
+const HEALTH_COMMONS_QUESTION_STOP_WORDS = new Set([
+  "a",
+  "about",
+  "all",
+  "an",
+  "and",
+  "any",
+  "are",
+  "as",
+  "at",
+  "be",
+  "benefit",
+  "benefits",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "evidence",
+  "effect",
+  "effects",
+  "for",
+  "from",
+  "health",
+  "help",
+  "helps",
+  "how",
+  "i",
+  "in",
+  "is",
+  "it",
+  "me",
+  "my",
+  "of",
+  "on",
+  "or",
+  "overall",
+  "please",
+  "research",
+  "say",
+  "should",
+  "study",
+  "studies",
+  "tell",
+  "the",
+  "this",
+  "to",
+  "use",
+  "using",
+  "what",
+  "when",
+  "whether",
+  "while",
+  "with",
+  "work",
+  "works",
+  "would",
+]);
 
 export type HealthCommonsKnowledgeItemKind =
   | "claim"
@@ -43,7 +100,6 @@ export interface HealthCommonsKnowledgeSearchItem {
 
 export interface HealthCommonsKnowledgeSearchResult {
   catalogHash: string;
-  focus: string;
   items: HealthCommonsKnowledgeSearchItem[];
   query: string;
   safety: HealthCommonsKnowledgeSearchItem | null;
@@ -127,7 +183,7 @@ export function writeHealthCommonsKnowledgeIndex(
           insertTopicOwner.run(normalizeTopicPhrase(phrase), entity.key, entity.key, index === 0 ? 0 : 1);
         }
       }
-      if (entity.entityType !== "protocol_variant") {
+      if (entity.entityType === "source_artifact") {
         continue;
       }
       for (const relation of entity.relations ?? []) {
@@ -164,7 +220,6 @@ export function writeHealthCommonsKnowledgeIndex(
 
 export function searchHealthCommonsKnowledgeIndex(input: {
   databasePath: string;
-  focus: string;
   limit?: number;
   query: string;
 }): HealthCommonsKnowledgeSearchResult {
@@ -172,18 +227,14 @@ export function searchHealthCommonsKnowledgeIndex(input: {
   if (!query) {
     throw new Error("Health Commons knowledge query must not be blank.");
   }
-  const normalizedTopic = normalizeTopicPhrase(query);
-  if (!normalizedTopic) {
+  const normalizedQuestion = normalizeTopicPhrase(query);
+  if (!normalizedQuestion) {
     throw new Error("Health Commons knowledge query needs at least one searchable term.");
   }
   const limit = Math.min(
     Math.max(Math.trunc(input.limit ?? HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT), 1),
     HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
   );
-  const focus = input.focus?.trim() ?? "";
-  if (!focus) {
-    throw new Error("Health Commons knowledge focus must not be blank.");
-  }
   const database = openKnowledgeDatabase(input.databasePath, true);
   try {
     const version = Number(database.prepare("PRAGMA user_version").get()?.user_version ?? 0);
@@ -193,39 +244,28 @@ export function searchHealthCommonsKnowledgeIndex(input: {
     const catalogHashRow = database
       .prepare("SELECT value FROM metadata WHERE key = 'catalog_hash'")
       .get();
-    const ownerRows = database.prepare(`
-      SELECT DISTINCT owner_key
-      FROM topic_owners
-      WHERE phrase = ?
-        AND match_priority = (
-          SELECT MIN(match_priority) FROM topic_owners WHERE phrase = ?
-        )
-      ORDER BY owner_key ASC
-      LIMIT 2
-    `).all(normalizedTopic, normalizedTopic);
-    if (ownerRows.length !== 1) {
+    const catalogHash = String(catalogHashRow?.["value"] ?? "");
+    const topic = resolveKnowledgeTopic(database, normalizedQuestion);
+    if (!topic) {
       return {
-        catalogHash: String(catalogHashRow?.["value"] ?? ""),
-        focus,
+        catalogHash,
         items: [],
         query,
         safety: null,
         topicResolved: false,
       };
     }
-    const ownerKey = String(ownerRows[0]?.["owner_key"]);
     const topicRows = database.prepare(`
       SELECT entity_key
       FROM topic_owners
       WHERE phrase = ? AND owner_key = ?
       ORDER BY entity_key ASC
       LIMIT ?
-    `).all(normalizedTopic, ownerKey, HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS + 1);
+    `).all(topic.phrase, topic.ownerKey, HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS + 1);
     const entityKeys = topicRows.map((row) => String(row["entity_key"]));
     if (entityKeys.length === 0 || entityKeys.length > HEALTH_COMMONS_KNOWLEDGE_MAX_TOPICS) {
       return {
-        catalogHash: String(catalogHashRow?.["value"] ?? ""),
-        focus,
+        catalogHash,
         items: [],
         query,
         safety: null,
@@ -233,10 +273,9 @@ export function searchHealthCommonsKnowledgeIndex(input: {
       };
     }
     const placeholders = entityKeys.map(() => "?").join(", ");
-    const broadEvidence = normalizeTopicPhrase(focus)
-      === normalizeTopicPhrase(HEALTH_COMMONS_KNOWLEDGE_OVERALL_FOCUS);
-    const contentQuery = broadEvidence ? null : toFtsQuery(focus);
-    const candidateRows = broadEvidence
+    const focusTokens = questionFocusTokens(normalizedQuestion, topic.phrase);
+    const contentQuery = focusTokens.length > 0 ? toFtsQuery(focusTokens) : null;
+    const candidateRows = contentQuery === null
       ? database.prepare(`
           SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
                  c.strength, c.sources_json, c.priority, 0 AS rank
@@ -266,9 +305,8 @@ export function searchHealthCommonsKnowledgeIndex(input: {
           Math.min(limit * 8, HEALTH_COMMONS_KNOWLEDGE_MAX_CANDIDATES),
         );
     const rows = selectDiverseKnowledgeRows(candidateRows, limit);
-
     const items = rows.map(readKnowledgeRow);
-    const safetyRow = broadEvidence
+    const safetyRow = contentQuery === null
       ? database.prepare(`
           SELECT c.id, c.entity_key, c.entity_title, c.kind, c.text, c.caveat,
                  c.strength, c.sources_json, c.priority
@@ -291,8 +329,7 @@ export function searchHealthCommonsKnowledgeIndex(input: {
     const safety = safetyRow ? readKnowledgeRow(safetyRow) : null;
 
     return {
-      catalogHash: String(catalogHashRow?.["value"] ?? ""),
-      focus,
+      catalogHash,
       items,
       query,
       safety,
@@ -301,6 +338,64 @@ export function searchHealthCommonsKnowledgeIndex(input: {
   } finally {
     database.close();
   }
+}
+
+function resolveKnowledgeTopic(
+  database: DatabaseSync,
+  normalizedQuestion: string,
+): { ownerKey: string; phrase: string } | null {
+  const paddedQuestion = ` ${normalizedQuestion} `;
+  const matches = database.prepare(`
+    SELECT DISTINCT phrase, owner_key, match_priority
+    FROM topic_owners
+    ORDER BY length(phrase) DESC, match_priority ASC, owner_key ASC
+  `).all().flatMap((row) => {
+    const phrase = String(row["phrase"]);
+    if (!phrase || !paddedQuestion.includes(` ${phrase} `)) {
+      return [];
+    }
+    return [{
+      matchPriority: Number(row["match_priority"]),
+      ownerKey: String(row["owner_key"]),
+      phrase,
+      tokenCount: phrase.split(" ").length,
+    }];
+  });
+  matches.sort((left, right) =>
+    right.tokenCount - left.tokenCount
+    || right.phrase.length - left.phrase.length
+    || left.matchPriority - right.matchPriority
+    || left.ownerKey.localeCompare(right.ownerKey)
+  );
+  const best = matches[0];
+  if (!best) {
+    return null;
+  }
+  const equallyRankedOwners = new Set(matches
+    .filter((match) =>
+      match.tokenCount === best.tokenCount
+      && match.phrase.length === best.phrase.length
+      && match.matchPriority === best.matchPriority
+    )
+    .map((match) => match.ownerKey));
+  if (equallyRankedOwners.size !== 1) {
+    return null;
+  }
+  return {
+    ownerKey: best.ownerKey,
+    phrase: best.phrase,
+  };
+}
+
+function questionFocusTokens(
+  normalizedQuestion: string,
+  topicPhrase: string,
+): string[] {
+  const topicTokens = new Set(searchTokens(topicPhrase));
+  return searchTokens(normalizedQuestion).filter((token) =>
+    !topicTokens.has(token)
+    && !HEALTH_COMMONS_QUESTION_STOP_WORDS.has(token)
+  );
 }
 
 function selectDiverseKnowledgeRows(
@@ -504,25 +599,14 @@ function sourceFindingTargets(
   return [];
 }
 
-function toFtsQuery(query: string): string {
-  const tokens = searchTokens(query);
+function toFtsQuery(tokens: readonly string[]): string {
   if (tokens.length === 0) {
     throw new Error("Health Commons knowledge query needs at least one searchable term.");
   }
-  const terms = tokens.map((token) => {
+  return tokens.map((token) => {
     const quoted = `"${token.replaceAll('"', '""')}"`;
     return token.length === 1 ? quoted : `${quoted}*`;
-  });
-  const qualifierPhrases = tokens.flatMap((token, index) => {
-    if (token.length !== 1 || index === 0) {
-      return [];
-    }
-    return [`"${tokens[index - 1]} ${token}"`];
-  });
-  return [
-    ...terms,
-    ...qualifierPhrases,
-  ].join(" AND ");
+  }).join(" OR ");
 }
 
 function normalizeTopicPhrase(value: string): string {

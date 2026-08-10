@@ -127,7 +127,6 @@ const commonsKnowledgeItemSchema = z.object({
 export const commonsKnowledgeSearchResultSchema = z.object({
   available: z.boolean(),
   catalogHash: z.string(),
-  focus: z.string().min(1),
   items: z.array(commonsKnowledgeItemSchema),
   query: z.string().min(1),
   safety: commonsKnowledgeItemSchema.nullable(),
@@ -153,17 +152,16 @@ export function registerCommonsCommands(cli: Cli.Cli) {
 
   knowledge.command("search", {
     description:
-      "Return a small evidence packet for one exact Health Commons title or alias and one required question focus.",
+      "Return one small source-backed evidence and safety packet for a natural-language health question.",
     args: z.object({
-      query: z.string().min(2).max(240),
-      focus: z.string().min(1).max(240),
+      query: z.string().min(2).max(480),
     }),
     options: z.object({
       limit: z.number().int().positive().max(HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT).default(3),
     }),
     examples: [{
-      description: "Find evidence and safety context about dry sauna.",
-      args: { query: "Finnish Dry Sauna", focus: "recent fainting" },
+      description: "Ask an ordinary health question about dry sauna.",
+      args: { query: "Does Finnish dry sauna improve immunity, and is it safe after fainting?" },
       options: { limit: 3 },
     }],
     output: commonsKnowledgeSearchResultSchema,
@@ -172,7 +170,6 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         return commonsKnowledgeSearchResultSchema.parse({
           available: true,
           ...searchGeneratedHealthCommonsKnowledge({
-            focus: args.focus,
             limit: options.limit,
             query: args.query,
           }),
@@ -182,7 +179,6 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         return commonsKnowledgeSearchResultSchema.parse({
           available: false,
           catalogHash: "",
-          focus: args.focus,
           items: [],
           query: args.query,
           safety: null,

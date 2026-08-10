@@ -11,10 +11,16 @@ const knowledgeIndexPath = fileURLToPath(
   new URL("../generated/knowledge.sqlite", import.meta.url),
 );
 
-function search(query: string, focus: string): HealthCommonsKnowledgeSearchResult {
+function search(topic: string, focus: string): HealthCommonsKnowledgeSearchResult {
   return searchHealthCommonsKnowledgeIndex({
     databasePath: knowledgeIndexPath,
-    focus,
+    query: `${topic}. ${focus}`,
+  });
+}
+
+function searchQuestion(query: string): HealthCommonsKnowledgeSearchResult {
+  return searchHealthCommonsKnowledgeIndex({
+    databasePath: knowledgeIndexPath,
     query,
   });
 }
@@ -31,6 +37,14 @@ function packetText(result: HealthCommonsKnowledgeSearchResult): string {
 }
 
 describe("Health Commons full-catalog knowledge retrieval", () => {
+  it("answers a normal sauna question without requiring an exact catalog title", () => {
+    const result = searchQuestion("Does sauna improve immunity?");
+
+    expect(result.topicResolved).toBe(true);
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(packetText(result)).toMatch(/immun/iu);
+  });
+
   it("returns a safety-only hard stop for sauna and fentanyl patches", () => {
     const result = search("Finnish Dry Sauna", "fentanyl patch");
 
@@ -79,7 +93,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
       expect(item.sources.length).toBeGreaterThan(0);
     }
     if (result.safety) {
-      expect(`${result.focus ?? ""} ${packetText({ ...result, items: [], safety: result.safety })}`)
+      expect(`${result.query ?? ""} ${packetText({ ...result, items: [], safety: result.safety })}`)
         .toMatch(expectedTopic);
     }
   });

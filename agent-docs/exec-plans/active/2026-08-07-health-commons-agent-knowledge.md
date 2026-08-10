@@ -149,3 +149,14 @@ Updated: 2026-08-07
 - `pnpm --dir packages/assistant-engine typecheck`
 - Focused Health Commons, CLI schema/command, and assistant prompt tests.
 - Focused Cloudflare runner packaging and deploy-artifact tests.
+
+
+## Final simplification
+
+- The agent now sends one natural-language health question. It does not resolve an
+  exact catalog title, invent a separate focus, use a magic broad-evidence token,
+  merge multiple calls, or compare catalog hashes.
+- Topic resolution, family expansion, evidence ranking, safety selection, and
+  packet limits stay behind the Health Commons runtime boundary.
+- The stable assistant rule is one lookup before substantive health claims, with
+  no experiment suggestion unless the member asks to try or track something.
