@@ -189,6 +189,13 @@ On a scheduled run:
    abandoned proposal; never substitute that lookup here. Then read and apply
    `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
    before resolving a card, even when five accepted goals already exist. This
+   first requires `vault-cli memory show --format json`; if that complete
+   canonical memory read fails or is unreadable, keep the ordinary compact
+   closeout, perform no Goal or measurement mutation, ask no question, and
+   attach no card. A clearly current saved age under 18 or clearly current
+   intuitive-eating or number-sensitive preference uses the same non-numeric,
+   no-write, no-question, no-card path. Missing or ambiguous age alone does not
+   block a scheduled closeout and never authorizes a question. The gate also
    requires both `vault-cli condition list --status active --limit 200 --format
    json` and `vault-cli regimen list --status active --limit 200 --format json`.
    If either returns exactly 200 records or fails, run no condition or regimen
@@ -202,7 +209,7 @@ On a scheduled run:
    use the same ordinary-text, no-write, no-question, no-card failure behavior.
    Also run the shared gate's bounded canonical measurement-entry read. A failed
    read, or a saturated read that cannot resolve usable BMI evidence, uses the
-   same failure behavior. Reuse these complete reads for the current turn. This
+   same failure behavior. Reuse all complete gate reads for the current turn. This
    scheduled closeout uses only that card-time safety gate and does not provide
    target-setting intent: do not ask for profile inputs, call `goal import-json`,
    create or change a paused proposal, or surface a numeric target proposal.

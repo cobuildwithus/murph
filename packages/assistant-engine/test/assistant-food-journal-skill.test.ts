@@ -87,7 +87,16 @@ describe('assistant food journal skill', () => {
       'the five-record context projection is not completeness\nproof',
     )
     expect(skill).toContain(
-      'canonical measurement read is likewise mandatory before deriving,\nsaving, or surfacing a proposal and again before activating one',
+      'canonical measurement read is likewise mandatory before deriving, saving,\nor surfacing a proposal and again before activating one',
+    )
+    expect(skill).toContain(
+      'complete `vault-cli memory show --format json` read is also mandatory',
+    )
+    expect(skill).toContain(
+      'the snapshot does not inject the canonical Identity, Preferences,\nInstructions, and Context memory document',
+    )
+    expect(skill).toContain(
+      'a failed or unreadable memory read\nfails closed, while missing or ambiguous age alone is not a universal block',
     )
     expect(skill).toContain(
       'target-authority and complete active-Goal discovery contract',

@@ -282,10 +282,10 @@ describe('assistant nutrition strategy skill', () => {
       'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactGoals).toContain(
-      'including its complete bounded active-condition, active-regimen, and canonical measurement reads.',
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, and canonical measurement read.',
     )
     expect(compactGoals).toContain(
-      'The context snapshot\'s five visible records are not completeness proof.',
+      'The context snapshot is not completeness proof for any of these owners.',
     )
     expect(compactGoals).toContain(
       'If any required canonical read is saturated or unavailable, or the gate suppresses numeric goals, stop here with no Goal or measurement mutation',
@@ -374,7 +374,7 @@ describe('assistant nutrition strategy skill', () => {
       'after the complete pre-activation safety gate in step 5 passes, activate and read back the Goal, reuse those identical current-turn safety reads, re-read same-date canonical meal totals, and attach exactly one card in that acceptance response',
     )
     expect(compactGoals).toContain(
-      'When the member accepts the proposal, first re-run the complete current-context gate in `daily-nutrition-card-safety.md`, including its bounded active-condition, active-regimen, and canonical measurement reads.',
+      'When the member accepts the proposal, first re-run the complete current-context gate in `daily-nutrition-card-safety.md`, including its bounded canonical memory, active-condition, active-regimen, and canonical measurement reads.',
     )
     expect(compactGoals).toContain(
       'leave the proposal paused and unchanged, surface no target values, use ordinary non-numeric text, and attach no card.',
@@ -447,6 +447,18 @@ describe('assistant nutrition strategy skill', () => {
       'before activating a paused nutrition proposal, and before every `daily_nutrition` attachment, including when five accepted active goals already exist and during a scheduled closeout.',
     )
     expect(compactSafety).toContain(
+      'run `vault-cli memory show --format json` and inspect the complete Identity, Preferences, Instructions, and Context memory document',
+    )
+    expect(compactSafety).toContain(
+      'A clearly current saved age under 18, or a clearly current saved intuitive-eating or number-sensitive preference, suppresses numeric setup, proposal presentation, every Goal write or activation, and every card.',
+    )
+    expect(compactSafety).toContain(
+      'Missing, stale, ambiguous, or conflicting age is unavailable evidence, not a universal block.',
+    )
+    expect(compactSafety).toContain(
+      'If the memory read fails or is unreadable, fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card.',
+    )
+    expect(compactSafety).toContain(
       'Before deriving, saving, or surfacing numeric nutrition goals and before every goal-aware card, run both `vault-cli condition list --status active --limit 200 --format json` and `vault-cli regimen list --status active --limit 200 --format json`.',
     )
     expect(compactSafety).toContain(
@@ -490,6 +502,12 @@ describe('assistant nutrition strategy skill', () => {
     )
     expect(compactSafety).toContain(
       'A scheduled occurrence uses this file only as a card-time safety check.',
+    )
+    expect(compactGoals).toContain(
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, and canonical measurement read.',
+    )
+    expect(compactGoals).toContain(
+      'including its bounded canonical memory, active-condition, active-regimen, and canonical measurement reads.',
     )
   })
 

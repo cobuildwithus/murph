@@ -44,9 +44,12 @@ Before every requested daily nutrition card, read and apply
 even when all five goals already appear to exist. Its complete active-condition
 and active-regimen discovery is mandatory before numeric target derivation as
 well as before a card; the five-record context projection is not completeness
-proof. Its canonical measurement read is likewise mandatory before deriving,
-saving, or surfacing a proposal and again before activating one. Also read and
-follow the
+proof. Its complete `vault-cli memory show --format json` read is also mandatory
+because the snapshot does not inject the canonical Identity, Preferences,
+Instructions, and Context memory document; a failed or unreadable memory read
+fails closed, while missing or ambiguous age alone is not a universal block.
+Its canonical measurement read is likewise mandatory before deriving, saving,
+or surfacing a proposal and again before activating one. Also read and follow the
 target-authority and complete active-Goal discovery contract in
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
 before deciding that the five canonical daily goals are complete. Use its

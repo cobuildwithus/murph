@@ -213,6 +213,15 @@ describe('assistant automatic meal capture skill', () => {
       'before resolving a card, even when five accepted goals already exist.',
     )
     expect(compactSkill).toContain(
+      'first requires `vault-cli memory show --format json`; if that complete canonical memory read fails or is unreadable, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
+    )
+    expect(compactSkill).toContain(
+      'A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same non-numeric, no-write, no-question, no-card path.',
+    )
+    expect(compactSkill).toContain(
+      'Missing or ambiguous age alone does not block a scheduled closeout and never authorizes a question.',
+    )
+    expect(compactSkill).toContain(
       'This scheduled closeout uses only that card-time safety gate and does not provide target-setting intent',
     )
     expect(compactSkill).toContain(
@@ -239,6 +248,9 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain('frailty, or malnutrition risk')
     expect(compactSafety).toContain(
       '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli memory show --format json`',
     )
     expect(compactSafety).toContain(
       'A usable adult BMI below 18.5 suppresses numeric goals, every Goal write or activation, and the card.',

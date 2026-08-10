@@ -11,7 +11,21 @@ context.
   into a universal medical screening checklist, but do not ignore a safety fact
   that is already known or becomes known later. The context snapshot's visible
   condition and medication-regimen rows are navigation only, not proof that the
-  canonical active sets are complete.
+  canonical active sets are complete, and it does not inject the complete
+  canonical memory document.
+- As part of the same gate, run `vault-cli memory show --format json` and inspect
+  the complete Identity, Preferences, Instructions, and Context memory document
+  for explicit, unambiguous facts relevant to the exclusions below. Reuse an
+  identical current-turn result. A clearly current saved age under 18, or a
+  clearly current saved intuitive-eating or number-sensitive preference,
+  suppresses numeric setup, proposal presentation, every Goal write or
+  activation, and every card. Missing, stale, ambiguous, or conflicting age is
+  unavailable evidence, not a universal block. On an interactive request, ask
+  one narrow age question only when it is necessary to resolve a decision that
+  would otherwise change; a scheduled occurrence asks no question. If the
+  memory read fails or is unreadable, fail closed with ordinary non-numeric
+  text, no Goal or measurement mutation, and no card. Leave an existing paused
+  proposal unchanged.
 - Before deriving, saving, or surfacing numeric nutrition goals and before every
   goal-aware card, run both `vault-cli condition list --status active --limit 200
   --format json` and `vault-cli regimen list --status active --limit 200 --format
@@ -47,7 +61,8 @@ context.
   evidence, not a universal block. Never ask a scheduled occurrence for these
   measurements and never mutate measurement records during this check.
 - Do not derive, save, or surface numeric goals, and do not attach a goal-aware
-  card, for intuitive-eating or number-sensitive contexts; known or suspected
+  card, for clearly current intuitive-eating or number-sensitive contexts;
+  known or suspected
   eating disorder, severe restriction, purging, compulsive exercise, rapid or
   unexplained weight change, under-fueling or RED-S concern; known underweight
   (including adult BMI below 18.5 when current height and weight are available),
