@@ -13,7 +13,10 @@ import {
 
 const CORE_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   accessKind: "paid",
-  forecast: null,
+  forecast: {
+    estimatedDaysRemaining: 7,
+    estimatedExhaustionAt: "2026-08-16T04:00:00.000Z",
+  },
   generatedAt: "2026-07-27T04:00:00.000Z",
   periodEnd: "2026-08-27T04:00:00.000Z",
   periodKind: "monthly",
