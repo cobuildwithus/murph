@@ -4,6 +4,7 @@ import type {
 } from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
@@ -11,8 +12,11 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
-import type {
-  HostedWorkspaceInvocationProcessingMode,
+import {
+  HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
+  isHostedRuntimeFailurePhaseCode,
+  type HostedRuntimeFailurePhaseCode,
+  type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
 import {
@@ -499,11 +503,23 @@ export interface RunnerContainerEnsureProcessingInput {
   userId: string;
 }
 
+// Durable Object RPC does not preserve custom own properties on thrown Errors,
+// so phase-bearing generic failures cross this seam as an explicitly bounded value.
+export interface RunnerContainerProcessingFailure {
+  errorCodeDetail: string | null;
+  runtimeFailurePhaseCode: HostedRuntimeFailurePhaseCode;
+  status: number | null;
+}
+
 export type RunnerContainerEnsureProcessingResult =
   | {
       action: "already_running" | "restarted" | "started" | "woken";
       kind: "accepted";
       result?: HostedExecutionRunnerJobResult;
+    }
+  | {
+      failure: RunnerContainerProcessingFailure;
+      kind: "failed";
     }
   | {
       kind: "start-required";
@@ -1075,6 +1091,13 @@ export class RunnerContainer extends Container {
         return {
           kind: "start-required",
           reason: "no-active-child",
+        };
+      }
+      const failure = buildRunnerContainerProcessingFailure(error);
+      if (failure) {
+        return {
+          failure,
+          kind: "failed",
         };
       }
       throw error;
@@ -3331,6 +3354,12 @@ function buildHostedRunnerContainerPayloadDetailsMetadata(
   if (errorCodeDetail) {
     metadata.errorCodeDetail = errorCodeDetail;
   }
+  const runtimeFailurePhaseCode =
+    record[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
+  if (isHostedRuntimeFailurePhaseCode(runtimeFailurePhaseCode)) {
+    metadata[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY] =
+      runtimeFailurePhaseCode;
+  }
   if (hasNonEmptyHostedRunnerContainerString(record.errorDetail)) {
     metadata.errorDetailPresent = true;
   }
@@ -3479,8 +3508,11 @@ function formatHostedRunnerContainerErrorMessage(input: {
   const cause = readHostedRunnerContainerDiagnosticFragment(input.details?.errorCause, {
     redactEnvKeys: true,
   });
+  const transportedCodeDetail = input.details?.errorCodeDetail;
   const code = readHostedRunnerContainerDiagnosticFragment(
-    input.details?.errorCodeDetail ?? input.code,
+    isHostedRuntimeFailurePhaseCode(transportedCodeDetail)
+      ? input.code ?? undefined
+      : transportedCodeDetail ?? input.code ?? undefined,
     { redactEnvKeys: false },
   );
 
@@ -3612,10 +3644,16 @@ async function invokeRunnerContainerProcessing(
   if (ensured.kind === "accepted" && ensured.result) {
     return ensured.result;
   }
+  if (ensured.kind === "failed") {
+    throw createRunnerContainerProcessingFailureError(ensured.failure);
+  }
   if (ensured.kind === "start-required" && ensured.reason === "no-active-child") {
     const retried = await ensure();
     if (retried.kind === "accepted" && retried.result) {
       return retried.result;
+    }
+    if (retried.kind === "failed") {
+      throw createRunnerContainerProcessingFailureError(retried.failure);
     }
     throw new Error(
       `Hosted runner container replacement retry returned ${retried.kind} without invoking work.`,
@@ -4224,6 +4262,83 @@ function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructu
   return sanitizeHostedExecutionStructuredLogDetails(
     (error as { details?: unknown }).details as HostedExecutionStructuredLogDetails | null | undefined,
   );
+}
+
+function buildRunnerContainerProcessingFailure(
+  error: unknown,
+): RunnerContainerProcessingFailure | null {
+  const code = deriveHostedExecutionErrorCode(error);
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  const details = readRunnerContainerErrorDetails(error);
+  const transportedCodeDetail = readHostedRunnerContainerSafeCode(
+    details?.errorCodeDetail,
+  );
+  const explicitPhase =
+    details?.[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
+  const runtimeFailurePhaseCode = isHostedRuntimeFailurePhaseCode(explicitPhase)
+    ? explicitPhase
+    : isHostedRuntimeFailurePhaseCode(transportedCodeDetail)
+    ? transportedCodeDetail
+    : null;
+  if (code !== "runtime_error" || !runtimeFailurePhaseCode) {
+    return null;
+  }
+  const errorCodeDetail = transportedCodeDetail
+    && !isHostedRuntimeFailurePhaseCode(transportedCodeDetail)
+    ? transportedCodeDetail
+    : null;
+  return {
+    errorCodeDetail,
+    runtimeFailurePhaseCode,
+    status: readHostedRunnerContainerDiagnosticStatus(diagnostics),
+  };
+}
+
+function createRunnerContainerProcessingFailureError(
+  failure: RunnerContainerProcessingFailure,
+): Error {
+  const errorCodeDetail = readHostedRunnerContainerSafeCode(
+    failure.errorCodeDetail,
+  );
+  const runtimeFailurePhaseCode = isHostedRuntimeFailurePhaseCode(
+    failure.runtimeFailurePhaseCode,
+  )
+    ? failure.runtimeFailurePhaseCode
+    : null;
+  const status = typeof failure.status === "number"
+    && Number.isInteger(failure.status)
+    && failure.status >= 100
+    && failure.status <= 599
+    ? failure.status
+    : null;
+  const details = sanitizeHostedExecutionStructuredLogDetails({
+    ...(errorCodeDetail
+      ? { errorCodeDetail }
+      : {}),
+    ...(runtimeFailurePhaseCode
+      ? {
+          [HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY]:
+            runtimeFailurePhaseCode,
+        }
+      : {}),
+  });
+  const message = joinHostedRunnerContainerErrorFragments([
+    summarizeHostedExecutionErrorCode("runtime_error")
+      ?? "Hosted execution runtime failed.",
+    `Code: ${errorCodeDetail ?? "runtime_error"}`,
+    ...(status === null ? [] : [`Status: ${status}`]),
+  ]);
+  const error = Object.assign(new Error(message), {
+    code: "runtime_error",
+    ...(details ? { details } : {}),
+    ...(status === null
+      ? {}
+      : {
+          status,
+          statusCode: status,
+        }),
+  });
+  return error;
 }
 
 function buildRunnerContainerEnvVars(): Record<string, string> {
