@@ -12,7 +12,7 @@ Use this skill only for Murph production-watch runs and incidents.
 - Use `murph-prod-psql-ro` only through `pnpm --silent prod-watch`; never discover, print, persist, or pass a database connection URL.
 - Provider MCP reads must aggregate at the provider before returning data. Return only `prod-watch.provider-evidence.v1`; reject rather than summarize raw text into a free-form field.
 - Monitoring state under `.runtime/**` is operational coordination only. It is never application, account, billing, clinical, or product truth.
-- Phase 1 is read-only. Do not edit source, create a worktree, commit, push, open a pull request, merge, deploy, mutate provider state, or acknowledge an incident as fixed.
+- Phase 1 is read-only. Do not edit source, create a worktree, commit, push, open a pull request, merge, deploy, mutate provider state, or claim that production-watch performed a fix. A `resolved` transition is record-only and is allowed only after a fresh, complete aggregate evidence pass independently observes an externally applied fix.
 - Billing, authentication, privacy, deletion/data-loss, credential, payment, medical, or health-data signals are alert-and-escalate only.
 
 ## Scheduled evidence pass
@@ -55,7 +55,7 @@ Use this skill only for Murph production-watch runs and incidents.
   ```
 
 - Corroborate the causal chain using aggregate provider evidence, release timestamps, and relevant repository source/tests. Never broaden into raw production records.
-- Record one evidence-backed state transition. Valid Phase 1 outcomes are `investigating`, `confirmed`, `monitor_incomplete`, `false_positive`, `escalated`, or `resolved`. Use `escalated` for sensitive domains and any incident lacking safe causal proof.
+- Record one evidence-backed state transition. Valid Phase 1 outcomes are `investigating`, `confirmed`, `monitor_incomplete`, `false_positive`, `escalated`, or `resolved`. Missing, partial, stale, or failed evidence must lead to `monitor_incomplete` or `escalated`, never `resolved`. Use `escalated` for sensitive domains; they remain escalation-only even if an external fix is later observed.
 
 ## ReviewGPT and remediation boundary
 

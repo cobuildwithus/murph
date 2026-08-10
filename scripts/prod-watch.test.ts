@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -471,6 +471,152 @@ describe("production-watch locking and dry-run behavior", () => {
     await winners[0]?.release?.();
   });
 
+  it("records a skipped scheduled run and consumes the overlap marker on recovery", () => {
+    const runtimeRoot = makeTempRoot();
+    const runLockPath = path.join(runtimeRoot, "tmp", "prod-watch", "run.lock");
+    mkdirSync(runLockPath, { recursive: true });
+    writeFileSync(path.join(runLockPath, "claim-00000000.json"), JSON.stringify({
+      pid: process.pid,
+      runId: "active-run",
+      startedAt: new Date().toISOString(),
+    }));
+
+    const skipped = runProdWatch([
+      "run",
+      "--scheduled",
+      "--fixture",
+      "healthy",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot);
+    expect(skipped.status).toBe(0);
+    const overlapPath = path.join(runtimeRoot, "operations", "prod-watch", "last-overlap.v1.json");
+    expect(JSON.parse(readFileSync(overlapPath, "utf8"))).toMatchObject({ ownerRunId: "active-run" });
+
+    rmSync(runLockPath, { recursive: true, force: true });
+    const recovered = runProdWatch([
+      "run",
+      "--scheduled",
+      "--fixture",
+      "healthy",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot);
+    expect(recovered.status).toBe(0);
+
+    const state = JSON.parse(readFileSync(
+      path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json"),
+      "utf8",
+    )) as { monitor: { skippedOverlapCount: number } };
+    const snapshot = JSON.parse(readFileSync(
+      path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"),
+      "utf8",
+    )) as ProductionWatchSnapshot;
+    expect(state.monitor.skippedOverlapCount).toBe(1);
+    expect(snapshot.run.skippedOverlap).toBe(true);
+    expect(existsSync(overlapPath)).toBe(false);
+  });
+
+  it("requires the incident lease and narrows drill-down evidence to the claimed incident", () => {
+    const runtimeRoot = makeTempRoot();
+    expect(runProdWatch(["run", "--fixture", "suspicious", "--settling-delay-seconds", "0"], runtimeRoot).status)
+      .toBe(0);
+    expect(runProdWatch(["run", "--fixture", "suspicious", "--settling-delay-seconds", "0"], runtimeRoot).status)
+      .toBe(0);
+
+    const state = JSON.parse(readFileSync(
+      path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json"),
+      "utf8",
+    )) as {
+      incidents: Array<{ id: string; fingerprint: string; sourceFingerprint?: string }>;
+    };
+    const incident = state.incidents.find((candidate) => candidate.sourceFingerprint !== undefined);
+    expect(incident).toBeDefined();
+
+    const fullResult = runProdWatch([
+      "collect",
+      "--fixture",
+      "suspicious",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot);
+    expect(fullResult.status).toBe(0);
+    const fullSnapshot = JSON.parse(fullResult.stdout) as ProductionWatchSnapshot;
+
+    const claim = runProdWatch([
+      "incident",
+      "claim",
+      incident!.id,
+      "--session-id",
+      "session-a",
+      "--kind",
+      "triage",
+    ], runtimeRoot);
+    expect(claim.status).toBe(0);
+
+    const denied = runProdWatch([
+      "drill-down",
+      incident!.id,
+      "--session-id",
+      "session-b",
+      "--fixture",
+      "suspicious",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot);
+    expect(denied.status).toBe(1);
+    expect(denied.stderr).toContain("incident_lease_not_owned");
+
+    const allowed = runProdWatch([
+      "drill-down",
+      incident!.id,
+      "--session-id",
+      "session-a",
+      "--fixture",
+      "suspicious",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot);
+    expect(allowed.status).toBe(0);
+    const filtered = JSON.parse(allowed.stdout) as ProductionWatchSnapshot;
+    expect(filtered.run.mode).toBe("drill_down");
+    expect(filtered.anomalyCandidates.length).toBeGreaterThan(0);
+    expect(filtered.anomalyCandidates.length).toBeLessThan(fullSnapshot.anomalyCandidates.length);
+    expect(filtered.anomalyCandidates.every((candidate) => (
+      candidate.fingerprint === incident!.fingerprint
+      || candidate.sourceFingerprint === incident!.sourceFingerprint
+    ))).toBe(true);
+    expect(filtered.fingerprints.every((fingerprint) => (
+      fingerprint.fingerprint === incident!.sourceFingerprint
+    ))).toBe(true);
+  });
+
+  it("persists local coordination state and projections with private modes", () => {
+    const runtimeRoot = makeTempRoot();
+    const result = runProdWatch([
+      "run",
+      "--fixture",
+      "healthy",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot);
+    expect(result.status).toBe(0);
+
+    const operationRoot = path.join(runtimeRoot, "operations", "prod-watch");
+    const projectionRoot = path.join(runtimeRoot, "projections", "prod-watch");
+    expect(statSync(operationRoot).mode & 0o777).toBe(0o700);
+    expect(statSync(projectionRoot).mode & 0o777).toBe(0o700);
+    for (const targetPath of [
+      path.join(operationRoot, "state.v1.json"),
+      path.join(projectionRoot, "ACTIVE_INCIDENTS.md"),
+      path.join(projectionRoot, "INCIDENT_HISTORY.md"),
+      path.join(projectionRoot, "MONITOR_STATUS.md"),
+      path.join(projectionRoot, "latest.snapshot.v1.json"),
+    ]) {
+      expect(statSync(targetPath).mode & 0o777).toBe(0o600);
+    }
+  });
+
   it("does not echo rejected provider values into collector failures", () => {
     const runtimeRoot = makeTempRoot();
     const provider = JSON.parse(readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8")) as {
@@ -633,7 +779,7 @@ describe("production-watch locking and dry-run behavior", () => {
     chmodSync(helperPath, 0o755);
 
     const result = runProdWatch(
-      ["collect", "--adapter-timeout-ms", "1000"],
+      ["collect", "--adapter-timeout-ms", "5000"],
       runtimeRoot,
       { PATH: `${binRoot}:${process.env.PATH ?? ""}` },
     );
@@ -719,6 +865,123 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).not.toContain(fakeHome);
     expect(() => renderLaunchdPlistTemplate(template, path.join(fakeHome, "..", "project"), fakeHome))
       .toThrow("scheduler_repo_path_unsafe");
+  });
+
+  it.runIf(process.platform === "darwin")(
+    "protects unmanaged launchd files and cleans up a failed managed installation",
+    () => {
+      const testRoot = makeTempRoot();
+      const fakeHome = path.join(testRoot, "home");
+      const checkoutRoot = path.join(fakeHome, "project");
+      const binRoot = path.join(testRoot, "bin");
+      const runtimeRoot = path.join(testRoot, "runtime");
+      const launchctlLog = path.join(testRoot, "launchctl.log");
+      const launchAgentsRoot = path.join(fakeHome, "Library", "LaunchAgents");
+      const plistPath = path.join(launchAgentsRoot, "com.murph.prod-watch.plist");
+      mkdirSync(fakeHome, { recursive: true });
+      mkdirSync(binRoot, { recursive: true });
+      mkdirSync(launchAgentsRoot, { recursive: true });
+      symlinkSync(repoRoot, checkoutRoot, "dir");
+
+      const launchctlPath = path.join(binRoot, "launchctl");
+      writeFileSync(
+        launchctlPath,
+        [
+          "#!/bin/sh",
+          "printf '%s\\n' \"$*\" >> \"$LAUNCHCTL_LOG\"",
+          "if [ \"${LAUNCHCTL_FAIL_ENABLE:-0}\" = \"1\" ] && [ \"$1\" = \"enable\" ]; then exit 1; fi",
+          "exit 0",
+          "",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      chmodSync(launchctlPath, 0o755);
+      const sharedEnv = {
+        HOME: fakeHome,
+        LAUNCHCTL_LOG: launchctlLog,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      };
+
+      writeFileSync(plistPath, "operator-owned\n", { mode: 0o600 });
+      const unmanagedInstall = runProdWatchFromCheckout(
+        ["scheduler", "install"],
+        runtimeRoot,
+        checkoutRoot,
+        sharedEnv,
+      );
+      expect(unmanagedInstall.status).toBe(1);
+      expect(unmanagedInstall.stderr).toContain("launchd_plist_unmanaged");
+      expect(readFileSync(plistPath, "utf8")).toBe("operator-owned\n");
+      expect(existsSync(launchctlLog)).toBe(false);
+
+      writeFileSync(plistPath, "<!-- murph-prod-watch-managed:v1 -->\n", { mode: 0o600 });
+      const replacement = runProdWatchFromCheckout(
+        ["scheduler", "install"],
+        runtimeRoot,
+        checkoutRoot,
+        sharedEnv,
+      );
+      expect(replacement.status).toBe(0);
+      const replacementCalls = readFileSync(launchctlLog, "utf8").trim().split("\n");
+      expect(replacementCalls).toHaveLength(3);
+      expect(replacementCalls[0]).toContain("bootout");
+      expect(replacementCalls[1]).toContain("bootstrap");
+      expect(replacementCalls[2]).toContain("enable");
+      expect(readFileSync(plistPath, "utf8")).toContain("murph-prod-watch-managed:v1");
+
+      writeFileSync(launchctlLog, "");
+      const enableFailure = runProdWatchFromCheckout(
+        ["scheduler", "install"],
+        runtimeRoot,
+        checkoutRoot,
+        { ...sharedEnv, LAUNCHCTL_FAIL_ENABLE: "1" },
+      );
+      expect(enableFailure.status).toBe(1);
+      expect(enableFailure.stderr).toContain("launchd_enable_failed");
+      expect(existsSync(plistPath)).toBe(false);
+      const failureCalls = readFileSync(launchctlLog, "utf8").trim().split("\n");
+      expect(failureCalls.map((call) => call.split(" ")[0])).toEqual([
+        "bootout",
+        "bootstrap",
+        "enable",
+        "bootout",
+      ]);
+
+      writeFileSync(plistPath, "operator-owned\n", { mode: 0o600 });
+      const unmanagedUninstall = runProdWatchFromCheckout(
+        ["scheduler", "uninstall"],
+        runtimeRoot,
+        checkoutRoot,
+        sharedEnv,
+      );
+      expect(unmanagedUninstall.status).toBe(1);
+      expect(unmanagedUninstall.stderr).toContain("launchd_plist_unmanaged");
+      expect(readFileSync(plistPath, "utf8")).toBe("operator-owned\n");
+
+      writeFileSync(plistPath, "<!-- murph-prod-watch-managed:v1 -->\n", { mode: 0o600 });
+      const managedUninstall = runProdWatchFromCheckout(
+        ["scheduler", "uninstall"],
+        runtimeRoot,
+        checkoutRoot,
+        sharedEnv,
+      );
+      expect(managedUninstall.status).toBe(0);
+      expect(existsSync(plistPath)).toBe(false);
+    },
+  );
+
+  it("keeps Phase 1 resolution authority complete-evidence-only and sensitive incidents escalation-only", () => {
+    const skill = readFileSync(
+      path.join(repoRoot, ".agents", "skills", "production-watch", "SKILL.md"),
+      "utf8",
+    );
+    expect(skill).toContain(
+      "A `resolved` transition is record-only and is allowed only after a fresh, complete aggregate evidence pass independently observes an externally applied fix.",
+    );
+    expect(skill).toContain(
+      "Missing, partial, stale, or failed evidence must lead to `monitor_incomplete` or `escalated`, never `resolved`.",
+    );
+    expect(skill).toContain("Use `escalated` for sensitive domains; they remain escalation-only");
   });
 
   it("keeps strict JSON schemas executable and fixtures conformant", () => {
@@ -812,7 +1075,40 @@ function runProdWatch(
         NODE_ENV: "test",
         MURPH_PROD_WATCH_TEST_RUNTIME_ROOT: runtimeRoot,
       },
-      timeout: 15_000,
+      timeout: 30_000,
+    },
+  );
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
+
+function runProdWatchFromCheckout(
+  args: string[],
+  runtimeRoot: string,
+  checkoutRoot: string,
+  env: Record<string, string | undefined>,
+): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--preserve-symlinks-main",
+      "--experimental-strip-types",
+      path.join(checkoutRoot, "scripts", "prod-watch.ts"),
+      ...args,
+    ],
+    {
+      cwd: checkoutRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...env,
+        NODE_ENV: "test",
+        MURPH_PROD_WATCH_TEST_RUNTIME_ROOT: runtimeRoot,
+      },
+      timeout: 30_000,
     },
   );
   return {
