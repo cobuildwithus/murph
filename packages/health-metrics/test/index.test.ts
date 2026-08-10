@@ -177,6 +177,10 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("SBP")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
+  assert.equal(resolveMetricDefinition("bodyfat")?.key, "body-fat-percentage");
+  assert.equal(resolveMetricDefinition("bodymassindex")?.key, "bmi");
+  assert.equal(resolveMetricDefinition("systolicbloodpressure")?.key, "systolic-blood-pressure");
+  assert.equal(resolveMetricDefinition("diastolicbloodpressure")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("self_rated_health")?.key, "self-rated-health");
   assert.equal(resolveMetricDefinition("hypertension_history_proxy_yes")?.key, "hypertension-history-proxy-yes");
   assert.equal(resolveMetricDefinition("diabetes_history_proxy_yes")?.key, "diabetes-history-proxy-yes");

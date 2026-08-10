@@ -2,7 +2,7 @@ import type { MetricDefinition } from "../types.ts";
 
 export const BODY_METRICS = [
   {
-    aliases: ["bmi", "body-mass-index", "body_mass_index"],
+    aliases: ["bmi", "body-mass-index", "body_mass_index", "bodymassindex"],
     biomarkerKey: null,
     canonicalUnit: "kg/m^2",
     category: "body",
@@ -35,7 +35,7 @@ export const BODY_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["body_fat", "bodyFat", "body_fat_pct", "body-fat-pct", "bodyFatPercentage", "body_fat_percentage"],
+    aliases: ["body_fat", "bodyFat", "bodyfat", "body_fat_pct", "body-fat-pct", "bodyFatPercentage", "body_fat_percentage"],
     biomarkerKey: null,
     canonicalUnit: "percent",
     category: "body",

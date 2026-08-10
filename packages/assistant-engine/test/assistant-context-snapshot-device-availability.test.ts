@@ -14,6 +14,7 @@ import {
 import { writeAssistantStateVersionedJson } from '@murphai/runtime-state/node'
 import {
   listMeasurementRecords,
+  normalizeMeasurementEntry,
   showMeasurementRecord,
 } from '@murphai/vault-usecases/measurements'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
@@ -145,7 +146,93 @@ describe('assistant context snapshot device availability', () => {
     }
   })
 
-  it('resolves generic measurement aliases without pairing separate blood-pressure events', async () => {
+  it.each([
+    {
+      metric: 'bodyFat',
+      storedMetric: 'bodyfat',
+      unit: 'percent',
+      value: 18.4,
+    },
+    {
+      metric: 'bodyMassIndex',
+      storedMetric: 'bodymassindex',
+      unit: 'kg/m2',
+      value: 22.1,
+    },
+  ] as const)(
+    'advertises writer-normalized $metric measurement history',
+    async ({ metric, storedMetric, unit, value }) => {
+      const parentRoot = await mkdtemp(
+        path.join(tmpdir(), `assistant-device-context-writer-${storedMetric}-`),
+      )
+      const vaultRoot = path.join(parentRoot, 'vault')
+      const queryProjectionPath = path.join(
+        vaultRoot,
+        '.runtime/projections/query.sqlite',
+      )
+
+      try {
+        await initializeVault({
+          createdAt: '2026-08-08T00:00:00.000Z',
+          vaultRoot,
+        })
+        await addMeasurement({
+          vaultRoot,
+          draft: {
+            occurredAt: '2026-08-08T09:00:00.000Z',
+            source: 'manual',
+            title: 'Writer-normalized body measurement',
+            measurements: [normalizeMeasurementEntry({
+              metric,
+              unit,
+              value,
+            })],
+          },
+        })
+        await markAssistantContextSnapshotDirty({
+          domains: ['blood_tests'],
+          vaultRoot,
+        })
+        await refreshAssistantContextSnapshot({ vaultRoot })
+
+        const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+        expect(prompt).toContain(
+          'Body/scale measurement history is present (latest 2026-08-08)',
+        )
+        expect(prompt).not.toContain(String(value))
+        await expect(access(queryProjectionPath)).rejects.toMatchObject({
+          code: 'ENOENT',
+        })
+
+        const candidates = await listMeasurementRecords({
+          from: '2026-08-08',
+          limit: 100,
+          to: '2026-08-08',
+          vault: vaultRoot,
+        })
+        const candidate = candidates.items[0]
+        expect(candidate).toMatchObject({ data: { dayKey: '2026-08-08' } })
+        if (!candidate) {
+          throw new Error('Expected a writer-normalized body measurement candidate.')
+        }
+        await expect(showMeasurementRecord(vaultRoot, candidate.id))
+          .resolves.toMatchObject({
+            entity: {
+              data: {
+                measurements: [expect.objectContaining({ metric: storedMetric })],
+              },
+            },
+          })
+      } finally {
+        await rm(parentRoot, {
+          force: true,
+          recursive: true,
+        })
+      }
+    },
+  )
+
+  it('resolves generic measurement aliases without pairing separate writer-normalized blood-pressure events', async () => {
     const parentRoot = await mkdtemp(
       path.join(tmpdir(), 'assistant-device-context-measurement-aliases-'),
     )
@@ -195,14 +282,22 @@ describe('assistant context snapshot device availability', () => {
           source: 'manual',
           title: 'Canonical blood pressure measurement',
           measurements: [
-            { metric: 'sbp', unit: 'mmHg', value: 118 },
-            { metric: 'dbp', unit: 'mmHg', value: 76 },
+            normalizeMeasurementEntry({
+              metric: 'systolicBloodPressure',
+              unit: 'mmHg',
+              value: 118,
+            }),
+            normalizeMeasurementEntry({
+              metric: 'diastolicBloodPressure',
+              unit: 'mmHg',
+              value: 76,
+            }),
           ],
         },
       })
       for (const pressure of [
-        { metric: 'systolic', value: 119 },
-        { metric: 'diastolic', value: 77 },
+        { metric: 'systolicBloodPressure', value: 119 },
+        { metric: 'diastolicBloodPressure', value: 77 },
       ] as const) {
         await addMeasurement({
           vaultRoot,
@@ -210,11 +305,11 @@ describe('assistant context snapshot device availability', () => {
             occurredAt: '2026-08-10T09:00:00.000Z',
             source: 'manual',
             title: 'Unpaired blood pressure measurement',
-            measurements: [{
+            measurements: [normalizeMeasurementEntry({
               metric: pressure.metric,
               unit: 'mmHg',
               value: pressure.value,
-            }],
+            })],
           },
         })
       }
@@ -277,8 +372,8 @@ describe('assistant context snapshot device availability', () => {
           entity: {
             data: {
               measurements: expect.arrayContaining([
-                expect.objectContaining({ metric: 'sbp' }),
-                expect.objectContaining({ metric: 'dbp' }),
+                expect.objectContaining({ metric: 'systolicbloodpressure' }),
+                expect.objectContaining({ metric: 'diastolicbloodpressure' }),
               ]),
             },
           },

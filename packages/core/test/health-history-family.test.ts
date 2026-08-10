@@ -1254,7 +1254,7 @@ test("canonical event availability reads supported legacy provider body rows", a
 });
 
 test("canonical event availability still fails closed for malformed relevant records", async () => {
-  const vaultRoot = await makeTempDirectory("murph-canonical-availability-malformed-body");
+  const vaultRoot = await makeTempDirectory("murph-canonical-availability-malformed-body-alias");
   await initializeVault({ vaultRoot });
   const occurredAt = "2026-07-15T12:00:00.000Z";
 
@@ -1268,17 +1268,16 @@ test("canonical event availability still fails closed for malformed relevant rec
     record: {
       dayKey: "2026-07-15",
       id: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F6",
-      externalRef: {
-        system: "oura",
-      },
-      kind: "observation",
-      metric: "body-weight",
+      kind: "measurement",
+      measurements: [{
+        metric: "bodymassindex",
+        value: 22.1,
+      }],
       occurredAt,
       recordedAt: "2026-07-15T12:05:00.000Z",
       schemaVersion: "murph.event.v1",
       source: "device",
-      title: "Malformed body measurement",
-      value: 74.2,
+      title: "Malformed body measurement alias",
     },
   });
 
