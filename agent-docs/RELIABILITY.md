@@ -35,6 +35,13 @@ Last verified: 2026-08-10
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
+- Codex App Server owns managed OpenAI standalone web search. Its exact
+  `POST /v1/alpha/search` request uses the existing signed provider credential
+  and Worker egress owner; a provider rejection remains the current tool
+  failure and must not create a Murph-side retry, fallback search provider,
+  queue, or durable search state. Unsupported methods, paths, providers, and
+  invalid runtime identity fail closed before Worker-owned credential
+  injection.
 - Health-data withdrawal commits its revocation boundary, then waits for the
   existing per-user Cloudflare execution owner to serialize with earlier
   ensures, re-read the Web-owned grant, clear the write fence, and stop the
