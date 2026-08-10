@@ -59,7 +59,17 @@ FROG
 
 Replace the example text with the actual public-safe report. Keep possible
 solutions optional; record the problem even when the correct fix is not yet
-known. Read back the returned `friction.md` before committing it.
+known. Do not create an empty or synthetic "no friction" entry when nothing
+qualifies.
+
+## Commit the entry
+
+A Frog entry created or modified during a task is part of that task's output.
+Read back the returned `friction.md`, verify the public-data boundary below,
+and include it in the same scoped task commit. Do not complete the task with
+that entry untracked, unstaged, or omitted from the commit. If a safe scoped
+commit is blocked, preserve the entry and report the exact blocker instead of
+dropping it.
 
 The wrapper permits only file-backed `list` and `log`; it rejects direct
 publishing, enters the repository root itself, and rejects caller-supplied
