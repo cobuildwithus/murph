@@ -116,6 +116,14 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
       canonicalValue: 79,
       effectiveDate: '2026-08-08',
     })
+    expect(systolic?.source).toMatchObject({
+      family: 'event',
+      kind: 'measurement',
+    })
+    expect(diastolic?.source).toMatchObject({
+      family: 'event',
+      kind: 'measurement',
+    })
     expect(systolic?.source.recordId).toBe(diastolic?.source.recordId)
   } finally {
     await rm(parentRoot, {

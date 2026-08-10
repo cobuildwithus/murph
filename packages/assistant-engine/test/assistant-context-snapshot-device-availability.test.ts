@@ -106,6 +106,114 @@ describe('assistant context snapshot device availability', () => {
     }
   })
 
+  it.each([
+    { metric: 'bmi', unit: 'kg/m2', value: 21.7 },
+    { metric: 'waist-circumference', unit: 'cm', value: 81 },
+  ] as const)(
+    'recognizes canonical $metric body history without injecting its value',
+    async ({ metric, unit, value }) => {
+      const parentRoot = await mkdtemp(
+        path.join(tmpdir(), `assistant-device-context-${metric}-`),
+      )
+      const vaultRoot = path.join(parentRoot, 'vault')
+
+      try {
+        await initializeVault({
+          createdAt: '2026-08-09T00:00:00.000Z',
+          vaultRoot,
+        })
+        await addMeasurement({
+          vaultRoot,
+          draft: {
+            occurredAt: '2026-08-09T09:00:00.000Z',
+            source: 'device',
+            title: 'Connected body measurement',
+            measurements: [{ metric, unit, value }],
+          },
+        })
+        await markAssistantContextSnapshotDirty({
+          domains: ['blood_tests'],
+          vaultRoot,
+        })
+        await refreshAssistantContextSnapshot({
+          now: () => '2026-08-09T09:10:00.000Z',
+          vaultRoot,
+        })
+
+        const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+        expect(prompt).toContain(
+          'Body/scale measurement history is present (latest 2026-08-09)',
+        )
+        expect(prompt).not.toContain(String(value))
+      } finally {
+        await rm(parentRoot, {
+          force: true,
+          recursive: true,
+        })
+      }
+    },
+  )
+
+  it('requires systolic and diastolic points from the same canonical event', async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), 'assistant-device-context-bp-pairing-'),
+    )
+    const vaultRoot = path.join(parentRoot, 'vault')
+
+    try {
+      await initializeVault({
+        createdAt: '2026-08-09T00:00:00.000Z',
+        vaultRoot,
+      })
+      await addMeasurement({
+        vaultRoot,
+        draft: {
+          occurredAt: '2026-08-09T09:05:00.000Z',
+          source: 'device',
+          title: 'Incomplete systolic reading',
+          measurements: [{
+            metric: 'systolic-blood-pressure',
+            unit: 'mmHg',
+            value: 120,
+          }],
+        },
+      })
+      await addMeasurement({
+        vaultRoot,
+        draft: {
+          occurredAt: '2026-08-09T09:05:00.000Z',
+          source: 'device',
+          title: 'Incomplete diastolic reading',
+          measurements: [{
+            metric: 'diastolic-blood-pressure',
+            unit: 'mmHg',
+            value: 78,
+          }],
+        },
+      })
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-08-09T09:10:00.000Z',
+        vaultRoot,
+      })
+
+      const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+      expect(prompt ?? '').not.toContain(
+        'Blood-pressure measurement history is present',
+      )
+      expect(prompt ?? '').not.toContain('120')
+      expect(prompt ?? '').not.toContain('78')
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  })
+
   it('rebuilds snapshots written with the previous schema version', async () => {
     const { parentRoot, vaultRoot } = await createDeviceMeasurementVault()
 

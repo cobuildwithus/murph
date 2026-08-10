@@ -116,19 +116,26 @@ const MAX_ASSISTANT_CONTEXT_SUPPLEMENT_INGREDIENTS = 3
 const MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES = 64 * 1024
 const MAX_ASSISTANT_CONTEXT_PROMPT_FIELD_LENGTH = 120
 const MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR = 200
+const ASSISTANT_CONTEXT_BLOOD_PRESSURE_PAIR_LIMIT = 100
 const ASSISTANT_CONTEXT_DEVICE_METRIC_FILTERS = [
+  { metricKey: 'bmi', limit: 1 },
   { metricKey: 'body-fat-percentage', limit: 1 },
   { metricKey: 'body-weight', limit: 1 },
-  { metricKey: 'diastolic-blood-pressure', limit: 1 },
-  { metricKey: 'systolic-blood-pressure', limit: 1 },
+  {
+    metricKey: 'diastolic-blood-pressure',
+    limit: ASSISTANT_CONTEXT_BLOOD_PRESSURE_PAIR_LIMIT,
+  },
+  {
+    metricKey: 'systolic-blood-pressure',
+    limit: ASSISTANT_CONTEXT_BLOOD_PRESSURE_PAIR_LIMIT,
+  },
+  { metricKey: 'waist-circumference', limit: 1 },
 ] as const
 const ASSISTANT_CONTEXT_BODY_METRIC_KEYS = new Set([
+  'bmi',
   'body-fat-percentage',
   'body-weight',
-])
-const ASSISTANT_CONTEXT_BLOOD_PRESSURE_METRIC_KEYS = new Set([
-  'diastolic-blood-pressure',
-  'systolic-blood-pressure',
+  'waist-circumference',
 ])
 
 export function resolveAssistantContextSnapshotPath(vaultRoot: string): string {
@@ -769,15 +776,49 @@ async function collectAssistantSnapshotDeviceMeasurementCoverage(input: {
   assertAssistantContextSnapshotCanContinue(input)
 
   return {
-    latestBloodPressureMeasurementDate: latestAssistantSnapshotMetricDate(
-      points,
-      ASSISTANT_CONTEXT_BLOOD_PRESSURE_METRIC_KEYS,
-    ),
+    latestBloodPressureMeasurementDate:
+      latestAssistantSnapshotPairedBloodPressureDate(points),
     latestBodyMeasurementDate: latestAssistantSnapshotMetricDate(
       points,
       ASSISTANT_CONTEXT_BODY_METRIC_KEYS,
     ),
   }
+}
+
+function latestAssistantSnapshotPairedBloodPressureDate(
+  points: Awaited<ReturnType<typeof listMetricPointsBatch>>,
+): string | null {
+  const systolicMeasurementEvents = new Set(
+    points
+      .filter((point) => point.metricKey === 'systolic-blood-pressure')
+      .map(assistantSnapshotMeasurementEventKey)
+      .filter((key): key is string => key !== null),
+  )
+
+  return points
+    .filter((point) => point.metricKey === 'diastolic-blood-pressure')
+    .filter((point) => {
+      const eventKey = assistantSnapshotMeasurementEventKey(point)
+      return eventKey !== null && systolicMeasurementEvents.has(eventKey)
+    })
+    .map((point) => point.effectiveDate)
+    .filter(isStrictIsoDate)
+    .sort((left, right) => right.localeCompare(left))[0]
+    ?? null
+}
+
+function assistantSnapshotMeasurementEventKey(
+  point: Awaited<ReturnType<typeof listMetricPointsBatch>>[number],
+): string | null {
+  if (
+    point.source.family !== 'event'
+    || point.source.kind !== 'measurement'
+    || point.source.recordId.length === 0
+  ) {
+    return null
+  }
+
+  return JSON.stringify([point.source.path, point.source.recordId])
 }
 
 function latestAssistantSnapshotMetricDate(
