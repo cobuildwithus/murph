@@ -246,9 +246,8 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Huawei Health",
     },
     {
-      assetPath: "/brand-logos/connect/health-connect-official.png",
-      description:
-        "Supported TicWatch data through direct Health Connect sharing or a Google Fit fallback.",
+      assetPath: "/brand-logos/connect/mobvoi-health.png",
+      description: "TicWatch activity and health data.",
       name: "Mobvoi / TicWatch",
     },
     {
@@ -436,7 +435,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.match(
     markup,
-    /First, enable direct Health Connect sharing in Mobvoi Health if your installed version offers it\. Otherwise, enable Google Fit sharing in Mobvoi Health and Sync Fit with Health Connect in Google Fit\. Then connect Health Connect in Murph for Android\. If no data appears, recheck Mobvoi Health&#x27;s sharing controls for your version and Health Connect permissions\. Categories and history depend on what the apps write\./,
+    /Share from Mobvoi Health to Health Connect, or use Google Fit as a bridge\. Finish in Murph on Android\./,
   );
   assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);

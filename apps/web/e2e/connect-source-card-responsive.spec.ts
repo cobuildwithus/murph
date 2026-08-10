@@ -20,7 +20,7 @@ function isLoopbackUrl(rawUrl: string): boolean {
 }
 
 test.describe("Mobvoi Health Connect design proof", () => {
-  test.use({ deviceScaleFactor: 2 });
+  test.use({ deviceScaleFactor: 3 });
 
   test(
     "the real source card stays complete and contained",
@@ -76,17 +76,20 @@ test.describe("Mobvoi Health Connect design proof", () => {
         await expect(status).toHaveCount(0);
         await expect(
           card.getByText(
-            "Supported TicWatch data through direct Health Connect sharing or a Google Fit fallback.",
+            "TicWatch activity and health data.",
             { exact: true },
           ),
         ).toBeVisible();
+        const logo = card.locator("img").first();
+        await expect(logo).toHaveAttribute("src", /mobvoi-health\.png/u);
+        await expect(logo).toHaveClass(/rounded-full/u);
         await expect(downloadLink).toHaveAttribute(
           "href",
           "https://play.google.com/store/apps/details?id=ai.withmurph.app",
         );
         await expect(
           card.getByText(
-            "First, enable direct Health Connect sharing in Mobvoi Health if your installed version offers it. Otherwise, enable Google Fit sharing in Mobvoi Health and Sync Fit with Health Connect in Google Fit. Then connect Health Connect in Murph for Android. If no data appears, recheck Mobvoi Health's sharing controls for your version and Health Connect permissions. Categories and history depend on what the apps write.",
+            "Share from Mobvoi Health to Health Connect, or use Google Fit as a bridge. Finish in Murph on Android.",
             { exact: true },
           ),
         ).toBeVisible();
