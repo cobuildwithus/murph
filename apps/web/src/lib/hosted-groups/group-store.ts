@@ -56,7 +56,6 @@ import {
   generateHostedGroupJoinCode,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
-import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
@@ -74,7 +73,6 @@ import {
   includeSourceAwareHostedGroupSleepProjectionScopes,
   legacyHostedGroupSleepProjectionScope,
   mergeHostedGroupJoinPolicy,
-  normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionKinds,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
@@ -243,7 +241,7 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     });
   }
 
-  const requested = normalizeHostedGroupAccessOfferProjectionScopes(
+  const requested = normalizeHostedVaultShareProjectionScopes(
     input.requestedVaultShareProjectionScopes
       ?? fixedProjectionKindsToScopes(input.requestedVaultShareProjectionKinds ?? []),
   );
@@ -1539,7 +1537,7 @@ export async function readHostedGroupJoinView(input: {
   }
 
   const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
-  const offeredProjectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
+  const offeredProjectionScopes = normalizeHostedVaultShareProjectionScopes(
     policy.requestedVaultShareProjectionScopes,
   );
   const activeVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
@@ -1559,7 +1557,7 @@ export async function readHostedGroupJoinView(input: {
       : [],
   );
   const visibleProjectionScopes = group.members.length > 0
-    ? normalizeHostedGroupAccessOfferProjectionScopes([
+    ? normalizeHostedVaultShareProjectionScopes([
         ...offeredProjectionScopes,
         ...activeVaultShareProjectionScopes,
       ])
@@ -2042,7 +2040,7 @@ async function acceptHostedGroupJoinTx(input: {
   const storedPolicy = readHostedGroupJoinPolicy(group.joinPolicyJson);
   const policyRequestedProjectionScopes = input.policyProjectionScopes
     ? normalizeHostedVaultShareProjectionScopes(input.policyProjectionScopes)
-    : normalizeHostedGroupAccessOfferProjectionScopes(
+    : normalizeHostedVaultShareProjectionScopes(
         storedPolicy.requestedVaultShareProjectionScopes,
       );
   const activeManageableProjectionScopes = existingMembership
@@ -2056,7 +2054,7 @@ async function acceptHostedGroupJoinTx(input: {
         prisma: input.tx,
       })
     : [];
-  const requestedProjectionScopes = normalizeHostedGroupAccessOfferProjectionScopes([
+  const requestedProjectionScopes = normalizeHostedVaultShareProjectionScopes([
     ...policyRequestedProjectionScopes,
     ...activeManageableProjectionScopes,
   ]);
@@ -2423,7 +2421,7 @@ async function replaceHostedGroupRequestedProjectionsTx(
     select: { joinPolicyJson: true, runtimeMemberId: true },
   });
   if (!group) throw hostedOnboardingError({ code: "HOSTED_GROUP_NOT_FOUND", httpStatus: 404, message: "Hosted group not found." });
-  const requested = normalizeHostedGroupAccessOfferProjectionScopes(
+  const requested = normalizeHostedVaultShareProjectionScopes(
     input.requestedVaultShareProjectionScopes,
   );
   const existing = readHostedGroupJoinPolicy(group.joinPolicyJson);

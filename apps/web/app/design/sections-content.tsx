@@ -1,8 +1,4 @@
 import {
-  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
-} from "@murphai/hosted-execution/vault-share";
-
-import {
   BiomarkerBoundaryResultStudy,
   BiomarkerDetailStudy,
   BiomarkerIndexStudy,
@@ -31,7 +27,10 @@ import { Separator } from "@/src/components/ui/separator";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
-import { projectHostedVaultShareProjectionDisplays } from "@/src/lib/hosted-groups/join-policy";
+import {
+  projectHostedVaultShareProjectionDisplays,
+  resolveHostedGroupAccessOfferProjectionScopes,
+} from "@/src/lib/hosted-groups/join-policy";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
@@ -510,7 +509,7 @@ export function SectionsContent() {
       <StudySection title="Group join invites, current and legacy sharing, and setup recovery">
         <GroupJoinStudy
           comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
-            HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+            resolveHostedGroupAccessOfferProjectionScopes(undefined),
           )}
         />
       </StudySection>

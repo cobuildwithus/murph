@@ -879,28 +879,20 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
       expect.objectContaining({ projectionScope: DEEP_SLEEP_SOURCES_SCOPE }),
     );
-    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledTimes(1);
-    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
-      destinationMemberId: "member_group_runtime",
-      grantorMemberId: "member_grantor",
-      now,
-      projectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
-      tx,
-    });
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalledWith(
       expect.objectContaining({ projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE] }),
     );
     expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
-  it("atomically replaces a legacy Deep sleep grant on explicit v1 approval", async () => {
+  it("rejects a source-aware selection when only aggregate Deep sleep was requested", async () => {
     const tx = buildTx({
       activeGroupGrantCount: 0,
       existingMembershipId: "membership_existing",
       requestedProjectionKinds: ["deep-sleep-days.v0"],
     });
     const now = new Date("2026-07-01T00:00:00.000Z");
-    mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(1);
 
     await expect(acceptHostedGroupJoinCodeTx({
       expectedMembershipId: "membership_existing",
@@ -909,45 +901,17 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       now,
       selectedVaultShareProjectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
       tx,
-    })).resolves.toMatchObject({
-      grantedVaultShareProjectionScopes: [PROFILE_SCOPE, DEEP_SLEEP_SOURCES_SCOPE],
-      revokedVaultShareProjectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PERMISSION_NOT_REQUESTED",
+      httpStatus: 400,
     });
 
-    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
-      destinationMemberId: "member_group_runtime",
-      grantorMemberId: "member_grantor",
-      now,
-      projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
-      tx,
-    });
-    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
-      destinationMemberId: "member_group_runtime",
-      grantorMemberId: "member_grantor",
-      now,
-      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
-      tx,
-    });
-    expect(tx.hostedGroup.update).toHaveBeenCalledWith({
-      data: {
-        joinPolicyJson: {
-          offerGeneration: OFFER_GENERATION_A,
-          requestedVaultShareProjectionKinds: [
-            "deep-sleep-days.v0",
-            "deep-sleep-sources-days.v1",
-          ],
-          requestedVaultShareProjectionScopes: [
-            LEGACY_DEEP_SLEEP_SCOPE,
-            DEEP_SLEEP_SOURCES_SCOPE,
-          ],
-          schema: "murph.hosted-group.join-policy.v1",
-        },
-      },
-      where: { id: "group_1" },
-    });
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
-  it("materializes a selected v1 request for a new member under a legacy policy", async () => {
+  it("rejects a source-aware selection for a new member under an aggregate policy", async () => {
     const tx = buildTx({
       activeGroupGrantCount: 0,
       requestedProjectionKinds: ["deep-sleep-days.v0"],
@@ -961,35 +925,13 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       now,
       selectedVaultShareProjectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
       tx,
-    })).resolves.toMatchObject({
-      alreadyMember: false,
-      grantedVaultShareProjectionScopes: [PROFILE_SCOPE, DEEP_SLEEP_SOURCES_SCOPE],
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PERMISSION_NOT_REQUESTED",
+      httpStatus: 400,
     });
 
-    expect(tx.hostedGroup.update).toHaveBeenCalledWith({
-      data: {
-        joinPolicyJson: {
-          offerGeneration: OFFER_GENERATION_A,
-          requestedVaultShareProjectionKinds: [
-            "deep-sleep-days.v0",
-            "deep-sleep-sources-days.v1",
-          ],
-          requestedVaultShareProjectionScopes: [
-            LEGACY_DEEP_SLEEP_SCOPE,
-            DEEP_SLEEP_SOURCES_SCOPE,
-          ],
-          schema: "murph.hosted-group.join-policy.v1",
-        },
-      },
-      where: { id: "group_1" },
-    });
-    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
-      destinationMemberId: "member_group_runtime",
-      grantorMemberId: "member_grantor",
-      now,
-      projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
-      tx,
-    });
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
   it("revokes both Deep sleep grant versions when the single permission is off", async () => {
@@ -999,8 +941,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       requestedProjectionKinds: ["deep-sleep-days.v0"],
     });
     const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValueOnce([
+      DEEP_SLEEP_SOURCES_SCOPE,
+    ]);
     mocks.revokeHostedVaultSharesTx
-      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1)
       .mockResolvedValueOnce(1);
 
     await expect(acceptHostedGroupJoinCodeTx({
@@ -1011,21 +956,24 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       selectedVaultShareProjectionScopes: [],
       tx,
     })).resolves.toMatchObject({
-      revokedVaultShareProjectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+      revokedVaultShareProjectionScopes: [
+        LEGACY_DEEP_SLEEP_SCOPE,
+        DEEP_SLEEP_SOURCES_SCOPE,
+      ],
     });
 
     expect(mocks.revokeHostedVaultSharesTx).toHaveBeenNthCalledWith(1, {
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_grantor",
       now,
-      projectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
+      projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
       tx,
     });
     expect(mocks.revokeHostedVaultSharesTx).toHaveBeenNthCalledWith(2, {
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_grantor",
       now,
-      projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
+      projectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
       tx,
     });
     expect(tx.hostedGroup.update).not.toHaveBeenCalled();
@@ -2179,7 +2127,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledTimes(1);
   });
 
-  it("stores a legacy deep-sleep request as the single source-aware permission", async () => {
+  it("stores an explicitly requested aggregate deep-sleep scope exactly", async () => {
     const tx = buildGroupLinkTx({
       existingGroup: false,
       joinCode: null,
@@ -2196,10 +2144,10 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     })).resolves.toMatchObject({
       group: {
         requestedVaultShareProjectionKinds: [
-          "deep-sleep-sources-days.v1",
+          "deep-sleep-days.v0",
         ],
         requestedVaultShareProjectionScopes: [
-          DEEP_SLEEP_SOURCES_SCOPE,
+          LEGACY_DEEP_SLEEP_SCOPE,
         ],
       },
     });
@@ -2209,10 +2157,10 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
         joinPolicyJson: {
           offerGeneration: expect.stringMatching(/^hgrpjog_/u),
           requestedVaultShareProjectionKinds: [
-            "deep-sleep-sources-days.v1",
+            "deep-sleep-days.v0",
           ],
           requestedVaultShareProjectionScopes: [
-            DEEP_SLEEP_SOURCES_SCOPE,
+            LEGACY_DEEP_SLEEP_SCOPE,
           ],
           schema: "murph.hosted-group.join-policy.v1",
         },
@@ -2787,7 +2735,7 @@ describe("readHostedGroupJoinView leave affordance", () => {
     mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([]);
   });
 
-  it("derives one current sleep permission without rewriting its legacy policy", async () => {
+  it("shows an aggregate sleep request without rewriting its exact policy", async () => {
     mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValueOnce([
       LEGACY_DEEP_SLEEP_SCOPE,
     ]);
@@ -2817,8 +2765,7 @@ describe("readHostedGroupJoinView leave affordance", () => {
       activeVaultShareProjectionScopes: [LEGACY_DEEP_SLEEP_SCOPE],
       requestedVaultShareProjections: [{
         label: "Deep sleep",
-        legacyProjectionScope: LEGACY_DEEP_SLEEP_SCOPE,
-        projectionScope: DEEP_SLEEP_SOURCES_SCOPE,
+        projectionScope: LEGACY_DEEP_SLEEP_SCOPE,
       }],
     });
     expect(mocks.readActiveHostedVaultShareProjectionScopes).toHaveBeenCalledWith({

@@ -320,7 +320,7 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import {
   mergeHostedGroupJoinPolicy,
-  normalizeHostedGroupAccessOfferProjectionScopes,
+  normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
   readHostedGroupJoinPolicy,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -365,9 +365,7 @@ const RUNNING_SESSION_COUNT_SCOPE = buildHostedVaultShareActivitySessionCountPro
   activityKind: "running",
 });
 const COMPLETE_ACCESS_OFFER_SCOPES =
-  normalizeHostedGroupAccessOfferProjectionScopes(
-    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
-  );
+  resolveHostedGroupAccessOfferProjectionScopes(undefined);
 const GROUP_RUNTIME_LINQ_THREAD = {
   authority: {
     accountLookupKey: "hplk_group_runtime",
@@ -419,10 +417,14 @@ describe("hosted group access-offer defaults", () => {
     expect(resolved).toEqual(COMPLETE_ACCESS_OFFER_SCOPES);
     expect(resolved).toEqual(expect.arrayContaining([
       SLEEP_DURATION_SCOPE,
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
       WORKOUTS_SCOPE,
       PROTEIN_SCOPE,
       RUNNING_SCOPE,
     ]));
+    expect(resolved).not.toContainEqual(DEEP_SLEEP_SCOPE);
+    expect(resolved).not.toContainEqual(REM_SLEEP_SCOPE);
     expect(resolved.some((scope) => "selector" in scope)).toBe(true);
   });
 
@@ -430,6 +432,20 @@ describe("hosted group access-offer defaults", () => {
     expect(resolveHostedGroupAccessOfferProjectionScopes([WORKOUTS_SCOPE]))
       .toEqual([WORKOUTS_SCOPE]);
     expect(resolveHostedGroupAccessOfferProjectionScopes([])).toEqual([]);
+    expect(resolveHostedGroupAccessOfferProjectionScopes([
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
+    ])).toEqual([
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
+    ]);
+    expect(resolveHostedGroupAccessOfferProjectionScopes([
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
+    ])).toEqual([
+      DEEP_SLEEP_SOURCES_SCOPE,
+      REM_SLEEP_SOURCES_SCOPE,
+    ]);
     expect(buildHostedGroupJoinOfferMessage({
       joinUrl: "https://www.withmurph.ai/groups/join/example",
       projectionScopes: [WORKOUTS_SCOPE],
@@ -1994,6 +2010,26 @@ describe("handleHostedRuntimeGroupTool", () => {
       }));
   });
 
+  it("preserves explicit aggregate sleep scopes for a standalone link", async () => {
+    const requestedScopes = [DEEP_SLEEP_SCOPE, REM_SLEEP_SCOPE];
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: requestedScopes },
+      },
+    })).resolves.toMatchObject({
+      action: "create_join_link",
+      result: { status: "ok" },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        requestedVaultShareProjectionScopes: requestedScopes,
+      }));
+  });
+
   it("reads the current Linq group title on demand from the durable route", async () => {
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       displayName: "  Weekend   Warriors  ",
@@ -2693,12 +2729,12 @@ describe("hosted group join policy", () => {
       REM_SLEEP_SOURCES_SCOPE,
     ]);
 
-    expect(normalizeHostedGroupAccessOfferProjectionScopes([
+    expect(normalizeHostedVaultShareProjectionScopes([
       DEEP_SLEEP_SCOPE,
       REM_SLEEP_SCOPE,
     ])).toEqual([
-      DEEP_SLEEP_SOURCES_SCOPE,
-      REM_SLEEP_SOURCES_SCOPE,
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
     ]);
 
     const mergedSleep = mergeHostedGroupJoinPolicy({
@@ -2712,13 +2748,13 @@ describe("hosted group join policy", () => {
       },
       requestedVaultShareProjectionScopes: [DEEP_SLEEP_SCOPE],
     }).requestedVaultShareProjectionScopes;
-    expect(mergedSleep).toHaveLength(4);
+    expect(mergedSleep).toHaveLength(3);
     expect(mergedSleep).toEqual(expect.arrayContaining([
       DEEP_SLEEP_SCOPE,
-      DEEP_SLEEP_SOURCES_SCOPE,
       REM_SLEEP_SCOPE,
       { projectionKind: "activity-days.v0" },
     ]));
+    expect(mergedSleep).not.toContainEqual(DEEP_SLEEP_SOURCES_SCOPE);
     expect(mergedSleep).not.toContainEqual(REM_SLEEP_SOURCES_SCOPE);
 
     expect(readHostedGroupJoinPolicy({
@@ -3635,11 +3671,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it.each([
-    ["deep sleep", "deep-sleep-days.v0", "deep-sleep-sources-days.v1", "deep sleep"],
-    ["REM sleep", "rem-sleep-days.v0", "rem-sleep-sources-days.v1", "REM sleep"],
+    ["deep sleep", "deep-sleep-days.v0", "deep sleep"],
+    ["REM sleep", "rem-sleep-days.v0", "REM sleep"],
   ] as const)(
-    "upgrades legacy %s requests and discloses each source in the native offer",
-    async (_label, requestedProjectionKind, offeredProjectionKind, displayLabel) => {
+    "keeps an explicit aggregate %s request exact in the native offer",
+    async (_label, requestedProjectionKind, displayLabel) => {
       await expect(handleHostedRuntimeGroupTool({
         memberId: "member_container",
         request: {
@@ -3657,10 +3693,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           message:
-            `Sounds good. Like or heart this message to share your Murph profile name and ${displayLabel} (by-source sleep includes every available source's value and name, plus when Murph recorded that source value) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.`,
+            `Sounds good. Like or heart this message to share your Murph profile name and ${displayLabel} with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.`,
         }),
       );
-      const offeredScopes = [{ projectionKind: offeredProjectionKind }];
+      const offeredScopes = [{ projectionKind: requestedProjectionKind }];
       expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
         .toHaveBeenCalledWith(expect.objectContaining({
           requestedVaultShareProjectionScopes: offeredScopes,

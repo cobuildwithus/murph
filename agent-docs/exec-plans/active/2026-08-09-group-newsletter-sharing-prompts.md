@@ -121,12 +121,22 @@ Updated: 2026-08-09
   tests passed, the two production-runtime finalization regressions passed, and
   Assistant Engine typecheck passed.
 - ReviewGPT round 6 found that the comprehensive join-without-sharing path still
-  required 96 checkbox mutations. The recorded retrospective keeps the fix in
+  required 94 checkbox mutations. The recorded retrospective keeps the fix in
   the existing component-owned selected set: one clear action, exact individual
   re-enable controls, the unchanged submit boundary, and no new policy or owner.
 - Round-6 remediation proof: 305/305 Web group store/tool, join-client, and Linq
   provider tests passed; Web typecheck and scoped frontend lint passed. The real
   join component proves clear, failed-submit retention, exact one-choice
   restoration, and existing-member revoke-all submission.
+- ReviewGPT round 7 found that explicitly supplied aggregate Deep/REM sleep
+  scopes were still widened to source-aware variants. The recorded hard-cap
+  retrospective keeps source-aware canonicalization only for omission and makes
+  supplied v0/v1 lists exact through the existing owners. Round 8 requires an
+  explicit continuation decision after this correction lands.
+- Round-7 remediation proof: 314/314 Web group store/tool, join-client, and Linq
+  provider tests passed; Web typecheck and scoped frontend lint passed. Native
+  and standalone access offers preserve supplied aggregate and source-aware
+  sleep scopes exactly, while omission still resolves to the 97-scope,
+  94-choice comprehensive default.
 - Exact-head CI and corrected ReviewGPT rounds remain pending on the remediation
   candidate.

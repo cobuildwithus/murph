@@ -9,6 +9,7 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import { groupJoinPermissionsForDisplay } from "@/src/components/hosted-groups/group-join-permission-groups";
 import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
+import { resolveHostedGroupAccessOfferProjectionScopes } from "@/src/lib/hosted-groups/join-policy";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
@@ -99,7 +100,7 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
 let cleanupRender: (() => Promise<void>) | null = null;
 
 const comprehensiveGroupJoinPermissions =
-  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((projectionScope) => {
+  resolveHostedGroupAccessOfferProjectionScopes(undefined).map((projectionScope) => {
     const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
     return {
       description: `Shares ${projectionScopeKey}.`,

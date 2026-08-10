@@ -265,12 +265,11 @@ export function normalizeHostedVaultShareProjectionScopes(
 }
 
 /**
- * Current group access offers expose one Deep sleep permission and one REM
- * sleep permission. Their source-aware v1 scopes are the complete contracts.
- * Durable join policies keep legacy v0 scopes exact so the previous Web remains
- * able to show and revoke their independently authoritative grants on rollback.
+ * Comprehensive defaults expose one Deep sleep permission and one REM sleep
+ * permission. Their source-aware v1 scopes are the complete contracts. An
+ * explicitly supplied list stays exact, including legacy aggregate v0 scopes.
  */
-export function normalizeHostedGroupAccessOfferProjectionScopes(
+function normalizeHostedGroupAccessOfferDefaultProjectionScopes(
   value: unknown,
 ): HostedVaultShareProjectionScope[] {
   const offered = normalizeHostedVaultShareProjectionScopes(value).map((scope) => {
@@ -288,9 +287,11 @@ export function normalizeHostedGroupAccessOfferProjectionScopes(
 export function resolveHostedGroupAccessOfferProjectionScopes(
   value: unknown,
 ): HostedVaultShareProjectionScope[] {
-  return normalizeHostedGroupAccessOfferProjectionScopes(
-    value ?? HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
-  );
+  return value === undefined || value === null
+    ? normalizeHostedGroupAccessOfferDefaultProjectionScopes(
+        HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+      )
+    : normalizeHostedVaultShareProjectionScopes(value);
 }
 
 export function legacyHostedGroupSleepProjectionScope(
@@ -341,7 +342,7 @@ export function mergeHostedGroupJoinPolicy(input: {
   requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
 }): HostedGroupJoinPolicy {
   const existing = readHostedGroupJoinPolicy(input.existing);
-  const offered = normalizeHostedGroupAccessOfferProjectionScopes(
+  const offered = normalizeHostedVaultShareProjectionScopes(
     input.requestedVaultShareProjectionScopes,
   );
   return hostedGroupJoinPolicyFromScopes(

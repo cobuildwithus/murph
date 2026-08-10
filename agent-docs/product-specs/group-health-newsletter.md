@@ -67,12 +67,14 @@ granting it. A comprehensive checkpoint provides one clear-all action so joining
 without optional health or email sharing does not require dozens of individual
 mutations; members can re-enable exact choices before submitting. When Murph
 supplies an explicit narrower scope list, the server
-preserves that exact narrow request. A new consent checkpoint replaces the
-group's prior requested policy instead of unioning it, revokes stale unaccepted
-offers, and reuses an active native offer only when its frozen scopes match
-exactly. This replacement changes requested consent only; it does not revoke
-permissions that members already granted. When an existing member reopens the
-join page, the editable list is the union of the current request and every
+preserves that exact narrow request, including an aggregate Deep or REM sleep
+scope. Only the omitted comprehensive default collapses each aggregate and
+source-aware sleep pair to the single source-aware permission. A new consent
+checkpoint replaces the group's prior requested policy instead of unioning it,
+revokes stale unaccepted offers, and reuses an active native offer only when its
+frozen scopes match exactly. This replacement changes requested consent only;
+it does not revoke permissions that members already granted. When an existing
+member reopens the join page, the editable list is the union of the current request and every
 permission that member still actively shares with the group, so a narrower
 future request cannot hide an older grant from the member's revoke controls.
 New invitees see only the current requested checkpoint.
@@ -94,8 +96,9 @@ or recovery owner.
 
 Channel fallback adapters preserve whether a projection array was supplied.
 An explicit empty scope or kind array remains empty through Web; only omission
-selects the complete default permission set. This distinction applies equally
-to native offers and standalone join links.
+selects the complete default permission set and canonicalizes its duplicate
+aggregate/source-aware sleep pairs. This distinction applies equally to native
+offers and standalone join links.
 
 ### Newsletter automation — the schedule + config
 
