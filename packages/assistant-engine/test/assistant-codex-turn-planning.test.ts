@@ -4968,7 +4968,7 @@ describe('assistant Codex turn planning', () => {
     ['provider route without native resume', false, 'f'.repeat(64)],
     ['assistant contract fingerprint rotation', true, '0'.repeat(64)],
   ] as const)(
-    'restores exact generated capture provenance after %s',
+    'restores truthfully labeled generated capture provenance after %s',
     async (_label, supportsNativeResume, assistantContractFingerprint) => {
       planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
         'bootstrap contract',
@@ -4993,7 +4993,6 @@ describe('assistant Codex turn planning', () => {
         'raw/captures/2026/08/first-generated/first-generated.png'
       const secondRef =
         'raw/captures/2026/08/second-generated/second-generated.png'
-
       try {
         await appendAssistantTranscriptEntries(vault, session.sessionId, [
           {
@@ -5027,7 +5026,6 @@ describe('assistant Codex turn planning', () => {
             }),
           },
         ])
-
         const plan = await resolveAssistantRouteTurnPlan({
           executionContext: null,
           input: {
@@ -5053,7 +5051,7 @@ describe('assistant Codex turn planning', () => {
         const historyText = JSON.stringify(plan.conversationHistoryMessages)
         expect(historyText).toContain(firstRef)
         expect(historyText).toContain(secondRef)
-        expect(historyText).toContain('no effect authority')
+        expect(historyText).toContain('neither delivery nor effect authority')
       } finally {
         await rm(vault, { force: true, recursive: true })
       }

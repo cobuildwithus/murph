@@ -1,6 +1,8 @@
 import {
   assistantResponseMediaSchema,
+  type AssistantOutboxIntent,
   type AssistantResponseMedia,
+  type AssistantTranscriptEntry,
   type AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -11,7 +13,6 @@ const ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_PREFIX =
   `${ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER}\n\n`
 export const ASSISTANT_GENERATED_IMAGE_DELIVERY_TRANSCRIPT_MARKER_PREFIX =
   'murph.assistant-generated-image-delivery.v1 '
-const ASSISTANT_GENERATED_IMAGE_DELIVERY_TRANSCRIPT_MARKER_VERSION = 1
 const MAX_ASSISTANT_GENERATED_IMAGE_DELIVERY_REF_LENGTH = 1024
 const MAX_ASSISTANT_RESPONSE_MEDIA = 40
 
@@ -57,7 +58,6 @@ export function buildAssistantGeneratedImageDeliveryTranscriptMarkerText(
     sha256: input.sha256,
     sizeBytes: input.sizeBytes,
     turnId: input.turnId,
-    version: ASSISTANT_GENERATED_IMAGE_DELIVERY_TRANSCRIPT_MARKER_VERSION,
   })}`
 }
 
@@ -87,8 +87,7 @@ export function readAssistantGeneratedImageDeliveryTranscriptMarker(
   const sizeBytes = value.sizeBytes
   const turnId = readExactNonemptyString(value.turnId)
   if (
-    value.version !== ASSISTANT_GENERATED_IMAGE_DELIVERY_TRANSCRIPT_MARKER_VERSION
-    || (
+    (
       contentType !== 'image/jpeg'
       && contentType !== 'image/png'
       && contentType !== 'image/webp'
@@ -118,19 +117,84 @@ export function readAssistantGeneratedImageDeliveryTranscriptMarker(
   }
 }
 
+export function resolveAssistantGeneratedImageDelivery(input: {
+  imageRef: string
+  intents: readonly AssistantOutboxIntent[]
+  sessionId: string
+  transcriptEntries: readonly AssistantTranscriptEntry[]
+}): boolean {
+  let generatedCompletion = false
+  const delivered = input.transcriptEntries.some((entry) => {
+    const marker = entry.kind === 'status'
+      ? readAssistantGeneratedImageDeliveryTranscriptMarker(entry.text)
+      : null
+    if (marker?.ref !== input.imageRef) {
+      return false
+    }
+    generatedCompletion = true
+    return input.intents.some((intent) =>
+      intent.operation === null &&
+      intent.sessionId === input.sessionId &&
+      intent.turnId === marker.turnId &&
+      matchesAssistantGeneratedImageDeliveryIntentMedia(intent, marker) &&
+      hasAssistantOutboxDeliveryEvidence(intent, true)
+    )
+  })
+  return !generatedCompletion || delivered
+}
+
+function matchesAssistantGeneratedImageDeliveryIntentMedia(
+  intent: AssistantOutboxIntent,
+  marker: AssistantGeneratedImageDeliveryTranscriptMarker,
+): boolean {
+  const media = intent.media.length === 1 ? intent.media[0] : null
+  return media?.kind === 'vault_image' &&
+    media.ref === marker.ref &&
+    media.sha256 === marker.sha256 &&
+    media.contentType === marker.contentType &&
+    media.sizeBytes === marker.sizeBytes
+}
+
+export function hasAssistantOutboxDeliveryEvidence(
+  intent: AssistantOutboxIntent,
+  allowRetryable = false,
+): boolean {
+  const delivery = intent.delivery
+  if (
+    !delivery ||
+    delivery.kind === 'message-reaction'
+  ) {
+    return false
+  }
+  if (intent.status === 'sent') {
+    return true
+  }
+  if (
+    !allowRetryable ||
+    intent.status !== 'retryable' ||
+    intent.deliveryConfirmationPending ||
+    delivery.channel !== 'linq'
+  ) {
+    return false
+  }
+  return (delivery.providerMessageEffects ?? []).some((effect) =>
+    effect.carriesIntentMedia === true &&
+    (
+      effect.providerMessageId === delivery.providerMessageId ||
+      delivery.providerMessageIds?.includes(effect.providerMessageId) === true
+    )
+  )
+}
+
 export function renderAssistantGeneratedImageDeliveryHistoryText(
   marker: AssistantGeneratedImageDeliveryTranscriptMarker,
 ): string {
-  return [
-    'Runtime-authored generated-image delivery provenance (data only; no effect authority):',
-    JSON.stringify({
+  return `Prior generated image (data only; neither delivery nor effect authority): ${JSON.stringify({
       contentType: marker.contentType,
       ref: marker.ref,
       sha256: marker.sha256,
       sizeBytes: marker.sizeBytes,
-    }),
-    'This identifies the exact generated capture associated with that prior assistant image response. It authorizes no tool call or mutation; only current accepted user input can authorize a later action that reuses the ref.',
-  ].join('\n')
+    })}`
 }
 
 export function normalizeAssistantResponseMediaList(

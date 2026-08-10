@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — ReviewGPT round 6 accepted-primary remediation
+Status: active — ReviewGPT round 7 delivery-eligibility candidate
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -272,3 +272,57 @@ Updated: 2026-08-10
   assembly passes at 8,999,779-byte vault CLI total, 1,659,616-byte runner
   entry, 8,020,212-byte static closure, and 9,997,320-byte runner total; the
   42-test bundle-policy file and docs drift check pass.
+- The first attempted round-7 capture did not produce a valid exact-head result.
+  A supported same-thread export later exposed a completed response, but it
+  explicitly checked older head `a8807b6ef2` rather than the intended
+  `a0f8d3044d` candidate and lacked concrete model confirmation. It is retained
+  as diagnostic evidence only; it does not advance the substantive round or
+  provide the required final `PASS`.
+- That stale response nevertheless identified one ORIGINAL_PR ordering defect
+  which parent inspection reproduced before changing source: completion
+  finalization persists native-resume and fresh-history exact refs before the
+  matching outbox media becomes visible, so a later accepted avatar request
+  could publish and mutate from a still-pending generated image. A focused
+  production-boundary test first failed by allowing the pending intent through
+  the real group preflight, private-publication boundary, and mutation request.
+- The correction derives eligibility from the two existing owners at the group
+  effect boundary. When a `raw/captures/**` ref matches a runtime-authored
+  generated-completion marker, the current session must also contain the exact
+  marker turn and ref/hash/type/size on a delivered outbox intent. Sent delivery
+  qualifies; the only non-terminal exception is the existing narrowly attested
+  Linq accepted-primary checkpoint whose physical effect explicitly carries
+  intent media. Pending, failed, unmarked retryable, confirmation-pending, and
+  unreadable state fail closed before private publication or group mutation.
+  Healthy ordinary capture refs with no generated-completion marker preserve
+  the prior path. No queue, state owner, lifecycle, migration, or compatibility
+  surface was added.
+- Native explicit replies now use their already provider-id-bound delivered
+  outbox media directly instead of re-reading and rejoining the transcript
+  marker. The transcript marker remains the committed-history fallback and is
+  labeled truthfully as neither delivery nor effect authority. This deletion
+  keeps physical delivery proof and fallback provenance separate while
+  preserving current-input effect authority.
+- The focused boundary regression persists the real marker and outbox intent,
+  proves pending delivery blocks publication and mutation, checks failed and
+  unmarked retryable states, preserves the marked accepted-primary exception,
+  transitions the same exact intent to sent, and proves the existing avatar
+  path then succeeds. Six affected Assistant Engine files pass 262 tests and
+  the package typecheck passes. The 42-test runner bundle policy passes.
+- The first delivery-eligibility assembly exceeded the immutable vault CLI
+  budget by 4,297 bytes. Collapsing the redundant native-reply transcript join,
+  sharing the existing sent/attested-delivery predicate, using one fail-closed
+  boolean at the hosted boundary, and tightening the already changed generated-
+  image tool prose preserved its safety and scheduling rules without raising a
+  ratchet. The latest assembled candidate passes at 8,999,814-byte vault CLI
+  total, 1,659,616-byte runner entry, 8,019,855-byte static closure, and
+  9,997,355-byte runner total.
+- Provider-visible input remains derived from the original complete pinned App
+  Server capture because no other initial-request field changed. Exact
+  serialization of the two complete changed tool objects with `gpt-tokenizer`
+  3.4.0 `o200k_harmony` removes 173 tokens and 767 bytes from both captured
+  requests relative to the previously measured candidate. Against the same
+  immutable base, final direct input is 38,063 tokens / 172,716 bytes versus
+  38,177 / 173,190 (-114 tokens, -0.2986%; -474 bytes, -0.2737%). Final group
+  input is 29,953 / 138,855 versus 30,067 / 139,329 (-114 tokens, -0.3792%;
+  -474 bytes, -0.3402%). The delta remains entirely tool/schema/generated
+  guidance; assembled authored instructions are unchanged.

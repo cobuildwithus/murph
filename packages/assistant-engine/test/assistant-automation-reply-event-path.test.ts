@@ -746,7 +746,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).toContain('Generated image')
     expect(prompt).toContain('no effect authority')
     expect(replyEventPathMocks.listAssistantTranscriptEntries)
-      .toHaveBeenCalledTimes(1)
+      .not.toHaveBeenCalled()
   })
 
   it('quotes the visible transcript when a media-only voice delivery fell back to text', async () => {

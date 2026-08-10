@@ -3907,6 +3907,20 @@ async function executeGroupTool(input: {
       }))
     }
 
+    if (
+      input.request.avatar.source === 'image_ref' &&
+      input.request.avatar.imageRef.startsWith('raw/captures/')
+    ) {
+      const delivered = await input.hostedToolContext
+        ?.verifyGeneratedImageDelivery?.(input.request.avatar.imageRef)
+      if (delivered === false) {
+        return toolTextResult(
+          false,
+          'generated image must be visible before it can become the group avatar',
+        )
+      }
+    }
+
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
       captureRequestId: input.toolCallId,

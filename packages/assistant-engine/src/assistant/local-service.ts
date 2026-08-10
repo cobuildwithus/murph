@@ -30,6 +30,7 @@ import {
 } from './outbox.js'
 import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
+  resolveAssistantGeneratedImageDelivery,
 } from './response-media.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { refreshAssistantStatusSnapshotLocal } from './status.js'
@@ -809,6 +810,22 @@ export async function sendAssistantMessageLocal(
                 ),
               messageInput: input,
               pendingVaultFilesAvailable,
+              verifyGeneratedImageDelivery: async (imageRef) => {
+                try {
+                  const [intents, transcriptEntries] = await Promise.all([
+                    runtimeState.outbox.listIntents(),
+                    runtimeState.transcripts.list(currentSession.sessionId),
+                  ])
+                  return resolveAssistantGeneratedImageDelivery({
+                    imageRef,
+                    intents,
+                    sessionId: currentSession.sessionId,
+                    transcriptEntries,
+                  })
+                } catch {
+                  return false
+                }
+              },
               route,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {

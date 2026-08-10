@@ -43,6 +43,19 @@ import {
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from "../src/assistant/group-shared-read-limits.ts";
+import {
+  createAssistantOutboxIntent,
+  listAssistantOutboxIntents,
+  saveAssistantOutboxIntent,
+} from "../src/assistant/outbox.ts";
+import {
+  buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
+  resolveAssistantGeneratedImageDelivery,
+} from "../src/assistant/response-media.ts";
+import {
+  appendAssistantTranscriptEntries,
+  listAssistantTranscriptEntries,
+} from "../src/assistant/store.ts";
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from "../src/assistant/message-target-selection.ts";
@@ -4113,6 +4126,238 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
+  it("keeps an undelivered generated completion image out of a later avatar update", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-pending-"));
+    const imageRef = "raw/captures/2026/08/pending-avatar/avatar.png";
+    const sessionId = "session_pending_generated_avatar";
+    const turnId = "turn_pending_generated_avatar";
+    const media = {
+      alt: "Pending generated avatar",
+      contentType: "image/png",
+      filename: "avatar.png",
+      kind: "vault_image",
+      ref: imageRef,
+      sha256: "a".repeat(64),
+      sizeBytes: 68,
+      source: "gpt-image-2",
+    } as const;
+    try {
+      await mkdir(dirname(join(vaultRoot, imageRef)), { recursive: true });
+      await writeFile(
+        join(vaultRoot, imageRef),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+      const transcriptEntries = await appendAssistantTranscriptEntries(
+        vaultRoot,
+        sessionId,
+        [{
+          kind: "status",
+          text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+            contentType: media.contentType,
+            deliveryContextOrdinal: 0,
+            ref: media.ref,
+            sha256: media.sha256,
+            sizeBytes: media.sizeBytes,
+            turnId,
+          }),
+        }],
+      );
+      const intent = await createAssistantOutboxIntent({
+        channel: "linq",
+        explicitTarget: "thread-pending-avatar",
+        media: [media],
+        message: "Pending generated avatar",
+        sessionId,
+        threadId: "thread-pending-avatar",
+        threadIsDirect: false,
+        turnId,
+        vault: vaultRoot,
+      });
+
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+        request.action === "preflight_set_chat_avatar"
+          ? {
+              action: "preflight_set_chat_avatar",
+              result: { status: "ok" },
+            }
+          : {
+              action: "set_chat_avatar",
+              result: { status: "requested" },
+            });
+      const privateImageUrlPublish = vi.fn<
+        AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+      >(async () => ({
+        expiresAt: "2033-05-18T03:33:20.000Z",
+        url: SIGNED_PRIVATE_IMAGE_URL,
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        alt: "Our group avatar",
+        avatarSource: "image_ref",
+        imageRef,
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_pending_avatar",
+            conversationScope: "group",
+            inboundMailboxItemIds: ["mailbox_pending_avatar"],
+            originSessionId: sessionId,
+            recipientKey: "recipient_pending_avatar",
+          }),
+          groupRequest,
+          privateImageUrlPublish,
+          verifyGeneratedImageDelivery: async (requestedRef) =>
+            resolveAssistantGeneratedImageDelivery({
+              imageRef: requestedRef,
+              intents: await listAssistantOutboxIntents(vaultRoot),
+              sessionId,
+              transcriptEntries: await listAssistantTranscriptEntries(
+                vaultRoot,
+                sessionId,
+              ),
+            }),
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult).toEqual({
+        contentItems: [{
+          text: "generated image must be visible before it can become the group avatar",
+          type: "inputText",
+        }],
+        success: false,
+      });
+      expect(groupRequest).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledWith({
+        action: "preflight_set_chat_avatar",
+      });
+      expect(privateImageUrlPublish).not.toHaveBeenCalled();
+
+      const sentAt = "2026-08-10T12:00:00.000Z";
+      const delivered = {
+        channel: "linq",
+        idempotencyKey: "pending-avatar-delivery",
+        messageLength: intent.message.length,
+        providerMessageEffects: [{
+          carriesIntentMedia: true as const,
+          message: intent.message,
+          providerMessageId: "linq-message-pending-avatar",
+        }],
+        providerMessageId: "linq-message-pending-avatar",
+        providerMessageIds: ["linq-message-pending-avatar"],
+        providerThreadId: "thread-pending-avatar",
+        sentAt,
+        target: "thread-pending-avatar",
+        targetKind: "thread" as const,
+      };
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
+        intents: [intent],
+        sessionId,
+        transcriptEntries: [],
+      })).toBe(true);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: {
+            ...delivered,
+            providerMessageEffects: delivered.providerMessageEffects.map(
+              ({ carriesIntentMedia: _ignored, ...effect }) => effect,
+            ),
+          },
+          status: "retryable",
+        }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: delivered,
+          status: "retryable",
+        }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(true);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: delivered,
+          deliveryConfirmationPending: true,
+          status: "retryable",
+        }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        imageRef,
+        intents: [{ ...intent, status: "failed" }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...intent,
+        delivery: delivered,
+        sentAt,
+        status: "sent",
+        updatedAt: sentAt,
+      });
+      const deliveredResult = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_pending_avatar",
+            conversationScope: "group",
+            inboundMailboxItemIds: ["mailbox_pending_avatar"],
+            originSessionId: sessionId,
+            recipientKey: "recipient_pending_avatar",
+          }),
+          groupRequest,
+          privateImageUrlPublish,
+          verifyGeneratedImageDelivery: async (requestedRef) =>
+            resolveAssistantGeneratedImageDelivery({
+              imageRef: requestedRef,
+              intents: await listAssistantOutboxIntents(vaultRoot),
+              sessionId,
+              transcriptEntries: await listAssistantTranscriptEntries(
+                vaultRoot,
+                sessionId,
+              ),
+            }),
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(deliveredResult.rpcResult.success).toBe(true);
+      expect(groupRequest).toHaveBeenCalledTimes(3);
+      expect(privateImageUrlPublish).toHaveBeenCalledOnce();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("shows bounded provider diagnostics for a rejected group avatar update", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
     try {
@@ -5569,6 +5814,9 @@ function createGroupHostedToolContext(input: {
   persistGeneratedImageCapture?: NonNullable<
     AssistantHostedToolContext["persistGeneratedImageCapture"]
   >;
+  verifyGeneratedImageDelivery?: NonNullable<
+    AssistantHostedToolContext["verifyGeneratedImageDelivery"]
+  >;
 } = {}): AssistantHostedToolContext {
   const currentUserActionScope = input.currentUserActionScope ?? (() => null);
   const context = {
@@ -5618,6 +5866,7 @@ function createGroupHostedToolContext(input: {
     privateImageUrlPublisher: input.privateImageUrlPublish
       ? { publishPrivateImageUrl: input.privateImageUrlPublish }
       : null,
+    verifyGeneratedImageDelivery: input.verifyGeneratedImageDelivery,
     sendVaultFile: async () => {
       throw new Error("Vault-file sending is unavailable for this test.");
     },

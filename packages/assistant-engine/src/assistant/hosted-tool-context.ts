@@ -160,6 +160,7 @@ export interface AssistantHostedToolContext {
   currentHostedMailboxItemIds(): readonly string[]
   currentHostedImageCompletionEffectScope?():
     AssistantHostedImageCompletionEffectScope | null
+  verifyGeneratedImageDelivery?(imageRef: string): Promise<boolean>
   currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
   claimIMessageContactAssistantInputId?(): string | null
@@ -212,6 +213,7 @@ export function createAssistantHostedToolContext(input: {
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
   recordNewsletterPendingDeliveryIntentId?: (intentId: string) => void
+  verifyGeneratedImageDelivery?: (imageRef: string) => Promise<boolean>
   sendVaultFile?: (
     ref: string,
     toolCallId?: string | null,
@@ -506,6 +508,7 @@ export function createAssistantHostedToolContext(input: {
     },
     currentHostedImageCompletionEffectScope:
       readCurrentHostedImageCompletionEffectScope,
+    verifyGeneratedImageDelivery: input.verifyGeneratedImageDelivery,
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null

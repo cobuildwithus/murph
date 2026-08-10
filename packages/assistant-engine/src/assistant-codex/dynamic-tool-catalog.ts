@@ -117,9 +117,9 @@ export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 export const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
-  `Optional ordered JPG, PNG, or WebP image refs to use as visual references (up to 16). Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated image. Describe in the prompt how image 1, image 2, etc. should be used.`
+  `Optional ordered JPG/PNG/WebP refs (max 16): raw/inbox/**, raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Explain roles; include the character sheet whenever Murph itself appears.`
 const GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION =
-  `Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate". Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated avatar.`
+  `Optional ordered JPG/PNG/WebP refs for generated avatars: raw/inbox/**, raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Explain roles; include the character sheet when Murph appears.`
 
 export const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
@@ -263,7 +263,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted accepted-message turns start generation in the background and receive private media in a later trusted system input. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response. Local runs remain synchronous and also save the image under CODEX_HOME/generated_images.`,
+    `Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response. Local runs stay synchronous and save under CODEX_HOME/generated_images.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
