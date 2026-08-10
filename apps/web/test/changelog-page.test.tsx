@@ -185,7 +185,9 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Private attachment");
     expect(markup.match(/>Usage credit</gu)).toHaveLength(7);
     expect(markup.toLowerCase()).not.toContain(RETIRED_USAGE_TERM);
-    expect(markup).toContain("Ways to earn Murph time");
+    expect(markup).not.toContain("Ways to earn Murph time");
+    expect(markup).not.toContain("Credit belongs to the room");
+    expect(markup).not.toContain("Group time");
     expect(markup).toContain("Live workout");
     expect(markup).toContain("Fasting glucose");
     expect(markup).toContain("Current browser task");

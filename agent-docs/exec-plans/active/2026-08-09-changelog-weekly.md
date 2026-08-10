@@ -131,6 +131,12 @@ Updated: 2026-08-10
   repeated the same parallel-authority mechanism: they showed Polar as an Apple
   Health relay and assigned live status to guide-only relay sources, contrary to
   the production `/connect` owners.
+- Final ReviewGPT round 3 verified every earlier correction and found one last
+  retained fixture from the same mechanism: the public referral visual assigned
+  all group-mission credit to the room even though the production owner credits
+  the personal or group Murph where the mission was accepted. Deleted the
+  visual and added render-level assertions against unconditional beneficiary
+  language; `/refer` remains the sole owner of current reward destinations.
 
 ## Decisions
 
@@ -159,10 +165,11 @@ Updated: 2026-08-10
   visual unless it reuses canonical data/components or has a focused contract
   assertion against the owner. Do not add synchronization machinery.
 - Re-audited all 57 catch-up items and 51 associated visuals under that rule.
-  Six items remain intentionally text-only. Deleted the two contradictory
-  health-route/status visuals. The retained 49 are bounded as 20 synthetic
-  output examples (message, table, card, chart, or artifact shape), 15
-  sequence/recovery diagrams (ordering and negative branches), and 14
+  Six items were intentionally text-only. Deleted two contradictory
+  health-route/status visuals and the unconditional referral-beneficiary
+  visual. The retained 48 are bounded as 20 synthetic output examples
+  (message, table, card, chart, or artifact shape), 15 sequence/recovery
+  diagrams (ordering and negative branches), and 13
   choice/handoff/consent illustrations tied to the existing referral, billing,
   message-routing, authorization, settings, and automation owners. The Apple
   Health entry now has a focused test derived from the production relay-source

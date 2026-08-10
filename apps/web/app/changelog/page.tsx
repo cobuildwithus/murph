@@ -58,16 +58,6 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
-  "public-referral-home": (
-    <PreferenceCard
-      label="Ways to earn Murph time"
-      meta="Current rewards"
-      entries={[
-        { label: "Share your link", note: "After a qualifying activation", value: "Usage days" },
-        { label: "Complete a group mission", note: "Credit belongs to the room", value: "Group time" },
-      ]}
-    />
-  ),
   "murph-max-plan": (
     <PreferenceCard
       label="Murph Max"
