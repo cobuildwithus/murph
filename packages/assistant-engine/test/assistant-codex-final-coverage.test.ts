@@ -27,6 +27,25 @@ const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
   'memories.use_memories': false,
   web_search: 'disabled',
 } as const
+const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
+  'features.shell_tool=true',
+  'features.apps=true',
+  'memories.use_memories=true',
+  'web_search="live"',
+  'memories.generate_memories=false',
+  'web_search="disabled"',
+  'features.web_search_request=false',
+  'features.standalone_web_search=false',
+  'features.apps=false',
+  'features.enable_mcp_apps=false',
+  'features.browser_use=false',
+  'features.plugins=false',
+  'features.multi_agent=false',
+  'features.multi_agent_v2=false',
+  'features.tool_suggest=false',
+  'memories.use_memories=false',
+  'features.shell_tool=false',
+] as const
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
@@ -860,6 +879,8 @@ describe('Codex model catalog', () => {
       codexConfigOverrides: [
         'features.shell_tool=true',
         'features.apps=true',
+        'memories.use_memories=true',
+        'web_search="live"',
       ],
       hostedImageCompletionEffectRestriction: restriction,
       prompt: 'Complete the trusted image turn.',
@@ -927,7 +948,9 @@ describe('Codex model catalog', () => {
         onboardingGuidanceInjected: false,
         planningDiagnostics: createRoutePlanningDiagnostics(),
         promptCacheMetadata: null,
-        resume: null,
+        resume: {
+          codexThreadId: 'thread-completion-native-authority',
+        },
         sessionContext: undefined,
         systemPrompt: 'Trusted completion system prompt.',
         turnContextPrompt: null,
@@ -955,15 +978,23 @@ describe('Codex model catalog', () => {
     expect(completionProviderInput?.codexThreadConfig).toEqual(
       EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
     )
+    expect(completionProviderInput?.codexConfigOverrides).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES,
+    )
     expect(completionProviderInput).toMatchObject({
       dynamicTools,
       environments: [],
       hostedToolContext,
       materializeWorkspaceArtifacts,
       progressDelivery,
-      providerFetch,
-      publicInternetFetch,
+      providerFetch: null,
+      publicInternetFetch: null,
       requireHostedPrivateImageDelivery: true,
+      resume: {
+        codexThreadId: 'thread-completion-native-authority',
+      },
+      vaultRoot: '/vaults/test',
+      workingDirectory: '/work',
     })
 
     currentCompletionScope = null
@@ -985,9 +1016,23 @@ describe('Codex model catalog', () => {
       sandbox: 'danger-full-access',
     })
     expect(foregroundProviderInput?.codexThreadConfig).toBeNull()
+    expect(foregroundProviderInput?.codexConfigOverrides).toEqual(
+      input.codexConfigOverrides,
+    )
     expect(foregroundProviderInput?.environments).toEqual([
       { PRIVATE_ENVIRONMENT: 'must-not-pass' },
     ])
+    expect(foregroundProviderInput).toMatchObject({
+      hostedToolContext,
+      materializeWorkspaceArtifacts,
+      progressDelivery,
+      providerFetch,
+      publicInternetFetch,
+      requireHostedPrivateImageDelivery: true,
+      resume: {
+        codexThreadId: 'thread-completion-native-authority',
+      },
+    })
   })
 
   it('keeps only song generation while denying native creative-notification capabilities', async () => {

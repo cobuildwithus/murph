@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — round 11 diagnostic finding remediated; valid round 11 and final base reconciliation pending
+Status: active — round 11 diagnostic remediation verified locally; valid round 11 and exact-head gates pending
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -555,12 +555,36 @@ Updated: 2026-08-10
   capability set.
 - The accepted correction reuses the turn runner's existing read-only sandbox
   and native-capabilities-disabled thread config only while the trusted image
-  completion scope is current. It deliberately preserves native resume, the
-  hosted tool context, workspace materializer, progress delivery, private-image
-  requirement, and exact media or physical-note dynamic paths. When a later
-  accepted foreground input is already current, the existing scope reader
-  restores the ordinary native route. No owner, queue, state machine,
-  compatibility path, or alternate authority source was added. The provider-
-  boundary regression failed before the source correction with
-  `danger-full-access` and no thread config, then passed with all 23 focused
-  tests.
+  completion scope is current. Because native resume does not resend thread
+  config, the same existing capability disables are appended to process config
+  after any requested overrides; injected environments and hosted fetch
+  adapters are removed for the completion. Native resume, the hosted tool
+  context, workspace materializer, progress delivery, private-image
+  requirement, and exact media or physical-note dynamic paths remain wired.
+  When a later accepted foreground input is already current, the existing
+  scope reader restores the ordinary native route. No owner, queue, state
+  machine, compatibility path, or alternate authority source was added. The
+  provider-boundary regression first failed with `danger-full-access` and no
+  thread config, then exposed the still-enabled process overrides after the
+  partial correction; it now passes all 23 focused tests while preserving the
+  resume id and exact hosted effects.
+- Current `main` advanced again while the correction was in progress. The
+  ordinary merge preserved both this PR's generated-group-photo changelog item
+  and main's Starter, web-search, and appointment-reminder entries. The two
+  focused changelog files pass 39 tests after the three-file resolution.
+- Post-merge inspection found that current `main` had strengthened the same
+  native restriction boundary with process-level config overrides. The
+  combined correction appends the full native-disable set after requested
+  overrides for the trusted completion, removes its hosted fetch adapters, and
+  keeps the hosted effect context, materializer, progress delivery, private-
+  image requirement, native resume, and later foreground route intact. Five
+  affected runner files pass 397 tests; the Assistant Engine typecheck passes.
+  The merged Web changelog/design proof set passes 53 tests, and the full Web
+  typecheck passes after its required Health Commons and Prisma generators.
+- Post-correction verification passes 281 tests across the seven affected
+  Assistant Engine files with 55 explicitly credential-gated live-provider
+  cases skipped, plus the Assistant Engine typecheck and 42 runner bundle-
+  policy tests. Fresh exact assembly passes every CLI parity probe at an
+  8,691,853-byte Vault CLI total, 1,596,168-byte runner entry, 7,729,067-byte
+  static boot closure, and 9,620,735-byte runner total without a ratchet
+  change. Docs drift, whitespace, and candidate identifier/secret scans pass.
