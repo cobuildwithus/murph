@@ -2,7 +2,10 @@ import {
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   type HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
-import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionStructuredLogRecord,
+  deriveHostedExecutionErrorCode,
+} from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -6886,7 +6889,7 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
-            errorCodeDetail: "runtime_phase:foreground.pass",
+            errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
             errorDetail: "Missing required file \"vault.json\".",
           },
           error: "Hosted execution runtime failed.",
@@ -6912,19 +6915,19 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
-        errorCodeDetail: "runtime_phase:foreground.pass",
+        errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
         errorDetailPresent: true,
         payloadDetailsPresent: true,
       },
-      message:
-        "Hosted execution runtime failed. Code: runtime_phase:foreground.pass. Status: 500.",
+      message: "Hosted execution runtime failed. Code: runtime_error. Status: 500.",
       name: "Error",
       status: 500,
       statusCode: 500,
     });
+    expect(deriveHostedExecutionErrorCode(thrown)).toBe("runtime_error");
     expect(buildHostedRunnerRedactedErrorJson(thrown)).toMatchObject({
       errorCode: "runtime_error",
-      errorCodeDetail: "runtime_phase:foreground.pass",
+      errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
     });
     expect(JSON.stringify(thrown)).not.toContain("vault.json");
   });

@@ -8,8 +8,9 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
-import type {
-  HostedWorkspaceInvocationProcessingMode,
+import {
+  isHostedRuntimeFailurePhaseCode,
+  type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
 import {
@@ -3340,8 +3341,11 @@ function formatHostedRunnerContainerErrorMessage(input: {
   const cause = readHostedRunnerContainerDiagnosticFragment(input.details?.errorCause, {
     redactEnvKeys: true,
   });
+  const transportedCodeDetail = input.details?.errorCodeDetail;
   const code = readHostedRunnerContainerDiagnosticFragment(
-    input.details?.errorCodeDetail ?? input.code,
+    isHostedRuntimeFailurePhaseCode(transportedCodeDetail)
+      ? input.code ?? undefined
+      : transportedCodeDetail ?? input.code ?? undefined,
     { redactEnvKeys: false },
   );
 

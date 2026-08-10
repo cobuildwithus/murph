@@ -94,7 +94,7 @@ describe("runtime invocation transport failure fence handling", () => {
     Object.assign(invocationError, {
       code: "runtime_error",
       details: {
-        errorCodeDetail: "runtime_phase:foreground.pass",
+        errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
       },
     });
     const harness = await createTransportFailureHarness({
@@ -123,7 +123,7 @@ describe("runtime invocation transport failure fence handling", () => {
         redactedJson: expect.objectContaining({
           attemptStillActive: true,
           errorCode: "runtime_error",
-          errorCodeDetail: "runtime_phase:foreground.pass",
+          errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
           fenceCleared: false,
           safeErrorCause:
             `${safeCausePrefix}${"y".repeat(319 - safeCausePrefix.length)}…`,

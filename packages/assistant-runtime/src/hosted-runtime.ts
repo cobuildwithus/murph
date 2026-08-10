@@ -4,7 +4,7 @@ import path from "node:path";
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
-  buildHostedRuntimeFailurePhaseCode,
+  attachHostedRuntimeFailurePhaseCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeFailurePhaseName,
   type HostedRuntimeLatencyPhaseBreakdown,
@@ -4285,28 +4285,23 @@ function attachHostedRuntimeFailurePhase(
   error: unknown,
   phase: HostedRuntimePhaseName,
 ): unknown {
-  if (!(error instanceof Error) || hasHostedRuntimeDiagnosticErrorCode(error)) {
+  if (!(error instanceof Error) || hasMeaningfulHostedRuntimeDiagnosticCode(error)) {
     return error;
   }
 
-  // The container-to-Worker boundary already carries short `.errorCode`
-  // values into the metadata-only accepted-attempt log. Add the phase only to
-  // otherwise-generic extensible errors, preserving every existing typed code
-  // and all retry/error-class behavior.
-  try {
-    Reflect.set(error, "errorCode", buildHostedRuntimeFailurePhaseCode(phase));
-  } catch {
-    // Diagnostics are fail-open: a frozen third-party error must keep its
-    // original behavior even when it cannot accept the optional phase tag.
-  }
-  return error;
+  // Keep the phase separate from `.code` and `.errorCode`: those properties
+  // own canonical classification. The container explicitly reads the hidden
+  // phase marker only for otherwise-generic errors.
+  return attachHostedRuntimeFailurePhaseCode(error, phase);
 }
 
-function hasHostedRuntimeDiagnosticErrorCode(error: Error): boolean {
+function hasMeaningfulHostedRuntimeDiagnosticCode(error: Error): boolean {
   try {
     const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-    return typeof diagnostics?.errorCodeDetail === "string"
-      && diagnostics.errorCodeDetail.trim().length > 0;
+    const detail = typeof diagnostics?.errorCodeDetail === "string"
+      ? diagnostics.errorCodeDetail.trim().toLowerCase()
+      : "";
+    return detail.length > 0 && detail !== "runtime_error";
   } catch {
     // A hostile getter or proxy must not let optional diagnostics replace the
     // original runtime failure.

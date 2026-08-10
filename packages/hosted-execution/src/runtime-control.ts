@@ -83,6 +83,9 @@ const HOSTED_RUNTIME_FAILURE_PHASE_CODES = new Set<string>(
   ),
 );
 
+const HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY =
+  "hostedRuntimeFailurePhaseCode";
+
 export function buildHostedRuntimeFailurePhaseCode(
   phase: HostedRuntimeFailurePhaseName,
 ): HostedRuntimeFailurePhaseCode {
@@ -94,6 +97,48 @@ export function isHostedRuntimeFailurePhaseCode(
 ): value is HostedRuntimeFailurePhaseCode {
   return typeof value === "string"
     && HOSTED_RUNTIME_FAILURE_PHASE_CODES.has(value);
+}
+
+export function attachHostedRuntimeFailurePhaseCode(
+  error: unknown,
+  phase: HostedRuntimeFailurePhaseName,
+): unknown {
+  if (!(error instanceof Error) || readHostedRuntimeFailurePhaseCode(error)) {
+    return error;
+  }
+
+  try {
+    Object.defineProperty(error, HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY, {
+      configurable: false,
+      enumerable: false,
+      value: buildHostedRuntimeFailurePhaseCode(phase),
+      writable: false,
+    });
+  } catch {
+    // Diagnostics are fail-open: frozen or hostile errors retain their
+    // original behavior when the optional phase cannot be attached.
+  }
+  return error;
+}
+
+export function readHostedRuntimeFailurePhaseCode(
+  error: unknown,
+): HostedRuntimeFailurePhaseCode | null {
+  try {
+    if (!error || typeof error !== "object") {
+      return null;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      error,
+      HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY,
+    );
+    return descriptor && "value" in descriptor
+      && isHostedRuntimeFailurePhaseCode(descriptor.value)
+      ? descriptor.value
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export const HOSTED_MAILBOX_KINDS = [

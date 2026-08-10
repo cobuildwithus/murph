@@ -93,6 +93,7 @@ import {
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
   type HostedMailboxItem,
@@ -8402,10 +8403,11 @@ describe("hosted workspace runtime entrypoint", () => {
       await expect(runFailure(
         "attempt_synthetic_phase_failure",
         genericFailure,
-      )).rejects.toMatchObject({
-        errorCode: "runtime_phase:foreground.pass",
-        message: hiddenFailureMessage,
-      });
+      )).rejects.toBe(genericFailure);
+      expect(readHostedRuntimeFailurePhaseCode(genericFailure)).toBe(
+        "runtime_phase:foreground.pass",
+      );
+      expect(genericFailure).not.toHaveProperty("errorCode");
 
       const codedFailure = Object.assign(new Error("hidden coded runtime failure"), {
         code: "existing_runtime_failure_code",
@@ -8415,6 +8417,7 @@ describe("hosted workspace runtime entrypoint", () => {
         codedFailure,
       )).rejects.toBe(codedFailure);
       expect(codedFailure).not.toHaveProperty("errorCode");
+      expect(readHostedRuntimeFailurePhaseCode(codedFailure)).toBeNull();
 
       const nestedCodedFailure = Object.assign(
         new Error("hidden nested-coded runtime failure"),
@@ -8431,6 +8434,37 @@ describe("hosted workspace runtime entrypoint", () => {
       )).rejects.toBe(nestedCodedFailure);
       expect(nestedCodedFailure).not.toHaveProperty("errorCode");
       expect(deriveHostedExecutionErrorCode(nestedCodedFailure)).toBe("timeout");
+      expect(readHostedRuntimeFailurePhaseCode(nestedCodedFailure)).toBeNull();
+
+      const genericCodedFailure = Object.assign(
+        new Error("hidden generic-coded runtime failure"),
+        { code: "runtime_error" },
+      );
+      await expect(runFailure(
+        "attempt_synthetic_generic_coded_phase_failure",
+        genericCodedFailure,
+      )).rejects.toBe(genericCodedFailure);
+      expect(genericCodedFailure.code).toBe("runtime_error");
+      expect(genericCodedFailure).not.toHaveProperty("errorCode");
+      expect(readHostedRuntimeFailurePhaseCode(genericCodedFailure)).toBe(
+        "runtime_phase:foreground.pass",
+      );
+
+      const nestedGenericCodedFailure = new Error(
+        "hidden nested generic-coded wrapper",
+        {
+          cause: Object.assign(new Error("hidden generic-coded cause"), {
+            code: "runtime_error",
+          }),
+        },
+      );
+      await expect(runFailure(
+        "attempt_synthetic_nested_generic_coded_phase_failure",
+        nestedGenericCodedFailure,
+      )).rejects.toBe(nestedGenericCodedFailure);
+      expect(readHostedRuntimeFailurePhaseCode(nestedGenericCodedFailure)).toBe(
+        "runtime_phase:foreground.pass",
+      );
 
       const phaseLogs = readCapturedRuntimePhaseLogs({
         attemptId: "attempt_synthetic_phase_failure",
@@ -8460,6 +8494,9 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(serializedLogs).not.toContain("hidden coded runtime failure");
       expect(serializedLogs).not.toContain("hidden nested-coded runtime failure");
       expect(serializedLogs).not.toContain("hidden nested cause");
+      expect(serializedLogs).not.toContain("hidden generic-coded runtime failure");
+      expect(serializedLogs).not.toContain("hidden nested generic-coded wrapper");
+      expect(serializedLogs).not.toContain("hidden generic-coded cause");
     } finally {
       if (previousStdIoLogSetting === undefined) {
         delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
@@ -8515,9 +8552,11 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       }).catch((error: unknown) => error);
       expect(restoreFailure).toMatchObject({
-        errorCode: "runtime_phase:workspace.restore",
         message: "Hosted workspace runtime job snapshot restore failed.",
       });
+      expect(readHostedRuntimeFailurePhaseCode(restoreFailure)).toBe(
+        "runtime_phase:workspace.restore",
+      );
 
       const failureLogs = readCapturedRuntimePhaseLogs({
         attemptId: "attempt_synthetic_restore_phase_failure",

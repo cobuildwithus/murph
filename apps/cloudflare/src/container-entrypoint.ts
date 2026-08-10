@@ -40,6 +40,9 @@ import {
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  readHostedRuntimeFailurePhaseCode,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedRuntimeLogWritesBestEffort,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
@@ -2555,7 +2558,8 @@ function buildHostedContainerRunnerJobErrorMetadata(
   if (safeErrorName) {
     details.errorName = safeErrorName;
   }
-  const errorCodeDetail = readHostedContainerSafeCodeProperty(error, "code")
+  const errorCodeDetail = readHostedRuntimeFailurePhaseCode(error)
+    ?? readHostedContainerSafeCodeProperty(error, "code")
     ?? readHostedContainerSafeCodeProperty(error, "errorCode");
   if (errorCodeDetail) {
     details.errorCodeDetail = errorCodeDetail;

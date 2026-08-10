@@ -83,6 +83,14 @@ Updated: 2026-08-09
   error, but the shared diagnostic reader gives the outer `runtime_error` code
   precedence during final redacted persistence. The narrow shared phase
   contract fixes that last hop without changing precedence for any other code.
+- The phase marker is a non-enumerable shared property separate from `.code`
+  and `.errorCode`. An exact `runtime_error` detail remains generic and may
+  receive a phase; every meaningful direct or nested code keeps its existing
+  transport and classification.
+- The Worker never interpolates an allowlisted phase into the reconstructed
+  error's `Code:` message fragment. This keeps checkpoint phase names from
+  changing canonical message-derived classification while preserving the phase
+  in structured redacted metadata.
 
 ## Verification
 
@@ -98,6 +106,13 @@ Updated: 2026-08-09
   tests-only artifact after full inspection and `git apply --check`; the added
   production-faithful assertion and Cloudflare typecheck pass on the corrected
   candidate.
+- Final ReviewGPT round 1 identified two accepted original-patch findings:
+  generic `runtime_error` wrappers suppressed the phase, and checkpoint phase
+  text could change canonical classification. The corrected design separates
+  phase from canonical code and keeps phase tokens out of reclassified message
+  text. Focused Assistant Runtime tests (2 selected), focused cross-boundary
+  Cloudflare tests (4 selected), all three owner typechecks, and the full
+  Cloudflare container/transport slice (3 files, 265 tests) pass.
 - Passed `git diff --check` and parent scope/call-path review.
 - Production deployment proof confirmed the existing propagation bridge is
   already live at 100%; no rollout wait or duplicate transport work is needed.
