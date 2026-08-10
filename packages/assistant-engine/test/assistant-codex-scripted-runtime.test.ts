@@ -15,6 +15,9 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -122,6 +125,7 @@ interface ScriptedStub {
   completedResponseLabelsSinceBaseline(): string[]
   markRequestBaseline(): void
   queue(...responses: readonly ScriptedResponse[]): void
+  resetQueue(): void
   requestCountSinceBaseline(): number
   requestSummariesSinceBaseline(): ScriptedProviderRequestSummary[]
 }
@@ -178,41 +182,6 @@ function quotePosixShellLiteral(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
-function buildScriptedVaultCli(input: {
-  commandLog: string
-  commandOutputs: readonly (readonly [string, unknown])[]
-  failedCommands?: readonly string[]
-}): string {
-  const failureBranches = (input.failedCommands ?? []).map((command) => [
-    `if [ "$*" = ${quotePosixShellLiteral(command)} ]; then`,
-    `  printf '%s\\n' ${quotePosixShellLiteral('{"error":"scripted command failure"}')} >&2`,
-    '  exit 1',
-    'fi',
-  ].join('\n'))
-  const branches = input.commandOutputs.map(([command, output]) => {
-    const payload = JSON.stringify(output)
-    if (payload === undefined) {
-      throw new Error(`Scripted command output for ${command} is not JSON-serializable.`)
-    }
-    return [
-      `if [ "$*" = ${quotePosixShellLiteral(command)} ]; then`,
-      `  printf '%s\\n' ${quotePosixShellLiteral(payload)}`,
-      '  exit 0',
-      'fi',
-    ].join('\n')
-  })
-
-  return [
-    '#!/bin/sh',
-    `printf '%s\\n' "$*" >> ${quotePosixShellLiteral(input.commandLog)}`,
-    ...failureBranches,
-    ...branches,
-    `printf '%s\\n' '{"error":"unexpected scripted command"}' >&2`,
-    'exit 1',
-    '',
-  ].join('\n')
-}
-
 async function requireScriptedStub(): Promise<ScriptedStub> {
   stub ??= await startScriptedResponsesStub()
   return stub
@@ -230,7 +199,7 @@ afterAll(async () => {
       force: true,
       recursive: true,
     })))
-})
+}, 180_000)
 
 describe('real codex app-server with scripted provider', () => {
   it('streams a scripted turn through the real app-server protocol', {
@@ -557,6 +526,9 @@ text(JSON.stringify(result));
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
             expect((await readFile(commandLog, 'utf8')).trim()).toBe(
               'assistant onboarding complete --reason user_answered',
             )
@@ -565,9 +537,13 @@ text(JSON.stringify(result));
               action: 'save',
               automationId: 'automation-first-personal-read',
               created: true,
+              effectiveTimeZone: null,
               lookupId: 'onboarding-first-personal-read',
+              nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
               routeBinding: 'current_conversation',
+              schedule: request.schedule,
               status: 'active',
+              timingVerified: true,
             }
           },
         },
@@ -1459,14 +1435,21 @@ if (!tool) {
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
             automationRequests.push(request)
             return {
               action: 'save',
               automationId: 'automation-native-deferred',
               created: true,
+              effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
+              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
               routeBinding: 'current_conversation',
+              schedule: request.schedule,
               status: 'active',
+              timingVerified: true,
             }
           },
         },
@@ -1540,45 +1523,407 @@ if (!tool) {
     ).toBeGreaterThan(4_000)
   })
 
-  it('accepts authorable card shapes and rejects legacy-only nutrition shapes through the real App Server boundary', {
+  it('preserves the stored timezone through a separate schedule-patch turn', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
-    const completeNutritionCard = {
-      kind: 'daily_nutrition',
-      version: 2,
-      localDate: '2026-08-08',
-      mealCount: 2,
-      totals: {
-        calories: { total: 900, mealCount: 2 },
-        proteinGrams: { total: 70, mealCount: 2 },
-        carbsGrams: { total: 80, mealCount: 2 },
-        fatGrams: { total: 30, mealCount: 2 },
-        fiberGrams: { total: 15, mealCount: 2 },
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  lookup: "evening-reminder",
+  schedule: { kind: "dailyLocal", localTime: "22:00" },
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
       },
-      goals: {
-        calories: { target: 1_800, status: 'under_target' },
-        proteinGrams: { target: 100, status: 'under_target' },
-        carbsGrams: { target: 190, status: 'under_target' },
-        fatGrams: { target: 55, status: 'under_target' },
-        fiberGrams: { target: 25, status: 'under_target' },
+      { text: 'Updated your evening reminder to 10 PM Central.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'patch',
+              automationId: 'automation-central-evening',
+              created: false,
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: 'evening-reminder',
+              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              routeBinding: 'preserved',
+              schedule: {
+                kind: 'dailyLocal',
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
       },
-    } as const
-    const authorableCards = [{
+      prompt: 'Move my evening reminder to 10 PM. Save the change now.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'patch',
+      lookup: 'evening-reminder',
+      schedule: { kind: 'dailyLocal', localTime: '22:00' },
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('America/Chicago')
+    expect(toolOutputs).toContain('2026-08-11T03:00:00.000Z')
+    expect(result.finalMessage).toBe(
+      'Updated your evening reminder to 10 PM Central.',
+    )
+  })
+
+  it('reports a reactivated stale one-shot as needing a new time', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  lookup: "one-time-evening-reminder",
+  status: "active",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'That reminder is active, but its requested time has already passed and is no longer deliverable. Tell me a new time and I can reschedule it.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'patch',
+              automationId: 'automation-one-time-evening',
+              created: false,
+              effectiveTimeZone: null,
+              lookupId: 'one-time-evening-reminder',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved',
+              schedule: {
+                at: '2026-08-01T13:00:00.000Z',
+                kind: 'at',
+              },
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Reactivate my one-time evening reminder. Save the change now.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'patch',
+      lookup: 'one-time-evening-reminder',
+      status: 'active',
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"at"')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(result.finalMessage).toMatch(/already passed|no longer deliverable/iu)
+    expect(result.finalMessage).toMatch(/new time|reschedule/iu)
+  })
+
+  it('does not describe an unverified stale recurrence as exhausted', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'The reminder wording was updated, but I could not verify its next occurrence. I can inspect or update the schedule if you want.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            return {
+              action: 'patch',
+              automationId: 'automation-daily-interval',
+              created: false,
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved',
+              schedule: { everyMs: 86_400_000, kind: 'every' },
+              status: 'active',
+              timingVerified: false,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Update the wording of my daily interval reminder now.',
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"every"')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
+    expect(toolOutputs).toContain('"timingVerified":false')
+    expect(result.finalMessage).toMatch(/could not verify/iu)
+    expect(result.finalMessage).toMatch(/inspect|update/iu)
+    expect(result.finalMessage).not.toMatch(
+      /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+    )
+  })
+
+  it('keeps active device-triggered saves distinct from exhausted clock schedules', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    const baseInstructions = buildScriptedHostedSystemPrompt('direct', true)
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+if (!tool) {
+  text(JSON.stringify({ found: false }));
+} else {
+  const result = await tools.murph__automation({
+    action: "save",
+    instructions: "Ask how the next workout felt.",
+    schedule: {
+      activityKind: "workout",
+      after: "2026-08-10T12:00:00.000Z",
+      kind: "deviceActivity",
+      source: "whoop",
+    },
+    title: "Next workout check-in",
+  });
+  text(JSON.stringify({ found: true, result }));
+}
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "Saved. I'll check in after your next workout. There isn't a clock time to confirm until that workout arrives.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-next-workout',
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: 'next-workout-check-in',
+              nextOccurrenceAt: null,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'After my next WHOOP workout, ask how it felt. Save it now.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Ask how the next workout felt.',
+      schedule: {
+        activityKind: 'workout',
+        after: '2026-08-10T12:00:00.000Z',
+        kind: 'deviceActivity',
+        source: 'whoop',
+      },
+      title: 'Next workout check-in',
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"deviceActivity"')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(result.finalMessage).toContain('after your next workout')
+    expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
+  })
+
+  it('preserves current response-card shapes and rejects legacy-only nutrition authoring through the real App Server boundary', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const completedWorkoutCard = {
       kind: 'compact_table',
       version: 1,
-      title: 'Training sets',
-      subtitle: null,
-      rowHeader: 'Order',
-      columns: ['Set', 'Reps'],
-      rows: [
-        { label: 'First', values: ['1', '8'] },
-        { label: 'Second', values: ['2', '6'] },
-      ],
-      footer: null,
-      tracking: null,
-    }, completeNutritionCard] as const
+      title: 'Lower body strength',
+      subtitle: '24 of 24 sets complete',
+      footer: 'Workout completed.',
+      tracking: {
+        kind: 'workout',
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        snapshotAt: '2026-08-09T19:45:00.000Z',
+      },
+      workout: {
+        version: 1,
+        state: 'completed',
+        exercises: [
+          'Dumbbell Single-Leg Romanian Deadlift',
+          'Dumbbell Bulgarian Split Squat',
+          'Dumbbell Walking Lunge in Place',
+          'Split Squat with Front Heel Lift',
+          'Dumbbell Reverse Lunge',
+          'Dumbbell Step-Up',
+        ].map((name) => ({
+          name,
+          sets: [
+            ['55 lb × 8–10', '55 lb × 9'],
+            ['55 lb × 10', '55 lb × 10'],
+            ['65 lb × 10–12', '65 lb × 11'],
+            ['65 lb × 12', '65 lb × 12'],
+          ].map(([target, actual]) => ({
+            status: 'completed' as const,
+            target: target ?? null,
+            actual: actual ?? null,
+          })),
+        })),
+      },
+    } satisfies AssistantResponseCard
+    const cards = [
+      {
+        kind: 'compact_table',
+        version: 1,
+        title: 'Training sets',
+        subtitle: null,
+        rowHeader: 'Order',
+        columns: ['Set', 'Reps'],
+        rows: [
+          { label: 'First', values: ['1', '8'] },
+          { label: 'Second', values: ['2', '6'] },
+        ],
+        footer: null,
+        tracking: null,
+      },
+      completedWorkoutCard,
+      {
+        kind: 'daily_nutrition',
+        version: 2,
+        localDate: '2026-08-08',
+        mealCount: 2,
+        totals: {
+          calories: { total: 900, mealCount: 2 },
+          proteinGrams: { total: 70, mealCount: 2 },
+          carbsGrams: { total: 80, mealCount: 2 },
+          fatGrams: { total: 30, mealCount: 2 },
+          fiberGrams: { total: 15, mealCount: 2 },
+        },
+        goals: {
+          calories: { target: 1_800, status: 'under_target' },
+          proteinGrams: { target: 100, status: 'under_target' },
+          carbsGrams: { target: 190, status: 'under_target' },
+          fatGrams: { target: 55, status: 'under_target' },
+          fiberGrams: { target: 25, status: 'under_target' },
+        },
+      },
+    ] as const
+    const completeNutritionCard = cards[2]
 
-    for (const card of authorableCards) {
+    for (const card of cards) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
@@ -1688,7 +2033,7 @@ if (!tool) {
   })
 
   it('proves complete Goal and safety discovery before nutrition targets and cards', {
-    timeout: 480_000,
+    timeout: 720_000,
   }, async () => {
     const activeListCommand =
       'goal list --status active --limit 200 --format json'
@@ -2083,6 +2428,7 @@ if (!tool) {
       skillSlugs: readonly string[]
     }) => {
       const scenario = await prepareScriptedTurnScenario()
+      scenario.stub.resetQueue()
       const skillsRoot = path.join(
         scenario.turnInput.workingDirectory,
         'skills',
@@ -2098,56 +2444,60 @@ if (!tool) {
         scenario.turnInput.workingDirectory,
         'nutrition-goal-discovery-commands.log',
       )
+      await writeFile(commandLog, '', 'utf8')
+      const scriptedCommands = new Set([
+        ...input.commandOutputs.map(([command]) => command),
+        ...(input.failedCommands ?? []),
+      ])
+      for (const command of input.expectedCommands) {
+        if (!scriptedCommands.has(command)) {
+          throw new Error(`Missing scripted fixture for ${command}.`)
+        }
+      }
       await writeFile(
-        path.join(scenario.turnInput.workingDirectory, 'vault-cli'),
-        buildScriptedVaultCli({
-          commandLog,
-          commandOutputs: input.commandOutputs,
-          failedCommands: input.failedCommands,
-        }),
+        path.join(
+          scenario.turnInput.workingDirectory,
+          'run-nutrition-discovery',
+        ),
+        [
+          '#!/bin/sh',
+          'set -eu',
+          ...input.expectedCommands.map(
+            (command) =>
+              `printf '%s\\n' ${quotePosixShellLiteral(command)} >> ${quotePosixShellLiteral(commandLog)}`,
+          ),
+          '',
+        ].join('\n'),
         { encoding: 'utf8', mode: 0o755 },
       )
 
       const responses: ScriptedResponse[] = []
-      input.skillReadCommands.forEach((command, index) => {
+      if (input.expectedCommands.length > 0) {
         responses.push({
           customToolCall: {
             input: `
-const result = await tools.exec_command({ cmd: ${JSON.stringify(command)} });
-text(result.output);
-`,
-            name: 'exec',
-          },
-          ...(index === 0
-            ? {
-                requestIncludes: [
-                  'Before every goal-aware daily_nutrition card',
-                  'goal list --status active --limit 200 --format json',
-                  'nonzero data.metricTargetsCount',
-                  'memory show --format json',
-                  'complete canonical Identity, Preferences, Instructions, and Context memory document',
-                  'condition list --status active --limit 200 --format json',
-                  'regimen list --status active --limit 200 --format json',
-                  'before activating a paused nutrition proposal',
-                  'event list --kind procedure --limit 200 --format json',
-                  'measurement entry list read over the canonical 45-day window',
-                  'separate vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json read',
-                ],
-              }
-            : {}),
-        })
-      })
-      input.expectedCommands.forEach((command) => {
-        responses.push({
-          customToolCall: {
-            input: `
-const result = await tools.exec_command({ cmd: ${JSON.stringify(`./vault-cli ${command}`)} });
+const result = await tools.exec_command({
+  cmd: "./run-nutrition-discovery",
+  yield_time_ms: 30000,
+});
 text(result.output);
 `,
             name: 'exec',
           },
         })
-      })
+        for (let waitAttempt = 0; waitAttempt < 4; waitAttempt += 1) {
+          responses.push({
+            functionCall: {
+              arguments: {
+                cell_id: '1',
+                yield_time_ms: 30_000,
+              },
+              name: 'wait',
+            },
+            requestIncludes: ['Script running with cell ID 1'],
+          })
+        }
+      }
       if (input.card) {
         responses.push({
           functionCall: {
@@ -2178,10 +2528,8 @@ text(result.output);
           prompt: input.prompt,
           sandbox: 'danger-full-access',
         })
-        const commands = (await readFile(commandLog, 'utf8'))
-          .trim()
-          .split('\n')
-
+        const commandLogText = (await readFile(commandLog, 'utf8')).trim()
+        const commands = commandLogText === '' ? [] : commandLogText.split('\n')
         expect(commands).toEqual(input.expectedCommands)
         expect(result.responseCard).toEqual(input.card ?? null)
         if (input.card) {
@@ -3166,14 +3514,21 @@ text(result.output);
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
             automationRequests.push(request)
             return {
               action: 'save',
               automationId: 'automation-native-search',
               created: true,
+              effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
+              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
               routeBinding: 'current_conversation',
+              schedule: request.schedule,
               status: 'active',
+              timingVerified: true,
             }
           },
         },
@@ -4730,6 +5085,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     close: async () => {
       await new Promise<void>((resolve) => {
         server.close(() => resolve())
+        server.closeAllConnections()
       })
     },
     completedResponseLabelsSinceBaseline: () => [...completedResponseLabels],
@@ -4741,6 +5097,9 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     },
     queue: (...responses) => {
       queuedResponses.push(...responses)
+    },
+    resetQueue: () => {
+      queuedResponses.splice(0)
     },
     requestCountSinceBaseline: () => responsesRequestCount - requestBaseline,
     requestSummariesSinceBaseline: () =>

@@ -6041,6 +6041,10 @@
                                   "maximum": 9007199254740991,
                                   "description": "One-based set order. Read the active workout and pass it explicitly."
                                 },
+                                "requireExistingSet": {
+                                  "description": "Fail instead of appending when the selected set no longer exists.",
+                                  "type": "boolean"
+                                },
                                 "type": {
                                   "type": "string",
                                   "enum": [

@@ -371,6 +371,15 @@ Last verified: 2026-08-09
   Pulse Trial loser cleanup validates exact provider targets before one short
   member-owner revalidation transaction and cancels them only after that
   transaction releases; no Stripe request is made while that lock is held.
+  Direct paid and direct Trial conversion to Family updates the exact existing
+  Subscription in place under the owner lock, clears Trial-only metadata, and
+  ends a Trial immediately instead of creating a competing Subscription. A
+  stale local owner or changed Stripe source fails before that update. If an
+  older competing Checkout nevertheless pays after Family wins, the ordinary
+  invoice reconciliation owner cancels it and attempts only the exact full
+  one-invoice/one-payment refund; partial refunds, balance credit, credit notes,
+  pagination, or multiple allocations remain support-required rather than
+  guessed.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a
@@ -389,6 +398,9 @@ Last verified: 2026-08-09
   Stripe webhooks remain the retry and local-reconciliation owner after the
   customer confirms the change; the unsigned return query is display/polling
   context only and never entitlement authority.
+  Renewal scheduling also rejects `cancel_at`, paused collection, manual
+  collection, and any existing schedule before it creates a new Stripe
+  schedule, because those states do not have one unambiguous renewal owner.
 - Stripe failure email reuses the shared operational Resend transport as a
   best-effort projection, never a retry or billing owner. Only an action owner
   schedules a metadata-only operation alert when a Stripe rejection actually
@@ -748,11 +760,19 @@ Last verified: 2026-08-09
   credit, never clears recovery, and applies a deferred cap decrease only at
   the next anchored boundary. Activation owns the sole public sponsorship
   moment; refill fulfillment is silent and private notices are period-deduped.
+  Payment authority rechecks the current payer suspension fence immediately
+  before a bound automatic refill can be confirmed. Payer-owned cancellation
+  remains available even when the beneficiary is inactive or the live funding
+  projection is otherwise unavailable; the page exposes no retry, cap, or new
+  payment capability in that management-only state.
 - The Vercel predeploy migration replaces the detached-payer checks before the
   saved-card producer can serve traffic. That replacement is backward
   compatible with the old application, retains the PaymentIntent/Charge and
   ciphertext-clearing invariants, and removes only the impossible
-  Checkout-Session requirement for fulfilled direct payments. The superseded
+  Checkout-Session requirement for fulfilled direct payments plus the payer
+  requirement for a terminal, unbound automatic-refill failure whose exact
+  sponsorship authorization and positive charge ordinal remain durable. The
+  superseded
   postdeploy constraint installer stays out of the contract-migration run so a
   later workflow cannot re-tighten the schema after promotion.
 - The payer-owned cancel endpoint also owns a sessionless direct
@@ -956,6 +976,7 @@ Last verified: 2026-08-09
 - For Murph's managed goal-aware daily-nutrition workflow, nullable goal snapshots remain replay/rendering compatibility only, not permission to attach an incomplete new card. Before deriving, saving, or surfacing numeric targets, activating a paused proposal, or attaching a card—even when accepted active goals exist or a scheduled closeout requested the card—the assistant reads the complete canonical memory document, the complete bounded active-condition and active-regimen sets plus every returned detail, the bounded lifetime procedure-event set, and the required bounded measurement entries. Failed, unreadable, saturated, or safety-incomplete discovery fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; an existing paused proposal stays unchanged. An explicit completed bariatric procedure, clearly current under-18 age, or number-sensitive preference also suppresses numeric output, while absent or ambiguous evidence alone does not universally block it. Scheduled authority never permits safety questions or target setup. The workflow separately proves complete active-Goal authority before deciding a metric is missing. After explicit interactive target-setting or card intent, a genuinely missing bundle creates or updates one paused canonical proposal and explains all five provisional values in ordinary text; only a later unambiguous acceptance may recheck safety, activate and read back the proposal, re-read same-date totals, and attach the pending card. Corrections, declines, ambiguous or compound replies, unsafe or incompatible targets, and incomplete or conflicting authority remain text-only.
 - The procedure-event safety read uses `event list --kind procedure --limit 200` because post-bariatric context is lifetime history rather than an active condition. Scalar procedure names and statuses remain in list output; missing or truncated decision fields require a detail read for that record. Completed bariatric procedures suppress proposals, Goal activation, and cards, while planned, ordered, cancelled, ambiguous, or unrelated procedures do not prove post-bariatric context. Failure, unreadable output, required-detail failure, or exactly 200 results fails closed before any later numeric effect.
 - The daily nutrition safety gate's canonical measurement discovery consists of two bounded lossless reads: the 45-day BMI/height/weight read and a separate 300-day `pregnancy-test` read. An exact positive result suppresses numeric output and wins over negative results in that window; negative, missing, malformed, indeterminate, or stale rows remain unavailable evidence rather than proof of non-pregnancy. Failure of either required read, body-measurement saturation that cannot resolve usable BMI evidence, or any pregnancy-test saturation fails closed before proposal, Goal mutation or activation, totals, or card effects.
+- Compact-table response cards use the same one-effect delivery and stateless image fallback as nutrition cards. Generic tables encode strict authority-free V3 presentation data; workout tables encode strict authority-free V4 tuples and derive progress only from those workout sets. The provider captions preserve every row and cell, or every workout state, set status, target, and actual value, independently of image availability. Both the native fragment and queryless image URL remain below the provider limit, and invalid image requests fail closed without changing the text fallback. Deploy the compatible V4 native reader first, the shared Web image route second, and the Worker and runner producer last. Keep the Web route available while a sent image URL may be fetched. Once either persisted owner accepts V4, the compatible Worker and runner remain the rollback floor. Static and interactive rollout still require macOS and no-extension iPhone proof, including image failure, accessibility behavior, and the App Store affordance.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Assistant product-feedback capture is available only with current accepted-message authority and accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains post-checkpoint and starts only after a current-turn member-channel send succeeds. Scheduled occurrences create no ordinary feedback candidate, staged delivery obligation, or no-reply exception. Feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out write may already have reached Web.
 - Exact private support escalation remains the bounded in-turn exception to ordinary post-reply feedback persistence. Under the same member-scoped advisory lock, Web writes the fixed member marker plus the anonymous bounded and sanitized issue Murph wrote in its own words, reads and validates both rows, and ranks the member marker for the three-per-UTC-day alert cap. An eligible provider attempt formats from the first stored issue rather than callback memory and uses the feedback-derived Resend idempotency key, so replay has one stable body even when a later callback supplies different wording; missing, member-linked, unsanitized, still-prefixed, or malformed stored detail fails before email. Later records remain durable without another alert; missing email configuration or provider failure remains visible to the current turn without adding a retry queue or second delivery owner.

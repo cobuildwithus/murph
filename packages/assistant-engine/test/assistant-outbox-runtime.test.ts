@@ -73,6 +73,7 @@ import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.ts'
 import { listAssistantCronJobs } from '../src/assistant-cron.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -140,6 +141,38 @@ const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
     carbsGrams: { target: 220, status: 'on_target' },
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
+  },
+}
+
+const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Push day',
+  subtitle: '1 of 2 sets complete',
+  footer: null,
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: [{
+      name: 'Bench press',
+      sets: [
+        {
+          status: 'completed',
+          target: '185 lb × 8',
+          actual: '185 lb × 8',
+        },
+        {
+          status: 'pending',
+          target: '185 lb × 6–8',
+          actual: null,
+        },
+      ],
+    }],
   },
 }
 
@@ -1199,6 +1232,49 @@ describe('assistant outbox runtime', () => {
     })).rejects.toMatchObject({
       code: 'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
     })
+  })
+
+  it('round-trips workout cards through local outbox save, list, and read owners', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-workout-card-',
+    )
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card: WORKOUT_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-workout-card-token',
+      message: 'ignored model prose',
+      sessionId: 'session-workout-card',
+      threadId: 'thread-workout-card',
+      threadIsDirect: true,
+      turnId: 'turn-workout-card',
+      vault: vaultRoot,
+    })
+
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...intent,
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRYABLE',
+        message: 'retry later',
+      },
+      nextAttemptAt: '2026-08-09T20:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-08-09T19:46:00.000Z',
+    })
+
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, retryable.intentId),
+    ).resolves.toMatchObject({
+      card: WORKOUT_RESPONSE_CARD,
+      status: 'retryable',
+    })
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([
+      expect.objectContaining({
+        card: WORKOUT_RESPONSE_CARD,
+        intentId: retryable.intentId,
+        status: 'retryable',
+      }),
+    ])
   })
 
   it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
@@ -3929,10 +4005,11 @@ describe('assistant outbox runtime', () => {
         now: new Date('2026-04-09T13:32:00.000Z'),
         vaultRoot,
       })
-      await expect(showAutomation({
+      const convertedAutomation = await showAutomation({
         automationId: automation.record.automationId,
         vaultRoot,
-      })).resolves.toMatchObject({
+      })
+      expect(convertedAutomation).toMatchObject({
         continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         schedule: expect.objectContaining({ kind: 'dailyLocal' }),
@@ -3941,20 +4018,36 @@ describe('assistant outbox runtime', () => {
         tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
         title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       })
+      if (convertedAutomation?.schedule.kind !== 'dailyLocal') {
+        throw new Error('Expected the predecessor to use the current daily schedule.')
+      }
       const convertedRuntimeStore =
         await readAssistantCronCanonicalRuntimeStore(paths)
       expect(convertedRuntimeStore.jobs).toContainEqual(expect.objectContaining({
         jobId: automation.record.automationId,
         state: expect.objectContaining({
+          activatedAt: schedule.kind === 'at'
+            ? '2026-04-09T13:32:00.000Z'
+            : automation.record.createdAt,
           pendingOccurrenceAt: occurrenceAt,
         }),
       }))
+      const expectedNextRunAt = schedule.kind === 'every'
+        ? computeAssistantCronNextRunAt(
+            {
+              kind: 'dailyLocal',
+              localTime: convertedAutomation.schedule.localTime,
+              timeZone: 'UTC',
+            },
+            new Date('2026-04-09T13:32:00.000Z'),
+          )
+        : '2026-04-09T13:31:30.000Z'
       await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
         expect.objectContaining({
           jobId: automation.record.automationId,
           prompt: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
           state: expect.objectContaining({
-            nextRunAt: '2026-04-09T13:31:30.000Z',
+            nextRunAt: expectedNextRunAt,
           }),
         }),
       )
