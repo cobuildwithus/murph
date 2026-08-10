@@ -29,19 +29,27 @@ jobs:
           from pathlib import Path
 
           path = Path("apps/web/src/lib/device-sync/hosted-runtime-authority.ts")
-          source = path.read_text()
-          old = '''                  refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
-                ).connection'''
-          new = '''                  refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
-                  {
-                    forceReauthorizationRequired:
-                      !providerApplicationBindingCurrent,
-                    includeCredentialMaterial: false,
-                  },
-                ).connection'''
-          if source.count(old) != 1:
-              raise SystemExit("expected exactly one runtime apply response projection")
-          path.write_text(source.replace(old, new, 1))
+          lines = path.read_text().splitlines(keepends=True)
+          matches = []
+          for index, line in enumerate(lines[:-1]):
+              if (
+                  line.strip() == "refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),"
+                  and lines[index + 1].strip() == ").connection"
+              ):
+                  matches.append(index)
+          if len(matches) != 1:
+              raise SystemExit(f"expected one runtime apply response projection, found {len(matches)}")
+
+          index = matches[0]
+          closing_indent = lines[index + 1][:-len(lines[index + 1].lstrip())]
+          lines[index + 1:index + 1] = [
+              f"{closing_indent}  {{\n",
+              f"{closing_indent}    forceReauthorizationRequired:\n",
+              f"{closing_indent}      !providerApplicationBindingCurrent,\n",
+              f"{closing_indent}    includeCredentialMaterial: false,\n",
+              f"{closing_indent}  }},\n",
+          ]
+          path.write_text("".join(lines))
           PY
           git diff --check
 
