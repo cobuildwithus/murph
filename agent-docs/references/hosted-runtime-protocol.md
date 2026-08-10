@@ -2271,12 +2271,11 @@ serve a usable replica, but they must mark it stale and request refresh after th
 HTTP response.
 An explicit authenticated browser refresh may also mark a metadata-current
 replica pending after a product-owned write handoff. The current readable
-replica stays visible while the shared browser-vault client polls with bounded
-exponential backoff for up to 210 seconds, covering the runtime's hard
-foreground quiet window. An in-memory marker keeps that explicit cycle pending
-until the requested ref changes; ordinary current non-pending replicas do not
-poll, and the assistant runtime remains the sole owner of replica hashing and
-publication.
+replica stays visible while the shared browser-vault client uses its existing
+fast-then-slow pending polling. An in-memory marker keeps that explicit cycle
+pending until the requested ref changes or the provider ends; ordinary current
+non-pending replicas do not poll, and the assistant runtime remains the sole
+owner of replica hashing and publication.
 Web represents that request as ordinary low-priority runtime work only when its
 freshness policy explicitly asks for it; normal nudges do not become browser-vault
 refresh sweeps just because a workspace has no replica yet. Foreground work may

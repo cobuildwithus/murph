@@ -32,9 +32,9 @@ import {
 
 export type BrowserVaultStatus = "loading" | "ready" | "empty" | "error";
 
-const BROWSER_VAULT_STALE_POLL_INITIAL_INTERVAL_MS = 1_500;
-const BROWSER_VAULT_STALE_POLL_MAX_INTERVAL_MS = 10_000;
-const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 210_000;
+const BROWSER_VAULT_STALE_POLL_INTERVAL_MS = 1_500;
+const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 20_000;
+const BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS = 15_000;
 const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
   deviceSyncImportPending: false,
   freshness: "stale",
@@ -382,36 +382,23 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     let cancelled = false;
     const startedAt = Date.now();
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let pollAttempt = 0;
-
-    const schedulePoll = (poll: () => void) => {
-      const remainingMs = BROWSER_VAULT_STALE_POLL_WINDOW_MS
-        - (Date.now() - startedAt);
-      if (cancelled || remainingMs <= 0) {
-        runtimeRefreshTargetRef.current = null;
-        return;
-      }
-
-      const delayMs = Math.min(
-        BROWSER_VAULT_STALE_POLL_INITIAL_INTERVAL_MS * (2 ** pollAttempt),
-        BROWSER_VAULT_STALE_POLL_MAX_INTERVAL_MS,
-        remainingMs,
-      );
-      pollAttempt += 1;
-      timeoutId = setTimeout(poll, delayMs);
-    };
 
     const poll = () => {
-      if (cancelled || Date.now() - startedAt > BROWSER_VAULT_STALE_POLL_WINDOW_MS) {
+      if (cancelled) {
         return;
       }
 
       void pollStaleReplica().finally(() => {
-        schedulePoll(poll);
+        if (!cancelled) {
+          const interval = Date.now() - startedAt <= BROWSER_VAULT_STALE_POLL_WINDOW_MS
+            ? BROWSER_VAULT_STALE_POLL_INTERVAL_MS
+            : BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS;
+          timeoutId = setTimeout(poll, interval);
+        }
       });
     };
 
-    schedulePoll(poll);
+    timeoutId = setTimeout(poll, BROWSER_VAULT_STALE_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
