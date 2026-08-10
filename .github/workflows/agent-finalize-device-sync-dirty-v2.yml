@@ -1,0 +1,136 @@
+name: Finalize device-sync dirty payload classification v2
+
+on:
+  push:
+    branches:
+      - agent/device-sync-dirty-classification
+    paths:
+      - .github/workflows/agent-finalize-device-sync-dirty-v2.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: finalize-device-sync-dirty-classification-v2
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare clean candidate on current main
+        id: prepare
+        shell: bash
+        env:
+          STAGING_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          mapfile -t chunks < <(find .agent -maxdepth 1 -type f -name 'device-sync-dirty.patch.b64.*' -print 2>/dev/null | sort)
+          if (( ${#chunks[@]} > 0 )); then
+            cat "${chunks[@]}" | base64 --decode > /tmp/device-sync-dirty.patch
+            test -s /tmp/device-sync-dirty.patch
+            git apply --numstat /tmp/device-sync-dirty.patch
+            git checkout --detach origin/main
+            git apply --3way --index /tmp/device-sync-dirty.patch
+            echo "needs_commit=true" >> "$GITHUB_OUTPUT"
+          else
+            git checkout --detach "${STAGING_HEAD}^"
+            git rebase origin/main
+            echo "needs_commit=false" >> "$GITHUB_OUTPUT"
+          fi
+          git diff --check origin/main...HEAD || true
+          git diff --cached --check
+          git status --short
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Verify focused device-sync boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run \
+            --config apps/web/vitest.workspace.ts \
+            --no-coverage \
+            apps/web/test/prisma-store-dirty-connections.test.ts \
+            apps/web/test/prisma-store-oauth-connection.test.ts
+          pnpm --dir apps/web typecheck
+          git diff --check origin/main...HEAD
+          git diff --cached --check
+
+      - name: Publish clean implementation branch
+        shell: bash
+        env:
+          NEEDS_COMMIT: ${{ steps.prepare.outputs.needs_commit }}
+          STAGING_HEAD: ${{ github.sha }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          if [[ "$NEEDS_COMMIT" == "true" ]]; then
+            git commit -m "fix(device-sync): persist dirty payload credential authority"
+          fi
+          git push \
+            --force-with-lease="refs/heads/${TARGET_BRANCH}:${STAGING_HEAD}" \
+            origin "HEAD:refs/heads/${TARGET_BRANCH}"
+
+      - name: Open or update pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$TARGET_BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+          cat > /tmp/pr-body.md <<'EOF'
+          ## Why
+
+          Reconnect cleanup previously had to decrypt and dynamically classify every retained dirty payload while holding the dirty-marker row lock. That increased database lock dwell and made old-writer/new-writer rollout behavior difficult to reason about.
+
+          ## What changed
+
+          - Persist one server-derived `credentialIndependent` authority bit with each new encrypted dirty payload.
+          - Prepare classification, compression, and encryption before opening the dirty-state admission transaction.
+          - Backfill nullable mixed-version rows outside reconnect's marker-lock transaction, in bounded batches, before cleanup can commit.
+          - Keep reconnect cleanup database-only: lock the existing dirty marker, fail closed if any row is still unclassified, advance the epoch, and delete only credential-scoped rows.
+          - Bound unique-conflict recovery to one reread/retry path rather than recursive retries.
+          - Preserve exact payload durability, transaction atomicity, account-deletion ordering, and companion ingestion behavior.
+
+          ## Architecture
+
+          The existing dirty marker and encrypted payload table remain the only durable owners. No queue, service, state machine, compatibility table, provider-specific persistence path, or second cleanup lifecycle is introduced. Mixed-version compatibility is a temporary nullable-column read path, not a new authority owner.
+
+          ## Verification
+
+          The publishing gate runs the focused dirty-connection and OAuth/reconnect suites plus the hosted Web typecheck on the exact candidate before updating this branch. Normal exact-head repository CI runs on the PR.
+
+          Do not merge as part of this task.
+          EOF
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --repo "$GITHUB_REPOSITORY" \
+              --title "Persist device-sync dirty payload credential authority" \
+              --body-file /tmp/pr-body.md
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$TARGET_BRANCH" \
+              --title "Persist device-sync dirty payload credential authority" \
+              --body-file /tmp/pr-body.md
+          fi
