@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-28
+Last verified: 2026-08-10
 
 ## Purpose
 
@@ -98,6 +98,16 @@ updates Stripe and reports that Family billing is syncing. The Family
 subscription webhook writes the paid projection and clears the old direct
 billing reference in the same transaction, so entitlement ownership changes
 once and never advances Stripe's event watermark from local wall time.
+
+Converting an active direct Pulse trial is a consequential billing action: it
+ends the free trial and starts the two-seat Family minimum immediately. Settings
+must show the exact $14/month total, $7/person Pulse price, two included seats,
+and immediate trial end in a confirmation dialog before sending the request.
+Keeping the trial sends no request. The server requires the explicit
+trial-conversion confirmation and rejects an old or crafted client that omits
+it before any Stripe mutation. The confirmed conversion updates the existing
+trial subscription rather than creating a competing subscription; webhook
+reconciliation remains the projection owner.
 
 Changing a member's tier is one owner-confirmed action. Web records the target
 in the membership's nullable `pendingPlanCode` while the current tier and access

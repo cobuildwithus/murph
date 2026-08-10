@@ -478,7 +478,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and exact usage status">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -514,7 +514,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group sponsorship purchase and cancel-only management">
+      <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
         <GroupUsageFundingStudy />
       </StudySection>
 

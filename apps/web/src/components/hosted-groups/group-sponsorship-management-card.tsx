@@ -3,6 +3,11 @@
 import { useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/src/components/ui/alert";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
   FieldLegend,
@@ -38,6 +43,7 @@ export function GroupSponsorshipManagementCard({
     initialManagement.pendingMonthlyCapMinor ?? initialManagement.monthlyCapMinor,
   );
   const [busy, setBusy] = useState(false);
+  const [canceled, setCanceled] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (body: Record<string, unknown>) => {
@@ -72,6 +78,10 @@ export function GroupSponsorshipManagementCard({
         return;
       }
       if (value.management === null) {
+        if (body.action === "cancel") {
+          setCanceled(true);
+          return;
+        }
         window.location.reload();
         return;
       }
@@ -98,6 +108,10 @@ export function GroupSponsorshipManagementCard({
     management.pendingMonthlyCapMinor ?? management.monthlyCapMinor;
   const capChanged = selectedMonthlyCapMinor !== appliedMonthlyCapMinor;
   const capIncrease = selectedMonthlyCapMinor > management.monthlyCapMinor;
+
+  if (canceled) {
+    return <GroupSponsorshipCanceledReceipt />;
+  }
 
   const applyCap = () => {
     if (selectedMonthlyCapMinor === appliedMonthlyCapMinor) {
@@ -295,6 +309,23 @@ export function GroupSponsorshipManagementCard({
         </Button>
       </div>
     </section>
+  );
+}
+
+export function GroupSponsorshipCanceledReceipt() {
+  return (
+    <Alert
+      data-component="group-sponsorship-management"
+      data-state="canceled"
+      role="status"
+    >
+      <AlertTitle>
+        Monthly sponsorship canceled
+      </AlertTitle>
+      <AlertDescription>
+        Future automatic refills are stopped. Usage credit already purchased stays with the group.
+      </AlertDescription>
+    </Alert>
   );
 }
 

@@ -76,7 +76,7 @@ Success means:
 
 - [x] Inventory billing actions, state owners, inverse operations, provider
   effects, browser recovery, and webhook reconciliation.
-- [x] Verify and correct sixteen independent traps across Family, direct-plan,
+- [x] Verify and correct nineteen independent traps across Family, direct-plan,
   usage-credit, Portal, refund, and sponsorship paths.
 - [x] Add focused regressions plus an installed real-PostgreSQL migration and
   account-deletion proof.
@@ -90,8 +90,8 @@ Success means:
   rejected incomplete rendered evidence rather than the implementation: the
   catalog had made the cancel-only proof inert and had not exercised Portal
   failure or the signed-out usage-return handoff.
-- [ ] Push the evidence remediation, rerun preliminary and final ReviewGPT with
-  exact-head CI, resolve findings, close this plan, and merge.
+- [ ] Push the evidence and specialist remediation, complete final ReviewGPT
+  with exact-head CI, resolve findings, close this plan, and merge.
 - [ ] Confirm the main-only live Stripe browser matrix and cleanup result on the
   merged commit, then retire the task worktree.
 
@@ -118,12 +118,18 @@ function-state matrix and verification ledger. The accepted defects are:
 15. Legacy Family refund cleanup guessed one payment and ignored partial refund.
 16. A late paid direct invoice after Family activation was canceled without the
     exact ordinary refund attempt.
+17. A signed-out sponsor could lose cancellation access when the beneficiary
+    group was no longer eligible for new funding.
+18. An active Pulse trial could become immediately paid Family billing from the
+    generic Family action without explicit terms or confirmation.
+19. Successful sponsorship cancellation could reload into an unrelated
+    unavailable state instead of preserving a terminal receipt.
 
 ## Current evidence
 
 - Affected hosted-web tests: 767 passed, 23 opt-in tests skipped.
 - Installed local PostgreSQL migration/concurrency proof: 23 passed.
-- Credential-free Stripe owner proof: 87 harness tests and 73 web tests passed.
+- Credential-free Stripe owner proof: 87 harness tests and 74 web tests passed.
 - `pnpm --dir apps/web typecheck`: passed.
 - `pnpm provider-requests:guard`: passed after replacing all new Stripe request
   spreads with explicit SDK-typed parameter construction.
@@ -155,3 +161,10 @@ function-state matrix and verification ledger. The accepted defects are:
   Its release-app failure was an inventory assertion for the new canonical
   migration; the inventory now includes that migration and the focused
   migration suite passes.
+- The preliminary specialist review found three further journey traps. Each was
+  reproduced before correction. Signed-out sponsors now authenticate before
+  private payer resolution and return to the exact funding URL; active trial
+  conversion now requires matching client and server confirmation of immediate
+  $14/month Family billing; and successful sponsorship cancellation now ends in
+  a stable receipt without reloading. The seven focused suites pass 293/293,
+  and the new desktop/mobile catalog states were inspected for all three paths.

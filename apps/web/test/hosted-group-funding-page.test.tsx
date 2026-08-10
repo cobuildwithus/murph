@@ -41,6 +41,7 @@ vi.mock("next/link", () => ({
 
 vi.mock("@/src/components/hosted-groups/group-funding-sign-in-button", () => ({
   GroupFundingSignInButton: () => React.createElement("button", null, "Sign in"),
+  GroupFundingSignInRequired: () => React.createElement("button", null, "Sign in"),
 }));
 
 vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
@@ -467,6 +468,48 @@ describe("hosted group funding page", () => {
     expect(mocks.readHostedGroupUsageStatus).not.toHaveBeenCalled();
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).not.toHaveBeenCalled();
     expect(mocks.HostedUsageTopUpDialog).not.toHaveBeenCalled();
+  });
+
+  it("offers a private sign-in handoff before resolving inactive sponsorship management", async () => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticatedMember: null,
+    });
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce(null);
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, /Sign in/u);
+    assert.doesNotMatch(markup, /This group funding link isn&#x27;t available/u);
+    expect(mocks.readHostedGroupUsageFundingManagementTargetByLocator)
+      .not.toHaveBeenCalled();
+    expect(mocks.readHostedGroupSponsorshipManagementProjection)
+      .not.toHaveBeenCalled();
+  });
+
+  it("keeps inactive sponsorship management unavailable to an authenticated non-payer", async () => {
+    mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce(null);
+    mocks.readHostedGroupUsageFundingManagementTargetByLocator.mockResolvedValueOnce({
+      displayName: "Sunday sleep crew",
+      joinCode: "group_join_code_1234",
+      kind: "friends",
+      runtimeMemberId: "member_group_runtime",
+    });
+    mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValueOnce(null);
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, /This group funding link isn&#x27;t available/u);
+    assert.doesNotMatch(markup, /management:/u);
+    expect(mocks.readHostedGroupSponsorshipManagementProjection)
+      .toHaveBeenCalledWith({
+        beneficiaryMemberId: "member_group_runtime",
+        payerMemberId: "member_payer",
+        prisma: { label: "test-prisma" },
+      });
   });
 
   it("shows sponsored status with a secondary one-time contribution to a non-sponsor", async () => {

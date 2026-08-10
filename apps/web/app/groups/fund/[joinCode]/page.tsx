@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
+import {
+  GroupFundingSignInButton,
+  GroupFundingSignInRequired,
+} from "@/src/components/hosted-groups/group-funding-sign-in-button";
 import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
@@ -101,7 +104,7 @@ export default async function GroupFundingPage({
     : null;
   const target = publicTarget ?? managementTarget;
   if (!target) {
-    return <GroupFundingUnavailable />;
+    return member ? <GroupFundingUnavailable /> : <GroupFundingSignInRequired />;
   }
 
   const managementOnly = publicTarget === null;

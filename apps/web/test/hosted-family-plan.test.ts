@@ -499,6 +499,18 @@ describe("hosted Family plan", () => {
       ownerMemberId: group.ownerMemberId,
       prisma: prisma as never,
       seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_TRIAL_CONVERSION_CONFIRMATION_REQUIRED",
+      httpStatus: 409,
+    });
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+
+    await expect(createHostedFamilyBillingCheckout({
+      confirmedTrialConversion: true,
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
     })).resolves.toEqual({ alreadyActive: false, url: null });
 
     expect(checkoutCreate).not.toHaveBeenCalled();

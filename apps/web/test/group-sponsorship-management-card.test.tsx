@@ -15,6 +15,17 @@ vi.mock("@/src/components/ui/button", () => ({
     createElement("button", props, children),
 }));
 
+vi.mock("@/src/components/ui/alert", () => ({
+  Alert: ({ children, ...props }: {
+    children?: ReactNode;
+    role?: string;
+  }) => createElement("section", props, children),
+  AlertDescription: ({ children }: { children?: ReactNode }) =>
+    createElement("p", null, children),
+  AlertTitle: ({ children }: { children?: ReactNode }) =>
+    createElement("h2", null, children),
+}));
+
 vi.mock("@/src/components/ui/card", () => ({
   Card: ({ children }: { children?: ReactNode }) =>
     createElement("section", null, children),
@@ -221,6 +232,53 @@ test("offers only cancellation when billing changes are unavailable", async () =
     expect(rendered.container.textContent).toContain(
       "you can still stop future automatic refills",
     );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps a terminal receipt visible after cancellation succeeds", async () => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({ management: null }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      cancelOnly: true,
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: baseManagement,
+    },
+  ));
+  Object.defineProperty(rendered.window, "confirm", {
+    configurable: true,
+    value: vi.fn(() => true),
+  });
+
+  try {
+    const cancelButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Cancel sponsorship");
+    assert.ok(cancelButton);
+    await act(async () => {
+      cancelButton.click();
+    });
+
+    expect(rendered.reload).not.toHaveBeenCalled();
+    expect(rendered.container.textContent).toContain(
+      "Monthly sponsorship canceled",
+    );
+    expect(rendered.container.textContent).toContain(
+      "Future automatic refills are stopped",
+    );
+    expect(
+      [...rendered.container.querySelectorAll("button")]
+        .map((button) => button.textContent),
+    ).not.toContain("Cancel sponsorship");
   } finally {
     await rendered.cleanup();
   }

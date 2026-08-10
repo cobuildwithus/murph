@@ -460,7 +460,25 @@ export function HostedBillingSettings(props: {
         : familyOwner
           ? <CurrentPlanButton />
           : props.canStartFamily === true
-            ? <HostedFamilyStartButton block label="Choose Family" />
+            ? (
+                <HostedFamilyStartButton
+                  block
+                  trialConversionConfirmation={pulseTrialActive
+                    ? {
+                        cancelLabel: "Keep my trial",
+                        confirmLabel: "End trial and start Family",
+                        description: `Your free trial ends now. Paid Family billing begins immediately at ${formatHostedBillingPrice(
+                          HOSTED_FAMILY_PLAN_DISPLAY.minSeats
+                            * HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
+                        )}/month for ${HOSTED_FAMILY_PLAN_DISPLAY.minSeats} Pulse seats (${formatHostedBillingPrice(
+                          HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
+                        )} per person). You can choose Pulse or Edge for each person and add up to ${HOSTED_FAMILY_PLAN_DISPLAY.maxSeats} seats.`,
+                        title: "Start paid Family billing?",
+                      }
+                    : undefined}
+                  label="Choose Family"
+                />
+              )
             : null,
       current: familyCurrent,
       currentLabel: familyState === "sponsored" ? "Sponsored" : "Current plan",

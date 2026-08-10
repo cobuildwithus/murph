@@ -139,6 +139,7 @@ vi.mock("@/src/components/ui/dialog", async () => {
         : null;
     },
     DialogDescription: passthrough("p"),
+    DialogFooter: passthrough("div"),
     DialogHeader: passthrough("div"),
     DialogTitle: passthrough("h2"),
     DialogTrigger(props: {
@@ -1461,6 +1462,80 @@ describe("HostedBillingSettings", () => {
       url: "/api/settings/billing/family/checkout",
     });
     await rendered.cleanup();
+  });
+
+  test("requires explicit paid Family consent before ending a Pulse trial", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: null,
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        billingStatus: "active",
+        canStartFamily: true,
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const chooseFamilyButton = findButtonByText(
+        rendered.window.document,
+        "Choose Family",
+        rendered.window,
+      );
+      await act(async () => {
+        chooseFamilyButton.click();
+      });
+
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /Your free trial ends now/u,
+      );
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /\$14\/month for 2 Pulse seats/u,
+      );
+
+      const cancelButton = findButtonByText(
+        rendered.window.document,
+        "Keep my trial",
+        rendered.window,
+      );
+      await act(async () => {
+        cancelButton.click();
+      });
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+
+      await act(async () => {
+        chooseFamilyButton.click();
+      });
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "End trial and start Family",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.click();
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "POST",
+        payload: { confirmedTrialConversion: true },
+        url: "/api/settings/billing/family/checkout",
+      });
+    } finally {
+      await rendered.cleanup();
+    }
   });
 
   test("posts the Join recovery Family action and keeps syncing feedback visible", async () => {

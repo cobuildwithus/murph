@@ -2155,6 +2155,7 @@ async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
 }
 
 export async function createHostedFamilyBillingCheckout(input: {
+  confirmedTrialConversion?: unknown;
   groupId: string;
   now?: Date;
   ownerMemberId: string;
@@ -2181,6 +2182,7 @@ export async function createHostedFamilyBillingCheckout(input: {
 
 async function createOrResumeHostedFamilyBillingCheckout(
   input: {
+    confirmedTrialConversion?: unknown;
     groupId: string;
     now?: Date;
     ownerMemberId: string;
@@ -2239,6 +2241,17 @@ async function createOrResumeHostedFamilyBillingCheckout(
       tx,
     });
     if (directPaidUpgrade) {
+      if (
+        directPaidUpgrade.currentBillingPhase === "trial"
+        && input.confirmedTrialConversion !== true
+      ) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_TRIAL_CONVERSION_CONFIRMATION_REQUIRED",
+          httpStatus: 409,
+          message:
+            "Confirm that your free trial will end and paid Family billing will begin now.",
+        });
+      }
       return directPaidUpgrade;
     }
 
