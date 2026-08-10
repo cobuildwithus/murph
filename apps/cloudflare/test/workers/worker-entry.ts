@@ -47,7 +47,7 @@ import {
   armTemporalMailboxSignalFaultForTest,
   clearTemporalMailboxSignalFaultForTest,
   consumeTemporalMailboxSignalFaultForTest,
-} from "../support/temporal-mailbox-signal-fault-control.ts";
+} from "../../src/hosted-local-test/temporal-mailbox-signal-fault-control.ts";
 import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
