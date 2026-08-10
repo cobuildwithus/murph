@@ -2932,7 +2932,10 @@ async function executeFamilyPlanTool(input: {
     const result = await familyPlanTool.request(input.request)
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
-    return toolTextResult(false, 'family plan tool request failed')
+    return toolTextResult(
+      false,
+      'family plan request was not confirmed; check Family Settings before retrying to avoid a duplicate request',
+    )
   }
 }
 

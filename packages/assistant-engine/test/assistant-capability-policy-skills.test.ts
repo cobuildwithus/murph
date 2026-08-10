@@ -148,6 +148,21 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('`action: "read_status"`')
     expect(normalized).toContain('`action: "start_checkout"`')
     expect(normalized).toContain('`action: "create_invite"`')
+    expect(normalized).toContain('before every Family invitation')
+    expect(normalized).toContain(
+      'Only call `action: "create_invite"` when the status proves all three conditions:',
+    )
+    expect(normalized).toContain('`plans.<requested plan>.remaining` is greater than zero')
+    expect(normalized).toContain(
+      'When the requested plan has no remaining paid seat, do not call `create_invite`',
+    )
+    expect(normalized).toContain('https://www.withmurph.ai/settings#family')
+    expect(normalized).toContain(
+      'The link is navigation only; never claim that opening it purchased a seat or created an invite.',
+    )
+    expect(normalized).toContain(
+      'say the request was not confirmed and ask the owner to check Family Settings before retrying',
+    )
     expect(normalized).toContain('`preparedInvite`')
     expect(normalized).toContain('`already_sponsored`')
     expect(normalized).toContain('`owner: true`')

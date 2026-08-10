@@ -304,4 +304,61 @@ describe("assistant family plan tool", () => {
       },
     })?.kind).toBe("invalid-family-plan-arguments");
   });
+
+  it("reports ambiguous Family mutations as unconfirmed without encouraging a duplicate", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "create_invite",
+          invite: {
+            planCode: "max",
+            targetEmail: "dad@example.com",
+          },
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a family plan dynamic tool request.");
+    }
+
+    const familyPlanTool = {
+      request: vi.fn(async () => {
+        throw new Error("ambiguous transport result");
+      }),
+    };
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        familyPlanTool,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(async () => ({
+          approvalUrl: "https://murph.test/approve/unused",
+          filename: "unused.pdf",
+          status: "pending" as const,
+        })),
+        vaultFileSendAvailable: false,
+      },
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(familyPlanTool.request).toHaveBeenCalledTimes(1);
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "request was not confirmed",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "check Family Settings before retrying",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "request failed",
+    );
+  });
 });
