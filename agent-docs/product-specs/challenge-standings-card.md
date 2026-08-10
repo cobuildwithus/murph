@@ -30,7 +30,11 @@ The response-card tool is available for this card in authenticated Linq group co
 
 The group response-card tool accepts the same normalized observation input as `score-challenge` plus exact room-facing presentation labels. It runs the deterministic scorer again and derives every point total, target, order, coverage state, coverage count, rank, and tie at the attachment boundary; the model cannot submit those derived values directly. The existing response-card pipeline then validates the closed card schema and emits semantic text for non-native routes.
 
+The App Server turn owns one ephemeral capacity-omission latch. Once any shared read in that turn drops members to stay within the model-result ceiling, every later challenge-card attachment in the turn is rejected and the model can only complete with ordinary text. A later complete read cannot clear the latch; it resets with the next turn and is never persisted as challenge state.
+
 Linq receives a complete static fallback layout plus a bounded `https://www.withmurph.ai/#murph-card=...` URL. The static layout carries the heading, every ranked row or the full collective score and coverage summary, lower-bound/rank qualifications, and the canonical footer when present. The value-free `fallback_text` remains free of dates and numbers so Messages does not demote the app card to an ordinary text bubble; recipients without the extension see the complete static layout. The URL must remain below 2,048 characters. The iOS Messages extension decodes that immutable snapshot offline; it does not fetch, score, reconcile identities, or persist challenge state.
+
+Production follows `apps/cloudflare/DEPLOY.md` § Native iMessage Response-Card Rollout: deploy the Worker and runner together with `container_rollout=immediate`, then prove the exact runner-bundle fingerprint and assistant CLI surface before card traffic. The prior bundle is a safe rollback only before the first card-bearing value exists; afterward the new bundle is the hard rollback floor and recovery requires a coordinated forward fix.
 
 ## Non-goals
 

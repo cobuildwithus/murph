@@ -926,6 +926,10 @@ export interface MurphDynamicToolExecutionResult {
   usageDraft?: AssistantProviderUsageDraft | null
 }
 
+export interface MurphGroupSharedReadTurnState {
+  capacityPartial: boolean
+}
+
 interface ParsedDynamicToolCallRequest {
   arguments: unknown
   namespace: string | null
@@ -1754,6 +1758,7 @@ export async function executeMurphDynamicToolRequest(input: {
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   currentResponseCard?: AssistantResponseCard | null
+  groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
   groupChallengeResponseCardAllowed?: boolean | null
   privateDirectResponseCardAllowed?: boolean | null
   env: NodeJS.ProcessEnv
@@ -1856,6 +1861,12 @@ export async function executeMurphDynamicToolRequest(input: {
           return toolTextResult(
             false,
             'challenge standings response cards require an authenticated Linq group conversation',
+          )
+        }
+        if (input.groupSharedReadTurnState?.capacityPartial === true) {
+          return toolTextResult(
+            false,
+            'challenge standings response cards are unavailable after an incomplete shared read; answer with a truthful ordinary-text incomplete update',
           )
         }
       } else if (input.request.card.kind === 'challenge_standings') {
@@ -2518,6 +2529,7 @@ export async function executeMurphDynamicToolRequest(input: {
         env: input.env,
         fetchImpl: input.fetchImpl,
         hostedToolContext: input.hostedToolContext ?? null,
+        groupSharedReadTurnState: input.groupSharedReadTurnState ?? null,
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
         nextUsageOrdinal: input.nextUsageOrdinal,
@@ -3457,7 +3469,7 @@ function groupSharedModelResult(
  */
 function groupSharedModelResultText(
   modelResult: ReturnType<typeof groupSharedModelResult>,
-): string {
+): { capacityPartial: boolean; text: string } {
   const serialize = (value: unknown): string =>
     JSON.stringify({ action: 'read_shared', result: value })
   let text = serialize(modelResult)
@@ -3466,7 +3478,7 @@ function groupSharedModelResultText(
     || !('members' in modelResult)
     || !Array.isArray(modelResult.members)
   ) {
-    return text
+    return { capacityPartial: false, text }
   }
 
   const members = [...modelResult.members]
@@ -3489,7 +3501,10 @@ function groupSharedModelResultText(
       status: 'partial',
     })
   }
-  return text
+  return {
+    capacityPartial: omittedParticipantIds.length > 0,
+    text,
+  }
 }
 
 function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
@@ -3619,6 +3634,7 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
 async function executeGroupSharedRead(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: Extract<MurphGroupToolRequest, { action: 'read_shared' }>
+  turnState: MurphGroupSharedReadTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const groupSharedReader = input.hostedToolContext?.groupSharedReader ?? null
   if (!groupSharedReader) {
@@ -3629,9 +3645,13 @@ async function executeGroupSharedRead(input: {
     const result = await groupSharedReader.request({
       projectionScopes: input.request.projectionScopes,
     })
+    const modelResult = groupSharedModelResultText(groupSharedModelResult(result))
+    if (modelResult.capacityPartial && input.turnState) {
+      input.turnState.capacityPartial = true
+    }
     return toolTextResult(
       true,
-      groupSharedModelResultText(groupSharedModelResult(result)),
+      modelResult.text,
     )
   } catch {
     return groupSharedUnavailableToolResult('group_shared_read_failed')
@@ -3690,6 +3710,7 @@ async function executeGroupTool(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
+  groupSharedReadTurnState: MurphGroupSharedReadTurnState | null
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
   request: MurphGroupToolRequest
@@ -3700,6 +3721,7 @@ async function executeGroupTool(input: {
     return executeGroupSharedRead({
       hostedToolContext: input.hostedToolContext,
       request: input.request,
+      turnState: input.groupSharedReadTurnState,
     })
   }
   const groupTool = input.hostedToolContext?.groupTool ?? null

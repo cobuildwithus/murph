@@ -3206,6 +3206,7 @@ async function runCodexAppServerTurnOnProcess(
   // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
+  const groupSharedReadTurnState = { capacityPartial: false }
   const generateSongTurnState = input.generateSongPolicy
     ? {
         attemptCount: 0,
@@ -4453,6 +4454,7 @@ async function runCodexAppServerTurnOnProcess(
               tool.namespace === 'murph' &&
               tool.name === 'attach_response_card'
             ),
+          groupSharedReadTurnState,
           privateDirectResponseCardAllowed: input.groupConversation === false,
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,

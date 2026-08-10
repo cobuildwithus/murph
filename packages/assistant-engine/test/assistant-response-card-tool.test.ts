@@ -105,6 +105,7 @@ function executeCardTool(input: {
   currentResponseCard?: AssistantResponseCard | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   groupChallengeResponseCardAllowed?: boolean | null
+  groupSharedReadTurnState?: { capacityPartial: boolean } | null
   privateDirectResponseCardAllowed?: boolean | null
   request?: Parameters<typeof executeMurphDynamicToolRequest>[0]['request']
 }) {
@@ -115,6 +116,7 @@ function executeCardTool(input: {
     fetchImpl: fetch,
     groupChallengeResponseCardAllowed:
       input.groupChallengeResponseCardAllowed ?? false,
+    groupSharedReadTurnState: input.groupSharedReadTurnState ?? null,
     nextUsageOrdinal: () => 0,
     privateDirectResponseCardAllowed:
       input.privateDirectResponseCardAllowed ?? true,
@@ -377,6 +379,21 @@ describe('murph.attach_response_card', () => {
     expect(groupChallenge).toMatchObject({
       responseCardPatch: { card: CHALLENGE_CARD },
       rpcResult: { success: true },
+    })
+
+    const incompleteGroupChallenge = await executeCardTool({
+      groupChallengeResponseCardAllowed: true,
+      groupSharedReadTurnState: { capacityPartial: true },
+      privateDirectResponseCardAllowed: false,
+      request: groupRequest,
+    })
+    expect(incompleteGroupChallenge).not.toHaveProperty('responseCardPatch')
+    expect(incompleteGroupChallenge.rpcResult).toEqual({
+      contentItems: [{
+        text: 'challenge standings response cards are unavailable after an incomplete shared read; answer with a truthful ordinary-text incomplete update',
+        type: 'inputText',
+      }],
+      success: false,
     })
 
     const first = await executeCardTool({})

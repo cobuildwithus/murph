@@ -103,6 +103,34 @@ const NUTRITION_CARD: HostedAssistantResponseCard = {
   },
 };
 
+const CHALLENGE_CARD: HostedAssistantResponseCard = {
+  entries: [{
+    coverage: "complete",
+    detail: null,
+    label: "Maya",
+    points: 120,
+  }],
+  footer: null,
+  format: "individual",
+  kind: "challenge_standings",
+  objective: { kind: "ranking" },
+  subtitle: "Current verified progress",
+  title: "Weird Health Week",
+  version: 1,
+};
+
+const COMPACT_TABLE_CARD: HostedAssistantResponseCard = {
+  columns: ["Completed"],
+  footer: null,
+  kind: "compact_table",
+  rowHeader: "Exercise",
+  rows: [{ label: "Bench press", values: ["2 sets"] }],
+  subtitle: "Live workout",
+  title: "Upper body A",
+  tracking: null,
+  version: 1,
+};
+
 describe("hosted assistant delivery contracts", () => {
   it("reuses gateway-owned delivery target kinds", () => {
     expect(hostedAssistantDeliveryTargetKindValues).toEqual(gatewayDeliveryTargetKindValues);
@@ -160,6 +188,60 @@ describe("hosted assistant delivery contracts", () => {
       ...effect,
       payload: legacyPayload,
     }).payload).not.toHaveProperty("card");
+  });
+
+  it("admits challenge cards only for Linq groups and keeps other cards private", () => {
+    const challengeEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-group-challenge-card",
+      effectId: "intent-group-challenge-card",
+      payload: createHostedAssistantDeliveryPayload({
+        card: CHALLENGE_CARD,
+        channel: "linq",
+        threadIsDirect: false,
+      }),
+    });
+    expect(parseHostedAssistantDeliverySideEffect(challengeEffect))
+      .toEqual(challengeEffect);
+
+    for (const payload of [
+      createHostedAssistantDeliveryPayload({
+        card: CHALLENGE_CARD,
+        channel: "linq",
+        threadIsDirect: true,
+      }),
+      createHostedAssistantDeliveryPayload({
+        card: CHALLENGE_CARD,
+        channel: "telegram",
+        threadIsDirect: false,
+      }),
+    ]) {
+      expect(() => buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-invalid-group-challenge-card",
+        effectId: "intent-invalid-group-challenge-card",
+        payload,
+      })).toThrow(/requires an authenticated Linq group conversation/);
+    }
+
+    for (const card of [NUTRITION_CARD, COMPACT_TABLE_CARD]) {
+      expect(buildHostedAssistantDeliveryEffect({
+        dedupeKey: `dedupe-private-${card.kind}`,
+        effectId: `intent-private-${card.kind}`,
+        payload: createHostedAssistantDeliveryPayload({
+          card,
+          channel: "linq",
+          threadIsDirect: true,
+        }),
+      }).payload.card).toEqual(card);
+      expect(() => buildHostedAssistantDeliveryEffect({
+        dedupeKey: `dedupe-group-${card.kind}`,
+        effectId: `intent-group-${card.kind}`,
+        payload: createHostedAssistantDeliveryPayload({
+          card,
+          channel: "linq",
+          threadIsDirect: false,
+        }),
+      })).toThrow(/requires a private direct conversation/);
+    }
   });
 
   it("rejects malformed hosted response cards and card-media coexistence", () => {

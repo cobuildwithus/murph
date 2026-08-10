@@ -85,6 +85,53 @@ const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
 
+const GROUP_CHALLENGE_AUTHORING_INPUT = {
+  footer: null,
+  participantLabels: [
+    { label: 'Maya', participantId: 'participant_maya' },
+    { label: 'Jon', participantId: 'participant_jon' },
+  ],
+  scoreInput: {
+    format: {
+      kind: 'individual',
+      objective: { kind: 'ranking' },
+    },
+    participants: [
+      {
+        components: [{
+          componentId: 'steps',
+          quantity: 4_000,
+          status: 'available',
+        }],
+        participantId: 'participant_maya',
+      },
+      {
+        components: [{ componentId: 'steps', status: 'pending' }],
+        participantId: 'participant_jon',
+      },
+    ],
+    scorecard: {
+      components: [{
+        id: 'steps',
+        label: 'Steps',
+        perQuantity: 100,
+        points: 3,
+        quantityUnit: 'steps',
+      }],
+    },
+  },
+  subtitle: 'Current verified progress',
+  title: 'Weird Health Week',
+} as const
+
+const GROUP_CHALLENGE_DYNAMIC_TOOLS = [
+  MURPH_GROUP_SHARED_READ_TOOL,
+  ...resolveMurphDynamicTools({
+    groupChallengeResponseCardsAvailable: true,
+    responseCardsAvailable: false,
+  }).filter((tool) => tool.name === 'attach_response_card'),
+]
+
 interface ScriptedResponseRoute {
   completionLabel?: string
   delayMs?: number
@@ -1578,49 +1625,23 @@ if (!tool) {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const authoringInput = {
-      footer: null,
-      participantLabels: [
-        { label: 'Maya', participantId: 'participant_maya' },
-        { label: 'Jon', participantId: 'participant_jon' },
-      ],
-      scoreInput: {
-        format: {
-          kind: 'individual',
-          objective: { kind: 'ranking' },
-        },
-        participants: [
-          {
-            components: [{
-              componentId: 'steps',
-              quantity: 4_000,
-              status: 'available',
-            }],
-            participantId: 'participant_maya',
-          },
-          {
-            components: [{ componentId: 'steps', status: 'pending' }],
-            participantId: 'participant_jon',
-          },
-        ],
-        scorecard: {
-          components: [{
-            id: 'steps',
-            label: 'Steps',
-            perQuantity: 100,
-            points: 3,
-            quantityUnit: 'steps',
-          }],
-        },
-      },
-      subtitle: 'Current verified progress',
-      title: 'Weird Health Week',
-    } as const
     scenario.stub.queue(
       {
         customToolCall: {
           input: [
-            `const result = await tools.murph__attach_response_card(${JSON.stringify(authoringInput)});`,
+            'const result = await tools.murph__group({',
+            '  action: "read_shared",',
+            '  projectionScopes: [{ projectionKind: "steps-days.v0" }],',
+            '});',
+            'text(JSON.stringify(result));',
+          ].join('\n'),
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: [
+            `const result = await tools.murph__attach_response_card(${JSON.stringify(GROUP_CHALLENGE_AUTHORING_INPUT)});`,
             'text(result);',
           ].join('\n'),
           name: 'exec',
@@ -1631,17 +1652,54 @@ if (!tool) {
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      dynamicTools: resolveMurphDynamicTools({
-        groupChallengeResponseCardsAvailable: true,
-        responseCardsAvailable: false,
-      }),
+      dynamicTools: GROUP_CHALLENGE_DYNAMIC_TOOLS,
       groupConversation: true,
-      prompt: 'Attach the requested synthetic group challenge card.',
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        groupSharedReader: {
+          request: async () => ({
+            members: [{
+              currentTurnHandles: [],
+              displayName: 'Maya',
+              memberId: 'member_maya',
+              participantId: 'participant_maya',
+              projections: [{
+                dataStatus: 'available' as const,
+                grantStatus: 'granted' as const,
+                projectionScope: {
+                  projectionKind: 'steps-days.v0' as const,
+                },
+                projectionScopeKey: 'steps-days.v0',
+                records: [{
+                  data: {
+                    date: '2026-08-08',
+                    metricKey: 'steps' as const,
+                    unit: 'count',
+                    value: 4_000,
+                  },
+                  occurredAt: '2026-08-08T00:00:00.000Z',
+                  recordKey: '2026-08-08',
+                }],
+              }],
+            }],
+            requestedProjectionScopeKeys: ['steps-days.v0'],
+            status: 'ok' as const,
+          }),
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Read shared steps and attach the requested group challenge card.',
     })
 
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
       .join('\n')
+    expect(toolOutputs).toContain('\\"status\\":\\"ok\\"')
     expect(toolOutputs).toContain('response card attached')
     expect(result.runtimeIssueInputs).toEqual([])
     expect(result.responseCard).toEqual({
@@ -1667,6 +1725,111 @@ if (!tool) {
       title: 'Weird Health Week',
       version: 1,
     })
+  })
+
+  it('withholds a group challenge card after a capacity-partial shared read', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const dates = [
+      '2026-07-24',
+      '2026-07-23',
+      '2026-07-22',
+      '2026-07-21',
+      '2026-07-20',
+      '2026-07-19',
+      '2026-07-18',
+    ]
+    const workoutKinds = Array.from({ length: 13 }, (_unused, index) =>
+      `activity-${String(index).padStart(2, '0')}-${'x'.repeat(65)}`)
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: [
+            'const result = await tools.murph__group({',
+            '  action: "read_shared",',
+            '  projectionScopes: [{ projectionKind: "workouts.v0" }],',
+            '});',
+            'text(JSON.stringify(result));',
+          ].join('\n'),
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: [
+            `const result = await tools.murph__attach_response_card(${JSON.stringify(GROUP_CHALLENGE_AUTHORING_INPUT)});`,
+            'text(result);',
+          ].join('\n'),
+          name: 'exec',
+        },
+      },
+      { text: 'The shared read was incomplete, so I cannot post a standings card yet.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: GROUP_CHALLENGE_DYNAMIC_TOOLS,
+      groupConversation: true,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        groupSharedReader: {
+          request: async () => ({
+            members: Array.from({ length: 32 }, (_unused, index) => ({
+              currentTurnHandles: [],
+              displayName: `Member ${index}`,
+              memberId: `member_oversized_${index}`,
+              participantId: `participant_oversized_${index}`,
+              projections: [{
+                dataStatus: 'available' as const,
+                grantStatus: 'granted' as const,
+                projectionScope: {
+                  projectionKind: 'workouts.v0' as const,
+                },
+                projectionScopeKey: 'workouts.v0',
+                records: dates.map((date) => ({
+                  data: {
+                    calendarClosedThroughDate: '2026-07-24',
+                    date,
+                    timeSemantics:
+                      'canonical-event-zone-or-vault-zone.v0' as const,
+                    workouts: workoutKinds.map((kind, workoutIndex) => ({
+                      kind,
+                      minutes: 1_440 - workoutIndex,
+                      startLocalMs: 86_399_999 - workoutIndex,
+                    })),
+                  },
+                  occurredAt: `${date}T00:00:00.000Z`,
+                  recordKey: date,
+                })),
+              }],
+            })),
+            requestedProjectionScopeKeys: ['workouts.v0'],
+            status: 'ok' as const,
+          }),
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Read the shared records and attach the requested standings card.',
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('\\"status\\":\\"partial\\"')
+    expect(toolOutputs).toContain('\\"omittedParticipantIds\\"')
+    expect(toolOutputs).toContain(
+      'response cards are unavailable after an incomplete shared read',
+    )
+    expect(result.responseCard).toBeNull()
+    expect(result.finalMessage).toBe(
+      'The shared read was incomplete, so I cannot post a standings card yet.',
+    )
   })
 
   it('discovers deferred Murph schemas through native Codex tool_search', {
