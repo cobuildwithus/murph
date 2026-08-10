@@ -1,7 +1,6 @@
 import { Cli, z } from "incur";
 import {
   HEALTH_COMMONS_PAGE_STATUSES,
-  HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
   getGeneratedHealthCommonsProtocolFamilyGraphReader,
   getGeneratedHealthCommonsProtocolIndexReader,
   getGeneratedHealthCommonsProtocolRunSpecReader,
@@ -125,12 +124,10 @@ const commonsKnowledgeItemSchema = z.object({
 });
 
 export const commonsKnowledgeSearchResultSchema = z.object({
-  available: z.boolean(),
-  catalogHash: z.string(),
+  status: z.enum(["ok", "no_match", "unavailable"]),
   items: z.array(commonsKnowledgeItemSchema),
   query: z.string().min(1),
   safety: commonsKnowledgeItemSchema.nullable(),
-  topicResolved: z.boolean(),
   warning: z.string().min(1).nullable(),
 });
 
@@ -156,33 +153,28 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     args: z.object({
       query: z.string().min(2).max(480),
     }),
-    options: z.object({
-      limit: z.number().int().positive().max(HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT).default(3),
-    }),
+    options: z.object({}),
     examples: [{
       description: "Ask an ordinary health question about dry sauna.",
       args: { query: "Does Finnish dry sauna improve immunity, and is it safe after fainting?" },
-      options: { limit: 3 },
     }],
     output: commonsKnowledgeSearchResultSchema,
-    run({ args, options }) {
+    run({ args }) {
       try {
+        const result = searchGeneratedHealthCommonsKnowledge({ query: args.query });
         return commonsKnowledgeSearchResultSchema.parse({
-          available: true,
-          ...searchGeneratedHealthCommonsKnowledge({
-            limit: options.limit,
-            query: args.query,
-          }),
+          status: result.items.length > 0 || result.safety ? "ok" : "no_match",
+          items: result.items,
+          query: result.query,
+          safety: result.safety,
           warning: null,
         });
       } catch {
         return commonsKnowledgeSearchResultSchema.parse({
-          available: false,
-          catalogHash: "",
+          status: "unavailable",
           items: [],
           query: args.query,
           safety: null,
-          topicResolved: false,
           warning: "Health Commons knowledge index is unavailable; continue without corpus context.",
         });
       }

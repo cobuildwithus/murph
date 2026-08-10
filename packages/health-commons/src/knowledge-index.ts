@@ -235,6 +235,16 @@ export function writeHealthCommonsKnowledgeIndex(
           continue;
         }
         insertTopicOwner.run(normalizeTopicPhrase(parent.title), parent.key, entity.key, 0);
+        if (entity.entityType === "experiment_family") {
+          for (const alias of parent.aliases ?? []) {
+            insertTopicOwner.run(
+              normalizeTopicPhrase(alias),
+              parent.key,
+              entity.key,
+              1,
+            );
+          }
+        }
       }
     }
     for (const chunk of buildKnowledgeChunks(catalog)) {

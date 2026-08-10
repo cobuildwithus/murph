@@ -40,26 +40,24 @@ test("deleted generic Commons commands are no longer registered", async () => {
 test("commons knowledge search returns a bounded source-backed sauna packet", async () => {
   const cli = createCommonsSliceCli();
   const result = await runInProcessJsonCli<{
-    available: boolean;
+    status: "ok" | "no_match" | "unavailable";
     items: Array<{
       entityKey: string;
       sources: Array<{ pmid: string | null; url: string | null }>;
     }>;
     safety: { kind: string } | null;
-    topicResolved: boolean;
   }>(cli, [
     "commons",
     "knowledge",
     "search",
     "What does the evidence say about Finnish Dry Sauna?",
-    "--limit",
-    "3",
   ]);
 
   assert.equal(result.envelope.ok, true);
   const data = requireData(result.envelope);
-  assert.equal(data.available, true);
-  assert.equal(data.topicResolved, true);
+  assert.equal(data.status, "ok");
+  assert.equal("catalogHash" in data, false);
+  assert.equal("topicResolved" in data, false);
   assert.ok(data.items.length > 0 && data.items.length <= 3);
   assert.ok(data.items.some((item) =>
     item.sources.some((source) => source.pmid === "29849692")
@@ -68,7 +66,7 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
 
 test("commons knowledge search returns a safety-only sauna hard stop", async () => {
   const result = await runInProcessJsonCli<{
-    available: boolean;
+    status: "ok" | "no_match" | "unavailable";
     items: unknown[];
     safety: {
       sources: Array<{ pmid: string | null; title: string }>;
@@ -83,7 +81,7 @@ test("commons knowledge search returns a safety-only sauna hard stop", async () 
 
   assert.equal(result.envelope.ok, true);
   const data = requireData(result.envelope);
-  assert.equal(data.available, true);
+  assert.equal(data.status, "ok");
   assert.deepEqual(data.items, []);
   assert.match(data.safety?.text ?? "", /opioid|fentanyl|life-threatening/iu);
   assert.ok(data.safety?.sources.some((source) =>
@@ -91,7 +89,29 @@ test("commons knowledge search returns a safety-only sauna hard stop", async () 
   ));
 });
 
-test("commons knowledge search rejects a packet larger than three items", async () => {
+
+test("commons knowledge search reports no match without leaking internal resolver state", async () => {
+  const result = await runInProcessJsonCli<{
+    status: "ok" | "no_match" | "unavailable";
+    items: unknown[];
+    safety: unknown | null;
+  }>(createCommonsSliceCli(), [
+    "commons",
+    "knowledge",
+    "search",
+    "Does unsupported quux therapy improve health?",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.status, "no_match");
+  assert.deepEqual(data.items, []);
+  assert.equal(data.safety, null);
+  assert.equal("catalogHash" in data, false);
+  assert.equal("topicResolved" in data, false);
+});
+
+test("commons knowledge search exposes no result-size tuning", async () => {
   const result = await runInProcessJsonCli(createCommonsSliceCli(), [
     "commons",
     "knowledge",
@@ -114,8 +134,8 @@ test("commons knowledge search stays non-blocking when its generated index is mi
   );
   try {
     const result = await runInProcessJsonCli<{
-      available: boolean;
-        items: unknown[];
+      status: "ok" | "no_match" | "unavailable";
+      items: unknown[];
       warning: string | null;
     }>(createCommonsSliceCli(), [
       "commons",
@@ -126,7 +146,7 @@ test("commons knowledge search stays non-blocking when its generated index is mi
 
     assert.equal(result.envelope.ok, true);
     const data = requireData(result.envelope);
-    assert.equal(data.available, false);
+    assert.equal(data.status, "unavailable");
     assert.deepEqual(data.items, []);
     assert.match(data.warning ?? "", /continue without corpus context/u);
   } finally {
