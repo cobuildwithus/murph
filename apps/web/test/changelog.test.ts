@@ -498,6 +498,7 @@ describe("changelog registry", () => {
       {
         id: "2026-08-09",
         itemIds: [
+          "group-sleep-challenges-use-fresh-data",
           "public-referral-home",
           "murph-max-plan",
           "generated-contact-card-avatar",
@@ -508,6 +509,7 @@ describe("changelog registry", () => {
           "group-replies-respect-the-room",
           "sponsorship-creative-opt-in",
           "response-cards-survive-long-turns",
+          "cleaner-imessage-nutrition-cards",
           "typing-prewarms-private-chat",
           "automation-output-variety",
           "ios-app-footer-link",

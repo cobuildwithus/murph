@@ -6,10 +6,7 @@ import type {
   NutritionCardMetric,
 } from "@murphai/contracts";
 
-import {
-  IMESSAGE_CARD_COLOR,
-  ImessageCardBadge,
-} from "./card-image-chrome";
+import { IMESSAGE_CARD_COLOR } from "./card-image-chrome";
 
 export const IMESSAGE_NUTRITION_CARD_IMAGE_SIZE = {
   width: 1200,
@@ -41,8 +38,8 @@ const EMPTY_METRIC: NutritionCardMetric = {
 
 /**
  * Static counterpart to the shipping SwiftUI nutrition balloon's default
- * state. Detailed dates, completeness, goals, and statuses remain in Linq's
- * native captions so the visual can stay aligned with the compact card.
+ * state. The provider owns the outer card chrome, so this image deliberately
+ * avoids its own badge and corner mask.
  */
 export function NutritionCardImage({
   card,
@@ -84,15 +81,11 @@ export function NutritionCardImage({
         display: "flex",
         width: "100%",
         height: "100%",
-        overflow: "hidden",
-        borderRadius: 105,
         backgroundColor: COLOR.balloon,
         color: COLOR.primary,
         fontFamily: "DM Sans",
       }}
     >
-      <ImessageCardBadge />
-
       <div
         style={{
           position: "absolute",

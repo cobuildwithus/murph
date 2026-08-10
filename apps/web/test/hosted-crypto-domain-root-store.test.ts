@@ -387,6 +387,83 @@ test("prepared hosted domain root candidates stay behind the advisory lock and r
   );
 });
 
+test("candidate preparation drains every started KMS operation before returning the first failure", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  const baseClient = createLocalKmsClient({
+    encryptCalls,
+    signCalls,
+    signer: signer.privateKey,
+  });
+  const firstError = new Error("First observed candidate KMS failure.");
+  const laterError = new Error("Later candidate KMS failure.");
+  const observedPlaintexts: Uint8Array[] = [];
+  let encryptCallCount = 0;
+  let releaseSlowEncrypt: (() => void) | undefined;
+  let slowEncryptStarted = false;
+  const slowEncrypt = new Promise<void>((resolve) => {
+    releaseSlowEncrypt = resolve;
+  });
+  gcpKmsMock.client = {
+    ...baseClient,
+    async encrypt(input) {
+      encryptCallCount += 1;
+      observedPlaintexts.push(input.plaintext);
+      if (encryptCallCount === 1) {
+        slowEncryptStarted = true;
+        await slowEncrypt;
+        throw laterError;
+      }
+      if (encryptCallCount === 2) {
+        throw firstError;
+      }
+      return baseClient.encrypt(input);
+    },
+  };
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+  const { prepareHostedCryptoDomainRootCandidates } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createCapturingTransaction();
+
+  const preparation = prepareHostedCryptoDomainRootCandidates({
+    prisma: recorder.prisma,
+    userId: "member-test-candidate-drain",
+  });
+  let preparationSettled = false;
+  void preparation.then(
+    () => {
+      preparationSettled = true;
+    },
+    () => {
+      preparationSettled = true;
+    },
+  );
+
+  await vi.waitFor(() => {
+    expect(slowEncryptStarted).toBe(true);
+    expect(encryptCallCount).toBeGreaterThanOrEqual(2);
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(preparationSettled).toBe(false);
+  if (!releaseSlowEncrypt) {
+    throw new Error("Expected the slow candidate KMS gate.");
+  }
+  releaseSlowEncrypt();
+
+  await expect(preparation).rejects.toBe(firstError);
+  expect(encryptCallCount).toBe(3);
+  expect(encryptCalls.length).toBeGreaterThanOrEqual(1);
+  expect(observedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+});
+
 test("legacy transaction provisioning prepares every candidate before its first advisory lock", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
@@ -435,6 +512,95 @@ test("legacy transaction provisioning prepares every candidate before its first 
   assert.ok(operationMetrics.maxConcurrent <= 4);
   assert.equal(steps.filter((step) => step === "db.advisory-lock").length, 4);
   assert.equal(recorder.persistedEnvelopes.length, 4);
+});
+
+test("legacy Family transaction provisioning drains candidate failures before rollback", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  const baseClient = createLocalKmsClient({
+    encryptCalls,
+    signCalls,
+    signer: signer.privateKey,
+  });
+  const firstError = new Error("First observed Family activation KMS failure.");
+  const laterError = new Error("Later Family activation KMS failure.");
+  let encryptCallCount = 0;
+  let releaseSlowEncrypt: (() => void) | undefined;
+  const slowEncrypt = new Promise<void>((resolve) => {
+    releaseSlowEncrypt = resolve;
+  });
+  gcpKmsMock.client = {
+    ...baseClient,
+    async encrypt(input) {
+      encryptCallCount += 1;
+      if (encryptCallCount === 1) {
+        await slowEncrypt;
+        throw laterError;
+      }
+      if (encryptCallCount === 2) {
+        throw firstError;
+      }
+      return baseClient.encrypt(input);
+    },
+  };
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+  const { provisionHostedCryptoDomainRootsForUserTx } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const steps: string[] = [];
+  const recorder = createStepRecordingTransaction(steps);
+  const transactionSteps: string[] = ["transaction.begin"];
+  const transaction = provisionHostedCryptoDomainRootsForUserTx({
+    reason: "test.family-activation-legacy-bridge",
+    tx: recorder.prisma,
+    userId: "member-test-family-activation-drain",
+  }).then(
+    () => {
+      transactionSteps.push("transaction.commit");
+    },
+    (error: unknown) => {
+      transactionSteps.push("transaction.rollback");
+      throw error;
+    },
+  );
+  let transactionSettled = false;
+  void transaction.then(
+    () => {
+      transactionSettled = true;
+    },
+    () => {
+      transactionSettled = true;
+    },
+  );
+
+  await vi.waitFor(() => expect(encryptCallCount).toBeGreaterThanOrEqual(2));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(transactionSettled).toBe(false);
+  expect(transactionSteps).toEqual(["transaction.begin"]);
+  expect(steps).not.toContain("db.advisory-lock");
+  expect(recorder.persistedEnvelopes).toHaveLength(0);
+  if (!releaseSlowEncrypt) {
+    throw new Error("Expected the slow Family activation KMS gate.");
+  }
+  releaseSlowEncrypt();
+
+  await expect(transaction).rejects.toBe(firstError);
+  expect(transactionSteps).toEqual(["transaction.begin", "transaction.rollback"]);
+  expect(steps).not.toContain("db.advisory-lock");
+  expect(recorder.persistedEnvelopes).toHaveLength(0);
+
+  gcpKmsMock.client = baseClient;
+  await expect(provisionHostedCryptoDomainRootsForUserTx({
+    reason: "test.family-activation-legacy-bridge-retry",
+    tx: recorder.prisma,
+    userId: "member-test-family-activation-drain",
+  })).resolves.toBeUndefined();
+  expect(recorder.persistedEnvelopes).toHaveLength(4);
 });
 
 test("prepared-only provisioning fails closed without signing inside the transaction", async () => {
@@ -965,6 +1131,273 @@ test("Linq authority batch preflight retains failure for its authoritative repea
 
   expect(envelopeFindMany).toHaveBeenCalledTimes(1);
   expect(decryptMetrics.calls).toHaveLength(1);
+});
+
+test("Linq authority batch retains an envelope query failure only for the current request", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const records = (await createBatchPrivateFieldRecords({
+    memberIds: [
+      "member-batch-retained-query-failure-1",
+      "member-batch-retained-query-failure-2",
+    ],
+    tx,
+  })).identityRecords;
+  const first = records[0];
+  const second = records[1];
+  if (!first || !second) {
+    throw new Error("Expected two private-field fixtures.");
+  }
+  const healthyFindMany = createBatchEnvelopeFindMany(tx);
+  const metadataError = new Error("Envelope metadata read failed.");
+  const envelopeFindMany = vi.fn(async (input: Parameters<typeof healthyFindMany>[0]) =>
+    healthyFindMany(input)
+  );
+  envelopeFindMany.mockRejectedValueOnce(metadataError);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const decrypt = (selectedRecords = records) => decryptHostedWebNullableFields({
+    entries: selectedRecords.map((record) => ({
+      field: "hosted-member-identity.phone-number",
+      memberId: record.memberId,
+      value: record.phoneNumberEncrypted,
+    })),
+    prisma,
+    retainFailureInScopedCache: true,
+  });
+
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(decrypt()).rejects.toBe(metadataError);
+    await expect(decrypt([first])).rejects.toBe(metadataError);
+    await expect(decrypt([second])).rejects.toBe(metadataError);
+  });
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(0);
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(decrypt()).resolves.toHaveLength(2);
+  });
+  expect(envelopeFindMany).toHaveBeenCalledTimes(2);
+  expect(decryptMetrics.calls).toHaveLength(2);
+});
+
+test("batch metadata query failures are retryable in the same cache scope without opt-in", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const [record] = (await createBatchPrivateFieldRecords({
+    memberIds: ["member-batch-query-failure-no-retain"],
+    tx,
+  })).identityRecords;
+  if (!record) {
+    throw new Error("Expected one private-field fixture.");
+  }
+  const healthyFindMany = createBatchEnvelopeFindMany(tx);
+  const metadataError = new Error("Transient envelope metadata read failed.");
+  const envelopeFindMany = vi.fn(async (input: Parameters<typeof healthyFindMany>[0]) =>
+    healthyFindMany(input)
+  );
+  envelopeFindMany.mockRejectedValueOnce(metadataError);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const decrypt = () => decryptHostedWebNullableFields({
+    entries: [{
+      field: "hosted-member-identity.phone-number",
+      memberId: record.memberId,
+      value: record.phoneNumberEncrypted,
+    }],
+    prisma,
+  });
+
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(decrypt()).rejects.toBe(metadataError);
+    await expect(decrypt()).resolves.toHaveLength(1);
+  });
+  expect(envelopeFindMany).toHaveBeenCalledTimes(2);
+  expect(decryptMetrics.calls).toHaveLength(1);
+});
+
+test("Linq authority batch retains metadata validation failures only for the current request", async () => {
+  type MetadataTestRow = Omit<
+    ReturnType<typeof buildBatchEnvelopeRows>[number],
+    "signedEnvelopeJson"
+  > & { signedEnvelopeJson: unknown };
+  const variants: Array<{
+    mutate: (
+      rows: MetadataTestRow[],
+      targetUserId: string,
+    ) => MetadataTestRow[];
+    name: string;
+  }> = [
+    {
+      mutate: (rows, targetUserId) =>
+        rows.filter((row) => row.userId !== targetUserId),
+      name: "missing row",
+    },
+    {
+      mutate: (rows, targetUserId) => rows.map((row) =>
+        row.userId === targetUserId
+          ? { ...row, signedEnvelopeJson: {} }
+          : row
+      ),
+      name: "malformed envelope",
+    },
+    {
+      mutate: (rows, targetUserId) => {
+        const otherEnvelope = rows.find((row) => row.userId !== targetUserId)
+          ?.signedEnvelopeJson;
+        if (!otherEnvelope) {
+          throw new Error("Expected another envelope for the binding mismatch.");
+        }
+        return rows.map((row) => row.userId === targetUserId
+          ? { ...row, signedEnvelopeJson: otherEnvelope }
+          : row);
+      },
+      name: "root binding mismatch",
+    },
+    {
+      mutate: (rows, targetUserId) => rows.map((row) => {
+        if (row.userId !== targetUserId) {
+          return row;
+        }
+        const envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
+        return {
+          ...row,
+          signedEnvelopeJson: {
+            ...envelope,
+            authoritySignature: {
+              ...envelope.authoritySignature,
+              signature: "AA==",
+            },
+          },
+        };
+      }),
+      name: "signature failure",
+    },
+  ];
+
+  for (const variant of variants) {
+    const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+    const records = await createBatchPrivateFieldRecords({
+      memberIds: [
+        `member-batch-retained-${variant.name.replaceAll(" ", "-")}`,
+        `member-batch-retained-${variant.name.replaceAll(" ", "-")}-other`,
+      ],
+      tx,
+    });
+    const record = records.identityRecords[0];
+    const siblingRecord = records.identityRecords[1];
+    if (!record || !siblingRecord) {
+      throw new Error("Expected two private-field fixtures.");
+    }
+    const healthyFindMany = createBatchEnvelopeFindMany(tx);
+    let failMetadata = true;
+    const envelopeFindMany = vi.fn(async (
+      input: Parameters<typeof healthyFindMany>[0],
+    ) => {
+      const rows: MetadataTestRow[] = await healthyFindMany(input);
+      return failMetadata
+        ? variant.mutate(rows, record.memberId)
+        : rows;
+    });
+    const prisma = Object.assign(tx.prisma, {
+      hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+    });
+    const { runWithHostedDomainRootUnwrapCache } = await import(
+      "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+    );
+    const decrypt = (selectedRecords = [record]) => decryptHostedWebNullableFields({
+      entries: selectedRecords.map((selectedRecord) => ({
+        field: "hosted-member-identity.phone-number",
+        memberId: selectedRecord.memberId,
+        value: selectedRecord.phoneNumberEncrypted,
+      })),
+      prisma,
+      retainFailureInScopedCache: true,
+    });
+
+    resetLocalKmsDecryptMetrics(decryptMetrics);
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      const firstFailure = await decrypt([record, siblingRecord]).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(firstFailure, variant.name).not.toBeNull();
+      await expect(decrypt([record]), variant.name).rejects.toBe(firstFailure);
+      await expect(decrypt([siblingRecord]), variant.name).resolves.toHaveLength(1);
+    });
+    expect(envelopeFindMany, variant.name).toHaveBeenCalledTimes(2);
+    expect(decryptMetrics.calls, variant.name).toHaveLength(1);
+
+    failMetadata = false;
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      await expect(decrypt(), variant.name).resolves.toHaveLength(1);
+    });
+    expect(envelopeFindMany, variant.name).toHaveBeenCalledTimes(3);
+    expect(decryptMetrics.calls, variant.name).toHaveLength(2);
+  }
+});
+
+test("a retained root failure stops a mixed batch before new metadata or KMS work", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const records = await createBatchPrivateFieldRecords({
+    memberIds: ["member-batch-retained-mixed-1", "member-batch-retained-mixed-2"],
+    tx,
+  });
+  const first = records.identityRecords[0];
+  const second = records.identityRecords[1];
+  if (!first || !second) {
+    throw new Error("Expected two private-field fixtures.");
+  }
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(decryptHostedWebNullableFields({
+      entries: [{
+        field: "hosted-member-identity.phone-number",
+        memberId: first.memberId,
+        value: first.phoneNumberEncrypted,
+      }],
+      prisma,
+      retainFailureInScopedCache: true,
+    })).rejects.toThrow("Test KMS decrypt failure.");
+    const envelopeCallsBeforeMixedBatch = envelopeFindMany.mock.calls.length;
+    const kmsCallsBeforeMixedBatch = decryptMetrics.calls.length;
+    decryptMetrics.failAtCall = null;
+
+    await expect(decryptHostedWebNullableFields({
+      entries: [
+        {
+          field: "hosted-member-identity.phone-number",
+          memberId: first.memberId,
+          value: first.phoneNumberEncrypted,
+        },
+        {
+          field: "hosted-member-identity.phone-number",
+          memberId: second.memberId,
+          value: second.phoneNumberEncrypted,
+        },
+      ],
+      prisma,
+      retainFailureInScopedCache: true,
+    })).rejects.toThrow("Test KMS decrypt failure.");
+    expect(envelopeFindMany).toHaveBeenCalledTimes(envelopeCallsBeforeMixedBatch);
+    expect(decryptMetrics.calls).toHaveLength(kmsCallsBeforeMixedBatch);
+  });
 });
 
 test("batch private-field decrypt zeroizes invalid KMS plaintext and stops before the next chunk", async () => {

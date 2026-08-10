@@ -48,6 +48,10 @@ import {
   type HostedGrowthMessagePoint,
 } from "@/src/lib/hosted-ops/growth-message-series";
 import {
+  buildHostedGrowthReferralLinkUsage,
+  type HostedGrowthReferralLinkUsage,
+} from "@/src/lib/hosted-ops/growth-referral-link-usage";
+import {
   MONTHLY_REVENUE_MONTHS,
   buildHostedGrowthMonthlyRevenueSeries,
   startOfUtcMonthsAgo,
@@ -60,6 +64,11 @@ export { buildHostedGrowthMessageSeries } from "@/src/lib/hosted-ops/growth-mess
 export type { HostedGrowthMessagePoint } from "@/src/lib/hosted-ops/growth-message-series";
 export { buildHostedGrowthMonthlyRevenueSeries } from "@/src/lib/hosted-ops/growth-monthly-revenue-series";
 export type { HostedGrowthMonthlyRevenuePoint } from "@/src/lib/hosted-ops/growth-monthly-revenue-series";
+export { buildHostedGrowthReferralLinkUsage } from "@/src/lib/hosted-ops/growth-referral-link-usage";
+export type {
+  HostedGrowthReferralLinkDailyPoint,
+  HostedGrowthReferralLinkUsage,
+} from "@/src/lib/hosted-ops/growth-referral-link-usage";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
@@ -296,6 +305,7 @@ export interface HostedGrowthDashboard {
     wowPercent: number | null;
   };
   payingCustomersWowPercent: number | null;
+  referralLinkUsage: HostedGrowthReferralLinkUsage;
   snapshotSeries: HostedGrowthSnapshotPoint[];
   trialCohorts: HostedGrowthTrialCohortRow[];
   trialStarts: {
@@ -1218,6 +1228,7 @@ export async function readHostedGrowthDashboard(
     activeUsersGroupRows,
     activeUsersTodayDirectRows,
     monthlyRevenuePurchases,
+    referralLinkClaimRows,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
@@ -1415,6 +1426,45 @@ export async function readHostedGrowthDashboard(
         stripeLiveMode: true,
       },
     }),
+    prisma.hostedInvite.findMany({
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
+      select: {
+        createdAt: true,
+        member: {
+          select: {
+            hostedMailboxItems: {
+              orderBy: [
+                { occurredAt: "asc" },
+                { id: "asc" },
+              ],
+              select: {
+                occurredAt: true,
+              },
+              where: {
+                kind: "member.activated",
+                occurredAt: {
+                  gte: dailyStart,
+                  lte: now,
+                },
+              },
+            },
+          },
+        },
+        referrerMemberId: true,
+      },
+      where: {
+        createdAt: {
+          gte: dailyStart,
+          lte: now,
+        },
+        referrerMemberId: {
+          not: null,
+        },
+      },
+    }),
   ]);
   const activeUsers = await calculateHostedGrowthActiveUsers({
     currentDirectRows: activeUsersTrailing7DayDirectRows,
@@ -1557,6 +1607,11 @@ export async function readHostedGrowthDashboard(
           current.payingCustomers,
           comparableSnapshot.payingCustomers,
         ),
+    referralLinkUsage: buildHostedGrowthReferralLinkUsage({
+      claimRows: referralLinkClaimRows,
+      dayCount: DAILY_SERIES_DAYS,
+      windowEnd: now,
+    }),
     snapshotSeries: snapshots
       .filter((row) => row.snapshotDate.getTime() >= dailyStart.getTime())
       .map(serializeSnapshotPoint),
