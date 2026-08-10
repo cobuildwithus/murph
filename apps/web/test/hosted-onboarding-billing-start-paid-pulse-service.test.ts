@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
   assertHostedBillingPlanSelectable: vi.fn(),
   applyStripeInvoicePaid: vi.fn(),
+  cleanupHostedFamilySponsoredDirectSubscription: vi.fn(),
   getPrisma: vi.fn(),
   prepareHostedCryptoDomainRootCandidates: vi.fn(),
   preparedCryptoDomainRoots: new Map(),
@@ -29,11 +30,13 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
   },
   readHostedMemberCoreState: vi.fn(),
+  readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
   requireHostedStripeBillingPlanConfig: vi.fn(),
   requireValidatedHostedStripeBillingPlanConfig: vi.fn(),
   scheduleHostedBillingPlanSwitch: vi.fn(),
+  updateHostedMemberCoreState: vi.fn(),
   withHostedMemberStripeMutationLock: vi.fn(),
   stripe: {
     billingPortal: {
@@ -68,7 +71,19 @@ vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+  updateHostedMemberCoreState: mocks.updateHostedMemberCoreState,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/family-plan")
+  >("@/src/lib/hosted-onboarding/family-plan");
+  return {
+    ...actual,
+    readHostedMemberFamilyBillingClaim:
+      mocks.readHostedMemberFamilyBillingClaim,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
@@ -93,6 +108,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeInvoicePaid: mocks.applyStripeInvoicePaid,
+  cleanupHostedFamilySponsoredDirectSubscription:
+    mocks.cleanupHostedFamilySponsoredDirectSubscription,
 }));
 
 import {
@@ -111,6 +128,8 @@ describe("startHostedPulseTrialPaidPlan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.assertHostedBillingPlanSelectable.mockResolvedValue(undefined);
+    mocks.applyStripeInvoicePaid.mockResolvedValue({});
+    mocks.cleanupHostedFamilySponsoredDirectSubscription.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
       mocks.preparedCryptoDomainRoots,
@@ -125,11 +144,19 @@ describe("startHostedPulseTrialPaidPlan", () => {
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef());
     mocks.scheduleHostedBillingPlanSwitch.mockResolvedValue({
       effectiveAt: "2026-05-10T00:00:00.000Z",
       scheduledBillingPlanCode: "launch_group_monthly",
       status: "scheduled",
+    });
+    mocks.updateHostedMemberCoreState.mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
     mocks.withHostedMemberStripeMutationLock.mockImplementation(
       async (input: { run: (tx: unknown) => Promise<unknown> }) =>
@@ -824,7 +851,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     mocks.stripe.subscriptions.update.mockResolvedValueOnce(paidSubscription);
     mocks.applyStripeInvoicePaid
       .mockRejectedValueOnce(new Error("Synthetic local invoice reconciliation failure."))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({});
     mocks.readHostedMemberStripeBillingRef
       .mockResolvedValueOnce(makeBillingRef())
       .mockResolvedValueOnce(makeBillingRef({
@@ -1005,6 +1032,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
       statusCode: 500,
       type: "StripeAPIError",
     });
+    mocks.applyStripeInvoicePaid.mockResolvedValueOnce({
+      cleanupFamilySponsoredStripeSubscriptionId: "sub_123",
+    });
 
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
@@ -1038,6 +1068,15 @@ describe("startHostedPulseTrialPaidPlan", () => {
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
       userId: "member_123",
+    });
+    expect(
+      mocks.cleanupHostedFamilySponsoredDirectSubscription,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      sourceEventId:
+        "stripe.invoice.paid:in_123:family-sponsored-cleanup",
+      subscriptionId: "sub_123",
     });
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
   });
@@ -1238,7 +1277,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     mocks.stripe.subscriptions.resume.mockResolvedValueOnce(paidSubscription);
     mocks.applyStripeInvoicePaid
       .mockRejectedValueOnce(new Error("Synthetic local invoice reconciliation failure."))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({});
 
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
@@ -1286,10 +1325,10 @@ describe("startHostedPulseTrialPaidPlan", () => {
       trialEnd: null,
     }));
     mocks.withHostedMemberStripeMutationLock.mockImplementationOnce(
-      async (input: { run: () => Promise<unknown> }) => {
+      async (input: { run: (tx: unknown) => Promise<unknown> }) => {
         signalFirstLock?.();
         await firstLockRelease;
-        return input.run();
+        return input.run(mocks.prismaClient);
       },
     );
 
@@ -1311,6 +1350,16 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(1, {
+      billingStatus: HostedBillingStatus.incomplete,
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(2, {
+      billingStatus: HostedBillingStatus.active,
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
       "sub_123",
       {
@@ -1329,6 +1378,59 @@ describe("startHostedPulseTrialPaidPlan", () => {
     ).toBeLessThan(
       mocks.stripe.subscriptions.resume.mock.invocationCallOrder[0] ?? 0,
     );
+    expect(
+      mocks.updateHostedMemberCoreState.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.stripe.subscriptions.update.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(
+      mocks.stripe.subscriptions.resume.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.updateHostedMemberCoreState.mock.invocationCallOrder[1] ?? 0,
+    );
+  });
+
+  test("blocks a stale paused resume after Family sponsorship wins the member lock", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+      billingStatus: HostedBillingStatus.paused,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+      currentBillingPhase: null,
+    }));
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: "pm_customer_123",
+        defaultSource: null,
+      }),
+      status: "paused",
+      trialEnd: null,
+    }));
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce({
+      groupId: "family_group_123",
+      kind: "active_sponsorship",
+      ownerMemberId: "family_owner_123",
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberFamilyBillingClaim).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
   test("clears a prepared extension target before resuming paused paid billing", async () => {
@@ -1481,6 +1583,12 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledOnce();
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.incomplete,
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
   });
 
   test("surfaces a deterministic resume failure after paused cleanup succeeds", async () => {
@@ -1717,6 +1825,11 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
 
     expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(1);
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenLastCalledWith({
+      billingStatus: HostedBillingStatus.incomplete,
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
       "sub_123",
       {

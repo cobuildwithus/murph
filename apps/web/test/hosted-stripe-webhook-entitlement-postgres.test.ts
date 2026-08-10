@@ -76,6 +76,7 @@ import {
   readHostedPersonalAiUsageStatus,
 } from "@/src/lib/hosted-execution/usage-status";
 import {
+  acceptHostedFamilyInviteTx,
   removeHostedFamilyMemberTx,
   writeHostedAccountGroupStripeBillingTx,
 } from "@/src/lib/hosted-onboarding/family-plan";
@@ -280,6 +281,100 @@ describe.skipIf(!runPostgresProof)(
           });
       } finally {
         await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("rejects Family acceptance after Checkout binds before status projection", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const fixtureId = randomUUID();
+      const ownerMemberId = `hbm_family_race_owner_${fixtureId}`;
+      const memberId = `hbm_family_race_member_${fixtureId}`;
+      const groupId = `hbag_family_race_${fixtureId}`;
+      const inviteId = `hbagi_family_race_${fixtureId}`;
+      const inviteCode = `family-race-${fixtureId}`;
+      const stripeCustomerId = `cus_family_race_${fixtureId}`;
+      const stripeSubscriptionId = `sub_family_race_${fixtureId}`;
+      const checkoutSessionId = `cs_family_race_${fixtureId}`;
+      const now = new Date("2026-07-01T13:30:00.000Z");
+
+      try {
+        await prisma.hostedMember.createMany({
+          data: [
+            { id: ownerMemberId },
+            { id: memberId },
+          ],
+        });
+        await prisma.hostedAccountGroup.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: groupId,
+            ownerMemberId,
+          },
+        });
+        await prisma.hostedAccountGroupInvite.create({
+          data: {
+            expiresAt: new Date(now.getTime() + 60_000),
+            groupId,
+            id: inviteId,
+            inviteCode,
+            invitedByMemberId: ownerMemberId,
+          },
+        });
+
+        const preparedCompletion =
+          await prepareHostedMemberStripeCheckoutCompletion({
+            memberId,
+            prisma,
+            stripeCustomerId,
+            stripeSubscriptionId,
+          });
+        await expect(prisma.$transaction((tx) =>
+          bindHostedStripeBillingRefsFromCheckoutSessionTx({
+            billingIdentityDisposition: "bind",
+            dispatchContext: {
+              eventCreatedAt: now,
+              sourceEventId: `evt_family_race_${fixtureId}`,
+            },
+            memberId,
+            preparedCompletion,
+            preparedStripeCheckoutEmail: null,
+            session: {
+              customer: stripeCustomerId,
+              id: checkoutSessionId,
+              subscription: stripeSubscriptionId,
+            } as never,
+            tx,
+          })
+        )).resolves.toMatchObject({ kind: "accepted" });
+        await expect(readHostedMemberBillingSnapshot({ memberId, prisma }))
+          .resolves.toMatchObject({
+            billingRef: { stripeSubscriptionId },
+            core: { billingStatus: HostedBillingStatus.not_started },
+          });
+
+        await expect(prisma.$transaction((tx) =>
+          acceptHostedFamilyInviteTx({
+            acceptedMemberId: memberId,
+            inviteCode,
+            now,
+            tx,
+          })
+        )).rejects.toMatchObject({
+          code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+        });
+        await expect(prisma.hostedAccountGroupInvite.findUnique({
+          select: { status: true },
+          where: { id: inviteId },
+        })).resolves.toEqual({ status: "pending" });
+        await expect(prisma.hostedAccountGroupMembership.count({
+          where: { groupId, memberId },
+        })).resolves.toBe(0);
+      } finally {
+        await prisma.hostedAccountGroup.deleteMany({ where: { id: groupId } });
+        await prisma.hostedMember.deleteMany({
+          where: { id: { in: [ownerMemberId, memberId] } },
+        });
         await prisma.$disconnect();
       }
     });

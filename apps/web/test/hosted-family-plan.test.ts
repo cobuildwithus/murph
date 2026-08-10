@@ -3335,6 +3335,7 @@ describe("hosted Family plan", () => {
   });
 
   it.each([
+    ["bound before status projection", HostedBillingStatus.not_started],
     ["paid", HostedBillingStatus.active],
     ["trial", HostedBillingStatus.active],
     ["incomplete", HostedBillingStatus.incomplete],
@@ -3364,6 +3365,44 @@ describe("hosted Family plan", () => {
       expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     },
   );
+
+  it("keeps a paused direct owner blocked from Family capacity management", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 1,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingRef: {
+        stripeSubscriptionIdEncrypted: "encrypted:sub_paused_direct",
+      },
+      billingStatus: HostedBillingStatus.paused,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const stripeSubscriptionRetrieve = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: stripeSubscriptionRetrieve,
+        update: vi.fn(),
+      },
+    });
+
+    await expect(updateHostedFamilyPlanCapacities({
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetCapacities: { edge: 0, pulse: 2 },
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+      httpStatus: 409,
+    });
+
+    expect(stripeSubscriptionRetrieve).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["canceled", HostedBillingStatus.canceled],
