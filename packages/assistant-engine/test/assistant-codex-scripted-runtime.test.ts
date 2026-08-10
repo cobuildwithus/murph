@@ -1703,6 +1703,8 @@ if (!tool) {
       'regimen list --status active --limit 200 --format json'
     const measurementCommand =
       'measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from 2026-06-15 --to 2026-07-30 --limit 200 --format json'
+    const pregnancyMeasurementCommand =
+      'measurement entry list --metric pregnancy-test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
     const totalsCommand =
       'meal totals --from 2026-07-30 --to 2026-07-30 --format json'
 
@@ -1815,7 +1817,7 @@ if (!tool) {
       filters: {
         from: '2026-06-15',
         limit: 200,
-        metrics: ['bmi', 'height', 'weight', 'body-weight'],
+        metric: ['bmi', 'height', 'weight', 'body-weight'],
         to: '2026-07-30',
       },
       items: [],
@@ -1854,7 +1856,21 @@ if (!tool) {
       filters: {
         from: '2026-06-15',
         limit: 200,
-        metrics: ['bmi', 'height', 'weight', 'body-weight'],
+        metric: ['bmi', 'height', 'weight', 'body-weight'],
+        to: '2026-07-30',
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const pregnancyMeasurementResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        from: '2025-10-03',
+        limit: 200,
+        metric: ['pregnancy-test'],
         to: '2026-07-30',
       },
       items,
@@ -1864,7 +1880,7 @@ if (!tool) {
     const lowBmiMeasurements = measurementResult([{
       eventId: 'event_low_bmi',
       metric: 'bmi',
-      observedAt: '2026-07-29T12:00:00.000Z',
+      occurredAt: '2026-07-29T12:00:00.000Z',
       unit: 'kg/m^2',
       value: 16.8,
     }])
@@ -1872,14 +1888,14 @@ if (!tool) {
       {
         eventId: 'event_low_pair',
         metric: 'height',
-        observedAt: '2026-07-29T12:00:00.000Z',
+        occurredAt: '2026-07-29T12:00:00.000Z',
         unit: 'cm',
         value: 180,
       },
       {
         eventId: 'event_low_pair',
         metric: 'weight',
-        observedAt: '2026-07-29T12:00:00.000Z',
+        occurredAt: '2026-07-29T12:00:00.000Z',
         unit: 'kg',
         value: 54,
       },
@@ -1887,7 +1903,7 @@ if (!tool) {
     const normalBmiMeasurements = measurementResult([{
       eventId: 'event_normal_bmi',
       metric: 'bmi',
-      observedAt: '2026-07-29T12:00:00.000Z',
+      occurredAt: '2026-07-29T12:00:00.000Z',
       unit: 'kg/m^2',
       value: 22.1,
     }])
@@ -1895,9 +1911,70 @@ if (!tool) {
       Array.from({ length: 200 }, (_, index) => ({
         eventId: `event_height_only_${index + 1}`,
         metric: 'height',
-        observedAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
+        occurredAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
         unit: 'cm',
         value: 180,
+      })),
+    )
+    const noPregnancyMeasurements = pregnancyMeasurementResult([])
+    const negativePregnancyMeasurements = pregnancyMeasurementResult([{
+      eventId: 'event_negative_pregnancy_test',
+      measurementIndex: 0,
+      metric: 'pregnancy-test',
+      occurredAt: '2026-07-29T12:00:00.000Z',
+      qualifiers: { result: 'negative' },
+      recordKind: 'measurement',
+      source: 'device',
+      unit: 'result',
+      value: 0,
+    }])
+    const ambiguousPregnancyMeasurements = pregnancyMeasurementResult([{
+      eventId: 'event_ambiguous_pregnancy_test',
+      measurementIndex: 0,
+      metric: 'pregnancy-test',
+      occurredAt: '2026-07-29T12:00:00.000Z',
+      qualifiers: { result: 'indeterminate' },
+      recordKind: 'measurement',
+      source: 'device',
+      unit: 'result',
+      value: 1,
+    }])
+    const positivePregnancyMeasurements = pregnancyMeasurementResult([{
+      eventId: 'event_positive_pregnancy_test',
+      measurementIndex: 0,
+      metric: 'pregnancy-test',
+      occurredAt: '2026-07-28T12:00:00.000Z',
+      qualifiers: { result: 'positive' },
+      recordKind: 'measurement',
+      source: 'device',
+      unit: 'result',
+      value: 1,
+    }])
+    const laterNegativeAfterPositiveMeasurements = pregnancyMeasurementResult([
+      {
+        eventId: 'event_later_negative_pregnancy_test',
+        measurementIndex: 0,
+        metric: 'pregnancy-test',
+        occurredAt: '2026-07-29T12:00:00.000Z',
+        qualifiers: { result: 'negative' },
+        recordKind: 'measurement',
+        source: 'device',
+        unit: 'result',
+        value: 0,
+      },
+      positivePregnancyMeasurements.items[0]!,
+    ])
+    const saturatedPregnancyMeasurements = pregnancyMeasurementResult(
+      Array.from({ length: 200 }, (_, index) => ({
+        eventId: `event_negative_pregnancy_test_${index + 1}`,
+        measurementIndex: 0,
+        metric: 'pregnancy-test',
+        occurredAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
+        qualifiers: { result: 'negative' },
+        recordKind: 'measurement',
+        source: 'device',
+        unit: 'result',
+        value: 0,
       })),
     )
     const canonicalTotals = {
@@ -1988,6 +2065,7 @@ text(result.output);
                   'regimen list --status active --limit 200 --format json',
                   'before activating a paused nutrition proposal',
                   'measurement entry list read over the canonical 45-day window',
+                  'separate vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json read',
                 ],
               }
             : {}),
@@ -2131,6 +2209,7 @@ text(result.output);
         vault: 'synthetic-vault',
       }],
       [measurementCommand, safeMeasurements],
+      [pregnancyMeasurementCommand, noPregnancyMeasurements],
       [totalsCommand, canonicalTotals],
     ] as const
     const controlCommands = [
@@ -2140,6 +2219,7 @@ text(result.output);
       conditionListCommand,
       regimenListCommand,
       measurementCommand,
+      pregnancyMeasurementCommand,
       totalsCommand,
     ]
     for (const control of [
@@ -2582,6 +2662,122 @@ text(result.output);
       skillSlugs: ['food-journal', 'nutrition-strategy'],
     })
 
+    for (const unavailablePregnancyRead of [
+      {
+        failed: true,
+        finalMessage: 'I could not complete the current pregnancy-test safety check, so I left target setup unchanged.',
+        output: noPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me, but do not proceed if the canonical pregnancy-test read fails.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not safely complete the pregnancy-test check, so I left target setup unchanged.',
+        output: saturatedPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical pregnancy-test discovery is saturated.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [measurementCommand, normalBmiMeasurements],
+          ...(unavailablePregnancyRead.failed
+            ? []
+            : [[pregnancyMeasurementCommand, unavailablePregnancyRead.output] as const]),
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+        ],
+        ...(unavailablePregnancyRead.failed
+          ? { failedCommands: [pregnancyMeasurementCommand] }
+          : {}),
+        finalMessage: unavailablePregnancyRead.finalMessage,
+        prompt: unavailablePregnancyRead.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, laterNegativeAfterPositiveMeasurements],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+      ],
+      finalMessage: 'I kept this non-numeric because a recent explicit positive pregnancy test keeps self-directed targets outside this path.',
+      prompt: 'Set daily nutrition targets for me. A later negative result must not erase a recent explicit positive result.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    for (const acceptance of [
+      {
+        finalMessage: 'I left the proposal paused and kept this non-numeric because of a recent explicit positive pregnancy test.',
+        prompt: 'Yes, accept those nutrition targets.',
+      },
+      {
+        finalMessage: 'I left the proposal paused and did not attach the pending card because of a recent explicit positive pregnancy test.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [measurementCommand, normalBmiMeasurements],
+          [pregnancyMeasurementCommand, positivePregnancyMeasurements],
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+        ],
+        finalMessage: acceptance.finalMessage,
+        prompt: acceptance.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+        snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [activeListCommand, completeList],
+        [visibleGoalShowCommand, visibleGoal],
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, positivePregnancyMeasurements],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        visibleGoalShowCommand,
+        memoryCommand,
+        ...emptySafetyCommands,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+      ],
+      finalMessage: 'Closeout saved without numeric feedback because a recent explicit positive pregnancy test requires the non-numeric path.',
+      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+      scheduled: true,
+      skillReadCommands: scheduledSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
+
     for (const acceptance of [
       {
         finalMessage: 'I left the proposal paused and kept this non-numeric because your current measurements make these targets inappropriate.',
@@ -2612,31 +2808,52 @@ text(result.output);
       })
     }
 
-    await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [measurementCommand, normalBmiMeasurements],
-        [activeListCommand, noActiveGoalsList],
-        [allStatusGoalListCommand, noManagedGoalsList],
-        [proposalImportCommand, pausedGoal],
-        [pausedGoalShowCommand, pausedGoal],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        measurementCommand,
-        activeListCommand,
-        allStatusGoalListCommand,
-        proposalImportCommand,
-        pausedGoalShowCommand,
-      ],
-      finalMessage: 'Proposed for 2026-07-30: 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber. These are paused until you accept them.',
-      prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-    })
+    for (const allowedPregnancyEvidence of [
+      {
+        measurements: noPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context; no pregnancy-test rows exist.',
+      },
+      {
+        measurements: negativePregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; the only current pregnancy-test row is an exact negative.',
+      },
+      {
+        measurements: ambiguousPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; the pregnancy-test qualifier and numeric value conflict, so treat that row as unavailable rather than positive.',
+      },
+      {
+        measurements: noPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an old positive pregnancy test falls before the bounded 300-day read and is stale for this gate.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [measurementCommand, normalBmiMeasurements],
+          [pregnancyMeasurementCommand, allowedPregnancyEvidence.measurements],
+          [activeListCommand, noActiveGoalsList],
+          [allStatusGoalListCommand, noManagedGoalsList],
+          [proposalImportCommand, pausedGoal],
+          [pausedGoalShowCommand, pausedGoal],
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+          activeListCommand,
+          allStatusGoalListCommand,
+          proposalImportCommand,
+          pausedGoalShowCommand,
+        ],
+        finalMessage: 'Proposed for 2026-07-30: 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber. These are paused until you accept them.',
+        prompt: allowedPregnancyEvidence.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
 
     await runCase({
       card: eligibleCard,
@@ -2644,6 +2861,7 @@ text(result.output);
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
         [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
         [activeListCommand, noActiveGoalsList],
         [allStatusGoalListCommand, pausedManagedGoalList],
         [activateGoalCommand, activeManagedGoal],
@@ -2654,6 +2872,7 @@ text(result.output);
         memoryCommand,
         ...emptySafetyCommands,
         measurementCommand,
+        pregnancyMeasurementCommand,
         activeListCommand,
         allStatusGoalListCommand,
         activateGoalCommand,
@@ -2676,6 +2895,7 @@ text(result.output);
         [memoryCommand, adultMemory],
         ...completeSafetyOutputs({}),
         [measurementCommand, safeMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
         [totalsCommand, canonicalTotals],
       ],
       expectedCommands: [
@@ -2684,6 +2904,7 @@ text(result.output);
         memoryCommand,
         ...completeSafetyCommands,
         measurementCommand,
+        pregnancyMeasurementCommand,
         totalsCommand,
       ],
       finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_SAFETY_READ',

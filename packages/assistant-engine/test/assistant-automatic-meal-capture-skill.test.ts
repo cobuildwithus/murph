@@ -165,7 +165,7 @@ describe('assistant automatic meal capture skill', () => {
       'If any required detail read fails or is unreadable, use the same ordinary-text, no-write, no-question, no-card failure behavior.',
     )
     expect(compactSkill).toContain(
-      'Also run the shared gate\'s bounded canonical measurement-entry read. A failed read, or a saturated read that cannot resolve usable BMI evidence, uses the same failure behavior.',
+      'Also run the shared gate\'s bounded body-measurement read and separate `pregnancy-test` read. A failed read, a body-measurement read saturated without resolving usable BMI evidence, or a saturated pregnancy-test read uses the same failure behavior.',
     )
     expect(compactSkill).toContain(
       'Only when all five qualifying exact point targets resolve from active canonical Goals',
@@ -248,6 +248,15 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain('frailty, or malnutrition risk')
     expect(compactSafety).toContain(
       '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSkill).toContain(
+      'An explicit positive pregnancy-test result uses the same non-numeric, no-write, no-question, no-card path.',
+    )
+    expect(compactSafety).toContain(
+      'It takes precedence over negative rows in the same window, including a later negative',
     )
     expect(compactSafety).toContain(
       '`vault-cli memory show --format json`',

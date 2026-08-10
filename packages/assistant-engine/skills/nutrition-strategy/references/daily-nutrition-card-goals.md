@@ -12,11 +12,11 @@ for inputs, derive or save targets, or surface a proposal.
 
 Before using this workflow, read and apply `daily-nutrition-card-safety.md`,
 including its complete canonical memory document, bounded active-condition and
-active-regimen discovery, and canonical measurement read. The context snapshot
-is not completeness proof for any of these owners. If any required canonical
-read is saturated or unavailable, or the gate suppresses numeric goals, stop
-here with no Goal or measurement mutation and keep the owning non-numeric or
-clinical path.
+active-regimen discovery, 45-day body-measurement read, and separate 300-day
+`pregnancy-test` read. The context snapshot is not completeness proof for any
+of these owners. If any required canonical read is saturated or unavailable,
+or the gate suppresses numeric goals, stop here with no Goal or measurement
+mutation and keep the owning non-numeric or clinical path.
 
 A numeric card request explicitly asks for Murph's goal-aware daily-card
 experience. It authorizes only the one paused canonical proposal below so the
@@ -225,11 +225,11 @@ Use the existing canonical Goal owner; add no new state surface.
    goal-aware card.
 5. When the member accepts the proposal, first re-run the complete
    current-context gate in `daily-nutrition-card-safety.md`, including its bounded
-   canonical memory, active-condition, active-regimen, and canonical measurement
-   reads. If that gate suppresses numeric guidance, fails, or cannot resolve a
-   saturated read, leave the proposal paused and unchanged, surface no target
-   values, use ordinary non-numeric text, and attach no card. Only after that
-   gate passes, re-read target authority. If a metric has gained an explicit
+   canonical memory, active-condition, active-regimen, body-measurement, and
+   `pregnancy-test` reads. If that gate suppresses numeric guidance, fails, or
+   cannot resolve a saturated read, leave the proposal paused and unchanged,
+   surface no target values, use ordinary non-numeric text, and attach no card.
+   Only after that gate passes, re-read target authority. If a metric has gained an explicit
    owner, remove it from the managed proposal by sending the complete intended
    post-update array and read the Goal back. Then run
    `vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active`

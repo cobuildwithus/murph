@@ -60,6 +60,25 @@ context.
   ordinary non-numeric text. Otherwise missing measurements are unavailable
   evidence, not a universal block. Never ask a scheduled occurrence for these
   measurements and never mutate measurement records during this check.
+- Separately run `vault-cli measurement entry list --metric pregnancy-test
+  --from <300-days-before-today> --to <today> --limit 200 --format json`.
+  Reuse an identical current-turn result. The 300-day product window is a
+  conservative buffer over [ACOG's average 280-day pregnancy
+  length](https://www.acog.org/womens-health/faqs/when-pregnancy-goes-past-your-due-date);
+  older rows are stale for this gate. Treat a row as an explicit positive only
+  when its metric is exactly `pregnancy-test`, its unit is exactly `result`, its
+  numeric value is exactly `1`, and its `qualifiers.result` string is `positive`
+  after case and surrounding-whitespace normalization. Any explicit positive in the
+  window suppresses numeric setup, proposal presentation, every Goal write or
+  activation, and every card. It takes precedence over negative rows in the
+  same window, including a later negative; a negative home test is not strong
+  enough to erase the positive safety signal. Missing, negative, stale,
+  indeterminate, malformed, or qualifier/value-conflicting rows are unavailable
+  evidence, not proof that the member is not pregnant and not a universal
+  block. If this read fails, is unreadable, or returns exactly 200 records, fail
+  closed with ordinary non-numeric text, no Goal or measurement mutation, and
+  no card; leave an existing paused proposal unchanged. Never ask a scheduled
+  occurrence about the result, and never diagnose pregnancy from this gate.
 - Do not derive, save, or surface numeric goals, and do not attach a goal-aware
   card, for clearly current intuitive-eating or number-sensitive contexts;
   known or suspected

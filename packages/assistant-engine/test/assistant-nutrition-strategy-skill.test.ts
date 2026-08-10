@@ -282,7 +282,7 @@ describe('assistant nutrition strategy skill', () => {
       'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactGoals).toContain(
-      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, and canonical measurement read.',
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, 45-day body-measurement read, and separate 300-day `pregnancy-test` read.',
     )
     expect(compactGoals).toContain(
       'The context snapshot is not completeness proof for any of these owners.',
@@ -374,7 +374,7 @@ describe('assistant nutrition strategy skill', () => {
       'after the complete pre-activation safety gate in step 5 passes, activate and read back the Goal, reuse those identical current-turn safety reads, re-read same-date canonical meal totals, and attach exactly one card in that acceptance response',
     )
     expect(compactGoals).toContain(
-      'When the member accepts the proposal, first re-run the complete current-context gate in `daily-nutrition-card-safety.md`, including its bounded canonical memory, active-condition, active-regimen, and canonical measurement reads.',
+      'When the member accepts the proposal, first re-run the complete current-context gate in `daily-nutrition-card-safety.md`, including its bounded canonical memory, active-condition, active-regimen, body-measurement, and `pregnancy-test` reads.',
     )
     expect(compactGoals).toContain(
       'leave the proposal paused and unchanged, surface no target values, use ordinary non-numeric text, and attach no card.',
@@ -474,6 +474,21 @@ describe('assistant nutrition strategy skill', () => {
       '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
     )
     expect(compactSafety).toContain(
+      '`vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      'Any explicit positive in the window suppresses numeric setup, proposal presentation, every Goal write or activation, and every card.',
+    )
+    expect(compactSafety).toContain(
+      'It takes precedence over negative rows in the same window, including a later negative',
+    )
+    expect(compactSafety).toContain(
+      'Missing, negative, stale, indeterminate, malformed, or qualifier/value-conflicting rows are unavailable evidence, not proof that the member is not pregnant and not a universal block.',
+    )
+    expect(compactSafety).toContain(
+      'If this read fails, is unreadable, or returns exactly 200 records, fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card',
+    )
+    expect(compactSafety).toContain(
       'either a direct `bmi` row whose unit is canonically equivalent to `kg/m^2` (including `kg/m2` and `kg_m2`), or height and weight rows that share the same `eventId`',
     )
     expect(compactSafety).toContain(
@@ -504,10 +519,10 @@ describe('assistant nutrition strategy skill', () => {
       'A scheduled occurrence uses this file only as a card-time safety check.',
     )
     expect(compactGoals).toContain(
-      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, and canonical measurement read.',
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, 45-day body-measurement read, and separate 300-day `pregnancy-test` read.',
     )
     expect(compactGoals).toContain(
-      'including its bounded canonical memory, active-condition, active-regimen, and canonical measurement reads.',
+      'including its bounded canonical memory, active-condition, active-regimen, body-measurement, and `pregnancy-test` reads.',
     )
   })
 

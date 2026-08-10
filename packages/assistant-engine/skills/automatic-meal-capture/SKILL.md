@@ -207,9 +207,12 @@ On a scheduled run:
    context projection, a title, substance, severity, or the default list prefix
    to select the safety set. If any required detail read fails or is unreadable,
    use the same ordinary-text, no-write, no-question, no-card failure behavior.
-   Also run the shared gate's bounded canonical measurement-entry read. A failed
-   read, or a saturated read that cannot resolve usable BMI evidence, uses the
-   same failure behavior. Reuse all complete gate reads for the current turn. This
+   Also run the shared gate's bounded body-measurement read and separate
+   `pregnancy-test` read. A failed read, a body-measurement read saturated
+   without resolving usable BMI evidence, or a saturated pregnancy-test read
+   uses the same failure behavior. An explicit positive pregnancy-test result
+   uses the same non-numeric, no-write, no-question, no-card path. Reuse all
+   complete gate reads for the current turn. This
    scheduled closeout uses only that card-time safety gate and does not provide
    target-setting intent: do not ask for profile inputs, call `goal import-json`,
    create or change a paused proposal, or surface a numeric target proposal.

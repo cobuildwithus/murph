@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { normalizeJunctionSnapshot } from '@murphai/importers'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
 import { afterEach } from 'vitest'
@@ -112,6 +113,8 @@ interface MeasurementEntryListResult {
     metric: string
     value: number
     unit: string
+    qualifiers?: Record<string, string | number | boolean>
+    note?: string
   }>
   count: number
   nextCursor: null
@@ -472,6 +475,63 @@ test('measurement entry list returns primary, legacy, and device-observation sca
       unit: 'bpm',
     },
   })
+  await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'junction-stale-positive-pregnancy-test.json',
+    payload: {
+      kind: 'measurement',
+      occurredAt: '2025-10-02T07:30:00.000Z',
+      source: 'device',
+      title: 'Junction pregnancy test',
+      measurements: [{
+        metric: 'pregnancy-test',
+        value: 1,
+        unit: 'result',
+        qualifiers: { result: 'positive' },
+      }],
+    },
+  })
+  const normalizedJunctionSnapshot = normalizeJunctionSnapshot({
+    importedAt: '2026-07-11T12:00:00.000Z',
+    summaries: {
+      menstrual_cycle: [{
+        id: 'cycle-2026-07',
+        period_start: '2026-07-01',
+        home_pregnancy_test: [{
+          date: '2026-07-10',
+          test_result: 'positive',
+        }],
+        source: {
+          provider: 'apple_health',
+          type: 'phone',
+        },
+      }],
+    },
+  })
+  const normalizedPositivePregnancyTest = normalizedJunctionSnapshot.events?.find(
+    (event) => event.title === 'Junction pregnancy test',
+  )
+  assert.ok(normalizedPositivePregnancyTest)
+  assert.equal(normalizedPositivePregnancyTest.kind, 'measurement')
+  assert.ok(normalizedPositivePregnancyTest.occurredAt)
+  assert.ok(normalizedPositivePregnancyTest.fields)
+
+  const junctionPositivePregnancyTest = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'junction-positive-pregnancy-test.json',
+    payload: {
+      kind: normalizedPositivePregnancyTest.kind,
+      occurredAt: normalizedPositivePregnancyTest.occurredAt,
+      source: normalizedPositivePregnancyTest.source,
+      title: normalizedPositivePregnancyTest.title,
+      ...normalizedPositivePregnancyTest.fields,
+      externalRef: normalizedPositivePregnancyTest.externalRef,
+    },
+  })
 
   const entries = requireData(
     (
@@ -589,6 +649,45 @@ test('measurement entry list returns primary, legacy, and device-observation sca
       unit: 'kg/m2',
     },
   ])
+
+  const pregnancyEntries = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'pregnancy-test',
+        '--from',
+        '2025-10-03',
+        '--to',
+        '2026-07-30',
+        '--limit',
+        '200',
+      ])
+    ).envelope,
+  )
+  assert.deepEqual(pregnancyEntries.filters, {
+    metric: ['pregnancy-test'],
+    from: '2025-10-03',
+    to: '2026-07-30',
+    limit: 200,
+  })
+  assert.deepEqual(pregnancyEntries.items, [{
+    eventId: junctionPositivePregnancyTest.eventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-10T00:00:00.000Z',
+    source: 'device',
+    metric: 'pregnancy-test',
+    value: 1,
+    unit: 'result',
+    qualifiers: { result: 'positive' },
+  }])
+  assert.equal(pregnancyEntries.count, 1)
+  assert.equal(pregnancyEntries.nextCursor, null)
 
   const saturated = requireData(
     (
