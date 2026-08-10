@@ -1,6 +1,6 @@
 # Voice memo explicit override policy
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -74,3 +74,4 @@ Updated: 2026-08-10
 - Expected outcomes: ordinary calls omit a named voice and use the running-turn
   configuration; explicit named requests keep the one-off roster path; all
   contract assertions and type checks pass.
+Completed: 2026-08-10
