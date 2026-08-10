@@ -108,6 +108,11 @@ Success criteria:
   793-byte CLI entry, plus a 1,672,620-byte runner entry, 8,047,715-byte static
   boot closure, and 10,025,716 total runner bytes. The 50 CLI and runner bundle
   policy tests passed before assembly.
+- On the exact merged candidate, contracts, operator-config, and Web typechecks
+  passed; the focused contract, operator, and Web suites passed 19, 27, and 66
+  tests respectively; documentation drift passed. The expanded operator sweep
+  also corrected its retained boundary fixture to prove the tighter static-image
+  URL and native-fragment limits together.
 
 ## Parent product-experience revalidation
 
