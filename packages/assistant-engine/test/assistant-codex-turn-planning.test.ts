@@ -292,6 +292,10 @@ describe('assistant Codex turn planning', () => {
     expect(enabledPlan.systemPrompt).toContain('Android Health Connect relay:')
     expect(enabledPlan.systemPrompt).toContain('Mobvoi/TicWatch:')
     expect(enabledPlan.systemPrompt).toContain('play.google.com')
+    expect(enabledPlan.systemPrompt).toContain(
+      'For any Apple Health relay setup named above, use one brief `murph.generate_voice_memo` when available',
+    )
+    expect(enabledPlan.systemPrompt).not.toContain('For any relay setup named above')
   })
 
   it('preserves the no-reply hooks in Codex execution plans', async () => {

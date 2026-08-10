@@ -1462,8 +1462,9 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain('The iPhone app supports sign-in, not account creation')
     expect(prompt).toContain('Never invent a link or pressure them')
     expect(prompt).toContain(
-      'use one brief `murph.generate_voice_memo` when available',
+      'For any Apple Health relay setup named above, use one brief `murph.generate_voice_memo` when available',
     )
+    expect(prompt).not.toContain('For any relay setup named above')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
       'Never call Apple Health unsupported/disabled/coming soon',

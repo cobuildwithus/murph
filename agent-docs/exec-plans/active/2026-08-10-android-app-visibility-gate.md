@@ -50,6 +50,8 @@ Updated: 2026-08-10
   assistant turn; forwarded and member-provided env cannot enable or override it.
 - Default Web and assistant tests prove the Android-only journey is absent.
 - Enabled tests prove the Mobvoi card, Play link, concise guidance, and prompt route return together.
+- Apple Health keeps its existing voice-memo guidance without imposing generated
+  audio on the Android setup path.
 - Focused Web, assistant-engine, hosted-execution, and Cloudflare suites pass.
 - All four affected package typechecks and focused Web lint pass.
 - Chromium mobile and desktop design studies pass with no horizontal overflow and the official rounded logo.

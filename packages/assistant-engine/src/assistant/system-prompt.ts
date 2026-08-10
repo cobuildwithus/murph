@@ -1452,7 +1452,8 @@ function buildAssistantHealthRelayGuidanceText(
 - Zepp/Amazfit: share with Apple Health in Zepp, then connect Apple Health in Murph.
 - Xiaomi/Mi Fitness, RingConn, COROS, and Suunto: enable Apple Health sharing in the vendor app, then connect Apple Health in Murph. Murph receives only categories the app writes; do not claim direct cloud access, proprietary scores, or full history.
 - Huawei Health: Apple Health sharing varies by device, region, and app version. Guide the user only through options they can see; never promise unsupported categories.
-- Apple Health relay paths have no direct cloud access or guaranteed history backfill.`;
+- Apple Health relay paths have no direct cloud access or guaranteed history backfill.
+- For any Apple Health relay setup named above, use one brief \`murph.generate_voice_memo\` when available; keep text minimal and put the App Store URL last.`;
   const androidHealthRelayGuidance = androidAppAvailable
     ? `Android Health Connect relay:
 - Android Health Connect works in the Murph Android app. Canonical Google Play listing: ${MURPH_ANDROID_PLAY_STORE_URL}.
@@ -1463,7 +1464,6 @@ function buildAssistantHealthRelayGuidanceText(
   return joinPromptSections(
     appleHealthRelayGuidance,
     androidHealthRelayGuidance,
-    "For any relay setup named above, use one brief `murph.generate_voice_memo` when available; keep text minimal and put the matching app-store URL last.",
   );
 }
 
