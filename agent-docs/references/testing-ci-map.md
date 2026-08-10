@@ -628,10 +628,10 @@ supported provider credential.
   bounded account-projection backfill. Thread-container route coverage also
   proves synthetic-id and four-domain candidate preparation happens before
   `BEGIN`, prepared control and mailbox roots keep route/container and activation
-  mailbox crypto from requiring in-transaction KMS, the unique external-thread
-  identity selects concurrent creators without an absent-row advisory lock,
-  existing-row repair retains its lock, and a changed route receives one fresh
-  prepare-before-transaction attempt. The migration
+  mailbox crypto from requiring in-transaction KMS, the version-independent
+  raw-thread lock serializes creators across privacy-key write versions, the
+  versioned unique identity remains a conflict backstop, and a changed route
+  receives one fresh prepare-before-transaction attempt. The migration
   guard proves the nullable projection column and index remain additive.
   Assertions keep the 5,000 soft assignment target distinct from the provider's
   7,000 combined daily traffic guideline and must not introduce a runtime

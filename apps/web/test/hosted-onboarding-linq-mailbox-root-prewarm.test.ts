@@ -573,7 +573,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       );
     });
 
-    it("re-prepares outside a fresh transaction after a concurrent route write", async () => {
+    it("re-prepares outside a fresh transaction after a late route winner", async () => {
       const { hostedOnboardingError } = await import(
         "@/src/lib/hosted-onboarding/errors"
       );
@@ -585,9 +585,9 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         .mockImplementationOnce(async () => {
           calls.push("plan-conflict");
           throw hostedOnboardingError({
-            code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
-            httpStatus: 409,
-            message: "Concurrent route write.",
+            code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+            httpStatus: 503,
+            message: "Fresh route preparation required.",
             retryable: true,
           });
         })

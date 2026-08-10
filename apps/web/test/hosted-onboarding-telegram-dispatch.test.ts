@@ -565,6 +565,103 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
   });
 
+  it("re-prepares for a Telegram route that wins after the transaction route read", async () => {
+    const { hostedOnboardingError } = await import(
+      "@/src/lib/hosted-onboarding/errors"
+    );
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "telegram",
+      threadId: "-100123",
+    });
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: "telegram:bot",
+      channel: "telegram",
+      threadId: "-100123",
+    });
+    if (!threadIdentityLookupKey || !threadLookupKey) {
+      throw new Error("Expected Telegram thread route lookup keys.");
+    }
+    const winnerRoute = {
+      channel: "telegram" as const,
+      containerMemberId: "member_telegram_group_winner",
+      deliveryRouteState: {
+        deliveryRouteEncryptedPresent: true,
+        threadIdentityLookupKey,
+        threadLookupKey,
+      },
+      owner: { id: "member_telegram_winner_owner" },
+    };
+    mocks.readHostedThreadRouteByThreadIdentity
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(winnerRoute);
+    mocks.ensureHostedThreadContainerRouteTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+        httpStatus: 503,
+        message: "Fresh route preparation required.",
+        retryable: true,
+      }),
+    );
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_owner",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_owner",
+        }),
+      },
+    });
+    const runTransaction = prisma.$transaction;
+    let transactionCount = 0;
+    prisma.$transaction = async (callback) => {
+      transactionCount += 1;
+      return runTransaction(callback);
+    };
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: { id: -100123, title: "Family chat", type: "group" },
+          date: 1_774_522_600,
+          from: { first_name: "Alice", id: 456 },
+          message_id: 2,
+          text: "hello from the race loser",
+        },
+        update_id: 326,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-group",
+    });
+
+    expect(transactionCount).toBe(2);
+    expect(mocks.ensureHostedThreadContainerRouteTx).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedThreadContainerCreation).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedThreadContainerDeliveryRoute)
+      .toHaveBeenCalledExactlyOnceWith({
+        accountLookupKey: "telegram:bot",
+        channel: "telegram",
+        containerMemberId: winnerRoute.containerMemberId,
+        prisma,
+        threadId: "-100123",
+      });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          userId: winnerRoute.containerMemberId,
+        }),
+      }),
+    );
+  });
+
   it("does not retry a failed Telegram crypto preparation as a route race", async () => {
     const { hostedOnboardingError } = await import(
       "@/src/lib/hosted-onboarding/errors"

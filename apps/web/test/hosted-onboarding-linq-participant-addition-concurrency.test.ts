@@ -34,7 +34,9 @@ import {
 } from "@/src/lib/hosted-routing/thread-container-service";
 import {
   buildHostedThreadDeliveryRoute,
+  HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
   sealHostedThreadDeliveryRoute,
+  type HostedThreadDeliveryRouteChannel,
 } from "@/src/lib/hosted-routing/thread-delivery-route";
 import {
   consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
@@ -83,13 +85,15 @@ function createDeferred<T = void>(): Deferred<T> {
 
 async function buildPreparedThreadContainerCreation(input: {
   accountLookupKey: string;
+  channel?: HostedThreadDeliveryRouteChannel;
   containerMemberId: string;
   prisma: PrismaClient;
   threadId: string;
 }): Promise<PreparedHostedThreadContainerCreation> {
+  const channel = input.channel ?? "linq";
   const deliveryRoute = buildHostedThreadDeliveryRoute({
     accountLookupKey: input.accountLookupKey,
-    channel: "linq",
+    channel,
     threadId: input.threadId,
   });
   const preparedAt = "2026-08-09T11:59:00.000Z";
@@ -537,32 +541,14 @@ function pauseHostedThreadRouteUpdateAfterWrite(input: {
   });
 }
 
-function observeFirstHostedThreadRouteRead(input: {
-  observed: Deferred<void>;
+function observeHostedThreadRouteLockAttempt(input: {
+  attempted: Deferred<void>;
   tx: Prisma.TransactionClient;
 }): Prisma.TransactionClient {
-  let didObserve = false;
-  const hostedThreadRoute = new Proxy(input.tx.hostedThreadRoute, {
-    get(target, property) {
-      if (property === "findMany") {
-        return async (args: Prisma.HostedThreadRouteFindManyArgs) => {
-          const rows = await target.findMany(args);
-          if (!didObserve) {
-            didObserve = true;
-            input.observed.resolve();
-          }
-          return rows;
-        };
-      }
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
-
   return new Proxy<Prisma.TransactionClient>(input.tx, {
     get(target, property) {
-      if (property === "hostedThreadRoute") {
-        return hostedThreadRoute;
+      if (property === "$executeRaw") {
+        input.attempted.resolve();
       }
       const value = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;
@@ -573,13 +559,16 @@ function observeFirstHostedThreadRouteRead(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Linq participant-addition PostgreSQL ordering",
   () => {
-    it("uses the unique external-thread identity to roll back a concurrent creator", async () => {
+    it("serializes mixed-version Telegram creators on the raw external thread", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
       }
+      const previousPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+      const previousPrivacyCurrentVersion =
+        process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
       const fixtureId = randomUUID();
       const threadId = `chat_thread_create_race_${fixtureId}`;
-      const accountLookupKey = `account_thread_create_race_${fixtureId}`;
+      const accountLookupKey = HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY;
       const ownerMemberIds = [
         `member_thread_create_owner_a_${fixtureId}`,
         `member_thread_create_owner_b_${fixtureId}`,
@@ -593,16 +582,206 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const loserClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const winnerCommittedState = createDeferred();
       const releaseWinner = createDeferred();
-      const loserObservedAbsentRoute = createDeferred();
+      const loserAttemptedRouteLock = createDeferred();
+      const loserPid = createDeferred<number>();
       let winnerTransaction: Promise<unknown> | null = null;
       let loserTransaction: Promise<unknown> | null = null;
 
+      configureHostedContactPrivacyKeyringForTest("v1");
       try {
         await observer.hostedMember.createMany({
           data: ownerMemberIds.map((id) => ({
             billingStatus: "active" as const,
             id,
           })),
+        });
+        const [winnerPreparation, loserPreparation] = await Promise.all([
+          buildPreparedThreadContainerCreation({
+            accountLookupKey,
+            channel: "telegram",
+            containerMemberId: containerMemberIds[0],
+            prisma: winnerClient,
+            threadId,
+          }),
+          buildPreparedThreadContainerCreation({
+            accountLookupKey,
+            channel: "telegram",
+            containerMemberId: containerMemberIds[1],
+            prisma: loserClient,
+            threadId,
+          }),
+        ]);
+        const v1ThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+          channel: "telegram",
+          threadId,
+        });
+        if (!v1ThreadIdentityLookupKey) {
+          throw new Error("Expected a v1 Telegram thread identity lookup key.");
+        }
+
+        winnerTransaction = winnerClient.$transaction(async (tx) => {
+          const result = await ensureHostedThreadContainerRouteTx({
+            accountLookupKey,
+            channel: "telegram",
+            mailboxDedupeKey: `thread-create-race:winner:${fixtureId}`,
+            occurredAt: new Date("2026-08-09T12:00:00.000Z"),
+            ownerMemberId: ownerMemberIds[0],
+            preparedCreation: winnerPreparation,
+            prisma: tx,
+            threadId,
+          });
+          winnerCommittedState.resolve();
+          await releaseWinner.promise;
+          return result;
+        });
+        await winnerCommittedState.promise;
+
+        configureHostedContactPrivacyKeyringForTest("v2");
+        const v2ThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+          channel: "telegram",
+          threadId,
+        });
+        if (!v2ThreadIdentityLookupKey) {
+          throw new Error("Expected a v2 Telegram thread identity lookup key.");
+        }
+        expect(v2ThreadIdentityLookupKey).not.toBe(v1ThreadIdentityLookupKey);
+
+        loserTransaction = loserClient.$transaction(async (tx) => {
+          loserPid.resolve(await readBackendPid(tx));
+          return ensureHostedThreadContainerRouteTx({
+            accountLookupKey,
+            channel: "telegram",
+            mailboxDedupeKey: `thread-create-race:loser:${fixtureId}`,
+            occurredAt: new Date("2026-08-09T12:00:01.000Z"),
+            ownerMemberId: ownerMemberIds[1],
+            preparedCreation: loserPreparation,
+            prisma: observeHostedThreadRouteLockAttempt({
+              attempted: loserAttemptedRouteLock,
+              tx,
+            }),
+            threadId,
+          });
+        });
+        await loserAttemptedRouteLock.promise;
+        await waitForBlockedBackend({
+          observer,
+          pid: await loserPid.promise,
+        });
+
+        releaseWinner.resolve();
+        await expect(winnerTransaction).resolves.toMatchObject({
+          containerMemberId: containerMemberIds[0],
+          created: true,
+        });
+        await expect(loserTransaction).rejects.toMatchObject({
+          code: "HOSTED_THREAD_ROUTE_ALREADY_BOUND",
+          retryable: false,
+        });
+
+        await expect(observer.hostedThreadRoute.count({
+          where: {
+            channel: "telegram",
+            containerMemberId: { in: [...containerMemberIds] },
+          },
+        })).resolves.toBe(1);
+        await expect(readHostedThreadRouteByThreadIdentity({
+          channel: "telegram",
+          prisma: observer,
+          threadId,
+        })).resolves.toMatchObject({
+          containerMemberId: containerMemberIds[0],
+        });
+        await expect(observer.hostedThreadRoute.findUnique({
+          where: {
+            channel_threadIdentityLookupKey: {
+              channel: "telegram",
+              threadIdentityLookupKey: v1ThreadIdentityLookupKey,
+            },
+          },
+        })).resolves.toMatchObject({
+          containerMemberId: containerMemberIds[0],
+        });
+        await expect(observer.hostedThreadRoute.findUnique({
+          where: {
+            channel_threadIdentityLookupKey: {
+              channel: "telegram",
+              threadIdentityLookupKey: v2ThreadIdentityLookupKey,
+            },
+          },
+        })).resolves.toBeNull();
+        await expect(observer.hostedThreadContainer.count({
+          where: { memberId: { in: [...containerMemberIds] } },
+        })).resolves.toBe(1);
+        await expect(observer.hostedMember.count({
+          where: { id: { in: [...containerMemberIds] } },
+        })).resolves.toBe(1);
+        await expect(observer.hostedUserCryptoEnvelope.count({
+          where: { userId: { in: [...containerMemberIds] } },
+        })).resolves.toBe(HOSTED_CRYPTO_DOMAINS.length);
+        await expect(observer.hostedMailboxItem.count({
+          where: { userId: { in: [...containerMemberIds] } },
+        })).resolves.toBe(1);
+      } finally {
+        releaseWinner.resolve();
+        await Promise.allSettled([
+          ...(winnerTransaction ? [winnerTransaction] : []),
+          ...(loserTransaction ? [loserTransaction] : []),
+        ]);
+        restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousPrivacyKeys);
+        restoreEnvValue(
+          "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
+          previousPrivacyCurrentVersion,
+        );
+        clearHostedOnboardingEnvCache();
+        await observer.hostedThreadRoute.deleteMany({
+          where: { containerMemberId: { in: [...containerMemberIds] } },
+        });
+        await observer.hostedThreadContainer.deleteMany({
+          where: { memberId: { in: [...containerMemberIds] } },
+        });
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [...ownerMemberIds, ...containerMemberIds],
+            },
+          },
+        });
+        await Promise.all([
+          observer.$disconnect(),
+          winnerClient.$disconnect(),
+          loserClient.$disconnect(),
+        ]);
+      }
+    });
+
+    it("rolls back stale same-owner preparation after the owner lock winner commits", async () => {
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
+      }
+      const fixtureId = randomUUID();
+      const threadId = `chat_thread_owner_race_${fixtureId}`;
+      const accountLookupKey = `account_thread_owner_race_${fixtureId}`;
+      const ownerMemberId = `member_thread_owner_race_${fixtureId}`;
+      const containerMemberIds = [
+        `member_thread_owner_winner_${fixtureId}`,
+        `member_thread_owner_loser_${fixtureId}`,
+      ] as const;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const winnerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const loserClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const winnerPreparedState = createDeferred();
+      const releaseWinner = createDeferred();
+      const loserAttemptedRouteLock = createDeferred();
+      const loserPid = createDeferred<number>();
+      let winnerTransaction: Promise<unknown> | null = null;
+      let loserTransaction: Promise<unknown> | null = null;
+
+      try {
+        await observer.hostedMember.create({
+          data: {
+            billingStatus: "active",
+            id: ownerMemberId,
+          },
         });
         const [winnerPreparation, loserPreparation] = await Promise.all([
           buildPreparedThreadContainerCreation({
@@ -623,35 +802,39 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           const result = await ensureHostedThreadContainerRouteTx({
             accountLookupKey,
             channel: "linq",
-            mailboxDedupeKey: `thread-create-race:winner:${fixtureId}`,
+            mailboxDedupeKey: `thread-owner-race:winner:${fixtureId}`,
             occurredAt: new Date("2026-08-09T12:00:00.000Z"),
-            ownerMemberId: ownerMemberIds[0],
+            ownerMemberId,
             preparedCreation: winnerPreparation,
             prisma: tx,
             threadId,
           });
-          winnerCommittedState.resolve();
+          winnerPreparedState.resolve();
           await releaseWinner.promise;
           return result;
         });
-        await winnerCommittedState.promise;
+        await winnerPreparedState.promise;
 
-        loserTransaction = loserClient.$transaction((tx) =>
-          ensureHostedThreadContainerRouteTx({
+        loserTransaction = loserClient.$transaction(async (tx) => {
+          loserPid.resolve(await readBackendPid(tx));
+          return ensureHostedThreadContainerRouteTx({
             accountLookupKey,
             channel: "linq",
-            mailboxDedupeKey: `thread-create-race:loser:${fixtureId}`,
+            mailboxDedupeKey: `thread-owner-race:loser:${fixtureId}`,
             occurredAt: new Date("2026-08-09T12:00:01.000Z"),
-            ownerMemberId: ownerMemberIds[1],
+            ownerMemberId,
             preparedCreation: loserPreparation,
-            prisma: observeFirstHostedThreadRouteRead({
-              observed: loserObservedAbsentRoute,
+            prisma: observeHostedThreadRouteLockAttempt({
+              attempted: loserAttemptedRouteLock,
               tx,
             }),
             threadId,
-          })
-        );
-        await loserObservedAbsentRoute.promise;
+          });
+        });
+        await waitForBlockedBackend({
+          observer,
+          pid: await loserPid.promise,
+        });
 
         releaseWinner.resolve();
         await expect(winnerTransaction).resolves.toMatchObject({
@@ -659,23 +842,21 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           created: true,
         });
         await expect(loserTransaction).rejects.toMatchObject({
-          code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
+          code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
           retryable: true,
         });
+        await loserAttemptedRouteLock.promise;
 
         await expect(observer.hostedThreadRoute.count({
-          where: {
-            channel: "linq",
-            threadIdentityLookupKey:
-              createHostedExternalThreadIdentityLookupKey({
-                channel: "linq",
-                threadId,
-              }) ?? "",
-          },
+          where: { containerMemberId: { in: [...containerMemberIds] } },
         })).resolves.toBe(1);
-        await expect(observer.hostedThreadContainer.count({
+        await expect(observer.hostedThreadContainer.findMany({
+          select: { memberId: true, ownerMemberId: true },
           where: { memberId: { in: [...containerMemberIds] } },
-        })).resolves.toBe(1);
+        })).resolves.toEqual([{
+          memberId: containerMemberIds[0],
+          ownerMemberId,
+        }]);
         await expect(observer.hostedMember.count({
           where: { id: { in: [...containerMemberIds] } },
         })).resolves.toBe(1);
@@ -700,7 +881,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await observer.hostedMember.deleteMany({
           where: {
             id: {
-              in: [...ownerMemberIds, ...containerMemberIds],
+              in: [ownerMemberId, ...containerMemberIds],
             },
           },
         });

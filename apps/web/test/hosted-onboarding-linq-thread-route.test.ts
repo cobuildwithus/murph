@@ -33,6 +33,7 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
   readHostedPhoneHint,
 } from "../src/lib/hosted-onboarding/contact-privacy";
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import {
   encryptHostedLinqLinePhoneNumber,
 } from "../src/lib/hosted-onboarding/linq-line-phone-codec";
@@ -2733,11 +2734,9 @@ describe("Linq explicit external-thread routing", () => {
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
       expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
       expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
-      expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(2);
-      expect(prisma.hostedThreadRoute.findMany.mock.invocationCallOrder[0])
-        .toBeLessThan(prisma.$executeRaw.mock.invocationCallOrder[0]!);
+      expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
-        prisma.hostedThreadRoute.findMany.mock.invocationCallOrder[1]!,
+        prisma.hostedThreadRoute.findMany.mock.invocationCallOrder[0]!,
       );
       expect(prisma.hostedThreadRoute.update).toHaveBeenCalledWith({
         data: {
@@ -2970,7 +2969,7 @@ describe("Linq explicit external-thread routing", () => {
     )).toBe("encrypted pending reaction context");
   });
 
-  it("reuses a route that wins after speculative container preparation", async () => {
+  it("requests fresh preparation when a route wins after container preparation", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     const accountLookupKey = requireTestPhoneLookupKey("+15550000000");
     const threadLookupKey = createHostedExternalThreadLookupKey({
@@ -3026,16 +3025,16 @@ describe("Linq explicit external-thread routing", () => {
         prisma: prisma as never,
         threadId: "chat_group_123",
       }),
-    ).resolves.toMatchObject({
-      activationMailboxItemId: null,
-      containerMemberId: "member_thread_container_winner",
-      created: false,
+    ).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      retryable: true,
     });
 
     expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
     expect(domainRootStore.provisionPreparedHostedCryptoDomainRootsTx).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
   });
 
   it("creates and reuses a route container before routing Linq ingress", async () => {
@@ -3088,7 +3087,7 @@ describe("Linq explicit external-thread routing", () => {
       containerMemberId: "member_thread_container_123",
       created: true,
     });
-    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
 
     await expect(
       ensureHostedThreadContainerRouteTx({
@@ -3108,7 +3107,7 @@ describe("Linq explicit external-thread routing", () => {
     expect(hostedMemberStore.createHostedMember).toHaveBeenCalledTimes(1);
     expect(domainRootStore.provisionPreparedHostedCryptoDomainRootsTx).toHaveBeenCalledTimes(1);
     expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
-    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
     expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
     expect(prisma.hostedThreadContainer.create).toHaveBeenCalledWith({
       data: {
@@ -7804,6 +7803,82 @@ describe("Linq group chat auto-provision", () => {
 });
 
 describe("Linq group chat concurrent provisioning race", () => {
+  it("requires fresh preparation when ensure discovers a winner after the transaction route read", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const recipient = "+15550000000";
+    prisma.seedActiveManagedLinqLine(recipient);
+    const accountLookupKey = requireTestPhoneLookupKey(recipient);
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey,
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    if (!threadLookupKey || !threadIdentityLookupKey) {
+      throw new Error("Expected Linq thread route lookup keys.");
+    }
+    const winnerDeliveryRoute = await prepareThreadDeliveryRouteForTest({
+      accountLookupKey,
+      channel: "linq",
+      containerMemberId: "member_thread_container_winner",
+      prisma: prisma as never,
+      threadId: "chat_group_123",
+    });
+    prisma.seedThreadRoute({
+      accountLookupKey,
+      channel: "linq",
+      containerMemberId: "member_thread_container_winner",
+      deliveryRouteEncrypted: winnerDeliveryRoute.deliveryRouteEncrypted,
+      ownerMemberId: "member_winner_456",
+      threadIdentityLookupKey,
+      threadLookupKey,
+    });
+    const statefulFindMany =
+      prisma.hostedThreadRoute.findMany.getMockImplementation()!;
+    let findManyCalls = 0;
+    prisma.hostedThreadRoute.findMany.mockImplementation(async (args: never) => {
+      findManyCalls += 1;
+      return findManyCalls === 1 ? [] : statefulFindMany(args);
+    });
+    const losingPreparation = await prepareThreadContainerCreationForTest({
+      accountLookupKey,
+      channel: "linq",
+      containerMemberId: "member_thread_container_loser",
+      prisma: prisma as never,
+      threadId: "chat_group_123",
+    });
+    preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
+      .mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+        httpStatus: 503,
+        message: "Fresh route preparation required.",
+        retryable: true,
+      }));
+    vi.mocked(
+      memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+    ).mockResolvedValue(null);
+
+    await expect(planHostedOnboardingLinqWebhookWithoutPreparedCrypto({
+      event: buildLinqMessageReceivedEvent({
+        eventId: "evt_group_late_winner_123",
+        messageId: "msg_group_late_winner_123",
+        recipient,
+        sender: "+15551112222",
+      }),
+      pendingGroupParticipantMemberIds: ["member_winner_456"],
+      preparedThreadContainerCreation: losingPreparation,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      retryable: true,
+    });
+
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       description: "same-line unknown sender",

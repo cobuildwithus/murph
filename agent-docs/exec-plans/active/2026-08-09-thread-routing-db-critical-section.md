@@ -16,9 +16,10 @@ Updated: 2026-08-09
 - The creation transaction commits the member, prepared roots, container,
   route, and activation mailbox item atomically without the legacy all-domain
   crypto bridge.
-- Concurrent creation is decided by the existing unique external-thread
-  identity; a losing transaction rolls back and the handler performs one fresh
-  prepare-before-transaction attempt against the winning route.
+- Concurrent creation is serialized by the existing version-independent
+  raw-thread advisory token across privacy-key write versions; the versioned
+  unique external-thread identity remains a conflict backstop, and a stale
+  prepared attempt rolls back for one fresh preparation against the winner.
 - Existing route refresh performs no KMS work while its transaction is open.
 - Focused unit, typecheck, and PostgreSQL concurrency proof pass on the final
   candidate; exact-head CI and required ReviewGPT gates are green.
@@ -46,8 +47,8 @@ Updated: 2026-08-09
 ## Risks and mitigations
 
 1. Risk: speculative preparation is accidentally treated as route authority.
-   Mitigation: repeat all owner/route checks in the transaction and let only the
-   unique external-thread row decide concurrent creation.
+   Mitigation: repeat all owner/route checks under the version-stable route lock
+   and retry when the observed container differs from prepared material.
 2. Risk: a prepared ciphertext is applied to a different container or route.
    Mitigation: bind prepared material to container id, channel, and normalized
    thread route and validate that binding before every write.
@@ -60,8 +61,9 @@ Updated: 2026-08-09
 
 1. Trace creation, refresh, Linq, Telegram, crypto-cache, mailbox, and
    concurrency owners; capture the current lock/KMS path in focused tests.
-2. Add bounded prepared route/container inputs and remove the creation-time
-   legacy crypto bridge plus creation advisory lock.
+2. Add bounded prepared route/container inputs, remove the creation-time legacy
+   crypto bridge, and keep the version-stable advisory lock around only the
+   short database commit.
 3. Plumb preparation through Linq and Telegram before their planning
    transactions and preserve unique-conflict convergence.
 4. Run focused unit/typecheck/PostgreSQL proof, inspect the diff, and update any
@@ -72,13 +74,14 @@ Updated: 2026-08-09
 
 ## Decisions
 
-- Reuse the existing external-thread unique identity rather than adding another
-  lock or state owner.
+- Reuse the existing version-independent raw-thread advisory token as the
+  cross-version creation authority and the versioned external-thread unique
+  identity as its same-version conflict backstop; add no lock or state owner.
 - Keep mailbox lane/causal allocation inside the transaction; prewarm only the
   ingress root because the allocated sequence is authenticated payload metadata.
-- Retain route-update serialization for existing rows unless focused
-  concurrency evidence proves it redundant; remove the advisory lock only from
-  the absent-row creation path.
+- Retain the same route lock for absent-row creation and existing-row refresh.
+  The stored identity key changes with the contact-privacy write version, so its
+  unique constraint alone cannot serialize rolling-version creators.
 - Include the existing line/chat-scoped pending-contact resolver in Linq's
   speculative preparation candidates, but repeat that resolver in the
   transaction so prepared material never grants authority after the contact
@@ -90,10 +93,10 @@ Updated: 2026-08-09
   `message.received` event, including self-authored echoes, and reuse that
   snapshot for attempt-zero crypto preparation. A conflict retry rereads the
   route before preparing for the winning container.
-- Treat a prepared creation's container id as speculative, not binding
-  authority. If the unique external-thread row appears after preparation but
-  before `BEGIN`, reuse its winning container unless the caller separately
-  supplied an explicit container id.
+- Treat a prepared creation's container id as an attempt-bound crypto package,
+  not route authority. If the transaction observes another winning container,
+  roll back with a retryable preparation-required result; a distinct explicit
+  caller binding remains a non-retryable already-bound error.
 
 ## Verification
 
@@ -105,9 +108,9 @@ Updated: 2026-08-09
   KMS operation begins after transaction open, one concurrent external thread
   route wins with no orphaned synthetic state, and all existing routing,
   activation, privacy-rotation, and mailbox assertions remain green.
-- Local proof on the remediated candidate: the six affected crypto/Linq/
-  Telegram routing files passed 382 tests together; the PostgreSQL concurrency
-  lane passed 8 tests; app-local typecheck and scoped lint passed; and
+- Local proof on the round-3-remediated candidate: the six affected crypto/
+  Linq/Telegram routing files passed 384 tests together; the PostgreSQL
+  concurrency lane passed 9 tests; app-local typecheck and scoped lint passed; and
   `git diff --check` passed.
 - Review remediation: the preliminary specialist and final round 1 both found
   the pending-contact preparation gap; final round 1 also found failed KMS work
@@ -121,12 +124,19 @@ Updated: 2026-08-09
   both exact CI regressions pass locally and the full affected slice covers the
   corrected module boundary.
 - Parent review found that a stale speculative container id could reject a
-  route committed between preparation and `BEGIN`. The unique route row now
-  remains authoritative in that window, with a focused regression proving the
-  winner is reused without creating loser state.
+  route committed between preparation and `BEGIN` and initially changed that
+  case to reuse the winner. Final round 3 proved direct reuse was unsafe because
+  the attempt's prewarmed crypto still belonged to the loser; the transaction
+  now rolls back for the bounded fresh winner preparation.
 - Final ReviewGPT round 2 required an anomaly retrospective after finding that
   self-authored Linq echoes used `null` for both an absent route and a skipped
   lookup, deterministically spending the race retry. Planning now observes the
   route on those paths; explicit and omitted group-metadata regressions prove
   one observation, one preparation, and one transaction, while the existing
   dispatch proof keeps outbound accounting at one update.
+- Final ReviewGPT round 3 required a second anomaly retrospective. It found the
+  late-winner prepared-cache mismatch and proved the absent-route lock removal
+  unsafe across privacy-key current-version flips. The existing raw-thread lock
+  is restored inside the short prepared transaction, while stale same-owner
+  preparation exits before demotion or mailbox work and uses the existing one
+  fresh preparation attempt.

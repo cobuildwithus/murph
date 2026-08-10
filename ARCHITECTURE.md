@@ -1616,9 +1616,10 @@ delivery route, and prewarms the prepared control and mailbox roots before
 route, identity, activation, access, line, pending-setup, and participant checks
 inside the transaction. A new route then commits the synthetic member,
 prepared root envelopes, container, unique external-thread route, and activation
-mailbox wake atomically using the prewarmed ingress root. The unique
-external-thread identity, rather than an absent-row advisory lock, selects the
-winner of concurrent creation; existing-row refresh still takes the route lock.
+mailbox wake atomically using the prewarmed ingress root. A version-independent
+raw-thread advisory token serializes creation and refresh across privacy-key
+write versions; the versioned unique external-thread identity remains the
+same-version conflict backstop.
 If the route changes after preparation, Web rolls back and performs at most one
 fresh prepare-before-transaction attempt. Thread-container creation therefore
 does not use the legacy all-domain provisioning bridge or perform domain-root

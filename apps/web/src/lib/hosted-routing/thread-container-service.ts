@@ -454,10 +454,10 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       "Hosted thread container id does not match its prepared creation.",
     );
   }
-  // A prepared creation is speculative until the unique external-thread
-  // identity is inserted. If another creator wins between preparation and
-  // BEGIN, its container is authoritative; only an explicitly requested
-  // container id may reject that existing binding.
+  // A prepared creation is speculative until the route transaction observes
+  // the version-stable external-thread lock. A winner that committed after
+  // preparation requires a fresh attempt for its container; only an explicitly
+  // requested container id makes that winner a non-retryable mismatch.
   const requestedContainerMemberId = explicitContainerMemberId;
   const accountLookupKeys = normalizeHostedThreadAccountLookupKeys([
     ...(input.accountLookupKeys ?? []),
@@ -501,26 +501,19 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         },
       },
     });
-  let existingRows = await readExistingRows();
+  // Privacy rotation versions the stored identity lookup key. Serialize both
+  // creation and refresh on the raw external-thread identity so concurrent
+  // writers using different key versions cannot create separate containers.
+  // Any variable envelope and route sealing required by a successful write has
+  // already completed before this short transaction acquires the lock.
+  await acquireHostedThreadContainerRouteWriteLockTx({
+    channel: input.channel,
+    prisma: input.prisma,
+    threadId: input.threadId,
+  });
+  const existingRows = await readExistingRows();
 
   if (existingRows.length > 0) {
-    // Existing-row refresh still serializes route rekeys and repair. The
-    // absent-row creation path deliberately skips this advisory lock and lets
-    // the unique external-thread identity choose the winner.
-    await acquireHostedThreadContainerRouteWriteLockTx({
-      channel: input.channel,
-      prisma: input.prisma,
-      threadId: input.threadId,
-    });
-    existingRows = await readExistingRows();
-    if (existingRows.length === 0) {
-      throw hostedOnboardingError({
-        code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
-        httpStatus: 409,
-        message: "This external thread route changed concurrently.",
-        retryable: true,
-      });
-    }
     const distinctContainerIds = new Set(existingRows.map((row) => row.containerMemberId));
     const authorityMatched = existingRows.some((row) =>
       threadLookupKeys.includes(row.threadLookupKey)
@@ -542,6 +535,17 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         httpStatus: 409,
         message: "This external thread is already routed to another container.",
         retryable: false,
+      });
+    }
+    if (
+      input.preparedCreation
+      && input.preparedCreation.containerMemberId !== existing.containerMemberId
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+        httpStatus: 503,
+        message: "Hosted thread delivery-route preparation is required.",
+        retryable: true,
       });
     }
 
