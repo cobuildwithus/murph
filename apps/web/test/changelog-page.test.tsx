@@ -189,7 +189,8 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Live workout");
     expect(markup).toContain("Fasting glucose");
     expect(markup).toContain("Current browser task");
-    expect(markup).toContain("Via Apple Health");
+    expect(markup).not.toContain("Polar via Apple Health");
+    expect(markup).not.toContain("Via Apple Health");
     expect(markup).toContain("Conversation handoff");
     expect(markup).toContain("Paused-member privacy cleanup");
     expect(markup).toContain("Daily nutrition card");

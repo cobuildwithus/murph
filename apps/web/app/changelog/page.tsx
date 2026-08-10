@@ -112,16 +112,6 @@ const VISUALS: Record<string, ReactNode> = {
       ]}
     />
   ),
-  "clearer-health-source-handoffs": (
-    <DeviceList
-      label="Connection routes"
-      devices={[
-        { color: "#111827", initial: "P", name: "Polar via Apple Health", status: "connected" },
-        { color: "#2563eb", initial: "V", name: "Vital-backed source", status: "syncing" },
-        { color: "#8b5e34", initial: "E", name: "Manual export", status: "reconnect" },
-      ]}
-    />
-  ),
   "body-composition-guidance": (
     <GoalsRegimenCard
       label="One goal, clear ownership"
@@ -444,16 +434,6 @@ const VISUALS: Record<string, ReactNode> = {
       from="Murph product support escalation"
       subject="Sanitized issue summary"
       body="A short problem summary, with no raw conversation, credentials, or health details."
-    />
-  ),
-  "apple-health-relay-wearables": (
-    <DeviceList
-      label="Via Apple Health"
-      devices={[
-        { color: "#df2c2c", initial: "P", name: "Polar", status: "connected" },
-        { color: "#2d3436", initial: "Z", name: "Zepp / Amazfit", status: "syncing" },
-        { color: "#1877f2", initial: "S", name: "Suunto", status: "connected" },
-      ]}
     />
   ),
   "prepare-next-group": (

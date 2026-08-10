@@ -117,6 +117,15 @@ Visual rules:
 - Use synthetic, private-free content only.
 - Show the real interaction contract. Do not create decorative stock art or an
   aspirational screen that the product does not have.
+- Keep route capability, authentication semantics, health-data ownership,
+  reward ownership, and connection status with their existing production
+  owners. A source PR is provenance, not an authority for duplicating live
+  state in a fixture. Reuse canonical product data or components, or add a
+  focused contract assertion against the owner. If neither is simple, delete
+  the visual and let accurate prose carry the release note.
+- Never give a guide-only integration a connected, syncing, disconnected, or
+  reconnect state. Never use a generic action visual for a channel-specific
+  capability unless the action is mechanically limited to that channel.
 - Keep it legible at mobile and desktop widths and within the established
   320-pixel visual frame.
 - Preserve semantic text, table headings, labels, and useful accessible names.
@@ -185,6 +194,8 @@ reason such as "not needed."
 - Every claim is supported by shipped code, tests, and the owning contract.
 - Every source PR is present, with no unmerged or unrelated PRs.
 - Copy describes outcomes, limits, and recovery without internal leakage.
+- Visual facts are derived from or mechanically checked against their existing
+  product owners; no fixture acts as a parallel authority for access or state.
 - Important behavior has a useful responsive visual where possible.
 - The design catalog, registry tests, page tests, and stable archive behavior
   are updated.

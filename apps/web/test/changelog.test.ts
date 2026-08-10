@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { listAppleHealthRelayConnectSources } from "../app/(dashboard)/connect/apple-health-relay-connect-sources";
 import {
   CHANGELOG_CARD_MAX_ITEMS,
   CHANGELOG_EDITIONS_PER_PAGE,
@@ -348,6 +349,22 @@ describe("changelog registry", () => {
     expect(`${experimentLinks?.summary} ${experimentLinks?.details}`).not.toMatch(
       /request-bound|signed link/iu,
     );
+
+    const relaySources = listAppleHealthRelayConnectSources();
+    const relayEntry = items.get("apple-health-relay-wearables");
+    expect(relaySources).toHaveLength(6);
+    for (const source of relaySources) {
+      for (const publicName of source.name.split(" / ")) {
+        expect(relayEntry?.summary).toContain(publicName);
+      }
+    }
+    expect(relayEntry).toMatchObject({
+      sourcePullRequests: [1316],
+      details: expect.stringContaining(
+        "never appear as direct connections or show a false disconnect state",
+      ),
+    });
+    expect(relayEntry?.summary).not.toContain("Polar");
   });
 
   it("keeps the August 5 through August 9 copy outcome-oriented", () => {

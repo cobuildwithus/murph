@@ -156,7 +156,12 @@ product-decision owners.
    concrete internal-only reason that makes the changelog not applicable. Keep
    related fixes under one user outcome while preserving every contributing
    source PR. For priority-5 or interaction-heavy changes, add a responsive
-   explanatory visual when the behavior can be shown truthfully.
+   explanatory visual when the behavior can be shown truthfully. Route
+   capability, authentication semantics, health-data ownership, reward
+   ownership, and connection status remain facts of their existing production
+   owners: reuse or mechanically check those owners instead of restating their
+   state in changelog fixtures. Delete a visual when accurate prose is simpler
+   than creating a parallel authority.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips completion audits unless the user explicitly asks for them

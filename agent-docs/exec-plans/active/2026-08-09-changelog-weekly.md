@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -57,8 +57,9 @@ Updated: 2026-08-09
 2. Risk: visuals decorate the page without clarifying behavior or drift from
    production interaction patterns.
    Mitigation: reuse or extend the existing compact mock primitives, keep every
-   fixture synthetic, and update the real design-catalog study plus desktop and
-   mobile proof.
+   fixture synthetic, require factual access/route/status claims to derive from
+   an existing production owner, and update the real design-catalog study plus
+   desktop and mobile proof. Delete a visual when prose avoids parallel state.
 3. Risk: a universal changelog rule encourages internal or sensitive details
    to be published.
    Mitigation: require coverage for member-visible outcomes, allow one explicit
@@ -120,6 +121,16 @@ Updated: 2026-08-09
   checkout tracks `agent-docs/product-marketing-context.md`, and `git cat-file`
   proved every path in the skill's required preflight exists. The review ZIP
   omitted that unchanged document; the repository and skill reference agree.
+- Final ReviewGPT round 1 found two production-faithfulness defects. Corrected
+  experiment-link copy to describe ordinary authenticated canonical routes and
+  deleted the generic contact-photo action because only a fresh direct iMessage
+  conversation can fulfill it. Added focused regression coverage; the exact
+  remediated head passed all GitHub Actions.
+- Final ReviewGPT round 2 verified both corrections, then required a
+  retrospective after finding that two hand-authored health-connection visuals
+  repeated the same parallel-authority mechanism: they showed Polar as an Apple
+  Health relay and assigned live status to guide-only relay sources, contrary to
+  the production `/connect` owners.
 
 ## Decisions
 
@@ -141,6 +152,24 @@ Updated: 2026-08-09
   fail-closed delimiter scanner in the Node guard. This avoids a generated
   mirror and a new parser dependency; unsupported future registry structure
   fails the PR check instead of silently accepting an unverified reference.
+- Retrospective decision: existing product owners remain authoritative for
+  route capability, authentication, health-data ownership, reward ownership,
+  and connection status. Source PRs prove release provenance but do not make a
+  changelog fixture a live-state owner. Default to shrinking: delete a factual
+  visual unless it reuses canonical data/components or has a focused contract
+  assertion against the owner. Do not add synchronization machinery.
+- Re-audited all 57 catch-up items and 51 associated visuals under that rule.
+  Six items remain intentionally text-only. Deleted the two contradictory
+  health-route/status visuals. The retained 49 are bounded as 20 synthetic
+  output examples (message, table, card, chart, or artifact shape), 15
+  sequence/recovery diagrams (ordering and negative branches), and 14
+  choice/handoff/consent illustrations tied to the existing referral, billing,
+  message-routing, authorization, settings, and automation owners. The Apple
+  Health entry now has a focused test derived from the production relay-source
+  list and rejects Polar; the page test rejects the deleted status fixtures.
+- Extended `$write-changelog` and the completion workflow with the same
+  production-owner gate so future visual work deletes parallel factual state
+  instead of inventing another authority.
 
 ## Verification
 
@@ -156,5 +185,10 @@ Updated: 2026-08-09
 - Recorded gap: the Fable 5 Claude UI check reported explicit usage-credit
   exhaustion, which the completion workflow treats as non-blocking without a
   substitute verdict.
-- Pending: preliminary `completion-specialists` ReviewGPT, exact-head GitHub
-  Actions, merge-conflict proof, parent final review, and plan-closing commit.
+- Passed before the retrospective correction: preliminary specialist review;
+  all exact-head GitHub Actions; 47 focused registry/page/design assertions;
+  19 PR/design guard tests; Web typecheck; scoped lint; browser proof; skill and
+  docs validation.
+- Pending: commit and push the retrospective correction, refresh exact-head
+  visual and CI proof, complete the next final ReviewGPT round, confirm merge
+  readiness, and close this plan.
