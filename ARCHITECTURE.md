@@ -1514,11 +1514,15 @@ Linq explicitly requests interactive transcript rendering. A recipient with
 the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
 layout with a generated image that mirrors the same compact native presentation.
-Nutrition images retain the calorie ring and metric row; compact-table images
-retain the table grid or workout progress and exercise rows. Native captions
-independently repeat the complete immutable semantics, including nutrition
-totals and goal states, every generic table cell, or every workout set status,
-target, and actual value, so a missing raster never erases the useful response.
+Nutrition images retain the calorie ring and metric row while remaining
+rectangular and badge-free so the provider owns the app icon and outer mask.
+Their concise native caption keeps only the date and meal count instead of
+repeating visible totals or target amounts. A short subcaption appears only
+when some totals are partial or an assessed V2 goal needs its directional
+status preserved. Compact-table images retain the table grid or workout
+progress and exercise rows, and their native captions
+independently repeat every generic table cell or every workout set status,
+target, and actual value so a missing raster never erases the useful response.
 The nutrition image derives a quantitative calorie arc only from a complete
 total and an assessed non-null goal; V1, partial, null-goal, and
 unavailable-status snapshots retain only the neutral ring track. The extension

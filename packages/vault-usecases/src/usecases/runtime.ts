@@ -109,6 +109,7 @@ function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
       "summarizeWearableMetricTrendRuntime",
       "summarizeWearableSleepRuntime",
       "summarizeWearableSleepPatternRuntime",
+      "buildPersonalPatternReportRuntime",
       "summarizeWearableActivityRuntime",
       "summarizeWearableBodyStateRuntime",
       "summarizeWearableDayRuntime",
