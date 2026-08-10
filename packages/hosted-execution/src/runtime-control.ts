@@ -985,7 +985,7 @@ export interface HostedRuntimeGroupDisclosureGrantListEntry
   groupLabel: string | null;
 }
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE =
-  "Like or heart this message to share {{share_scope}} with this group. To choose different permissions, use {{join_url}}.";
+  "Sounds good. Like or heart this message to share {{share_scope}} with the group, or use {{join_url}} to customize what you share.";
 
 export interface HostedRuntimeGroupMemberSummary {
   disclosureGrants?: HostedRuntimeGroupDisclosureGrantSummary[];
@@ -1097,10 +1097,9 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
   displayName?: string | null;
-  // Legacy wire compatibility only. Current Web ignores this field and owns
-  // the canonical copy. The runtime supplies one fixed value so older Web can
-  // substitute already-known scopes; model input can never set it. Remove the
-  // field after the consumer-first Web rollout sets the Cloudflare rollback floor.
+  // Optional conversational frame. Web accepts only the two required
+  // placeholders and substitutes the frozen scope snapshot and first-party URL.
+  // Invalid templates fall back to the server-owned legacy template.
   messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.

@@ -318,7 +318,6 @@ import {
   buildHostedVaultShareProjectionScopeKey,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
   mergeHostedGroupJoinPolicy,
   normalizeHostedGroupAccessOfferProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
@@ -362,6 +361,10 @@ const RUNNING_DISTANCE_SCOPE = buildHostedVaultShareActivityDistanceProjectionSc
 const RUNNING_SESSION_COUNT_SCOPE = buildHostedVaultShareActivitySessionCountProjectionScope({
   activityKind: "running",
 });
+const COMPLETE_ACCESS_OFFER_SCOPES =
+  normalizeHostedGroupAccessOfferProjectionScopes(
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  );
 const GROUP_RUNTIME_LINQ_THREAD = {
   authority: {
     accountLookupKey: "hplk_group_runtime",
@@ -408,29 +411,48 @@ function groupSummaryWithOwnerEmailGrant() {
 }
 
 describe("hosted group access-offer defaults", () => {
-  it("requests every top-level permission when no narrower set is supplied", () => {
-    const resolved = resolveHostedGroupAccessOfferProjectionScopes([]);
-    expect(resolved).toEqual(HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES);
+  it("requests every selectable permission when no narrower set is supplied", () => {
+    const resolved = resolveHostedGroupAccessOfferProjectionScopes(undefined);
+    expect(resolved).toEqual(COMPLETE_ACCESS_OFFER_SCOPES);
     expect(resolved).toEqual(expect.arrayContaining([
       SLEEP_DURATION_SCOPE,
       WORKOUTS_SCOPE,
       PROTEIN_SCOPE,
+      RUNNING_SCOPE,
     ]));
-    expect(resolved.every((scope) => !("selector" in scope))).toBe(true);
-    expect(resolved.length).toBeLessThan(
-      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
-    );
+    expect(resolved.some((scope) => "selector" in scope)).toBe(true);
   });
 
   it("keeps explicit scopes narrow and renders one natural consent sentence", () => {
     expect(resolveHostedGroupAccessOfferProjectionScopes([WORKOUTS_SCOPE]))
       .toEqual([WORKOUTS_SCOPE]);
+    expect(resolveHostedGroupAccessOfferProjectionScopes([])).toEqual([]);
     expect(buildHostedGroupJoinOfferMessage({
       joinUrl: "https://www.withmurph.ai/groups/join/example",
+      messageTemplate:
+        "Okay—react to share {{share_scope}}, or adjust it at {{join_url}}.",
       projectionScopes: [WORKOUTS_SCOPE],
     })).toBe(
+      "Okay—react to share your Murph profile name and workout details, or adjust it at https://www.withmurph.ai/groups/join/example.",
+    );
+  });
+
+  it.each([
+    "React to share {{share_scope}}.",
+    "React now, or customize at {{join_url}}.",
+    "React to share {{share_scope}} twice: {{share_scope}}. Use {{join_url}}.",
+    "React to share {{share_scope}}. Use {{join_url}} or {{join_url}}.",
+    "React to share {{share_scope}}. Use {{join_url}} or {{external_url}}.",
+  ])("falls back when a consent template is incomplete or invalid", (messageTemplate) => {
+    const message = buildHostedGroupJoinOfferMessage({
+      joinUrl: "https://www.withmurph.ai/groups/join/example",
+      messageTemplate,
+      projectionScopes: [WORKOUTS_SCOPE],
+    });
+    expect(message).toBe(
       "Sounds good. Like or heart this message to share your Murph profile name and workout details with the group, or use https://www.withmurph.ai/groups/join/example to customize what you share.",
     );
+    expect(message).not.toContain("{{");
   });
 });
 
@@ -1948,6 +1970,26 @@ describe("handleHostedRuntimeGroupTool", () => {
         memberId: "member_owner",
         prisma: expect.any(Object),
       });
+  });
+
+  it("requests every selectable permission for a standalone link when scopes are omitted", async () => {
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
+      group: groupSummaryWithOwnerEmailGrant(),
+      joinCode: "abc123",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "create_join_link" },
+    })).resolves.toMatchObject({
+      action: "create_join_link",
+      result: { status: "ok" },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        requestedVaultShareProjectionScopes: COMPLETE_ACCESS_OFFER_SCOPES,
+      }));
   });
 
   it("reads the current Linq group title on demand from the durable route", async () => {
@@ -3734,7 +3776,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      projectionScopes: HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
+      projectionScopes: COMPLETE_ACCESS_OFFER_SCOPES,
       tx: fakeTx,
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -3747,7 +3789,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
-      projectionScopes: HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
+      projectionScopes: COMPLETE_ACCESS_OFFER_SCOPES,
       tx: fakeTx,
     });
   });
@@ -3946,14 +3988,13 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("renders comprehensive defaults when no optional kinds are requested", async () => {
+  it("renders comprehensive defaults when no scopes are requested", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
         action: "post_join_offer",
         joinOffer: {
           messageTemplate: "Joining shares {{share_scope}}. Customize: {{join_url}}.",
-          projectionKinds: [],
         },
         linqThread: LINQ_THREAD,
       },
@@ -3965,7 +4006,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
       .toHaveBeenCalledWith(expect.objectContaining({
         requestedVaultShareProjectionScopes:
-          HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
+          COMPLETE_ACCESS_OFFER_SCOPES,
       }));
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3993,7 +4034,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name and email address with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Joining shares your Murph profile name and email address. Customize: https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
   });
@@ -4023,7 +4064,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Scope: your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. Customize: https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
   });
@@ -4091,7 +4132,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name and recent running distance and session count with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Like this to join. It shares your Murph profile name and recent running distance and session count with the group. Join page: https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
   });
@@ -4114,7 +4155,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
-      projectionScopes: HOSTED_GROUP_DEFAULT_ACCESS_OFFER_PROJECTION_SCOPES,
+      projectionScopes: COMPLETE_ACCESS_OFFER_SCOPES,
       tx: fakeTx,
     });
   });

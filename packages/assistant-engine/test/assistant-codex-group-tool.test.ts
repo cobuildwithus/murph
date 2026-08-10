@@ -19,7 +19,6 @@ import {
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
@@ -195,15 +194,18 @@ describe("murph.group dynamic tool", () => {
       .toContain("the name the group chose");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
       .toContain("immediately preceding read_chat_name result");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties).not.toHaveProperty("messageTemplate");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .toContain("{{share_scope}}");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .toContain("{{join_url}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
-      .toContain("initial group creation");
+      .toContain("every selectable permission by default");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
-      .toContain("exact new projections requested");
+      .toContain("exact narrower set requested");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
-      .toContain("trusted host owns the exact consent copy");
+      .toContain("trusted host owns the actual scope snapshot");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
@@ -405,12 +407,16 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
+      messageTemplate:
+        "React to share {{share_scope}}, or customize at {{join_url}}.",
       displayName: "Sunday Sleep Crew",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))).toEqual({
       kind: "group",
       request: {
         action: "offer_access",
+        messageTemplate:
+          "React to share {{share_scope}}, or customize at {{join_url}}.",
         displayName: "Sunday Sleep Crew",
         projectionScopes: [{ projectionKind: "sleep-times.v0" }],
       },
@@ -3010,7 +3016,7 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
-      messageTemplate: "Model-authored offer copy.",
+      messageTemplate: " ",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
 
@@ -3076,6 +3082,8 @@ describe("murph.group dynamic tool", () => {
     }));
     const native = readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
+      messageTemplate:
+        "All set—react to share {{share_scope}}, or use {{join_url}} to adjust it.",
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     }));
     if (
@@ -3118,7 +3126,8 @@ describe("murph.group dynamic tool", () => {
     expect(groupRequest).toHaveBeenNthCalledWith(2, {
       action: "post_join_offer",
       joinOffer: {
-        messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+        messageTemplate:
+          "All set—react to share {{share_scope}}, or use {{join_url}} to adjust it.",
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       },
     });
@@ -3147,7 +3156,10 @@ describe("murph.group dynamic tool", () => {
       "native-hidden",
     );
     expect(standaloneResult.finalActionPatch).toBeUndefined();
-    expect(nativeResult.finalActionPatch).toEqual({ kind: "none" });
+    expect(nativeResult.finalActionPatch).toEqual({
+      kind: "none",
+      owner: "group-access-offer",
+    });
   });
 
   it("shows a fresh exact link for a reused native offer and fails closed without recency evidence", async () => {
@@ -3268,7 +3280,8 @@ describe("murph.group dynamic tool", () => {
       expect(request).toEqual({
         action: "post_join_offer",
         joinOffer: {
-          messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+          messageTemplate:
+            "React to share {{share_scope}}; customize at {{join_url}}.",
           projectionScopes: [{ projectionKind: "steps-days.v0" }],
         },
       });
@@ -3295,6 +3308,8 @@ describe("murph.group dynamic tool", () => {
     });
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
+      messageTemplate:
+        "React to share {{share_scope}}; customize at {{join_url}}.",
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     }));
     if (!request || request.kind !== "group") {
@@ -3326,13 +3341,9 @@ describe("murph.group dynamic tool", () => {
     );
   });
 
-  it("forwards only the runtime-owned legacy offer template", async () => {
-    const modelAuthoredCopy = "Model-authored consent copy must never be forwarded.";
-    expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "offer_access",
-      messageTemplate: modelAuthoredCopy,
-      projectionScopes: [{ projectionKind: "steps-days.v0" }],
-    }))?.kind).toBe("invalid-group-arguments");
+  it("forwards Murph-authored offer copy without substituting trusted values", async () => {
+    const modelAuthoredCopy =
+      "React to share {{share_scope}}, or choose details at {{join_url}}.";
 
     const groupRequest = vi.fn<GroupToolRequest>(async () => ({
       action: "post_join_offer",
@@ -3344,6 +3355,7 @@ describe("murph.group dynamic tool", () => {
     }));
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
+      messageTemplate: modelAuthoredCopy,
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     }));
     if (!request || request.kind !== "group") {
@@ -3365,11 +3377,11 @@ describe("murph.group dynamic tool", () => {
     expect(groupRequest).toHaveBeenCalledWith({
       action: "post_join_offer",
       joinOffer: {
-        messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+        messageTemplate: modelAuthoredCopy,
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       },
     });
-    expect(JSON.stringify(groupRequest.mock.calls)).not.toContain(modelAuthoredCopy);
+    expect(JSON.stringify(groupRequest.mock.calls)).toContain(modelAuthoredCopy);
     expect(readGroupToolPayload(result)).toEqual({
       action: "offer_access",
       result: {

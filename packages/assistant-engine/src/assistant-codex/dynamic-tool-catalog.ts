@@ -19,6 +19,7 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
@@ -992,7 +993,14 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, omit projectionScopes only for initial group creation to request every top-level default permission; existing-group additions must supply the exact new projections requested. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',
+          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, omit projectionScopes to request every selectable permission by default, or supply the exact narrower set requested. Existing membership and other grants remain unchanged. The trusted host owns the actual scope snapshot and uses a handled native consent path or a first-party link.',
+      },
+      messageTemplate: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+        description:
+          'Optional natural-language consent message for action="offer_access" on the native reaction path. Include {{share_scope}} and {{join_url}} exactly once each and no other {{...}} placeholders. The trusted host substitutes only its exact server-owned permission description and first-party customization URL; invalid templates fall back to trusted copy.',
       },
       standaloneLink: {
         type: 'boolean',

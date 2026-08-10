@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
@@ -1314,6 +1315,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
+    messageTemplate: input.joinOffer?.messageTemplate,
     projectionScopes,
   });
   const providerSendStartedAt = new Date();
@@ -1537,13 +1539,44 @@ async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
 
 export function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
+  messageTemplate?: string | null;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  // Keep one deterministic server-owned sentence: it is the reaction's
-  // consent surface and must replay with the exact stored scope snapshot.
-  return `Sounds good. Like or heart this message to share ${
-    renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  } with the group, or use ${input.joinUrl} to customize what you share.`;
+  const template = isValidHostedGroupJoinOfferMessageTemplate(
+    input.messageTemplate,
+  )
+    ? input.messageTemplate
+    : HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE;
+  return template
+    .replace(
+      HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+      () => renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
+    )
+    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, () => input.joinUrl);
+}
+
+const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
+const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
+
+function isValidHostedGroupJoinOfferMessageTemplate(
+  value: string | null | undefined,
+): value is string {
+  if (!value) {
+    return false;
+  }
+  const shareScopeCount = value.split(
+    HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+  ).length - 1;
+  const joinUrlCount = value.split(
+    HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
+  ).length - 1;
+  const unknownPlaceholderCandidate = value
+    .replace(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER, "")
+    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, "");
+  return shareScopeCount === 1
+    && joinUrlCount === 1
+    && !unknownPlaceholderCandidate.includes("{{")
+    && !unknownPlaceholderCandidate.includes("}}");
 }
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {

@@ -30,7 +30,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Delivery shape | One stable newsletter automation chooses either **one ordinary current-chat update** or **one shared email thread** to all eligible participants. |
 | Email permission | Included in the disclosed newsletter reaction-share scope and on the join page as **"share your email with this group."** The shared thread exposes addresses to co-members by design. |
 | Newsletter content opt-in | Liking the newsletter permission offer opts into the disclosed default snapshot: profile name, email, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV. It grants membership only when needed; the customize link lets a member share more or less. |
-| New-group requested permissions | Murph requests every top-level selectable group permission by default so the initial consent surface is complete. The member still opts in through the disclosed reaction or join page and may deselect any permission. Later additive permission offers remain narrow when Murph supplies the exact new scopes requested. Selector-specific activity scopes stay optional because workout details already include type. |
+| New-group requested permissions | Murph requests and initially selects every selectable group permission by default, including activity-specific selector scopes, so the consent checkpoint is complete. This does **not** grant access: each member still opts in through the disclosed reaction or join page and may deselect any permission. An explicitly supplied narrower scope list remains narrow. |
 | Setup flow | **Ask before creating.** Murph asks for the name, schedule, and email-versus-chat delivery in one short message, with tone optional. If the group already answered or says "just set it up," Murph uses sensible defaults and confirms the essentials. |
 | Naming | The **group-chosen name** becomes the automation title, the group display name when a group join link is created, and the name in the setup notice. |
 | Individual opt-out | **Revoke email sharing** through settings, an authenticated Linq/iMessage or Telegram group message, or a private Murph chat. Email headers do not prove the sender's self-revocation authority. Leaves challenge/health-sharing intact. Forward-only. |
@@ -39,8 +39,8 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Tone | **Supportive by default, never shaming.** Coach-style roast only on explicit group opt-in ("be hard on us"). Optional custom note. |
 | Access gating | **Free for every group.** No entitlement checks. |
 | Cadence | Weekly default (Sunday morning local), natural-language configurable, per-group jitter. |
-| Chat delivery | The same `group-health-newsletter` automation uses a system-owned delivery tag. Current-chat runs use one bounded `read_shared` for at most three configured scopes plus the ordinary conversation outbox and receive no newsletter email-send authority. |
-| Permission offers | In iMessage/Linq, lead with **Like this message**, state the exact `{{share_scope}}`, and include the customize link. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
+| Chat delivery | The same `group-health-newsletter` automation uses a system-owned delivery tag. Current-chat runs use one bounded `read_shared` for at most three configured scopes plus the ordinary conversation outbox and receive no newsletter email-send authority. The default scopes are steps, workout details, and sleep duration so same-week activity context is available when shared. |
+| Permission offers | In iMessage/Linq, Murph authors one natural consent message with `{{share_scope}}` and `{{join_url}}` exactly once each. Web rejects unknown, repeated, or missing placeholders to trusted fallback copy, substitutes only the frozen server-owned scope description and first-party URL, and treats a freshly posted native offer as Murph's complete reply. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
 | Projection retention | Each Web-owned encrypted health snapshot can carry **the 8 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. This retains the open local date plus the seven prior completed dates without exposing older history. The signed callback body ceiling is 19 KiB: above the maximum legal eight-record workout payload and below the equivalent nine-record payload. |
@@ -57,14 +57,14 @@ There is deliberately **no separate "newsletter" permission.** Email sharing is 
 
 It rides the existing `HostedVaultShare` table (`apps/web/prisma/schema.prisma`) and grant/revoke control plane (`apps/web/src/lib/hosted-vault-share/share-grant-store.ts`). No schema migration is required beyond registering the kind. Grant caps apply as-is.
 
-It is **default-checked at group creation**: the server requests every
-top-level selectable projection in the group's `joinPolicyJson` requested set.
-This includes workout summaries and workout details so a later weekly update can
-explain a movement number with the observed training context when available.
-The reaction or join page remains the consent gate: each member can deselect any
-requested permission before granting it. Later additive offers remain narrow
-when Murph supplies the exact new scopes requested. Selector-specific activity
-scopes remain optional additions rather than duplicating the workout-detail contract.
+At group creation, every selectable projection is **initially requested and
+selected at the consent checkpoint**, including activity-specific selector
+scopes. This includes workout summaries and workout details so a later weekly
+update can explain a movement number with observed same-period training context
+when available. Nothing is silently granted: the reaction or join page remains
+the consent gate, and each member can deselect any requested permission before
+granting it. When Murph supplies an explicit narrower scope list, the server
+preserves that exact narrow request.
 
 ### Newsletter automation — the schedule + config
 
