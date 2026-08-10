@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
+  resolveHostedPrivySessionFromBearerToken: vi.fn(),
   resolveHostedPrivySessionFromRequest: vi.fn(),
 }));
 
@@ -14,6 +15,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
+  resolveHostedPrivySessionFromBearerToken:
+    mocks.resolveHostedPrivySessionFromBearerToken,
   resolveHostedPrivySessionFromRequest: mocks.resolveHostedPrivySessionFromRequest,
 }));
 
@@ -24,8 +27,10 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 import {
   requirePrivyCompletionSession,
   requireActivePrivyMemberAuth,
+  requireActivePrivyMemberAuthFromBearerToken,
   requireFreshActivePrivyMemberAuthForHostedAppSession,
   requireFreshPrivyMemberAuthForHostedAppSession,
+  requireHostedCompanionMemberAuthFromBearerToken,
   resolvePrivyMemberAuthFromSession,
   requirePrivyMemberAuth,
   requirePrivySession,
@@ -86,6 +91,9 @@ describe("hosted Privy request auth", () => {
         id: "did:privy:user_123",
       },
     });
+    mocks.resolveHostedPrivySessionFromBearerToken.mockImplementation(
+      () => mocks.resolveHostedPrivySessionFromRequest(),
+    );
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member: createHostedMember(),
@@ -330,6 +338,87 @@ describe("hosted Privy request auth", () => {
     });
   });
 
+  it("allows paused members through companion bearer auth only", async () => {
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
+      createHostedMember({
+        billingStatus: HostedBillingStatus.paused,
+      }),
+    );
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
+      billingStatus: HostedBillingStatus.paused,
+    }));
+
+    await expect(
+      requireHostedCompanionMemberAuthFromBearerToken(
+        createBearerAuthenticatedRequest(),
+        prisma,
+      ),
+    ).resolves.toMatchObject({
+      member: {
+        id: "member_123",
+      },
+    });
+
+    await expect(
+      requireActivePrivyMemberAuthFromBearerToken(
+        createBearerAuthenticatedRequest(),
+        prisma,
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+    });
+  });
+
+  it("keeps administrative suspension blocked for paused companion members", async () => {
+    const suspendedAt = new Date("2026-08-09T12:00:00.000Z");
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
+      createHostedMember({
+        billingStatus: HostedBillingStatus.paused,
+        suspendedAt,
+      }),
+    );
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
+      billingStatus: HostedBillingStatus.paused,
+      suspendedAt,
+    }));
+
+    await expect(
+      requireHostedCompanionMemberAuthFromBearerToken(
+        createBearerAuthenticatedRequest(),
+        prisma,
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+  });
+
+  it.each([
+    HostedBillingStatus.canceled,
+    HostedBillingStatus.incomplete,
+    HostedBillingStatus.not_started,
+    HostedBillingStatus.past_due,
+    HostedBillingStatus.unpaid,
+  ])("keeps %s billing blocked for companion bearer auth", async (billingStatus) => {
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
+      createHostedMember({ billingStatus }),
+    );
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
+      billingStatus,
+    }));
+
+    await expect(
+      requireHostedCompanionMemberAuthFromBearerToken(
+        createBearerAuthenticatedRequest(),
+        prisma,
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+    });
+  });
+
   it("allows Family-sponsored members without direct billing through active hosted mutations", async () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
       createHostedMember({
@@ -527,6 +616,14 @@ function createAuthenticatedRequest(): Request {
   return new Request("https://join.example.test/api/settings/email/sync", {
     headers: {
       cookie: "privy-id-token=signed-identity-token",
+    },
+  });
+}
+
+function createBearerAuthenticatedRequest(): Request {
+  return new Request("https://app.example.test/api/device-sync/companion/status", {
+    headers: {
+      authorization: "Bearer signed-identity-token",
     },
   });
 }

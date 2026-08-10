@@ -5,7 +5,7 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readJsonObject } from "@/src/lib/http";
-import { requireActivePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireHostedCompanionMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
 import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -16,7 +16,7 @@ const COMPANION_HRV_REQUEST_BODY_LIMIT_BYTES = 512;
 // timestamps are not part of this API.
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireHostedCompanionMemberAuthFromBearerToken(request, prisma);
   await assertHostedHistoricalLaunchConsentGranted({
     memberId: auth.member.id,
     prisma,

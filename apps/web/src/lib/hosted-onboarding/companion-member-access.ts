@@ -10,8 +10,9 @@ import { ensureHostedAutoPulseTrialEnrollment } from "./auto-trial-enrollment-se
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
-  assertActiveHostedMemberAccessAllowed,
+  assertHostedCompanionMemberAccessAllowed,
   readActiveHostedMemberAccess,
+  readHostedCompanionMemberAccess,
 } from "./member-access";
 import { lookupHostedMemberForPrivyPrincipal } from "./member-identity-service";
 import {
@@ -70,7 +71,7 @@ export async function ensureHostedCompanionMemberId(input: {
   if (existingMember) {
     assertHostedMemberNotSuspended(existingMember);
 
-    if (await readActiveHostedMemberAccess({
+    if (await readHostedCompanionMemberAccess({
       memberId: existingMember.id,
       prisma,
     })) {
@@ -122,7 +123,7 @@ export async function ensureHostedCompanionMemberId(input: {
     });
   }
 
-  await assertActiveHostedMemberAccessAllowed({
+  await assertHostedCompanionMemberAccessAllowed({
     memberId: completion.memberId,
     prisma,
   });

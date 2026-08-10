@@ -551,6 +551,21 @@ Last verified: 2026-08-09
   setup failure to `COMPANION_ADMISSION_SUPPORT_REQUIRED`. Do not expose
   internal hosted lifecycle codes through this route or let a client retry the
   terminal support outcome in a loop.
+- Companion account, onboarding, Junction token, status, and health-data
+  ingress routes use one narrow companion-access derivation: canonical active
+  or sponsored access, or non-suspended `paused` own billing. This exception
+  keeps already-authorized native health sync and the companion shell available
+  without changing Stripe state or granting assistant/model execution,
+  meal-photo capture authority, browser billing authority, or any other paid
+  product access. Administrative suspension, identity binding, historical
+  launch consent, and device lifecycle authority remain independent fail-closed
+  checks.
+- Automatic meal-photo enrollment, activation, and upload retain active paid
+  access. Enrollment and activation translate only the canonical inactive-
+  access failure into the feature-scoped
+  `MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED` conflict, preventing an optional
+  paid feature from masquerading as whole-account loss in released companion
+  clients without issuing a credential or weakening upload admission.
 - Native iOS and Android device-sync routes under `/api/device-sync/companion/**` normally authenticate with a Privy identity token in `Authorization: Bearer` (no cookie fallback, so no browser ambient authority or CSRF surface). The sign-in contract accepts only `platform: "ios" | "android"` when supplied. The Messages enrollment route follows the bearer rule, then mints a 24-hour Messages-only bearer; the revoke and proof-action routes are the only companion exceptions that accept that derived scope. The one pre-login exception, `POST /api/device-sync/companion/auth-diagnostics`, accepts only an allowlisted, size-bounded failure envelope containing app-owned categories, an optional closed platform value that defaults to iOS for legacy clients, and an optional Murph-recognized Privy auth machine code; unsupported provider codes become `null`. It writes one structured hosted warning, has no database or object-storage sink, and must never retain or log raw provider prose, email, phone, OTP, tokens, authorization headers, member/user ids, or health data. Treat its telemetry as spoofable rather than audit evidence; a bundled mobile secret is not an attestation boundary because it can be extracted and replayed. Production keeps this route hidden unless `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`, and the production build must use explicit Vercel API credentials to prove the enabled WAF rule is the first active custom rule, matches only this exact path, and caps requests at 30 per minute per IP with a fixed window. The Junction SDK sign-in token authenticated routes mint is short-lived, returned exactly once, and must never be logged or persisted. Only a visible Android Connect Health Connect action or explicit hosted reconnect may send `connect` and run the account-ensure step, which must reuse the shared device-sync `upsertConnection` external-account identity discipline so SDK and Junction Link flows always share one `device_connection`; passive `resume`, omitted-intent reconciliation, foreground return, and data ingress may not ensure or reactivate a row. Source-scoped status accepts only a normalized Junction provider slug and filters both connected-source availability and durable webhook receipts. A receipt may store `sourceProviderSlug` only when the provider-owned webhook parser identifies an actual data-bearing source; data-less historical completions, lifecycle events, and legacy rows keep it null and cannot satisfy a source-scoped read. The junction client's API-key-prefix/environment validation is the sandbox/production separation authority, and the response surfaces the active environment.
 - Initial onboarding follows the same bearer-only native boundary and accepts no
   member id from the client. The browser completion route instead requires the

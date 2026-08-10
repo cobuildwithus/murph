@@ -319,6 +319,38 @@ export async function readActiveHostedMemberAccess(input: {
   return hasActiveHostedMemberAccess(member);
 }
 
+export async function readHostedCompanionMemberAccess(input: {
+  memberId: string;
+  now?: Date;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const member = await prisma.hostedMember.findUnique({
+    select: hostedMemberAccessSelect,
+    where: {
+      id: input.memberId,
+    },
+  });
+
+  if (!member || isHostedMemberSuspended(member.suspendedAt)) {
+    return false;
+  }
+  if (member.threadContainer) {
+    return await hasActiveHostedThreadContainerAccessWithParticipants({
+      container: member,
+      containerMemberId: input.memberId,
+      now: input.now,
+      owner: member.threadContainer.owner,
+      prisma,
+    });
+  }
+  if (member.billingStatus === HostedBillingStatus.paused) {
+    return true;
+  }
+
+  return hasActiveHostedMemberAccess(member);
+}
+
 /**
  * Billing-only guard for flows that must distinguish Family sponsorship from
  * a member's own Stripe access. Keep this query here with the canonical access
@@ -670,4 +702,20 @@ export async function assertActiveHostedMemberAccessAllowed(input: {
       member?.billingStatus ?? HostedBillingStatus.not_started,
     ),
   });
+}
+
+/**
+ * Native companion shell and health-sync access remains available while a
+ * member's own billing is paused. This does not grant assistant/runtime access,
+ * and administrative suspension still fails closed before billing is read.
+ */
+export async function assertHostedCompanionMemberAccessAllowed(input: {
+  memberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<void> {
+  if (await readHostedCompanionMemberAccess(input)) {
+    return;
+  }
+
+  await assertActiveHostedMemberAccessAllowed(input);
 }

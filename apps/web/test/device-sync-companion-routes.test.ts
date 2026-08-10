@@ -97,6 +97,11 @@ const ACTIVE_MEMBER = {
   suspendedAt: null,
 };
 
+const PAUSED_MEMBER = {
+  ...ACTIVE_MEMBER,
+  billingStatus: "paused",
+};
+
 function mockVerifiedPrivyUser(): void {
   mocks.verifyIdentityToken.mockResolvedValue({
     id: "did:privy:user_123",
@@ -113,6 +118,17 @@ function mockVerifiedPrivyUser(): void {
     accountGroupMemberships: [],
     billingStatus: ACTIVE_MEMBER.billingStatus,
     suspendedAt: ACTIVE_MEMBER.suspendedAt,
+    threadContainer: null,
+  });
+}
+
+function mockPausedPrivyUser(): void {
+  mockVerifiedPrivyUser();
+  mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(PAUSED_MEMBER);
+  mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
+    accountGroupMemberships: [],
+    billingStatus: PAUSED_MEMBER.billingStatus,
+    suspendedAt: PAUSED_MEMBER.suspendedAt,
     threadContainer: null,
   });
 }
@@ -755,6 +771,21 @@ describe("device sync companion routes", () => {
       expect(mocks.createSdkSignInSession).toHaveBeenCalledTimes(1);
     });
 
+    it("issues a device sign-in token while member billing is paused", async () => {
+      mockPausedPrivyUser();
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({
+        connectionIntent: "resume",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
+        PAUSED_MEMBER.id,
+        "junction",
+        "resume",
+      );
+    });
+
     it("rejects a device sign-in token without both historical launch grants", async () => {
       mockVerifiedPrivyUser();
       rejectHistoricalLaunchConsent();
@@ -984,6 +1015,19 @@ describe("device sync companion routes", () => {
       expect(mocks.acceptCompanionHrvRmssdObservation).toHaveBeenCalledTimes(1);
     });
 
+    it("accepts current device observations while member billing is paused", async () => {
+      mockPausedPrivyUser();
+
+      const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation));
+
+      expect(response.status).toBe(202);
+      expect(mocks.acceptCompanionHrvRmssdObservation).toHaveBeenCalledWith({
+        acceptedAt: expect.any(String),
+        observation: validHrvObservation,
+        userId: PAUSED_MEMBER.id,
+      });
+    });
+
     it("rejects current device observations without both historical launch grants", async () => {
       mockVerifiedPrivyUser();
       rejectHistoricalLaunchConsent();
@@ -1162,6 +1206,15 @@ describe("device sync companion routes", () => {
         prisma: mocks.prismaClient,
       });
       expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("member_1");
+    });
+
+    it("reads current device sync status while member billing is paused", async () => {
+      mockPausedPrivyUser();
+
+      const response = await statusRoute.GET(statusRequest());
+
+      expect(response.status).toBe(200);
+      expect(mocks.listConnectionsForUser).toHaveBeenCalledWith(PAUSED_MEMBER.id);
     });
 
     it("rejects current device sync status without both historical launch grants", async () => {
@@ -1501,6 +1554,23 @@ describe("device sync companion routes", () => {
         memberId: "member_1",
         prisma: mocks.prismaClient,
       });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it("stages current device metadata while member billing is paused", async () => {
+      mockPausedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(200);
       expect(mocks.persistHostedDeviceSyncCompanionMetadata).toHaveBeenCalledTimes(1);
     });
 

@@ -320,6 +320,31 @@ describe("meal photo companion routes", () => {
     expect(mocks.issueMealPhotoCaptureEnrollment).not.toHaveBeenCalled();
   });
 
+  it("keeps paid enrollment denial feature-scoped for paused companion sessions", async () => {
+    mocks.requireActivePrivyMemberAuthFromBearerToken.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_ACCESS_REQUIRED",
+        httpStatus: 403,
+        message: "Your subscription is paused. Resume billing before continuing.",
+      }),
+    );
+
+    const response = await enrollmentRoute.POST(
+      jsonRequest("https://app.example.test/enrollment", ENROLLMENT_REQUEST),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED",
+        message: "Active Murph access is required for automatic meal capture.",
+        retryable: false,
+      },
+    });
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.issueMealPhotoCaptureEnrollment).not.toHaveBeenCalled();
+  });
+
   it("requires an existing private Murph delivery route before enrollment", async () => {
     mocks.readCurrentHostedMemberDirectRoute.mockResolvedValueOnce(null);
     const request = jsonRequest(
@@ -400,6 +425,29 @@ describe("meal photo companion routes", () => {
       token: "scoped-upload-token",
     });
     expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+  });
+
+  it("keeps paid activation denial feature-scoped for paused companion sessions", async () => {
+    mocks.activateMealPhotoCaptureEnrollmentForScopedToken.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_ACCESS_REQUIRED",
+        httpStatus: 403,
+        message: "Your subscription is paused. Resume billing before continuing.",
+      }),
+    );
+    const request = new Request("https://app.example.test/enrollment", {
+      headers: { authorization: "Bearer scoped-upload-token" },
+      method: "PUT",
+    });
+
+    const response = await enrollmentRoute.PUT(request);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED",
+      },
+    });
   });
 
   it("keeps identity-authenticated revocation available without active billing", async () => {

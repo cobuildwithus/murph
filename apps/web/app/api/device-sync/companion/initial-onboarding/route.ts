@@ -22,7 +22,7 @@ import {
   type HostedInitialOnboardingState,
 } from "@/src/lib/hosted-onboarding/initial-onboarding";
 import {
-  requireActivePrivyMemberAuthFromBearerToken,
+  requireHostedCompanionMemberAuthFromBearerToken,
 } from "@/src/lib/hosted-onboarding/request-auth";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from
   "@/src/lib/hosted-onboarding/shared";
@@ -50,7 +50,7 @@ const INITIAL_MESSAGE = {
 
 export const GET = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireHostedCompanionMemberAuthFromBearerToken(request, prisma);
   const state = await readHostedInitialOnboardingState({
     memberId: auth.member.id,
     prisma,
@@ -87,7 +87,7 @@ export const GET = withJsonError(async (request: Request) => {
 
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireHostedCompanionMemberAuthFromBearerToken(request, prisma);
   const completion = parseHostedInitialOnboardingCompletionRequest(
     await readJsonObject(request, {
       limitBytes: INITIAL_ONBOARDING_BODY_LIMIT_BYTES,

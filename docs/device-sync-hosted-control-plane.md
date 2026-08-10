@@ -168,8 +168,12 @@ route. The UUID never uploads or enters logs.
 Native account admission is separate from both band enrollment and hosted
 device lifecycle authority. `POST /api/device-sync/companion/admission`
 accepts only an optional validated IANA time zone, reuses the canonical hosted
-member consent/trial/access owner, and returns only `{ "ok": true }`. Its
-public Android recovery boundary preserves the stable login, consent, access,
+member consent/trial/companion-access owner, and returns only `{ "ok": true }`.
+The companion owner admits canonical active or sponsored access plus
+non-suspended paused own billing for the native shell and health-sync boundary;
+it does not grant assistant runtime, meal-photo capture, or other paid-product
+authority. The public Android recovery boundary preserves the stable login,
+consent, access,
 suspension, and alternate-sign-in identity-conflict outcomes. All other
 retryable owner failures normalize to `COMPANION_ADMISSION_RETRYABLE`; all
 remaining terminal setup failures normalize to
@@ -181,6 +185,11 @@ existing signup-welcome suppression policy. Admission therefore preserves
 trial activation and the internal `member.activated` fact without assigning a
 Linq home line, queueing or emailing a welcome, or creating, resuming,
 reactivating, or otherwise mutating a Junction connection.
+Optional meal-photo enrollment and activation keep their active paid-access
+gate. They map its denial to the feature-scoped
+`MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED` conflict so a released companion
+does not close the admitted account or Junction session; upload authority is
+unchanged and remains active-access gated.
 
 ### Cloudflare execution state
 

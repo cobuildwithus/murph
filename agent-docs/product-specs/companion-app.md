@@ -155,8 +155,11 @@ before status, token exchange, or any health setup:
    existing bearer-only legal-consent `GET` and `POST` boundary to render and
    record the required launch grants, then retry admission. On typed
    `HOSTED_ACCESS_REQUIRED`—including normalized unavailable, blocked, or
-   already-used automatic-trial outcomes—enter the existing billing/activation
-   access recovery instead of falling through to health setup. Typed
+   already-used automatic-trial outcomes other than paused own billing—enter
+   the existing billing/activation access recovery instead of falling through
+   to health setup. A non-suspended paused member retains companion shell and
+   health-sync access while paid assistant/runtime authority remains blocked.
+   Typed
    `HOSTED_MEMBER_SUSPENDED` enters suspended-account support recovery.
    `COMPANION_ADMISSION_RETRYABLE` keeps the account gate visible with an
    explicit retry, while `COMPANION_ADMISSION_SUPPORT_REQUIRED` enters support
@@ -173,10 +176,18 @@ resume a hosted connection before the member explicitly chooses **Connect
 Health Connect**. Account-only admission also suppresses the ordinary hosted
 signup welcome: it must not assign a Linq home line, queue a signup-welcome
 notification, or send a welcome email. Canonical Pulse trial activation,
-active-access proof, and the internal `member.activated` fact remain intact.
+companion-access proof, and the internal `member.activated` fact remain intact.
 Existing established-member session restoration retains its separate
 documented `resume` path and cannot turn admission itself into health
 connection authority.
+
+Automatic meal-photo capture still requires active paid access. If enrollment
+or prepared-credential activation reaches that paid gate after companion
+admission, Web returns the feature-scoped
+`MEAL_PHOTO_CAPTURE_ACTIVE_ACCESS_REQUIRED` conflict instead of the account-
+level access error. Existing iOS builds therefore keep the Home and health-sync
+session available while rendering capture as needing attention; no credential
+or upload authority is issued.
 
 The Android home screen treats
 `GET /api/device-sync/companion/status?sourceProviderSlug=health_connect` as

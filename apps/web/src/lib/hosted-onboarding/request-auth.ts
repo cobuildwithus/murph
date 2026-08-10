@@ -8,6 +8,7 @@ import {
 import { type HostedMemberCoreState } from "./hosted-member-store";
 import {
   assertActiveHostedMemberAccessAllowed,
+  assertHostedCompanionMemberAccessAllowed,
 } from "./member-access";
 import { hostedOnboardingError } from "./errors";
 import { lookupHostedMemberForPrivyPrincipal } from "./member-identity-service";
@@ -163,6 +164,25 @@ export async function requireActivePrivyMemberAuthFromBearerToken(
 ): Promise<AuthenticatedPrivyMemberAuthContext> {
   const context = await requirePrivyMemberAuthFromBearerToken(request, prisma);
   await assertActiveHostedMemberAccessAllowed({
+    memberId: context.member.id,
+    prisma,
+  });
+
+  return context;
+}
+
+/**
+ * Companion bearer auth for the native shell and health-sync boundary. Paused
+ * own billing remains eligible here, while suspension and every other inactive
+ * billing state keep the canonical access error. Paid product authority must
+ * continue to use the active wrapper above.
+ */
+export async function requireHostedCompanionMemberAuthFromBearerToken(
+  request: Request,
+  prisma: PrismaClient = getPrisma(),
+): Promise<AuthenticatedPrivyMemberAuthContext> {
+  const context = await requirePrivyMemberAuthFromBearerToken(request, prisma);
+  await assertHostedCompanionMemberAccessAllowed({
     memberId: context.member.id,
     prisma,
   });
