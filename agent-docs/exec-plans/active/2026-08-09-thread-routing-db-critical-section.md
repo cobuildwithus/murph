@@ -134,9 +134,18 @@ Updated: 2026-08-09
   route on those paths; explicit and omitted group-metadata regressions prove
   one observation, one preparation, and one transaction, while the existing
   dispatch proof keeps outbound accounting at one update.
-- Final ReviewGPT round 3 required a second anomaly retrospective. It found the
-  late-winner prepared-cache mismatch and proved the absent-route lock removal
-  unsafe across privacy-key current-version flips. The existing raw-thread lock
-  is restored inside the short prepared transaction, while stale same-owner
-  preparation exits before demotion or mailbox work and uses the existing one
-  fresh preparation attempt.
+- Final ReviewGPT round 3's established-route KMS finding was rejected against
+  the merge-base path: every canonical snapshot already entered the refresh
+  boundary and opened its sealed route with the control-domain root. The PR
+  moves that required unwrap before `BEGIN`; skipping it for apparently healthy
+  rows would weaken the existing ciphertext-validation and repair invariant.
+- Final ReviewGPT round 3's late-winner finding was accepted. A winner observed
+  after loser preparation now exits before demotion or mailbox work and uses
+  the existing one fresh preparation attempt. The remediation audit also found
+  that the stored identity unique key changes with the privacy write version,
+  so it restored the existing version-independent raw-thread lock inside the
+  short prepared transaction and added mixed-version PostgreSQL proof.
+- The round-3 anomaly retrospective chose the smaller existing architecture:
+  one retained raw-thread lock, one attempt-bound preparation package, and the
+  existing bounded retry. It adds no persisted state, cache, queue, retry class,
+  reconciliation owner, compatibility path, or provider work under the lock.
