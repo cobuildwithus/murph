@@ -3,8 +3,11 @@ import {
   deriveHostedExecutionErrorCode,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
-import type {
-  HostedRuntimeRedactedJson,
+import {
+  HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
+  isHostedRuntimeFailurePhaseCode,
+  type HostedRuntimeFailurePhaseCode,
+  type HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type {
@@ -169,18 +172,56 @@ export function buildHostedRunnerMetadataOnlyErrorDetails(
   if (!diagnostics) {
     return {};
   }
+  const errorCodeDetail = readHostedRunnerTransportedErrorCodeDetail(error)
+    ?? (typeof diagnostics.errorCodeDetail === "string"
+      ? diagnostics.errorCodeDetail
+      : null);
 
   return {
     detailsKeys: Object.keys(diagnostics).sort(),
     ...(typeof diagnostics.errorCode === "string" ? { errorCode: diagnostics.errorCode } : {}),
-    ...(typeof diagnostics.errorCodeDetail === "string"
-      ? { errorCodeDetail: diagnostics.errorCodeDetail }
-      : {}),
+    ...(errorCodeDetail ? { errorCodeDetail } : {}),
     errorDetailPresent: typeof diagnostics.errorDetail === "string",
     ...(typeof diagnostics.errorMessage === "string" ? { errorMessage: diagnostics.errorMessage } : {}),
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
+}
+
+function readHostedRunnerTransportedErrorCodeDetail(
+  error: unknown,
+): HostedRuntimeFailurePhaseCode | null {
+  try {
+    if (!error || typeof error !== "object") {
+      return null;
+    }
+
+    const detailsDescriptor = Object.getOwnPropertyDescriptor(error, "details");
+    if (!detailsDescriptor || !("value" in detailsDescriptor)) {
+      return null;
+    }
+    const details = detailsDescriptor.value;
+    if (!details || typeof details !== "object" || Array.isArray(details)) {
+      return null;
+    }
+
+    for (const key of [
+      HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
+      "errorCodeDetail",
+    ] as const) {
+      const codeDescriptor = Object.getOwnPropertyDescriptor(details, key);
+      if (
+        codeDescriptor
+        && "value" in codeDescriptor
+        && isHostedRuntimeFailurePhaseCode(codeDescriptor.value)
+      ) {
+        return codeDescriptor.value;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function safeCleanupErrorCode(error: unknown): string {

@@ -1,10 +1,10 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
   listMurphDynamicToolNames,
   MURPH_ASK_GROK_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
@@ -15,7 +15,7 @@ import {
 } from '../src/assistant-codex/ask-grok-tool.ts'
 
 function readAskGrokCall(argumentsValue: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     id: 1,
     method: 'item/tool/call',
     params: { arguments: argumentsValue, namespace: 'murph', tool: 'ask_grok' },

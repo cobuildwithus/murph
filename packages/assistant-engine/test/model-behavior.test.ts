@@ -1710,6 +1710,9 @@ describe('assistant consumption lookup guidance', () => {
       'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.',
     )
     expect(prompt).toContain(
+      'Live workout/card: read strength-training and tracked-table.',
+    )
+    expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
     )
     expect(prompt).toContain(
@@ -3043,6 +3046,21 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'In group email, where filesystem reads are forbidden, do not attempt the read; apply the resident group Understand before recommending rules instead.',
     )
+    expect(prompt).toContain(
+      'Group email has no filesystem access. Do not try to read a usage skill.',
+    )
+    expect(prompt).toContain(
+      'call `murph.group action="read_usage"` exactly once',
+    )
+    expect(prompt).toContain(
+      'At least all of this room\'s included usage for the current period has been used.',
+    )
+    expect(prompt).toContain(
+      'authoritative included-usage progress figure for this room is unavailable right now',
+    )
+    expect(prompt).not.toContain(
+      'Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md`',
+    )
     expect(prompt).not.toContain(
       'Use `murph.automation` with `action: save`',
     )
@@ -3066,6 +3084,36 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
+    )
+    expect(prompt).toContain(
+      'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
+    )
+    expect(prompt).toContain(
+      'On patch, a replacement recurring wall-clock schedule that omits `schedule.timeZone` preserves the stored explicit timezone',
+    )
+    expect(prompt).toContain(
+      'do not ask the user to repeat it or guess it from current conversation context',
+    )
+    expect(prompt).toContain(
+      'For an active `deviceActivity` schedule, confirm the persisted event trigger directly',
+    )
+    expect(prompt).toContain(
+      'a null `nextOccurrenceAt` means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+    )
+    expect(prompt).toContain(
+      'do not invent a time or offer timing recovery',
+    )
+    expect(prompt).toContain(
+      'For time-based schedules, confirm timing only from a result with `timingVerified: true`',
+    )
+    expect(prompt).toContain(
+      'a verified null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
+    )
+    expect(prompt).toContain(
+      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+    )
+    expect(prompt).toContain(
+      'When a time-based result has `timingVerified: false`, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write.',
     )
     expect(prompt).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',

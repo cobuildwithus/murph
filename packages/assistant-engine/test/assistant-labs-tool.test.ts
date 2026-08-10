@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -10,7 +11,6 @@ import {
   listMurphDynamicToolNames,
   MURPH_DYNAMIC_TOOLS,
   MURPH_LABS_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import type {
@@ -251,7 +251,7 @@ describe('murph.labs dynamic tool', () => {
 })
 
 function readLabsRequest(argumentsValue: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     method: 'item/tool/call',
     params: {
       arguments: argumentsValue,

@@ -721,6 +721,56 @@ test("AuthProvider preserves a Group payment return through sign-in", async () =
   await rendered.cleanup();
 });
 
+test("AuthProvider preserves a usage-credit Checkout return through sign-in", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const search = "?usageCheckout=success&usagePurchase=hucp_abcdefghijklmnop";
+  const href = `https://join.example.test/settings${search}#subscription`;
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: "#subscription",
+        href,
+        origin: "https://join.example.test",
+        pathname: "/settings",
+        search,
+      },
+    },
+  );
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  expect(rendered.window.location.href).toBe(href);
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
 test.each([
   {
     label: "Edge completion",

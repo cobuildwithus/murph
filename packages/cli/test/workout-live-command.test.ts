@@ -8,6 +8,7 @@ import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import {
   addLiveWorkoutExercise,
   clearLiveWorkoutSet,
+  logLiveWorkoutSet,
   saveWorkoutFormat,
   showActiveLiveWorkout,
   startLiveWorkout,
@@ -157,6 +158,16 @@ test('live workout commands keep one canonical session and target one set', asyn
   const retried = requireData((await run<ShowResult>(cli, logArgs)).envelope)
   assert.equal(retried.entity.data.workout.exercises[0]?.sets.length, 2)
 
+  const staleCardLog = await run<ShowResult>(cli, [
+    'workout', 'set', 'log', 'Bench press',
+    '--workout-id', workoutId,
+    '--set-order', '3',
+    '--require-existing-set',
+    '--reps', '8',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(staleCardLog.envelope.ok, false)
+
   const added = requireData((await run<ShowResult>(cli, [
     'workout', 'exercise', 'add', 'Cable fly',
     '--workout-id', workoutId,
@@ -266,6 +277,18 @@ test('live workout usecases fail closed on invalid selectors and coordinates', a
     name: 'Bench press',
     order: 1,
   })
+  await assert.rejects(
+    () =>
+      logLiveWorkoutSet({
+        vault: vaultRoot,
+        workoutId: started.eventId,
+        exerciseOrder: 1,
+        setOrder: 2,
+        requireExistingSet: true,
+        reps: 8,
+      }),
+    (error: unknown) => isVaultCliErrorCode(error, 'not_found'),
+  )
   await assert.rejects(
     () =>
       clearLiveWorkoutSet({

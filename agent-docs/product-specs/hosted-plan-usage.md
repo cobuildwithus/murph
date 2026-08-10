@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-08-05
+Last verified: 2026-08-09
 Status: Implemented current-state contract
 
 ## Goal
@@ -458,9 +458,13 @@ inventing a billing menu:
   calls the shared capacity "Murph time," says Murph may pause for the room,
   and asks whether they want Murph to check the options without naming or
   counting any path. The assistant receives no current sponsorship-status
-  field. Payer identity, payment setup, cap, charges, balance, percentages,
-  message counts, and refill events stay private. It never frames each text as
-  a unit being purchased or spent. After
+  field. Payer identity, payment setup, cap, charges, credit balance or source,
+  remaining capacity, period dates, message counts, and refill events stay
+  private. The required current-response `includedUsageUsedPercent` is separate from urgency and
+  may be stated only when a participant explicitly asks how much AI usage the
+  room has consumed or asks for the room's current usage status. It never
+  appears in this proactive heads-up or in a general funding-options answer.
+  Murph never frames each text as a unit being purchased or spent. After
   someone asks for the options, asks for more Murph time, asks how to keep the
   room going, or accepts the quick path, the assistant reads the options for
   that responding sender, using the exact accepted request-bearing message as
@@ -496,11 +500,42 @@ Classify a group-thread allowance from its source, never by comparing its
 numeric cap with a trial cap. `murph.plan_usage` still returns
 `group_not_supported`; group capacity is not projected as a personal plan or a
 synthetic personal allowance. The existing `murph.group` tool's `read_usage`
-action reports only `fundingNeeded` and the current first-party funding URL.
-Web derives the boolean from current capacity plus automatic-refill
-availability and keeps the underlying healthy/low/exhausted state, period,
-percentage, funding setup, internal USD-micro accounting, contributors,
-receipts, and payer identity out of the assistant projection.
+action reports `fundingNeeded`, the current first-party funding URL, and an
+integer `includedUsageUsedPercent` on every successful current response.
+
+Web owns the aggregate. The successful thread-container usage gate already
+proves that the included limit is positive; an inactive or malformed limit
+makes the read unavailable. With current-period counted included spend `spent`
+and included limit `limit`, Web returns `0` when `spent <= 0`, `100` when
+`spent >= limit`, and `max(1, floor(spent * 100 / limit))` in between. This is
+the percentage of the room's included usage for the current period that has
+been used. It excludes purchased, referral, carryover, and automatic-refill
+credit. Credit changes therefore cannot lower or reset it; a new included
+period can. A value of `100` means at least all included usage has been used,
+not that effective capacity is exhausted, because credit may remain.
+
+The assistant may disclose the aggregate only after a participant explicitly
+asks how much AI usage the room has consumed or asks for the room's current
+usage status. It says, in substance, "About X% of this room's included usage
+for the current period has been used." For `100`, it says at least all included
+usage has been used and does not say the room is exhausted unless an
+authoritative capacity result separately says so. The transport returns the
+field on every successful current response and does not infer intent. A
+funding-only current response is schema-invalid by design; during accepted
+mixed-version skew Murph says the quantitative status is unavailable instead
+of estimating it from funding urgency, sponsorship, messages, or history.
+Filesystem-capable group-chat turns load the detailed hosted-low-usage skill.
+Because group-email turns deliberately have no filesystem or shell access, the
+stable group-email prompt carries the same compact one-read, bounded-answer,
+100-is-not-exhaustion, and unavailable-result contract. That room-public read
+does not authenticate the email sender or authorize a mutation.
+
+Web derives `fundingNeeded` from current capacity plus automatic-refill
+availability. It keeps the underlying healthy/low/exhausted state, raw spend
+and limit, remaining capacity, funding setup, internal USD-micro accounting,
+credit amount or source, contributors, receipts, payer identity, sponsor cap,
+charges, pending payments, refill state and events, period dates, and message
+counts out of the assistant projection.
 The recovery projection does not read the page-only sponsorship projection,
 so a private sponsor-state failure cannot remove the exhausted-room action.
 
@@ -593,6 +628,14 @@ and Portal transition before the Web deploy exposes the plan, then verify its
 Settings card and conversational quote/confirmation boundary. Roll back Web
 before rolling back Cloudflare so Web stops producing the new code before an
 old strict consumer returns to service.
+
+Ship the `includedUsageUsedPercent` Web producer, strict runtime reader, and
+assistant policy as one product change. There is no strip-only reader phase or
+rollout-only feature flag. A mixed-version Web/runner window may temporarily
+make the strict group usage read fail; that availability tradeoff is accepted.
+After Web and Cloudflare converge, prove the serving runner fingerprint and run
+one controlled explicit group usage-status question. Roll back both sides to a
+schema-compatible pair if rollback is required.
 
 Existing billing mechanics remain in:
 

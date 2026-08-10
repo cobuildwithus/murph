@@ -249,6 +249,10 @@ test("adds one paid seat and retries when the plan is full", async () => {
 
   expect(response.status).toBe(200);
   expect(mocks.updateHostedFamilyPlanCapacities).toHaveBeenCalledWith({
+    autoSeatInviteTarget: {
+      targetEmail: null,
+      targetPhoneNumber: "+48600000001",
+    },
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
@@ -364,6 +368,31 @@ test("does not buy a seat when a full-plan invite is reused (no seat-limit error
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(1);
 });
 
+test("does not buy an orphaned seat when a reused invite needs a tier rebalance", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PLAN_CAPACITY_REQUIRED",
+      httpStatus: 409,
+      message: "Change the Family plan mix before moving this invite.",
+    }),
+  );
+
+  const response = await inviteRoute.POST(
+    inviteRequest({
+      addSeatIfNeeded: true,
+      planCode: "edge",
+      targetEmail: "relative@example.test",
+      targetLabel: "Relative",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_INVITE_PLAN_CAPACITY_REQUIRED" },
+  });
+  expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
+});
+
 test("does not auto-add a seat for a label-only invite (no dedup key)", async () => {
   mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
     hostedOnboardingError({
@@ -384,6 +413,31 @@ test("does not auto-add a seat for a label-only invite (no dedup key)", async ()
     error: { code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED" },
   });
   expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
+});
+
+test("does not auto-add a paid seat for a Telegram-only invite", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    }),
+  );
+
+  const response = await inviteRoute.POST(
+    inviteRequest({
+      addSeatIfNeeded: true,
+      targetLabel: "Relative",
+      targetTelegramUsername: "@relative",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED" },
+  });
+  expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(1);
 });
 
 test("does not add a seat when the seat limit is hit but addSeatIfNeeded is off", async () => {
