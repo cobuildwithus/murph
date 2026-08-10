@@ -1,5 +1,9 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import {
   buildAssistantSystemPromptLayers,
   type AssistantSystemPromptInput,
@@ -31,35 +35,46 @@ function createPromptInput(
 }
 
 describe('assistant appointment reminder policy', () => {
-  it('authorizes one verified private reminder for a confirmed appointment', () => {
+  it('routes confirmed private appointments to the scheduling policy', async () => {
     const prompt = buildAssistantSystemPromptLayers(
       createPromptInput(),
     ).stableRouteCapabilityPrompt
+    const skill = await readFile(
+      path.join(
+        resolveAssistantSkillsRoot(),
+        'appointment-scheduling',
+        'SKILL.md',
+      ),
+      'utf8',
+    )
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
 
-    expect(prompt).toContain('Appointment reminder default:')
     expect(prompt).toContain(
+      'For a confirmed future care appointment in private, follow `$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md`.',
+    )
+    expect(normalizedSkill).toContain(
       'a booked or otherwise confirmed future care appointment',
     )
-    expect(prompt).toContain(
+    expect(normalizedSkill).toContain(
       'explicit owning-tool authorization for exactly one private one-shot reminder',
     )
-    expect(prompt).toContain(
+    expect(normalizedSkill).toContain(
       'without separate confirmation unless the user opts out',
     )
-    expect(prompt).toContain('before noon local')
-    expect(prompt).toContain(
+    expect(normalizedSkill).toContain('before noon local')
+    expect(normalizedSkill).toContain(
       'the prior evening at a known pre-bed reminder time or 8:00 PM',
     )
-    expect(prompt).toContain(
-      'for noon or later, schedule 8:00 AM local that day',
+    expect(normalizedSkill).toContain(
+      'For noon or later, schedule 8:00 AM local that day',
     )
-    expect(prompt).toContain(
+    expect(normalizedSkill).toContain(
       'Reuse one stable automation identity for repeated mentions',
     )
-    expect(prompt).toContain(
-      'patch it when a reschedule is confirmed and archive it when cancellation is confirmed',
+    expect(normalizedSkill).toContain(
+      'Patch it when a reschedule is confirmed and archive it when cancellation is confirmed',
     )
-    expect(prompt).toContain(
+    expect(normalizedSkill).toContain(
       'follow the existing save-verification rules before claiming it is active',
     )
   })
@@ -72,8 +87,12 @@ describe('assistant appointment reminder policy', () => {
       createPromptInput({ assistantHostedAutomationAvailable: false }),
     ).stableRouteCapabilityPrompt
 
-    expect(groupPrompt).not.toContain('Appointment reminder default:')
-    expect(unavailablePrompt).not.toContain('Appointment reminder default:')
+    expect(groupPrompt).not.toContain(
+      'For a confirmed future care appointment in private',
+    )
+    expect(unavailablePrompt).not.toContain(
+      'For a confirmed future care appointment in private',
+    )
     expect(unavailablePrompt).toContain(
       'Scheduled automation changes are unavailable in this turn.',
     )
