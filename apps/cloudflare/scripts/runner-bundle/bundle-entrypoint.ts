@@ -169,9 +169,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
 // on 2026-08-09; startup entry and static closure are unchanged, so ratchet
 // only the total ceiling and keep both startup baselines and all tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_887_441 + 32_768;
+//
+// Bounded group-tool failure diagnostics plus the strict included-usage read
+// contract increase the runner output. Exact ubuntu assembly measured a
+// 9,938,038B total on 2026-08-10, while the corresponding local production
+// assembly measured a 7,983,431B static closure. Retain both growth alarms.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_938_038 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_983_431;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
