@@ -6,6 +6,7 @@ import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
 import { afterEach } from 'vitest'
 
+import { registerEventCommands } from '../src/commands/event.js'
 import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
@@ -144,6 +145,7 @@ function createMeasurementCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
+  registerEventCommands(cli, services)
   registerMeasurementCommands(cli)
 
   return cli
@@ -249,7 +251,7 @@ test('measurement entry list schema requires exact metric filters and preserves 
   assert.match(getOptionDescription(schema, 'metric'), /matching is exact, not fuzzy/u)
 })
 
-test('measurement entry list returns direct BMI and same-event height and weight without changing event list', async () => {
+test('measurement entry list returns primary and legacy scalar entries without changing event list', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-entry-list-')
   cleanupPaths.push(parentRoot)
   const cli = createMeasurementCli()
@@ -319,6 +321,36 @@ test('measurement entry list returns direct BMI and same-event height and weight
       ])
     ).envelope,
   )
+  const bodyMeasurementPayloadPath = path.join(parentRoot, 'body-measurement.json')
+  await writeFile(
+    bodyMeasurementPayloadPath,
+    JSON.stringify({
+      kind: 'body_measurement',
+      occurredAt: '2026-07-05T07:30:00.000Z',
+      source: 'manual',
+      title: 'Legacy body check-in',
+      measurements: [
+        {
+          type: 'weight',
+          value: 49,
+          unit: 'kg',
+        },
+      ],
+    }),
+    'utf8',
+  )
+  const bodyMeasurement = requireData(
+    (
+      await runInProcessJsonCli<{ eventId: string }>(cli, [
+        'event',
+        'import-json',
+        '--vault',
+        vaultRoot,
+        '--input',
+        `@${bodyMeasurementPayloadPath}`,
+      ])
+    ).envelope,
+  )
   requireData(
     (
       await runInProcessJsonCli<MeasurementAddResult>(cli, [
@@ -370,9 +402,18 @@ test('measurement entry list returns direct BMI and same-event height and weight
     to: '2026-07-31',
     limit: 200,
   })
-  assert.equal(entries.count, 3)
+  assert.equal(entries.count, 4)
   assert.equal(entries.nextCursor, null)
   assert.deepEqual(entries.items, [
+    {
+      eventId: bodyMeasurement.eventId,
+      measurementIndex: 0,
+      occurredAt: '2026-07-05T07:30:00.000Z',
+      source: 'manual',
+      metric: 'weight',
+      value: 49,
+      unit: 'kg',
+    },
     {
       eventId: grouped.eventId,
       measurementIndex: 0,

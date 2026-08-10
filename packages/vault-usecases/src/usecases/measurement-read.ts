@@ -1,8 +1,10 @@
 import path from 'node:path'
 import {
+  bodyMeasurementEntrySchema,
   eventSourceSchema,
   measurementEntrySchema,
   rawImportManifestSchema,
+  type MeasurementEntry,
 } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
@@ -201,14 +203,31 @@ export async function listMeasurementEntries(input: {
       const occurredAt = record.occurredAt
       const parsedSource = eventSourceSchema.safeParse(record.attributes.source)
       return record.attributes.measurements.flatMap((rawEntry, measurementIndex) => {
-        const parsedEntry = measurementEntrySchema.safeParse(rawEntry)
-        if (!parsedEntry.success) {
-          throw new VaultCliError(
-            'invalid_payload',
-            `Measurement "${record.entityId}" entry ${measurementIndex} is not a valid canonical measurement entry.`,
-          )
+        let entry: MeasurementEntry
+        if (record.kind === 'body_measurement') {
+          const parsedEntry = bodyMeasurementEntrySchema.safeParse(rawEntry)
+          if (!parsedEntry.success) {
+            throw new VaultCliError(
+              'invalid_payload',
+              `Measurement "${record.entityId}" entry ${measurementIndex} is not a valid canonical body-measurement entry.`,
+            )
+          }
+          entry = {
+            metric: normalizeMetricSlug(parsedEntry.data.type),
+            value: parsedEntry.data.value,
+            unit: parsedEntry.data.unit,
+            ...(parsedEntry.data.note ? { note: parsedEntry.data.note } : {}),
+          }
+        } else {
+          const parsedEntry = measurementEntrySchema.safeParse(rawEntry)
+          if (!parsedEntry.success) {
+            throw new VaultCliError(
+              'invalid_payload',
+              `Measurement "${record.entityId}" entry ${measurementIndex} is not a valid canonical measurement entry.`,
+            )
+          }
+          entry = parsedEntry.data
         }
-        const entry = parsedEntry.data
         if (!metricSet.has(entry.metric)) {
           return []
         }
