@@ -166,9 +166,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Adding the personalized generated contact card puts its request contract,
 // exact-shape parser, direct route resolution, and acknowledgement handling in
-// the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
-// on 2026-08-09; startup entry and static closure are unchanged, so ratchet
-// only the total ceiling and keep both startup baselines and all tolerances.
+// the runner's lazy output. The subsequent reviewed biomarker ranges, hosted
+// runtime-control compaction, and named-diet guidance moved exact ubuntu total
+// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
+// remain within their existing ceilings and no forbidden subsystem enters the
+// boot graph.
 //
 // Preserving admitted identity and retry state for Junction blood-pressure
 // history extends that deferred provider's lazy output. After reconciling the
