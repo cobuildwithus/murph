@@ -299,6 +299,24 @@ touch hook-installed
     expect(check.stdout).toContain('regular=3 data=0 ceiling=3')
   })
 
+  it('keeps created worktrees out of Spotlight indexing without dirtying Git', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'spotlight-excluded')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'spotlight-excluded-task',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+    expect(runGit(target, ['check-ignore', '.metadata_never_index'])).toBe(
+      '.metadata_never_index',
+    )
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  })
+
   it('ratchets unmanaged temporary clones to zero and rejects new paths', () => {
     const harness = createHarness()
     const origin = 'https://example.test/example/murph.git'
@@ -528,6 +546,7 @@ done
     ])
     expect(creation.status).toBe(23)
     expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).toContain(target)
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
     rmSync(postCheckout)
 
     const guard = runScript(harness, 'worktree-storage-guard')
