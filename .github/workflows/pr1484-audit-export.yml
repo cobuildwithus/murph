@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: agent/pr1484-audit-export
-          fetch-depth: 1
+          fetch-depth: 0
           path: helper
 
       - name: Rebuild exact feature tree on one main snapshot
@@ -34,6 +34,7 @@ jobs:
           cd target
           expected_target=ee78d0004d070d0e9aa422f20b603a826f085545
           feature_commit=e5fe6d0f70a1c46a2e098ae117bdcd971aa126f8
+          audit_payload_commit=c78d258170fce81c74b0afbf443460546eca4580
           test "$(git rev-parse HEAD)" = "$expected_target"
           git fetch origin main
           main_sha=$(git rev-parse origin/main)
@@ -42,9 +43,33 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git checkout -B rebuilt "$main_sha"
           git cherry-pick "$feature_commit"
-          base64 --decode ../helper/.github/pr1484/fixes-final.patch.gz.b64 \
+          git -C ../helper show \
+            "$audit_payload_commit":.github/pr1484/fixes-final.patch.gz.b64 \
+            | base64 --decode \
             | gzip --decompress > /tmp/pr1484-fixes-final.patch
           git apply --index --whitespace=nowarn /tmp/pr1484-fixes-final.patch
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/web/test/device-sync-hosted-runtime-authority.test.ts")
+          text = path.read_text()
+          old = '''vi.mock("@/src/lib/device-sync/provider-applications", () => ({
+            isDeviceProviderApplicationError: (value: unknown) =>
+              Boolean(value && typeof value === "object" && "code" in value),
+            resolveDeviceProviderApplication: mocks.resolveDeviceProviderApplication,
+          }));'''
+          new = '''vi.mock("@/src/lib/device-sync/provider-applications", () => ({
+            isDeviceProviderApplicationError: (value: unknown) =>
+              Boolean(value && typeof value === "object" && "code" in value),
+            isMemberOwnedDeviceProviderApplicationProvider: (provider: string) =>
+              provider === "strava",
+            resolveDeviceProviderApplication: mocks.resolveDeviceProviderApplication,
+          }));'''
+          if old not in text:
+              raise SystemExit("expected provider-application mock not found")
+          path.write_text(text.replace(old, new))
+          PY
+          git add apps/web/test/device-sync-hosted-runtime-authority.test.ts
           git diff --cached --check
           git commit -m "fix: complete member-owned provider application audit"
 
