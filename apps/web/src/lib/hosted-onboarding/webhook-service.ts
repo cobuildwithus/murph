@@ -556,6 +556,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
+              pendingGroupRosterUnavailable:
+                planningResolution.pendingGroupRosterUnavailable ?? false,
               prisma,
               // The resolver already performed the first authority read. A
               // route-conflict retry must read again so it can prepare for the
@@ -1849,6 +1851,7 @@ interface HostedThreadRoutingCryptoPreparation {
 async function prepareHostedLinqThreadRoutingCrypto(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
+  pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
   threadRoute?: HostedThreadRouteSnapshot | null;
 }): Promise<HostedThreadRoutingCryptoPreparation> {
@@ -1859,11 +1862,6 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   const accountLookupKey = createHostedPhoneLookupKey(
     context.recipientPhoneNumber,
   );
-  if (!accountLookupKey) {
-    throw new TypeError(
-      "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
-    );
-  }
 
   const threadRoute = input.threadRoute === undefined
     ? await readHostedThreadRouteByThreadIdentity({
@@ -1873,6 +1871,11 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
       })
     : input.threadRoute;
   if (threadRoute) {
+    if (!accountLookupKey) {
+      throw new TypeError(
+        "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
+      );
+    }
     const [preparedThreadDeliveryRoute] = await Promise.all([
       prepareHostedThreadContainerDeliveryRoute({
         accountLookupKey,
@@ -1894,8 +1897,12 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     if (!await shouldPrepareHostedLinqThreadContainerCrypto({
       event: input.event,
       participantMemberIds: input.participantMemberIds,
+      pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
       prisma: input.prisma,
     })) {
+      return {};
+    }
+    if (!accountLookupKey) {
       return {};
     }
     return {
@@ -1909,6 +1916,11 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     };
   }
 
+  if (!accountLookupKey) {
+    throw new TypeError(
+      "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
+    );
+  }
   await warmHostedLinqMailboxPayloadRoot({
     event: input.event,
     prisma: input.prisma,

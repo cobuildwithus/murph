@@ -5570,6 +5570,7 @@ describe("Linq group chat auto-provision", () => {
 
   it("prepares new-container crypto for an active pending-contact sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
     vi.mocked(
       memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
     ).mockResolvedValue({
@@ -5659,6 +5660,7 @@ describe("Linq group chat auto-provision", () => {
 
   it("does not prepare new-container crypto for an inactive pending-contact sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
     prisma.hostedMember.findUnique.mockResolvedValue({
       accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.canceled,
@@ -5685,6 +5687,112 @@ describe("Linq group chat auto-provision", () => {
       participantMemberIds: [],
       prisma: prisma as never,
     })).resolves.toBe(false);
+  });
+
+  it("does not prepare new-container crypto while group roster authority is unavailable", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
+      { memberId: senderCore.id },
+    ]);
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({}),
+      participantMemberIds: [senderCore.id],
+      pendingGroupRosterUnavailable: true,
+      prisma: prisma as never,
+    })).resolves.toBe(false);
+
+    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
+    expect(
+      pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("does not prepare new-container crypto without recipient line authority", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({
+        recipient: "not-a-phone",
+      }),
+      participantMemberIds: [senderCore.id],
+      prisma: prisma as never,
+    })).resolves.toBe(false);
+
+    expect(prisma.hostedLinqLine.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
+  });
+
+  it("does not prepare new-container crypto for a roster member without a live setup", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({}),
+      participantMemberIds: ["member_roster_only"],
+      prisma: prisma as never,
+    })).resolves.toBe(false);
+
+    expect(
+      pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx,
+    ).toHaveBeenCalled();
+  });
+
+  it("prepares new-container crypto for a roster member with a live setup", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    const recipientPhoneLookupKey = requireTestPhoneLookupKey("+15550000000");
+    pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
+      .mockResolvedValue([{
+        armedAt: new Date("2026-06-24T00:00:00.000Z"),
+        id: "hpgs_roster_live",
+        ownerMemberId: "member_roster_setup",
+        recipientPhoneLookupKey,
+      }]);
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({}),
+      participantMemberIds: ["member_roster_setup"],
+      prisma: prisma as never,
+    })).resolves.toBe(true);
+  });
+
+  it("does not prepare new-container crypto on a hard-blocked incoming line", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "unhealthy",
+      providerReputationStatus: "CRITICAL",
+    });
+    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
+      { memberId: senderCore.id },
+    ]);
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({}),
+      participantMemberIds: [senderCore.id],
+      prisma: prisma as never,
+    })).resolves.toBe(false);
+
+    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
+  });
+
+  it("prepares new-container crypto for an active sender on their AT_RISK line", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "degraded",
+      providerReputationStatus: "AT_RISK",
+    });
+    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
+      { memberId: senderCore.id },
+    ]);
+    mockHomeLinqRoute("+15550000000");
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({}),
+      participantMemberIds: [],
+      prisma: prisma as never,
+    })).resolves.toBe(true);
   });
 
   it.each([
@@ -7330,6 +7438,9 @@ describe("Linq group chat auto-provision", () => {
       retryable: true,
     });
 
+    expect(
+      domainRootStore.prepareHostedCryptoDomainRootCandidates,
+    ).not.toHaveBeenCalled();
     expect(
       preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
     ).not.toHaveBeenCalled();

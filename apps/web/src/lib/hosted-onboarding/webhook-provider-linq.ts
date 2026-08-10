@@ -322,9 +322,13 @@ export async function resolveHostedLinqMailboxPayloadRootPrewarmMemberId(input: 
 export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
+  pendingGroupRosterUnavailable?: boolean;
   prisma: HostedOnboardingReadClient;
 }): Promise<boolean> {
-  if (input.event.event_type !== "message.received") {
+  if (
+    input.event.event_type !== "message.received"
+    || input.pendingGroupRosterUnavailable === true
+  ) {
     return false;
   }
   const context = resolveHostedOnboardingLinqMessageContext(input.event);
@@ -342,11 +346,28 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
     return false;
   }
 
+  const recipientPhone = normalizePhoneNumber(context.recipientPhoneNumber);
+  const recipientPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+    recipientPhone,
+  );
+  if (!recipientPhone || recipientPhoneLookupKeys.length === 0) {
+    return false;
+  }
+  const lineState = await readHostedLinqIncomingLineState({
+    phoneNumberLookupKeys: recipientPhoneLookupKeys,
+    prisma: input.prisma,
+  });
+  if (
+    !("phoneNumberLookupKey" in lineState)
+    || lineState.kind === "hard_blocked"
+  ) {
+    return false;
+  }
+
   const senderMemberId = await lookupHostedLinqPrewarmIdentityMemberId({
     contact: participantContact,
     prisma: input.prisma,
   });
-  const recipientPhone = normalizePhoneNumber(context.recipientPhoneNumber);
   const pendingSenderMemberId = senderMemberId || !recipientPhone
     ? null
     : (await lookupHostedMemberRoutingByPendingLinqParticipantContact({
@@ -355,22 +376,67 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
         prisma: input.prisma,
         recipientPhone,
       }))?.core.id ?? null;
-  const candidates = new Set(input.participantMemberIds);
-  if (senderMemberId) {
-    candidates.add(senderMemberId);
-  }
-  if (pendingSenderMemberId) {
-    candidates.add(pendingSenderMemberId);
-  }
-  const eligibility = await Promise.all(
-    [...candidates].map((memberId) =>
-      readActiveHostedMemberAccess({
-        memberId,
+  const candidateSenderMemberId = senderMemberId ?? pendingSenderMemberId;
+  const activeSenderMemberId = candidateSenderMemberId
+    && await readActiveHostedMemberAccess({
+      memberId: candidateSenderMemberId,
+      prisma: input.prisma,
+    })
+    ? candidateSenderMemberId
+    : null;
+  if (lineState.kind === "at_risk") {
+    if (
+      !activeSenderMemberId
+      || !isHostedLinqIMessageService(messageEvent.data.service)
+    ) {
+      return false;
+    }
+    const senderAuthority = readHostedLinqHomeLineAuthority(
+      await readHostedMemberRoutingState({
+        memberId: activeSenderMemberId,
         prisma: input.prisma,
-      })
+      }),
+    );
+    return senderAuthority.kind !== "none"
+      && normalizePhoneNumber(senderAuthority.recipientPhone) === recipientPhone;
+  }
+  if (activeSenderMemberId) {
+    return true;
+  }
+  if (
+    hostedLinqFirstContactContainsBlockedContent({
+      event: messageEvent,
+      participantContact,
+    })
+    || input.participantMemberIds.length === 0
+  ) {
+    return false;
+  }
+
+  const occurredAt = new Date(context.occurredAt);
+  const recoveredPendingSetup = await resolveHostedLinqRecoveredPendingGroupSetup({
+    occurredAt,
+    participantMemberIds: input.participantMemberIds,
+    recoveredRecipientPhoneLookupKey: lineState.phoneNumberLookupKey,
+    senderMemberId: null,
+    threadId: summary.chatId,
+    tx: input.prisma,
+  });
+  if (recoveredPendingSetup) {
+    return true;
+  }
+  const candidates =
+    await readHostedPendingGroupSetupCandidatesForParticipantsTx({
+      occurredAt,
+      participantMemberIds: input.participantMemberIds,
+      tx: input.prisma,
+    });
+  return selectHostedPendingGroupSetupCandidate({
+    candidates: candidates.filter((candidate) =>
+      recipientPhoneLookupKeys.includes(candidate.recipientPhoneLookupKey)
     ),
-  );
-  return eligibility.some(Boolean);
+    senderMemberId: null,
+  }).kind === "selected";
 }
 
 async function lookupHostedLinqPrewarmIdentityMemberId(input: {
