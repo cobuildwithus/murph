@@ -2120,30 +2120,38 @@ export function ComponentsContent() {
                   label: null,
                   memberId: "design-owner",
                   pendingPlanCode: null,
-                  planCode: "pulse",
+                  planCode: "max",
                 },
                 {
                   isOwner: false,
                   joinedAtIso: "2026-07-07T00:00:00.000Z",
                   label: "Partner",
                   memberId: "design-member",
-                  pendingPlanCode: "max",
+                  pendingPlanCode: null,
                   planCode: "edge",
+                },
+                {
+                  isOwner: false,
+                  joinedAtIso: "2026-07-12T00:00:00.000Z",
+                  label: "Sibling",
+                  memberId: "design-pending-member",
+                  pendingPlanCode: "max",
+                  planCode: "pulse",
                 },
               ]}
               plans={{
                 edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
-                max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+                max: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
                 pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
               }}
               seats={{
-                active: 2,
-                billed: 3,
+                active: 3,
+                billed: 4,
                 invited: 1,
                 max: 6,
                 min: 2,
                 remaining: 0,
-                used: 3,
+                used: 4,
               }}
               tiers={[
                 {

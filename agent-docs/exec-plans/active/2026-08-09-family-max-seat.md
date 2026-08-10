@@ -187,3 +187,8 @@ Updated: 2026-08-09
 - Pending: push that correction, capture/retry the preliminary
   specialist pass with desktop/mobile proof, configure the test Stripe sandbox
   price, then run the next exact-head final ReviewGPT round and CI to green.
+- The first specialist artifact also required rendered proof of both transition
+  directions. The inert design fixture now composes one current Max member, one
+  current Edge member, and one Pulse member pending Max so the real component
+  can demonstrate downgrade choices, upgrade-to-Max choices, confirmation, and
+  the existing pending/retry state without live data or mutations.
