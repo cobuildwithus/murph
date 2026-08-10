@@ -91,6 +91,12 @@ describe("runtime invocation transport failure fence handling", () => {
         cause: new Error(`authorization=Bearer cause-secret ${"y".repeat(400)}`),
       },
     );
+    Object.assign(invocationError, {
+      code: "runtime_error",
+      details: {
+        errorCodeDetail: "runtime_phase:foreground.pass",
+      },
+    });
     const harness = await createTransportFailureHarness({
       invocationError,
       readActiveRuntimeUserFence: async (token) => ({
@@ -112,9 +118,12 @@ describe("runtime invocation transport failure fence handling", () => {
     expect(harness.loggedFailureEntries()).toEqual([
       expect.objectContaining({
         attemptId: harness.token.attemptId,
+        errorCode: "runtime_error",
         eventCode: "runner.accepted_attempt_failed",
         redactedJson: expect.objectContaining({
           attemptStillActive: true,
+          errorCode: "runtime_error",
+          errorCodeDetail: "runtime_phase:foreground.pass",
           fenceCleared: false,
           safeErrorCause:
             `${safeCausePrefix}${"y".repeat(319 - safeCausePrefix.length)}…`,

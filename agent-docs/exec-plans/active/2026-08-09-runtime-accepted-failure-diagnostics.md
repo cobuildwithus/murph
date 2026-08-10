@@ -93,6 +93,11 @@ Updated: 2026-08-09
   regressions (2 selected; 212 skipped), then the full container-entrypoint,
   runner-container, and transport-failure slice (3 files, 264 tests), plus
   Cloudflare typecheck.
+- The preliminary coverage specialist identified that the reconstructed phase
+  was not asserted at the final accepted-attempt request boundary. Accepted the
+  tests-only artifact after full inspection and `git apply --check`; the added
+  production-faithful assertion and Cloudflare typecheck pass on the corrected
+  candidate.
 - Passed `git diff --check` and parent scope/call-path review.
 - Production deployment proof confirmed the existing propagation bridge is
   already live at 100%; no rollout wait or duplicate transport work is needed.
