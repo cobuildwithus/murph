@@ -116,6 +116,18 @@ export type {
   OverviewWeeklyStat,
 } from "./overview.ts";
 export {
+  buildPersonalPatternReport,
+  buildPersonalPatternReportFromWearableBundle,
+  emptyPersonalPatternReport,
+} from "./personal-patterns.ts";
+export type {
+  PersonalPatternCell,
+  PersonalPatternFactor,
+  PersonalPatternOutcome,
+  PersonalPatternReport,
+  PersonalPatternStage,
+} from "./personal-patterns.ts";
+export {
   buildSharedGroupWeeklyMembers,
 } from "./group-weekly.ts";
 export type {
@@ -560,6 +572,14 @@ export async function summarizeWearableSleepPatternRuntime(
 ): Promise<WearableSleepPatternSummary> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableSleepPatternRuntime(vaultRoot, filters);
+}
+
+export async function buildPersonalPatternReportRuntime(
+  vaultRoot: string,
+  options: { asOf?: Date | string; windowDays?: number } = {},
+): Promise<import("./personal-patterns.ts").PersonalPatternReport> {
+  const mod = await import("./query-projection.ts");
+  return mod.buildPersonalPatternReportRuntime(vaultRoot, options);
 }
 
 export async function summarizeWearableActivityRuntime(

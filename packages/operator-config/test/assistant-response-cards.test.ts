@@ -503,7 +503,7 @@ describe('assistant response cards', () => {
     }).endsWith('Some calorie and macro estimates were partial.')).toBe(true)
   })
 
-  it('omits unavailable layout metrics while retaining the partial marker', () => {
+  it('keeps the static nutrition layout concise when metrics are unavailable', () => {
     const card: DailyNutritionResponseCardV2 = {
       ...COMPLETE_CARD_V2,
       totals: {
@@ -524,7 +524,7 @@ describe('assistant response cards', () => {
     expect(buildLinqIMessageAppLayout(card)).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(card),
-      subcaption: '1,490.25 cal · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
+      subcaption: 'Some nutrition estimates were partial.',
     })
   })
 
@@ -547,6 +547,26 @@ describe('assistant response cards', () => {
       goals: {
         calories: null,
         proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    })
+    const completeNoGoalsLayout = buildLinqIMessageAppLayout({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        calories: null,
+        proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    })
+    const directionalGoalsLayout = buildLinqIMessageAppLayout({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        calories: { target: 3_000, status: 'far_under_target' },
+        proteinGrams: { target: 90, status: 'over_target' },
         carbsGrams: null,
         fatGrams: null,
         fiberGrams: null,
@@ -575,15 +595,17 @@ describe('assistant response cards', () => {
     expect(completeLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD),
-      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat',
     })
     expect(goalLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
-      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · Goals: calories goal 2,100 cal, under target; protein goal 100g, on target; carbs goal 220g, on target; fat goal 40g, on target; fiber goal 30g, under target',
+      subcaption:
+        'Goals: Calories under · Protein on target · Carbs on target · Fat on target · Fiber under',
     })
-    expect(proteinGoalLayout.subcaption).toContain(
-      'protein goal 100g, on target',
+    expect(proteinGoalLayout.subcaption).toBe('Goals: Protein on target')
+    expect(completeNoGoalsLayout).not.toHaveProperty('subcaption')
+    expect(directionalGoalsLayout.subcaption).toBe(
+      'Goals: Calories far under · Protein over',
     )
     expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
       schemaVersion: 2,
@@ -603,7 +625,7 @@ describe('assistant response cards', () => {
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
-      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
+      subcaption: 'Some calorie and nutrition estimates were partial.',
     })
     expect(buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2).length)
       .toBeLessThan(2_048)
