@@ -99,6 +99,7 @@
     "@murphai/health-metrics": "workspace:*",
     "@types/node": "^25.6.2",
     "@vitest/coverage-v8": "^4.1.6",
+    "frog": "1.1.0",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",
     "vite": "^8.0.12",

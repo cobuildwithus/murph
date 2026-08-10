@@ -65,9 +65,10 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Training, Starter access, patterns, reminders, and web search",
+    title:
+      "Training, Starter access, patterns, reminders, cards, and web search",
     summary:
-      "A private Training view brings workouts together, Starter usage remains available until it is used, patterns compare repeated actions with next-day health, reminders keep their local time, and managed OpenAI web search can reach current information again.",
+      "A private Training view brings workouts together, Starter usage remains available until it is used, patterns compare repeated actions with next-day health, reminders keep their local time, workout cards keep completed rows clear, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "private-training-review",
@@ -167,6 +168,18 @@ const RAW_CHANGELOG_EDITIONS = [
           prompt:
             "I have a confirmed dentist appointment next Thursday at 2 PM.",
         },
+      },
+      {
+        id: "workout-card-status-rendering",
+        kind: "improvement",
+        priority: 3,
+        title: "Completed workout rows keep their checkmark",
+        summary:
+          "Completed exercises now keep a clear checkmark in Messages workout cards, including their static previews.",
+        details:
+          "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
+        relevanceTags: ["workouts", "imessage", "cards", "reliability"],
+        sourcePullRequests: [1599],
       },
     ],
   },
