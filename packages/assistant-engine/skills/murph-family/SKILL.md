@@ -86,10 +86,11 @@ not the group's synthetic thread-container member.
 
 When someone explicitly asks in a group to start, convert, or manage their own
 Family plan, send `https://www.withmurph.ai/family/setup` immediately. This is a
-stable navigation-only handoff: it signs the person in when needed, then opens
-that person's authenticated Family Settings. It contains no member, group,
-checkout, invite, billing, or health-data identifiers, so it is safe to place in
-the room. Do not require an extra confirmation merely to send it.
+stable navigation-only handoff: it authenticates the person when needed and
+opens that person's Family Settings once their Murph account is accessible. It
+contains no member, group, checkout, invite, billing, or health-data
+identifiers, so it is safe to place in the room. Do not require an extra
+confirmation merely to send it.
 
 Do not call `murph.family_plan`, claim account state, choose an owner, or create
 a checkout or invite from the group runtime. If the requester wants Murph to
