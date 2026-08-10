@@ -1,6 +1,11 @@
 import { Buffer } from "node:buffer";
 
 import {
+  isMurphAndroidAppEnabled,
+  MURPH_ANDROID_APP_ENABLED_ENV,
+} from "@murphai/hosted-execution/env";
+
+import {
   HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS,
   HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
@@ -186,6 +191,8 @@ function assertHostedR2Configuration(input: {
 }
 
 function readHostedWorkerVars(source: EnvSource): Record<string, string> {
+  const androidAppEnabled = isMurphAndroidAppEnabled(source);
+
   return {
     ...Object.fromEntries(
       HOSTED_WORKER_REQUIRED_VAR_NAMES.map((key) => [
@@ -199,6 +206,9 @@ function readHostedWorkerVars(source: EnvSource): Record<string, string> {
         return value ? [[key, value] as const] : [];
       }),
     ),
+    ...(androidAppEnabled
+      ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
+      : {}),
   };
 }
 

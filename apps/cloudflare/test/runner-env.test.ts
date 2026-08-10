@@ -1221,9 +1221,11 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
-        "MURPH_ANDROID_APP_ENABLED",
         "WHOOP_SCOPES",
       ]),
+    );
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
+      "MURPH_ANDROID_APP_ENABLED",
     );
     for (const retiredVeniceModelVar of [
       "HOSTED_VENICE_LUNA_MODEL",

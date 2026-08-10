@@ -41,6 +41,8 @@ Updated: 2026-08-10
 ## Evidence
 
 - The shared parser and runner projection accept only the exact enabled value.
+- Cloudflare deploy config preserves that exact-value rule before Wrangler output;
+  generic optional-var whitespace normalization cannot activate the flag.
 - The trusted per-invocation platform projection carries the flag into the
   assistant turn; forwarded and member-provided env cannot enable or override it.
 - Default Web and assistant tests prove the Android-only journey is absent.
