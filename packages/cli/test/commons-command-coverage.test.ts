@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Cli } from "incur";
 import { localParallelCliTest as test } from "./local-parallel-test.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
@@ -32,6 +34,124 @@ test("deleted generic Commons commands are no longer registered", async () => {
 
     assert.equal(result.exitCode, 1, command.join(" "));
     assert.equal(result.envelope.ok, false, command.join(" "));
+  }
+});
+
+test("commons knowledge search returns a bounded source-backed sauna packet", async () => {
+  const cli = createCommonsSliceCli();
+  const result = await runInProcessJsonCli<{
+    available: boolean;
+    candidates: Array<{ key: string; title: string }>;
+    items: Array<{
+      entityKey: string;
+      sources: Array<{ pmid: string | null; url: string | null }>;
+    }>;
+    safety: { kind: string } | null;
+    topic: { key: string; title: string } | null;
+  }>(cli, [
+    "commons",
+    "knowledge",
+    "search",
+    "What does the evidence say about Finnish dry sauna?",
+    "--limit",
+    "3",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.available, true);
+  assert.equal(data.topic?.title, "Finnish Dry Sauna");
+  assert.deepEqual(data.candidates, []);
+  assert.ok(data.items.length > 0 && data.items.length <= 3);
+  assert.ok(data.items.some((item) =>
+    item.sources.some((source) => source.pmid === "29849692")
+  ));
+});
+
+test("commons knowledge search returns a safety-only sauna hard stop", async () => {
+  const result = await runInProcessJsonCli<{
+    available: boolean;
+    items: unknown[];
+    safety: {
+      sources: Array<{ pmid: string | null; title: string }>;
+      text: string;
+    } | null;
+  }>(createCommonsSliceCli(), [
+    "commons",
+    "knowledge",
+    "search",
+    "Is Finnish dry sauna safe while wearing a fentanyl patch?",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.available, true);
+  assert.deepEqual(data.items, []);
+  assert.match(data.safety?.text ?? "", /opioid|fentanyl|life-threatening/iu);
+  assert.ok(data.safety?.sources.some((source) =>
+    source.pmid === "32740103" || /opioid patch|fentanyl patch/iu.test(source.title)
+  ));
+});
+
+test("commons knowledge search rejects a result limit larger than three items", async () => {
+  const result = await runInProcessJsonCli(createCommonsSliceCli(), [
+    "commons",
+    "knowledge",
+    "search",
+    "What does the evidence say about Finnish dry sauna?",
+    "--limit",
+    "4",
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.envelope.ok, false);
+});
+
+test("commons knowledge search requires one complete question", async () => {
+  const result = await runInProcessJsonCli(createCommonsSliceCli(), [
+    "commons",
+    "knowledge",
+    "search",
+    "x",
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.envelope.ok, false);
+});
+
+test("commons knowledge search stays non-blocking when its generated index is missing", async () => {
+  const previousRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+  process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = path.join(
+    tmpdir(),
+    `missing-health-commons-${process.pid}`,
+  );
+  try {
+    const result = await runInProcessJsonCli<{
+      available: boolean;
+      candidates: unknown[];
+      items: unknown[];
+      topic: unknown;
+      warning: string | null;
+    }>(createCommonsSliceCli(), [
+      "commons",
+      "knowledge",
+      "search",
+      "Is Finnish dry sauna safe after recent fainting?",
+    ]);
+
+    assert.equal(result.envelope.ok, true);
+    const data = requireData(result.envelope);
+    assert.equal(data.available, false);
+    assert.deepEqual(data.candidates, []);
+    assert.deepEqual(data.items, []);
+    assert.equal(data.topic, null);
+    assert.match(data.warning ?? "", /continue without corpus context/u);
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+    } else {
+      process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = previousRoot;
+    }
   }
 });
 

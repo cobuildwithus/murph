@@ -1284,8 +1284,9 @@ ${replyTargetGuidance}
 }
 
 function buildAssistantHealthCommonsGuidanceText(): string {
-  return `Health Commons route surface:
-- For protocol discovery, protocol setup, and experiment design, search Health Commons first. Do not require a protocol lookup for an ordinary health answer, task, plan, or habit when no experiment or protocol is being considered. ${buildHealthCommonsDiscoverySurfaceText()}`;
+  return `Health Commons tools:
+- Before health advice, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, acknowledgements, logs, logistics, and non-health turns. Suggest experiments only when asked to try, test, track, or set one up.
+- For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 
 function buildAssistantHealthCommonsCoreGuidanceText(): string {
@@ -1370,7 +1371,7 @@ function buildAssistantSkillRouteHintText(): string {
     "- Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.",
     "- Eye health: general-eye-health for screen-linked discomfort, contact-lens safety, refractive questions, prevention, and symptom triage.",
     "- Route any active eye pain, redness, light sensitivity, discharge, vision change, flashes, floaters, injury, or chemical exposure to general-eye-health first, even when contacts, light devices, screens, circadian timing, or a browser or ordering task are also involved. Load secondary skills only after establishing the care level and immediate action.",
-    "- Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.",
+    "- Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities.",
     "- Mind/substances: stress-regulation, cognitive-focus, substance-load. Chronic care: chronic-illness-support, chronic-pain-support.",
     "- Care logistics: appointment-scheduling. Transports and services: connected-apps, computer-use, phone-calls. Account products: murph-family. Artifacts: pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.",
     "- Overlaps: sleep-improvement owns sleep mechanics; circadian-rhythm clock timing; sleep-recovery-readiness an acute train/modify/rest decision; hrv-resting-heart-rate marker interpretation; energy-fatigue persistent fatigue.",
@@ -1728,13 +1729,8 @@ function buildAssistantKnowledgeGuidanceText(input: {
       ? "For wiki work, prefer the dedicated knowledge surface for this route over generic CLI execution."
       : "For wiki work, use `vault-cli knowledge ...` directly in this turn.",
     "Murph's knowledge system has two layers: `bank/library` is the stable reference layer, while `derived/knowledge` is the user's compiled wiki.",
-    buildHealthCommonsKnowledgeDistinctionText(),
     "The assistant is responsible for compiling and maintaining the wiki over time. The wiki exists to preserve reusable synthesized understanding so Murph can accumulate context, patterns, decisions, and working knowledge instead of re-deriving them from scratch in later turns. Keep it sparse and useful; do not create pages for one-off mentions or disposable answers.",
     "For wiki tasks, read `derived/knowledge/index.md` first, then one to three targeted pages. Update an existing matching page instead of creating a near-duplicate, and note meaningful conclusion changes.",
     "Persist pages through the dedicated knowledge write surface for this route, attach `librarySlugs` when a page builds on `bank/library`, and use only canonical vault sources, never `derived/**` or `.runtime/**`."
   );
-}
-
-function buildHealthCommonsKnowledgeDistinctionText(): string {
-  return "`vault-cli knowledge ...` is for the user's derived knowledge wiki. It is not the canonical Health Commons corpus; use `vault-cli commons protocol ...` for public Health Commons protocol discovery.";
 }

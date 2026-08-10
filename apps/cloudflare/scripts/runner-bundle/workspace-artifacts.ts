@@ -15,6 +15,7 @@ const CONTRACTS_PACKAGE_NAME = "@murphai/contracts";
 const CLI_PACKAGE_NAME = "@murphai/murph";
 const HEALTH_COMMONS_RUNTIME_GENERATED_FILES = [
   "generated/biomarker-desired-directions.json",
+  "generated/knowledge.sqlite",
   "generated/protocol-index.json",
   "generated/protocol-run-specs.json",
   "generated/protocol-family-graph.json",
