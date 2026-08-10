@@ -33,14 +33,28 @@ jobs:
                   raise SystemExit(f"{path}: expected one exact match, found {count}")
               target.write_text(text.replace(old, new, 1))
 
-          test_path = "packages/assistant-engine/test/assistant-hosted-domain-tools.test.ts"
+          source_path = "packages/assistant-engine/src/assistant/group-newsletter-automation.ts"
           replace_once(
-              test_path,
+              source_path,
+              """        'The saved automation instructions and group-newsletter skill define the editorial behavior. This trusted contract governs only the authorized email effect.',\n""",
+              """        'Read the group-newsletter skill before composing. The saved automation instructions and that skill define the editorial behavior. This trusted contract governs only the authorized email effect.',\n""",
+          )
+
+          ownership_test_path = "packages/assistant-engine/test/group-newsletter-automation.test.ts"
+          replace_once(
+              ownership_test_path,
+              """    expect(prompt).toContain('existing outbox owns delivery and retry')\n    expect(prompt).not.toContain('140-220 word')\n""",
+              """    expect(prompt).toContain('existing outbox owns delivery and retry')\n    expect(prompt).toContain('Read the group-newsletter skill before composing.')\n    expect(prompt).not.toContain('140-220 word')\n""",
+          )
+
+          hosted_test_path = "packages/assistant-engine/test/assistant-hosted-domain-tools.test.ts"
+          replace_once(
+              hosted_test_path,
               """  GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES,\n  GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,\n} from '../src/assistant/group-newsletter-automation.js'\n""",
               """  GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES,\n  GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,\n  GROUP_NEWSLETTER_ORDINARY_EXECUTION_MARKER,\n} from '../src/assistant/group-newsletter-automation.js'\n""",
           )
           replace_once(
-              test_path,
+              hosted_test_path,
               """          GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,\n          'These are configuration values. The runtime appends the current execution contract on every scheduled run.',\n          'Newsletter name: \"Family weekly health newsletter\"',\n""",
               """          GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,\n          GROUP_NEWSLETTER_ORDINARY_EXECUTION_MARKER,\n          'Read the group-newsletter skill before every execution. The saved values below define the requested edition.',\n          'Current-chat delivery uses the ordinary scheduled group-read and conversation-outbox path. Group-email delivery receives a separate trusted one-shot email contract from the runtime.',\n          'Newsletter name: \"Family weekly health newsletter\"',\n""",
           )
@@ -61,16 +75,6 @@ jobs:
               """The dedicated `group-newsletter` assistant skill owns the editorial story,\nhuman-readable units, comparison rules, email subject, tone, calibrated\nexamples, and final edition. The `group-chat` skill owns the room-level setup\nquestions, group-chosen name and schedule, email-share offer,\nannounce-before-first-send behavior, and opt-out handling. The structured setup\naction writes configuration only; the runtime appends the current execution\ncontract on each scheduled turn. Skills carry no durable state; state lives in\nthe automation and grants.\n""",
               """The dedicated `group-newsletter` assistant skill owns the editorial story,\nhuman-readable units, comparison rules, email subject, tone, calibrated\nexamples, and final edition. The `group-chat` skill owns the room-level setup\nquestions, group-chosen name and schedule, email-share offer,\nannounce-before-first-send behavior, and opt-out handling. The structured setup\naction compiles validated choices into one ordinary automation record. New\ncurrent-chat records execute that saved skill-owned recipe directly; the runtime\nadds only the trusted email-effect contract and the bounded legacy-chat\ncompatibility contract. Skills carry no durable state; state lives in the\nautomation and grants.\n""",
           )
-
-          cleanup_paths = [
-              Path('.github/workflows/one-shot-group-newsletter-patch.yml'),
-              Path('.github/workflows/one-shot-group-newsletter-refine.yml'),
-              Path('.github/workflows/finalize-newsletter-simplification.yml'),
-          ]
-          for cleanup_path in cleanup_paths:
-              if not cleanup_path.exists():
-                  raise SystemExit(f"missing expected temporary workflow: {cleanup_path}")
-              cleanup_path.unlink()
 
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
@@ -94,19 +98,15 @@ jobs:
       - name: Typecheck assistant engine
         run: pnpm --filter @murphai/assistant-engine typecheck
 
-      - name: Check and publish final patch
+      - name: Publish verified non-workflow changes
         run: |
           git diff --check
-          test ! -e .github/workflows/one-shot-group-newsletter-patch.yml
-          test ! -e .github/workflows/one-shot-group-newsletter-refine.yml
-          test ! -e .github/workflows/finalize-newsletter-simplification.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
             agent-docs/product-specs/group-health-newsletter.md \
-            packages/assistant-engine/test/assistant-hosted-domain-tools.test.ts \
-            .github/workflows/one-shot-group-newsletter-patch.yml \
-            .github/workflows/one-shot-group-newsletter-refine.yml \
-            .github/workflows/finalize-newsletter-simplification.yml
+            packages/assistant-engine/src/assistant/group-newsletter-automation.ts \
+            packages/assistant-engine/test/group-newsletter-automation.test.ts \
+            packages/assistant-engine/test/assistant-hosted-domain-tools.test.ts
           git commit -m "test: finalize newsletter simplification"
           git push origin HEAD:agent/simplify-newsletter-automation-final
