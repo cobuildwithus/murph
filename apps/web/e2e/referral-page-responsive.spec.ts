@@ -3,11 +3,15 @@ import { expect, test } from "@playwright/test";
 const WIDTHS = [320, 375, 390, 768, 1280] as const;
 const REFERRAL_STUDY_WIDTHS = [390, 1440] as const;
 const OVERFLOW_TOLERANCE_PX = 1;
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
 const REFERRAL_STUDIES = [
   {
     dayLabels: [
-      { count: 2, label: "10 days of Murph" },
-      { count: 1, label: "14 days of Murph" },
+      { count: 2, label: "About 10 more days of Murph usage" },
+      { count: 1, label: "About 14 more days of Murph usage" },
     ],
     description: "Share your link or start a group with Murph.",
     rewardCount: 3,
@@ -21,8 +25,8 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "10 days of Murph" },
-      { count: 1, label: "14 days of Murph" },
+      { count: 1, label: "About 10 more days of Murph usage" },
+      { count: 1, label: "About 14 more days of Murph usage" },
     ],
     description: "Start a fresh group with Murph.",
     rewardCount: 2,
@@ -32,7 +36,9 @@ const REFERRAL_STUDIES = [
     titles: ["Bring someone new to Murph", "Start an active group"],
   },
   {
-    dayLabels: [{ count: 1, label: "10 days of Murph" }],
+    dayLabels: [
+      { count: 1, label: "About 10 more days of Murph usage" },
+    ],
     description: "Share your personal link with someone new.",
     rewardCount: 1,
     selector:
@@ -112,9 +118,88 @@ test("referral page stays contained and actionable at every marketing breakpoint
       }),
     ).toBeVisible();
     await expect(
-      page.getByText("$3.50 of cost-weighted usage credit", { exact: true }),
+      page.getByText("About 14 more days of Murph usage", { exact: true }),
     ).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(
+      /\$|≈|usage credit/i,
+    );
+    await expect(page.locator("body")).not.toContainText(
+      RETIRED_USAGE_TERM_PATTERN,
+    );
   }
+});
+
+test("referral reward-state study renders without reading a member referral link", async ({
+  page,
+}) => {
+  const referralLinkRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/settings/signup-referral-link") {
+      referralLinkRequests.push(request.url());
+    }
+  });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto(
+    "/design?tab=sections#referral-page-reward-states",
+    { waitUntil: "networkidle" },
+  );
+  expect(response?.status()).toBe(200);
+
+  const study = page.locator("#referral-page-reward-states");
+  await expect(study).toBeVisible();
+  await expect(study.locator("[data-referral-reward-state]"))
+    .toHaveCount(3);
+
+  const signupOnly = study.locator(
+    '[data-referral-reward-state="signup-only"]',
+  );
+  await expect(signupOnly.locator("article")).toHaveCount(1);
+  await expect(
+    signupOnly.getByText("About 10 more days of Murph usage", { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    signupOnly.getByText(
+      /Your referral came through\. About 10 more days of Murph usage/,
+    ),
+  ).toBeVisible();
+
+  const groupOnly = study.locator(
+    '[data-referral-reward-state="group-only"]',
+  );
+  await expect(groupOnly.locator("article")).toHaveCount(2);
+  await expect(
+    groupOnly.getByText("About 10 more days of Murph usage", { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    groupOnly.getByText("About 14 more days of Murph usage", { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    groupOnly.getByText(
+      /Your group mission is complete\. About 10 more days of Murph usage/,
+    ),
+  ).toBeVisible();
+
+  const allRewards = study.locator(
+    '[data-referral-reward-state="all-rewards"]',
+  );
+  await expect(allRewards.locator("article")).toHaveCount(3);
+  await expect(
+    allRewards.getByText("About 10 more days of Murph usage", { exact: true }),
+  ).toHaveCount(2);
+  await expect(
+    allRewards.getByText("About 14 more days of Murph usage", { exact: true }),
+  ).toHaveCount(1);
+  await expect(allRewards).not.toContainText(/already added to/iu);
+  await expect(study).not.toContainText(/\$|≈|usage credit/i);
+  await expect(study).not.toContainText(RETIRED_USAGE_TERM_PATTERN);
+  expect(referralLinkRequests).toEqual([]);
 });
 
 test.describe("homepage referral design proof", () => {
@@ -176,7 +261,10 @@ test.describe("homepage referral design proof", () => {
           ).toHaveCount(dayLabel.count);
         }
         await expect(study.getByText(/If eligible/)).toHaveCount(0);
-        await expect(study.getByText(/≈|\$[0-9]/)).toHaveCount(0);
+        await expect(study).not.toContainText(
+          /\$|≈|usage credit/i,
+        );
+        await expect(study).not.toContainText(RETIRED_USAGE_TERM_PATTERN);
 
         const overflowPx = await study.evaluate((element) =>
           element.scrollWidth - element.clientWidth

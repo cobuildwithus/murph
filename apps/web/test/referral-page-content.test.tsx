@@ -32,6 +32,11 @@ import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
 
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
+
 function selectRewards(
   ids: readonly (typeof HOSTED_PUBLIC_REFERRAL_REWARDS)[number]["id"][],
 ) {
@@ -55,8 +60,8 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.match(markup, /Opening a link or creating a group alone is never enough\./);
   assert.match(markup, /Choose a referral path\./);
   assert.match(markup, /eligibility, rolling-limit, and completion checks pass/);
-  assert.match(markup, /\$2\.00 of cost-weighted usage credit/);
-  assert.match(markup, /\$3\.50 of cost-weighted usage credit/);
+  assert.match(markup, /About 10 more days of Murph usage/);
+  assert.match(markup, /About 14 more days of Murph usage/);
   assert.match(markup, /15 human messages/);
   assert.match(markup, /8 from at least 2 other people/);
   assert.match(markup, /at least 10 minutes/);
@@ -76,7 +81,10 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.doesNotMatch(markup, /Murph tells you that/);
   assert.doesNotMatch(markup, /Ways to earn right now/);
   assert.doesNotMatch(markup, /the reward is added automatically/);
-  assert.match(markup, /Rewards are usage, not cash\./);
+  assert.match(markup, /Rewards add usage capacity, not cash or extra calendar time\./);
+  assert.match(markup, /does not extend a trial or subscription period/);
+  assert.doesNotMatch(markup, /\$|usage credit/i);
+  assert.doesNotMatch(markup, RETIRED_USAGE_TERM_PATTERN);
   assert.match(markup, /Health is hard\./);
   assert.match(markup, /Bring someone with you\./);
   assert.equal(
@@ -156,5 +164,5 @@ test("ReferralPageContent shows one unavailability state when every reward path 
   assert.doesNotMatch(markup, /does not earn usage/);
   assert.doesNotMatch(markup, /Referral action/);
   assert.doesNotMatch(markup, /Choose a referral path\./);
-  assert.doesNotMatch(markup, /cost-weighted usage credit/);
+  assert.doesNotMatch(markup, RETIRED_USAGE_TERM_PATTERN);
 });

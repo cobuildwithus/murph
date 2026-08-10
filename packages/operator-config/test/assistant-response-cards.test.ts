@@ -436,7 +436,7 @@ describe('assistant response cards', () => {
     )
     const completeCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD)
     const goalCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD_V2)
-    expect(LINQ_IMESSAGE_APP_CARD_ORIGIN).toBe('https://murph.ai')
+    expect(LINQ_IMESSAGE_APP_CARD_ORIGIN).toBe('https://www.withmurph.ai')
     expect(completeCardUrl.startsWith(
       `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`,
     )).toBe(true)

@@ -1642,7 +1642,7 @@ describe('assistant automation scanner', () => {
     }
   })
 
-  it('consumes provider-start timing only when the first group reaches the provider', async () => {
+  it('preserves canonical provider-start timing but suppresses mixed-work subdivision after an earlier group', async () => {
     const captures = [
       createCaptureSummary({
         captureId: 'capture-timing-no-provider',
@@ -1698,11 +1698,73 @@ describe('assistant automation scanner', () => {
     })
 
     expect(receivedCriticalPaths).toEqual([
-      providerStartCriticalPath,
-      providerStartCriticalPath,
+      expect.objectContaining({
+        ...providerStartCriticalPath,
+        automationCandidateScanDoneAtMonotonicMs: expect.any(Number),
+        automationGroupAndOperationScopeDoneAtMonotonicMs: expect.any(Number),
+      }),
+      expect.objectContaining({
+        ...providerStartCriticalPath,
+        automationCandidateScanDoneAtMonotonicMs: expect.any(Number),
+        automationGroupAndOperationScopeDoneAtMonotonicMs: expect.any(Number),
+        automationLaneSubdivisionEligible: false,
+      }),
       undefined,
     ])
+    expect(receivedCriticalPaths[0]).not.toHaveProperty(
+      'automationLaneSubdivisionEligible',
+    )
     expect(onProviderRequestStarted).toHaveBeenCalledTimes(2)
+  })
+
+  it('propagates the automation timing context through scanning and reply preparation', async () => {
+    const capture = createCaptureSummary({
+      captureId: 'capture-timing-propagation',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+    })
+    const reply = await vi.importActual<
+      typeof import('../src/assistant/automation/reply.ts')
+    >('../src/assistant/automation/reply.ts')
+    scannerReplyMocks.processAssistantAutoReplyGroup.mockImplementationOnce(
+      async (groupInput) => await reply.processAssistantAutoReplyGroup(groupInput),
+    )
+    const scanner = await vi.importActual<
+      typeof import('../src/assistant/automation/scanner.ts')
+    >('../src/assistant/automation/scanner.ts')
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCaptures([capture]),
+      providerStartCriticalPath: {
+        automationInputSelectionDoneAtMonotonicMs: 0,
+        automationLaneStartedAtMonotonicMs: 0,
+        automationPassSetupDoneAtMonotonicMs: 0,
+        automationReadinessDoneAtMonotonicMs: 0,
+        mailboxImportDoneAtMonotonicMs: 0,
+      },
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerStartCriticalPath: expect.objectContaining({
+          automationCandidateScanDoneAtMonotonicMs: expect.any(Number),
+          automationCrossSessionContextDoneAtMonotonicMs: expect.any(Number),
+          automationGroupAndOperationScopeDoneAtMonotonicMs: expect.any(Number),
+          automationInputSelectionDoneAtMonotonicMs: 0,
+          automationLaneStartedAtMonotonicMs: 0,
+          automationPassSetupDoneAtMonotonicMs: 0,
+          automationPromptPreparationDoneAtMonotonicMs: expect.any(Number),
+          automationReadinessDoneAtMonotonicMs: 0,
+          automationSessionPreflightDoneAtMonotonicMs: expect.any(Number),
+          automationTerminalEvidenceDoneAtMonotonicMs: expect.any(Number),
+          mailboxImportDoneAtMonotonicMs: 0,
+        }),
+      }),
+    )
   })
 
   it('advances the auto-reply channel cursor with the processed assistant input cursor', async () => {
@@ -6736,6 +6798,12 @@ describe('assistant auto-reply runtime', () => {
       beforeProviderAcceptedInputs,
       executionContext,
       onProviderEvent,
+      providerStartCriticalPath: {
+        automationInputSelectionDoneAtMonotonicMs: 0,
+        automationLaneStartedAtMonotonicMs: 0,
+        automationReadinessDoneAtMonotonicMs: 0,
+        mailboxImportDoneAtMonotonicMs: 0,
+      },
       requestId: 'request-hosted',
       vault: '/tmp/assistant-automation-vault',
     })
@@ -6748,6 +6816,13 @@ describe('assistant auto-reply runtime', () => {
         beforeProviderAcceptedInputs,
         executionContext,
         onProviderEvent,
+        providerStartCriticalPath: expect.objectContaining({
+          automationInputSelectionDoneAtMonotonicMs: 0,
+          automationLaneStartedAtMonotonicMs: 0,
+          automationPassSetupDoneAtMonotonicMs: expect.any(Number),
+          automationReadinessDoneAtMonotonicMs: 0,
+          mailboxImportDoneAtMonotonicMs: 0,
+        }),
         inputSource: expect.objectContaining({
           listInputCandidates: expect.any(Function),
           listNewConversationInputs: expect.any(Function),
