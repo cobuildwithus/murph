@@ -4539,6 +4539,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     lastErrorMessage: null,
     lastSeenAt: "2026-04-03T00:00:00.000Z",
     resourceCount: 1,
+    resourceAvailabilitySummary: { blood_pressure: true },
     sourceProviderSlug: "garmin",
     status: "connected" as const,
   };

@@ -85,6 +85,9 @@ function createSourceSummary(
   sourceProviderSlug: string,
   firstSeenAt = NOW,
   status: "connected" | "disconnected" = "connected",
+  resourceAvailabilitySummary: Record<string, string | number | boolean | null> = {
+    blood_pressure: true,
+  },
 ): NonNullable<DeviceSyncAccount["sources"]>[number] {
   return {
     displayName: sourceProviderSlug,
@@ -94,6 +97,7 @@ function createSourceSummary(
     lastErrorMessage: null,
     lastSeenAt: NOW,
     resourceCount: 1,
+    resourceAvailabilitySummary,
     sourceProviderSlug,
     status,
   };
@@ -682,6 +686,62 @@ test("completed source coverage does not certify a sibling source", () => {
   assert.equal(bloodPressureJobs[0]?.payload?.windowEnd, "2026-06-01T00:00:00.000Z");
 });
 
+test("the scheduler waits for persisted blood-pressure capability", () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ requests });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const firstSeenAt = "2026-03-20T23:55:00.000Z";
+  const unavailableSummaries: readonly Record<
+    string,
+    string | number | boolean | null
+  >[] = [
+    { activity: true },
+    {},
+    { blood_pressure: false },
+  ];
+
+  for (const resourceAvailabilitySummary of unavailableSummaries) {
+    const scheduled = createScheduledJobs(
+      createStoredAccount({
+        sources: [createSourceSummary(
+          "omron",
+          firstSeenAt,
+          "connected",
+          resourceAvailabilitySummary,
+        )],
+      }),
+      NOW,
+    );
+
+    assert.equal(
+      scheduled.jobs.some((job) =>
+        job.kind === "resource" && job.payload?.resource === "blood_pressure"
+      ),
+      false,
+    );
+  }
+  assert.equal(requests.length, 0);
+
+  const advertised = createScheduledJobs(
+    createStoredAccount({
+      sources: [createSourceSummary("omron", firstSeenAt)],
+    }),
+    NOW,
+  );
+  const bloodPressureJobs = advertised.jobs.filter((job) =>
+    job.kind === "resource" && job.payload?.resource === "blood_pressure"
+  );
+
+  assert.equal(bloodPressureJobs.length, 1);
+  assert.equal(bloodPressureJobs[0]?.payload?.sourceProviderSlug, "omron");
+  assert.equal(
+    bloodPressureJobs[0]?.payload?.historicalWindowStart,
+    "2026-02-18T00:00:00.000Z",
+  );
+});
+
 test("existing source obligations keep independent windows and queue identities", () => {
   const provider = createProvider({ requests: [] });
   const createScheduledJobs = requireValue(
@@ -840,16 +900,36 @@ test("retryable provider failure after raw rows preserves evidence through later
   assert.equal(retained.payload?.historicalProviderRecordsSeen, true);
   assert.equal(retained.payload?.historicalRecordsSeen, undefined);
 
+  let retainedAcrossOutage = retained;
+  for (let outageDay = 1; outageDay <= 5; outageDay += 1) {
+    const outageNow = new Date(
+      Date.parse(NOW) + outageDay * 24 * 60 * 60_000,
+    ).toISOString();
+    const outage = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ now: outageNow }),
+      toJobRecord(retainedAcrossOutage, outageDay + 1),
+    );
+    retainedAcrossOutage = findBloodPressureJob(outage.scheduledJobs ?? []);
+
+    assert.equal(outage.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(retainedAcrossOutage.dedupeKey, exhausted.dedupeKey);
+    assert.equal(retainedAcrossOutage.payload?.emptyBackfillAttempts, 4);
+    assert.equal(
+      retainedAcrossOutage.payload?.historicalProviderRecordsSeen,
+      true,
+    );
+  }
+
   requestFailure.active = false;
   bloodPressureRecords.length = 0;
   const empty = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
-    toJobRecord(retained, 2),
+    createJobContext({ now: "2026-06-17T12:00:00.000Z" }),
+    toJobRecord(retainedAcrossOutage, 7),
   );
   const stillRecoverable = findBloodPressureJob(empty.scheduledJobs ?? []);
 
   assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
-  assert.equal(stillRecoverable.availableAt, "2026-06-13T12:00:00.000Z");
+  assert.equal(stillRecoverable.availableAt, "2026-06-18T12:00:00.000Z");
   assert.equal(stillRecoverable.dedupeKey, exhausted.dedupeKey);
   assert.equal(stillRecoverable.payload?.historicalProviderRecordsSeen, true);
 
@@ -860,8 +940,8 @@ test("retryable provider failure after raw rows preserves evidence through later
     diastolic: 79,
   });
   const recovered = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
-    toJobRecord(stillRecoverable, 3),
+    createJobContext({ now: "2026-06-18T12:00:00.000Z" }),
+    toJobRecord(stillRecoverable, 8),
   );
 
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);

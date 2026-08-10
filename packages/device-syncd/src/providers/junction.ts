@@ -165,6 +165,7 @@ interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImport
 }
 
 interface JunctionPreciseTimeseriesImportOptions {
+  historicalProviderRecordsSeen?: boolean;
   preservePartialRetryableFailure?: boolean;
 }
 
@@ -653,6 +654,9 @@ export function createJunctionDeviceSyncProvider(
         if (
           !sourceProviderSlug
           || !isDeviceSyncSourceAdmitted(account.sources ?? [], sourceProviderSlug)
+          || !isJunctionResourceAdvertisedAvailable(
+            source.resourceAvailabilitySummary?.[resource],
+          )
           || hasJunctionBloodPressureHistoryBackfillCoverage(
             storedCoverage,
             sourceProviderSlug,
@@ -1876,6 +1880,8 @@ export function createJunctionDeviceSyncProvider(
           [effectiveResource],
           sourceProviderSlug,
           {
+            historicalProviderRecordsSeen:
+              job.payload.historicalProviderRecordsSeen === true,
             preservePartialRetryableFailure: extendedHistoricalBackfill,
           },
         );
@@ -2505,7 +2511,10 @@ export function createJunctionDeviceSyncProvider(
       } catch (error) {
         if (
           options.preservePartialRetryableFailure === true
-          && hasJunctionSnapshotRecords(accumulatedTimeseries)
+          && (
+            options.historicalProviderRecordsSeen === true
+            || hasJunctionSnapshotRecords(accumulatedTimeseries)
+          )
           && isRetryableJunctionApiRequestFailure(error)
         ) {
           fetchComplete = false;
