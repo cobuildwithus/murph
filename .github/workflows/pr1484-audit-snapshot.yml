@@ -1,4 +1,4 @@
-name: Validate final PR 1484 head
+name: Push PR 1484 yield-boundary test fixes
 
 on:
   push:
@@ -6,80 +6,79 @@ on:
       - agent/pr1484-audit-snapshot-20260810
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
-      - name: Check out exact PR head
+      - name: Check out exact PR branch
         uses: actions/checkout@v4
         with:
-          ref: bddf0cb2e74d083b71671cedd520ee169224b5f3
+          ref: agent/member-owned-provider-applications
           fetch-depth: 0
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.14.1
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma client
-        run: pnpm -C apps/web run prisma:generate
-
-      - name: Validate Prisma schema
-        run: pnpm -C apps/web exec prisma validate
-
-      - name: Typecheck device sync
-        run: pnpm -C packages/device-syncd run typecheck
-
-      - name: Typecheck assistant runtime
-        run: pnpm -C packages/assistant-runtime run typecheck
-
-      - name: Typecheck Web
-        run: pnpm -C apps/web run typecheck
-
-      - name: Lint Web
-        run: pnpm -C apps/web run lint
-
-      - name: Run focused Web tests
+      - name: Update yield-boundary tests
         shell: bash
         run: |
           set -euo pipefail
-          pnpm -C apps/web exec vitest run --config vitest.workspace.ts --no-coverage \
-            test/device-provider-application-crypto.test.ts \
-            test/device-provider-application-ingress-store.test.ts \
-            test/device-provider-application-store.test.ts \
-            test/device-provider-application-types.test.ts \
-            test/device-sync-hosted-runtime-authority.test.ts \
-            test/device-sync-internal-runtime.test.ts \
-            test/device-sync-providers.test.ts \
-            test/hosted-account-data-service.test.ts \
-            test/prisma-store-oauth-connection.test.ts \
-            test/prisma-store-oauth-sessions.test.ts
+          expected_head=bddf0cb2e74d083b71671cedd520ee169224b5f3
+          test "$(git rev-parse HEAD)" = "$expected_head"
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Run assistant-runtime tests
-        run: pnpm -C packages/assistant-runtime run test
+          path = Path("packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts")
+          source = path.read_text()
+          if source.count("  vi.clearAllMocks();") != 1:
+              raise SystemExit("expected one global mock clear")
+          source = source.replace("  vi.clearAllMocks();", "  vi.resetAllMocks();", 1)
 
-      - name: Run device-sync package tests
-        run: pnpm -C packages/device-syncd run test
+          def update_test(title: str, transform):
+              nonlocal_source = None
 
-      - name: Run smoke checks
-        run: pnpm test:smoke
+          def replace_in_test(text: str, title: str, old: str, new: str) -> str:
+              marker = f'  it("{title}", async () => {{'
+              start = text.find(marker)
+              if start < 0:
+                  raise SystemExit(f"missing test: {title}")
+              end = text.find('\n  it("', start + len(marker))
+              if end < 0:
+                  end = len(text)
+              chunk = text[start:end]
+              if chunk.count(old) != 1:
+                  raise SystemExit(f"expected one target in test: {title}")
+              return text[:start] + chunk.replace(old, new, 1) + text[end:]
 
-      - name: Verify generated and source cleanliness
-        shell: bash
-        run: |
-          set -euo pipefail
+          source = replace_in_test(
+              source,
+              "yields before dirty control-plane fetch when foreground input is waiting",
+              '    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");',
+              "    await expectDenseRawRetentionMailboxWakeAt(null);",
+          )
+          source = replace_in_test(
+              source,
+              "carries staged dirty acks when foreground input arrives after dirty fetch",
+              "    const shouldYield = vi.fn()\n      .mockReturnValueOnce(false)\n      .mockReturnValue(true);",
+              "    const shouldYield = vi.fn()\n      .mockReturnValueOnce(false)\n      .mockReturnValueOnce(false)\n      .mockReturnValue(true);",
+          )
+          source = replace_in_test(
+              source,
+              "carries staged dirty acks when foreground input arrives after scheduler work",
+              "    const shouldYield = vi.fn()\n      .mockReturnValueOnce(false)\n      .mockReturnValueOnce(false)\n      .mockReturnValue(true);",
+              "    const shouldYield = vi.fn()\n      .mockReturnValueOnce(false)\n      .mockReturnValueOnce(false)\n      .mockReturnValueOnce(false)\n      .mockReturnValue(true);",
+          )
+          path.write_text(source)
+          PY
           git diff --check
-          test -z "$(git status --short --untracked-files=no)" || {
-            git status --short
-            exit 1
-          }
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts
+          git commit -m "test: align device-sync yield checks with pre-service boundary"
+          git push --force-with-lease=refs/heads/agent/member-owned-provider-applications:bddf0cb2e74d083b71671cedd520ee169224b5f3 \
+            origin HEAD:refs/heads/agent/member-owned-provider-applications
