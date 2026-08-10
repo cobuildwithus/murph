@@ -2017,13 +2017,7 @@ export function createJunctionDeviceSyncProvider(
           historicalUnresolvedProviderRecordCount === undefined
             ? undefined
             : historicalUnresolvedProviderRecordCount > 0;
-        if (
-          timeseriesImport.yieldedAt
-          && (
-            !extendedHistoricalBackfill
-            || historicalUnresolvedProviderRecordCount === 0
-          )
-        ) {
+        if (timeseriesImport.yieldedAt) {
           return withJunctionSkippedResourceMetadata(
             context,
             buildYieldedJunctionJobResult({
@@ -2251,9 +2245,9 @@ export function createJunctionDeviceSyncProvider(
           resource: input.resource,
           sourceProviderSlug,
           windowEnd: input.window.windowEnd,
-          windowStart: unresolvedProviderRecordsSeen
-            ? input.window.windowStart
-            : historicalWindowStart,
+          windowStart: input.importResult.fetchComplete
+            ? historicalWindowStart
+            : input.window.windowStart,
         }),
       ],
     };

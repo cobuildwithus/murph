@@ -1048,7 +1048,7 @@ test("live capability loss preserves carried history evidence until authority re
     assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
     assert.equal(stillRecoverable.dedupeKey, evidenceBearing.dedupeKey);
     assert.equal(stillRecoverable.payload?.historicalProviderRecordsSeen, true);
-    assert.equal(stillRecoverable.payload?.windowStart, original.payload?.windowStart);
+    assert.equal(stillRecoverable.payload?.windowStart, "2026-02-19T00:00:00.000Z");
 
     records.push({
       id: `bp-after-live-authority-recovery-${index}`,
@@ -1175,7 +1175,7 @@ test("a fetched blood-pressure record completes without an empty retry", async (
   assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
 
-test("partial optional failure retries from the anchored window after importing canonical events", async () => {
+test("partial optional failure retries the uncompleted segment after importing canonical events", async () => {
   const importedSnapshots: unknown[] = [];
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
@@ -1205,7 +1205,7 @@ test("partial optional failure retries from the anchored window after importing 
   assert.equal(retry.dedupeKey, admittedBloodPressure.dedupeKey);
   assert.equal(retry.payload?.historicalRecordsSeen, true);
   assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
-  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(retry.payload?.windowStart, "2026-05-13T00:00:00.000Z");
 
   const { result: completed } = await executeImmediateBloodPressureContinuations({
     context: createJobContext(),
@@ -1216,7 +1216,7 @@ test("partial optional failure retries from the anchored window after importing 
   assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
   assert.equal(
     requests.filter((request) => request.resource === "blood_pressure").length,
-    32,
+    31,
   );
 });
 
@@ -1537,7 +1537,7 @@ test("source history partial failure stays recoverable after the empty retry lad
   assert.equal(retry.dedupeKey, exhausted.dedupeKey);
   assert.equal(retry.payload?.emptyBackfillAttempts, 4);
   assert.equal(retry.payload?.historicalRecordsSeen, true);
-  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(retry.payload?.windowStart, "2026-05-13T00:00:00.000Z");
 
   const { result: recovered } = await executeImmediateBloodPressureContinuations({
     context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
@@ -1584,7 +1584,7 @@ test("source-scoped partial failure stays recoverable after the empty retry ladd
   assert.equal(retry.payload?.emptyBackfillAttempts, 4);
   assert.equal(retry.payload?.historicalRecordsSeen, true);
   assert.equal(retry.payload?.sourceProviderSlug, "omron");
-  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(retry.payload?.windowStart, "2026-05-13T00:00:00.000Z");
 
   const { result: recovered } = await executeImmediateBloodPressureContinuations({
     context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
@@ -1707,7 +1707,7 @@ test("mixed canonical and malformed history stays unresolved until a complete re
   );
   assert.equal(
     mixedContinuation.payload?.windowStart,
-    "2026-05-21T00:00:00.000Z",
+    "2026-05-12T00:00:00.000Z",
   );
 
   bloodPressureRecords.length = 0;
@@ -1863,13 +1863,14 @@ test("every malformed provider identity must be repaired before coverage complet
     ...bloodPressureRecords[0],
     diastolic: 79,
   };
-  const oneRepair = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
+  const { result: oneRepair } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
       importSnapshot: importWithRealJunctionNormalizer,
       now: "2026-06-12T12:00:00.000Z",
     }),
-    toJobRecord(bothUnresolved, 71),
-  );
+    job: toJobRecord(bothUnresolved, 71),
+    provider,
+  });
   const oneUnresolved = findBloodPressureJob(oneRepair.scheduledJobs ?? []);
   assert.equal(oneRepair.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
   assert.equal(oneUnresolved.payload?.historicalUnresolvedProviderRecordCount, 1);
@@ -2023,7 +2024,7 @@ test("a malformed post-yield segment requires one repaired anchored scan", async
   );
   assert.equal(
     anchoredRetry.payload?.windowStart,
-    "2026-05-13T00:00:00.000Z",
+    "2026-05-12T00:00:00.000Z",
   );
 
   bloodPressureRecords[1] = {
@@ -2158,7 +2159,7 @@ test("source-scoped partial failure retries instead of abandoning remaining hist
   assert.equal(retry.dedupeKey, sourceScoped.dedupeKey);
   assert.equal(retry.payload?.sourceProviderSlug, "omron");
   assert.equal(retry.payload?.historicalRecordsSeen, true);
-  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(retry.payload?.windowStart, "2026-05-13T00:00:00.000Z");
 });
 
 test("ordinary empty webhook fetches do not enter the historical retry ladder", async () => {
@@ -2230,55 +2231,123 @@ test("yielded blood-pressure history keeps one identity and remembers earlier re
   assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
 
-test("malformed rows before a yield cannot become terminal empty coverage", async () => {
+test("malformed history cannot starve later valid days or clear without exact repair", async () => {
+  const malformedIdentity = "bp-malformed-before-later-history";
   const bloodPressureRecords: Record<string, unknown>[] = [{
-    id: "bp-malformed-before-yield",
+    id: malformedIdentity,
     timestamp: "2026-05-12T08:30:00.000Z",
     systolic: 118,
   }];
-  const provider = createProvider({ bloodPressureRecords, requests: [] });
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ bloodPressureRecords, requests });
   const bloodPressure = createScheduledBloodPressureJob(provider);
   const exhausted = toJobRecord({
     ...bloodPressure,
     payload: {
       ...bloodPressure.payload,
       emptyBackfillAttempts: 4,
+      historicalWindowStart: "2026-05-12T00:00:00.000Z",
+      windowEnd: "2026-05-14T00:00:00.000Z",
+      windowStart: "2026-05-12T00:00:00.000Z",
     },
   }, 1);
   exhausted.dedupeKey = `hosted-device-sync:${"8".repeat(64)}`;
-  let yieldChecks = 0;
-  const yielded = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
-      canonicalEventCount: 0,
-      shouldYield: () => {
-        yieldChecks += 1;
-        return yieldChecks > 1;
-      },
-    }),
+  const executor = requireValue(provider.jobExecutor);
+  const firstDay = await executor.executeJob(
+    createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
     exhausted,
   );
-  const continuation = findBloodPressureJob(yielded.scheduledJobs ?? []);
+  const secondDay = findBloodPressureJob(firstDay.scheduledJobs ?? []);
+  const unresolvedIdentitiesJson =
+    secondDay.payload?.historicalUnresolvedProviderRecordIdentitiesJson;
 
-  assert.equal(continuation.dedupeKey, exhausted.dedupeKey);
-  assert.equal(continuation.payload?.emptyBackfillAttempts, 4);
-  assert.equal(continuation.payload?.historicalProviderRecordsSeen, true);
-  assert.equal(continuation.payload?.historicalRecordsSeen, undefined);
-  assert.equal(continuation.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(firstDay.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(secondDay.availableAt, undefined);
+  assert.equal(secondDay.dedupeKey, exhausted.dedupeKey);
+  assert.equal(secondDay.payload?.emptyBackfillAttempts, 4);
+  assert.equal(secondDay.payload?.historicalProviderRecordsSeen, true);
+  assert.equal(secondDay.payload?.historicalRecordsSeen, false);
+  assert.equal(secondDay.payload?.historicalUnresolvedProviderRecordCount, 1);
+  assert.equal(typeof unresolvedIdentitiesJson, "string");
+  assert.equal(
+    secondDay.payload?.historicalWindowStart,
+    "2026-05-12T00:00:00.000Z",
+  );
+  assert.equal(secondDay.payload?.sourceProviderSlug, "omron");
+  assert.equal(secondDay.payload?.windowStart, "2026-05-13T00:00:00.000Z");
+  assert.equal(secondDay.payload?.windowEnd, "2026-05-14T00:00:00.000Z");
 
-  bloodPressureRecords.length = 0;
-  const { result: completedContinuation } = await executeImmediateBloodPressureContinuations({
-    context: createJobContext(),
-    job: toJobRecord(continuation, 2),
+  bloodPressureRecords.splice(0, bloodPressureRecords.length, {
+    id: "bp-valid-after-malformed-history",
+    timestamp: "2026-05-13T08:30:00.000Z",
+    systolic: 121,
+    diastolic: 79,
+  });
+  const reachedWindowEnd = await executor.executeJob(
+    createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    toJobRecord(secondDay, 2),
+  );
+  const anchoredRetry = findBloodPressureJob(reachedWindowEnd.scheduledJobs ?? []);
+
+  assert.equal(reachedWindowEnd.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(anchoredRetry.availableAt, "2026-06-12T12:00:00.000Z");
+  assert.equal(anchoredRetry.dedupeKey, exhausted.dedupeKey);
+  assert.equal(anchoredRetry.payload?.emptyBackfillAttempts, 4);
+  assert.equal(anchoredRetry.payload?.historicalProviderRecordsSeen, true);
+  assert.equal(anchoredRetry.payload?.historicalRecordsSeen, true);
+  assert.equal(anchoredRetry.payload?.historicalUnresolvedProviderRecordCount, 1);
+  assert.equal(
+    anchoredRetry.payload?.historicalUnresolvedProviderRecordIdentitiesJson,
+    unresolvedIdentitiesJson,
+  );
+  assert.equal(
+    anchoredRetry.payload?.historicalWindowStart,
+    "2026-05-12T00:00:00.000Z",
+  );
+  assert.equal(anchoredRetry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+  assert.deepEqual(
+    requests.filter((request) => request.resource === "blood_pressure").map(
+      (request) => request.start,
+    ),
+    ["2026-05-12T00:00:00.000Z", "2026-05-13T00:00:00.000Z"],
+  );
+
+  const { result: unrelated } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-12T12:00:00.000Z",
+    }),
+    job: toJobRecord(anchoredRetry, 3),
     provider,
   });
-  const retry = findBloodPressureJob(completedContinuation.scheduledJobs ?? []);
+  const unresolvedRetry = findBloodPressureJob(unrelated.scheduledJobs ?? []);
 
-  assert.equal(completedContinuation.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
-  assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
-  assert.equal(retry.dedupeKey, exhausted.dedupeKey);
-  assert.equal(retry.payload?.emptyBackfillAttempts, 4);
-  assert.equal(retry.payload?.historicalProviderRecordsSeen, true);
-  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(unrelated.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(unresolvedRetry.dedupeKey, exhausted.dedupeKey);
+  assert.equal(unresolvedRetry.payload?.historicalUnresolvedProviderRecordCount, 1);
+  assert.equal(
+    unresolvedRetry.payload?.historicalUnresolvedProviderRecordIdentitiesJson,
+    unresolvedIdentitiesJson,
+  );
+  assert.equal(unresolvedRetry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+
+  bloodPressureRecords.splice(0, bloodPressureRecords.length, {
+    id: malformedIdentity,
+    timestamp: "2026-05-12T08:30:00.000Z",
+    systolic: 118,
+    diastolic: 76,
+  });
+  const { result: repaired } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-13T12:00:00.000Z",
+    }),
+    job: toJobRecord(unresolvedRetry, 4),
+    provider,
+  });
+
+  assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
+  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
 
 test("an empty yielded scan retries from the original anchored window", async () => {
