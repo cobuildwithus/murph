@@ -364,25 +364,41 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
     return false;
   }
 
-  const senderMemberId = await lookupHostedLinqPrewarmIdentityMemberId({
+  const senderCandidate = await lookupHostedLinqPrewarmIdentityCandidate({
     contact: participantContact,
     prisma: input.prisma,
   });
-  const pendingSenderMemberId = senderMemberId || !recipientPhone
+  const pendingSenderLookup = senderCandidate || !recipientPhone
     ? null
-    : (await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+    : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
         contact: participantContact,
         linqChatId: summary.chatId,
         prisma: input.prisma,
         recipientPhone,
-      }))?.core.id ?? null;
-  const candidateSenderMemberId = senderMemberId ?? pendingSenderMemberId;
-  const activeSenderMemberId = candidateSenderMemberId
-    && (await readHostedRuntimeAiAccessDecision({
-      memberId: candidateSenderMemberId,
+      });
+  const candidateSender = senderCandidate ?? (pendingSenderLookup
+    ? {
+        memberId: pendingSenderLookup.core.id,
+        suspendedAt: pendingSenderLookup.core.suspendedAt,
+      }
+    : null);
+  if (candidateSender?.suspendedAt) {
+    return false;
+  }
+  const candidateSenderAccess = candidateSender
+    ? await readHostedRuntimeAiAccessDecision({
+      memberId: candidateSender.memberId,
       prisma: input.prisma,
-    })).allowed
-    ? candidateSenderMemberId
+    })
+    : null;
+  if (
+    candidateSenderAccess?.allowed === false
+    && candidateSenderAccess.reason === "health_data_consent_withdrawn"
+  ) {
+    return false;
+  }
+  const activeSenderMemberId = candidateSenderAccess?.allowed
+    ? candidateSender?.memberId ?? null
     : null;
   if (lineState.kind === "at_risk") {
     if (
@@ -404,8 +420,7 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
     return true;
   }
   if (
-    candidateSenderMemberId
-    || resolveHostedLinqFirstContactContentDisposition({
+    resolveHostedLinqFirstContactContentDisposition({
         event: messageEvent,
         participantContact,
       }) !== "allow"
@@ -440,10 +455,23 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
   }).kind === "selected";
 }
 
+type HostedLinqPrewarmIdentityCandidate = {
+  memberId: string;
+  suspendedAt: Date | null;
+};
+
 async function lookupHostedLinqPrewarmIdentityMemberId(input: {
   contact: HostedLinqParticipantContact;
   prisma: HostedOnboardingReadClient;
 }): Promise<string | null> {
+  return (await lookupHostedLinqPrewarmIdentityCandidate(input))?.memberId
+    ?? null;
+}
+
+async function lookupHostedLinqPrewarmIdentityCandidate(input: {
+  contact: HostedLinqParticipantContact;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedLinqPrewarmIdentityCandidate | null> {
   if (input.contact.kind === "phone") {
     const lookupKeys = createHostedPhoneLookupKeyReadCandidates(input.contact.value);
     if (lookupKeys.length === 0) {
@@ -451,6 +479,11 @@ async function lookupHostedLinqPrewarmIdentityMemberId(input: {
     }
     const records = await input.prisma.hostedMemberIdentity.findMany({
       select: {
+        member: {
+          select: {
+            suspendedAt: true,
+          },
+        },
         memberId: true,
       },
       where: {
@@ -459,11 +492,20 @@ async function lookupHostedLinqPrewarmIdentityMemberId(input: {
         },
       },
     });
-    return resolveUniqueHostedLinqPrewarmMemberId({
+    const memberId = resolveUniqueHostedLinqPrewarmMemberId({
       ambiguityCode: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
       matchedBy: "phoneNumber",
       records,
     });
+    if (!memberId) {
+      return null;
+    }
+    return {
+      memberId,
+      suspendedAt:
+        records.find((record) => record.memberId === memberId)?.member?.suspendedAt
+        ?? null,
+    };
   }
 
   const lookupKeys = createHostedEmailLookupKeyReadCandidates(input.contact.value);
@@ -472,6 +514,11 @@ async function lookupHostedLinqPrewarmIdentityMemberId(input: {
   }
   const records = await input.prisma.hostedMemberEmailAuthorization.findMany({
     select: {
+      member: {
+        select: {
+          suspendedAt: true,
+        },
+      },
       memberId: true,
     },
     where: {
@@ -483,11 +530,20 @@ async function lookupHostedLinqPrewarmIdentityMemberId(input: {
       },
     },
   });
-  return resolveUniqueHostedLinqPrewarmMemberId({
+  const memberId = resolveUniqueHostedLinqPrewarmMemberId({
     ambiguityCode: "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS",
     matchedBy: "verifiedEmail",
     records,
   });
+  if (!memberId) {
+    return null;
+  }
+  return {
+    memberId,
+    suspendedAt:
+      records.find((record) => record.memberId === memberId)?.member?.suspendedAt
+      ?? null,
+  };
 }
 
 async function lookupHostedLinqPrewarmHomeChatMemberId(input: {

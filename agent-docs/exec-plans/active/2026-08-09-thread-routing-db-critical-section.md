@@ -167,6 +167,10 @@ Updated: 2026-08-09
   withdrawal. Real webhook-entry regressions cover both that denial and a
   degraded recipient line, while the eligible pending-contact case still
   prepares once before `BEGIN`.
+- Integration with the latest first-contact content guard keeps that rule
+  precise: suspended and consent-withdrawn senders stop before setup lookup,
+  while an ordinary billing-inactive sender does not suppress a different
+  roster member's eligible live pending setup.
 - The round-4 documentation finding was accepted. Architecture and PR wording
   now name the moved thread-container cryptography precisely and disclose that
   pending-group setup transfer-payload opening remains inside the planner
@@ -180,6 +184,10 @@ Updated: 2026-08-09
   mailbox-prewarm files passed 155 tests together; all six affected
   non-PostgreSQL files passed 400 tests; app-local typecheck, scoped lint, and
   `git diff --check` passed.
+- Latest-main integration proof: the focused Linq route file passed 142 tests;
+  all six affected non-PostgreSQL files passed 402 tests, the PostgreSQL
+  concurrency lane passed 9 tests, and app-local prepared typecheck, scoped
+  lint, and `git diff --check` passed.
 
 ## Round 4 anomaly retrospective
 
