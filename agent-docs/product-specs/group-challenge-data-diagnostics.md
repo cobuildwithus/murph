@@ -211,9 +211,13 @@ The current `read_shared` result gates every diagnosis. Murph applies this order
 to each `in` participant and stops at the first match:
 
 When a participant explicitly asks whether a shared metric is visible now,
-yet, or after a source change, Murph performs one new `read_shared` call for
-the exact relevant scope before answering. A prior tool result, conversation
-claim, or connection timestamp is not current shared-data evidence.
+yet, or after a source change, the model that owns the group-shared answer
+performs one new `read_shared` call for the exact relevant scope before
+answering. This applies both to an ordinary group turn and to the detached
+joined-group model serving a private group consultation; the private root only
+admits the existing `ask` and never gains the shared reader. A prior tool
+result, conversation claim, or connection timestamp is not current shared-data
+evidence.
 
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |

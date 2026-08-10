@@ -33,7 +33,9 @@ Updated: 2026-08-10
 - Current-local-day Deep and REM rows are available without a provisional flag;
   future-dated rows remain excluded.
 - A user asking whether shared data is visible now or yet causes one fresh
-  `read_shared` call for the exact relevant scope before Murph answers.
+  `read_shared` call for the exact relevant scope at the group-authorized answer
+  model before Murph answers, including a detached group consultation requested
+  from the user's private Murph conversation.
 - Product and protocol docs describe the same behavior as code.
 - Focused regressions, package typechecks, preliminary specialist review, final
   ReviewGPT, exact-head CI, and parent final review complete with no unresolved
@@ -56,7 +58,7 @@ Updated: 2026-08-10
    same-day sleep scoring, and explicit freshness reads.
 3. [x] Implement the smallest owner-local fixes and align durable docs.
 4. [x] Run focused tests, package typechecks, and direct diff/privacy review.
-5. [ ] Push the exact candidate, open the PR, and start specialist/final
+5. [x] Push the exact candidate, open the PR, and start specialist/final
    ReviewGPT concurrently with CI.
 6. [ ] Resolve accepted findings, close this plan through `scripts/finish-task`,
    merge the green PR, verify deployment behavior, and retire the worktree.
@@ -77,3 +79,8 @@ Updated: 2026-08-10
 - Live Wrangler SSH remains blocked by expired local OAuth; the no-browser
   authorization window expired without a callback, and no container command or
   production mutation ran.
+- Final ReviewGPT round 2 required a retrospective after proving that the
+  detached joined-group Assistant Ask child was a second answer owner without
+  the freshness rule. The recorded continuation decision keeps one shared
+  instruction at both group-authorized model boundaries, leaves the private
+  root on `ask`, and replaces admission-only coverage with target-owner proof.

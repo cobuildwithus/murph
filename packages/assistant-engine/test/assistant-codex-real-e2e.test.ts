@@ -10,6 +10,7 @@ import {
 } from '@murphai/core'
 import {
   assistantOnboardingResumeContextResultSchema,
+  parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { describe, expect, it } from 'vitest'
@@ -19,6 +20,9 @@ import {
   resolveMurphDynamicTools,
   type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
+import {
+  executeReadOnlyAssistantAsk,
+} from '../src/assistant-ask.ts'
 import {
   MURPH_AUTOMATION_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
@@ -55,6 +59,10 @@ import {
 import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
+import {
+  appendAssistantTranscriptEntries,
+  saveAssistantSession,
+} from '../src/assistant/store.ts'
 import type {
   AssistantHostedAutomationToolRequest,
 } from '../src/assistant/execution-context.ts'
@@ -1488,125 +1496,108 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'keeps a private sleep visibility check on the group ask path',
+    'rereads shared sleep inside a detached group consultation',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-private-group-sleep-freshness-e2e-'),
+        path.join(tmpdir(), 'murph-group-sleep-consultation-e2e-'),
       )
-      const groupRequests: unknown[] = []
+      const vaultRoot = path.join(workingDirectory, 'vault')
+      const sharedRequests: unknown[] = []
+      const now = new Date('2026-08-10T12:00:00.000Z')
 
       try {
-        const skillsRoot = path.join(workingDirectory, 'skills')
-        await materializeAssistantSkill({
-          skillsRoot,
-          slug: 'group-chat',
-        })
-        const result = await executeRealCodexAppServerTurn({
-          approvalPolicy: 'never',
-          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        await mkdir(vaultRoot, { recursive: true })
+        await saveAssistantSession(vaultRoot, parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'linq',
+            conversationKey: null,
+            delivery: null,
+            identityId: null,
+            threadId: null,
+            threadIsDirect: false,
+          },
+          createdAt: '2026-08-10T11:00:00.000Z',
+          lastTurnAt: '2026-08-10T11:30:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session_stale_group_sleep_evidence',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: null,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'low',
+            sandbox: 'danger-full-access',
+          },
+          turnCount: 1,
+          updatedAt: '2026-08-10T11:30:00.000Z',
+        }))
+        await appendAssistantTranscriptEntries(
+          vaultRoot,
+          'session_stale_group_sleep_evidence',
+          [{
+            createdAt: '2026-08-10T11:30:00.000Z',
+            kind: 'assistant',
+            text: 'Your shared Deep sleep is visible at 61 minutes.',
+          }],
+        )
+
+        const result = await executeReadOnlyAssistantAsk({
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions:
-            buildDirectConversationDeveloperInstructions(),
-          dynamicTools: [MURPH_GROUP_TOOL],
-          env: {
-            ...config.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
-          },
-          excludeResumeTurns: true,
-          hostedToolContext: {
-            computerToolsAvailable: false,
-            currentHostedDeliveryContext: () => ({
-              conversationId: 'conversation_private_sleep_freshness',
-              recipientKey: 'recipient_private_sleep_freshness',
-              returnContactKind: 'text',
-            }),
-            currentHostedMailboxItemIds: () => [
-              'mailbox_private_sleep_freshness',
-            ],
-            currentUserActionScope: () => ({
-              acceptedInputIds: ['input_private_sleep_freshness'],
-              conversationId: 'conversation_private_sleep_freshness',
-              conversationScope: 'direct',
-              inboundMailboxItemIds: ['mailbox_private_sleep_freshness'],
-              originSessionId: 'session_private_sleep_freshness',
-              recipientKey: 'recipient_private_sleep_freshness',
-            }),
-            groupTool: {
-              request: async (request) => {
-                groupRequests.push(request)
-                if (request.action === 'list_memberships') {
-                  return {
-                    action: 'list_memberships',
-                    result: {
-                      disclosureGrants: [],
-                      memberships: [{
-                        displayName: 'Run Club',
-                        grantedVaultShareProjectionScopes: [],
-                        kind: 'friends',
-                        memberCount: 4,
-                        membershipId: 'membership_run_club',
-                        permissionsUrl: 'https://example.test/groups/run-club',
-                        requestedVaultShareProjectionScopes: [{
-                          projectionKind: 'deep-sleep-sources-days.v1',
-                        }],
-                        role: 'member',
-                        sponsorshipUrl: null,
-                      }],
-                      status: 'ok',
-                      truncated: false,
+          env: config.env,
+          groupSharedReader: {
+            request: async (request) => {
+              sharedRequests.push(request)
+              return {
+                members: [{
+                  currentTurnHandles: [],
+                  displayName: null,
+                  memberId: 'member_sleep_consultation',
+                  participantId: 'membership_requester',
+                  projections: [{
+                    dataStatus: 'missing',
+                    grantStatus: 'granted',
+                    grantedAt: '2026-08-10T10:00:00.000Z',
+                    projectionScope: {
+                      projectionKind: 'deep-sleep-sources-days.v1',
                     },
-                  }
-                }
-                if (request.action === 'ask') {
-                  return {
-                    action: 'ask',
-                    result: {
-                      status: 'accepted',
-                      targetLabel: 'Run Club',
-                    },
-                  }
-                }
-                throw new Error(`Unexpected group action: ${request.action}`)
-              },
+                    projectionScopeKey: 'deep-sleep-sources-days.v1',
+                    records: [],
+                  }],
+                }],
+                requestedProjectionScopeKeys: [
+                  'deep-sleep-sources-days.v1',
+                ],
+                status: 'ok',
+              }
             },
-            sendVaultFile: async () => {
-              throw new Error('Vault file sends are unavailable in this test.')
-            },
-            vaultFileSendAvailable: false,
           },
           model: config.model,
           modelProvider: config.modelProvider,
-          prompt:
-            'Can you ask Run Club whether they can see my Deep sleep yet after I reconnected?',
+          now,
+          question:
+            'Can Run Club see my Deep sleep yet after I reconnected?',
           reasoningEffort: 'low',
-          sandbox: 'workspace-write',
-          workingDirectory,
+          requesterParticipantId: 'membership_requester',
+          workspaceRoot: vaultRoot,
         })
-        const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const askAction = actions.find((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_GROUP_TOOL.name
-          && readRecord(action.argumentsValue)?.action === 'ask'
-        )
 
-        expect(askAction).toBeDefined()
-        expect(readRecord(groupRequests.at(-1))).toMatchObject({
-          action: 'ask',
-          groupLabel: 'Run Club',
-        })
-        expect(readString(readRecord(groupRequests.at(-1))?.question))
-          .toMatch(/deep sleep/iu)
-        expect(actions).not.toEqual(expect.arrayContaining([
-          expect.objectContaining({
-            kind: 'dynamic',
-            tool: MURPH_GROUP_SHARED_READ_TOOL.name,
-          }),
-        ]))
-        expect(result.finalMessage).toMatch(/asked|sent|run club/iu)
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{
+            projectionKind: 'deep-sleep-sources-days.v1',
+          }],
+        }])
+        expect(result).toEqual({ outcome: 'cannot_answer' })
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

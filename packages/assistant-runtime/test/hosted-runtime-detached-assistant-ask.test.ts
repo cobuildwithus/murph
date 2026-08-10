@@ -733,11 +733,11 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("starts the detached model with a fresh lazy reader and no eager shared-data read", async () => {
+  test("runs a freshness read lazily inside the detached model and commits its result", async () => {
     const vaultRoot = await createVaultRoot();
     const sharedRead = vi.fn(async () => ({
       members: [] as const,
-      requestedProjectionScopeKeys: ["steps-days.v0"],
+      requestedProjectionScopeKeys: ["deep-sleep-sources-days.v1"],
       status: "none" as const,
     }));
     const groupSharedReader = { request: sharedRead };
@@ -745,8 +745,14 @@ describe("hosted detached assistant ask controller", () => {
     const executeAsk = vi.fn(async (input) => {
       assert.equal(input.groupSharedReader, groupSharedReader);
       assert.equal(sharedRead.mock.calls.length, 0);
-      return { answer: "answer", outcome: "answered" as const };
+      await input.groupSharedReader?.request({
+        projectionScopes: [{
+          projectionKind: "deep-sleep-sources-days.v1",
+        }],
+      });
+      return { outcome: "cannot_answer" as const };
     });
+    const completionRequests: unknown[] = [];
 
     try {
       await writePending(vaultRoot, [
@@ -756,11 +762,12 @@ describe("hosted detached assistant ask controller", () => {
         assistantAskPort: {
           async request(request) {
             if (request.action === "complete") {
+              completionRequests.push(request);
               return { action: "complete", status: "completed" };
             }
             return {
               action: "prepare",
-              question: "question with optional shared context",
+              question: "Can the group see my Deep sleep yet after I reconnected?",
               status: "ready",
               targetLabel: "100 Club",
             };
@@ -785,7 +792,16 @@ describe("hosted detached assistant ask controller", () => {
       await controller.closeAndRequeue();
       assert.equal(createGroupSharedReader.mock.calls.length, 1);
       assert.equal(executeAsk.mock.calls.length, 1);
-      assert.equal(sharedRead.mock.calls.length, 0);
+      assert.deepEqual(sharedRead.mock.calls, [[{
+        projectionScopes: [{
+          projectionKind: "deep-sleep-sources-days.v1",
+        }],
+      }]]);
+      assert.deepEqual(completionRequests, [{
+        action: "complete",
+        requestId: "ask_event_authority",
+        result: { answer: null, outcome: "cannot_answer" },
+      }]);
     } finally {
       await removeVaultRoot(vaultRoot);
     }

@@ -38,6 +38,9 @@ import type { AssistantMaintenanceProfile } from "./maintenance-evidence.js";
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from "./generated-delivery-files.js";
+import {
+  ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION,
+} from "./group-shared-freshness.js";
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
@@ -638,7 +641,7 @@ function buildAssistantHostedGroupGuidanceText(
     `- \`murph.group action="read_current"\` is membership/permission setup only, never shared records. Use \`action="read_shared"\` as the only hosted path for shared facts. Request one to three exact \`projectionScopes\`; the host resolves live authority lazily after the tool call. \`status="ok"\` is complete. Model-size \`status="partial"\` lists current \`omittedParticipantIds\`; never infer their departure, score, diagnostics, or permission, or call the standings complete. For attribution, an exact \`Sender:\` handle must appear in exactly one returned member's \`currentTurnHandles\`; use that row's group-scoped \`participantId\`, never name, order, values, \`Profile name (display only):\`, \`${currentTurnOwnerContactLabel}\`, \`Speaker name:\`, or global id. Scheduled and detached reads have no current-turn handles. Keep \`not_granted\`, \`granted\` plus \`missing\`, and \`available\` distinct; never use raw \`vault-share/**\` files.`,
     ...(conversationScope === "group"
       ? [
-          "- For \"now\"/\"yet\"/post-sync/reconnect checks, call exact-scope `read_shared` once first; answer only from it, never prior context or sync times.",
+          `- ${ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION}`,
         ]
       : []),
     "- After read_current, use the group-chat skill's core permissions only for `status=none`; existing groups use workflow scopes.",
